@@ -1,0 +1,3 @@
+{
+  "_comment": "Phase 3-B bootstrap: every slot is omitted intentionally — serde's #[serde(default)] on DarudaTheme falls each missing key through to the compile-time palette constant, so an empty object means 'use whatever the binary was built with'. Phase 3-D will populate explicit values once daruda_light.json (the contrasting variant) lands and the two need to be diffable side-by-side. The bundled_daruda_dark_json_matches_default unit test guards this invariant — if a future palette tweak changes a default colour, this file does not need to be touched unless you want to pin a specific value."
+}

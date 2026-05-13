@@ -1,0 +1,27 @@
+[package]
+name = "daruda_terminal"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.86"
+publish = false
+license.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+base64 = "0.22"
+daruda_store = { path = "../daruda_store" }
+ghostty_vt = { path = "../ghostty_vt" }
+gpui = { workspace = true }
+portable-pty = "0.9"
+regex = "1.10"
+smallvec = { workspace = true }
+unicode-width = "0.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "render"
+harness = false

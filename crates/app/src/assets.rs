@@ -1,0 +1,143 @@
+//! Embedded application assets.
+//!
+//! `DarudaAssets` implements GPUI's `AssetSource` trait. All asset bytes are
+//! baked into the binary at compile time via `include_bytes!` so the app
+//! ships as a single self-contained executable.
+//!
+//! File icons are sourced from material-icon-theme (MIT).
+//! Copyright (c) 2025 Material Extensions / Philipp Kief.
+//! See LICENSES/material-icon-theme-MIT.txt for the full attribution.
+
+use std::borrow::Cow;
+
+use gpui::{AssetSource, SharedString};
+
+pub struct DarudaAssets;
+
+impl AssetSource for DarudaAssets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+        macro_rules! icon {
+            ($file:literal) => {
+                return Ok(Some(Cow::Borrowed(include_bytes!(concat!(
+                    "../../../assets/icons/",
+                    $file
+                )) as &'static [u8])))
+            };
+        }
+        match path {
+            // ── Fallbacks ────────────────────────────────────────────────
+            "icons/file.svg" => icon!("file.svg"),
+            "icons/symlink.svg" => icon!("symlink.svg"),
+
+            // ── Folders ──────────────────────────────────────────────────
+            "icons/folder.svg" => icon!("folder.svg"),
+            "icons/folder-open.svg" => icon!("folder-open.svg"),
+            "icons/folder-git.svg" => icon!("folder-git.svg"),
+            "icons/folder-github.svg" => icon!("folder-github.svg"),
+            "icons/folder-vscode.svg" => icon!("folder-vscode.svg"),
+            "icons/folder-node.svg" => icon!("folder-node.svg"),
+            "icons/folder-next.svg" => icon!("folder-next.svg"),
+            "icons/folder-nuxt.svg" => icon!("folder-nuxt.svg"),
+            "icons/folder-svelte.svg" => icon!("folder-svelte.svg"),
+            "icons/folder-src.svg" => icon!("folder-src.svg"),
+            "icons/folder-dist.svg" => icon!("folder-dist.svg"),
+            "icons/folder-test.svg" => icon!("folder-test.svg"),
+            "icons/folder-config.svg" => icon!("folder-config.svg"),
+            "icons/folder-docs.svg" => icon!("folder-docs.svg"),
+            "icons/folder-lib.svg" => icon!("folder-lib.svg"),
+            "icons/folder-api.svg" => icon!("folder-api.svg"),
+            "icons/folder-coverage.svg" => icon!("folder-coverage.svg"),
+
+            // ── Systems / compiled ────────────────────────────────────────
+            "icons/rust.svg" => icon!("rust.svg"),
+            "icons/c.svg" => icon!("c.svg"),
+            "icons/cpp.svg" => icon!("cpp.svg"),
+            "icons/csharp.svg" => icon!("csharp.svg"),
+            "icons/fsharp.svg" => icon!("fsharp.svg"),
+            "icons/go.svg" => icon!("go.svg"),
+            "icons/zig.svg" => icon!("zig.svg"),
+            "icons/java.svg" => icon!("java.svg"),
+            "icons/kotlin.svg" => icon!("kotlin.svg"),
+            "icons/scala.svg" => icon!("scala.svg"),
+            "icons/swift.svg" => icon!("swift.svg"),
+            "icons/dart.svg" => icon!("dart.svg"),
+
+            // ── Scripting ─────────────────────────────────────────────────
+            "icons/python.svg" => icon!("python.svg"),
+            "icons/ruby.svg" => icon!("ruby.svg"),
+            "icons/lua.svg" => icon!("lua.svg"),
+            "icons/elixir.svg" => icon!("elixir.svg"),
+            "icons/erlang.svg" => icon!("erlang.svg"),
+            "icons/haskell.svg" => icon!("haskell.svg"),
+            "icons/nim.svg" => icon!("nim.svg"),
+            "icons/julia.svg" => icon!("julia.svg"),
+            "icons/r.svg" => icon!("r.svg"),
+            "icons/elm.svg" => icon!("elm.svg"),
+            "icons/ocaml.svg" => icon!("ocaml.svg"),
+            "icons/clojure.svg" => icon!("clojure.svg"),
+            "icons/shell.svg" => icon!("shell.svg"),
+            "icons/powershell.svg" => icon!("powershell.svg"),
+
+            // ── Web / JS ecosystem ────────────────────────────────────────
+            "icons/javascript.svg" => icon!("javascript.svg"),
+            "icons/typescript.svg" => icon!("typescript.svg"),
+            "icons/react.svg" => icon!("react.svg"),
+            "icons/vue.svg" => icon!("vue.svg"),
+            "icons/svelte.svg" => icon!("svelte.svg"),
+            "icons/astro.svg" => icon!("astro.svg"),
+            "icons/html.svg" => icon!("html.svg"),
+            "icons/css.svg" => icon!("css.svg"),
+
+            // ── Data / config ─────────────────────────────────────────────
+            "icons/json.svg" => icon!("json.svg"),
+            "icons/toml.svg" => icon!("toml.svg"),
+            "icons/yaml.svg" => icon!("yaml.svg"),
+            "icons/xml.svg" => icon!("xml.svg"),
+            "icons/markdown.svg" => icon!("markdown.svg"),
+            "icons/sql.svg" => icon!("sql.svg"),
+            "icons/table.svg" => icon!("table.svg"),
+            "icons/jupyter.svg" => icon!("jupyter.svg"),
+            "icons/webassembly.svg" => icon!("webassembly.svg"),
+
+            // ── API / schema ──────────────────────────────────────────────
+            "icons/graphql.svg" => icon!("graphql.svg"),
+            "icons/proto.svg" => icon!("proto.svg"),
+            "icons/prisma.svg" => icon!("prisma.svg"),
+
+            // ── Infra ─────────────────────────────────────────────────────
+            "icons/docker.svg" => icon!("docker.svg"),
+            "icons/terraform.svg" => icon!("terraform.svg"),
+            "icons/nix.svg" => icon!("nix.svg"),
+            "icons/nginx.svg" => icon!("nginx.svg"),
+
+            // ── Build tools / config ──────────────────────────────────────
+            "icons/editorconfig.svg" => icon!("editorconfig.svg"),
+            "icons/eslint.svg" => icon!("eslint.svg"),
+            "icons/prettier.svg" => icon!("prettier.svg"),
+            "icons/jest.svg" => icon!("jest.svg"),
+            "icons/vite.svg" => icon!("vite.svg"),
+            "icons/nodejs.svg" => icon!("nodejs.svg"),
+            "icons/bun.svg" => icon!("bun.svg"),
+            "icons/go-mod.svg" => icon!("go-mod.svg"),
+            "icons/makefile.svg" => icon!("makefile.svg"),
+            "icons/python-misc.svg" => icon!("python-misc.svg"),
+            "icons/poetry.svg" => icon!("poetry.svg"),
+
+            // ── Security / lock ───────────────────────────────────────────
+            "icons/lock.svg" => icon!("lock.svg"),
+
+            // ── Media ─────────────────────────────────────────────────────
+            "icons/image.svg" => icon!("image.svg"),
+            "icons/video.svg" => icon!("video.svg"),
+            "icons/audio.svg" => icon!("audio.svg"),
+            "icons/archive.svg" => icon!("archive.svg"),
+
+            // Fallback: gpui_component's vendored icons (e.g. icons/check.svg).
+            _ => gpui_component_assets::Assets.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        gpui_component_assets::Assets.list(path)
+    }
+}

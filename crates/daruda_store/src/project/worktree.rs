@@ -1,0 +1,256 @@
+//! Worktree — a git worktree (or a default stand-in for non-git
+//! folders) plus its persisted tab/pane layout and metadata.
+//!
+//! GPUI-free: only persistable fields live here. The runtime form
+//! (with live `TerminalView` entities, PTY handles, agent tasks, etc.)
+//! is assembled in the `app` crate and wraps this struct as
+//! `worktree.serialized`.
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+use super::SerializedTab;
+
+/// Stable identifier for a worktree within a project.
+pub type WorktreeId = u64;
+
+/// Which view the sidebar is currently showing. Persisted so the app
+/// restores the user's last-used view on restart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarView {
+    #[default]
+    Worktrees,
+    GitChanges,
+    Files,
+}
+
+/// Which view the right dock is currently showing. Persisted so the
+/// app restores the user's last-used right-panel tab on restart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RightPanelView {
+    #[default]
+    Usage,
+    Skills,
+    Tools,
+    Tasks,
+}
+
+/// Time window applied to the Usage tab. Sessions whose latest
+/// activity is older than the window are hidden, and the "Total"
+/// summary aggregates only sessions that pass the filter.
+///
+/// `Last7d` is the default — it lines up with Anthropic's 7-day
+/// plan-rate window so the rendered Total feels comparable to the
+/// plan dashboard. `All` shows lifetime cumulative usage; `Last5h`
+/// matches the 5-hour billing window; `Last24h` is the daily view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageWindow {
+    /// Cumulative — every recorded session counted.
+    All,
+    /// Last 5 hours (Anthropic 5-hour rate window). Serde's
+    /// `snake_case` rule does not insert an underscore between
+    /// letters and digits, so each `LastNh`/`LastNd` variant
+    /// overrides the rename explicitly to keep the on-disk slug
+    /// (`last_5h`, `last_24h`, `last_7d`) aligned with [`Self::slug`].
+    #[serde(rename = "last_5h")]
+    Last5h,
+    /// Last 24 hours.
+    #[serde(rename = "last_24h")]
+    Last24h,
+    /// Last 7 days (Anthropic 7-day rate window). Default.
+    #[default]
+    #[serde(rename = "last_7d")]
+    Last7d,
+}
+
+impl UsageWindow {
+    /// Length of the rolling window; `None` for [`Self::All`] (no
+    /// cutoff). Caller computes `now - duration` to get the lower
+    /// bound for `last_updated`.
+    pub fn duration(self) -> Option<std::time::Duration> {
+        use std::time::Duration;
+        match self {
+            Self::All => None,
+            Self::Last5h => Some(Duration::from_secs(5 * 60 * 60)),
+            Self::Last24h => Some(Duration::from_secs(24 * 60 * 60)),
+            Self::Last7d => Some(Duration::from_secs(7 * 24 * 60 * 60)),
+        }
+    }
+
+    /// Inclusive lower bound for `SessionUsage::last_updated`.
+    /// Returns `None` for [`Self::All`] (everything passes).
+    /// `now.checked_sub(duration)` guards against underflow if the
+    /// system clock somehow precedes the duration since the epoch.
+    pub fn cutoff(self, now: std::time::SystemTime) -> Option<std::time::SystemTime> {
+        self.duration().and_then(|d| now.checked_sub(d))
+    }
+
+    /// Every variant in display order — shorter rolling windows
+    /// first, then the lifetime "All" option as the explicit
+    /// no-filter escape hatch. Used by the right-panel dropdown to
+    /// seed its options without duplicating the list at the call
+    /// site. User-facing labels live in `surface::strings` so this
+    /// data-layer crate stays free of UI strings.
+    pub const ALL: &'static [Self] = &[Self::Last5h, Self::Last24h, Self::Last7d, Self::All];
+
+    /// Stable string identifier — same value as the snake_case serde
+    /// representation. Used by the right-panel `Select` widget to
+    /// attach an opaque `value` to each option, keeping rendering
+    /// free of `match` boilerplate per call site.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Last5h => "last_5h",
+            Self::Last24h => "last_24h",
+            Self::Last7d => "last_7d",
+        }
+    }
+
+    /// Inverse of [`Self::slug`]. Returns `None` for unknown input
+    /// so a stale state file with a removed window kind falls back
+    /// to the caller's default rather than crashing.
+    pub fn from_slug(s: &str) -> Option<Self> {
+        match s {
+            "all" => Some(Self::All),
+            "last_5h" => Some(Self::Last5h),
+            "last_24h" => Some(Self::Last24h),
+            "last_7d" => Some(Self::Last7d),
+            _ => None,
+        }
+    }
+}
+
+/// Distinguishes git worktrees from the fallback used when daruda
+/// opens a plain directory. `Default` is reserved for non-git paths
+/// and must be unique per project.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorktreeKind {
+    Git {
+        /// `None` = detached HEAD.
+        branch: Option<String>,
+        /// Absolute path to the **shared** main repository top — the
+        /// directory holding the common `.git/` for the whole repo.
+        /// Same value across every worktree of the repo. Use this as
+        /// cwd for worktree-management ops (`git worktree add/remove`,
+        /// `git branch -D`) where git resolves the shared gitdir from
+        /// any path inside the repo. Do **not** use it as cwd for
+        /// per-worktree ops (`git add`, `git restore`) — those need
+        /// [`worktree_root`].
+        repo_root: PathBuf,
+        /// Absolute path to **this** worktree's filesystem toplevel —
+        /// the directory holding the per-worktree `.git` entry
+        /// (regular `.git/` for the main worktree, a `.git` pointer
+        /// file for linked worktrees). Per-worktree, immutable after
+        /// the initial probe. Use this as cwd for every git CLI that
+        /// targets a specific worktree's index: `git status`,
+        /// `git add`, `git restore --staged`, `git diff`. Porcelain
+        /// paths returned by `git status` are relative to this path,
+        /// so subsequent `git add <path>` resolves correctly only
+        /// when cwd matches.
+        ///
+        /// Distinct from `Worktree.path` because the latter is
+        /// anchored to a sub-directory when the user opens one
+        /// (terminal-cwd convenience); `worktree_root` always stays
+        /// at the actual git toplevel.
+        #[serde(default)]
+        worktree_root: PathBuf,
+    },
+    Default,
+}
+
+impl WorktreeKind {
+    /// `true` when this worktree is backed by git (any branch state).
+    pub fn is_git(&self) -> bool {
+        matches!(self, Self::Git { .. })
+    }
+}
+
+/// Runtime-only status indicator. Not persisted — always `Idle` after
+/// restore; the runtime recomputes `Running` / `Error` from live PTY
+/// and agent signals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorktreeStatus {
+    #[default]
+    Idle,
+    Running,
+    Error,
+}
+
+/// On-disk representation of a worktree. Each worktree owns its own
+/// tab list and active-tab index; a `ProjectState` is a collection of
+/// these worktrees plus shared workspace chrome state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SerializedWorktree {
+    pub id: WorktreeId,
+    pub kind: WorktreeKind,
+    pub path: PathBuf,
+    #[serde(default, alias = "label")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tab_order: u32,
+    #[serde(default)]
+    pub is_unread: bool,
+    /// Unix timestamp (seconds). `0` = unknown / never.
+    #[serde(default)]
+    pub last_activity: u64,
+    #[serde(default)]
+    pub tabs: Vec<SerializedTab>,
+    #[serde(default)]
+    pub active_tab_index: usize,
+    /// Ref the worktree was branched from (e.g. `main`,
+    /// `origin/main`). `None` means the user accepted the default
+    /// (current HEAD at creation time). Captured so the user can
+    /// answer "what is this worktree based on?" later.
+    #[serde(default)]
+    pub base_ref: Option<String>,
+    /// Free-form description set at creation time (e.g.
+    /// "PR #123 review", "feat/sidebar TextInput IME"). Surfaced as
+    /// the worktree row sublabel in the sidebar so an idle worktree
+    /// from last week is still self-describing.
+    #[serde(default, alias = "task")]
+    pub description: Option<String>,
+}
+
+impl SerializedWorktree {
+    /// Default worktree for a non-git path. Caller supplies a unique
+    /// `id` (typically `0` since only one default exists per project).
+    pub fn default_for_path(id: WorktreeId, path: PathBuf) -> Self {
+        Self {
+            id,
+            kind: WorktreeKind::Default,
+            path,
+            name: None,
+            tab_order: 0,
+            is_unread: false,
+            last_activity: 0,
+            tabs: Vec::new(),
+            active_tab_index: 0,
+            base_ref: None,
+            description: None,
+        }
+    }
+
+    /// Resolved display name — user-set `name` if present, otherwise
+    /// branch (for git) or path basename (for default).
+    pub fn display_name(&self) -> String {
+        if let Some(name) = self.name.as_deref() {
+            return name.to_string();
+        }
+        match &self.kind {
+            WorktreeKind::Git {
+                branch: Some(b), ..
+            } => b.clone(),
+            WorktreeKind::Git { branch: None, .. } => "(detached)".to_string(),
+            WorktreeKind::Default => self
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("default")
+                .to_string(),
+        }
+    }
+}

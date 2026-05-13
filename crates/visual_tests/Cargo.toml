@@ -1,0 +1,10 @@
+[package]
+name = "visual_tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+
+[dependencies]
+daruda_terminal = { path = "../daruda_terminal", features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }

@@ -1,0 +1,19 @@
+--- a/crates/gpui/src/platform/mac/window.rs
++++ b/crates/gpui/src/platform/mac/window.rs
+@@ -1761,7 +1761,14 @@
+             // however we skip keys with control or the input handler adds control-characters to the buffer.
+             // and keys with function, as the input handler swallows them.
+-            if is_composing
++            // Also route non-ASCII key_char (e.g. Korean jamo ㅎ, Japanese kana)
++            // through the IME-first path so the input method can properly start
++            // composition instead of falling back to insertText.
++            let has_non_ascii_key_char = key_down_event
++                .keystroke
++                .key_char
++                .as_ref()
++                .map_or(false, |c| !c.is_ascii());
++            if is_composing
++                || has_non_ascii_key_char
+                 || (key_down_event.keystroke.key_char.is_none()
+                     && !key_down_event.keystroke.modifiers.control
+                     && !key_down_event.keystroke.modifiers.function)

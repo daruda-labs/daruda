@@ -1,0 +1,13 @@
+[package]
+name = "gen_licenses"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+
+[[bin]]
+name = "gen_licenses"
+path = "src/main.rs"
+
+[dependencies]
+two-face = "0.5.1"

@@ -1,0 +1,203 @@
+use super::*;
+
+// ---- Dock integration ----
+
+#[gpui::test]
+fn test_left_dock_starts_closed(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.read_with(cx, |ws, cx| {
+        assert!(!ws.left_dock.read(cx).is_open);
+        assert!(!ws.bottom_dock.read(cx).is_open);
+        assert!(!ws.right_dock.read(cx).is_open);
+    });
+}
+
+#[gpui::test]
+fn test_toggle_left_dock(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        assert!(!ws.left_dock.read(cx).is_open);
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.left_dock.read(cx).is_open);
+        ws.left_dock.update(cx, |d, _| d.toggle());
+        assert!(!ws.left_dock.read(cx).is_open);
+    });
+}
+
+#[gpui::test]
+fn test_toggle_bottom_dock(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        assert!(!ws.bottom_dock.read(cx).is_open);
+        ws.bottom_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.bottom_dock.read(cx).is_open);
+    });
+}
+
+#[gpui::test]
+fn test_toggle_right_dock(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        assert!(!ws.right_dock.read(cx).is_open);
+        ws.right_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.right_dock.read(cx).is_open);
+    });
+}
+
+#[gpui::test]
+fn test_left_dock_registers_three_sidebar_panels(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.read_with(cx, |ws, cx| {
+        let d = ws.left_dock.read(cx);
+        assert_eq!(d.panels.len(), 3);
+        assert_eq!(
+            d.panels[0].name(),
+            crate::surface::strings::DOCK_PANEL_WORKTREES
+        );
+        assert_eq!(d.panels[1].name(), crate::surface::strings::DOCK_PANEL_GIT);
+        assert_eq!(
+            d.panels[2].name(),
+            crate::surface::strings::DOCK_PANEL_FILES
+        );
+    });
+}
+
+#[gpui::test]
+fn test_left_dock_active_panel_matches_default_sidebar_view(cx: &mut TestAppContext) {
+    // Default sidebar view is Worktrees → index 0.
+    let (_wh, ws) = build_workspace(cx);
+    ws.read_with(cx, |ws, cx| {
+        let d = ws.left_dock.read(cx);
+        assert_eq!(d.active_panel, 0);
+        assert_eq!(
+            d.active_panel_name(),
+            crate::surface::strings::DOCK_PANEL_WORKTREES
+        );
+    });
+}
+
+#[gpui::test]
+fn test_set_sidebar_view_updates_sidebar_view(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::SidebarView::GitChanges, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.sidebar_view,
+            daruda_store::project::SidebarView::GitChanges
+        );
+    });
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+    });
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::SidebarView::Worktrees, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.sidebar_view,
+            daruda_store::project::SidebarView::Worktrees
+        );
+    });
+}
+
+#[gpui::test]
+fn test_set_sidebar_view_no_op_when_same(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    // First call switches to Files.
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+    });
+    // Second call with the same view should be a no-op (sidebar_view unchanged).
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+    });
+}
+
+#[gpui::test]
+fn test_bottom_dock_registers_macros_panel(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.read_with(cx, |ws, cx| {
+        let d = ws.bottom_dock.read(cx);
+        assert_eq!(d.panels.len(), 1);
+        assert_eq!(
+            d.panels[0].name(),
+            crate::surface::strings::DOCK_PANEL_MACROS
+        );
+    });
+}
+
+#[gpui::test]
+fn test_right_dock_has_agent_chat_panel(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.read_with(cx, |ws, cx| {
+        let d = ws.right_dock.read(cx);
+        assert_eq!(d.panels.len(), 1);
+        assert_eq!(
+            d.panels[0].name(),
+            crate::surface::strings::DOCK_PANEL_AGENT_TASKS
+        );
+    });
+}
+
+#[gpui::test]
+fn test_dock_drag_resizes_left_dock(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.left_dock.update(cx, |d, _| d.is_open = true);
+        let start = ws.left_dock.read(cx).size;
+        ws.begin_dock_drag(dock::DockPosition::Left, 100.0, cx);
+        // Simulate drag by mutating size directly — the mousemove path
+        // exercises resize_all_tabs which needs a live Window.
+        ws.left_dock.update(cx, |d, _| d.resize(start + 30.0));
+        assert_eq!(ws.left_dock.read(cx).size, start + 30.0);
+        ws.end_dock_drag(cx);
+        assert!(ws.dock_drag.is_none());
+    });
+}
+
+#[gpui::test]
+fn test_dock_drag_clamps_to_range(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.left_dock.update(cx, |d, _| d.is_open = true);
+        ws.begin_dock_drag(dock::DockPosition::Left, 0.0, cx);
+        // Pull way past max — clamp must hold.
+        ws.left_dock.update(cx, |d, _| d.resize(99999.0));
+        assert_eq!(ws.left_dock.read(cx).size, ws.left_dock.read(cx).max_size);
+        ws.left_dock.update(cx, |d, _| d.resize(0.0));
+        assert_eq!(ws.left_dock.read(cx).size, ws.left_dock.read(cx).min_size);
+        ws.end_dock_drag(cx);
+    });
+}
+
+#[gpui::test]
+fn test_dock_drag_right_and_bottom_track_their_own_sizes(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.right_dock.update(cx, |d, _| d.is_open = true);
+        ws.bottom_dock.update(cx, |d, _| d.is_open = true);
+        ws.begin_dock_drag(dock::DockPosition::Right, 0.0, cx);
+        assert!(matches!(
+            ws.dock_drag.map(|d| d.position),
+            Some(dock::DockPosition::Right)
+        ));
+        ws.end_dock_drag(cx);
+        ws.begin_dock_drag(dock::DockPosition::Bottom, 0.0, cx);
+        assert!(matches!(
+            ws.dock_drag.map(|d| d.position),
+            Some(dock::DockPosition::Bottom)
+        ));
+        ws.end_dock_drag(cx);
+    });
+}

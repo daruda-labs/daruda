@@ -1,0 +1,12 @@
+[package]
+name = "gpui_component_assets"
+description = "Vendored SVG icon assets for gpui-component v0.5.1 (longbridge/gpui-component, Apache-2.0)."
+version = "0.5.1"
+license = "Apache-2.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+gpui = { workspace = true }
+anyhow = { workspace = true }
+rust-embed = { workspace = true }

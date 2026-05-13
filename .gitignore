@@ -1,0 +1,14 @@
+# Rust build artifacts
+target/
+
+# Zig
+.context/
+**/.zig-cache/
+
+# macOS
+.DS_Store
+
+*.swp
+
+# Patch backup files
+**/*.orig

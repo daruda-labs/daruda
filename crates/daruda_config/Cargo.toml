@@ -1,0 +1,16 @@
+[package]
+name = "daruda_config"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "TOML configuration loader for daruda"
+
+[dependencies]
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+toml_edit = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,9 @@
+[package]
+name = "vt_dump"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+
+[dependencies]
+ghostty_vt = { path = "../../crates/ghostty_vt" }

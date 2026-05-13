@@ -1,0 +1,8 @@
+[package]
+name = "ghostty_vt_sys"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+
+[build-dependencies]

@@ -1,0 +1,641 @@
+//! Markdown parser and IR types for the file viewer preview mode.
+//!
+//! `parse_markdown` converts a raw Markdown string into a flat list of
+//! `MdBlock`s using `pulldown-cmark`. Code blocks are syntax-highlighted
+//! in-place using the existing `highlighter` infrastructure.
+//!
+//! The rendering of these blocks lives in `render_file_viewer.rs`.
+
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+use super::highlighter::highlight_raw_rows;
+use super::pane_file_view::{VisualRow, VisualRowKind};
+
+// ----------------------------------------------------------------
+// Inline IR
+// ----------------------------------------------------------------
+
+#[derive(Clone)]
+pub(in crate::workspace) enum MdSpan {
+    Text(String),
+    Bold(Vec<MdSpan>),
+    Italic(Vec<MdSpan>),
+    Code(String),
+    Link {
+        text: String,
+        #[allow(dead_code)]
+        url: String,
+    },
+    Strikethrough(Vec<MdSpan>),
+    SoftBreak,
+    HardBreak,
+    /// Inline footnote reference `[^label]`.
+    Footnote(String),
+    /// Inline HTML shown verbatim in dim monospace.
+    Html(String),
+}
+
+// ----------------------------------------------------------------
+// List item IR
+// ----------------------------------------------------------------
+
+/// A single item in a bullet or ordered list.
+#[derive(Clone)]
+pub(in crate::workspace) struct ListItem {
+    /// `Some(true)` = [x] checked, `Some(false)` = [ ] unchecked, `None` = plain bullet.
+    pub checked: Option<bool>,
+    pub spans: Vec<MdSpan>,
+    /// Nested sublists (parsed recursively).
+    pub children: Vec<MdBlock>,
+}
+
+// ----------------------------------------------------------------
+// Block IR
+// ----------------------------------------------------------------
+
+#[derive(Clone)]
+pub(in crate::workspace) enum MdBlock {
+    Heading {
+        level: u8,
+        spans: Vec<MdSpan>,
+    },
+    Paragraph(Vec<MdSpan>),
+    /// Pre-highlighted code block rows (one `VisualRow` per source line).
+    CodeBlock {
+        #[allow(dead_code)]
+        lang: Option<String>,
+        rows: Vec<VisualRow>,
+    },
+    BulletList(Vec<ListItem>),
+    OrderedList {
+        start: u64,
+        items: Vec<ListItem>,
+    },
+    Blockquote(Vec<MdSpan>),
+    Rule,
+    /// GFM table. `header` is the first row; `rows` are the body rows.
+    /// Each cell is a list of inline spans.
+    Table {
+        header: Vec<Vec<MdSpan>>,
+        rows: Vec<Vec<Vec<MdSpan>>>,
+    },
+    /// Footnote definition `[^label]: ...` collected at end of document.
+    FootnoteDefinition {
+        label: String,
+        spans: Vec<MdSpan>,
+    },
+    /// Raw HTML block (dim monospace passthrough).
+    HtmlBlock(String),
+}
+
+// ----------------------------------------------------------------
+// Parser
+// ----------------------------------------------------------------
+
+/// Parse `text` into a `Vec<MdBlock>`. Code fences are syntax-highlighted
+/// using `syntax_theme` (falls back to the bundled default on unknown names).
+pub(in crate::workspace) fn parse_markdown(text: &str, syntax_theme: &str) -> Vec<MdBlock> {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_GFM);
+
+    let events: Vec<Event<'_>> = Parser::new_ext(text, opts).collect();
+    let mut pos = 0;
+    let mut blocks = Vec::new();
+
+    while pos < events.len() {
+        if let Some((block, consumed)) = parse_block(&events, pos, syntax_theme) {
+            blocks.push(block);
+            pos += consumed;
+        } else {
+            pos += 1;
+        }
+    }
+    blocks
+}
+
+// ----------------------------------------------------------------
+// Block-level parsing helpers
+// ----------------------------------------------------------------
+
+fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(MdBlock, usize)> {
+    match &events[pos] {
+        Event::Start(Tag::Heading { level, .. }) => {
+            let (spans, consumed) = collect_inline_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::Heading(_)))
+            });
+            Some((
+                MdBlock::Heading {
+                    level: heading_level_to_u8(*level),
+                    spans,
+                },
+                consumed + 2, // +2: Start + End
+            ))
+        }
+
+        Event::Start(Tag::Paragraph) => {
+            let (spans, consumed) = collect_inline_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::Paragraph))
+            });
+            Some((MdBlock::Paragraph(spans), consumed + 2))
+        }
+
+        Event::Start(Tag::CodeBlock(kind)) => {
+            let lang = match kind {
+                CodeBlockKind::Fenced(s) if !s.is_empty() => {
+                    let lang = s.split_whitespace().next().unwrap_or("").to_owned();
+                    if lang.is_empty() { None } else { Some(lang) }
+                }
+                _ => None,
+            };
+            let (text, consumed) = collect_text_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::CodeBlock))
+            });
+            let mut rows = build_code_rows(&text);
+            if let Some(ref l) = lang {
+                highlight_raw_rows(&mut rows, l, syntax_theme);
+            }
+            Some((MdBlock::CodeBlock { lang, rows }, consumed + 2))
+        }
+
+        Event::Start(Tag::BlockQuote(_)) => {
+            let (spans, consumed) = collect_inline_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::BlockQuote(_)))
+            });
+            Some((MdBlock::Blockquote(spans), consumed + 2))
+        }
+
+        Event::Start(Tag::List(start_num)) => {
+            let ordered = start_num.is_some();
+            let start = start_num.unwrap_or(1);
+            let mut items: Vec<ListItem> = Vec::new();
+            let mut i = pos + 1;
+            while i < events.len() {
+                match &events[i] {
+                    Event::Start(Tag::Item) => {
+                        let (item, consumed) = parse_item(events, i + 1, syntax_theme);
+                        items.push(item);
+                        i += consumed + 2;
+                    }
+                    Event::End(TagEnd::List(_)) => {
+                        i += 1;
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            let consumed = i - pos;
+            let block = if ordered {
+                MdBlock::OrderedList { start, items }
+            } else {
+                MdBlock::BulletList(items)
+            };
+            Some((block, consumed))
+        }
+
+        Event::Rule => Some((MdBlock::Rule, 1)),
+
+        Event::Start(Tag::FootnoteDefinition(label)) => {
+            let label = label.to_string();
+            let mut spans: Vec<MdSpan> = Vec::new();
+            let mut i = pos + 1;
+            while i < events.len() {
+                match &events[i] {
+                    Event::End(TagEnd::FootnoteDefinition) => {
+                        i += 1;
+                        break;
+                    }
+                    // pulldown-cmark wraps footnote body in paragraphs; strip the wrapper.
+                    Event::Start(Tag::Paragraph) => {
+                        if !spans.is_empty() {
+                            spans.push(MdSpan::SoftBreak);
+                        }
+                        let (ps, consumed) = collect_inline_until(events, i + 1, |e| {
+                            matches!(e, Event::End(TagEnd::Paragraph))
+                        });
+                        spans.extend(ps);
+                        i += consumed + 2;
+                    }
+                    _ => {
+                        let (span, consumed) = parse_inline(events, i);
+                        spans.push(span);
+                        i += consumed;
+                    }
+                }
+            }
+            Some((MdBlock::FootnoteDefinition { label, spans }, i - pos))
+        }
+
+        Event::Html(s) => Some((MdBlock::HtmlBlock(s.to_string()), 1)),
+
+        Event::Start(Tag::Table(_alignments)) => {
+            let mut header: Vec<Vec<MdSpan>> = Vec::new();
+            let mut rows: Vec<Vec<Vec<MdSpan>>> = Vec::new();
+            let mut i = pos + 1;
+
+            while i < events.len() {
+                match &events[i] {
+                    Event::Start(Tag::TableHead) => {
+                        i += 1;
+                        let mut head_cells: Vec<Vec<MdSpan>> = Vec::new();
+                        while i < events.len() {
+                            match &events[i] {
+                                Event::Start(Tag::TableCell) => {
+                                    let (spans, consumed) =
+                                        collect_inline_until(events, i + 1, |e| {
+                                            matches!(e, Event::End(TagEnd::TableCell))
+                                        });
+                                    head_cells.push(spans);
+                                    i += consumed + 2;
+                                }
+                                Event::End(TagEnd::TableHead) => {
+                                    i += 1;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                        header = head_cells;
+                    }
+                    Event::Start(Tag::TableRow) => {
+                        i += 1;
+                        let mut row_cells: Vec<Vec<MdSpan>> = Vec::new();
+                        while i < events.len() {
+                            match &events[i] {
+                                Event::Start(Tag::TableCell) => {
+                                    let (spans, consumed) =
+                                        collect_inline_until(events, i + 1, |e| {
+                                            matches!(e, Event::End(TagEnd::TableCell))
+                                        });
+                                    row_cells.push(spans);
+                                    i += consumed + 2;
+                                }
+                                Event::End(TagEnd::TableRow) => {
+                                    i += 1;
+                                    break;
+                                }
+                                _ => i += 1,
+                            }
+                        }
+                        rows.push(row_cells);
+                    }
+                    Event::End(TagEnd::Table) => {
+                        i += 1;
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            Some((MdBlock::Table { header, rows }, i - pos))
+        }
+
+        _ => None,
+    }
+}
+
+// ----------------------------------------------------------------
+// List item parser
+// ----------------------------------------------------------------
+
+/// Parse one list item starting at `pos` (just after `Start(Item)`).
+/// Returns the item and the number of events consumed (NOT including `End(Item)`).
+fn parse_item(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> (ListItem, usize) {
+    let mut i = pos;
+
+    // Task list marker is always the first event in task list items.
+    let checked = if let Some(Event::TaskListMarker(c)) = events.get(i) {
+        let c = *c;
+        i += 1;
+        Some(c)
+    } else {
+        None
+    };
+
+    let mut spans: Vec<MdSpan> = Vec::new();
+    let mut children: Vec<MdBlock> = Vec::new();
+
+    while i < events.len() {
+        match &events[i] {
+            Event::End(TagEnd::Item) => break,
+
+            // Loose lists wrap item content in a paragraph.
+            Event::Start(Tag::Paragraph) => {
+                let (ps, consumed) = collect_inline_until(events, i + 1, |e| {
+                    matches!(e, Event::End(TagEnd::Paragraph))
+                });
+                spans.extend(ps);
+                i += consumed + 2;
+            }
+
+            // Nested list — recurse via parse_block.
+            Event::Start(Tag::List(_)) => {
+                if let Some((block, consumed)) = parse_block(events, i, syntax_theme) {
+                    children.push(block);
+                    i += consumed;
+                } else {
+                    i += 1;
+                }
+            }
+
+            _ => {
+                let (span, consumed) = parse_inline(events, i);
+                spans.push(span);
+                i += consumed;
+            }
+        }
+    }
+
+    (
+        ListItem {
+            checked,
+            spans,
+            children,
+        },
+        i - pos,
+    )
+}
+
+// ----------------------------------------------------------------
+// Inline parsing helpers
+// ----------------------------------------------------------------
+
+fn collect_inline_until<F>(events: &[Event<'_>], start: usize, stop: F) -> (Vec<MdSpan>, usize)
+where
+    F: Fn(&Event<'_>) -> bool,
+{
+    let mut spans = Vec::new();
+    let mut i = start;
+    while i < events.len() {
+        if stop(&events[i]) {
+            break;
+        }
+        let (span, consumed) = parse_inline(events, i);
+        spans.push(span);
+        i += consumed;
+    }
+    (spans, i - start)
+}
+
+fn parse_inline(events: &[Event<'_>], pos: usize) -> (MdSpan, usize) {
+    match &events[pos] {
+        Event::Text(s) => (MdSpan::Text(s.to_string()), 1),
+        Event::Code(s) => (MdSpan::Code(s.to_string()), 1),
+        Event::SoftBreak => (MdSpan::SoftBreak, 1),
+        Event::HardBreak => (MdSpan::HardBreak, 1),
+
+        Event::Start(Tag::Strong) => {
+            let (inner, consumed) =
+                collect_inline_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Strong)));
+            (MdSpan::Bold(inner), consumed + 2)
+        }
+
+        Event::Start(Tag::Emphasis) => {
+            let (inner, consumed) = collect_inline_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::Emphasis))
+            });
+            (MdSpan::Italic(inner), consumed + 2)
+        }
+
+        Event::Start(Tag::Strikethrough) => {
+            let (inner, consumed) = collect_inline_until(events, pos + 1, |e| {
+                matches!(e, Event::End(TagEnd::Strikethrough))
+            });
+            (MdSpan::Strikethrough(inner), consumed + 2)
+        }
+
+        Event::Start(Tag::Link {
+            dest_url, title, ..
+        }) => {
+            let url = if dest_url.is_empty() {
+                title.to_string()
+            } else {
+                dest_url.to_string()
+            };
+            let (inner, consumed) =
+                collect_inline_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Link)));
+            let text = flatten_spans_to_text(&inner);
+            (MdSpan::Link { text, url }, consumed + 2)
+        }
+
+        Event::Start(Tag::Image { dest_url, .. }) => {
+            let (alt_text, consumed) =
+                collect_text_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Image)));
+            let text = if alt_text.is_empty() {
+                dest_url.to_string()
+            } else {
+                alt_text
+            };
+            (MdSpan::Text(format!("[{text}]")), consumed + 2)
+        }
+
+        Event::InlineHtml(s) => (MdSpan::Html(s.to_string()), 1),
+        Event::FootnoteReference(label) => (MdSpan::Footnote(label.to_string()), 1),
+        Event::Html(_) => (MdSpan::Text(String::new()), 1),
+
+        _ => (MdSpan::Text(String::new()), 1),
+    }
+}
+
+// ----------------------------------------------------------------
+// Utilities
+// ----------------------------------------------------------------
+
+fn collect_text_until<F>(events: &[Event<'_>], start: usize, stop: F) -> (String, usize)
+where
+    F: Fn(&Event<'_>) -> bool,
+{
+    let mut text = String::new();
+    let mut i = start;
+    while i < events.len() {
+        if stop(&events[i]) {
+            break;
+        }
+        if let Event::Text(s) = &events[i] {
+            text.push_str(s);
+        }
+        i += 1;
+    }
+    (text, i - start)
+}
+
+/// Plain-text representation of a block for clipboard copy.
+pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
+    match block {
+        MdBlock::Heading { level, spans } => {
+            let prefix = "#".repeat(*level as usize);
+            format!("{} {}", prefix, flatten_spans_to_text(spans))
+        }
+        MdBlock::Paragraph(spans) => flatten_spans_to_text(spans),
+        MdBlock::CodeBlock { lang, rows } => {
+            let fence = lang.as_deref().unwrap_or("");
+            let body = rows
+                .iter()
+                .map(|r| r.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("```{fence}\n{body}\n```")
+        }
+        MdBlock::BulletList(items) => items
+            .iter()
+            .map(|item| {
+                let prefix = match item.checked {
+                    Some(true) => "- [x] ",
+                    Some(false) => "- [ ] ",
+                    None => "- ",
+                };
+                let mut text = format!("{}{}", prefix, flatten_spans_to_text(&item.spans));
+                for child in &item.children {
+                    for line in md_block_plain_text(child).lines() {
+                        text.push('\n');
+                        text.push_str("  ");
+                        text.push_str(line);
+                    }
+                }
+                text
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        MdBlock::OrderedList { start, items } => items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let mut text = format!(
+                    "{}. {}",
+                    start + i as u64,
+                    flatten_spans_to_text(&item.spans)
+                );
+                for child in &item.children {
+                    for line in md_block_plain_text(child).lines() {
+                        text.push('\n');
+                        text.push_str("  ");
+                        text.push_str(line);
+                    }
+                }
+                text
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        MdBlock::Blockquote(spans) => format!("> {}", flatten_spans_to_text(spans)),
+        MdBlock::Rule => "---".to_owned(),
+        MdBlock::FootnoteDefinition { label, spans } => {
+            format!("[^{}]: {}", label, flatten_spans_to_text(spans))
+        }
+        MdBlock::HtmlBlock(html) => html.clone(),
+        MdBlock::Table { header, rows } => {
+            let header_line = header
+                .iter()
+                .map(|c| flatten_spans_to_text(c))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let sep_line = header.iter().map(|_| "---").collect::<Vec<_>>().join(" | ");
+            let body_lines: Vec<String> = rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|c| flatten_spans_to_text(c))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                })
+                .collect();
+            let mut out = format!("{header_line}\n{sep_line}");
+            for line in body_lines {
+                out.push('\n');
+                out.push_str(&line);
+            }
+            out
+        }
+    }
+}
+
+fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
+    let mut out = String::new();
+    for s in spans {
+        match s {
+            MdSpan::Text(t) | MdSpan::Code(t) | MdSpan::Link { text: t, .. } => out.push_str(t),
+            MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
+                out.push_str(&flatten_spans_to_text(inner));
+            }
+            MdSpan::SoftBreak | MdSpan::HardBreak => out.push(' '),
+            MdSpan::Footnote(label) => out.push_str(&format!("[^{label}]")),
+            MdSpan::Html(s) => out.push_str(s),
+        }
+    }
+    out
+}
+
+fn heading_level_to_u8(level: HeadingLevel) -> u8 {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
+}
+
+fn build_code_rows(text: &str) -> Vec<VisualRow> {
+    text.lines()
+        .enumerate()
+        .map(|(i, line)| VisualRow {
+            content: line.to_owned(),
+            kind: VisualRowKind::Plain,
+            line_no_left: (i + 1).to_string(),
+            line_no_right: String::new(),
+            header_context: String::new(),
+            spans: Vec::new(),
+            word_changes: Vec::new(),
+        })
+        .collect()
+}
+
+// ----------------------------------------------------------------
+// Tests
+// ----------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_heading() {
+        let blocks = parse_markdown("# Hello\n", "base16-ocean.dark");
+        assert!(matches!(blocks[0], MdBlock::Heading { level: 1, .. }));
+    }
+
+    #[test]
+    fn parse_paragraph_with_inline() {
+        let blocks = parse_markdown("normal **bold** text\n", "base16-ocean.dark");
+        assert!(matches!(blocks[0], MdBlock::Paragraph(_)));
+        if let MdBlock::Paragraph(spans) = &blocks[0] {
+            assert!(spans.iter().any(|s| matches!(s, MdSpan::Bold(_))));
+        }
+    }
+
+    #[test]
+    fn parse_fenced_code_block() {
+        let md = "```rust\nfn main() {}\n```\n";
+        let blocks = parse_markdown(md, "base16-ocean.dark");
+        assert!(matches!(
+            blocks[0],
+            MdBlock::CodeBlock { lang: Some(_), .. }
+        ));
+    }
+
+    #[test]
+    fn parse_bullet_list() {
+        let blocks = parse_markdown("- item one\n- item two\n", "base16-ocean.dark");
+        assert!(matches!(blocks[0], MdBlock::BulletList(_)));
+        if let MdBlock::BulletList(items) = &blocks[0] {
+            assert_eq!(items.len(), 2);
+        }
+    }
+
+    #[test]
+    fn parse_horizontal_rule() {
+        let blocks = parse_markdown("---\n", "base16-ocean.dark");
+        assert!(matches!(blocks[0], MdBlock::Rule));
+    }
+}

@@ -1,0 +1,18 @@
+[package]
+name = "daruda_claude"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Claude Code session status detection — hook event FSM + JSONL fallback parser (GPUI-free)"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+daruda_store = { path = "../daruda_store" }
+dirs = "6"
+fs4 = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+ureq = { version = "2", default-features = false, features = ["tls"] }

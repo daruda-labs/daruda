@@ -1,0 +1,1303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DarudaTheme",
+  "type": "object",
+  "properties": {
+    "title_bar_bg": {
+      "description": "Maps to `palette::TITLE_BAR_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1a1a1aff"
+    },
+    "tab_bar_bg": {
+      "description": "Maps to `palette::TAB_BAR_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1f1f1fff"
+    },
+    "tab_bar_border": {
+      "description": "Maps to `palette::TAB_BAR_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4dff"
+    },
+    "tab_active_bg": {
+      "description": "Maps to `palette::TAB_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c3c3cff"
+    },
+    "tab_active_text": {
+      "description": "Maps to `palette::TAB_ACTIVE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "pane_header_focused_text": {
+      "description": "Maps to `palette::PANE_HEADER_FOCUSED_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "tab_inactive_bg": {
+      "description": "Maps to `palette::TAB_INACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2a2a2aff"
+    },
+    "tab_inactive_hover_bg": {
+      "description": "Maps to `palette::TAB_INACTIVE_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "tab_inactive_text": {
+      "description": "Maps to `palette::TAB_INACTIVE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a6a6a6ff"
+    },
+    "status_bar_bg": {
+      "description": "Maps to `palette::STATUS_BAR_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1a1a1aff"
+    },
+    "status_bar_border": {
+      "description": "Maps to `palette::STATUS_BAR_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "status_bar_error": {
+      "description": "Maps to `palette::STATUS_BAR_ERROR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#dd3c3cff"
+    },
+    "status_bar_project_dot": {
+      "description": "Maps to `palette::STATUS_BAR_PROJECT_DOT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcbcbff"
+    },
+    "dock_bg": {
+      "description": "Maps to `palette::DOCK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1f1f1fff"
+    },
+    "dock_border": {
+      "description": "Maps to `palette::DOCK_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "dock_header_text": {
+      "description": "Maps to `palette::DOCK_HEADER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "dock_placeholder_text": {
+      "description": "Maps to `palette::DOCK_PLACEHOLDER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#595959ff"
+    },
+    "button_widget_bg": {
+      "description": "Maps to `palette::BUTTON_WIDGET_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "button_widget_bg_hover": {
+      "description": "Maps to `palette::BUTTON_WIDGET_BG_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "button_widget_text": {
+      "description": "Maps to `palette::BUTTON_WIDGET_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d9d9d9ff"
+    },
+    "panel_tab_drop_target_bg": {
+      "description": "Maps to `palette::PANEL_TAB_DROP_TARGET_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "muted_text": {
+      "description": "Maps to `palette::MUTED_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "faint_text": {
+      "description": "Maps to `palette::FAINT_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "disabled_item_bg": {
+      "description": "Maps to `palette::DISABLED_ITEM_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4dff"
+    },
+    "disabled_item_text": {
+      "description": "Maps to `palette::DISABLED_ITEM_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "close_button_hover_bg": {
+      "description": "Maps to `palette::CLOSE_BUTTON_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#cb4d4dff"
+    },
+    "accent_green": {
+      "description": "Maps to `palette::ACCENT_GREEN`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb6dff"
+    },
+    "dock_icon_inactive": {
+      "description": "Maps to `palette::DOCK_ICON_INACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "dock_icon_hover": {
+      "description": "Maps to `palette::DOCK_ICON_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#b3b3b3ff"
+    },
+    "dock_icon_active_bg": {
+      "description": "Maps to `palette::DOCK_ICON_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c3c3cff"
+    },
+    "sidebar_view_tab_inactive": {
+      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_INACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "sidebar_view_tab_active": {
+      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_ACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f2f2f2ff"
+    },
+    "sidebar_view_tab_accent": {
+      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_ACCENT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5299e0ff"
+    },
+    "sidebar_view_tab_hover_bg": {
+      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "worktree_accent_active": {
+      "description": "Maps to `palette::WORKTREE_ACCENT_ACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5299e0ff"
+    },
+    "worktree_unread": {
+      "description": "Maps to `palette::WORKTREE_UNREAD`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#eb9947ff"
+    },
+    "worktree_row_hover_bg": {
+      "description": "Maps to `palette::WORKTREE_ROW_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "worktree_drop_target_bg": {
+      "description": "Maps to `palette::WORKTREE_DROP_TARGET_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#264d7359"
+    },
+    "modal_panel_bg": {
+      "description": "Maps to `palette::MODAL_PANEL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#242424ff"
+    },
+    "modal_panel_border": {
+      "description": "Maps to `palette::MODAL_PANEL_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4dff"
+    },
+    "modal_input_bg": {
+      "description": "Maps to `palette::MODAL_INPUT_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141414ff"
+    },
+    "modal_input_border": {
+      "description": "Maps to `palette::MODAL_INPUT_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "input_focus_border": {
+      "description": "Maps to `palette::INPUT_FOCUS_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f2f2f2ff"
+    },
+    "modal_error_text": {
+      "description": "Maps to `palette::MODAL_ERROR_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e46767ff"
+    },
+    "modal_primary_bg": {
+      "description": "Maps to `palette::MODAL_PRIMARY_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c8cddff"
+    },
+    "modal_primary_hover_bg": {
+      "description": "Maps to `palette::MODAL_PRIMARY_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#67a6e4ff"
+    },
+    "modal_secondary_text": {
+      "description": "Maps to `palette::MODAL_SECONDARY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#bfbfbfff"
+    },
+    "modal_text_primary": {
+      "description": "Maps to `palette::MODAL_TEXT_PRIMARY`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "input_selection_bg": {
+      "description": "Maps to `palette::INPUT_SELECTION_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c8cdd59"
+    },
+    "textarea_scrollbar_thumb": {
+      "description": "Maps to `palette::TEXTAREA_SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#b3b3b366"
+    },
+    "banner_error_bg": {
+      "description": "Maps to `palette::BANNER_ERROR_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#dd3c3c1a"
+    },
+    "banner_error_text": {
+      "description": "Maps to `palette::BANNER_ERROR_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e87d7dff"
+    },
+    "banner_warning_bg": {
+      "description": "Maps to `palette::BANNER_WARNING_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e8ab301a"
+    },
+    "banner_warning_text": {
+      "description": "Maps to `palette::BANNER_WARNING_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f0c775ff"
+    },
+    "banner_info_bg": {
+      "description": "Maps to `palette::BANNER_INFO_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c8cdd1a"
+    },
+    "banner_info_text": {
+      "description": "Maps to `palette::BANNER_INFO_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#93bfecff"
+    },
+    "banner_success_bg": {
+      "description": "Maps to `palette::BANNER_SUCCESS_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#34b25e1a"
+    },
+    "banner_success_text": {
+      "description": "Maps to `palette::BANNER_SUCCESS_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#75d795ff"
+    },
+    "settings_scrollbar_thumb": {
+      "description": "Maps to `palette::SETTINGS_SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff40"
+    },
+    "settings_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::SETTINGS_SCROLLBAR_THUMB_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff73"
+    },
+    "right_panel_scrollbar_thumb": {
+      "description": "Maps to `palette::RIGHT_PANEL_SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff40"
+    },
+    "right_panel_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::RIGHT_PANEL_SCROLLBAR_THUMB_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff73"
+    },
+    "settings_sidebar_bg": {
+      "description": "Maps to `palette::SETTINGS_SIDEBAR_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#0000002e"
+    },
+    "settings_sidebar_row_active_bg": {
+      "description": "Maps to `palette::SETTINGS_SIDEBAR_ROW_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff1a"
+    },
+    "settings_sidebar_row_hover_bg": {
+      "description": "Maps to `palette::SETTINGS_SIDEBAR_ROW_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0f"
+    },
+    "palette_bg": {
+      "description": "Maps to `palette::PALETTE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#252525ff"
+    },
+    "palette_border": {
+      "description": "Maps to `palette::PALETTE_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#545454ff"
+    },
+    "palette_input_border": {
+      "description": "Maps to `palette::PALETTE_INPUT_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#454545ff"
+    },
+    "palette_focused_bg": {
+      "description": "Maps to `palette::PALETTE_FOCUSED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3c3c3cff"
+    },
+    "palette_entry_text": {
+      "description": "Maps to `palette::PALETTE_ENTRY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#bfbfbfff"
+    },
+    "palette_shortcut_text": {
+      "description": "Maps to `palette::PALETTE_SHORTCUT_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "palette_empty_text": {
+      "description": "Maps to `palette::PALETTE_EMPTY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#666666ff"
+    },
+    "git_badge_text": {
+      "description": "Maps to `palette::GIT_BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "git_staged_color": {
+      "description": "Maps to `palette::GIT_STAGED_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb6dff"
+    },
+    "git_unstaged_color": {
+      "description": "Maps to `palette::GIT_UNSTAGED_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e6bf4dff"
+    },
+    "git_untracked_color": {
+      "description": "Maps to `palette::GIT_UNTRACKED_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#53ac69ff"
+    },
+    "git_file_row_selected_bg": {
+      "description": "Maps to `palette::GIT_FILE_ROW_SELECTED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "git_file_row_hover_bg": {
+      "description": "Maps to `palette::GIT_FILE_ROW_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "git_diff_panel_bg": {
+      "description": "Maps to `palette::GIT_DIFF_PANEL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#171717ff"
+    },
+    "git_diff_border": {
+      "description": "Maps to `palette::GIT_DIFF_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "git_diff_add_bg": {
+      "description": "Maps to `palette::GIT_DIFF_ADD_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#0e2f16ff"
+    },
+    "git_diff_del_bg": {
+      "description": "Maps to `palette::GIT_DIFF_DEL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2f0e0eff"
+    },
+    "git_diff_add_text": {
+      "description": "Maps to `palette::GIT_DIFF_ADD_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#81e49aff"
+    },
+    "git_diff_del_text": {
+      "description": "Maps to `palette::GIT_DIFF_DEL_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e48181ff"
+    },
+    "git_diff_context_text": {
+      "description": "Maps to `palette::GIT_DIFF_CONTEXT_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "git_diff_hunk_bg": {
+      "description": "Maps to `palette::GIT_DIFF_HUNK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#222e39ff"
+    },
+    "git_stage_checkbox_border": {
+      "description": "Maps to `palette::GIT_STAGE_CHECKBOX_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#616161ff"
+    },
+    "git_stage_checkbox_checked_bg": {
+      "description": "Maps to `palette::GIT_STAGE_CHECKBOX_CHECKED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#267339ff"
+    },
+    "git_stage_checkbox_unchecked_bg": {
+      "description": "Maps to `palette::GIT_STAGE_CHECKBOX_UNCHECKED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#242424ff"
+    },
+    "git_commit_border": {
+      "description": "Maps to `palette::GIT_COMMIT_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "palette_query_text": {
+      "description": "Maps to `palette::PALETTE_QUERY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "palette_focused_text": {
+      "description": "Maps to `palette::PALETTE_FOCUSED_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "input_panel_drop_target_bg": {
+      "description": "Maps to `palette::INPUT_PANEL_DROP_TARGET_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#264d7333"
+    },
+    "terminal_drop_target_bg": {
+      "description": "Maps to `palette::TERMINAL_DROP_TARGET_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#264d734d"
+    },
+    "sidebar_scrollbar_thumb": {
+      "description": "Maps to `palette::SIDEBAR_SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff40"
+    },
+    "sidebar_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::SIDEBAR_SCROLLBAR_THUMB_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff73"
+    },
+    "pane_header_focused_bg": {
+      "description": "Maps to `palette::PANE_HEADER_FOCUSED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2d2d2dff"
+    },
+    "pane_header_unfocused_bg": {
+      "description": "Maps to `palette::PANE_HEADER_UNFOCUSED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1f1f1fff"
+    },
+    "pane_header_cwd_text": {
+      "description": "Maps to `palette::PANE_HEADER_CWD_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "agent_log_status_text": {
+      "description": "Maps to `palette::AGENT_LOG_STATUS_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "agent_chat_user_text": {
+      "description": "Maps to `palette::AGENT_CHAT_USER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "agent_task_running_fg": {
+      "description": "Maps to `palette::AGENT_TASK_RUNNING_FG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "agent_task_running_bg": {
+      "description": "Maps to `palette::AGENT_TASK_RUNNING_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "pane_divider_bg": {
+      "description": "Maps to `palette::PANE_DIVIDER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#404040ff"
+    },
+    "welcome_bg": {
+      "description": "Maps to `palette::WELCOME_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1a1a1aff"
+    },
+    "welcome_button_bg": {
+      "description": "Maps to `palette::WELCOME_BUTTON_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "welcome_button_hover_bg": {
+      "description": "Maps to `palette::WELCOME_BUTTON_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#404040ff"
+    },
+    "welcome_button_border": {
+      "description": "Maps to `palette::WELCOME_BUTTON_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "welcome_recent_hover_bg": {
+      "description": "Maps to `palette::WELCOME_RECENT_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "welcome_text": {
+      "description": "Maps to `palette::WELCOME_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "file_viewer_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141414ff"
+    },
+    "file_viewer_header_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_HEADER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#212121ff"
+    },
+    "file_viewer_header_border": {
+      "description": "Maps to `palette::FILE_VIEWER_HEADER_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "file_viewer_header_text": {
+      "description": "Maps to `palette::FILE_VIEWER_HEADER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ccccccff"
+    },
+    "file_viewer_close_hover": {
+      "description": "Maps to `palette::FILE_VIEWER_CLOSE_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "file_viewer_text": {
+      "description": "Maps to `palette::FILE_VIEWER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d1d1d1ff"
+    },
+    "file_viewer_selection_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_SELECTION_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#24324cff"
+    },
+    "file_viewer_line_no_text": {
+      "description": "Maps to `palette::FILE_VIEWER_LINE_NO_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#595959ff"
+    },
+    "file_viewer_tab_active_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_TAB_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#404040ff"
+    },
+    "file_viewer_tab_text": {
+      "description": "Maps to `palette::FILE_VIEWER_TAB_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a6a6a6ff"
+    },
+    "file_viewer_tab_active_text": {
+      "description": "Maps to `palette::FILE_VIEWER_TAB_ACTIVE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffff"
+    },
+    "file_diff_add_bg": {
+      "description": "Maps to `palette::FILE_DIFF_ADD_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#17361fff"
+    },
+    "file_diff_del_bg": {
+      "description": "Maps to `palette::FILE_DIFF_DEL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#371515ff"
+    },
+    "file_diff_add_text": {
+      "description": "Maps to `palette::FILE_DIFF_ADD_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#85e09cff"
+    },
+    "file_diff_del_text": {
+      "description": "Maps to `palette::FILE_DIFF_DEL_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e08585ff"
+    },
+    "file_diff_hunk_bg": {
+      "description": "Maps to `palette::FILE_DIFF_HUNK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#252b37ff"
+    },
+    "file_diff_hunk_text": {
+      "description": "Maps to `palette::FILE_DIFF_HUNK_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#708bc2ff"
+    },
+    "file_diff_hunk_border": {
+      "description": "Maps to `palette::FILE_DIFF_HUNK_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#394660ff"
+    },
+    "file_diff_ctx_text": {
+      "description": "Maps to `palette::FILE_DIFF_CTX_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#999999ff"
+    },
+    "file_viewer_divider": {
+      "description": "Maps to `palette::FILE_VIEWER_DIVIDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "file_viewer_scrollbar_thumb": {
+      "description": "Maps to `palette::FILE_VIEWER_SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff40"
+    },
+    "file_viewer_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::FILE_VIEWER_SCROLLBAR_THUMB_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff73"
+    },
+    "file_diff_hunk_ctx_text": {
+      "description": "Maps to `palette::FILE_DIFF_HUNK_CTX_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5c6b8aff"
+    },
+    "file_diff_stat_add": {
+      "description": "Maps to `palette::FILE_DIFF_STAT_ADD`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#47d165ff"
+    },
+    "file_diff_stat_del": {
+      "description": "Maps to `palette::FILE_DIFF_STAT_DEL`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d14747ff"
+    },
+    "file_diff_word_add_bg": {
+      "description": "Maps to `palette::FILE_DIFF_WORD_ADD_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1c6e30ff"
+    },
+    "file_diff_word_del_bg": {
+      "description": "Maps to `palette::FILE_DIFF_WORD_DEL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#6e1c1cff"
+    },
+    "file_viewer_search_text": {
+      "description": "Maps to `palette::FILE_VIEWER_SEARCH_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e6e6e6ff"
+    },
+    "file_viewer_search_count": {
+      "description": "Maps to `palette::FILE_VIEWER_SEARCH_COUNT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "file_viewer_search_empty": {
+      "description": "Maps to `palette::FILE_VIEWER_SEARCH_EMPTY`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d27979ff"
+    },
+    "file_viewer_search_match_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_SEARCH_MATCH_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#82641773"
+    },
+    "file_viewer_search_focused_bg": {
+      "description": "Maps to `palette::FILE_VIEWER_SEARCH_FOCUSED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e2a71299"
+    },
+    "md_h1_color": {
+      "description": "Maps to `palette::MD_H1_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f7f7f7ff"
+    },
+    "md_h2_color": {
+      "description": "Maps to `palette::MD_H2_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ebebebff"
+    },
+    "md_h3_color": {
+      "description": "Maps to `palette::MD_H3_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d9d9d9ff"
+    },
+    "md_h4_color": {
+      "description": "Maps to `palette::MD_H4_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d1d1d1ff"
+    },
+    "md_code_inline_bg": {
+      "description": "Maps to `palette::MD_CODE_INLINE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "md_code_inline_text": {
+      "description": "Maps to `palette::MD_CODE_INLINE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#dfb690ff"
+    },
+    "md_code_block_bg": {
+      "description": "Maps to `palette::MD_CODE_BLOCK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1c1c1cff"
+    },
+    "md_code_block_border": {
+      "description": "Maps to `palette::MD_CODE_BLOCK_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "md_blockquote_border": {
+      "description": "Maps to `palette::MD_BLOCKQUOTE_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#595959ff"
+    },
+    "md_blockquote_text": {
+      "description": "Maps to `palette::MD_BLOCKQUOTE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#999999ff"
+    },
+    "md_rule_color": {
+      "description": "Maps to `palette::MD_RULE_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "md_link_color": {
+      "description": "Maps to `palette::MD_LINK_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#67a8e4ff"
+    },
+    "md_strikethrough_color": {
+      "description": "Maps to `palette::MD_STRIKETHROUGH_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "md_list_bullet_color": {
+      "description": "Maps to `palette::MD_LIST_BULLET_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "md_task_checked_color": {
+      "description": "Maps to `palette::MD_TASK_CHECKED_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb71ff"
+    },
+    "md_footnote_color": {
+      "description": "Maps to `palette::MD_FOOTNOTE_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#6b9bc7ff"
+    },
+    "md_html_color": {
+      "description": "Maps to `palette::MD_HTML_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#6b6b6bff"
+    },
+    "md_table_border": {
+      "description": "Maps to `palette::MD_TABLE_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "md_table_header_bg": {
+      "description": "Maps to `palette::MD_TABLE_HEADER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#292929ff"
+    },
+    "md_table_row_bg_even": {
+      "description": "Maps to `palette::MD_TABLE_ROW_BG_EVEN`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#1c1c1cff"
+    },
+    "md_table_row_bg_odd": {
+      "description": "Maps to `palette::MD_TABLE_ROW_BG_ODD`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#212121ff"
+    },
+    "toast_bg": {
+      "description": "Maps to `palette::TOAST_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2ef7"
+    },
+    "toast_border": {
+      "description": "Maps to `palette::TOAST_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#525252ff"
+    },
+    "toast_text": {
+      "description": "Maps to `palette::TOAST_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e6e6e6ff"
+    },
+    "toast_action_text": {
+      "description": "Maps to `palette::TOAST_ACTION_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb6dff"
+    },
+    "toast_tint_info": {
+      "description": "Maps to `palette::TOAST_TINT_INFO`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#75b6d7ff"
+    },
+    "toast_tint_warning": {
+      "description": "Maps to `palette::TOAST_TINT_WARNING`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f0b042ff"
+    },
+    "toast_tint_error": {
+      "description": "Maps to `palette::TOAST_TINT_ERROR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e05252ff"
+    },
+    "toast_text_dim": {
+      "description": "Maps to `palette::TOAST_TEXT_DIM`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#b3b3b3ff"
+    },
+    "toast_repeat_bg": {
+      "description": "Maps to `palette::TOAST_REPEAT_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "error_modal_body_bg": {
+      "description": "Maps to `palette::ERROR_MODAL_BODY_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141414ff"
+    },
+    "error_modal_body_border": {
+      "description": "Maps to `palette::ERROR_MODAL_BODY_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#383838ff"
+    },
+    "terminal_bg": {
+      "description": "Maps to `palette::TERMINAL_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#000000ff"
+    },
+    "terminal_scrollbar_track_bg": {
+      "description": "Maps to `palette::TERMINAL_SCROLLBAR_TRACK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0a"
+    },
+    "keystroke_input_bg": {
+      "description": "Maps to `palette::KEYSTROKE_INPUT_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#242424ff"
+    },
+    "keystroke_input_border": {
+      "description": "Maps to `palette::KEYSTROKE_INPUT_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#474747ff"
+    },
+    "keystroke_input_border_active": {
+      "description": "Maps to `palette::KEYSTROKE_INPUT_BORDER_ACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb6dff"
+    },
+    "keystroke_badge_bg": {
+      "description": "Maps to `palette::KEYSTROKE_BADGE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3d3d3dff"
+    },
+    "keystroke_badge_border": {
+      "description": "Maps to `palette::KEYSTROKE_BADGE_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#616161ff"
+    },
+    "keystroke_badge_text": {
+      "description": "Maps to `palette::KEYSTROKE_BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e0e0e0ff"
+    },
+    "keystroke_hint_text": {
+      "description": "Maps to `palette::KEYSTROKE_HINT_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "popover_bg": {
+      "description": "Maps to `palette::POPOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#292929fa"
+    },
+    "popover_border": {
+      "description": "Maps to `palette::POPOVER_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4dff"
+    },
+    "popover_item_text": {
+      "description": "Maps to `palette::POPOVER_ITEM_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e0e0e0ff"
+    },
+    "popover_item_hover_bg": {
+      "description": "Maps to `palette::POPOVER_ITEM_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff14"
+    },
+    "popover_item_danger_text": {
+      "description": "Maps to `palette::POPOVER_ITEM_DANGER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#db5757ff"
+    },
+    "popover_separator": {
+      "description": "Maps to `palette::POPOVER_SEPARATOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff14"
+    },
+    "status_working_light": {
+      "description": "Maps to `palette::STATUS_WORKING_LIGHT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#389cffff"
+    },
+    "status_executing_tool_light": {
+      "description": "Maps to `palette::STATUS_EXECUTING_TOOL_LIGHT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#db7706ff"
+    },
+    "status_needs_attention_light": {
+      "description": "Maps to `palette::STATUS_NEEDS_ATTENTION_LIGHT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#dc2828ff"
+    },
+    "status_idle_light": {
+      "description": "Maps to `palette::STATUS_IDLE_LIGHT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#21c45dff"
+    },
+    "status_connecting_light": {
+      "description": "Maps to `palette::STATUS_CONNECTING_LIGHT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#6b7280ff"
+    },
+    "status_working_dark": {
+      "description": "Maps to `palette::STATUS_WORKING_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5cadffff"
+    },
+    "status_executing_tool_dark": {
+      "description": "Maps to `palette::STATUS_EXECUTING_TOOL_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#fbbd23ff"
+    },
+    "status_needs_attention_dark": {
+      "description": "Maps to `palette::STATUS_NEEDS_ATTENTION_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ef4343ff"
+    },
+    "status_idle_dark": {
+      "description": "Maps to `palette::STATUS_IDLE_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#36d39fff"
+    },
+    "status_connecting_dark": {
+      "description": "Maps to `palette::STATUS_CONNECTING_DARK`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#9ea3aeff"
+    },
+    "status_badge_active_outline": {
+      "description": "Maps to `palette::STATUS_BADGE_ACTIVE_OUTLINE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffffd9"
+    },
+    "claude_banner_bg": {
+      "description": "Maps to `palette::CLAUDE_BANNER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5cadff14"
+    },
+    "claude_banner_border": {
+      "description": "Maps to `palette::CLAUDE_BANNER_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5cadff33"
+    },
+    "claude_banner_hover_bg": {
+      "description": "Maps to `palette::CLAUDE_BANNER_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5cadff24"
+    },
+    "claude_banner_text": {
+      "description": "Maps to `palette::CLAUDE_BANNER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#bfbfbfff"
+    },
+    "claude_banner_icon": {
+      "description": "Maps to `palette::CLAUDE_BANNER_ICON`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#5cadffff"
+    },
+    "right_panel_cost_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_COST_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e0b96cff"
+    },
+    "right_panel_task_hover_bg": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0a"
+    },
+    "right_panel_task_selected_bg": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_SELECTED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0f"
+    },
+    "right_panel_task_state_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_STATE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "right_panel_task_title_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_TITLE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d9d9d9ff"
+    },
+    "right_panel_task_running_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_RUNNING_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4dcb6dff"
+    },
+    "right_panel_task_done_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_DONE_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a6a6a6ff"
+    },
+    "right_panel_task_error_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_ERROR_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d36969ff"
+    },
+    "right_panel_task_cancelled_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_CANCELLED_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    },
+    "right_panel_task_backlog_color": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_BACKLOG_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "right_panel_task_duration_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_DURATION_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#999999ff"
+    },
+    "right_panel_task_failure_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_FAILURE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e0b96cff"
+    },
+    "right_panel_task_session_status_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_SESSION_STATUS_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a6a6a6ff"
+    },
+    "right_panel_task_session_needs_attention_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_TASK_SESSION_NEEDS_ATTENTION_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#e4bb67ff"
+    },
+    "task_edit_branch_invalid_border": {
+      "description": "Maps to `palette::TASK_EDIT_BRANCH_INVALID_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d36969ff"
+    },
+    "badge_bg": {
+      "description": "Maps to `palette::BADGE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "badge_border": {
+      "description": "Maps to `palette::BADGE_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4dff"
+    },
+    "badge_text": {
+      "description": "Maps to `palette::BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d9d9d9ff"
+    },
+    "divider_default_color": {
+      "description": "Maps to `palette::DIVIDER_DEFAULT_COLOR`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#525252ff"
+    },
+    "gauge_green": {
+      "description": "Maps to `palette::GAUGE_GREEN`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#33c758ff"
+    },
+    "gauge_yellow": {
+      "description": "Maps to `palette::GAUGE_YELLOW`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffd60aff"
+    },
+    "gauge_red": {
+      "description": "Maps to `palette::GAUGE_RED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ff4a3dff"
+    },
+    "status_orange": {
+      "description": "Maps to `palette::STATUS_ORANGE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ff910aff"
+    },
+    "gauge_track_bg": {
+      "description": "Maps to `palette::GAUGE_TRACK_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "right_panel_dim_text": {
+      "description": "Maps to `palette::RIGHT_PANEL_DIM_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "skill_badge_both_bg": {
+      "description": "Maps to `palette::SKILL_BADGE_BOTH_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3399552e"
+    },
+    "skill_badge_both_text": {
+      "description": "Maps to `palette::SKILL_BADGE_BOTH_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#9ce2b4ff"
+    },
+    "skill_badge_user_only_bg": {
+      "description": "Maps to `palette::SKILL_BADGE_USER_ONLY_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#3473b22e"
+    },
+    "skill_badge_user_only_text": {
+      "description": "Maps to `palette::SKILL_BADGE_USER_ONLY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a8c7e6ff"
+    },
+    "skill_badge_model_only_bg": {
+      "description": "Maps to `palette::SKILL_BADGE_MODEL_ONLY_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8639ac2e"
+    },
+    "skill_badge_model_only_text": {
+      "description": "Maps to `palette::SKILL_BADGE_MODEL_ONLY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#d5b3e6ff"
+    },
+    "skill_badge_disabled_bg": {
+      "description": "Maps to `palette::SKILL_BADGE_DISABLED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#4d4d4d4d"
+    },
+    "skill_badge_disabled_text": {
+      "description": "Maps to `palette::SKILL_BADGE_DISABLED_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "skill_aux_chip_bg": {
+      "description": "Maps to `palette::SKILL_AUX_CHIP_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333d9"
+    },
+    "skill_aux_chip_text": {
+      "description": "Maps to `palette::SKILL_AUX_CHIP_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#c7c7c7ff"
+    },
+    "skill_section_header_text": {
+      "description": "Maps to `palette::SKILL_SECTION_HEADER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#9e9e9eff"
+    },
+    "skill_name_text": {
+      "description": "Maps to `palette::SKILL_NAME_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f2f2f2ff"
+    },
+    "skill_meta_text": {
+      "description": "Maps to `palette::SKILL_META_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#b8b8b8ff"
+    },
+    "skill_row_hover_bg": {
+      "description": "Maps to `palette::SKILL_ROW_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2e2e2eff"
+    },
+    "skill_empty_text": {
+      "description": "Maps to `palette::SKILL_EMPTY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "mcp_indicator_enabled": {
+      "description": "Maps to `palette::MCP_INDICATOR_ENABLED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#2dd248ff"
+    },
+    "mcp_indicator_disabled": {
+      "description": "Maps to `palette::MCP_INDICATOR_DISABLED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#666666ff"
+    },
+    "mcp_indicator_malformed": {
+      "description": "Maps to `palette::MCP_INDICATOR_MALFORMED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#dd613cff"
+    },
+    "mcp_row_hover_bg": {
+      "description": "Maps to `palette::MCP_ROW_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0a"
+    },
+    "mcp_section_header_text": {
+      "description": "Maps to `palette::MCP_SECTION_HEADER_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#9e9e9eff"
+    },
+    "mcp_row_body_text": {
+      "description": "Maps to `palette::MCP_ROW_BODY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#b3b3b3ff"
+    },
+    "mcp_row_meta_text": {
+      "description": "Maps to `palette::MCP_ROW_META_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#8c8c8cff"
+    },
+    "mcp_empty_text": {
+      "description": "Maps to `palette::MCP_EMPTY_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#808080ff"
+    },
+    "mcp_transport_badge_bg": {
+      "description": "Maps to `palette::MCP_TRANSPORT_BADGE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0f"
+    },
+    "mcp_transport_badge_text": {
+      "description": "Maps to `palette::MCP_TRANSPORT_BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#bfbfbfff"
+    },
+    "mcp_malformed_badge_bg": {
+      "description": "Maps to `palette::MCP_MALFORMED_BADGE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#994b334d"
+    },
+    "mcp_malformed_badge_text": {
+      "description": "Maps to `palette::MCP_MALFORMED_BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f4cabeff"
+    },
+    "mcp_disabled_badge_text": {
+      "description": "Maps to `palette::MCP_DISABLED_BADGE_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#737373ff"
+    }
+  },
+  "$defs": {
+    "Rgba": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    }
+  }
+}

@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    name: Build macOS dmg
+    runs-on: macos-14  # Apple Silicon runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.86"
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+
+      - name: Install Zig 0.14.1
+        run: ./scripts/bootstrap-zig.sh
+
+      - name: Add Zig to PATH
+        run: echo "$GITHUB_WORKSPACE/.context/zig/0.14.1" >> "$GITHUB_PATH"
+
+      - name: Fetch dependencies and apply GPUI patch
+        run: cargo fetch && ./scripts/apply-gpui-patch.sh
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          CARGO_VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
+            | grep '^version' | head -1 \
+            | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Tag $GITHUB_REF_NAME does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          echo "✅ Tag and Cargo.toml version match: $CARGO_VERSION"
+
+      - name: Build .app bundle
+        run: ./scripts/build-app.sh
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep -A20 '^\[workspace\.package\]' Cargo.toml \
+            | grep '^version' | head -1 \
+            | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create .dmg
+        run: |
+          create-dmg \
+            --volname "daruda" \
+            --window-size 540 380 \
+            --icon-size 128 \
+            --icon "daruda.app" 150 180 \
+            --app-drop-link 390 180 \
+            --no-internet-enable \
+            "daruda-${{ steps.version.outputs.version }}.dmg" \
+            "target/release/daruda.app"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "daruda v${{ steps.version.outputs.version }}"
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          files: daruda-${{ steps.version.outputs.version }}.dmg
+          body: |
+            ## Install
+
+            ```bash
+            # Download daruda-${{ steps.version.outputs.version }}.dmg and open it,
+            # then drag daruda.app to Applications.
+
+            # Remove quarantine flag (required until Developer ID signing is set up):
+            xattr -d com.apple.quarantine /Applications/daruda.app
+            ```
+
+            ## Build from source
+
+            ```bash
+            git clone --recurse-submodules https://github.com/daruda-labs/daruda
+            cd daruda
+            ./scripts/bootstrap-zig.sh
+            ./scripts/build-app.sh
+            ```
