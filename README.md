@@ -128,7 +128,7 @@ Built-in `daruda_dark` and `daruda_light` presets; live switching without restar
 | Dependency | Version |
 |---|---|
 | macOS | 12.0 Monterey or later |
-| Rust | 1.86+ (edition 2024) |
+| Rust | 1.95+ (edition 2024) |
 | Zig | 0.14.1 (installed by `bootstrap-zig.sh`) |
 | Xcode Command Line Tools | any recent |
 

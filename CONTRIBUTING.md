@@ -31,7 +31,7 @@ cargo test
 cargo run -p daruda
 ```
 
-**Requirements**: macOS 12+, Rust 1.86+, Zig 0.14.1 (installed above), Xcode Command Line Tools.
+**Requirements**: macOS 12+, Rust 1.95+, Zig 0.14.1 (installed above), Xcode Command Line Tools.
 
 ---
 

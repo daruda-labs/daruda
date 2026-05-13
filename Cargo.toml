@@ -5,6 +5,7 @@ members = ["crates/*", "tools/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.95"
 license = "AGPL-3.0-only"
 description = "Run multiple AI agents in parallel, each in its own git worktree, from a single macOS terminal window."
 repository = "https://github.com/daruda-labs/daruda"

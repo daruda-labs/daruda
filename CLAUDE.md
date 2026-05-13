@@ -23,7 +23,7 @@ daruda/
 
 ## Requirements
 
-- **Rust**: 2024 edition (1.86.0+)
+- **Rust**: 2024 edition (1.95.0+)
 - **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh`)
 - **macOS**: Apple Silicon or Intel + Xcode Command Line Tools
 
