@@ -29,6 +29,12 @@ jobs:
         with:
           key: release
 
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: .context/zig
+          key: zig-0.14.1-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install Zig 0.14.1
         run: ./scripts/bootstrap-zig.sh
 

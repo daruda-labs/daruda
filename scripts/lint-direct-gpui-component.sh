@@ -31,7 +31,7 @@ cd "$ROOT"
 ALLOW='\bcrates/app/src/ui/|\bcrates/app/src/(main|test_support|windows)\.rs|\bcrates/app/src/workspace/render/mod\.rs'
 
 violations=$(
-    grep -rn '^[[:space:]]*use[[:space:]]\+gpui_component\b' crates/app/src/ \
+    grep -rn --include="*.rs" '^[[:space:]]*use[[:space:]]\+gpui_component\b' crates/app/src \
         | grep -Ev "$ALLOW" \
         || true
 )
