@@ -32,6 +32,13 @@ esac
 
 url="https://ziglang.org/download/${VERSION}/${tarball}"
 
+dest="${OUT_DIR}/${VERSION}"
+if [[ -x "${dest}/zig" ]]; then
+  echo "Zig ${VERSION} already installed, skipping download"
+  ln -sfn "${dest}/zig" "${OUT_DIR}/zig"
+  exit 0
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
@@ -42,7 +49,6 @@ curl -fsSL -o "${archive}" "${url}"
 
 echo "${shasum}  ${archive}" | shasum -a 256 -c -
 
-dest="${OUT_DIR}/${VERSION}"
 rm -rf "${dest}"
 mkdir -p "${dest}"
 
