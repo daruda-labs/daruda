@@ -606,7 +606,7 @@ fn json_schema_lists_every_theme_slot() {
 #[test]
 #[ignore = "regenerator — writes to assets/themes/theme.schema.json"]
 fn regenerate_theme_schema_json() {
-    let schema = serde_json::to_value(&DarudaTheme::json_schema())
+    let schema = serde_json::to_value(DarudaTheme::json_schema())
         .expect("DarudaTheme::json_schema() must serialise");
     let pretty =
         serde_json::to_string_pretty(&schema).expect("schema must serialise to pretty JSON");
@@ -628,7 +628,7 @@ fn bundled_theme_schema_json_matches_generated() {
     let bundled = include_str!("../../../../../../assets/themes/theme.schema.json");
     let bundled_value: serde_json::Value =
         serde_json::from_str(bundled).expect("bundled theme.schema.json must be valid JSON");
-    let generated = serde_json::to_value(&DarudaTheme::json_schema())
+    let generated = serde_json::to_value(DarudaTheme::json_schema())
         .expect("DarudaTheme::json_schema() must serialise to JSON");
     assert_eq!(
         bundled_value, generated,

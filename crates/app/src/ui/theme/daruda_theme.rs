@@ -28,6 +28,7 @@
 //! Adding a new theme slot:
 //! 1. Add a `pub const FOO: Hsla = ...` to `palette.rs`.
 //! 2. Add `foo => FOO,` to the [`daruda_theme_fields!`] call below.
+//!
 //! No other site needs editing — the macro keeps the struct
 //! definition, the field list, and `Default::default()` in lockstep.
 

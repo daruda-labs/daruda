@@ -1154,10 +1154,10 @@ impl Workspace {
         id
     }
 
-    /// Open the Create Skill modal. `prefill_scope` lets the caller
-    /// preselect Project / Personal (e.g. from the section header
-    /// rather than the global header button); `None` falls back to
-    /// the active worktree's scope.
+    // Open the Create Skill modal. `prefill_scope` lets the caller
+    // preselect Project / Personal (e.g. from the section header
+    // rather than the global header button); `None` falls back to
+    // the active worktree's scope.
 
     // ---- Focused-pane file-viewer accessors ----
     //
