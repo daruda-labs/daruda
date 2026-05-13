@@ -494,6 +494,5 @@ pub fn git_clean_untracked(wt_path: &Path, path: &Path) -> Result<(), GitError> 
 // Tests
 // ----------------------------------------------------------------
 
-
 #[cfg(test)]
 mod tests;

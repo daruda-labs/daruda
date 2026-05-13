@@ -103,8 +103,7 @@ impl SettingsStore {
     /// `Workspace::new_with_project` and again from any reload path.
     pub fn load_project_layer(&mut self, worktree: &Path) {
         let cfg = ProjectConfig::load_for(worktree);
-        self.project
-            .insert(worktree.to_path_buf(), Arc::new(cfg));
+        self.project.insert(worktree.to_path_buf(), Arc::new(cfg));
     }
 
     /// Drop the project overlay for `worktree`. Required by
@@ -247,7 +246,9 @@ mod tests {
             SettingsStore::init(cx);
             let path = PathBuf::from("/tmp/daruda-test-worktree");
             cx.update_global::<SettingsStore, _>(|store, _| {
-                store.project.insert(path.clone(), Arc::new(ProjectConfig::default()));
+                store
+                    .project
+                    .insert(path.clone(), Arc::new(ProjectConfig::default()));
                 assert!(store.project.contains_key(&path));
                 store.forget_worktree(&path);
                 assert!(!store.project.contains_key(&path));

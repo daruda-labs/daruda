@@ -514,8 +514,8 @@ fn from_json_partial_overrides_only_listed_keys() {
     // exactly that key; every other slot keeps the dark default.
     // Double-hash delimiter because the JSON body itself contains
     // `"#ff00ff"` — single-hash raw strings would terminate early.
-    let parsed = DarudaTheme::from_json(r##"{ "tab_bar_bg": "#ff00ff" }"##)
-        .expect("partial JSON parses");
+    let parsed =
+        DarudaTheme::from_json(r##"{ "tab_bar_bg": "#ff00ff" }"##).expect("partial JSON parses");
     let defaults = DarudaTheme::default();
 
     // Overridden slot reflects the JSON value (magenta).
@@ -608,8 +608,8 @@ fn json_schema_lists_every_theme_slot() {
 fn regenerate_theme_schema_json() {
     let schema = serde_json::to_value(&DarudaTheme::json_schema())
         .expect("DarudaTheme::json_schema() must serialise");
-    let pretty = serde_json::to_string_pretty(&schema)
-        .expect("schema must serialise to pretty JSON");
+    let pretty =
+        serde_json::to_string_pretty(&schema).expect("schema must serialise to pretty JSON");
     let dest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/themes/theme.schema.json");
     std::fs::write(&dest, pretty).expect("write theme.schema.json");

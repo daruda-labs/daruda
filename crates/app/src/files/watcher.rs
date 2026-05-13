@@ -327,9 +327,7 @@ mod tests {
         raw_tx
             .send(dummy_event("/repo/.git/refs/heads/main"))
             .unwrap();
-        raw_tx
-            .send(remove_event("/repo/.git/HEAD.lock"))
-            .unwrap();
+        raw_tx.send(remove_event("/repo/.git/HEAD.lock")).unwrap();
         drop(raw_tx);
         debounce_loop(raw_rx, out_tx);
         assert!(out_rx.try_recv().is_err(), "no event must be emitted");

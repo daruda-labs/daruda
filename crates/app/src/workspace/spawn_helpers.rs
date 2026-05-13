@@ -49,10 +49,7 @@ where
     G: FnOnce(&mut Workspace, R, &mut Context<Workspace>) + 'static,
 {
     cx.spawn(async move |this, cx| {
-        let result = cx
-            .background_executor()
-            .spawn(async move { bg() })
-            .await;
+        let result = cx.background_executor().spawn(async move { bg() }).await;
         let _ = this.update(cx, |ws, cx| on_result(ws, result, cx));
     })
 }

@@ -81,10 +81,7 @@ pub fn spawn_config_watcher() -> ConfigWatcherHandle {
     use notify::{RecursiveMode, Watcher};
 
     let config_path = daruda_config::config_path();
-    let watch_dir = config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
+    let watch_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let file_name = config_path.file_name().map(|n| n.to_os_string());
 
     // `tx` is moved into the FS callback; dropping the watcher drops

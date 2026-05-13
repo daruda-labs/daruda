@@ -169,7 +169,9 @@ impl SettingsWindow {
         // Defensive idempotent init for test fixtures that open a
         // Settings window without going through `globals::init_all`.
         crate::settings_store::SettingsStore::init(cx);
-        let config = crate::settings_store::SettingsStore::global(cx).user().clone();
+        let config = crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .clone();
 
         // Terminal preset select — cell palette (fg/bg + ANSI 16).
         let terminal_preset = SharedString::from(config.theme.terminal_preset.clone());

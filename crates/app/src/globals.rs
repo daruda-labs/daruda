@@ -47,10 +47,7 @@ pub(crate) fn init_all(cx: &mut App) {
 fn register_settings_observer(cx: &mut App) {
     cx.observe_global::<crate::settings_store::SettingsStore>(|cx| {
         let user = crate::settings_store::SettingsStore::global(cx).user_arc();
-        crate::surface::action_map::apply_keybinding_overrides(
-            &user.keybindings.bindings,
-            cx,
-        );
+        crate::surface::action_map::apply_keybinding_overrides(&user.keybindings.bindings, cx);
         ui::theme::apply_ui_theme(&user.theme.ui_preset, cx);
         let appearance = crate::settings_window::window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {

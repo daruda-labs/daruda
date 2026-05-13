@@ -62,13 +62,8 @@ impl TerminalTextElement {
             let shaped = view.line_layouts.get(row).and_then(|l| l.as_ref());
             let line_text = view.state.viewport_lines.get(row).map(|s| s.as_str());
             for span in crate::view::bg_merge::merge_bg_runs(runs, default_bg) {
-                let (x_start, x_end) = bg_pixel_range(
-                    shaped,
-                    line_text,
-                    span.start_col,
-                    span.end_col,
-                    cell_width,
-                );
+                let (x_start, x_end) =
+                    bg_pixel_range(shaped, line_text, span.start_col, span.end_col, cell_width);
                 let x = origin.x + x_start;
                 let w = x_end - x_start;
                 let color = rgba(

@@ -12,8 +12,8 @@
 
 use crate::surface::{self, keybindings as k};
 use crate::windows::{
-    OpenMode, build_window_options, close_all_workspace_windows, prompt_and_open_folder,
-    open_workspace_window,
+    OpenMode, build_window_options, close_all_workspace_windows, open_workspace_window,
+    prompt_and_open_folder,
 };
 use crate::workspace::{
     ClosePane, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, FilesActivate,
@@ -25,8 +25,8 @@ use crate::workspace::{
     ToggleCommandPalette, ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
-    CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow, OpenGithubRepo,
-    OpenReportIssue, Quit,
+    CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
+    OpenGithubRepo, OpenReportIssue, Quit,
 };
 use daruda_terminal::view::{Copy, Paste, SelectAll};
 use gpui::{App, KeyBinding};

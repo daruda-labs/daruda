@@ -74,7 +74,6 @@ fn path_to_file_url(path: &std::path::Path) -> String {
     format!("file://{encoded}")
 }
 
-
 impl SettingsWindow {
     pub(super) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         // Phase 3-D ships two UI presets (`daruda_dark` / `daruda_light`)
@@ -313,7 +312,6 @@ impl SettingsWindow {
             cx,
         )
     }
-
 
     /// Shared body for sections that have no GUI yet — shows the
     /// section header + an explanation pointing the user at the

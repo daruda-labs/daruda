@@ -15,7 +15,6 @@ use std::process::Command;
 
 use super::{GitError, run_git};
 
-
 /// One file entry from `git status --porcelain=v1`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitFileEntry {
@@ -340,4 +339,3 @@ pub fn git_show_staged(repo_root: &Path, path: &Path) -> Result<Vec<u8>, GitErro
     }
     Ok(output.stdout)
 }
-

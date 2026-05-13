@@ -155,7 +155,10 @@ fn read_plugin_installs_indexed() -> BTreeMap<String, PluginInstall> {
 }
 
 impl SettingsWindow {
-    pub(in crate::settings_window) fn render_plugin(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(in crate::settings_window) fn render_plugin(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         // Snapshot the skills Global once per render to keep all derived
         // views consistent: the master list, the detail header, the
         // skill table. Reading `cx.global::<...>()` repeatedly in the

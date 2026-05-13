@@ -26,13 +26,7 @@ pub(crate) fn open_first_window(
 
     if let Some(state) = restored_state {
         let project = daruda_store::project::Project::from_path(&state.root);
-        open_workspace_window(
-            config.clone(),
-            Some(project),
-            Some(state),
-            window_opts,
-            cx,
-        );
+        open_workspace_window(config.clone(), Some(project), Some(state), window_opts, cx);
     } else {
         open_welcome_window(config, window_opts, cx);
     }

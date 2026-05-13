@@ -43,14 +43,12 @@ fn spawn_claude_status(cx: &mut App) {
     match daruda_claude::hooks::status_file::default_dir() {
         Err(e) => {
             LogWriter::log(
-                ErrorReport::new(
-                    "Claude status watcher disabled — could not resolve status dir",
-                )
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .dedup("claude.status.dir")
-                .build(),
+                ErrorReport::new("Claude status watcher disabled — could not resolve status dir")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("claude.status.dir")
+                    .build(),
             );
         }
         Ok(status_dir) => {

@@ -868,14 +868,13 @@ impl Workspace {
             // overlay and reapply whenever `SettingsStore` changes —
             // both the FS watch tick and the Settings-window save
             // fold into the same Global mutation and fanout here.
-            _settings_global_subscription: cx.observe_global::<crate::settings_store::SettingsStore>(
-                |ws, cx| {
+            _settings_global_subscription: cx
+                .observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
                     let store = crate::settings_store::SettingsStore::global(cx);
                     let worktree = ws.project.as_ref().map(|p| p.root.as_path());
                     let effective = store.effective_for(worktree);
                     ws.apply_config(&effective, cx);
-                },
-            ),
+                }),
         };
         ws.add_tab(window, cx);
         // After tabs/worktrees are seeded, decide whether the JSONL

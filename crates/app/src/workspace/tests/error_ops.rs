@@ -243,8 +243,8 @@ async fn error_severity_keeps_toast_for_longer_window(cx: &mut TestAppContext) {
 /// refactor can't quietly drop one of them.
 #[gpui::test]
 async fn report_pane_error_fills_status_bar_and_toast(cx: &mut TestAppContext) {
-    use daruda_terminal::pty::PtyError;
     use crate::workspace::pane::PaneSpawnError;
+    use daruda_terminal::pty::PtyError;
 
     let (_window, workspace) = build_workspace(cx);
 
