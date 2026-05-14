@@ -1493,7 +1493,7 @@ checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
 
 [[package]]
 name = "daruda"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_claude"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "daruda_store",
@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs 6.0.0",
  "serde",
@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "daruda_terminal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "criterion",
@@ -2332,7 +2332,7 @@ dependencies = [
 
 [[package]]
 name = "gen_licenses"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "two-face",
 ]
@@ -2397,14 +2397,14 @@ dependencies = [
 
 [[package]]
 name = "ghostty_vt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ghostty_vt_sys",
 ]
 
 [[package]]
 name = "ghostty_vt_sys"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "gif"
@@ -7116,7 +7116,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visual_tests"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "daruda_terminal",
  "gpui",
@@ -7144,7 +7144,7 @@ dependencies = [
 
 [[package]]
 name = "vt_dump"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ghostty_vt",
 ]
