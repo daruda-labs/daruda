@@ -103,8 +103,9 @@ jobs:
             # Download daruda-${{ steps.version.outputs.version }}.dmg and open it,
             # then drag daruda.app to Applications.
 
-            # Remove quarantine flag (required until Developer ID signing is set up):
-            xattr -d com.apple.quarantine /Applications/daruda.app
+            # First launch: right-click daruda.app → Open (bypasses Gatekeeper once).
+            # If macOS still refuses, clear extended attributes recursively:
+            xattr -cr /Applications/daruda.app
             ```
 
             ## Build from source

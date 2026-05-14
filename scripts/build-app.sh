@@ -31,6 +31,10 @@ sed "s/@@DARUDA_VERSION@@/${DARUDA_VERSION}/g" \
   scripts/Info.plist.tmpl \
   > "$APP_DIR/Contents/Info.plist"
 
+# Ad-hoc sign so Gatekeeper shows "unidentified developer" (right-click → Open
+# works) instead of "damaged and can't be opened". No Apple Developer ID needed.
+codesign --force --deep --sign - "$APP_DIR"
+
 echo ""
 echo "Built:   $APP_DIR"
 echo "Version: $DARUDA_VERSION"
