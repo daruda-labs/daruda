@@ -76,7 +76,7 @@ impl Workspace {
             worktrees,
             active_worktree_id: self.active_worktree_id,
             active_sidebar_view: self.left_sidebar_view,
-            active_right_sidebar_view: self.right_sidebar_view,
+            active_right_panel_view: self.right_sidebar_view,
             active_usage_window: self.claude.usage_window,
             // Top-level `tabs` stays empty from W-2 onward — the data
             // now lives on the active worktree. `skip_serializing_if`
@@ -179,7 +179,7 @@ impl Workspace {
             }
         });
         self.left_sidebar_view = state.active_sidebar_view;
-        self.right_sidebar_view = state.active_right_sidebar_view;
+        self.right_sidebar_view = state.active_right_panel_view;
         self.claude.usage_window = state.active_usage_window;
         // Resync the dropdown so its visible selection matches the
         // restored state (the entity was constructed with the

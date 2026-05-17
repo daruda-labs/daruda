@@ -307,7 +307,7 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
             ],
             active_worktree_id: 5,
             active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
+            active_right_panel_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: Vec::new(),
             active_tab_index: 0,
@@ -391,7 +391,7 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             worktrees: vec![worktree],
             active_worktree_id: 0,
             active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
+            active_right_panel_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -430,7 +430,7 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             worktrees: vec![worktree],
             active_worktree_id: 999, // stale — only id 3 exists
             active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
+            active_right_panel_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -517,7 +517,7 @@ fn test_restore_state_applies_active_sidebar_view(cx: &mut TestAppContext) {
             worktrees: Vec::new(),
             active_worktree_id: 0,
             active_sidebar_view: daruda_store::project::LeftSidebarView::GitChanges,
-            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
+            active_right_panel_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -542,7 +542,7 @@ fn test_restore_state_applies_active_sidebar_view(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_save_state_captures_active_right_sidebar_view(cx: &mut TestAppContext) {
+fn test_save_state_captures_active_right_panel_view(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_save_right_sidebar_view");
     let wh = cx.add_window(|window, cx| {
@@ -556,13 +556,13 @@ fn test_save_state_captures_active_right_sidebar_view(cx: &mut TestAppContext) {
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
     assert_eq!(
-        state.active_right_sidebar_view,
+        state.active_right_panel_view,
         daruda_store::project::RightSidebarView::Tools
     );
 }
 
 #[gpui::test]
-fn test_restore_state_applies_active_right_sidebar_view(cx: &mut TestAppContext) {
+fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_restore_right_sidebar_view");
     let wh = cx.add_window(|window, cx| {
@@ -573,7 +573,7 @@ fn test_restore_state_applies_active_right_sidebar_view(cx: &mut TestAppContext)
             worktrees: Vec::new(),
             active_worktree_id: 0,
             active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-            active_right_sidebar_view: daruda_store::project::RightSidebarView::Tasks,
+            active_right_panel_view: daruda_store::project::RightSidebarView::Tasks,
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -639,7 +639,7 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 worktrees: Vec::new(),
                 active_worktree_id: 0,
                 active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-                active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
+                active_right_panel_view: daruda_store::project::RightSidebarView::default(),
                 active_usage_window: daruda_store::project::UsageWindow::Last24h,
                 tabs: vec![],
                 active_tab_index: 0,
