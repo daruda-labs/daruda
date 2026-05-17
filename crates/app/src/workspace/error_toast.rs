@@ -20,35 +20,35 @@ use daruda_store::observability::error_report::ErrorReport;
 
 /// Default capacity (D3). Public so tests can pin the value
 /// without copying the literal.
-pub(super) const TOAST_CAP: usize = 3;
+pub(in crate::workspace) const TOAST_CAP: usize = 3;
 
 /// Stable identifier for a live toast. Allocated by the queue at push
 /// time and never reused within the queue's lifetime. The renderer
 /// captures the id into its click handlers so a dismiss click sent
 /// after an unrelated auto-expire shifts indices around still removes
 /// the right toast (the index-based version was racy by 1 s).
-pub(super) type ToastId = u64;
+pub(in crate::workspace) type ToastId = u64;
 
 /// One live toast. Cheap to clone — the underlying [`ErrorReport`] is
 /// already cheap-clone (small heap fields, stable timestamp).
 #[derive(Clone, Debug)]
-pub(super) struct ErrorToast {
-    pub(super) id: ToastId,
-    pub(super) report: ErrorReport,
+pub(in crate::workspace) struct ErrorToast {
+    pub(in crate::workspace) id: ToastId,
+    pub(in crate::workspace) report: ErrorReport,
     /// 1 on first push; incremented every time a report with the same
     /// `dedup_key` arrives while this toast is alive. The renderer
     /// only shows the badge when this is `>= 2`.
-    pub(super) repeat_count: u32,
+    pub(in crate::workspace) repeat_count: u32,
     /// Wall-clock instant after which the toast auto-dismisses. Set
     /// to `last_push_time + severity.auto_dismiss_after()`. Refreshed
     /// on every dedup hit so a busy error keeps its toast on screen.
-    pub(super) expires_at: Instant,
+    pub(in crate::workspace) expires_at: Instant,
 }
 
 /// Bounded FIFO of [`ErrorToast`]s. Capacity-stable across pushes —
 /// pushing onto a full queue evicts the oldest entry.
 #[derive(Debug)]
-pub(super) struct ErrorToastQueue {
+pub(in crate::workspace) struct ErrorToastQueue {
     toasts: Vec<ErrorToast>,
     capacity: usize,
     next_id: ToastId,
@@ -61,7 +61,7 @@ impl Default for ErrorToastQueue {
 }
 
 impl ErrorToastQueue {
-    pub(super) fn new(capacity: usize) -> Self {
+    pub(in crate::workspace) fn new(capacity: usize) -> Self {
         Self {
             toasts: Vec::with_capacity(capacity),
             capacity,
@@ -81,7 +81,7 @@ impl ErrorToastQueue {
     ///
     /// Returns `true` when the queue's visible state changed and the
     /// renderer should be notified.
-    pub(super) fn push(&mut self, report: ErrorReport, now: Instant) -> bool {
+    pub(in crate::workspace) fn push(&mut self, report: ErrorReport, now: Instant) -> bool {
         let dismiss_after = report.severity.auto_dismiss_after();
         let expires_at = now + dismiss_after;
 
@@ -117,7 +117,7 @@ impl ErrorToastQueue {
     /// a toast was found + removed. Stale ids (e.g. the toast already
     /// auto-expired between the user's click and this call) are a
     /// no-op — the caller can ignore the return value.
-    pub(super) fn dismiss_id(&mut self, id: ToastId) -> bool {
+    pub(in crate::workspace) fn dismiss_id(&mut self, id: ToastId) -> bool {
         if let Some(pos) = self.toasts.iter().position(|t| t.id == id) {
             self.toasts.remove(pos);
             true
@@ -128,22 +128,22 @@ impl ErrorToastQueue {
 
     /// Drop every toast whose `expires_at` is at or before `now`.
     /// Returns `true` when at least one toast was removed.
-    pub(super) fn expire_tick(&mut self, now: Instant) -> bool {
+    pub(in crate::workspace) fn expire_tick(&mut self, now: Instant) -> bool {
         let before = self.toasts.len();
         self.toasts.retain(|t| t.expires_at > now);
         self.toasts.len() != before
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(in crate::workspace) fn is_empty(&self) -> bool {
         self.toasts.is_empty()
     }
 
     #[allow(dead_code)] // Reserved for future test / palette surfaces; kept for symmetry with iter().
-    pub(super) fn len(&self) -> usize {
+    pub(in crate::workspace) fn len(&self) -> usize {
         self.toasts.len()
     }
 
-    pub(super) fn iter(&self) -> std::slice::Iter<'_, ErrorToast> {
+    pub(in crate::workspace) fn iter(&self) -> std::slice::Iter<'_, ErrorToast> {
         self.toasts.iter()
     }
 }

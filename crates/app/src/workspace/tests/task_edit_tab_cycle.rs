@@ -53,7 +53,7 @@ async fn task_edit_pane_tab_cycle_wires_base_select(cx: &mut TestAppContext) {
                 crate::workspace::pane::PaneContent::TaskEditPane(te) => te,
                 _ => panic!("expected TaskEdit pane"),
             };
-            let _ = crate::workspace::right_panel::task_edit_pane::render(pane_id, te, cx);
+            let _ = crate::workspace::render::task_edit_pane::render(pane_id, te, cx);
         });
     })
     .unwrap();

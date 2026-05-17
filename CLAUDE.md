@@ -169,3 +169,4 @@ Workspace
 | `TerminalPane` | `PaneContent::Terminal` | `workspace/pane.rs` |
 | `FileViewPane` | `PaneContent::File` | `workspace/pane.rs` |
 | `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/pane.rs` |
+| `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer.rs` |

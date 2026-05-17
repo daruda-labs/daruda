@@ -1,7 +1,7 @@
 //! TaskEdit pane lifecycle — builder, open / find, branch validation,
 //! save / discard / start dispatchers (R-19 + R-25 + I-12).
 //!
-//! The pane itself is rendered by `right_panel::task_edit_pane`; this
+//! The pane itself is rendered by `render::task_edit_pane`; this
 //! module owns the *operations* (open, save, validate, find existing)
 //! that the renderer + status_pill + Tasks-tab row click dispatch into.
 //!

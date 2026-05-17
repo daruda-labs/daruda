@@ -11,32 +11,20 @@
 //! 2. Push it onto the in-memory `error_history` ring (capped at 50)
 //!    so a future "Show recent errors" command palette entry can
 //!    reach reports the user dismissed before they auto-expired.
-//! 3. Push it onto the live [`ErrorToastQueue`](super::error_toast::ErrorToastQueue)
-//!    that the renderer mirrors above the status bar — dedup,
-//!    capacity-3 FIFO, severity-driven auto-dismiss.
-//! 4. Schedule a 1 Hz background timer that drives the queue's
-//!    expiry sweeps. The timer is rescheduled (not duplicated) on
-//!    every push.
-
-use std::time::Duration;
+//! 3. Delegate the live toast (queue, expiry sweep, render) to
+//!    [`ToastLayer`](super::toast_layer::ToastLayer).
 
 use daruda_store::observability::error_report::ErrorReport;
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::Context;
 
 use super::Workspace;
-use super::error_toast::{ErrorToastQueue, ToastId};
+use super::error_toast::ToastId;
 
 /// Cap on the in-memory ring of recent reports. Tuned to fit comfortably
 /// in a future "Show recent errors" command palette entry without
 /// forcing scrollback.
 const HISTORY_CAP: usize = 50;
-
-/// Period of the queue's expiry sweep. 1 Hz strikes a balance between
-/// "user notices the toast vanishing on time" and "no needless wakeups
-/// when nothing is queued" — the sweep self-terminates as soon as the
-/// queue empties (see [`spawn_expiry_sweep`]).
-const EXPIRY_TICK: Duration = Duration::from_secs(1);
 
 impl Workspace {
     /// Surface an error to the user and the on-disk log. Safe to call
@@ -60,19 +48,11 @@ impl Workspace {
             self.error_history.truncate(HISTORY_CAP);
         }
 
-        // 3. Live toast — visible above the status bar until the user
-        // dismisses or the severity-specific timer fires. Read `now`
-        // through GPUI's executor so the virtual clock in
-        // `TestAppContext` can drive auto-dismiss deterministically.
-        let now = cx.background_executor().now();
-        self.error_toasts.push(report, now);
-
-        // 4. Make sure an expiry sweep is running while toasts are
-        // alive. Replacing the task drops the previous one, so we
-        // never run two concurrent sweeps.
-        self._error_expire_sweep = Some(spawn_expiry_sweep(cx));
-
-        cx.notify();
+        // 3. Live toast — queue, expiry sweep, and render owned by
+        // ToastLayer. Updating the child entity is re-entrant-safe in
+        // GPUI (parent may update child freely). ToastLayer calls its
+        // own cx.notify(); no Workspace repaint needed here.
+        self.toast_layer.update(cx, |tl, cx| tl.push(report, cx));
     }
 
     /// Hand-dismiss the toast with the given stable id. Stale ids
@@ -84,9 +64,7 @@ impl Workspace {
         id: ToastId,
         cx: &mut Context<Self>,
     ) {
-        if self.error_toasts.dismiss_id(id) {
-            cx.notify();
-        }
+        self.toast_layer.update(cx, |tl, cx| tl.dismiss_id(id, cx));
     }
 
     /// Read-only accessor for the in-memory history ring. Used by
@@ -96,35 +74,12 @@ impl Workspace {
         &self.error_history
     }
 
-    /// Read-only accessor for the live toast queue. Used by the
-    /// renderer (snapshot pattern) and tests.
-    #[allow(dead_code)] // Renderer wired in Step 3.4.
-    pub(in crate::workspace) fn error_toasts(&self) -> &ErrorToastQueue {
-        &self.error_toasts
+    /// Read-only accessor for the live toast queue. Used by tests.
+    #[cfg(test)]
+    pub(in crate::workspace) fn error_toasts<'a>(
+        &self,
+        cx: &'a gpui::App,
+    ) -> &'a super::error_toast::ErrorToastQueue {
+        &self.toast_layer.read(cx).queue
     }
-}
-
-/// Spawn a 1 Hz expiry sweep that runs as long as the queue is
-/// non-empty. The task self-terminates once `expire_tick` reports an
-/// empty queue, so an idle workspace doesn't burn a wakeup per second.
-fn spawn_expiry_sweep(cx: &mut Context<Workspace>) -> gpui::Task<()> {
-    cx.spawn(async move |this, cx| {
-        loop {
-            cx.background_executor().timer(EXPIRY_TICK).await;
-            let still_alive = this
-                .update(cx, |ws, cx| {
-                    // Same virtual-clock source as `report_error` (D4).
-                    let now = cx.background_executor().now();
-                    let changed = ws.error_toasts.expire_tick(now);
-                    if changed {
-                        cx.notify();
-                    }
-                    !ws.error_toasts.is_empty()
-                })
-                .unwrap_or(false);
-            if !still_alive {
-                break;
-            }
-        }
-    })
 }

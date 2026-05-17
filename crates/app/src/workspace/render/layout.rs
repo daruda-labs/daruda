@@ -300,9 +300,7 @@ pub(super) fn render_layout(
                         .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
                             d.track_focus(fh)
                         })
-                        .child(super::super::right_panel::task_edit_pane::render(
-                            id, te, cx,
-                        ))
+                        .child(super::task_edit_pane::render(id, te, cx))
                 }
                 super::super::pane::PaneContent::Terminal(t) => {
                     // Terminal panes: TerminalView::render calls track_focus on

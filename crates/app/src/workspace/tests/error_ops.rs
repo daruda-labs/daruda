@@ -27,12 +27,12 @@ async fn report_error_appends_to_history_and_pushes_toast(cx: &mut TestAppContex
         ws.report_error(report, cx);
     });
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         let history = ws.error_history();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].title, "PTY died");
 
-        let toasts: Vec<_> = ws.error_toasts().iter().collect();
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
         assert_eq!(toasts.len(), 1, "live toast surfaces immediately");
         assert_eq!(toasts[0].report.title, "PTY died");
         assert_eq!(toasts[0].repeat_count, 1);
@@ -54,8 +54,8 @@ async fn dedup_key_collapses_repeats_into_one_toast(cx: &mut TestAppContext) {
         }
     });
 
-    workspace.read_with(cx, |ws, _cx| {
-        let toasts: Vec<_> = ws.error_toasts().iter().collect();
+    workspace.read_with(cx, |ws, cx| {
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
         assert_eq!(
             toasts.len(),
             1,
@@ -83,9 +83,9 @@ async fn capacity_evicts_oldest_when_full(cx: &mut TestAppContext) {
         }
     });
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         let titles: Vec<&str> = ws
-            .error_toasts()
+            .error_toasts(cx)
             .iter()
             .map(|t| t.report.title.as_str())
             .collect();
@@ -112,8 +112,8 @@ async fn dismiss_error_toast_removes_specific_id(cx: &mut TestAppContext) {
         }
     });
 
-    let target_id = workspace.read_with(cx, |ws, _cx| {
-        ws.error_toasts()
+    let target_id = workspace.read_with(cx, |ws, cx| {
+        ws.error_toasts(cx)
             .iter()
             .find(|t| t.report.title == "Err 1")
             .expect("Err 1 toast present")
@@ -124,9 +124,9 @@ async fn dismiss_error_toast_removes_specific_id(cx: &mut TestAppContext) {
         ws.dismiss_error_toast(target_id, cx);
     });
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         let titles: Vec<&str> = ws
-            .error_toasts()
+            .error_toasts(cx)
             .iter()
             .map(|t| t.report.title.as_str())
             .collect();
@@ -173,8 +173,8 @@ async fn info_toast_auto_dismisses_after_severity_window(cx: &mut TestAppContext
         ws.report_error(report, cx);
     });
 
-    workspace.read_with(cx, |ws, _cx| {
-        assert_eq!(ws.error_toasts().iter().count(), 1);
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.error_toasts(cx).iter().count(), 1);
     });
 
     // The expiry sweep ticks every second. Walking the virtual clock
@@ -185,9 +185,9 @@ async fn info_toast_auto_dismisses_after_severity_window(cx: &mut TestAppContext
         cx.run_until_parked();
     }
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         assert!(
-            ws.error_toasts().is_empty(),
+            ws.error_toasts(cx).is_empty(),
             "Info toast should have auto-dismissed after 5 s",
         );
         assert_eq!(
@@ -216,9 +216,9 @@ async fn error_severity_keeps_toast_for_longer_window(cx: &mut TestAppContext) {
         cx.run_until_parked();
     }
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.error_toasts().iter().count(),
+            ws.error_toasts(cx).iter().count(),
             1,
             "Error toast should still be visible at t = 10 s",
         );
@@ -230,9 +230,9 @@ async fn error_severity_keeps_toast_for_longer_window(cx: &mut TestAppContext) {
         cx.run_until_parked();
     }
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         assert!(
-            ws.error_toasts().is_empty(),
+            ws.error_toasts(cx).is_empty(),
             "Error toast should have auto-dismissed past 30 s",
         );
     });
@@ -256,7 +256,7 @@ async fn report_pane_error_fills_status_bar_and_toast(cx: &mut TestAppContext) {
         );
     });
 
-    workspace.read_with(cx, |ws, _cx| {
+    workspace.read_with(cx, |ws, cx| {
         assert!(
             ws.last_error.is_some(),
             "status bar pin should be set on pane spawn failure",
@@ -268,7 +268,7 @@ async fn report_pane_error_fills_status_bar_and_toast(cx: &mut TestAppContext) {
             "status bar text should mention the operation context",
         );
 
-        let toasts: Vec<_> = ws.error_toasts().iter().collect();
+        let toasts: Vec<_> = ws.error_toasts(cx).iter().collect();
         assert_eq!(toasts.len(), 1, "toast should fire alongside the pin");
         assert_eq!(toasts[0].report.title, "Pane spawn failed: Add tab");
         assert_eq!(toasts[0].report.severity, ErrorSeverity::Error);

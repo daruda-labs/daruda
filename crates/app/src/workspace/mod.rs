@@ -49,6 +49,7 @@ mod spawn_helpers;
 pub(crate) mod status_bar;
 mod tab_ops;
 mod task_edit_ops;
+mod toast_layer;
 mod task_ops;
 mod task_workflow_ops;
 #[cfg(test)]
@@ -333,18 +334,11 @@ pub struct Workspace {
     /// recent errors" command palette entry can read it.
     pub(in crate::workspace) error_history:
         Vec<daruda_store::observability::error_report::ErrorReport>,
-    /// Live toast queue rendered above the status bar (Layer 1 of the
-    /// error-reporting pipeline). Capacity 3 with FIFO eviction, dedup
-    /// merging on [`ErrorReport::dedup_key`], severity-driven
-    /// auto-dismiss timers (5 s / 8 s / 30 s). The renderer
-    /// snapshot-reads this; mutations all go through
-    /// [`Workspace::report_error`] / [`Workspace::dismiss_error_toast`].
-    pub(in crate::workspace) error_toasts: error_toast::ErrorToastQueue,
-    /// 1 Hz expiry-sweep task driving the toast queue. Self-terminates
-    /// when the queue empties so an idle workspace doesn't burn
-    /// wakeups. Replaced (not duplicated) by every push, so we never
-    /// run two concurrent sweeps.
-    _error_expire_sweep: Option<gpui::Task<()>>,
+    /// Toast notification layer — owns the live queue, the 1 Hz expiry
+    /// sweep, and the overlay renderer. Isolated into its own entity so
+    /// a toast change triggers only the toast layer's repaint, not a
+    /// full Workspace repaint.
+    pub(in crate::workspace) toast_layer: gpui::Entity<toast_layer::ToastLayer>,
     /// Most recently observed window bounds (position + size). Updated by
     /// the `observe_window_bounds` callback so `save_state()` can
     /// persist the live window geometry without taking `Window` as a
@@ -539,6 +533,7 @@ impl Workspace {
 
         let focus_handle = cx.focus_handle();
         let ws_weak = cx.entity().downgrade();
+        let toast_layer = cx.new(|_| toast_layer::ToastLayer::new(ws_weak.clone()));
 
         // Commit-message input panel + subscription must be created before the
         // struct literal so both can reference each other without a borrow
@@ -805,8 +800,7 @@ impl Workspace {
             _git_commit_subscription: git_commit_sub,
             last_error: None,
             error_history: Vec::new(),
-            error_toasts: error_toast::ErrorToastQueue::default(),
-            _error_expire_sweep: None,
+            toast_layer,
             cached_window_bounds: None,
             window_user_label: None,
             close_pane_on_exit: config.shell.close_pane_on_exit,

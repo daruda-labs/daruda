@@ -8,8 +8,9 @@
 
 mod error_toast_overlay;
 mod layout;
+pub(in crate::workspace) mod task_edit_pane;
 
-use self::error_toast_overlay::{ErrorToastOverlay, ToastSnapshot};
+pub(in crate::workspace) use self::error_toast_overlay::{ErrorToastOverlay, ToastSnapshot};
 use self::layout::render_layout;
 
 use crate::ui::theme;
@@ -989,28 +990,6 @@ impl Render for Workspace {
         };
         let status_bar = status_bar::StatusBar(status_data);
 
-        // Snapshot the toast queue before render so the overlay closures
-        // stay `'static` and never reach back into the live entity. The
-        // queue's mutation path is already gated on `Workspace::report_error` /
-        // `dismiss_error_toast`; the renderer only reads.
-        let toast_snapshots: Vec<ToastSnapshot> = self
-            .error_toasts
-            .iter()
-            .map(|t| ToastSnapshot {
-                id: t.id,
-                title: t.report.title.clone().into(),
-                message: t.report.message.clone().into(),
-                repeat_count: t.repeat_count,
-                severity: t.report.severity,
-                plain_text: t.report.to_plain_text().into(),
-                report: t.report.clone(),
-            })
-            .collect();
-        let toast_overlay = (!toast_snapshots.is_empty()).then(|| ErrorToastOverlay {
-            toasts: toast_snapshots,
-            workspace: cx.entity().downgrade(),
-        });
-
         // Key contexts gate search/file-viewer actions on the focused
         // pane's content. Each open file pane carries its own search
         // state; "the file viewer" for action-routing purposes is the
@@ -1270,9 +1249,10 @@ impl Render for Workspace {
             .child(body_layout)
             .child(status_bar)
             // Toast overlay paints last so it floats above the status
-            // bar; positioned `absolute()` so it never pushes the
-            // workspace content out of the flex column.
-            .when_some(toast_overlay, |el, overlay| el.child(overlay))
+            // bar. ToastLayer owns its queue, expiry sweep, and render;
+            // it notifies only itself when toasts change, sparing the
+            // full Workspace repaint.
+            .child(self.toast_layer.clone())
             .child(command_palette::CommandPaletteOverlay::new(
                 self.command_palette.clone(),
                 cx.listener(|this, _, _, cx| {

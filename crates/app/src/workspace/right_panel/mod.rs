@@ -9,7 +9,6 @@ use super::dock_snap::RightSidebarSnapshot;
 
 pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
-pub(in crate::workspace) mod task_edit_pane;
 pub(in crate::workspace) mod task_picker_modal;
 pub(in crate::workspace) mod tasks;
 pub(in crate::workspace) mod tools;
