@@ -60,6 +60,7 @@ scripts/lint-no-eprintln.sh
 - **GPUI dependency**: only view/UI code may import GPUI. PTY, config, git stay GPUI-free.
 - **`gpui_component` access**: app code must go through `crate::ui::*`; direct imports forbidden. See `crates/app/src/ui/CLAUDE.md`.
 - **Commit only when explicitly asked** — never `git add`/`git commit` without direct instruction.
+- **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
 - **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
 - **Comments**: current logic only. No history, no "used to be X".
 - **In-progress docs**: keep outside the repo in a personal document store.
