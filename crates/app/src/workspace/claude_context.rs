@@ -1,4 +1,5 @@
 //! Claude Code integration state owned by [`super::Workspace`].
+//! Workspace methods that mutate or read `self.claude` live here.
 //!
 //! Groups the 18 fields that together drive the right-panel Usage tab,
 //! the per-worktree session-status indicator, the JSONL fallback
@@ -21,7 +22,7 @@ use gpui::{Entity, Subscription, Task};
 
 use crate::hooks::pty_tracker::{PtyBinding, PtyTracker};
 use crate::ui::select::SelectState;
-use crate::workspace::layout::PaneId;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 pub(in crate::workspace) struct ClaudeContext {
     /// Token-usage accumulator for the right dock's Usage tab. Folded
@@ -133,4 +134,119 @@ pub(in crate::workspace) struct ClaudeContext {
     /// owns both.
     #[allow(dead_code)]
     pub(in crate::workspace) _limits_pumps: (Task<()>, Task<()>),
+}
+
+// ---- Workspace methods that own the claude field ----
+
+use gpui::{Context, Window};
+use crate::workspace::Workspace;
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::system_info::redact_home;
+
+impl Workspace {
+    /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
+    /// `main.rs` from the global `hooks::watcher`.
+    pub fn apply_claude_status_event(
+        &mut self,
+        event: crate::hooks::watcher::StatusEvent,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::hooks::watcher::StatusEvent;
+        match event {
+            StatusEvent::Changed(path) => match daruda_claude::hooks::status_file::read(&path) {
+                Ok(Some(file)) => {
+                    self.apply_task_session_changed(&file.cwd, &file.session_id, cx);
+                    if file.last_event == "PostToolUseFailure" {
+                        self.bump_tool_use_failure(&file.session_id, cx);
+                    }
+                    if file.last_event == "PostToolUse"
+                        && file.tool_name.as_deref() == Some("TodoWrite")
+                        && let Some(input) = file.tool_input.as_ref()
+                    {
+                        self.apply_todo_write(&file.session_id, input, cx);
+                    }
+                    if let Some(reason) = Self::classify_hook_end_reason(&file.last_event) {
+                        self.claude.tool_use_failure_counts.remove(&file.session_id);
+                        self.apply_task_session_ended(&file.session_id, reason, cx);
+                    }
+                    if self.claude.claude_status.update(file) {
+                        cx.notify();
+                    }
+                }
+                Ok(None) => {
+                    // Mid-write or malformed; skip silently.
+                }
+                Err(e) => {
+                    let report = ErrorReport::new("Claude status file read failed")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&path))
+                        .dedup("claude.status.read")
+                        .build();
+                    self.report_error(report, cx);
+                }
+            },
+            StatusEvent::Removed { session_id, .. } => {
+                self.claude.tool_use_failure_counts.remove(&session_id);
+                self.apply_task_session_ended(
+                    &session_id,
+                    daruda_store::tasks::SessionEndReason::Other,
+                    cx,
+                );
+                if self.claude.claude_status.remove(&session_id).is_some() {
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn set_usage_window(
+        &mut self,
+        value: daruda_store::project::UsageWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.claude.usage_window == value {
+            return;
+        }
+        self.claude.usage_window = value;
+        let slug = gpui::SharedString::from(value.slug());
+        self.claude.usage_select.update(cx, |s, cx_inner| {
+            s.set_selected_value(&slug, window, cx_inner)
+        });
+        self.mark_dirty_and_save(cx);
+        cx.notify();
+    }
+
+    /// Replace the cached plan-rate snapshot. Called by `limits_pump`
+    /// after a successful `/api/oauth/usage` fetch. Skips `cx.notify()`
+    /// when only `fetched_at` moved.
+    pub(in crate::workspace) fn set_plan_limits(
+        &mut self,
+        limits: daruda_claude::PlanLimits,
+        cx: &mut Context<Self>,
+    ) {
+        let visible_changed = self.claude.plan_limits.five_hour != limits.five_hour
+            || self.claude.plan_limits.seven_day != limits.seven_day;
+        self.claude.plan_limits = limits;
+        if visible_changed {
+            cx.notify();
+        }
+    }
+
+    /// Replace the cached service-status snapshot. Called by
+    /// `limits_pump` after a successful `status.claude.com` fetch.
+    pub(in crate::workspace) fn set_service_status(
+        &mut self,
+        status: daruda_claude::ServiceStatus,
+        cx: &mut Context<Self>,
+    ) {
+        let visible_changed = self.claude.service_status.indicator != status.indicator
+            || self.claude.service_status.description != status.description;
+        self.claude.service_status = status;
+        if visible_changed {
+            cx.notify();
+        }
+    }
 }

@@ -7,8 +7,8 @@ async fn test_split_right(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.panes.len(), 1);
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.panes.len(), 1);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -19,10 +19,10 @@ async fn test_split_right(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.panes.len(), 2);
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.panes.len(), 2);
         assert!(matches!(
-            ws.tabs[0].layout,
+            ws.main_area.tabs[0].layout,
             PaneLayout::Split {
                 direction: SplitDirection::Horizontal,
                 ..
@@ -43,9 +43,9 @@ async fn test_split_down(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.panes.len(), 2);
+        assert_eq!(ws.main_area.panes.len(), 2);
         assert!(matches!(
-            ws.tabs[0].layout,
+            ws.main_area.tabs[0].layout,
             PaneLayout::Split {
                 direction: SplitDirection::Vertical,
                 ..
@@ -66,7 +66,7 @@ async fn test_close_pane_in_split(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.panes.len(), 2);
+        assert_eq!(ws.main_area.panes.len(), 2);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -77,9 +77,9 @@ async fn test_close_pane_in_split(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.panes.len(), 1);
-        assert!(matches!(ws.tabs[0].layout, PaneLayout::Pane(_)));
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.panes.len(), 1);
+        assert!(matches!(ws.main_area.tabs[0].layout, PaneLayout::Pane(_)));
     });
 }
 
@@ -95,13 +95,13 @@ async fn test_focus_next_prev_pane(cx: &mut TestAppContext) {
     .unwrap();
 
     let (pane_a, pane_b) = workspace.read_with(cx, |ws, _| {
-        let ids = ws.tabs[0].layout.pane_ids();
+        let ids = ws.main_area.tabs[0].layout.pane_ids();
         (ids[0], ids[1])
     });
 
     // After split, focus is on the new (second) pane.
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.focused_pane_id, pane_b);
+        assert_eq!(ws.main_area.focused_pane_id, pane_b);
     });
 
     // Focus next wraps to first pane.
@@ -112,7 +112,7 @@ async fn test_focus_next_prev_pane(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.focused_pane_id, pane_a);
+        assert_eq!(ws.main_area.focused_pane_id, pane_a);
     });
 
     // Focus prev wraps back to second pane.
@@ -123,7 +123,7 @@ async fn test_focus_next_prev_pane(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.focused_pane_id, pane_b);
+        assert_eq!(ws.main_area.focused_pane_id, pane_b);
     });
 }
 
@@ -148,8 +148,8 @@ async fn test_nested_split(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.panes.len(), 3);
-        assert_eq!(ws.tabs[0].layout.leaf_count(), 3);
+        assert_eq!(ws.main_area.panes.len(), 3);
+        assert_eq!(ws.main_area.tabs[0].layout.leaf_count(), 3);
     });
 
     // Close focused pane (C) → back to [A | B].
@@ -161,8 +161,8 @@ async fn test_nested_split(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.panes.len(), 2);
-        assert_eq!(ws.tabs[0].layout.leaf_count(), 2);
+        assert_eq!(ws.main_area.panes.len(), 2);
+        assert_eq!(ws.main_area.tabs[0].layout.leaf_count(), 2);
     });
 }
 
@@ -188,8 +188,8 @@ async fn test_close_tab_removes_all_panes(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 2);
-        assert_eq!(ws.panes.len(), 3); // 2 in tab 0, 1 in tab 1
+        assert_eq!(ws.main_area.tabs.len(), 2);
+        assert_eq!(ws.main_area.panes.len(), 3); // 2 in tab 0, 1 in tab 1
     });
 
     // Close tab 0 — should remove both panes.
@@ -201,8 +201,8 @@ async fn test_close_tab_removes_all_panes(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.panes.len(), 1);
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.panes.len(), 1);
     });
 }
 
@@ -216,7 +216,7 @@ async fn test_move_tab_left_right(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
     assert_eq!(ids.len(), 3);
 
     // Active tab is index 2; move it left → index 1.
@@ -227,9 +227,9 @@ async fn test_move_tab_left_right(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_tab_index, 1);
-        assert_eq!(ws.tabs[1].id, ids[2]);
-        assert_eq!(ws.tabs[2].id, ids[1]);
+        assert_eq!(ws.main_area.active_tab_index, 1);
+        assert_eq!(ws.main_area.tabs[1].id, ids[2]);
+        assert_eq!(ws.main_area.tabs[2].id, ids[1]);
     });
 
     // Move right back to 2.
@@ -240,8 +240,8 @@ async fn test_move_tab_left_right(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_tab_index, 2);
-        assert_eq!(ws.tabs[2].id, ids[2]);
+        assert_eq!(ws.main_area.active_tab_index, 2);
+        assert_eq!(ws.main_area.tabs[2].id, ids[2]);
     });
 }
 
@@ -254,7 +254,7 @@ async fn test_osc7_updates_pane_cwd_via_view_flush(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     let view = workspace.read_with(cx, |ws, _| {
-        ws.panes[0]
+        ws.main_area.panes[0]
             .terminal_view()
             .expect("first pane is a terminal in build_workspace")
             .clone()
@@ -285,7 +285,7 @@ async fn test_close_active_tab_returns_to_last_active(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
 
     // Close active tab (index 1) — should jump back to previously-active (0).
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -295,9 +295,9 @@ async fn test_close_active_tab_returns_to_last_active(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 2);
-        assert_eq!(ws.active_tab_index, 0);
-        assert_eq!(ws.tabs[0].id, ids[0]);
+        assert_eq!(ws.main_area.tabs.len(), 2);
+        assert_eq!(ws.main_area.active_tab_index, 0);
+        assert_eq!(ws.main_area.tabs[0].id, ids[0]);
     });
 }
 
@@ -322,11 +322,11 @@ async fn test_move_tab_adjusts_history_indices(cx: &mut TestAppContext) {
 
     // Confirm setup: active=0, history ends with 1.
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_tab_index, 0);
-        assert_eq!(ws.tab_history.last(), Some(&1));
+        assert_eq!(ws.main_area.active_tab_index, 0);
+        assert_eq!(ws.main_area.tab_history.last(), Some(&1));
     });
 
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
 
     // Move tab A (0) to tail position (2): [A,B,C] → [B,C,A]
     cx.update_window(window_handle.into(), |_, _window, cx| {
@@ -338,12 +338,12 @@ async fn test_move_tab_adjusts_history_indices(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, _| {
         // Tab order: B, C, A.
-        assert_eq!(ws.tabs[0].id, ids[1]); // B
-        assert_eq!(ws.tabs[1].id, ids[2]); // C
-        assert_eq!(ws.tabs[2].id, ids[0]); // A
+        assert_eq!(ws.main_area.tabs[0].id, ids[1]); // B
+        assert_eq!(ws.main_area.tabs[1].id, ids[2]); // C
+        assert_eq!(ws.main_area.tabs[2].id, ids[0]); // A
 
         // active_tab_index was 0 (A), which moved to 2.
-        assert_eq!(ws.active_tab_index, 2);
+        assert_eq!(ws.main_area.active_tab_index, 2);
 
         // History had entry 1 (B) at the top → B is now index 0 (shifted down).
         // All history entries that referenced A (old 0) map to new 2.
@@ -352,9 +352,9 @@ async fn test_move_tab_adjusts_history_indices(cx: &mut TestAppContext) {
         //   2(C) → from<to (0<2) && 2>0 && 2<=2 → 2−1 = 1 ✓
         //   0(A) → idx==from → to = 2 ✓
         //   1(B) → from<to (0<2) && 1>0 && 1<=2 → 1−1 = 0 ✓
-        assert!(ws.tab_history.contains(&2)); // A's new position
-        assert!(ws.tab_history.contains(&0)); // B's new position
-        assert!(ws.tab_history.contains(&1)); // C's new position
+        assert!(ws.main_area.tab_history.contains(&2)); // A's new position
+        assert!(ws.main_area.tab_history.contains(&0)); // B's new position
+        assert!(ws.main_area.tab_history.contains(&1)); // C's new position
     });
 }
 
@@ -377,7 +377,7 @@ async fn test_close_tab_stale_history_fallback(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_tab_index, 1);
+        assert_eq!(ws.main_area.active_tab_index, 1);
     });
 
     // Close tab 2 first — this removes the history entry pointing at 2,
@@ -389,8 +389,8 @@ async fn test_close_tab_stale_history_fallback(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 2);
-        assert_eq!(ws.active_tab_index, 1); // active tab 1 unaffected (index < 2)
+        assert_eq!(ws.main_area.tabs.len(), 2);
+        assert_eq!(ws.main_area.active_tab_index, 1); // active tab 1 unaffected (index < 2)
     });
 
     // Close active tab 1 — history has [0] which is valid → should navigate to 0.
@@ -401,7 +401,7 @@ async fn test_close_tab_stale_history_fallback(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.active_tab_index, 0);
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.active_tab_index, 0);
     });
 }

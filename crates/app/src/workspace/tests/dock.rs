@@ -165,7 +165,7 @@ fn test_dock_drag_resizes_left_dock(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| {
         ws.left_dock.update(cx, |d, _| d.is_open = true);
         let start = ws.left_dock.read(cx).size;
-        ws.begin_dock_drag(dock::DockPosition::Left, 100.0, cx);
+        ws.begin_dock_drag(layout::DockPosition::Left, 100.0, cx);
         // Simulate drag by mutating size directly — the mousemove path
         // exercises resize_all_tabs which needs a live Window.
         ws.left_dock.update(cx, |d, _| d.resize(start + 30.0));
@@ -180,7 +180,7 @@ fn test_dock_drag_clamps_to_range(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
         ws.left_dock.update(cx, |d, _| d.is_open = true);
-        ws.begin_dock_drag(dock::DockPosition::Left, 0.0, cx);
+        ws.begin_dock_drag(layout::DockPosition::Left, 0.0, cx);
         // Pull way past max — clamp must hold.
         ws.left_dock.update(cx, |d, _| d.resize(99999.0));
         assert_eq!(ws.left_dock.read(cx).size, ws.left_dock.read(cx).max_size);
@@ -196,16 +196,16 @@ fn test_dock_drag_right_and_bottom_track_their_own_sizes(cx: &mut TestAppContext
     ws.update(cx, |ws, cx| {
         ws.right_dock.update(cx, |d, _| d.is_open = true);
         ws.bottom_dock.update(cx, |d, _| d.is_open = true);
-        ws.begin_dock_drag(dock::DockPosition::Right, 0.0, cx);
+        ws.begin_dock_drag(layout::DockPosition::Right, 0.0, cx);
         assert!(matches!(
             ws.dock_drag.map(|d| d.position),
-            Some(dock::DockPosition::Right)
+            Some(layout::DockPosition::Right)
         ));
         ws.end_dock_drag(cx);
-        ws.begin_dock_drag(dock::DockPosition::Bottom, 0.0, cx);
+        ws.begin_dock_drag(layout::DockPosition::Bottom, 0.0, cx);
         assert!(matches!(
             ws.dock_drag.map(|d| d.position),
-            Some(dock::DockPosition::Bottom)
+            Some(layout::DockPosition::Bottom)
         ));
         ws.end_dock_drag(cx);
     });

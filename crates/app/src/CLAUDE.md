@@ -20,14 +20,25 @@ app/src/
 ├── ui/                   # Reusable widget primitives
 ├── workspace/            # Tabs + panes + docks Workspace entity
 │   ├── actions.rs        # Trivial `on_*` action-handler shims
-│   ├── dock_ops.rs       # Dock toggle + divider / dock drag state
-│   ├── file_tree_ops/    # Sidebar Files view ops (mod.rs + walker.rs)
-│   ├── file_viewer/      # File-viewer data model + diff parser (mod.rs) + renderers (render/)
+│   ├── command/          # Command palette (palette.rs) + history picker (history.rs)
+│   ├── layout/           # Dock entities (mod.rs), drag/toggle ops (ops.rs), snapshots (snap.rs)
+│   ├── left_sidebar/     # Left-dock sidebar — view_tabs, worktrees, git_changes, files
+│   ├── main_area/        # TabBar + PaneTree runtime
+│   │   ├── bottom_dock/  # Macro grid, terminal input, tab strip
+│   │   ├── file_view_pane/  # File-viewer data model + renderers
+│   │   ├── task_edit_pane/  # Task-edit inline form + ops
+│   │   ├── context.rs    # MainAreaContext (active worktree tab/pane state)
+│   │   ├── nav.rs        # iTerm2-model directional navigation
+│   │   ├── pane.rs       # Pane + PaneContent structs, create_pane()
+│   │   ├── pane_tree.rs  # Pure PaneLayout split-tree (PaneId, SplitDirection, adjust_divider)
+│   │   ├── prompt_watcher.rs  # Filesystem watcher for TaskEdit prompt file
+│   │   ├── resize.rs     # resize_all_tabs — propagate viewport to PTYs + views
+│   │   └── tab_ops.rs    # Tab lifecycle (add/close/activate/move)
 │   ├── persistence.rs    # save_state / restore_state / rebuild_layout / WorktreeRuntime
-│   ├── render/           # GPUI render — impl Render in mod.rs, layout walker in layout.rs
-│   ├── resize.rs         # `resize_all_tabs` — propagate viewport size to PTYs + views
+│   ├── render/           # GPUI render — impl Render in mod.rs
+│   ├── right_sidebar/    # Right-dock sidebar — view_tabs, usage, skills, tasks, tools
+│   ├── sync/             # Background pumps: pty, jsonl, limits, mcp, skills
 │   ├── worktree_ops.rs   # Worktree create/remove/activate + branch sanitization
-│   ├── sidebar/          # Left-dock sidebar per-view subdirectories
 │   └── tests/            # mod.rs = lifecycle tests, pure_ops.rs = sync helpers
 └── worktree/             # Runtime Worktree + git CLI wrappers
 ```
@@ -165,38 +176,54 @@ slot regardless of which fields are visible.
 
 | File/dir | Purpose |
 |----------|---------|
-| `mod.rs` | `Workspace` entity. Tabs/panes/active_tab_index, docks, worktrees. `apply_config`, `new_with_project`, tab/pane/split lifecycle, `focus_pane_in_direction`. |
-| `dialog_helpers.rs` | `open_form_modal(...)` (entity-owned body), `open_single_field_dialog(...)` (one `gpui_component::Input` via `crate::ui::input` + OK/Cancel, Enter-to-submit via `Dialog::Confirm` action), `open_confirm_dialog(...)` (title + body + OK/Cancel for destructive flows). All wrap `gpui_component::WindowExt::open_dialog` and schedule initial focus via `cx.defer` *after* the dialog mounts. |
-| `dock_ops.rs` | Dock toggle + divider/dock drag. `DividerDrag`, `DockDrag` structs. |
-| `persistence.rs` | `save_state`/`restore_state`/`rebuild_layout` + `WorktreeRuntime`. Helpers: `effective_cwd` (anchors cwd to worktree_root), `anchor_worktree_paths_to_project_root`. |
-| `worktree_ops.rs` | Worktree create/remove/activate, modal openers, slot-id allocator, `sanitize_branch_name`. |
-| `pane.rs` | `Pane` = PTY + `TerminalView`. `create_pane()` spawns PTY. `Pane::display_cwd()` for display. |
-| `layout.rs` | Pure pane tree. `PaneLayout::{Leaf, Split}`, insert/remove, `collect_pane_rects`, `find_divider`, `adjust_divider`. |
-| `nav.rs` | iTerm2-model direction navigation. `pane_in_direction()`. |
-| `render/mod.rs` | `impl Render for Workspace`. Snapshots into plain structs (no re-entrant reads). |
-| `render/layout.rs` | `render_layout` recursive `PaneLayout` walker. `pane_header` lives here. |
+| `mod.rs` | `Workspace` entity — struct definition, `new_with_project`, `apply_config`, `focus_pane_in_direction`. |
 | `actions.rs` | Trivial `on_*` one-liner shims forwarding to business logic. |
-| `resize.rs` | `resize_all_tabs` — propagates viewport changes to PTY grids and `TerminalView`. |
-| `file_tree_ops/` | Files view ops. `mod.rs`: `VisibleEntry` + workspace ops. `walker.rs`: pure `walk_into`/`visible_from`. |
-| `file_viewer/mod.rs` | `PaneFileView`, `PaneFileContent`, `FileViewerSearch`, `VisualRow`, `CharSelection`. |
-| `file_viewer/diff_parser.rs` | `DiffHunk`/`DiffLine`, `parse_diff_hunks`. |
-| `file_viewer/render/` | Pane-area file viewer renderers (`render_pane_file_viewer` entry point). |
-| `dock.rs` | `Dock { position, is_open, size, panels, active_panel }`. |
-| `command_palette.rs` | `Cmd+Shift+P`. `PALETTE_ENTRIES` const array. Substring fuzzy filter. |
+| `command/palette.rs` | `Cmd+Shift+P`. `PALETTE_ENTRIES` const array. Substring fuzzy filter. |
+| `command/history.rs` | `Cmd+Shift+H`. Command history picker modal. |
+| `dialog_helpers.rs` | `open_form_modal(...)`, `open_single_field_dialog(...)`, `open_confirm_dialog(...)`. All wrap `gpui_component::WindowExt::open_dialog`. |
+| `layout/mod.rs` | `Dock` entity — left/bottom/right panel management. `DockPosition`. |
+| `layout/ops.rs` | Dock toggle + divider/dock drag. `DividerDrag`, `DockDrag` structs. |
+| `layout/snap.rs` | `DockSnapshot`, `LeftSidebarSnapshot`, `BottomDockSnapshot`, `RightSidebarSnapshot` — plain-data snapshots for re-entrancy-safe render. |
+| `main_area/context.rs` | `MainAreaContext` — active worktree's tab/pane runtime, `inactive_worktree_runtimes`. |
+| `main_area/pane_tree.rs` | Pure pane split tree. `PaneLayout`, `PaneId`, `SplitDirection`, `insert_split_at`, `remove_pane_from_layout`, `adjust_divider`. |
+| `main_area/pane.rs` | `Pane` + `PaneContent`. `create_pane()` spawns PTY. `Pane::display_cwd()`, `Pane::title()`. |
+| `main_area/nav.rs` | iTerm2-model directional navigation. `pane_in_direction()`. |
+| `main_area/tab_ops.rs` | Tab lifecycle — add, close, activate, move. |
+| `main_area/resize.rs` | `resize_all_tabs` — propagates viewport changes to PTY grids and `TerminalView`. |
+| `main_area/prompt_watcher.rs` | Two-thread filesystem watcher for TaskEdit pane prompt file. `PromptFileWatcherHandle`. |
+| `main_area/mod.rs` | `render_layout` recursive `PaneLayout` walker. `pane_header` lives here. |
+| `main_area/file_view_pane/` | File-viewer: data model, diff parser, virtual-list renderers. |
+| `main_area/task_edit_pane/` | Task-edit form renderer + ops. |
+| `main_area/bottom_dock/mod.rs` | Bottom dock render entry point. |
+| `main_area/bottom_dock/tab_strip.rs` | `PanelTabStrip` — bottom dock tab row. |
+| `main_area/bottom_dock/terminal_input.rs` | `TerminalInputPanel` — multiline input + action buttons. |
+| `main_area/bottom_dock/macro_ops/` | Macro grid data ops — load/save panels, register shortcuts. |
+| `persistence.rs` | `save_state`/`restore_state`/`rebuild_layout` + `WorktreeRuntime`. |
+| `render/mod.rs` | `impl Render for Workspace`. Snapshots into plain structs (no re-entrant reads). |
 | `status_bar.rs` | `StatusBarData` snapshot. Surfaces cwd, branch, agent status, transient error. |
-| `tests/mod.rs` | `#[gpui::test]` async lifecycle tests. `build_workspace` (default config, no project) + `build_workspace_with(cx, &config, project)` helpers — both wrap Workspace inside `gpui_component::Root::new` to mirror prod (windows.rs). |
+| `sync/pty.rs` | PTY event pump — drains `pty_rx` on 100ms tick, updates Claude-binding map. |
+| `sync/jsonl.rs` | JSONL watcher pump — drains NDJSON events, feeds task/usage state. |
+| `sync/limits.rs` | HTTP polling pump — fetches usage + status.claude.com on interval. |
+| `sync/mcp.rs` | MCP watcher pump — drains filesystem events, refreshes `McpState`. |
+| `sync/skills.rs` | Skills watcher pump — drains filesystem events, refreshes `SkillsState`. |
+| `worktree_ops.rs` | Worktree create/remove/activate, modal openers, slot-id allocator, `sanitize_branch_name`. |
+| `tests/mod.rs` | `#[gpui::test]` async lifecycle tests. `build_workspace` + `build_workspace_with` helpers. |
 | `tests/pure_ops.rs` | `#[test]` sync tests for layout ops, `adjust_divider`, `sanitize_branch_name`. |
 
-## `workspace/sidebar/`
+## `workspace/left_sidebar/`
 
 | Path | Purpose |
 |------|---------|
-| `view_tabs.rs` | Header strip mapping `SidebarView` variants to tabs. |
+| `view_tabs.rs` | Header strip mapping `LeftSidebarView` variants to tabs. |
+| `file_tree_context.rs` | `FileTreeContext` — per-worktree lazy tree, watcher, gitignore, scroll handle. |
+| `file_tree_ops/mod.rs` | `VisibleEntry` + workspace file-tree ops. |
+| `file_tree_ops/walker.rs` | Pure `walk_into` / `visible_from`. |
+| `git_status_ops.rs` | Git status fetch, diff loading, file-pane integration. |
 | `worktrees/list.rs` | Worktrees view body — list items, `[+]` button. |
 | `worktrees/create_modal.rs` | `CreateWorktreeModal` — Dialog-rendered, focus + validation + background `git worktree add`. |
 | `worktrees/remove_modal.rs` | `RemoveWorktreeModal` — Dialog-rendered, `allow_force` for dirty worktree retry. |
-| `git_changes/mod.rs` | Placeholder (W-6). |
-| `files/mod.rs` | Placeholder (W-7). |
+| `git_changes/mod.rs` | Git changes view (W-6). |
+| `files/mod.rs` | Files view (W-7). |
 
 Modal key handlers must call `cx.stop_propagation()` to swallow global action dispatch.
 
@@ -224,21 +251,21 @@ Modal key handlers must call `cx.stop_propagation()` to swallow global action di
 | Recipe | Key touch points |
 |--------|-----------------|
 | New sidebar view | `SidebarView` variant → `view_tabs.rs` → `sidebar/<view>/mod.rs` (export `render`) → `mod.rs` action + handler → `render.rs` match arm → test |
-| New global action + keybinding | `actions!()` → handler in ops file → `surface/keybindings.rs` const → `main.rs` bind_keys → `action_map.rs` arm → `command_palette.rs` entry |
+| New global action + keybinding | `actions!()` → handler in ops file → `surface/keybindings.rs` const → `main.rs` bind_keys → `action_map.rs` arm → `command/palette.rs` entry |
 | New dock panel | `PlaceholderKind` variant → `Workspace::new_with_project` push → renderer module → `render.rs` dock match arm → persistence if needed |
 | New modal | `impl Render + Focusable` (no `Modal` trait, no `EventEmitter`). Open via `crate::workspace::dialog_helpers::open_form_modal(title, width, build, window, cx)`. Dismiss via `window.close_dialog(cx)`. Embed `Entity<crate::ui::InputState>` and render through `crate::ui::input(&state, cx, tab)` for text fields. Apply `.tab_group()` to the modal entity's root `div`. Never own backdrop/stop_propagation — Dialog covers it. |
-| New pane content kind | `PaneContent` variant + struct in `pane.rs` → match arms (title/cwd/focus_handle/resize) → `render/layout.rs` walker arm → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip |
-| Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnap` → `cx.observe_global` rebroadcasts to every Workspace + the Settings window |
-| Worktree drag/context menu | Data ops in `worktree/mod.rs` → `WorktreeDrag` in `dock_ops.rs` → actions in `worktree_ops.rs` → UI in `sidebar/worktrees/list.rs` |
+| New pane content kind | `PaneContent` variant + struct in `main_area/pane.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip |
+| Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightSidebarSnapshot` → `cx.observe_global` rebroadcasts to every Workspace + the Settings window |
+| Worktree drag/context menu | Data ops in `worktree/mod.rs` → `WorktreeDrag` in `layout/ops.rs` → actions in `worktree_ops.rs` → UI in `left_sidebar/worktrees/list.rs` |
 
 ## Where things go (decision matrix)
 
 | New feature touches… | Lives in |
 |---|---|
-| Pure data / algorithm, no GPUI | `worktree/`, `agent/mod.rs`, `workspace/layout.rs`, `daruda_project`, `daruda_config` |
-| GPUI render only | `agent/<view>.rs`, `workspace/sidebar/<view>/`, `workspace/render/` |
-| Workspace action handler | `workspace/mod.rs` (tab/pane/focus) · `workspace/worktree_ops.rs` · `workspace/dock_ops.rs` |
-| New pane content kind | `pane.rs` + `render/layout.rs` + `daruda_project` + `workspace/mod.rs` constructor |
+| Pure data / algorithm, no GPUI | `worktree/`, `agent/mod.rs`, `workspace/main_area/pane_tree.rs`, `daruda_project`, `daruda_config` |
+| GPUI render only | `agent/<view>.rs`, `workspace/left_sidebar/<view>/`, `workspace/render/` |
+| Workspace action handler | `workspace/mod.rs` (tab/pane/focus) · `workspace/worktree_ops.rs` · `workspace/layout/ops.rs` |
+| New pane content kind | `main_area/pane.rs` + `main_area/mod.rs` walker arm + `daruda_project` + `workspace/mod.rs` constructor |
 | New modal | `impl Render + Focusable` beside feature; open via `dialog_helpers::open_form_modal` |
 | Text input inside modal | Embed `Entity<crate::ui::InputState>`, render through `crate::ui::input(&state, cx, tab)`; subscribe `InputEvent`. Never re-implement caret/blink. |
 | Reusable widget | `crate::ui`. Never inline `div().flex().hover(...).on_mouse_down(...)` at call site. |
@@ -267,7 +294,7 @@ Modal key handlers must call `cx.stop_propagation()` to swallow global action di
 ### G2 — Responsibility fences
 
 - `render.rs` is `impl Render` + leaf UI builders only. No `std::process`, `std::fs`, or multi-field string formatting. Add display methods on data structs (e.g. `Pane::display_cwd()`).
-- Data modules (`worktree/`, `agent/mod.rs`, `layout.rs`) must not import `gpui::Element`, `Context<Workspace>`, or `Window`.
+- Data modules (`worktree/`, `agent/mod.rs`, `main_area/pane_tree.rs`) must not import `gpui::Element`, `Context<Workspace>`, or `Window`.
 - `worktree/git.rs` stays GPUI-free. UI callers wrap with `background_executor`.
 - Display-string helpers live next to the call site, not as data struct methods.
 
@@ -277,7 +304,7 @@ Every user-facing affordance must update all four:
 1. Type — `actions!()`
 2. Handler — `register_action` or `cx.bind_keys`
 3. Constant — `surface/keybindings.rs::SHORTCUT_*` or `surface/strings.rs`
-4. Discoverability — `command_palette::PALETTE_ENTRIES` + `surface/action_map.rs` arm
+4. Discoverability — `command::palette::PALETTE_ENTRIES` + `surface/action_map.rs` arm
 
 ### G4 — Inline-literal ban
 

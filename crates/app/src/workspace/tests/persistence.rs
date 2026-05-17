@@ -198,14 +198,14 @@ fn test_restore_state_rebuilds_horizontal_split(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
-        assert_eq!(ws.panes.len(), 2);
-        assert_eq!(ws.tabs[0].layout.leaf_count(), 2);
+        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.main_area.panes.len(), 2);
+        assert_eq!(ws.main_area.tabs[0].layout.leaf_count(), 2);
         // Both panes in the active tab should be registered.
-        let ids = ws.tabs[0].layout.pane_ids();
+        let ids = ws.main_area.tabs[0].layout.pane_ids();
         assert_eq!(ids.len(), 2);
         // Focused pane must be one of the restored leaves.
-        assert!(ids.contains(&ws.focused_pane_id));
+        assert!(ids.contains(&ws.main_area.focused_pane_id));
     });
 }
 
@@ -283,13 +283,13 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 3);
-        assert_eq!(ws.panes.len(), 3);
+        assert_eq!(ws.main_area.tabs.len(), 3);
+        assert_eq!(ws.main_area.panes.len(), 3);
         // Active tab index preserved.
-        assert_eq!(ws.active_tab_index, 2);
+        assert_eq!(ws.main_area.active_tab_index, 2);
         // Focused pane is a valid leaf of the active tab.
-        let active_leaves = ws.tabs[2].layout.pane_ids();
-        assert!(active_leaves.contains(&ws.focused_pane_id));
+        let active_leaves = ws.main_area.tabs[2].layout.pane_ids();
+        assert!(active_leaves.contains(&ws.main_area.focused_pane_id));
     });
 }
 
@@ -334,7 +334,7 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_tab_index, 0);
+        assert_eq!(ws.main_area.active_tab_index, 0);
     });
 }
 
@@ -371,10 +371,10 @@ fn test_save_restore_round_trip_preserves_layout(cx: &mut TestAppContext) {
     });
     let ws2 = window_handle2.root(cx).unwrap();
     ws2.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 2);
+        assert_eq!(ws.main_area.tabs.len(), 2);
         // Tab 0 had a horizontal split → 2 panes.
-        assert_eq!(ws.tabs[0].layout.leaf_count(), 2);
-        assert_eq!(ws.tabs[1].layout.leaf_count(), 1);
-        assert_eq!(ws.panes.len(), 3);
+        assert_eq!(ws.main_area.tabs[0].layout.leaf_count(), 2);
+        assert_eq!(ws.main_area.tabs[1].layout.leaf_count(), 1);
+        assert_eq!(ws.main_area.panes.len(), 3);
     });
 }

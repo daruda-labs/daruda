@@ -18,8 +18,8 @@ use gpui::{App, Context, Window};
 use crate::path_ext::PathExt;
 
 use super::Workspace;
-use super::layout::{self, PaneLayout, SplitDirection};
-use super::pane::{self, PaneSpawnError, TabEntry};
+use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
+use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 
 /// Frozen runtime state of a non-active worktree. `activate_worktree`
 /// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
@@ -35,7 +35,7 @@ pub(in crate::workspace) struct WorktreeRuntime {
     /// be confusing because the user's intent from a previous session
     /// is unknown. Starts empty on every app launch.
     pub tab_history: Vec<usize>,
-    pub focused_pane_id: layout::PaneId,
+    pub focused_pane_id: pane_tree::PaneId,
 }
 
 impl Workspace {
@@ -52,8 +52,8 @@ impl Workspace {
             .map(|wt| {
                 let mut s = wt.to_serialized();
                 let (tabs_src, panes_src, active_idx) = if wt.id == self.active_worktree_id {
-                    (&self.tabs, &self.panes, self.active_tab_index)
-                } else if let Some(rt) = self.inactive_worktree_runtimes.get(&wt.id) {
+                    (&self.main_area.tabs, &self.main_area.panes, self.main_area.active_tab_index)
+                } else if let Some(rt) = self.main_area.inactive_worktree_runtimes.get(&wt.id) {
                     (&rt.tabs, &rt.panes, rt.active_tab_index)
                 } else {
                     return s;
@@ -83,7 +83,7 @@ impl Workspace {
             // keeps it out of the JSON.
             tabs: Vec::new(),
             active_tab_index: 0,
-            focused_pane_id: self.focused_pane_id,
+            focused_pane_id: self.main_area.focused_pane_id,
             docks: daruda_store::project::DockStates {
                 left_open: self.left_dock.read(cx).is_open,
                 left_size: self.left_dock.read(cx).size,
@@ -251,22 +251,22 @@ impl Workspace {
         // Nothing to rebuild — keep the single pane `new_with_project`
         // already created.
         if state.worktrees.is_empty() {
-            self.pending_resize = true;
+            self.main_area.pending_resize = true;
             return;
         }
 
         // Drop bootstrapped pane/tab; we're about to rebuild every
         // worktree's runtime from scratch.
-        self.tabs.clear();
-        self.panes.clear();
-        self.activity_counter.clear();
-        self.inactive_worktree_runtimes.clear();
+        self.main_area.tabs.clear();
+        self.main_area.panes.clear();
+        self.main_area.activity_counter.clear();
+        self.main_area.inactive_worktree_runtimes.clear();
 
         // Rebuild each serialized worktree into a WorktreeRuntime.
-        // `rebuild_layout` appends spawned panes onto `self.panes`, so
+        // `rebuild_layout` appends spawned panes onto `self.main_area.panes`, so
         // we split them off at the end of each worktree to keep them
         // segregated.
-        let mut active_focus: Option<layout::PaneId> = None;
+        let mut active_focus: Option<pane_tree::PaneId> = None;
         for swt in &state.worktrees {
             // If the worktree's checkout is no longer on disk, warn via the
             // status bar. Inactive worktrees skip layout rebuild — their
@@ -287,13 +287,13 @@ impl Workspace {
                 }
             }
 
-            let panes_start = self.panes.len();
-            let mut id_map: HashMap<u64, layout::PaneId> = HashMap::new();
+            let panes_start = self.main_area.panes.len();
+            let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
             let mut tabs: Vec<TabEntry> = Vec::new();
             let mut failed = false;
 
             for stab in &swt.tabs {
-                let panes_before = self.panes.len();
+                let panes_before = self.main_area.panes.len();
                 // Pass the worktree's own path as the fallback cwd so
                 // restore never lands a pane at the parent process's
                 // cwd (HOME when daruda is launched from Finder/Dock).
@@ -318,7 +318,7 @@ impl Workspace {
                         });
                     }
                     Err(e) => {
-                        self.panes.truncate(panes_before);
+                        self.main_area.panes.truncate(panes_before);
                         self.report_pane_error("restore", e, cx);
                         failed = true;
                         break;
@@ -329,7 +329,7 @@ impl Workspace {
                 break;
             }
 
-            let wt_panes = self.panes.split_off(panes_start);
+            let wt_panes = self.main_area.panes.split_off(panes_start);
             let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
             // Focus defaults to the tab's last focused pane; only the
             // active worktree honours the top-level `focused_pane_id`
@@ -357,19 +357,19 @@ impl Workspace {
             };
 
             if swt.id == state.active_worktree_id {
-                self.tabs = runtime.tabs;
-                self.panes = runtime.panes;
-                self.active_tab_index = runtime.active_tab_index;
-                self.focused_pane_id = runtime.focused_pane_id;
-                self.tab_history = runtime.tab_history;
+                self.main_area.tabs = runtime.tabs;
+                self.main_area.panes = runtime.panes;
+                self.main_area.active_tab_index = runtime.active_tab_index;
+                self.main_area.focused_pane_id = runtime.focused_pane_id;
+                self.main_area.tab_history = runtime.tab_history;
                 active_focus = Some(runtime.focused_pane_id);
             } else {
-                self.inactive_worktree_runtimes.insert(swt.id, runtime);
+                self.main_area.inactive_worktree_runtimes.insert(swt.id, runtime);
             }
         }
 
         // Fall back to a fresh tab if nothing was restored.
-        if self.tabs.is_empty() {
+        if self.main_area.tabs.is_empty() {
             self.add_tab(window, cx);
             return;
         }
@@ -378,7 +378,7 @@ impl Workspace {
             self.bump_activity(focus);
             self.focus_pane(focus, window, cx);
         }
-        self.pending_resize = true;
+        self.main_area.pending_resize = true;
 
         // Auto-refresh git status when restoring with the Git Changes sidebar
         // active — the cache is always empty on startup so the sidebar would
@@ -409,7 +409,7 @@ impl Workspace {
         &mut self,
         slayout: &daruda_store::project::SerializedLayout,
         fallback_cwd: Option<&std::path::Path>,
-        id_map: &mut HashMap<u64, layout::PaneId>,
+        id_map: &mut HashMap<u64, pane_tree::PaneId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneLayout, PaneSpawnError> {
@@ -436,7 +436,7 @@ impl Workspace {
                 };
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
-                self.panes.push(pane);
+                self.main_area.panes.push(pane);
                 Ok(PaneLayout::Pane(new_id))
             }
             daruda_store::project::SerializedLayout::Split {
@@ -466,7 +466,7 @@ impl Workspace {
                         cx,
                     )?;
                     let id = pane.id;
-                    self.panes.push(pane);
+                    self.main_area.panes.push(pane);
                     return Ok(PaneLayout::Pane(id));
                 }
                 if n == 1 {
@@ -506,9 +506,9 @@ pub(in crate::workspace) fn normalize_ratios(ratios: &[f32], expected_len: usize
 /// Kept as a free function so the conversion lives next to the only
 /// site that needs it (serialization round-trips).
 fn serialize_view_mode(
-    mode: super::file_viewer::FileViewMode,
+    mode: crate::workspace::main_area::file_view_pane::FileViewMode,
 ) -> daruda_store::project::SerializedFileViewMode {
-    use super::file_viewer::FileViewMode;
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
     match mode {
         FileViewMode::Raw => daruda_store::project::SerializedFileViewMode::Raw,
         FileViewMode::Preview => daruda_store::project::SerializedFileViewMode::Preview,
@@ -519,8 +519,8 @@ fn serialize_view_mode(
 /// Inverse of [`serialize_view_mode`].
 pub(in crate::workspace) fn deserialize_view_mode(
     mode: daruda_store::project::SerializedFileViewMode,
-) -> super::file_viewer::FileViewMode {
-    use super::file_viewer::FileViewMode;
+) -> crate::workspace::main_area::file_view_pane::FileViewMode {
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
     match mode {
         daruda_store::project::SerializedFileViewMode::Raw => FileViewMode::Raw,
         daruda_store::project::SerializedFileViewMode::Preview => FileViewMode::Preview,
@@ -584,11 +584,11 @@ fn anchor_worktree_paths_to_project_root(
 }
 
 fn serialize_layout(
-    layout: &layout::PaneLayout,
+    layout: &pane_tree::PaneLayout,
     panes: &[pane::Pane],
 ) -> daruda_store::project::SerializedLayout {
     match layout {
-        layout::PaneLayout::Pane(id) => {
+        pane_tree::PaneLayout::Pane(id) => {
             let pane = panes.iter().find(|p| p.id == *id);
             // File panes serialize their viewer state; Terminal panes
             // serialize their cwd. The two are mutually exclusive —
@@ -613,16 +613,16 @@ fn serialize_layout(
                 file,
             }
         }
-        layout::PaneLayout::Split {
+        pane_tree::PaneLayout::Split {
             direction,
             children,
             ratios,
         } => {
             let dir = match direction {
-                layout::SplitDirection::Horizontal => {
+                pane_tree::SplitDirection::Horizontal => {
                     daruda_store::project::SplitDirectionSerde::Horizontal
                 }
-                layout::SplitDirection::Vertical => {
+                pane_tree::SplitDirection::Vertical => {
                     daruda_store::project::SplitDirectionSerde::Vertical
                 }
             };

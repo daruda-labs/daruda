@@ -17,8 +17,8 @@ use daruda_store::observability::system_info::redact_home;
 use gpui::{Context, Focusable as _, Window};
 
 use super::Workspace;
-use super::layout::SplitDirection;
-use super::nav::NavDirection;
+use crate::workspace::main_area::pane_tree::SplitDirection;
+use crate::workspace::main_area::nav::NavDirection;
 use super::{
     CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, CommitChanges, EditTask,
     EditWindowTitle, FetchChanges, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh,
@@ -52,7 +52,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request_close_tab(self.active_tab_index, window, cx);
+        self.request_close_tab(self.main_area.active_tab_index, window, cx);
         self.mark_dirty_and_save(cx);
     }
 
@@ -62,8 +62,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tabs.len() > 1 {
-            self.activate_tab((self.active_tab_index + 1) % self.tabs.len(), window, cx);
+        if self.main_area.tabs.len() > 1 {
+            self.activate_tab((self.main_area.active_tab_index + 1) % self.main_area.tabs.len(), window, cx);
         }
     }
 
@@ -73,11 +73,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tabs.len() > 1 {
-            let idx = if self.active_tab_index == 0 {
-                self.tabs.len() - 1
+        if self.main_area.tabs.len() > 1 {
+            let idx = if self.main_area.active_tab_index == 0 {
+                self.main_area.tabs.len() - 1
             } else {
-                self.active_tab_index - 1
+                self.main_area.active_tab_index - 1
             };
             self.activate_tab(idx, window, cx);
         }
@@ -90,11 +90,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let index = if n == 8 {
-            self.tabs.len().saturating_sub(1)
+            self.main_area.tabs.len().saturating_sub(1)
         } else {
             n
         };
-        if index < self.tabs.len() {
+        if index < self.main_area.tabs.len() {
             self.activate_tab(index, window, cx);
         }
     }
@@ -231,7 +231,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_task_picker_modal(
-            crate::workspace::right_panel::task_picker_modal::TaskPickAction::Edit,
+            crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Edit,
             window,
             cx,
         );
@@ -434,7 +434,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use super::command_history_modal::{CommandHistoryItem, CommandHistoryModal};
+        use super::command::history::{CommandHistoryItem, CommandHistoryModal};
 
         // Snapshot the focused pane's command history at open time;
         // a user filtering the picker is acting on what they were
@@ -667,8 +667,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let idx = self.active_tab_index;
-        let indices: Vec<usize> = (0..self.tabs.len()).rev().filter(|&i| i != idx).collect();
+        let idx = self.main_area.active_tab_index;
+        let indices: Vec<usize> = (0..self.main_area.tabs.len()).rev().filter(|&i| i != idx).collect();
         self.request_close_tabs_bulk(indices, window, cx);
         self.mark_dirty_and_save(cx);
     }
@@ -679,8 +679,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let idx = self.active_tab_index;
-        let indices: Vec<usize> = (idx + 1..self.tabs.len()).rev().collect();
+        let idx = self.main_area.active_tab_index;
+        let indices: Vec<usize> = (idx + 1..self.main_area.tabs.len()).rev().collect();
         self.request_close_tabs_bulk(indices, window, cx);
         self.mark_dirty_and_save(cx);
     }
@@ -691,7 +691,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pane_id = self.focused_pane_id;
+        let pane_id = self.main_area.focused_pane_id;
         self.toggle_zoom_pane(pane_id, cx);
     }
 
@@ -775,7 +775,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from = self.active_tab_index;
+        let from = self.main_area.active_tab_index;
         if from > 0 {
             self.move_tab(from, from - 1, cx);
             self.mark_dirty_and_save(cx);
@@ -788,8 +788,8 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from = self.active_tab_index;
-        if from + 1 < self.tabs.len() {
+        let from = self.main_area.active_tab_index;
+        if from + 1 < self.main_area.tabs.len() {
             self.move_tab(from, from + 1, cx);
             self.mark_dirty_and_save(cx);
         }

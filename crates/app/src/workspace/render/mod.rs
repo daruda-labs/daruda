@@ -6,12 +6,7 @@
 //!   • Pane header (per pane)     — built by `pane_header()`, only in split mode.
 //!                                   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`.
 
-mod error_toast_overlay;
-mod layout;
-pub(in crate::workspace) mod task_edit_pane;
-
-pub(in crate::workspace) use self::error_toast_overlay::{ErrorToastOverlay, ToastSnapshot};
-use self::layout::render_layout;
+use super::main_area::render_layout;
 
 use crate::ui::theme;
 use gpui::{
@@ -22,14 +17,14 @@ use gpui::{
 
 use gpui::KeyDownEvent;
 
-use super::command_palette;
-use super::dock::DockPosition;
-use super::dock_snap::{
+use super::command::palette as command_palette;
+use super::layout::DockPosition;
+use super::layout::{
     BottomDockSnapshot, DockSnapshot, LeftSidebarSnapshot, RightSidebarSnapshot,
 };
-use super::file_viewer::{CharPos, CharSelection};
-use super::layout::{DIVIDER_PX, PaneLayout, SplitDirection};
-use super::pane::PaneContent;
+use super::main_area::file_view_pane::{CharPos, CharSelection};
+use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
+use crate::workspace::main_area::pane::PaneContent;
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, TAB_BAR_HEIGHT,
@@ -87,7 +82,7 @@ fn wrap_items_with_close(
 /// Capturing a `WeakEntity<Workspace>` (rather than `&mut Workspace`
 /// directly) keeps the closure `'static` and avoids re-entrancy — the
 /// action executes in a new event cycle after the current render is done.
-pub(super) fn ws_menu_item(
+pub(in crate::workspace) fn ws_menu_item(
     ws: gpui::WeakEntity<Workspace>,
     label: &'static str,
     disabled: bool,
@@ -106,7 +101,7 @@ pub(super) fn ws_menu_item(
 
 /// Builds a workspace-scoped context-menu item that closes the menu and
 /// writes `text` to the system clipboard.
-pub(super) fn ws_clipboard_item(
+pub(in crate::workspace) fn ws_clipboard_item(
     ws: gpui::WeakEntity<Workspace>,
     label: &'static str,
     text: String,
@@ -195,7 +190,7 @@ pub(super) const DEFAULT_INACTIVE_PANE_DIM_ALPHA: f32 = 0.35;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.pending_resize {
+        if self.main_area.pending_resize {
             self.resize_all_tabs(window, cx);
         }
 
@@ -227,11 +222,12 @@ impl Render for Workspace {
             Option<std::path::PathBuf>,
             Option<std::path::PathBuf>,
         )> = self
+            .main_area
             .tabs
             .iter()
             .enumerate()
             .map(|(i, tab)| {
-                let pane = self.panes.iter().find(|p| p.id == tab.last_focused_pane);
+                let pane = self.main_area.panes.iter().find(|p| p.id == tab.last_focused_pane);
                 let base_label = tab
                     .user_label
                     .clone()
@@ -273,7 +269,7 @@ impl Render for Workspace {
                 };
                 (
                     i,
-                    i == self.active_tab_index,
+                    i == self.main_area.active_tab_index,
                     label,
                     file_path,
                     worktree_root,
@@ -286,7 +282,7 @@ impl Render for Workspace {
         // cwd is known, just title otherwise (matches iTerm2 default).
         if let Some(label) = self.window_user_label.as_ref() {
             window.set_window_title(label.as_ref());
-        } else if let Some(pane) = self.panes.iter().find(|p| p.id == self.focused_pane_id) {
+        } else if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == self.main_area.focused_pane_id) {
             let pane_title = pane.title();
             let title = match pane.cwd() {
                 Some(cwd) => format!("{} — {}", pane_title.as_ref(), cwd.display()),
@@ -315,7 +311,7 @@ impl Render for Workspace {
             left_sidebar_view: self.left_sidebar_view,
             worktrees: self.worktrees.clone(),
             active_worktree_id: self.active_worktree_id,
-            active_tab_count: self.tabs.len(),
+            active_tab_count: self.main_area.tabs.len(),
             git_status_cache: self.git_status_cache.clone(),
             git_stage_in_flight: self.git_stage_in_flight,
             git_op_in_flight: self.git_op_in_flight,
@@ -408,7 +404,7 @@ impl Render for Workspace {
             claude_active_session_id: self
                 .claude
                 .pty_claude_bindings
-                .get(&self.focused_pane_id)
+                .get(&self.main_area.focused_pane_id)
                 .map(|b| b.session_id.clone()),
             claude_install_banner_visible: self.claude.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
@@ -685,7 +681,7 @@ impl Render for Workspace {
                                 use crate::surface::strings as s;
                                 use crate::ui::ContextMenuItem as CItem;
 
-                                let tab_count = this.tabs.len();
+                                let tab_count = this.main_area.tabs.len();
                                 let ws = cx.entity().downgrade();
                                 let abs_path = file_path.clone();
                                 let rel_path = file_path.as_ref().and_then(|p| {
@@ -715,7 +711,7 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_OTHER_TABS,
                                         tab_count <= 1,
                                         move |this, win, cx| {
-                                            let indices: Vec<usize> = (0..this.tabs.len())
+                                            let indices: Vec<usize> = (0..this.main_area.tabs.len())
                                                 .rev()
                                                 .filter(|&j| j != i)
                                                 .collect();
@@ -729,7 +725,7 @@ impl Render for Workspace {
                                         is_last,
                                         move |this, win, cx| {
                                             let indices: Vec<usize> =
-                                                (i + 1..this.tabs.len()).rev().collect();
+                                                (i + 1..this.main_area.tabs.len()).rev().collect();
                                             this.request_close_tabs_bulk(indices, win, cx);
                                             this.mark_dirty_and_save(cx);
                                         },
@@ -751,7 +747,7 @@ impl Render for Workspace {
                                         s::CTX_MOVE_TAB_RIGHT,
                                         is_last,
                                         move |this, _win, cx| {
-                                            if i + 1 < this.tabs.len() {
+                                            if i + 1 < this.main_area.tabs.len() {
                                                 this.move_tab(i, i + 1, cx);
                                                 this.mark_dirty_and_save(cx);
                                             }
@@ -768,7 +764,7 @@ impl Render for Workspace {
                                             s::CTX_SPLIT_RIGHT,
                                             false,
                                             move |this, win, cx| {
-                                                if this.active_tab_index != i {
+                                                if this.main_area.active_tab_index != i {
                                                     this.activate_tab(i, win, cx);
                                                 }
                                                 this.split_focused_pane(
@@ -784,7 +780,7 @@ impl Render for Workspace {
                                             s::CTX_SPLIT_DOWN,
                                             false,
                                             move |this, win, cx| {
-                                                if this.active_tab_index != i {
+                                                if this.main_area.active_tab_index != i {
                                                     this.activate_tab(i, win, cx);
                                                 }
                                                 this.split_focused_pane(
@@ -888,14 +884,14 @@ impl Render for Workspace {
         // user access to the right-click Unzoom menu. The dim overlay
         // is suppressed (dim_alpha = 0.0) because is_focused is always
         // true for the sole zoomed leaf.
-        let center_content = if let Some(tab) = self.tabs.get(self.active_tab_index) {
+        let center_content = if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
             let actual_has_splits = tab.layout.leaf_count() > 1;
-            if let Some(zoomed_id) = self.zoomed_pane_id {
+            if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
                 if tab.layout.pane_ids().contains(&zoomed_id) {
                     let leaf = PaneLayout::Pane(zoomed_id);
                     render_layout(
                         &leaf,
-                        &self.panes,
+                        &self.main_area.panes,
                         zoomed_id,
                         true,
                         0.0,
@@ -906,20 +902,20 @@ impl Render for Workspace {
                 } else {
                     render_layout(
                         &tab.layout,
-                        &self.panes,
-                        self.focused_pane_id,
+                        &self.main_area.panes,
+                        self.main_area.focused_pane_id,
                         actual_has_splits,
                         self.dim_alpha,
                         SharedString::from(self.font_family.clone()),
-                        self.zoomed_pane_id,
+                        self.main_area.zoomed_pane_id,
                         cx,
                     )
                 }
             } else {
                 render_layout(
                     &tab.layout,
-                    &self.panes,
-                    self.focused_pane_id,
+                    &self.main_area.panes,
+                    self.main_area.focused_pane_id,
                     actual_has_splits,
                     self.dim_alpha,
                     SharedString::from(self.font_family.clone()),
@@ -970,7 +966,7 @@ impl Render for Workspace {
             });
 
         // Status bar
-        let focused_pane = self.panes.iter().find(|p| p.id == self.focused_pane_id);
+        let focused_pane = self.main_area.panes.iter().find(|p| p.id == self.main_area.focused_pane_id);
         // Cheap stat per render — the path is a single file under the
         // user config dir and renders only fire on `cx.notify()`, not
         // in a tight loop.
@@ -1054,7 +1050,7 @@ impl Render for Workspace {
                         // `InputEvent`, so the per-pane subscription can't
                         // see it; the panel-level handler picks it up.
                         "escape" if search_open => {
-                            let pane_id = this.focused_pane_id;
+                            let pane_id = this.main_area.focused_pane_id;
                             if let Some(fc) = this.focused_file_content() {
                                 let input = fc.search_input.clone();
                                 input.update(cx, |inp, cx_state| {
@@ -1154,7 +1150,7 @@ impl Render for Workspace {
                     this.update_dock_drag(cursor_px, window, cx);
                     return;
                 }
-                let Some(drag) = this.drag_state else {
+                let Some(drag) = this.main_area.drag_state else {
                     return;
                 };
                 let cursor_px: f32 = match drag.direction {
@@ -1267,7 +1263,7 @@ impl Render for Workspace {
             // opens a Dialog (e.g. discard / amend confirms) leaves the
             // backdrop layered behind the Dialog and steals later clicks.
             .when_some(
-                self.context_menu
+                self.main_area.context_menu
                     .as_ref()
                     .map(|m| (m.position, m.corner, wrap_items_with_close(&m.items, cx))),
                 |el, (position, corner, items)| {

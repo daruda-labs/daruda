@@ -175,15 +175,15 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     // empty).
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            assert_eq!(ws.tabs.len(), 1);
-            assert_eq!(ws.panes.len(), 1);
+            assert_eq!(ws.main_area.tabs.len(), 1);
+            assert_eq!(ws.main_area.panes.len(), 1);
             ws.activate_worktree(1, window, cx);
             assert_eq!(ws.active_worktree_id, 1);
             // Lazy seed: exactly one tab/pane materialized.
-            assert_eq!(ws.tabs.len(), 1);
-            assert_eq!(ws.panes.len(), 1);
-            assert_eq!(ws.inactive_worktree_runtimes.len(), 1);
-            let stashed = ws.inactive_worktree_runtimes.get(&0).unwrap();
+            assert_eq!(ws.main_area.tabs.len(), 1);
+            assert_eq!(ws.main_area.panes.len(), 1);
+            assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
+            let stashed = ws.main_area.inactive_worktree_runtimes.get(&0).unwrap();
             assert_eq!(stashed.tabs.len(), 1);
             assert_eq!(stashed.panes.len(), 1);
         });
@@ -197,9 +197,9 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             ws.activate_worktree(0, window, cx);
             assert_eq!(ws.active_worktree_id, 0);
-            assert_eq!(ws.tabs.len(), 1);
-            assert_eq!(ws.panes.len(), 1);
-            let stashed = ws.inactive_worktree_runtimes.get(&1).unwrap();
+            assert_eq!(ws.main_area.tabs.len(), 1);
+            assert_eq!(ws.main_area.panes.len(), 1);
+            let stashed = ws.main_area.inactive_worktree_runtimes.get(&1).unwrap();
             // Worktree 1 carries its lazy-spawned pane now.
             assert_eq!(stashed.tabs.len(), 1);
             assert_eq!(stashed.panes.len(), 1);
@@ -326,11 +326,11 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         // Active worktree is 5 with 2 tabs → Workspace.tabs mirrors it.
         assert_eq!(ws.active_worktree_id, 5);
-        assert_eq!(ws.tabs.len(), 2);
-        assert_eq!(ws.active_tab_index, 1);
+        assert_eq!(ws.main_area.tabs.len(), 2);
+        assert_eq!(ws.main_area.active_tab_index, 1);
         // Inactive worktree 0 rebuilt into the inactive map with 1 tab.
-        assert_eq!(ws.inactive_worktree_runtimes.len(), 1);
-        let stashed = ws.inactive_worktree_runtimes.get(&0).unwrap();
+        assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
+        let stashed = ws.main_area.inactive_worktree_runtimes.get(&0).unwrap();
         assert_eq!(stashed.tabs.len(), 1);
     });
 }
@@ -408,7 +408,7 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(ws.main_area.tabs.len(), 1);
         assert_eq!(ws.worktrees.len(), 1);
         assert_eq!(ws.active_worktree_id, 0);
     });

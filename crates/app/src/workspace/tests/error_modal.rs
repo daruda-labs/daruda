@@ -12,7 +12,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AppContext as _, ClipboardItem, TestAppContext};
 
 use super::build_workspace;
-use crate::workspace::error_modal::ErrorReportModal;
+use crate::workspace::error::modal::ErrorReportModal;
 
 fn synthetic_report() -> ErrorReport {
     ErrorReport::new("PTY died")

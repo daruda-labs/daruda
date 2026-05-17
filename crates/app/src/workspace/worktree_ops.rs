@@ -13,8 +13,8 @@ use gpui::{Context, Window};
 
 use super::Workspace;
 use super::WorktreeRuntime;
-use super::layout::{PaneId, PaneLayout};
-use super::pane::{self, TabEntry};
+use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane::{self, TabEntry};
 
 /// Immutable plan produced by `CreateWorktreeModal::validate` — holds
 /// the sanitized branch, derived new-path, and repo_root so the modal
@@ -120,7 +120,7 @@ impl Workspace {
         {
             self.activate_worktree(fallback, window, cx);
         }
-        self.inactive_worktree_runtimes.remove(&id);
+        self.main_area.inactive_worktree_runtimes.remove(&id);
         // W-7 per-worktree state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
@@ -230,7 +230,7 @@ impl Workspace {
             tab_history: Vec::new(),
             focused_pane_id: pane_id,
         };
-        self.inactive_worktree_runtimes.insert(new_id, runtime);
+        self.main_area.inactive_worktree_runtimes.insert(new_id, runtime);
         self.activate_worktree(new_id, window, cx);
         // New cwd → new `~/.claude/projects/<encoded>/` to watch.
         self.refresh_jsonl_watcher(cx);
@@ -249,7 +249,7 @@ impl Workspace {
     /// crash mid-remove never collides with a fresh id.
     fn allocate_worktree_id(&self) -> daruda_store::project::WorktreeId {
         let max_list = self.worktrees.iter().map(|w| w.id).max();
-        let max_map = self.inactive_worktree_runtimes.keys().copied().max();
+        let max_map = self.main_area.inactive_worktree_runtimes.keys().copied().max();
         match (max_list, max_map) {
             (Some(a), Some(b)) => a.max(b) + 1,
             (Some(a), None) => a + 1,
@@ -295,24 +295,24 @@ impl Workspace {
         // 1. Freeze the currently active runtime into the inactive map.
         let current = self.active_worktree_id;
         let frozen = WorktreeRuntime {
-            tabs: std::mem::take(&mut self.tabs),
-            panes: std::mem::take(&mut self.panes),
-            active_tab_index: std::mem::take(&mut self.active_tab_index),
-            tab_history: std::mem::take(&mut self.tab_history),
-            focused_pane_id: std::mem::take(&mut self.focused_pane_id),
+            tabs: std::mem::take(&mut self.main_area.tabs),
+            panes: std::mem::take(&mut self.main_area.panes),
+            active_tab_index: std::mem::take(&mut self.main_area.active_tab_index),
+            tab_history: std::mem::take(&mut self.main_area.tab_history),
+            focused_pane_id: std::mem::take(&mut self.main_area.focused_pane_id),
         };
-        self.inactive_worktree_runtimes.insert(current, frozen);
+        self.main_area.inactive_worktree_runtimes.insert(current, frozen);
 
         // 2. Pull the target worktree's runtime into the live fields.
         let next = self
-            .inactive_worktree_runtimes
+            .main_area.inactive_worktree_runtimes
             .remove(&id)
             .unwrap_or_default();
-        self.tabs = next.tabs;
-        self.panes = next.panes;
-        self.active_tab_index = next.active_tab_index;
-        self.tab_history = next.tab_history;
-        self.focused_pane_id = next.focused_pane_id;
+        self.main_area.tabs = next.tabs;
+        self.main_area.panes = next.panes;
+        self.main_area.active_tab_index = next.active_tab_index;
+        self.main_area.tab_history = next.tab_history;
+        self.main_area.focused_pane_id = next.focused_pane_id;
         self.active_worktree_id = id;
         // File viewer panes travel with their worktree's tab list via
         // the `WorktreeRuntime` swap above, so each worktree retains
@@ -325,7 +325,7 @@ impl Workspace {
         //    failure the error surfaces in the status bar and the
         //    viewport stays empty — still better than a silent black
         //    pane.
-        if self.tabs.is_empty() {
+        if self.main_area.tabs.is_empty() {
             let cwd = self
                 .worktrees
                 .iter()
@@ -334,16 +334,16 @@ impl Workspace {
             match self.create_pane_with_cwd(cwd, window, cx) {
                 Ok(pane) => {
                     let pane_id = pane.id;
-                    self.panes.push(pane);
+                    self.main_area.panes.push(pane);
                     let tab_id = self.alloc_id();
-                    self.tabs.push(TabEntry {
+                    self.main_area.tabs.push(TabEntry {
                         id: tab_id,
                         layout: PaneLayout::Pane(pane_id),
                         last_focused_pane: pane_id,
                         user_label: None,
                     });
-                    self.active_tab_index = 0;
-                    self.focused_pane_id = pane_id;
+                    self.main_area.active_tab_index = 0;
+                    self.main_area.focused_pane_id = pane_id;
                     self.bump_activity(pane_id);
                 }
                 Err(e) => {
@@ -354,10 +354,10 @@ impl Workspace {
 
         // 4. Refocus the active pane and request a resize — the
         //    worktree may have been last seen at a different viewport.
-        if self.panes.iter().any(|p| p.id == self.focused_pane_id) {
-            self.focus_pane(self.focused_pane_id, window, cx);
+        if self.main_area.panes.iter().any(|p| p.id == self.main_area.focused_pane_id) {
+            self.focus_pane(self.main_area.focused_pane_id, window, cx);
         }
-        self.pending_resize = true;
+        self.main_area.pending_resize = true;
         // Any File panes that arrived in the live `panes` vec via the
         // runtime swap above may still have `Loading` content (if they
         // came in from a restored-but-never-active runtime); fire

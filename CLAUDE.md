@@ -157,17 +157,15 @@ Workspace
 
 | Hierarchy name | Code identifier | Location |
 |---|---|---|
-| `BodyLayout` | `body_layout` local var | `render/mod.rs` |
-| `MainArea` | `main_area` local var | `render/mod.rs` |
-| `LeftSidebar` | `left_dock` / `LeftDock` entity | `dock.rs`, `render/mod.rs` |
-| `RightSidebar` | `right_dock` / `RightDock` entity | `dock.rs`, `render/mod.rs` |
-| `ViewSwitcher` | `render()` in `view_tabs.rs` (both docks) | `sidebar/view_tabs.rs`, `right_panel/view_tabs.rs` |
-| `DockSwitcher` | `PanelTabStrip` | `bottom_panel/tab_strip.rs` |
-| `TerminalInputDock` | `TerminalInputPanel` | `bottom_panel/terminal_input.rs` |
-| `MacroKey` | `MacroKey` | `ui/macro_key.rs` |
-| `PaneTree` | `PaneLayout` enum | `workspace/layout.rs` |
-| `Pane` | `PaneLayout::Pane` | `workspace/layout.rs` |
-| `TerminalPane` | `PaneContent::Terminal` | `workspace/pane.rs` |
-| `FileViewPane` | `PaneContent::File` | `workspace/pane.rs` |
-| `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/pane.rs` |
-| `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer.rs` |
+| `LeftSidebar` | `left_dock` / `LeftDock` entity | `workspace/layout/mod.rs`, `render/mod.rs` |
+| `RightSidebar` | `right_dock` / `RightDock` entity | `workspace/layout/mod.rs`, `render/mod.rs` |
+| `ViewSwitcher` | `render()` in `view_tabs.rs` (both sidebars) | `left_sidebar/view_tabs.rs`, `right_sidebar/view_tabs.rs` |
+| `DockSwitcher` | `PanelTabStrip` | `main_area/bottom_dock/tab_strip.rs` |
+| `TerminalInputDock` | `TerminalInputPanel` | `main_area/bottom_dock/terminal_input.rs` |
+| `MacroKey` | `MacroKey` | `ui/macro_tile.rs` |
+| `PaneTree` | `PaneLayout` enum | `workspace/main_area/pane_tree.rs` |
+| `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
+| `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane.rs` |
+| `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane.rs` |
+| `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/main_area/pane.rs` |
+| `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |

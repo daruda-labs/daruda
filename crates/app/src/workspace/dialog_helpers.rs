@@ -35,7 +35,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::dialog::{ButtonVariant, DialogButtonProps};
 use crate::ui::{InputState, input};
 use crate::workspace::Workspace;
-use crate::workspace::error_modal::ErrorReportModal;
+use crate::workspace::error::modal::ErrorReportModal;
 
 /// Open a Dialog with one labelled `gpui_component::Input` and a
 /// Cancel / OK footer. On OK the callback receives the trimmed text

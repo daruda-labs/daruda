@@ -2,7 +2,7 @@
 //! async. Paired file with `tests/mod.rs`, which holds the
 //! `TestAppContext`-based lifecycle tests.
 
-use super::super::layout::{
+use crate::workspace::main_area::pane_tree::{
     PaneId, PaneLayout, SplitDirection, adjust_divider, cleanup_after_remove, collect_pane_rects,
     collect_pane_sizes, insert_split_at, remove_pane_from_layout,
 };
@@ -283,7 +283,7 @@ fn test_normalize_ratios_zero_sum_falls_back_to_equal() {
 // never at the umbrella project root.
 
 mod resolve_default_cwd {
-    use super::super::super::pane::{CwdCandidates, resolve_default_cwd};
+    use crate::workspace::main_area::pane::{CwdCandidates, resolve_default_cwd};
     use std::path::PathBuf;
 
     fn p(s: &str) -> PathBuf {

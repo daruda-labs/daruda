@@ -14,54 +14,27 @@
 //! tab cells and pane headers; do not rename it back to `tab_title`.
 
 mod actions;
-mod bottom_panel;
 mod claude_context;
-mod command_history_modal;
-pub(crate) mod command_palette;
+mod config_ops;
+pub(in crate::workspace) mod command;
 pub(in crate::workspace) mod dialog_helpers;
-pub(crate) mod dock;
-mod dock_ops;
-pub(in crate::workspace) mod dock_snap;
-mod error_modal;
-mod error_ops;
-mod error_toast;
-mod file_tree_context;
-mod file_viewer;
-mod jsonl_pump;
-mod layout;
-mod limits_pump;
-mod mcp_ops;
-mod mcp_pump;
-mod nav;
-mod pane;
-mod panels_ops;
+pub(in crate::workspace) mod error;
+pub(in crate::workspace) mod layout;
+mod left_sidebar;
+pub(in crate::workspace) mod main_area;
 mod path_drag;
 mod persistence;
-mod prompt_watcher;
-mod pty_pump;
 mod render;
-mod resize;
-mod right_panel;
-mod sidebar;
-mod skill_ops;
-mod skills_pump;
+mod right_sidebar;
 mod spawn_helpers;
 pub(crate) mod status_bar;
-mod tab_ops;
-mod task_edit_ops;
+pub(in crate::workspace) mod sync;
 mod toast_layer;
-mod task_ops;
-mod task_workflow_ops;
 #[cfg(test)]
 mod tests;
+mod window_close_ops;
 mod worktree_ops;
 
-mod file_content;
-mod file_tree_ops;
-mod git_status_ops;
-mod highlighter;
-mod markdown_viewer;
-mod word_diff;
 
 pub(in crate::workspace) use persistence::WorktreeRuntime;
 
@@ -69,13 +42,9 @@ use std::collections::{HashMap, HashSet};
 
 use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::system_info::redact_home;
 use daruda_terminal::TerminalConfig;
 
-use file_viewer::{FileViewMode, PaneFileContent, PaneFileView};
-use layout::{PaneId, PaneLayout, SplitDirection, insert_split_at, remove_pane_from_layout};
-use pane::{FileContent, Pane, PaneContent, PaneSpawnError, TabEntry};
+use main_area::pane_tree::{PaneLayout, SplitDirection};
 
 // ----------------------------------------------------------------
 // Actions
@@ -212,32 +181,15 @@ const TITLE_BAR_HEIGHT: f32 = crate::ui::theme::TITLE_BAR_HEIGHT;
 const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 
 pub struct Workspace {
-    tabs: Vec<TabEntry>,
-    panes: Vec<Pane>,
-    active_tab_index: usize,
-    tab_history: Vec<usize>,
-    focused_pane_id: PaneId,
+    /// TabBar + PaneTree runtime state. Holds tabs, panes, focus,
+    /// drag/context-menu overlays, and inactive worktree runtimes.
+    pub(in crate::workspace) main_area: main_area::MainAreaContext,
     next_id: u64,
     focus_handle: FocusHandle,
-    pending_resize: bool,
-    /// Monotonic counter incremented every time a pane gains focus.
-    /// Used by directional navigation (nav.rs) as the tie-breaker.
-    activity_counter: HashMap<PaneId, u64>,
-    activity_tick: u64,
-    last_viewport: Option<(f32, f32)>,
-    pub(in crate::workspace) drag_state: Option<dock_ops::DividerDrag>,
     /// Dock resize drag — active while the user is pulling on the
     /// right edge of the left dock, the left edge of the right dock,
     /// or the top edge of the bottom dock.
-    pub(in crate::workspace) dock_drag: Option<dock_ops::DockDrag>,
-    /// Active right-click context menu. `None` = menu is closed.
-    /// Rendered as an absolute overlay in `render.rs` and cleared by
-    /// backdrop click or item selection.
-    pub(in crate::workspace) context_menu: Option<dock_ops::ContextMenuAnchor>,
-    /// When `Some(id)`, the pane with that id is rendered full-size,
-    /// hiding all other panes in the split. Cleared on tab switch or
-    /// when the zoomed pane is closed.
-    pub(in crate::workspace) zoomed_pane_id: Option<PaneId>,
+    pub(in crate::workspace) dock_drag: Option<layout::ops::DockDrag>,
     /// Overlay alpha for inactive panes when split (0.0 = no dim).
     /// Tunable knob — first step toward a `Theme` struct (config Phase).
     pub(in crate::workspace) dim_alpha: f32,
@@ -255,7 +207,7 @@ pub struct Workspace {
     pub(in crate::workspace) font_family: String,
     /// Left sidebar dock (worktree list, git changes, files — the
     /// active view is picked by `left_sidebar_view`).
-    pub(in crate::workspace) left_dock: gpui::Entity<dock::Dock>,
+    pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
     pub(in crate::workspace) left_sidebar_view: daruda_store::project::LeftSidebarView,
     /// Active tab inside the right dock (Usage / Skills / Tools /
@@ -275,19 +227,12 @@ pub struct Workspace {
     /// ID of the visible worktree. Meaningful only when `worktrees`
     /// is non-empty.
     pub(in crate::workspace) active_worktree_id: daruda_store::project::WorktreeId,
-    /// Runtime tab/pane state of every **inactive** worktree. The
-    /// active worktree's runtime lives in the top-level `tabs` /
-    /// `panes` / `active_tab_index` / etc. fields; activating a
-    /// different worktree swaps those fields with the corresponding
-    /// entry in this map.
-    pub(in crate::workspace) inactive_worktree_runtimes:
-        HashMap<daruda_store::project::WorktreeId, WorktreeRuntime>,
     /// Bottom dock (terminal panel, problems, output).
-    pub(in crate::workspace) bottom_dock: gpui::Entity<dock::Dock>,
+    pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
     /// Right dock (file explorer, git changes).
-    pub(in crate::workspace) right_dock: gpui::Entity<dock::Dock>,
+    pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
     /// Command palette state (Cmd+Shift+P).
-    pub(in crate::workspace) command_palette: command_palette::CommandPaletteState,
+    pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
     /// Active project. None = empty workspace (no project root).
     pub(in crate::workspace) project: Option<daruda_store::project::Project>,
     /// Cached git status per worktree. Refreshed when the Git Changes
@@ -298,8 +243,8 @@ pub struct Workspace {
     /// Sidebar Files-view state — per-worktree lazy tree, watcher,
     /// gitignore matcher, scroll handle, keyboard cursor. Grouped
     /// into one struct so the 12 sub-fields don't clutter
-    /// `Workspace`'s top level. See [`file_tree_context::FileTreeContext`].
-    pub(in crate::workspace) file_tree: file_tree_context::FileTreeContext,
+    /// `Workspace`'s top level. See [`left_sidebar::file_tree_context::FileTreeContext`].
+    pub(in crate::workspace) file_tree: left_sidebar::file_tree_context::FileTreeContext,
     /// Per-worktree "git status currently running" guard. Watcher
     /// events can arrive faster than `git status` can complete on a
     /// large repo; this keeps at most one in-flight task per worktree.
@@ -514,7 +459,7 @@ impl Workspace {
         // Layer the project-local override (Phase 1: `[shell]` only)
         // on top of the user-global config so the workspace boots with
         // the right shell program for its project.
-        let effective = effective_config_for(project.as_ref(), config);
+        let effective = config_ops::effective_config_for(project.as_ref(), config);
         let config = &effective;
 
         // Ensure app-wide Globals exist before any constructor code
@@ -640,26 +585,15 @@ impl Workspace {
         // claude descendants of registered panes. The tracker handle
         // is shared with the Workspace (for register/unregister) and
         // the receiver feeds an event-pump task that updates the
-        // bindings map. See `workspace/pty_pump.rs`.
+        // bindings map. See `workspace/sync/pty.rs`.
         let (pty_tracker, pty_rx) = crate::hooks::pty_tracker::PtyTracker::spawn();
-        let pty_event_pump = pty_pump::spawn(pty_rx, cx);
+        let pty_event_pump = sync::pty::spawn(pty_rx, cx);
 
         let mut ws = Self {
-            tabs: Vec::new(),
-            panes: Vec::new(),
-            active_tab_index: 0,
-            tab_history: Vec::new(),
-            focused_pane_id: 0,
+            main_area: main_area::MainAreaContext::default(),
             next_id: 0,
             focus_handle,
-            pending_resize: false,
-            activity_counter: HashMap::new(),
-            activity_tick: 0,
-            last_viewport: None,
-            drag_state: None,
             dock_drag: None,
-            context_menu: None,
-            zoomed_pane_id: None,
             dim_alpha: render::DEFAULT_INACTIVE_PANE_DIM_ALPHA,
             inherit_cwd: true,
             terminal_config: {
@@ -693,15 +627,15 @@ impl Workspace {
             left_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
-                    let mut d = dock::Dock::new(dock::DockPosition::Left, ws);
+                    let mut d = layout::Dock::new(layout::DockPosition::Left, ws);
                     d.resize(config.sidebar.left_default_width);
                     d.is_open = !config.sidebar.left_collapsed_by_default;
                     // Register the three sidebar view panels in the same order
                     // as `view_tabs::entries()` so `active_panel` and the
                     // tab strip always agree on which view is shown.
-                    d.add_panel(dock::WorktreesPanel);
-                    d.add_panel(dock::GitChangesPanel);
-                    d.add_panel(dock::FilesPanel);
+                    d.add_panel(layout::WorktreesPanel);
+                    d.add_panel(layout::GitChangesPanel);
+                    d.add_panel(layout::FilesPanel);
                     d
                 })
             },
@@ -709,7 +643,7 @@ impl Workspace {
             right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             claude: claude_context::ClaudeContext {
                 usage: daruda_claude::usage::UsageState::default(),
-                usage_pricing: usage_pricing_from_config(&config.usage.pricing),
+                usage_pricing: config_ops::usage_pricing_from_config(&config.usage.pricing),
                 usage_poll: config.usage.poll.clone(),
                 plan_limits: daruda_claude::PlanLimits::default(),
                 service_status: daruda_claude::ServiceStatus::default(),
@@ -752,7 +686,7 @@ impl Workspace {
                 _jsonl_watcher_shutdown: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
-                _limits_pumps: limits_pump::spawn(cx),
+                _limits_pumps: sync::limits::spawn(cx),
             },
             // Bootstrap worktrees for this project. If git is
             // installed and the path is a repo, every linked worktree
@@ -765,19 +699,18 @@ impl Workspace {
                 .map(|p| crate::worktree::Worktree::bootstrap_from_project(&p.root))
                 .unwrap_or_default(),
             active_worktree_id: 0,
-            inactive_worktree_runtimes: HashMap::new(),
             bottom_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
-                    let mut d = dock::Dock::new(dock::DockPosition::Bottom, ws);
-                    d.add_panel(dock::MacrosPanel);
+                    let mut d = layout::Dock::new(layout::DockPosition::Bottom, ws);
+                    d.add_panel(layout::MacrosPanel);
                     d
                 })
             },
-            command_palette: command_palette::CommandPaletteState::default(),
+            command_palette: command::palette::CommandPaletteState::default(),
             project: project.clone(),
             git_status_cache: HashMap::new(),
-            file_tree: file_tree_context::FileTreeContext {
+            file_tree: left_sidebar::file_tree_context::FileTreeContext {
                 file_trees: HashMap::new(),
                 files_visible_cache: HashMap::new(),
                 file_watchers: HashMap::new(),
@@ -814,7 +747,7 @@ impl Workspace {
             git_collapsed_dirs: std::collections::HashMap::new(),
             git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
-            panels: panels_ops::load_or_seed_panels(&data_dir),
+            panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
@@ -844,8 +777,8 @@ impl Workspace {
             right_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
-                    let mut d = dock::Dock::new(dock::DockPosition::Right, ws);
-                    d.add_panel(dock::AgentChatPanel);
+                    let mut d = layout::Dock::new(layout::DockPosition::Right, ws);
+                    d.add_panel(layout::AgentChatPanel);
                     d
                 })
             },
@@ -912,7 +845,7 @@ impl Workspace {
         // Uses the App context (cx derefs to App) — global bindings,
         // last-wins, so two windows registering the same shortcut is
         // harmless.
-        panels_ops::register_macro_shortcuts(&ws.panels, cx);
+        main_area::bottom_dock::macro_ops::register_macro_shortcuts(&ws.panels, cx);
 
         // Register this Workspace in the WindowRegistry so broadcasts
         // and window-lifecycle helpers can find it without iterating
@@ -932,121 +865,6 @@ impl Workspace {
         ws
     }
 
-    /// Resolve `user` against this workspace's project-layer override
-    /// (loaded fresh from disk every call so a project-config edit is
-    /// reflected without restart) and apply the merged config.
-    ///
-    /// Test-only: production reloads go through the
-    /// `cx.observe_global::<SettingsStore>` subscription installed
-    /// in `new_with_project`. `lifecycle.rs` exercises the resolver
-    /// directly without standing up the live store.
-    #[cfg(test)]
-    pub fn reload_config(&mut self, user: &daruda_config::Config, cx: &mut Context<Self>) {
-        let effective = effective_config_for(self.project.as_ref(), user);
-        self.apply_config(&effective, cx);
-    }
-
-    /// Apply a reloaded config to all running panes. Called by the
-    /// config file watcher and the Settings window when the TOML changes.
-    ///
-    /// **UI theme:** Workspace does *not* swap the live `DarudaTheme`
-    /// here. The config watcher (`main.rs::spawn_config_watcher`) owns
-    /// that — it calls `crate::ui::theme::apply_ui_theme` once per
-    /// reload, app-wide, so a single config change repaints every
-    /// open window. Keeping the swap out of this method means
-    /// Workspace tests that build a sub-tree directly (without the
-    /// full `gpui_component::init` chain) don't accidentally trigger
-    /// a paint that reaches into uninitialised theme Globals.
-    pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
-        let colors = config.effective_colors();
-        let pal = colors.to_ansi_palette();
-
-        // Update terminal config for future panes.
-        let fg = ghostty_vt::Rgb {
-            r: colors.foreground.r,
-            g: colors.foreground.g,
-            b: colors.foreground.b,
-        };
-        let bg = ghostty_vt::Rgb {
-            r: colors.background.r,
-            g: colors.background.g,
-            b: colors.background.b,
-        };
-        self.terminal_config.default_fg = fg;
-        self.terminal_config.default_bg = bg;
-        self.terminal_config.palette = Some(pal);
-        self.terminal_config.font_size = config.font.size;
-        self.terminal_config.vertical_spacing = config.font.vertical_spacing;
-        self.terminal_config.horizontal_spacing = config.font.horizontal_spacing;
-        self.terminal_config.clamp_font_settings();
-        self.terminal_config.max_scrollback = config.scrollback.max_rows;
-        self.terminal_config.background_alpha = config.window.opacity;
-        self.terminal_config.osc1337_max_bytes = config.clipboard.streaming_max_bytes;
-        self.font_family = config.font.family.clone();
-        self.close_pane_on_exit = config.shell.close_pane_on_exit;
-        self.shell_program = config.shell.program.clone();
-        self.syntax_theme = config.file_viewer.syntax_theme.clone();
-        self.file_viewer_preview_tab = config.file_viewer.preview_tab;
-        self.notifications = config.notifications.clone();
-        self.clipboard = config.clipboard.clone();
-        self.claude.usage_pricing = usage_pricing_from_config(&config.usage.pricing);
-        self.claude.usage_poll = config.usage.poll.clone();
-
-        // Patch all existing pane views: font + colors + opacity.
-        // Non-terminal panes (future content kinds) skip — they don't
-        // host a TerminalView and can subscribe to the same config
-        // signal independently when added.
-        let font = daruda_terminal::terminal_font_with_family(&self.font_family);
-        for pane in &self.panes {
-            let Some(view) = pane.terminal_view() else {
-                continue;
-            };
-            view.update(cx, |view, _cx| {
-                view.set_font(font.clone());
-                view.apply_font_settings(
-                    config.font.size,
-                    config.font.vertical_spacing,
-                    config.font.horizontal_spacing,
-                );
-                view.apply_colors(fg, bg, &pal);
-                view.set_background_alpha(config.window.opacity);
-            });
-        }
-        // Trigger #7 — sidebar config affecting filter state changed.
-        let mut filter_changed = false;
-        if self.file_tree.files_show_hidden != config.sidebar.files_show_hidden {
-            self.file_tree.files_show_hidden = config.sidebar.files_show_hidden;
-            filter_changed = true;
-        }
-        if self.file_tree.files_use_gitignore != config.sidebar.files_use_gitignore {
-            self.file_tree.files_use_gitignore = config.sidebar.files_use_gitignore;
-            filter_changed = true;
-        }
-        if self.file_tree.files_icon_color_mode != config.sidebar.file_icon_color_mode {
-            self.file_tree.files_icon_color_mode = config.sidebar.file_icon_color_mode.clone();
-            cx.notify();
-        }
-        if self.panels_grid_columns != config.panels.grid_columns {
-            self.panels_grid_columns = config.panels.grid_columns;
-            cx.notify();
-        }
-        if filter_changed {
-            let ids: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
-            for id in ids {
-                self.invalidate_visible_files_cache(id);
-            }
-        }
-        // Picks up `claude_status.enable` flips: re-evaluate whether
-        // the JSONL fallback should be running. `refresh` is a no-op
-        // when nothing actually changed.
-        let new_enabled = config.claude_status.enable;
-        if new_enabled != self.claude.claude_status_enabled {
-            self.claude.claude_status_enabled = new_enabled;
-            self.refresh_jsonl_watcher(cx);
-        }
-        cx.notify();
-    }
-
     /// Notify that workspace state has changed and should be persisted.
     ///
     /// Always deferred: `save_state` reads all three dock entities, and this
@@ -1062,761 +880,10 @@ impl Workspace {
         });
     }
 
-    /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
-    /// `main.rs` from the global `hooks::watcher`.
-    pub fn apply_claude_status_event(
-        &mut self,
-        event: crate::hooks::watcher::StatusEvent,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::hooks::watcher::StatusEvent;
-        match event {
-            StatusEvent::Changed(path) => match daruda_claude::hooks::status_file::read(&path) {
-                Ok(Some(file)) => {
-                    // R-15: register session for any Running task at
-                    // the matching cwd, then map terminal hook events
-                    // (Stop / SessionEnd) into the task's lifecycle.
-                    self.apply_task_session_changed(&file.cwd, &file.session_id, cx);
-                    // P2-C: PostToolUseFailure escalation. The
-                    // counter routes through `bump_tool_use_failure`
-                    // which converts to `Error` once the threshold
-                    // is hit. Other "Failure"-style events would
-                    // land here too if Claude grows new ones.
-                    if file.last_event == "PostToolUseFailure" {
-                        self.bump_tool_use_failure(&file.session_id, cx);
-                    }
-                    // R-22: TodoWrite tool calls land here as a normal
-                    // PostToolUse. The status writer records the
-                    // tool_input on every PostToolUse, so we can
-                    // reach the `todos` array without a separate
-                    // hook subscription. Filter by tool_name +
-                    // event name so other PostToolUse payloads
-                    // (Bash output, Read responses) don't waste a
-                    // serde walk.
-                    if file.last_event == "PostToolUse"
-                        && file.tool_name.as_deref() == Some("TodoWrite")
-                        && let Some(input) = file.tool_input.as_ref()
-                    {
-                        self.apply_todo_write(&file.session_id, input, cx);
-                    }
-                    if let Some(reason) = Self::classify_hook_end_reason(&file.last_event) {
-                        // Terminal event → task transitions out of
-                        // Running, so the failure counter is no
-                        // longer meaningful for this session.
-                        self.claude.tool_use_failure_counts.remove(&file.session_id);
-                        self.apply_task_session_ended(&file.session_id, reason, cx);
-                    }
-                    if self.claude.claude_status.update(file) {
-                        cx.notify();
-                    }
-                }
-                Ok(None) => {
-                    // Mid-write or malformed; skip silently — the
-                    // next event will overwrite.
-                }
-                Err(e) => {
-                    let report = ErrorReport::new("Claude status file read failed")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(&path))
-                        .dedup("claude.status.read")
-                        .build();
-                    self.report_error(report, cx);
-                }
-            },
-            StatusEvent::Removed { session_id, .. } => {
-                // R-15: file removal = "session is gone, no end_reason
-                // available". Treat it as a soft Done (Other).
-                self.claude.tool_use_failure_counts.remove(&session_id);
-                self.apply_task_session_ended(
-                    &session_id,
-                    daruda_store::tasks::SessionEndReason::Other,
-                    cx,
-                );
-                if self.claude.claude_status.remove(&session_id).is_some() {
-                    cx.notify();
-                }
-            }
-        }
-    }
-
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id
-    }
-
-    // Open the Create Skill modal. `prefill_scope` lets the caller
-    // preselect Project / Personal (e.g. from the section header
-    // rather than the global header button); `None` falls back to
-    // the active worktree's scope.
-
-    // ---- Focused-pane file-viewer accessors ----
-    //
-    // Each open file lives in its own `Pane` carrying
-    // `PaneContent::File(FileContent)`; "the file viewer" — for
-    // action handlers, key contexts, sidebar highlighting — is
-    // whichever file pane currently has focus.
-
-    pub(in crate::workspace) fn focused_file_view(&self) -> Option<&PaneFileView> {
-        let id = self.focused_pane_id;
-        self.panes
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| p.file_view())
-    }
-
-    /// Focused pane's TerminalView, when the focused pane is a
-    /// terminal (not a file viewer). Used by command-history picker
-    /// and other actions that target the currently-active terminal.
-    pub(in crate::workspace) fn focused_terminal_view(
-        &self,
-    ) -> Option<&gpui::Entity<daruda_terminal::view::TerminalView>> {
-        let id = self.focused_pane_id;
-        self.panes
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| p.terminal_view())
-    }
-
-    pub(in crate::workspace) fn focused_file_view_mut(&mut self) -> Option<&mut PaneFileView> {
-        let id = self.focused_pane_id;
-        self.panes
-            .iter_mut()
-            .find(|p| p.id == id)
-            .and_then(|p| p.file_view_mut())
-    }
-
-    pub(in crate::workspace) fn focused_file_content(&self) -> Option<&FileContent> {
-        let id = self.focused_pane_id;
-        self.panes
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| p.file_content())
-    }
-
-    pub(in crate::workspace) fn focused_file_content_mut(&mut self) -> Option<&mut FileContent> {
-        let id = self.focused_pane_id;
-        self.panes
-            .iter_mut()
-            .find(|p| p.id == id)
-            .and_then(|p| p.file_content_mut())
-    }
-
-    /// Find any single-pane tab whose pane holds a file viewer,
-    /// regardless of which file it shows. Returns `(tab_index, pane_id)`
-    /// when found. Used by `open_pane_file_view` in preview-tab mode to
-    /// locate the tab whose content will be replaced in place.
-    pub(in crate::workspace) fn find_any_file_tab(&self) -> Option<(usize, PaneId)> {
-        for (i, tab) in self.tabs.iter().enumerate() {
-            if let PaneLayout::Pane(pane_id) = tab.layout
-                && self
-                    .panes
-                    .iter()
-                    .any(|p| p.id == pane_id && p.file_view().is_some())
-            {
-                return Some((i, pane_id));
-            }
-        }
-        None
-    }
-
-    /// Find an existing single-pane tab whose pane shows the given
-    /// file (worktree + path + staged). Returns `(tab_index, pane_id)`
-    /// when found. Used by `open_file_in_new_tab` to dedupe — clicking
-    /// the same file twice in the sidebar activates the existing tab
-    /// instead of opening another viewer.
-    pub(in crate::workspace) fn find_existing_file_tab(
-        &self,
-        worktree_id: daruda_store::project::WorktreeId,
-        path: &std::path::Path,
-        staged: bool,
-    ) -> Option<(usize, PaneId)> {
-        for (i, tab) in self.tabs.iter().enumerate() {
-            if let PaneLayout::Pane(pane_id) = tab.layout
-                && let Some(pane) = self.panes.iter().find(|p| p.id == pane_id)
-                && let Some(fv) = pane.file_view()
-                && fv.worktree_id == worktree_id
-                && fv.path == path
-                && fv.staged == staged
-            {
-                return Some((i, pane_id));
-            }
-        }
-        None
-    }
-
-    // ---- Tab management ----
-
-    /// Construct a file-viewer `Pane` (no tab side-effects). Allocates
-    /// the pane id, creates a per-pane `InputState` for the find panel
-    /// (and its subscription), and seeds `PaneFileView` with `Loading`
-    /// so the viewer shows immediately while content loads in the
-    /// background. Caller is responsible for adding the pane + tab and
-    /// kicking off `load_pane_file_content`.
-    #[allow(clippy::too_many_arguments)]
-    fn create_file_pane(
-        &mut self,
-        worktree_id: daruda_store::project::WorktreeId,
-        path: std::path::PathBuf,
-        staged: bool,
-        file_status: Option<char>,
-        view_mode: FileViewMode,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Pane {
-        let pane_id = self.alloc_id();
-
-        let cached_title = path
-            .file_name()
-            .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| gpui::SharedString::from("(file)"));
-
-        let search_input = cx.new(|cx_state| {
-            crate::ui::InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::FILE_VIEWER_SEARCH_PLACEHOLDER)
-        });
-        // The subscription is owned by `FileContent` and dropped with
-        // the pane. Capture `pane_id` so the closure can locate the
-        // right pane (the focused pane may have changed by the time
-        // an event fires). Escape is wired separately by the
-        // file-viewer panel's own key handler — the `InputEvent` enum
-        // doesn't expose it, so the close-on-esc flow lives outside
-        // this subscription.
-        let search_subscription = cx.subscribe_in(
-            &search_input,
-            window,
-            move |this, inp, ev: &crate::ui::InputEvent, _window, cx| match ev {
-                crate::ui::InputEvent::Change => {
-                    let query = inp.read(cx).value().to_string();
-                    if let Some(pane) = this.panes.iter_mut().find(|p| p.id == pane_id)
-                        && let Some(fv) = pane.file_view_mut()
-                    {
-                        fv.search_update_query(&query);
-                    }
-                    this.scroll_file_viewer_to_focused_match();
-                    cx.notify();
-                }
-                crate::ui::InputEvent::PressEnter { .. } => {
-                    if let Some(pane) = this.panes.iter_mut().find(|p| p.id == pane_id)
-                        && let Some(fv) = pane.file_view_mut()
-                    {
-                        fv.search_next_match();
-                    }
-                    this.scroll_file_viewer_to_focused_match();
-                    cx.notify();
-                }
-                _ => {}
-            },
-        );
-
-        let focus_handle = cx.focus_handle();
-        Pane {
-            id: pane_id,
-            content: PaneContent::File(FileContent {
-                view: PaneFileView {
-                    worktree_id,
-                    path,
-                    staged,
-                    file_status,
-                    content: PaneFileContent::Loading,
-                    view_mode,
-                    hide_unchanged: false,
-                    char_selection: None,
-                    char_anchor: None,
-                    is_drag_selecting: false,
-                    search: None,
-                },
-                scroll_handle: gpui::ScrollHandle::new(),
-                search_input,
-                focus_handle,
-                _search_subscription: search_subscription,
-                cached_title,
-            }),
-        }
-    }
-
-    /// Surface a pane-spawn failure on both the pinned status bar
-    /// (`last_error`, persists until the next op clears it) and the
-    /// transient toast queue (auto-dismisses, with copy / details
-    /// affordances). Pane spawn is core enough to warrant both surfaces:
-    /// the pin gives the user time to read at their own pace, the toast
-    /// gives them the Copy / Details path. Kept in one place so both
-    /// `add_tab` and `split_focused_pane` report failures with the same
-    /// wording.
-    pub(in crate::workspace) fn report_pane_error(
-        &mut self,
-        context: &str,
-        err: PaneSpawnError,
-        cx: &mut Context<Self>,
-    ) {
-        let msg = format!("{context} failed — {err}");
-        self.last_error = Some(msg.clone().into());
-        let report = ErrorReport::new(format!("Pane spawn failed: {context}"))
-            .severity(ErrorSeverity::Error)
-            .from_error(&err)
-            .at(file!(), line!())
-            .with_context("context", context)
-            .dedup("pane.spawn")
-            .build();
-        self.report_error(report, cx);
-    }
-
-    // ---- Split management ----
-
-    fn split_focused_pane(
-        &mut self,
-        direction: SplitDirection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let new_pane = match self.create_pane(window, cx) {
-            Ok(p) => p,
-            Err(e) => {
-                self.report_pane_error("split", e, cx);
-                return;
-            }
-        };
-        let new_pane_id = new_pane.id;
-        self.panes.push(new_pane);
-
-        let focused = self.focused_pane_id;
-        for tab in &mut self.tabs {
-            if insert_split_at(&mut tab.layout, focused, direction, new_pane_id) {
-                tab.last_focused_pane = new_pane_id;
-                break;
-            }
-        }
-
-        self.focused_pane_id = new_pane_id;
-        self.focus_pane(new_pane_id, window, cx);
-        self.resize_all_tabs(window, cx);
-        cx.notify();
-    }
-
-    pub(super) fn close_pane_by_id(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Locate which tab owns this pane.
-        let Some(tab_index) = self
-            .tabs
-            .iter()
-            .position(|t| t.layout.pane_ids().contains(&pane_id))
-        else {
-            return;
-        };
-        let leaf_count = self.tabs[tab_index].layout.leaf_count();
-        if leaf_count <= 1 {
-            self.close_tab_at(tab_index, window, cx);
-            return;
-        }
-
-        let next_focus = self.tabs[tab_index]
-            .layout
-            .prev_pane(pane_id)
-            .unwrap_or_else(|| self.tabs[tab_index].layout.first_leaf());
-
-        if self.zoomed_pane_id == Some(pane_id) {
-            self.zoomed_pane_id = None;
-        }
-        remove_pane_from_layout(&mut self.tabs[tab_index].layout, pane_id);
-        self.claude.pty_tracker.unregister(pane_id);
-        self.panes.retain(|p| p.id != pane_id);
-        self.activity_counter.remove(&pane_id);
-
-        if tab_index == self.active_tab_index {
-            self.focused_pane_id = next_focus;
-            self.bump_activity(next_focus);
-            self.focus_pane(next_focus, window, cx);
-        }
-        self.tabs[tab_index].last_focused_pane = next_focus;
-        self.resize_all_tabs(window, cx);
-        cx.notify();
-    }
-
-    fn close_focused_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.request_close_pane(self.focused_pane_id, window, cx);
-    }
-
-    /// Register the platform `on_window_should_close` callback that
-    /// holds the window open while the R-25 batch prompt runs. The
-    /// `window_close_in_flight` flag guards against the callback
-    /// firing again while the prompt is on screen (otherwise the user
-    /// would get a second prompt stacked on top).
-    fn install_window_close_hook(
-        weak: gpui::WeakEntity<Workspace>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let weak_for_hook = weak.clone();
-        window.on_window_should_close(cx, move |window, app| {
-            let Some(ws) = weak_for_hook.upgrade() else {
-                return true;
-            };
-            let dirty = ws.read(app).collect_dirty_pane_descriptors(app);
-            if dirty.is_empty() {
-                return true;
-            }
-            if ws.read(app).window_close_in_flight {
-                return false;
-            }
-            ws.update(app, |this, _| {
-                this.window_close_in_flight = true;
-            });
-
-            let detail = dirty
-                .iter()
-                .map(|(_, t, draft)| {
-                    if *draft {
-                        format!("• {} (new task)", t)
-                    } else {
-                        format!("• {}", t)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let receiver = window.prompt(
-                gpui::PromptLevel::Warning,
-                crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
-                Some(&detail),
-                &[
-                    crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                    crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                    crate::surface::strings::TASK_EDIT_CANCEL,
-                ],
-                app,
-            );
-
-            let weak_inner = weak_for_hook.clone();
-            window
-                .spawn(app, async move |cx| {
-                    let answer = receiver.await.unwrap_or(2);
-                    let _ = weak_inner.update_in(cx, |this, window, cx| {
-                        this.window_close_in_flight = false;
-                        match answer {
-                            0 => {
-                                this.commit_dirty_panes_with_failure_toast(&dirty, cx);
-                                window.remove_window();
-                            }
-                            1 => window.remove_window(),
-                            _ => {} // Cancel — leave the window open
-                        }
-                    });
-                })
-                .detach();
-
-            false
-        });
-    }
-
-    /// Walk every entry in `dirty` and call `commit_task_edit_pane`.
-    /// Surfaces a single dedup'd warning toast naming the panes whose
-    /// commit returned `None` (invalid branch / disk write failure),
-    /// so the "Save all" code paths can't silently swallow a partial
-    /// failure across N dirty panes. The closing logic remains
-    /// unchanged — failed panes drop their unsaved edits when the
-    /// tab closes, which matches the user's explicit "Save all"
-    /// intent even when one pane has an invalid branch (M-2 review).
-    fn commit_dirty_panes_with_failure_toast(
-        &mut self,
-        dirty: &[(PaneId, gpui::SharedString, bool)],
-        cx: &mut Context<Self>,
-    ) {
-        let mut failed: Vec<gpui::SharedString> = Vec::new();
-        for (pane_id, title, _is_draft) in dirty {
-            if self.commit_task_edit_pane(*pane_id, cx).is_none() {
-                failed.push(title.clone());
-            }
-        }
-        if failed.is_empty() {
-            return;
-        }
-        let listing = failed
-            .iter()
-            .map(|t| t.as_ref())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let report = ErrorReport::new(crate::surface::strings::TASK_BATCH_SAVE_FAILED_TITLE)
-            .severity(ErrorSeverity::Warning)
-            .message(format!(
-                "{} pane(s) had invalid input and were not saved: {}",
-                failed.len(),
-                listing,
-            ))
-            .at(file!(), line!())
-            .dedup("tasks.batch_save")
-            .build();
-        self.report_error(report, cx);
-    }
-
-    /// Snapshot of every dirty TaskEdit pane in this workspace. Used
-    /// by the window-close batch prompt (R-25) to summarise pending
-    /// edits in a single modal. Returns `(pane_id, title, is_draft)`
-    /// triples; the draft flag drives the "(new task)" suffix in the
-    /// summary list.
-    fn collect_dirty_pane_descriptors(
-        &self,
-        cx: &gpui::App,
-    ) -> Vec<(PaneId, gpui::SharedString, bool)> {
-        self.panes
-            .iter()
-            .filter_map(|p| {
-                if !p.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &p.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((p.id, p.title(), is_draft))
-            })
-            .collect()
-    }
-
-    /// Batch close prompt covering every tab in `indices`. Walks each
-    /// tab's panes for `is_dirty` and presents one summary modal.
-    /// Used by the bulk close menu items ("Close Other Tabs" /
-    /// "Close Tabs to the Right") so the user gets one chance to bail
-    /// even when ten tabs are about to disappear. `indices` must be
-    /// in descending order — `close_tab_at` shifts every higher index
-    /// down by one and the call site has to walk the list in reverse
-    /// to keep its references valid.
-    pub(in crate::workspace) fn request_close_tabs_bulk(
-        &mut self,
-        indices: Vec<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let dirty: Vec<(PaneId, gpui::SharedString, bool)> = indices
-            .iter()
-            .filter_map(|&i| self.tabs.get(i))
-            .flat_map(|tab| tab.layout.pane_ids().into_iter())
-            .filter_map(|id| {
-                let pane = self.panes.iter().find(|p| p.id == id)?;
-                if !pane.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &pane.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((id, pane.title(), is_draft))
-            })
-            .collect();
-
-        if dirty.is_empty() {
-            for i in &indices {
-                self.close_tab_at(*i, window, cx);
-            }
-            return;
-        }
-
-        let detail = dirty
-            .iter()
-            .map(|(_, t, draft)| {
-                if *draft {
-                    format!("• {} (new task)", t)
-                } else {
-                    format!("• {}", t)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let receiver = window.prompt(
-            gpui::PromptLevel::Warning,
-            crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
-            Some(&detail),
-            &[
-                crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                crate::surface::strings::TASK_EDIT_CANCEL,
-            ],
-            cx,
-        );
-
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(answer) = receiver.await else {
-                return;
-            };
-            let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 => {
-                    this.commit_dirty_panes_with_failure_toast(&dirty, cx);
-                    for i in &indices {
-                        this.close_tab_at(*i, window, cx);
-                    }
-                }
-                1 => {
-                    for i in &indices {
-                        this.close_tab_at(*i, window, cx);
-                    }
-                }
-                _ => {} // Cancel
-            });
-        })
-        .detach();
-    }
-
-    /// Batch close prompt for a whole tab. Walks every dirty pane in
-    /// `index` and presents a single 3-button prompt — Save all /
-    /// Discard all / Cancel — so the user gets one chance to bail
-    /// before the whole layout disappears. Use anywhere a user-driven
-    /// tab close lands (tab-bar `×`, `Close Tab` menu / palette).
-    pub(in crate::workspace) fn request_close_tab(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(tab) = self.tabs.get(index) else {
-            return;
-        };
-
-        let dirty: Vec<(PaneId, gpui::SharedString, bool)> = tab
-            .layout
-            .pane_ids()
-            .iter()
-            .filter_map(|&id| {
-                let pane = self.panes.iter().find(|p| p.id == id)?;
-                if !pane.is_dirty(cx) {
-                    return None;
-                }
-                let is_draft = matches!(
-                    &pane.content,
-                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
-                );
-                Some((id, pane.title(), is_draft))
-            })
-            .collect();
-
-        if dirty.is_empty() {
-            self.close_tab_at(index, window, cx);
-            return;
-        }
-
-        let detail = dirty
-            .iter()
-            .map(|(_, t, draft)| {
-                if *draft {
-                    format!("• {} (new task)", t)
-                } else {
-                    format!("• {}", t)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let receiver = window.prompt(
-            gpui::PromptLevel::Warning,
-            crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
-            Some(&detail),
-            &[
-                crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                crate::surface::strings::TASK_EDIT_CANCEL,
-            ],
-            cx,
-        );
-
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(answer) = receiver.await else {
-                return;
-            };
-            let _ = this.update_in(cx, |this, window, cx| match answer {
-                0 => {
-                    // Save-all: commit every dirty pane in place (no
-                    // close), then drop the tab. Panes whose form is
-                    // invalid don't block the rest, but their titles
-                    // surface in a single dedup'd warning toast so
-                    // the user knows which edits were dropped — see
-                    // `commit_dirty_panes_with_failure_toast` for the
-                    // shared collect-and-report pipeline.
-                    this.commit_dirty_panes_with_failure_toast(&dirty, cx);
-                    this.close_tab_at(index, window, cx);
-                }
-                1 => this.close_tab_at(index, window, cx),
-                _ => {} // Cancel
-            });
-        })
-        .detach();
-    }
-
-    /// Public close entry point that walks pane content through the
-    /// R-25 dirty-prompt before delegating to `close_pane_by_id`. Use
-    /// this anywhere a user-driven close action lands (Cmd+W, the
-    /// pane-header `×`, the context-menu "Close Pane"). The
-    /// unconditional `close_pane_by_id` is reserved for paths that
-    /// already cleared the dirty state (the prompt's own Discard
-    /// branch, the shell-exited auto-close path, layout serializers).
-    pub(in crate::workspace) fn request_close_pane(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pane) = self.panes.iter().find(|p| p.id == pane_id) else {
-            return;
-        };
-
-        if !pane.is_dirty(cx) {
-            self.close_pane_by_id(pane_id, window, cx);
-            return;
-        }
-
-        let is_draft = matches!(
-            &pane.content,
-            PaneContent::TaskEditPane(te) if te.task_id.is_none()
-        );
-        let title = pane.title();
-        let can_save = pane.can_save(cx);
-
-        let heading: String = if is_draft {
-            crate::surface::strings::TASK_EDIT_DISCARD_DRAFT_PROMPT.to_string()
-        } else {
-            format!(
-                "{}{}{}",
-                crate::surface::strings::TASK_EDIT_SAVE_PROMPT_PREFIX,
-                title,
-                crate::surface::strings::TASK_EDIT_SAVE_PROMPT_SUFFIX,
-            )
-        };
-
-        // Button order is fixed across draft and saved-task variants:
-        // index 0 = Save / Save Draft, 1 = Discard, 2 = Cancel.
-        let save_label = if is_draft {
-            crate::surface::strings::TASK_EDIT_SAVE_DRAFT
-        } else {
-            crate::surface::strings::TASK_EDIT_SAVE
-        };
-        let buttons = [
-            save_label,
-            crate::surface::strings::TASK_EDIT_DISCARD,
-            crate::surface::strings::TASK_EDIT_CANCEL,
-        ];
-
-        let receiver = window.prompt(gpui::PromptLevel::Warning, &heading, None, &buttons, cx);
-
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(answer) = receiver.await else {
-                return;
-            };
-            let _ = this.update_in(cx, |this, window, cx| match answer {
-                // can_save=false means the form is invalid (empty title
-                // or bad branch). Leaving the pane open is safer than
-                // silently discarding work — the user can fix it and
-                // try again.
-                0 if can_save => this.save_task_edit_pane(pane_id, false, window, cx),
-                0 => {}
-                1 => this.close_pane_by_id(pane_id, window, cx),
-                _ => {} // Cancel
-            });
-        })
-        .detach();
     }
 
     pub(in crate::workspace) fn set_sidebar_view(
@@ -1849,70 +916,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn set_usage_window(
-        &mut self,
-        value: daruda_store::project::UsageWindow,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.claude.usage_window == value {
-            return;
-        }
-        self.claude.usage_window = value;
-        // Sync the dropdown so any caller (a future keyboard
-        // shortcut, an action handler, the SelectEvent loop, or a
-        // test) sees a consistent UI. `set_selected_value` emits no
-        // `Confirm` event, so this never re-enters `set_usage_window`
-        // and can't loop.
-        let slug = gpui::SharedString::from(value.slug());
-        self.claude.usage_select.update(cx, |s, cx_inner| {
-            s.set_selected_value(&slug, window, cx_inner)
-        });
-        self.mark_dirty_and_save(cx);
-        cx.notify();
-    }
-
-    /// Replace the cached plan-rate snapshot. Called by
-    /// `limits_pump` after a successful `/api/oauth/usage` fetch.
-    ///
-    /// Skips `cx.notify()` when only `fetched_at` moved — every
-    /// fetch updates that timestamp, but the renderer never reads
-    /// it, so a notify on each tick would force a repaint per poll
-    /// (12/hour on default cadence) for no visible change. The
-    /// first fetch from `Default::default()` always notifies (both
-    /// windows transition None → Some).
-    pub(in crate::workspace) fn set_plan_limits(
-        &mut self,
-        limits: daruda_claude::PlanLimits,
-        cx: &mut Context<Self>,
-    ) {
-        let visible_changed = self.claude.plan_limits.five_hour != limits.five_hour
-            || self.claude.plan_limits.seven_day != limits.seven_day;
-        self.claude.plan_limits = limits;
-        if visible_changed {
-            cx.notify();
-        }
-    }
-
-    /// Replace the cached service-status snapshot. Called by
-    /// `limits_pump` after a successful `status.claude.com` fetch.
-    ///
-    /// Same dedup as `set_plan_limits` — only `indicator` /
-    /// `description` drive the visible pill; `fetched_at` is
-    /// invisible so a tick-only change skips notify.
-    pub(in crate::workspace) fn set_service_status(
-        &mut self,
-        status: daruda_claude::ServiceStatus,
-        cx: &mut Context<Self>,
-    ) {
-        let visible_changed = self.claude.service_status.indicator != status.indicator
-            || self.claude.service_status.description != status.description;
-        self.claude.service_status = status;
-        if visible_changed {
-            cx.notify();
-        }
-    }
-
     /// Execute the currently focused palette action and close.
     pub(super) fn execute_palette_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let action_id = self.command_palette.focused_action_id();
@@ -1925,27 +928,27 @@ impl Workspace {
                 "new_task" => self.on_new_task(&NewTask, window, cx),
                 "edit_task" => self.on_edit_task(&EditTask, window, cx),
                 "start_task" => self.open_task_picker_modal(
-                    crate::workspace::right_panel::task_picker_modal::TaskPickAction::Start,
+                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Start,
                     window,
                     cx,
                 ),
                 "cancel_task" => self.open_task_picker_modal(
-                    crate::workspace::right_panel::task_picker_modal::TaskPickAction::Cancel,
+                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Cancel,
                     window,
                     cx,
                 ),
                 "reopen_task" => self.open_task_picker_modal(
-                    crate::workspace::right_panel::task_picker_modal::TaskPickAction::Reopen,
+                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Reopen,
                     window,
                     cx,
                 ),
                 "retry_task" => self.open_task_picker_modal(
-                    crate::workspace::right_panel::task_picker_modal::TaskPickAction::Retry,
+                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Retry,
                     window,
                     cx,
                 ),
                 "delete_task" => self.open_task_picker_modal(
-                    crate::workspace::right_panel::task_picker_modal::TaskPickAction::Delete,
+                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Delete,
                     window,
                     cx,
                 ),
@@ -2031,33 +1034,3 @@ impl Workspace {
     }
 }
 
-/// Layer the project-local override (loaded from
-/// `<config_dir>/daruda/projects/<repo>-<hash>/config.toml`) on top of
-/// the user-global config and return the resolved [`daruda_config::Config`].
-/// Phase 1 only honours `[shell]`; absent project files / parse
-/// errors fall back to the user layer unchanged.
-fn effective_config_for(
-    project: Option<&daruda_store::project::Project>,
-    user: &daruda_config::Config,
-) -> daruda_config::Config {
-    let project_cfg = project
-        .map(|p| daruda_config::ProjectConfig::load_for(&p.root))
-        .unwrap_or_default();
-    user.clone().resolve(&project_cfg)
-}
-
-/// Translate `[usage.pricing]` (TOML-facing) into the data-layer
-/// [`daruda_claude::usage::UsagePricing`] consumed by
-/// `SessionUsage::estimated_cost`. Lives in `app/` because neither
-/// `daruda_config` nor `daruda_claude` depends on the other and we
-/// keep them as leaf crates.
-fn usage_pricing_from_config(
-    p: &daruda_config::PricingConfig,
-) -> daruda_claude::usage::UsagePricing {
-    daruda_claude::usage::UsagePricing {
-        input_per_mtok: p.input_per_mtok,
-        output_per_mtok: p.output_per_mtok,
-        cache_read_per_mtok: p.cache_read_per_mtok,
-        cache_write_per_mtok: p.cache_write_per_mtok,
-    }
-}

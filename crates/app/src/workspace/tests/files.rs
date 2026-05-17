@@ -129,7 +129,7 @@ async fn clicking_file_opens_file_viewer_in_raw_mode(cx: &mut TestAppContext) {
         assert!(!fv.staged, "Files view always uses staged=false");
         assert!(matches!(
             fv.view_mode,
-            crate::workspace::file_viewer::FileViewMode::Raw
+            crate::workspace::main_area::file_view_pane::FileViewMode::Raw
         ));
     });
 }
@@ -188,7 +188,7 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
         assert_eq!(fv.worktree_id, id);
         assert!(matches!(
             fv.view_mode,
-            crate::workspace::file_viewer::FileViewMode::Raw
+            crate::workspace::main_area::file_view_pane::FileViewMode::Raw
         ));
     });
 }
@@ -203,7 +203,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
-    let initial_tab_count = ws.read_with(cx, |ws, _| ws.tabs.len());
+    let initial_tab_count = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -211,7 +211,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
         });
     })
     .unwrap();
-    let after_first = ws.read_with(cx, |ws, _| ws.tabs.len());
+    let after_first = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
     assert_eq!(
         after_first,
         initial_tab_count + 1,
@@ -225,7 +225,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
         });
     })
     .unwrap();
-    let after_second = ws.read_with(cx, |ws, _| ws.tabs.len());
+    let after_second = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
     assert_eq!(
         after_second, after_first,
         "re-clicking the same file does not open a second tab"
