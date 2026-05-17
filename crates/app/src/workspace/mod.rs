@@ -256,7 +256,7 @@ pub struct Workspace {
     /// active view is picked by `left_sidebar_view`).
     pub(in crate::workspace) left_dock: gpui::Entity<dock::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
-    pub(in crate::workspace) left_left_sidebar_view: daruda_store::project::LeftSidebarView,
+    pub(in crate::workspace) left_sidebar_view: daruda_store::project::LeftSidebarView,
     /// Active tab inside the right dock (Usage / Skills / Tools /
     /// Tasks). Persisted via ProjectState.
     pub(in crate::workspace) right_sidebar_view: daruda_store::project::RightSidebarView,
