@@ -67,7 +67,7 @@ impl RenderOnce for ErrorToastOverlay {
         let workspace = self.workspace;
         // Float the toast stack above the status bar without taking
         // part in the Workspace root's flex column. Using `absolute()`
-        // here is what keeps the workspace content (`middle_row`)
+        // here is what keeps the workspace content (`body_layout`)
         // from getting squeezed every time a toast appears.
         let mut stack = div()
             .absolute()

@@ -1,50 +1,53 @@
-//! Tab strip rendered in the right dock's header slot.
+//! ViewSwitcher for the right sidebar (RightSidebar).
 //!
 //! Four tabs (Usage / Skills / Tools / Tasks) map to
-//! `daruda_store::project::RightPanelView`. Clicking a tab dispatches
-//! `set_right_panel_view` on `Workspace` via the snapshot's `workspace`
+//! `daruda_store::project::RightSidebarView`. Clicking a tab dispatches
+//! `set_right_sidebar_view` on `Workspace` via the snapshot's `workspace`
 //! weak-entity handle. Mirrors `workspace/sidebar/view_tabs.rs`.
 
-use daruda_store::project::RightPanelView;
+use daruda_store::project::RightSidebarView;
 use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
 
 use crate::surface::strings;
 use crate::ui::{tab, tab_bar};
 
 use super::super::dock::Dock;
-use super::super::dock_snap::RightDockSnap;
+use super::super::dock_snap::RightSidebarSnapshot;
 
 /// All view entries shown in the strip, in visible order.
-fn entries() -> [(RightPanelView, &'static str); 4] {
+fn entries() -> [(RightSidebarView, &'static str); 4] {
     [
-        (RightPanelView::Usage, strings::RIGHT_PANEL_TAB_USAGE),
-        (RightPanelView::Skills, strings::RIGHT_PANEL_TAB_SKILLS),
-        (RightPanelView::Tools, strings::RIGHT_PANEL_TAB_TOOLS),
-        (RightPanelView::Tasks, strings::RIGHT_PANEL_TAB_TASKS),
+        (RightSidebarView::Usage, strings::RIGHT_PANEL_TAB_USAGE),
+        (RightSidebarView::Skills, strings::RIGHT_PANEL_TAB_SKILLS),
+        (RightSidebarView::Tools, strings::RIGHT_PANEL_TAB_TOOLS),
+        (RightSidebarView::Tasks, strings::RIGHT_PANEL_TAB_TASKS),
     ]
 }
 
-/// Map a tab strip index back to its `RightPanelView`. Falls back to
+/// Map a tab strip index back to its `RightSidebarView`. Falls back to
 /// the first entry on out-of-bounds — `TabBar::on_click` only emits
 /// indices within the children we passed, so this is a defensive
 /// ceiling.
-fn view_by_index(ix: usize) -> RightPanelView {
+fn view_by_index(ix: usize) -> RightSidebarView {
     entries()
         .get(ix)
         .map(|(v, _)| *v)
-        .unwrap_or(RightPanelView::Usage)
+        .unwrap_or(RightSidebarView::Usage)
 }
 
-/// Render the right-panel tab strip.
-pub(in crate::workspace) fn render(snap: &RightDockSnap, _cx: &mut Context<Dock>) -> AnyElement {
+/// Render the ViewSwitcher tab strip for the right sidebar.
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    _cx: &mut Context<Dock>,
+) -> AnyElement {
     let all = entries();
     let active_ix = all
         .iter()
-        .position(|(v, _)| *v == snap.right_panel_view)
+        .position(|(v, _)| *v == snap.right_sidebar_view)
         .unwrap_or(0);
     let workspace = snap.workspace.clone();
 
-    tab_bar("right-dock-tabs")
+    tab_bar("right-sidebar-view-switcher")
         .w_full()
         .gap(px(0.))
         .selected_index(active_ix)
@@ -52,7 +55,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnap, _cx: &mut Context<Dock>
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.set_right_panel_view(view, cx));
+                ws.update(cx, |ws, cx| ws.set_right_sidebar_view(view, cx));
             }
         })
         .into_any_element()

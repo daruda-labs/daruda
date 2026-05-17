@@ -129,7 +129,7 @@ async fn clicking_file_opens_file_viewer_in_raw_mode(cx: &mut TestAppContext) {
         assert!(!fv.staged, "Files view always uses staged=false");
         assert!(matches!(
             fv.view_mode,
-            crate::workspace::pane_file_view::FileViewMode::Raw
+            crate::workspace::file_viewer::FileViewMode::Raw
         ));
     });
 }
@@ -188,7 +188,7 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
         assert_eq!(fv.worktree_id, id);
         assert!(matches!(
             fv.view_mode,
-            crate::workspace::pane_file_view::FileViewMode::Raw
+            crate::workspace::file_viewer::FileViewMode::Raw
         ));
     });
 }

@@ -4,12 +4,12 @@
 //! `MdBlock`s using `pulldown-cmark`. Code blocks are syntax-highlighted
 //! in-place using the existing `highlighter` infrastructure.
 //!
-//! The rendering of these blocks lives in `render_file_viewer.rs`.
+//! The rendering of these blocks lives in `file_viewer/render/markdown.rs`.
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use super::file_viewer::{VisualRow, VisualRowKind};
 use super::highlighter::highlight_raw_rows;
-use super::pane_file_view::{VisualRow, VisualRowKind};
 
 // ----------------------------------------------------------------
 // Inline IR

@@ -1,5 +1,5 @@
 //! Tools tab body — renders the project + personal MCP server scopes
-//! pulled from `RightDockSnap::mcp` (a snapshot of `Workspace::mcp`).
+//! pulled from `RightSidebarSnapshot::mcp` (a snapshot of `Workspace::mcp`).
 //!
 //! Layout:
 //! ```text
@@ -25,10 +25,13 @@ use crate::surface::strings;
 use crate::ui::Divider;
 use crate::workspace::Workspace;
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::RightDockSnap;
+use crate::workspace::dock_snap::RightSidebarSnapshot;
 
 /// Render the Tools tab body.
-pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let mcp = &snap.mcp;
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();

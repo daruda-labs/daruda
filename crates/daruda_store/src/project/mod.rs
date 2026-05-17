@@ -10,7 +10,7 @@ pub mod worktree;
 mod tests;
 
 pub use worktree::{
-    RightPanelView, SerializedWorktree, SidebarView, UsageWindow, WorktreeId, WorktreeKind,
+    LeftSidebarView, RightSidebarView, SerializedWorktree, UsageWindow, WorktreeId, WorktreeKind,
     WorktreeStatus,
 };
 
@@ -62,13 +62,13 @@ pub struct ProjectState {
 
     /// Which sidebar view (Worktrees / Git / Files) was last shown.
     #[serde(default)]
-    pub active_sidebar_view: SidebarView,
+    pub active_sidebar_view: LeftSidebarView,
 
     /// Which right-panel tab (Usage / Skills / Tools / Tasks) was last
     /// shown. Backwards compatible — older state files without the
-    /// field decode as `RightPanelView::default()` (= Usage).
+    /// field decode as `RightSidebarView::default()` (= Usage).
     #[serde(default)]
-    pub active_right_panel_view: RightPanelView,
+    pub active_right_panel_view: RightSidebarView,
 
     /// Time window applied to the Usage tab. `#[serde(default)]`
     /// makes pre-filter state files load as `UsageWindow::default()`

@@ -14,7 +14,7 @@
 //! tab cells and pane headers; do not rename it back to `tab_title`.
 
 mod actions;
-mod bottom;
+mod bottom_panel;
 mod claude_context;
 mod command_history_modal;
 pub(crate) mod command_palette;
@@ -26,6 +26,7 @@ mod error_modal;
 mod error_ops;
 mod error_toast;
 mod file_tree_context;
+mod file_viewer;
 mod jsonl_pump;
 mod layout;
 mod limits_pump;
@@ -39,7 +40,6 @@ mod persistence;
 mod prompt_watcher;
 mod pty_pump;
 mod render;
-mod render_file_viewer;
 mod resize;
 mod right_panel;
 mod sidebar;
@@ -60,7 +60,6 @@ mod file_tree_ops;
 mod git_status_ops;
 mod highlighter;
 mod markdown_viewer;
-mod pane_file_view;
 mod word_diff;
 
 pub(in crate::workspace) use persistence::WorktreeRuntime;
@@ -73,9 +72,9 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_terminal::TerminalConfig;
 
+use file_viewer::{FileViewMode, PaneFileContent, PaneFileView};
 use layout::{PaneId, PaneLayout, SplitDirection, insert_split_at, remove_pane_from_layout};
-use pane::{FileContent, Pane, PaneContent, PaneSpawnError, Tab};
-use pane_file_view::{FileViewMode, PaneFileContent, PaneFileView};
+use pane::{FileContent, Pane, PaneContent, PaneSpawnError, TabEntry};
 
 // ----------------------------------------------------------------
 // Actions
@@ -212,7 +211,7 @@ const TITLE_BAR_HEIGHT: f32 = crate::ui::theme::TITLE_BAR_HEIGHT;
 const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 
 pub struct Workspace {
-    tabs: Vec<Tab>,
+    tabs: Vec<TabEntry>,
     panes: Vec<Pane>,
     active_tab_index: usize,
     tab_history: Vec<usize>,
@@ -254,13 +253,13 @@ pub struct Workspace {
     /// TerminalView so user-specified fonts take effect.
     pub(in crate::workspace) font_family: String,
     /// Left sidebar dock (worktree list, git changes, files — the
-    /// active view is picked by `sidebar_view`).
+    /// active view is picked by `left_sidebar_view`).
     pub(in crate::workspace) left_dock: gpui::Entity<dock::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
-    pub(in crate::workspace) sidebar_view: daruda_store::project::SidebarView,
+    pub(in crate::workspace) left_left_sidebar_view: daruda_store::project::LeftSidebarView,
     /// Active tab inside the right dock (Usage / Skills / Tools /
     /// Tasks). Persisted via ProjectState.
-    pub(in crate::workspace) right_panel_view: daruda_store::project::RightPanelView,
+    pub(in crate::workspace) right_sidebar_view: daruda_store::project::RightSidebarView,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
     /// associated background tasks. Grouped into one struct so the
@@ -454,17 +453,17 @@ pub struct Workspace {
     _terminal_input_subscription: gpui::Subscription,
     /// When true, the bottom dock shows the built-in "Input" panel
     /// instead of the active macro tab.
-    pub(in crate::workspace) bottom_input_active: bool,
+    pub(in crate::workspace) terminal_input_visible: bool,
     /// Search query input rendered atop the right-bar Skills tab.
     /// Cleared on `Esc`; substring-filters Project / Personal / Plugin
     /// scopes simultaneously. The renderer reads the current text via
-    /// `RightDockSnap::skill_search_query` (captured per frame) so the
+    /// `RightSidebarSnapshot::skill_search_query` (captured per frame) so the
     /// panel render closure never re-enters the workspace.
     pub(in crate::workspace) skill_search_input: gpui::Entity<crate::ui::InputState>,
     /// Search query input rendered atop the right-bar Tasks tab. Same
     /// pattern as `skill_search_input` — substring-filters task rows
     /// over `title / prompt / notes / branch_name`. The renderer reads
-    /// the current text via `RightDockSnap::task_search_query`
+    /// the current text via `RightSidebarSnapshot::task_search_query`
     /// (captured per frame).
     pub(in crate::workspace) task_search_input: gpui::Entity<crate::ui::InputState>,
     /// Plugin ids (`<plugin>@<marketplace>`) whose accordion section
@@ -711,8 +710,8 @@ impl Workspace {
                     d
                 })
             },
-            sidebar_view: daruda_store::project::SidebarView::default(),
-            right_panel_view: daruda_store::project::RightPanelView::default(),
+            left_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+            right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             claude: claude_context::ClaudeContext {
                 usage: daruda_claude::usage::UsageState::default(),
                 usage_pricing: usage_pricing_from_config(&config.usage.pricing),
@@ -837,7 +836,7 @@ impl Workspace {
             window_close_in_flight: false,
             terminal_input,
             _terminal_input_subscription: terminal_input_sub,
-            bottom_input_active: false,
+            terminal_input_visible: false,
             skill_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
                     .placeholder(crate::surface::strings::SKILLS_SEARCH_PLACEHOLDER)
@@ -1217,7 +1216,7 @@ impl Workspace {
     /// locate the tab whose content will be replaced in place.
     pub(in crate::workspace) fn find_any_file_tab(&self) -> Option<(usize, PaneId)> {
         for (i, tab) in self.tabs.iter().enumerate() {
-            if let PaneLayout::Leaf(pane_id) = tab.layout
+            if let PaneLayout::Pane(pane_id) = tab.layout
                 && self
                     .panes
                     .iter()
@@ -1241,7 +1240,7 @@ impl Workspace {
         staged: bool,
     ) -> Option<(usize, PaneId)> {
         for (i, tab) in self.tabs.iter().enumerate() {
-            if let PaneLayout::Leaf(pane_id) = tab.layout
+            if let PaneLayout::Pane(pane_id) = tab.layout
                 && let Some(pane) = self.panes.iter().find(|p| p.id == pane_id)
                 && let Some(fv) = pane.file_view()
                 && fv.worktree_id == worktree_id
@@ -1578,7 +1577,7 @@ impl Workspace {
                 }
                 let is_draft = matches!(
                     &p.content,
-                    PaneContent::TaskEdit(te) if te.task_id.is_none()
+                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
                 Some((p.id, p.title(), is_draft))
             })
@@ -1610,7 +1609,7 @@ impl Workspace {
                 }
                 let is_draft = matches!(
                     &pane.content,
-                    PaneContent::TaskEdit(te) if te.task_id.is_none()
+                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
                 Some((id, pane.title(), is_draft))
             })
@@ -1695,7 +1694,7 @@ impl Workspace {
                 }
                 let is_draft = matches!(
                     &pane.content,
-                    PaneContent::TaskEdit(te) if te.task_id.is_none()
+                    PaneContent::TaskEditPane(te) if te.task_id.is_none()
                 );
                 Some((id, pane.title(), is_draft))
             })
@@ -1777,7 +1776,7 @@ impl Workspace {
 
         let is_draft = matches!(
             &pane.content,
-            PaneContent::TaskEdit(te) if te.task_id.is_none()
+            PaneContent::TaskEditPane(te) if te.task_id.is_none()
         );
         let title = pane.title();
         let can_save = pane.can_save(cx);
@@ -1828,30 +1827,30 @@ impl Workspace {
 
     pub(in crate::workspace) fn set_sidebar_view(
         &mut self,
-        view: daruda_store::project::SidebarView,
+        view: daruda_store::project::LeftSidebarView,
         cx: &mut Context<Self>,
     ) {
-        if self.sidebar_view == view {
+        if self.left_sidebar_view == view {
             return;
         }
-        self.sidebar_view = view;
+        self.left_sidebar_view = view;
         self.mark_dirty_and_save(cx);
-        if view == daruda_store::project::SidebarView::GitChanges {
+        if view == daruda_store::project::LeftSidebarView::GitChanges {
             let id = self.active_worktree_id;
             self.refresh_git_status(id, cx);
         }
         cx.notify();
     }
 
-    pub(in crate::workspace) fn set_right_panel_view(
+    pub(in crate::workspace) fn set_right_sidebar_view(
         &mut self,
-        view: daruda_store::project::RightPanelView,
+        view: daruda_store::project::RightSidebarView,
         cx: &mut Context<Self>,
     ) {
-        if self.right_panel_view == view {
+        if self.right_sidebar_view == view {
             return;
         }
-        self.right_panel_view = view;
+        self.right_sidebar_view = view;
         self.mark_dirty_and_save(cx);
         cx.notify();
     }

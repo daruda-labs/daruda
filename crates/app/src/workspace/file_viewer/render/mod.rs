@@ -31,7 +31,7 @@ use self::scrollbar::file_viewer_scrollbar;
 use self::search_panel::render_search_panel;
 use self::toolbar::render_file_viewer_toolbar;
 use crate::workspace::Workspace;
-use crate::workspace::pane_file_view::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::file_viewer::{FileViewMode, PaneFileContent, PaneFileView};
 
 /// Top-level entry: toolbar (top) + scrollable body (middle) + hint bar (bottom).
 /// Uses absolute positioning so the body receives a definite, bounded height from

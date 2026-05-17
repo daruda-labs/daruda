@@ -19,7 +19,7 @@ use crate::path_ext::PathExt;
 
 use super::Workspace;
 use super::layout::{self, PaneLayout, SplitDirection};
-use super::pane::{self, PaneSpawnError, Tab};
+use super::pane::{self, PaneSpawnError, TabEntry};
 
 /// Frozen runtime state of a non-active worktree. `activate_worktree`
 /// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
@@ -27,7 +27,7 @@ use super::pane::{self, PaneSpawnError, Tab};
 /// assignment pair per direction, rather than a tangle of field moves.
 #[derive(Default)]
 pub(in crate::workspace) struct WorktreeRuntime {
-    pub tabs: Vec<pane::Tab>,
+    pub tabs: Vec<pane::TabEntry>,
     pub panes: Vec<pane::Pane>,
     pub active_tab_index: usize,
     /// Tab navigation history (most-recent-last). Not serialized —
@@ -75,8 +75,8 @@ impl Workspace {
             root: project.root.clone(),
             worktrees,
             active_worktree_id: self.active_worktree_id,
-            active_sidebar_view: self.sidebar_view,
-            active_right_panel_view: self.right_panel_view,
+            active_sidebar_view: self.left_sidebar_view,
+            active_right_sidebar_view: self.right_sidebar_view,
             active_usage_window: self.claude.usage_window,
             // Top-level `tabs` stays empty from W-2 onward — the data
             // now lives on the active worktree. `skip_serializing_if`
@@ -178,8 +178,8 @@ impl Workspace {
                 d.size = left_size;
             }
         });
-        self.sidebar_view = state.active_sidebar_view;
-        self.right_panel_view = state.active_right_panel_view;
+        self.left_sidebar_view = state.active_sidebar_view;
+        self.right_sidebar_view = state.active_right_sidebar_view;
         self.claude.usage_window = state.active_usage_window;
         // Resync the dropdown so its visible selection matches the
         // restored state (the entity was constructed with the
@@ -289,7 +289,7 @@ impl Workspace {
 
             let panes_start = self.panes.len();
             let mut id_map: HashMap<u64, layout::PaneId> = HashMap::new();
-            let mut tabs: Vec<Tab> = Vec::new();
+            let mut tabs: Vec<TabEntry> = Vec::new();
             let mut failed = false;
 
             for stab in &swt.tabs {
@@ -307,7 +307,7 @@ impl Workspace {
                             .copied()
                             .unwrap_or_else(|| layout.first_leaf());
                         let tab_id = self.alloc_id();
-                        tabs.push(Tab {
+                        tabs.push(TabEntry {
                             id: tab_id,
                             layout,
                             last_focused_pane: last_focus,
@@ -383,7 +383,7 @@ impl Workspace {
         // Auto-refresh git status when restoring with the Git Changes sidebar
         // active — the cache is always empty on startup so the sidebar would
         // show the placeholder until the user clicked Refresh manually.
-        if self.sidebar_view == daruda_store::project::SidebarView::GitChanges {
+        if self.left_sidebar_view == daruda_store::project::LeftSidebarView::GitChanges {
             let id = self.active_worktree_id;
             self.refresh_git_status(id, cx);
         }
@@ -437,7 +437,7 @@ impl Workspace {
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
                 self.panes.push(pane);
-                Ok(PaneLayout::Leaf(new_id))
+                Ok(PaneLayout::Pane(new_id))
             }
             daruda_store::project::SerializedLayout::Split {
                 direction,
@@ -467,7 +467,7 @@ impl Workspace {
                     )?;
                     let id = pane.id;
                     self.panes.push(pane);
-                    return Ok(PaneLayout::Leaf(id));
+                    return Ok(PaneLayout::Pane(id));
                 }
                 if n == 1 {
                     // Invariant: n == 1, rebuilt has exactly one element.
@@ -506,9 +506,9 @@ pub(in crate::workspace) fn normalize_ratios(ratios: &[f32], expected_len: usize
 /// Kept as a free function so the conversion lives next to the only
 /// site that needs it (serialization round-trips).
 fn serialize_view_mode(
-    mode: super::pane_file_view::FileViewMode,
+    mode: super::file_viewer::FileViewMode,
 ) -> daruda_store::project::SerializedFileViewMode {
-    use super::pane_file_view::FileViewMode;
+    use super::file_viewer::FileViewMode;
     match mode {
         FileViewMode::Raw => daruda_store::project::SerializedFileViewMode::Raw,
         FileViewMode::Preview => daruda_store::project::SerializedFileViewMode::Preview,
@@ -519,8 +519,8 @@ fn serialize_view_mode(
 /// Inverse of [`serialize_view_mode`].
 pub(in crate::workspace) fn deserialize_view_mode(
     mode: daruda_store::project::SerializedFileViewMode,
-) -> super::pane_file_view::FileViewMode {
-    use super::pane_file_view::FileViewMode;
+) -> super::file_viewer::FileViewMode {
+    use super::file_viewer::FileViewMode;
     match mode {
         daruda_store::project::SerializedFileViewMode::Raw => FileViewMode::Raw,
         daruda_store::project::SerializedFileViewMode::Preview => FileViewMode::Preview,
@@ -588,7 +588,7 @@ fn serialize_layout(
     panes: &[pane::Pane],
 ) -> daruda_store::project::SerializedLayout {
     match layout {
-        layout::PaneLayout::Leaf(id) => {
+        layout::PaneLayout::Pane(id) => {
             let pane = panes.iter().find(|p| p.id == *id);
             // File panes serialize their viewer state; Terminal panes
             // serialize their cwd. The two are mutually exclusive —

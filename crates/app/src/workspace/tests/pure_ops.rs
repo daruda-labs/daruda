@@ -12,7 +12,7 @@ fn split(dir: SplitDirection, children: Vec<PaneLayout>) -> PaneLayout {
 }
 
 fn leaf(id: PaneId) -> PaneLayout {
-    PaneLayout::Leaf(id)
+    PaneLayout::Pane(id)
 }
 
 // ---- PaneLayout unit tests ----
@@ -115,7 +115,7 @@ fn test_insert_split_opposite_direction_creates_nested() {
 fn test_remove_pane_collapses_split() {
     let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
     assert!(remove_pane_from_layout(&mut layout, 1));
-    assert!(matches!(layout, PaneLayout::Leaf(2)));
+    assert!(matches!(layout, PaneLayout::Pane(2)));
 }
 
 #[test]
@@ -148,9 +148,9 @@ fn test_cleanup_flattens_same_direction_nested() {
     cleanup_after_remove(&mut layout);
     if let PaneLayout::Split { children, .. } = &layout {
         assert_eq!(children.len(), 3);
-        assert!(matches!(children[0], PaneLayout::Leaf(1)));
-        assert!(matches!(children[1], PaneLayout::Leaf(2)));
-        assert!(matches!(children[2], PaneLayout::Leaf(3)));
+        assert!(matches!(children[0], PaneLayout::Pane(1)));
+        assert!(matches!(children[1], PaneLayout::Pane(2)));
+        assert!(matches!(children[2], PaneLayout::Pane(3)));
     } else {
         panic!("expected Split");
     }

@@ -28,7 +28,7 @@ use crate::ui::dialog::ButtonVariant;
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::BottomDockSnap;
+use crate::workspace::dock_snap::BottomDockSnapshot;
 
 /// Row-preset table: dock height → number of macro-tile rows visible.
 /// Order matters: `nearest_row_preset` walks midpoints between adjacent
@@ -44,7 +44,7 @@ const ROW_PRESETS: [(u8, f32); 3] = [
 /// the dropdown to mark the active entry with a check glyph; also
 /// consumed by `terminal_input` to swap between the vertical chrome
 /// (2/3 rows) and the inline single-row layout (1 row).
-pub(in crate::workspace::bottom) fn nearest_row_preset(size: f32) -> u8 {
+pub(in crate::workspace::bottom_panel) fn nearest_row_preset(size: f32) -> u8 {
     let mid_12 = (ROW_PRESETS[0].1 + ROW_PRESETS[1].1) / 2.0;
     let mid_23 = (ROW_PRESETS[1].1 + ROW_PRESETS[2].1) / 2.0;
     if size <= mid_12 {
@@ -94,14 +94,17 @@ impl Render for DraggedPanelTabGhost {
 /// Render the bottom dock tab strip. Index 0 is always the built-in
 /// Input tab; macro tabs follow in `tab_summaries` order. The `+`
 /// chip lives in the TabBar's right-edge `suffix` slot.
-pub(in crate::workspace) fn render(snap: &BottomDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &BottomDockSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let active_id = snap.active_tab_id.clone();
-    let bottom_input_active = snap.bottom_input_active;
+    let terminal_input_visible = snap.terminal_input_visible;
     let tabs_sorted = snap.tab_summaries.clone();
     let workspace = snap.workspace.clone();
     let terminal_input = snap.terminal_input.clone();
 
-    let active_ix = if bottom_input_active {
+    let active_ix = if terminal_input_visible {
         0
     } else {
         active_id
@@ -154,7 +157,7 @@ pub(in crate::workspace) fn render(snap: &BottomDockSnap, cx: &mut Context<Dock>
                 .gap(px(theme::PANEL_BODY_GAP))
                 .px(px(theme::SIDEBAR_VIEW_TAB_PAD_X))
                 .child(add_tab_button(snap, cx))
-                .when(!bottom_input_active, |el| {
+                .when(!terminal_input_visible, |el| {
                     el.child(row_preset_button(snap, cx))
                 }),
         )
@@ -170,7 +173,7 @@ fn builtin_input_tab() -> Tab {
 /// Row-preset chip rendered next to `[+]` in the TabBar suffix. Shows
 /// the nearest preset to the current dock height (e.g. `2`) and opens
 /// a context menu listing the three presets when clicked.
-fn row_preset_button(snap: &BottomDockSnap, cx: &mut Context<Dock>) -> impl IntoElement {
+fn row_preset_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
     let current_preset = nearest_row_preset(snap.bottom_dock_size);
     let workspace = snap.workspace.clone();
     let label = SharedString::from(current_preset.to_string());
@@ -239,7 +242,7 @@ fn row_preset_item(
 /// Uses the same chip chrome as `row_preset_button` so the two
 /// adjacent buttons read as discrete actions rather than a single
 /// glyph sequence.
-fn add_tab_button(snap: &BottomDockSnap, cx: &mut Context<Dock>) -> impl IntoElement {
+fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     crate::ui::button_chip("panel-tab-add", "+").on_click(cx.listener(
         move |_dock, _: &ClickEvent, window, cx| {

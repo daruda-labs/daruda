@@ -14,7 +14,7 @@ use daruda_claude::SessionStatus;
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use crate::surface::strings as surface_strings;
-use crate::ui::{IndicatorSize, StatusIndicator};
+use crate::ui::{AgentStatusBadge, IndicatorSize};
 
 /// Fixed-width cell that holds the leading Claude-status indicator.
 /// Empty (just the spacer width) when no Claude session is associated
@@ -29,7 +29,7 @@ pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -
         .justify_center();
     match state {
         Some(s) => cell
-            .child(StatusIndicator::for_status(s, IndicatorSize::Leading, cx))
+            .child(AgentStatusBadge::for_status(s, IndicatorSize::Leading, cx))
             .into_any_element(),
         None => cell.into_any_element(),
     }
@@ -87,7 +87,7 @@ pub(super) fn claude_badges_row(
                         format!("{prefix}{}", surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS)
                     };
                     let mut indicator =
-                        StatusIndicator::for_status(*state, IndicatorSize::Badge, cx);
+                        AgentStatusBadge::for_status(*state, IndicatorSize::Badge, cx);
                     if is_active {
                         indicator = indicator.active();
                     }

@@ -14,7 +14,7 @@ use gpui::{Context, Window};
 use super::Workspace;
 use super::WorktreeRuntime;
 use super::layout::{PaneId, PaneLayout};
-use super::pane::{self, Tab};
+use super::pane::{self, TabEntry};
 
 /// Immutable plan produced by `CreateWorktreeModal::validate` — holds
 /// the sanitized branch, derived new-path, and repo_root so the modal
@@ -197,9 +197,9 @@ impl Workspace {
             .map_err(|e| e.to_string())?;
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
-        let tab = pane::Tab {
+        let tab = pane::TabEntry {
             id: tab_id,
-            layout: PaneLayout::Leaf(pane_id),
+            layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         };
@@ -336,9 +336,9 @@ impl Workspace {
                     let pane_id = pane.id;
                     self.panes.push(pane);
                     let tab_id = self.alloc_id();
-                    self.tabs.push(Tab {
+                    self.tabs.push(TabEntry {
                         id: tab_id,
-                        layout: PaneLayout::Leaf(pane_id),
+                        layout: PaneLayout::Pane(pane_id),
                         last_focused_pane: pane_id,
                         user_label: None,
                     });

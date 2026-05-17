@@ -31,7 +31,7 @@
 //!
 //! ## Design notes
 //! - **No icon slot.** zed's `Chip` carries an optional `IconName`;
-//!   daruda uses `ui::status_indicator` next to a `Badge` instead.
+//!   daruda uses `ui::agent_status_badge` next to a `Badge` instead.
 //! - **No interactivity.** No `on_click`, no tooltip — `Badge` is
 //!   pure data display. Wrap in a clickable parent if needed.
 //! - **`truncate` is opt-in.** Default behaviour lets the badge size

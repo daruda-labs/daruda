@@ -129,7 +129,7 @@ mod tests {
         PaneLayout::new_split(dir, children)
     }
     fn leaf(id: PaneId) -> PaneLayout {
-        PaneLayout::Leaf(id)
+        PaneLayout::Pane(id)
     }
 
     fn rects_of(layout: &PaneLayout) -> Vec<PaneRect> {

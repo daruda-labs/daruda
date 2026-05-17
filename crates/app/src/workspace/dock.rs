@@ -11,7 +11,7 @@ use gpui::{IntoElement, Render, WeakEntity, div, prelude::*, px};
 use crate::surface::strings;
 
 use super::Workspace;
-use super::dock_snap::DockSnap;
+use super::dock_snap::DockSnapshot;
 
 /// Where a dock sits relative to the center panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,20 +125,20 @@ pub(super) struct Dock {
     /// Registered panels. Heterogeneous via `PanelHandle` — adding a new
     /// panel type requires no enum change, only `add_panel(MyPanel)`.
     pub panels: Vec<Box<dyn PanelHandle>>,
-    /// Index into `panels`. Tab-based docks (left = sidebar_view,
-    /// right = right_panel_view) drive selection from `Workspace`
+    /// Index into `panels`. Tab-based docks (left = left_sidebar_view,
+    /// right = right_sidebar_view) drive selection from `Workspace`
     /// state instead, so this index is currently exercised by the
     /// panel-registration tests only.
     #[allow(dead_code)]
     pub active_panel: usize,
     /// Back-reference to the owning `Workspace`. Read by `Workspace::render`
-    /// when staging each `DockSnap` so event handlers in sidebar and bottom
+    /// when staging each `DockSnapshot` so event handlers in sidebar and bottom
     /// renderers can route calls back to `Workspace` without going through
     /// `cx.entity()` (which would give `Entity<Dock>` in that context).
     pub(in crate::workspace) workspace: WeakEntity<Workspace>,
     /// Staged snapshot written by `Workspace::render` before GPUI
     /// descends into this dock's element tree.
-    pub(in crate::workspace) snap: DockSnap,
+    pub(in crate::workspace) snap: DockSnapshot,
 }
 
 impl Dock {
@@ -169,7 +169,7 @@ impl Dock {
             panels: Vec::new(),
             active_panel: 0,
             workspace,
-            snap: DockSnap::None,
+            snap: DockSnapshot::None,
         }
     }
 
@@ -217,32 +217,32 @@ impl Render for Dock {
         let dock_bg = t.dock_bg;
 
         let (header_el, content_el) = match &self.snap {
-            DockSnap::Left(snap) => {
+            DockSnapshot::Left(snap) => {
                 let header = super::sidebar::view_tabs::render(snap, cx);
-                let content: gpui::AnyElement = match snap.sidebar_view {
-                    daruda_store::project::SidebarView::Worktrees => {
+                let content: gpui::AnyElement = match snap.left_sidebar_view {
+                    daruda_store::project::LeftSidebarView::Worktrees => {
                         super::sidebar::worktrees::render(snap, cx)
                     }
-                    daruda_store::project::SidebarView::GitChanges => {
+                    daruda_store::project::LeftSidebarView::GitChanges => {
                         super::sidebar::git_changes::render(snap, cx)
                     }
-                    daruda_store::project::SidebarView::Files => {
+                    daruda_store::project::LeftSidebarView::Files => {
                         super::sidebar::files::render(snap, cx)
                     }
                 };
                 (header, content)
             }
-            DockSnap::Bottom(snap) => {
-                let header = super::bottom::tab_strip::render(snap, cx);
-                let body = super::bottom::render_body(snap, cx);
+            DockSnapshot::Bottom(snap) => {
+                let header = super::bottom_panel::tab_strip::render(snap, cx);
+                let body = super::bottom_panel::render_body(snap, cx);
                 (header, body)
             }
-            DockSnap::Right(snap) => {
+            DockSnapshot::Right(snap) => {
                 let header = super::right_panel::view_tabs::render(snap, cx);
                 let content = super::right_panel::render(snap, cx);
                 (header, content)
             }
-            DockSnap::None => {
+            DockSnapshot::None => {
                 return div().into_any_element();
             }
         };

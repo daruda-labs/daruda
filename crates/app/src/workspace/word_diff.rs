@@ -16,7 +16,7 @@
 
 use similar::{ChangeTag, TextDiff};
 
-use super::pane_file_view::{DiffHunk, DiffLine, WordChange};
+use super::file_viewer::{DiffHunk, DiffLine, WordChange};
 
 /// Maximum line byte length for which word diff is computed. Lines longer than
 /// this are left without intra-line highlights (performance guard).
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_marks_adjacent_pair() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         let diff = "@@ -1,2 +1,2 @@\n-foo_old\n+foo_new\n";
         let mut hunks = parse_diff_hunks(diff);
         apply_word_diff(&mut hunks);
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_skips_non_adjacent() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         // Context line between Removed and Added — no pairing.
         let diff = "@@ -1,3 +1,3 @@\n-foo\n ctx\n+bar\n";
         let mut hunks = parse_diff_hunks(diff);
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_pairs_multi_line_block_correctly() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         // 2 removed + 2 added: removed[0]↔added[0], removed[1]↔added[1].
         // The old 1:1 scan would pair removed[1]↔added[0] (wrong).
         let diff =
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_skips_unequal_block() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         // 2 removed + 1 added — N≠M, no word diff on either side.
         let diff = "@@ -1,2 +1,1 @@\n-foo\n-bar\n+baz\n";
         let mut hunks = parse_diff_hunks(diff);
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn apply_word_diff_skips_long_lines() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         let long = "x".repeat(WORD_DIFF_LINE_LIMIT + 1);
         let diff = format!("@@ -1,2 +1,2 @@\n-{long}\n+{long}z\n");
         let mut hunks = parse_diff_hunks(&diff);

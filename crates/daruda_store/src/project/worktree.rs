@@ -18,7 +18,7 @@ pub type WorktreeId = u64;
 /// restores the user's last-used view on restart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SidebarView {
+pub enum LeftSidebarView {
     #[default]
     Worktrees,
     GitChanges,
@@ -29,7 +29,7 @@ pub enum SidebarView {
 /// app restores the user's last-used right-panel tab on restart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RightPanelView {
+pub enum RightSidebarView {
     #[default]
     Usage,
     Skills,

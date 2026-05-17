@@ -15,14 +15,14 @@ use crate::ui::ContextMenuItem;
 use crate::ui::dialog::ButtonVariant;
 use crate::workspace::Workspace;
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::BottomDockSnap;
+use crate::workspace::dock_snap::BottomDockSnapshot;
 
 /// Render one button widget. Returned element is sized for `flex_wrap`
 /// — text mode is auto-width, icon mode is fixed-square.
 pub(in crate::workspace) fn render(
     tab_id: TabId,
     btn: &ButtonWidget,
-    snap: &BottomDockSnap,
+    snap: &BottomDockSnapshot,
     cx: &mut gpui::Context<Dock>,
 ) -> impl IntoElement {
     let widget_id = btn.id.clone();
@@ -62,7 +62,7 @@ pub(in crate::workspace) fn render(
         })
     };
 
-    let mut button = crate::ui::MacroTile::new(element_id, btn.label.clone())
+    let mut button = crate::ui::MacroKey::new(element_id, btn.label.clone())
         .on_click(on_click)
         .on_right_click(on_right_click)
         .tooltip(crate::ui::tooltip::text(build_tooltip(btn)));

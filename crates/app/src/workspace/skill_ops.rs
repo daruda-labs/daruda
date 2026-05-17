@@ -161,7 +161,7 @@ impl Workspace {
             path,
             false,
             None,
-            crate::workspace::pane_file_view::FileViewMode::Raw,
+            crate::workspace::file_viewer::FileViewMode::Raw,
             window,
             cx,
         );

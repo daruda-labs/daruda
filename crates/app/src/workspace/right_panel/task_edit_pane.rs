@@ -1,6 +1,6 @@
 //! Renderer for the TaskEdit pane content variant (R-19c).
 //!
-//! Builds the form body for `PaneContent::TaskEdit`: title input,
+//! Builds the form body for `PaneContent::TaskEditPane`: title input,
 //! branch input (with auto-derive + git ref validation), markdown
 //! prompt editor, subtask placeholder, notes editor, auto-execute
 //! checkbox, and the trailing [Discard] / [Save Draft] / [Start]

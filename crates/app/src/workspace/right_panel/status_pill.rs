@@ -25,7 +25,7 @@ use daruda_store::tasks::{Task, TaskState};
 use gpui::{Hsla, IntoElement, SharedString, Styled as _, px};
 
 use super::super::Workspace;
-use super::super::dock_snap::RightDockSnap;
+use super::super::dock_snap::RightSidebarSnapshot;
 use crate::surface::strings;
 use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 
@@ -41,7 +41,7 @@ use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 /// explicitly are the corner radius and a state-tinted background.
 pub(in crate::workspace) fn status_pill(
     task: &Task,
-    snap: &RightDockSnap,
+    snap: &RightSidebarSnapshot,
     state_label: SharedString,
     cx: &gpui::App,
 ) -> impl IntoElement {

@@ -18,12 +18,14 @@ pub(super) const MIN_RATIO: f32 = 0.05;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum SplitDirection {
+    // Note: Horizontal = children side-by-side along X axis (the divider bar is vertical).
+    // Not renamed to Left/Right/Up/Down because Zed's 4-direction enum has no 1:1 mapping.
     Horizontal, // side-by-side (children laid out along X)
     Vertical,   // stacked (children laid out along Y)
 }
 
 pub(super) enum PaneLayout {
-    Leaf(PaneId),
+    Pane(PaneId),
     Split {
         direction: SplitDirection,
         children: Vec<PaneLayout>,
@@ -46,21 +48,21 @@ impl PaneLayout {
     #[cfg(test)]
     pub(super) fn contains(&self, target: PaneId) -> bool {
         match self {
-            PaneLayout::Leaf(id) => *id == target,
+            PaneLayout::Pane(id) => *id == target,
             PaneLayout::Split { children, .. } => children.iter().any(|c| c.contains(target)),
         }
     }
 
     pub(super) fn first_leaf(&self) -> PaneId {
         match self {
-            PaneLayout::Leaf(id) => *id,
+            PaneLayout::Pane(id) => *id,
             PaneLayout::Split { children, .. } => children[0].first_leaf(),
         }
     }
 
     fn collect_pane_ids(&self, out: &mut Vec<PaneId>) {
         match self {
-            PaneLayout::Leaf(id) => out.push(*id),
+            PaneLayout::Pane(id) => out.push(*id),
             PaneLayout::Split { children, .. } => {
                 for c in children {
                     c.collect_pane_ids(out);
@@ -77,7 +79,7 @@ impl PaneLayout {
 
     pub(super) fn leaf_count(&self) -> usize {
         match self {
-            PaneLayout::Leaf(_) => 1,
+            PaneLayout::Pane(_) => 1,
             PaneLayout::Split { children, .. } => children.iter().map(|c| c.leaf_count()).sum(),
         }
     }
@@ -114,11 +116,11 @@ pub(super) fn insert_split_at(
     new_id: PaneId,
 ) -> bool {
     // Case C: root is the target leaf.
-    if let PaneLayout::Leaf(id) = layout
+    if let PaneLayout::Pane(id) = layout
         && *id == target
     {
-        let original = PaneLayout::Leaf(*id);
-        *layout = PaneLayout::new_split(direction, vec![original, PaneLayout::Leaf(new_id)]);
+        let original = PaneLayout::Pane(*id);
+        *layout = PaneLayout::new_split(direction, vec![original, PaneLayout::Pane(new_id)]);
         return true;
     }
 
@@ -130,7 +132,7 @@ pub(super) fn insert_split_at(
     {
         // Direct child matches target?
         for i in 0..children.len() {
-            if let PaneLayout::Leaf(id) = children[i]
+            if let PaneLayout::Pane(id) = children[i]
                 && id == target
             {
                 if *parent_dir == direction {
@@ -138,13 +140,13 @@ pub(super) fn insert_split_at(
                     let share = ratios[i] / 2.0;
                     ratios[i] = share;
                     ratios.insert(i + 1, share);
-                    children.insert(i + 1, PaneLayout::Leaf(new_id));
+                    children.insert(i + 1, PaneLayout::Pane(new_id));
                 } else {
                     // Case B: wrap target in a new Split.
-                    let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Leaf(0));
+                    let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(0));
                     children[i] = PaneLayout::new_split(
                         direction,
-                        vec![target_leaf, PaneLayout::Leaf(new_id)],
+                        vec![target_leaf, PaneLayout::Pane(new_id)],
                     );
                 }
                 return true;
@@ -186,7 +188,7 @@ fn remove_pane_inner(layout: &mut PaneLayout, target: PaneId) -> bool {
 
     // Direct leaf removal.
     for i in 0..children.len() {
-        if let PaneLayout::Leaf(id) = children[i]
+        if let PaneLayout::Pane(id) = children[i]
             && id == target
         {
             children.remove(i);
@@ -268,7 +270,7 @@ pub(super) fn cleanup_after_remove(layout: &mut PaneLayout) {
             }
             let parent_share = ratios[i];
             let (mut inner_children, inner_ratios) =
-                match std::mem::replace(&mut children[i], PaneLayout::Leaf(0)) {
+                match std::mem::replace(&mut children[i], PaneLayout::Pane(0)) {
                     PaneLayout::Split {
                         children: ic,
                         ratios: ir,
@@ -324,7 +326,7 @@ pub(super) fn collect_pane_rects(
     out: &mut Vec<PaneRect>,
 ) {
     match layout {
-        PaneLayout::Leaf(id) => out.push(PaneRect {
+        PaneLayout::Pane(id) => out.push(PaneRect {
             id: *id,
             x,
             y,

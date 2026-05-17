@@ -113,3 +113,59 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_claude
              →  gpui, portable-pty
 ```
+
+### UI component hierarchy
+
+```
+Workspace
+├── TitleBar
+├── BodyLayout
+│   ├── LeftSidebar
+│   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip
+│   │   ├── WorktreesView            — worktree list (create / delete / merge)
+│   │   ├── GitChangesView
+│   │   └── FilesView
+│   ├── MainArea
+│   │   ├── TabBar
+│   │   ├── PaneTree                 — one per tab; recursive split tree (single pane = 1-leaf root)
+│   │   │   └── Pane                 — leaf node, single content slot
+│   │   │       ├── PaneHeader       — per-pane title bar, visible in split mode only
+│   │   │       └── PaneContent
+│   │   │           ├── TerminalPane — PTY terminal (TerminalTextElement)
+│   │   │           ├── FileViewPane — file viewer (toolbar + virtual list)
+│   │   │           └── TaskEditPane — task edit inline form
+│   │   └── BottomDock
+│   │       ├── DockSwitcher         — BottomDock top tab row
+│   │       ├── TerminalInputDock    — multiline input + submit / action buttons
+│   │       └── MacroDock            — N-column macro key grid
+│   │           └── MacroKey         — macro key (icon or text mode)
+│   └── RightSidebar
+│       ├── ViewSwitcher             — Usage / Skills / Tasks / Tools tab strip
+│       ├── UsageView
+│       ├── SkillsView
+│       ├── TasksView
+│       └── ToolsView
+├── StatusBar
+├── ModalLayout                      — modal overlay container (absolute-positioned)
+│   └── ModalView
+└── ToastLayout                      — toast notification container (absolute-positioned)
+    └── ToastView
+```
+
+**Concept-to-code mapping** (updated after refactoring — identifiers now match hierarchy names):
+
+| Hierarchy name | Code identifier | Location |
+|---|---|---|
+| `BodyLayout` | `body_layout` local var | `render/mod.rs` |
+| `MainArea` | `main_area` local var | `render/mod.rs` |
+| `LeftSidebar` | `left_dock` / `LeftDock` entity | `dock.rs`, `render/mod.rs` |
+| `RightSidebar` | `right_dock` / `RightDock` entity | `dock.rs`, `render/mod.rs` |
+| `ViewSwitcher` | `render()` in `view_tabs.rs` (both docks) | `sidebar/view_tabs.rs`, `right_panel/view_tabs.rs` |
+| `DockSwitcher` | `PanelTabStrip` | `bottom_panel/tab_strip.rs` |
+| `TerminalInputDock` | `TerminalInputPanel` | `bottom_panel/terminal_input.rs` |
+| `MacroKey` | `MacroKey` | `ui/macro_key.rs` |
+| `PaneTree` | `PaneLayout` enum | `workspace/layout.rs` |
+| `Pane` | `PaneLayout::Pane` | `workspace/layout.rs` |
+| `TerminalPane` | `PaneContent::Terminal` | `workspace/pane.rs` |
+| `FileViewPane` | `PaneContent::File` | `workspace/pane.rs` |
+| `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/pane.rs` |

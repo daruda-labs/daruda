@@ -1,6 +1,6 @@
 //! Snapshot types for dock rendering.
 //!
-//! Each `*DockSnap` struct carries a point-in-time copy of the
+//! Each `*DockSnapshot` struct carries a point-in-time copy of the
 //! `Workspace` fields that the corresponding dock's `impl Render`
 //! needs to build its element tree.  Snapshots are staged by
 //! `render/mod.rs` at the start of every `Workspace::render` cycle
@@ -28,8 +28,8 @@ use super::Workspace;
 
 /// Point-in-time copy of `Workspace` fields consumed by the left
 /// dock's `impl Render`.
-pub(in crate::workspace) struct LeftDockSnap {
-    pub sidebar_view: daruda_store::project::SidebarView,
+pub(in crate::workspace) struct LeftSidebarSnapshot {
+    pub left_sidebar_view: daruda_store::project::LeftSidebarView,
     pub worktrees: Vec<crate::worktree::Worktree>,
     pub active_worktree_id: daruda_store::project::WorktreeId,
     pub active_tab_count: usize,
@@ -96,11 +96,11 @@ pub(in crate::workspace) struct LeftDockSnap {
 
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
-pub(in crate::workspace) struct BottomDockSnap {
-    pub bottom_input_active: bool,
+pub(in crate::workspace) struct BottomDockSnapshot {
+    pub terminal_input_visible: bool,
     pub active_tab_id: Option<daruda_store::panels::TabId>,
     pub tab_summaries: Vec<(daruda_store::panels::TabId, String, usize)>,
-    pub active_tab_widgets: Vec<daruda_store::panels::Widget>,
+    pub active_tab_widgets: Vec<daruda_store::panels::MacroKey>,
     /// Mirror of `Workspace::panels_grid_columns` — column count for
     /// the bottom-dock macro tile grid. Already clamped (>= 1).
     pub grid_columns: u8,
@@ -123,14 +123,14 @@ pub(in crate::workspace) struct BottomDockSnap {
 
 /// Point-in-time copy of `Workspace` fields consumed by the right
 /// dock's `impl Render`.
-pub(in crate::workspace) struct RightDockSnap {
+pub(in crate::workspace) struct RightSidebarSnapshot {
     /// Active right-panel tab. The tab strip in the dock header reads
     /// this to highlight the current tab; the body match-arm reads it
     /// to pick the renderer.
-    pub right_panel_view: daruda_store::project::RightPanelView,
+    pub right_sidebar_view: daruda_store::project::RightSidebarView,
     /// Back-reference to the owning `Workspace`, mirrored from the
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
-    /// `set_right_panel_view` without re-entering the dock context.
+    /// `set_right_sidebar_view` without re-entering the dock context.
     pub workspace: WeakEntity<Workspace>,
     /// Snapshot of `Workspace::usage` for the Usage tab renderer.
     /// Carried in the snap so the per-tab body can read it without
@@ -228,14 +228,14 @@ pub(in crate::workspace) struct RightDockSnap {
 /// `None` and overwritten by `Workspace::render` before `Dock::render`
 /// is invoked.
 ///
-/// `Left` and `Right` are `Box`ed because `LeftDockSnap` (~416 B)
-/// and `RightDockSnap` (~776 B) dwarf the other variants — leaving
-/// them inline would inflate every `DockSnap` slot, including the
+/// `Left` and `Right` are `Box`ed because `LeftSidebarSnapshot` (~416 B)
+/// and `RightSidebarSnapshot` (~776 B) dwarf the other variants — leaving
+/// them inline would inflate every `DockSnapshot` slot, including the
 /// cleared `None` state, well past clippy's variant-size threshold.
-pub(in crate::workspace) enum DockSnap {
-    Left(Box<LeftDockSnap>),
-    Bottom(BottomDockSnap),
-    Right(Box<RightDockSnap>),
+pub(in crate::workspace) enum DockSnapshot {
+    Left(Box<LeftSidebarSnapshot>),
+    Bottom(BottomDockSnapshot),
+    Right(Box<RightSidebarSnapshot>),
     /// Initial / cleared state — `Dock::render` returns an empty
     /// element when the snap is absent (first frame safety net).
     None,

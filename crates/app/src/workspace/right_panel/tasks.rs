@@ -42,12 +42,15 @@ use gpui::{
 
 use super::super::Workspace;
 use super::super::dock::Dock;
-use super::super::dock_snap::RightDockSnap;
+use super::super::dock_snap::RightSidebarSnapshot;
 use super::status_pill;
 use crate::surface::strings;
 use crate::ui::{Badge, button, button_primary};
 
-pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     // Pipeline: state filter → search filter → newest-first sort.
     // The search filter is a no-op when the query is blank, so empty
     // searches still go through `filter_by_state` unchanged.
@@ -117,7 +120,7 @@ fn matches_task(t: &Task, query_lower: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Top row: filter chip on the left, `[+ New]` button on the right.
-fn header_row(snap: &RightDockSnap) -> impl IntoElement {
+fn header_row(snap: &RightSidebarSnapshot) -> impl IntoElement {
     let ws = snap.workspace.clone();
     let new_ws = snap.workspace.clone();
 
@@ -161,10 +164,10 @@ fn header_row(snap: &RightDockSnap) -> impl IntoElement {
 // ---------------------------------------------------------------------------
 
 /// Search input row. Mirrors `right_panel/skills/render.rs::search_row`
-/// — wraps `RightDockSnap::task_search_input` in a relative container
+/// — wraps `RightSidebarSnapshot::task_search_input` in a relative container
 /// so the in-field `✕` button can sit absolutely on the trailing edge.
 /// The icon only renders while the query is non-empty.
-fn search_row(snap: &RightDockSnap, cx: &gpui::App) -> impl IntoElement {
+fn search_row(snap: &RightSidebarSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.task_search_query.trim().is_empty();
     let workspace = snap.workspace.clone();
     let t = theme::current(cx);
@@ -250,7 +253,7 @@ fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
 // Per-task row
 // ---------------------------------------------------------------------------
 
-fn task_row(task: &Task, snap: &RightDockSnap, cx: &gpui::App) -> impl IntoElement {
+fn task_row(task: &Task, snap: &RightSidebarSnapshot, cx: &gpui::App) -> impl IntoElement {
     let pill = status_pill::status_pill(task, snap, state_label(&task.state), cx);
     let session_badge = session_badge(task, snap, cx);
     let duration = duration_cell(task, snap, cx);
@@ -465,7 +468,7 @@ fn done_flavour_label(reason: SessionEndReason) -> &'static str {
 /// second rounding follows `surface::strings::format_duration_compact`,
 /// which already powers the long-running notification body so a
 /// single helper keeps both surfaces in sync.
-fn duration_cell(task: &Task, snap: &RightDockSnap, cx: &gpui::App) -> Option<AnyElement> {
+fn duration_cell(task: &Task, snap: &RightSidebarSnapshot, cx: &gpui::App) -> Option<AnyElement> {
     let end = match &task.state {
         TaskState::Backlog => return None,
         TaskState::Running { .. } => snap.now,
@@ -501,7 +504,7 @@ fn duration_cell(task: &Task, snap: &RightDockSnap, cx: &gpui::App) -> Option<An
 /// isn't known to the store (hook + jsonl both silent) so a fresh
 /// task that hasn't yet emitted any event reads as "no session
 /// activity yet" rather than "idle".
-fn session_badge(task: &Task, snap: &RightDockSnap, cx: &gpui::App) -> Option<AnyElement> {
+fn session_badge(task: &Task, snap: &RightSidebarSnapshot, cx: &gpui::App) -> Option<AnyElement> {
     let sid = task.session_ids.first()?;
     let take = ux_strings::RIGHT_PANEL_TASK_SESSION_BADGE_LEN.min(sid.len());
     let prefix: String = sid.chars().take(take).collect();
@@ -568,7 +571,11 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 ///
 /// Drops out for terminal states (the row has already settled) and
 /// when no session has crossed the soft threshold yet.
-fn failure_indicator(task: &Task, snap: &RightDockSnap, cx: &gpui::App) -> Option<AnyElement> {
+fn failure_indicator(
+    task: &Task,
+    snap: &RightSidebarSnapshot,
+    cx: &gpui::App,
+) -> Option<AnyElement> {
     if !matches!(task.state, TaskState::Running { .. }) {
         return None;
     }

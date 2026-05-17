@@ -9,19 +9,19 @@
 //!     call back into `Workspace::run_widget`.
 
 pub(in crate::workspace) mod macro_edit_modal;
+pub(in crate::workspace) mod macro_key;
 pub(in crate::workspace) mod tab_strip;
 pub(in crate::workspace) mod terminal_input;
-pub(in crate::workspace) mod widgets;
 
 use crate::ui::theme;
-use daruda_store::panels::{TabId, Widget};
+use daruda_store::panels::{MacroKey, TabId};
 use daruda_terminal::ux::strings as s;
 use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
 
 use self::macro_edit_modal::MacroEditModal;
 use crate::ui::button_add_tile;
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::BottomDockSnap;
+use crate::workspace::dock_snap::BottomDockSnapshot;
 
 /// Build the bottom dock body for the active tab. Active tab's widgets
 /// render in a fixed-column grid (`snap.grid_columns`, mirrored from
@@ -30,13 +30,13 @@ use crate::workspace::dock_snap::BottomDockSnap;
 /// when the last data row is full. Per-tab `height` (`Some(px)` = fixed)
 /// is enforced via the dock's outer container; auto (`None`) lets the
 /// grid (`flex_col` of N-column rows) size the body to fit content.
-/// When `snap.bottom_input_active` is set the built-in Input panel is
+/// When `snap.terminal_input_visible` is set the built-in Input panel is
 /// rendered instead of any macro tab.
 pub(in crate::workspace) fn render_body(
-    snap: &BottomDockSnap,
+    snap: &BottomDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
-    if snap.bottom_input_active {
+    if snap.terminal_input_visible {
         return terminal_input::render_body(snap, cx);
     }
 
@@ -54,18 +54,18 @@ pub(in crate::workspace) fn render_body(
     };
     let tab_id = active_tab_id.clone();
 
-    // Collect renderable tiles in order (Widget::Unknown is skipped
+    // Collect renderable tiles in order (MacroKey::Unknown is skipped
     // entirely — no placeholder cell), then append the trailing `[+]`
     // button so it always lands at the end of the tile sequence.
     let mut tiles: Vec<AnyElement> = Vec::new();
     for widget in active_widgets {
         match widget {
-            Widget::Button(btn) => {
+            MacroKey::Button(btn) => {
                 tiles.push(
-                    widgets::button::render(tab_id.clone(), btn, snap, cx).into_any_element(),
+                    macro_key::button::render(tab_id.clone(), btn, snap, cx).into_any_element(),
                 );
             }
-            Widget::Unknown(_) => {}
+            MacroKey::Unknown(_) => {}
         }
     }
     tiles.push(add_widget_button(tab_id, snap, cx).into_any_element());
@@ -104,7 +104,7 @@ pub(in crate::workspace) fn render_body(
 /// MacroEditModal in Create mode for the active tab.
 fn add_widget_button(
     tab_id: TabId,
-    snap: &BottomDockSnap,
+    snap: &BottomDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();

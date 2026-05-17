@@ -23,10 +23,12 @@ use gpui::KeyDownEvent;
 
 use super::command_palette;
 use super::dock::DockPosition;
-use super::dock_snap::{BottomDockSnap, DockSnap, LeftDockSnap, RightDockSnap};
+use super::dock_snap::{
+    BottomDockSnapshot, DockSnapshot, LeftSidebarSnapshot, RightSidebarSnapshot,
+};
+use super::file_viewer::{CharPos, CharSelection};
 use super::layout::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::pane::PaneContent;
-use super::pane_file_view::{CharPos, CharSelection};
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, TAB_BAR_HEIGHT,
@@ -256,7 +258,7 @@ impl Render for Workspace {
                 };
                 let (file_path, worktree_root) = match pane.and_then(|p| match &p.content {
                     PaneContent::File(f) => Some((f.view.path.clone(), f.view.worktree_id)),
-                    PaneContent::Terminal(_) | PaneContent::TaskEdit(_) => None,
+                    PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
                 }) {
                     Some((path, wt_id)) => {
                         let root = self
@@ -308,8 +310,8 @@ impl Render for Workspace {
             self.ensure_file_tree(self.active_worktree_id, cx);
         }
 
-        let left_snap = LeftDockSnap {
-            sidebar_view: self.sidebar_view,
+        let left_snap = LeftSidebarSnapshot {
+            left_sidebar_view: self.left_sidebar_view,
             worktrees: self.worktrees.clone(),
             active_worktree_id: self.active_worktree_id,
             active_tab_count: self.tabs.len(),
@@ -412,7 +414,7 @@ impl Render for Workspace {
             workspace: self.left_dock.read(cx).workspace.clone(),
         };
         self.left_dock
-            .update(cx, |d, _| d.snap = DockSnap::Left(Box::new(left_snap)));
+            .update(cx, |d, _| d.snap = DockSnapshot::Left(Box::new(left_snap)));
 
         let bottom_snap = {
             let active_tab_id = self.panels.active_tab_id.clone();
@@ -445,8 +447,8 @@ impl Render for Workspace {
                 .map(crate::shell_quote::Shell::detect_from_program)
                 .unwrap_or_default();
             let bottom_dock_size = self.bottom_dock.read(cx).size;
-            BottomDockSnap {
-                bottom_input_active: self.bottom_input_active,
+            BottomDockSnapshot {
+                terminal_input_visible: self.terminal_input_visible,
                 active_tab_id,
                 tab_summaries,
                 active_tab_widgets,
@@ -458,7 +460,7 @@ impl Render for Workspace {
             }
         };
         self.bottom_dock
-            .update(cx, |d, _| d.snap = DockSnap::Bottom(bottom_snap));
+            .update(cx, |d, _| d.snap = DockSnapshot::Bottom(bottom_snap));
 
         let claude_status_per_path = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
@@ -496,8 +498,8 @@ impl Render for Workspace {
             .filter(|&(_, &n)| n > 0)
             .map(|(sid, &n)| (sid.clone(), n))
             .collect();
-        let right_snap = RightDockSnap {
-            right_panel_view: self.right_panel_view,
+        let right_snap = RightSidebarSnapshot {
+            right_sidebar_view: self.right_sidebar_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
             usage: self.claude.usage.clone(),
             usage_pricing: self.claude.usage_pricing.clone(),
@@ -527,8 +529,9 @@ impl Render for Workspace {
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_worktree_root().as_deref()),
         };
-        self.right_dock
-            .update(cx, |d, _| d.snap = DockSnap::Right(Box::new(right_snap)));
+        self.right_dock.update(cx, |d, _| {
+            d.snap = DockSnapshot::Right(Box::new(right_snap))
+        });
 
         // Read dock display state after staging snapshots.
         let (left_dock_open, left_dock_size) = {
@@ -888,7 +891,7 @@ impl Render for Workspace {
             let actual_has_splits = tab.layout.leaf_count() > 1;
             if let Some(zoomed_id) = self.zoomed_pane_id {
                 if tab.layout.pane_ids().contains(&zoomed_id) {
-                    let leaf = PaneLayout::Leaf(zoomed_id);
+                    let leaf = PaneLayout::Pane(zoomed_id);
                     render_layout(
                         &leaf,
                         &self.panes,
@@ -927,12 +930,12 @@ impl Render for Workspace {
             div().flex_1().w_full().into_any_element()
         };
 
-        // Middle row: [left_dock] [center_col] [right_dock]
+        // BodyLayout: [LeftSidebar] [MainArea] [RightSidebar]
         // Resize handles are absolutely positioned overlays centered
         // on each dock's border (see `dock_resize_handle`) — they don't
         // consume flex space, so toggling docks doesn't reflow layout.
         let pane_area = div().flex_1().w_full().flex().child(center_content);
-        let center_col = div()
+        let main_area = div()
             .flex_1()
             .flex()
             .flex_col()
@@ -949,14 +952,14 @@ impl Render for Workspace {
                 ))
             });
 
-        let middle_row = div()
+        let body_layout = div()
             .flex_1()
             .flex()
             .flex_row()
             .relative()
             .overflow_hidden()
             .when(left_dock_open, |el| el.child(self.left_dock.clone()))
-            .child(center_col)
+            .child(main_area)
             .when(right_dock_open, |el| el.child(self.right_dock.clone()))
             .when(left_dock_open, |el| {
                 el.child(dock_resize_handle(DockPosition::Left, left_dock_size, cx))
@@ -1264,7 +1267,7 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .child(title_bar)
-            .child(middle_row)
+            .child(body_layout)
             .child(status_bar)
             // Toast overlay paints last so it floats above the status
             // bar; positioned `absolute()` so it never pushes the

@@ -3,7 +3,7 @@
 //! Each tab holds a list of widgets. Currently the only widget kind is
 //! `Button` (a clickable macro that sends text to the focused PTY), but
 //! the schema is forward-compatible: future widget variants land as
-//! `Widget::Unknown(value)` in older daruda versions, and the original
+//! `MacroKey::Unknown(value)` in older daruda versions, and the original
 //! JSON survives round-trip so user data is never silently dropped.
 
 mod persistence;
@@ -39,7 +39,7 @@ pub fn migrate_builtin_flags(state: &mut PanelsState) -> bool {
     let mut changed = false;
     for tab in &mut state.tabs {
         for widget in &mut tab.widgets {
-            if let Widget::Button(btn) = widget {
+            if let MacroKey::Button(btn) = widget {
                 if btn.builtin {
                     // Restore canonical send if it drifted.
                     if let Some(canonical_send) = seed::SEED_AI_ENTRIES
@@ -70,7 +70,7 @@ use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Persistence schema version. Bump when the structural contract changes
-/// in a way `Widget::Unknown` cannot transparently absorb (e.g. a tab-level
+/// in a way `MacroKey::Unknown` cannot transparently absorb (e.g. a tab-level
 /// rework, not just a new widget variant).
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -123,7 +123,7 @@ pub struct PanelTab {
     #[serde(default)]
     pub layout: TabLayout,
     #[serde(default)]
-    pub widgets: Vec<Widget>,
+    pub widgets: Vec<MacroKey>,
 }
 
 /// How the widgets inside a tab are laid out. New algorithms land as new
@@ -144,25 +144,25 @@ pub enum TabLayout {
 ///     opens a panels file authored by a newer daruda version, those
 ///     widgets survive a save round-trip instead of being dropped.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Widget {
+pub enum MacroKey {
     Button(ButtonWidget),
     /// Captures the raw JSON for any widget type not yet known to this
     /// daruda version. The render layer ignores these.
     Unknown(serde_json::Value),
 }
 
-impl Widget {
+impl MacroKey {
     /// `id` accessor that works for both Button and Unknown (when the
     /// unknown carries an `id` field).
     pub fn id(&self) -> Option<&str> {
         match self {
-            Widget::Button(b) => Some(&b.id),
-            Widget::Unknown(v) => v.get("id").and_then(|v| v.as_str()),
+            MacroKey::Button(b) => Some(&b.id),
+            MacroKey::Unknown(v) => v.get("id").and_then(|v| v.as_str()),
         }
     }
 }
 
-impl<'de> Deserialize<'de> for Widget {
+impl<'de> Deserialize<'de> for MacroKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -172,20 +172,20 @@ impl<'de> Deserialize<'de> for Widget {
         match type_str {
             Some("button") => {
                 let btn: ButtonWidget = serde_json::from_value(value).map_err(D::Error::custom)?;
-                Ok(Widget::Button(btn))
+                Ok(MacroKey::Button(btn))
             }
-            _ => Ok(Widget::Unknown(value)),
+            _ => Ok(MacroKey::Unknown(value)),
         }
     }
 }
 
-impl Serialize for Widget {
+impl Serialize for MacroKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            Widget::Button(btn) => {
+            MacroKey::Button(btn) => {
                 let mut value = serde_json::to_value(btn).map_err(S::Error::custom)?;
                 if let serde_json::Value::Object(ref mut map) = value {
                     map.insert(
@@ -195,7 +195,7 @@ impl Serialize for Widget {
                 }
                 value.serialize(serializer)
             }
-            Widget::Unknown(value) => value.serialize(serializer),
+            MacroKey::Unknown(value) => value.serialize(serializer),
         }
     }
 }

@@ -48,7 +48,7 @@ fn update_button_in_place_replaces_content() {
         order: 0,
         height: None,
         layout: TabLayout::FlexWrap,
-        widgets: vec![Widget::Button(make_button("w1", "Old", "old"))],
+        widgets: vec![MacroKey::Button(make_button("w1", "Old", "old"))],
     }];
     let new_btn = ButtonWidget {
         id: "ignored".to_string(), // overwritten with existing id
@@ -63,7 +63,7 @@ fn update_button_in_place_replaces_content() {
     };
     assert!(update_button_in_place(&mut tabs, "t1", "w1", new_btn));
     let updated = match &tabs[0].widgets[0] {
-        Widget::Button(b) => b,
+        MacroKey::Button(b) => b,
         _ => panic!("button"),
     };
     assert_eq!(updated.id, "w1"); // id preserved
@@ -81,7 +81,7 @@ fn update_button_in_place_no_op_missing_tab() {
         order: 0,
         height: None,
         layout: TabLayout::FlexWrap,
-        widgets: vec![Widget::Button(make_button("w1", "X", "y"))],
+        widgets: vec![MacroKey::Button(make_button("w1", "X", "y"))],
     }];
     assert!(!update_button_in_place(
         &mut tabs,
@@ -99,7 +99,7 @@ fn update_button_in_place_no_op_missing_widget() {
         order: 0,
         height: None,
         layout: TabLayout::FlexWrap,
-        widgets: vec![Widget::Button(make_button("w1", "X", "y"))],
+        widgets: vec![MacroKey::Button(make_button("w1", "X", "y"))],
     }];
     assert!(!update_button_in_place(
         &mut tabs,
@@ -117,7 +117,7 @@ fn update_button_in_place_skips_unknown_widget() {
         order: 0,
         height: None,
         layout: TabLayout::FlexWrap,
-        widgets: vec![Widget::Unknown(
+        widgets: vec![MacroKey::Unknown(
             serde_json::json!({"type": "future_bar", "id": "w1"}),
         )],
     }];
@@ -140,8 +140,8 @@ fn remove_widget_in_place_removes_match() {
         height: None,
         layout: TabLayout::FlexWrap,
         widgets: vec![
-            Widget::Button(make_button("w1", "A", "a")),
-            Widget::Button(make_button("w2", "B", "b")),
+            MacroKey::Button(make_button("w1", "A", "a")),
+            MacroKey::Button(make_button("w2", "B", "b")),
         ],
     }];
     assert!(remove_widget_in_place(&mut tabs, "t1", "w1"));
@@ -157,7 +157,7 @@ fn remove_widget_in_place_no_op_missing() {
         order: 0,
         height: None,
         layout: TabLayout::FlexWrap,
-        widgets: vec![Widget::Button(make_button("w1", "A", "a"))],
+        widgets: vec![MacroKey::Button(make_button("w1", "A", "a"))],
     }];
     assert!(!remove_widget_in_place(&mut tabs, "t1", "wnope"));
     assert!(!remove_widget_in_place(&mut tabs, "tnope", "w1"));
@@ -176,7 +176,7 @@ fn find_widget_by_shortcut_finds_first_match() {
             height: None,
             layout: TabLayout::FlexWrap,
             widgets: vec![
-                Widget::Button(ButtonWidget {
+                MacroKey::Button(ButtonWidget {
                     id: "w1".to_string(),
                     label: "A".to_string(),
                     send: "a".to_string(),
@@ -187,7 +187,7 @@ fn find_widget_by_shortcut_finds_first_match() {
                     style: None,
                     builtin: false,
                 }),
-                Widget::Button(ButtonWidget {
+                MacroKey::Button(ButtonWidget {
                     id: "w2".to_string(),
                     label: "B".to_string(),
                     send: "b".to_string(),
@@ -218,11 +218,11 @@ fn find_widget_by_shortcut_skips_unknown_widgets() {
             height: None,
             layout: TabLayout::FlexWrap,
             widgets: vec![
-                Widget::Unknown(serde_json::json!({
+                MacroKey::Unknown(serde_json::json!({
                     "type": "future",
                     "shortcut": "cmd-shift-1"
                 })),
-                Widget::Button(make_button("w2", "Real", "real")),
+                MacroKey::Button(make_button("w2", "Real", "real")),
             ],
         }],
     };

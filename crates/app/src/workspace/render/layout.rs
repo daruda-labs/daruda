@@ -18,9 +18,9 @@ use crate::ui::ContextMenuItem as CItem;
 use crate::workspace::path_drag::PathDrag;
 
 use super::super::Workspace;
+use super::super::file_viewer::render::render_pane_file_viewer;
 use super::super::layout::{DIVIDER_PX, PaneId, PaneLayout, SplitDirection};
 use super::super::pane::Pane;
-use super::super::render_file_viewer::render_pane_file_viewer;
 use super::PANE_HEADER_HEIGHT;
 
 /// Flex child cell wrapping a pane or nested split in a Split layout.
@@ -220,7 +220,7 @@ pub(super) fn render_layout(
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
-        PaneLayout::Leaf(pane_id) => {
+        PaneLayout::Pane(pane_id) => {
             let id = *pane_id;
             let Some(pane) = panes.iter().find(|p| p.id == id) else {
                 return div().into_any_element();
@@ -288,7 +288,7 @@ pub(super) fn render_layout(
                             cx,
                         ))
                 }
-                super::super::pane::PaneContent::TaskEdit(te) => {
+                super::super::pane::PaneContent::TaskEditPane(te) => {
                     // TaskEdit panes are plain div trees — wrapper_focus_handle()
                     // returns Some(te.focus_handle). The form body is the
                     // single source of editable state; close / dirty handling

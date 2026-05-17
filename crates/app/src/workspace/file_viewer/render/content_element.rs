@@ -15,7 +15,7 @@ use gpui::{
 };
 
 use crate::workspace::Workspace;
-use crate::workspace::pane_file_view::{
+use crate::workspace::file_viewer::{
     CharPos, CharSelection, HighlightedSpan, VisualRow, VisualRowKind, WordChange,
 };
 

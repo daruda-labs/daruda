@@ -11,7 +11,7 @@ use std::path::Path;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::panels::{
-    ButtonWidget, PanelTab, PanelsState, TabId, TabLayout, Widget, WidgetId, new_tab_id,
+    ButtonWidget, MacroKey, PanelTab, PanelsState, TabId, TabLayout, WidgetId, new_tab_id,
     new_widget_id,
 };
 use gpui::{Context, KeyBinding, Keystroke, SharedString, Window};
@@ -76,11 +76,11 @@ fn update_button_in_place(
     let Some(widget) = tab.widgets.iter_mut().find(|w| w.id() == Some(widget_id)) else {
         return false;
     };
-    let Widget::Button(_) = widget else {
+    let MacroKey::Button(_) = widget else {
         return false;
     };
     new_btn.id = widget_id.to_string();
-    *widget = Widget::Button(new_btn);
+    *widget = MacroKey::Button(new_btn);
     true
 }
 
@@ -185,14 +185,14 @@ fn build_new_tab(name: &str, existing: &[PanelTab]) -> Option<PanelTab> {
 
 /// Find the first widget whose shortcut matches `shortcut`. Returns
 /// `(tab_id, widget_id)` so the caller can dispatch via
-/// `Workspace::run_widget`. Skips `Widget::Unknown` (no shortcut
+/// `Workspace::run_widget`. Skips `MacroKey::Unknown` (no shortcut
 /// metadata exposed). When two macros share the same shortcut, the
 /// **first one in tab/widget visit order** wins — document this so
 /// users understand what happens with conflicts.
 fn find_widget_by_shortcut(panels: &PanelsState, shortcut: &str) -> Option<(TabId, WidgetId)> {
     for tab in &panels.tabs {
         for widget in &tab.widgets {
-            let Widget::Button(btn) = widget else {
+            let MacroKey::Button(btn) = widget else {
                 continue;
             };
             if btn.shortcut.as_deref() == Some(shortcut) {
@@ -232,7 +232,7 @@ fn is_valid_shortcut(shortcut: &str) -> bool {
 pub(in crate::workspace) fn register_macro_shortcuts(panels: &PanelsState, cx: &mut gpui::App) {
     for tab in &panels.tabs {
         for widget in &tab.widgets {
-            let Widget::Button(btn) = widget else {
+            let MacroKey::Button(btn) = widget else {
                 continue;
             };
             let Some(shortcut) = btn.shortcut.as_deref().filter(|s| !s.is_empty()) else {
@@ -396,7 +396,7 @@ impl Workspace {
             return;
         };
         btn.id = new_widget_id();
-        tab.widgets.push(Widget::Button(btn));
+        tab.widgets.push(MacroKey::Button(btn));
         self.save_panels(cx);
         cx.notify();
     }
@@ -479,11 +479,11 @@ impl Workspace {
             return;
         }
         let already_active =
-            !self.bottom_input_active && self.panels.active_tab_id.as_ref() == Some(&tab_id);
+            !self.terminal_input_visible && self.panels.active_tab_id.as_ref() == Some(&tab_id);
         if already_active {
             return;
         }
-        self.bottom_input_active = false;
+        self.terminal_input_visible = false;
         self.panels.active_tab_id = Some(tab_id);
         self.save_panels(cx);
         self.bottom_dock.update(cx, |_, cx| cx.notify());
@@ -492,10 +492,10 @@ impl Workspace {
 
     /// Switch the bottom dock to the built-in "Input" panel.
     pub(in crate::workspace) fn activate_bottom_input(&mut self, cx: &mut Context<Self>) {
-        if self.bottom_input_active {
+        if self.terminal_input_visible {
             return;
         }
-        self.bottom_input_active = true;
+        self.terminal_input_visible = true;
         self.bottom_dock.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
@@ -538,7 +538,7 @@ impl Workspace {
     /// Click handler for a widget — dispatches based on the widget
     /// kind. Today only `Button` is implemented; unknown / future
     /// types are silent no-ops (the JSON survives via
-    /// `Widget::Unknown` round-trip; the click simply does nothing
+    /// `MacroKey::Unknown` round-trip; the click simply does nothing
     /// until a daruda version that understands the type loads it).
     pub(in crate::workspace) fn run_widget(
         &mut self,
@@ -557,11 +557,11 @@ impl Workspace {
             return;
         };
         match widget {
-            Widget::Button(btn) => {
+            MacroKey::Button(btn) => {
                 let payload = button_payload(btn);
                 self.send_to_focused_pane(payload.as_bytes(), cx);
             }
-            Widget::Unknown(_) => {
+            MacroKey::Unknown(_) => {
                 // Forward-compat: a widget type defined by a newer
                 // daruda — we round-trip the JSON but cannot dispatch.
             }

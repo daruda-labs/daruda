@@ -306,8 +306,8 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
                 },
             ],
             active_worktree_id: 5,
-            active_sidebar_view: daruda_store::project::SidebarView::default(),
-            active_right_panel_view: daruda_store::project::RightPanelView::default(),
+            active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: Vec::new(),
             active_tab_index: 0,
@@ -390,8 +390,8 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             root: std::path::PathBuf::from("/tmp/test_restore_wt_tabs"),
             worktrees: vec![worktree],
             active_worktree_id: 0,
-            active_sidebar_view: daruda_store::project::SidebarView::default(),
-            active_right_panel_view: daruda_store::project::RightPanelView::default(),
+            active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -429,8 +429,8 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             root: std::path::PathBuf::from("/tmp/test_restore_clamp_id"),
             worktrees: vec![worktree],
             active_worktree_id: 999, // stale — only id 3 exists
-            active_sidebar_view: daruda_store::project::SidebarView::default(),
-            active_right_panel_view: daruda_store::project::RightPanelView::default(),
+            active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -456,8 +456,8 @@ fn test_sidebar_view_defaults_to_worktrees(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.sidebar_view,
-            daruda_store::project::SidebarView::Worktrees
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Worktrees
         );
     });
 }
@@ -466,16 +466,22 @@ fn test_sidebar_view_defaults_to_worktrees(cx: &mut TestAppContext) {
 fn test_set_sidebar_view_switches_and_notifies(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::GitChanges, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::GitChanges, cx);
         assert_eq!(
-            ws.sidebar_view,
-            daruda_store::project::SidebarView::GitChanges
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::GitChanges
         );
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
-        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        assert_eq!(
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Files
+        );
         // No-op when already on that view (shouldn't panic).
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
-        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        assert_eq!(
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Files
+        );
     });
 }
 
@@ -488,14 +494,14 @@ fn test_save_state_captures_active_sidebar_view(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
     });
     let state = ws
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
     assert_eq!(
         state.active_sidebar_view,
-        daruda_store::project::SidebarView::Files
+        daruda_store::project::LeftSidebarView::Files
     );
 }
 
@@ -510,8 +516,8 @@ fn test_restore_state_applies_active_sidebar_view(cx: &mut TestAppContext) {
             root: std::path::PathBuf::from("/tmp/test_restore_sidebar_view"),
             worktrees: Vec::new(),
             active_worktree_id: 0,
-            active_sidebar_view: daruda_store::project::SidebarView::GitChanges,
-            active_right_panel_view: daruda_store::project::RightPanelView::default(),
+            active_sidebar_view: daruda_store::project::LeftSidebarView::GitChanges,
+            active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -529,45 +535,45 @@ fn test_restore_state_applies_active_sidebar_view(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.sidebar_view,
-            daruda_store::project::SidebarView::GitChanges
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::GitChanges
         );
     });
 }
 
 #[gpui::test]
-fn test_save_state_captures_active_right_panel_view(cx: &mut TestAppContext) {
+fn test_save_state_captures_active_right_sidebar_view(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_save_right_panel_view");
+    let project = daruda_store::project::Project::from_path("/tmp/test_save_right_sidebar_view");
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
     });
     let ws = wh.root(cx).unwrap();
     ws.update(cx, |ws, cx| {
-        ws.set_right_panel_view(daruda_store::project::RightPanelView::Tools, cx);
+        ws.set_right_sidebar_view(daruda_store::project::RightSidebarView::Tools, cx);
     });
     let state = ws
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
     assert_eq!(
-        state.active_right_panel_view,
-        daruda_store::project::RightPanelView::Tools
+        state.active_right_sidebar_view,
+        daruda_store::project::RightSidebarView::Tools
     );
 }
 
 #[gpui::test]
-fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
+fn test_restore_state_applies_active_right_sidebar_view(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_restore_right_panel_view");
+    let project = daruda_store::project::Project::from_path("/tmp/test_restore_right_sidebar_view");
     let wh = cx.add_window(|window, cx| {
         let mut ws =
             Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx);
         let state = daruda_store::project::ProjectState {
-            root: std::path::PathBuf::from("/tmp/test_restore_right_panel_view"),
+            root: std::path::PathBuf::from("/tmp/test_restore_right_sidebar_view"),
             worktrees: Vec::new(),
             active_worktree_id: 0,
-            active_sidebar_view: daruda_store::project::SidebarView::default(),
-            active_right_panel_view: daruda_store::project::RightPanelView::Tasks,
+            active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+            active_right_sidebar_view: daruda_store::project::RightSidebarView::Tasks,
             active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
@@ -585,8 +591,8 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.right_panel_view,
-            daruda_store::project::RightPanelView::Tasks
+            ws.right_sidebar_view,
+            daruda_store::project::RightSidebarView::Tasks
         );
     });
 }
@@ -632,8 +638,8 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 root: std::path::PathBuf::from("/tmp/test_restore_usage_window"),
                 worktrees: Vec::new(),
                 active_worktree_id: 0,
-                active_sidebar_view: daruda_store::project::SidebarView::default(),
-                active_right_panel_view: daruda_store::project::RightPanelView::default(),
+                active_sidebar_view: daruda_store::project::LeftSidebarView::default(),
+                active_right_sidebar_view: daruda_store::project::RightSidebarView::default(),
                 active_usage_window: daruda_store::project::UsageWindow::Last24h,
                 tabs: vec![],
                 active_tab_index: 0,

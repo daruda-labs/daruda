@@ -1,4 +1,4 @@
-//! Bottom-dock macro grid tile.
+//! Bottom-dock macro key widget.
 //!
 //! Square or pill button tuned to the macro grid's tone — distinct
 //! enough from `gpui_component::Button` that wrapping it is incompatible:
@@ -10,11 +10,11 @@
 //!
 //! | Mode  | Use case                          |
 //! |-------|-----------------------------------|
-//! | `Text` | pill-style tile labelled with `label` (content-driven width) |
-//! | `Icon` | fixed-square tile showing `icon` codepoint (falls back to first char of `label`) |
+//! | `Text` | pill-style key labelled with `label` (content-driven width) |
+//! | `Icon` | fixed-square key showing `icon` codepoint (falls back to first char of `label`) |
 //!
 //! ```ignore
-//! MacroTile::new(element_id, label)
+//! MacroKey::new(element_id, label)
 //!     .icon_mode()
 //!     .icon(codepoint)
 //!     .tooltip(build_fn)
@@ -32,21 +32,21 @@ use gpui::{
     RenderOnce, SharedString, Window, div, prelude::*, px,
 };
 
-/// Content display mode for a [`MacroTile`].
+/// Content display mode for a [`MacroKey`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum TileDisplay {
+pub enum KeyDisplay {
     /// Pill button labelled with `label`. Width is content-driven.
     Text,
-    /// Fixed-square tile showing `icon` codepoint (falls back to first char of `label`).
+    /// Fixed-square key showing `icon` codepoint (falls back to first char of `label`).
     Icon,
 }
 
 #[derive(IntoElement)]
-pub struct MacroTile {
+pub struct MacroKey {
     id: ElementId,
     label: SharedString,
     icon: Option<SharedString>,
-    display: TileDisplay,
+    display: KeyDisplay,
     disabled: bool,
     fixed_width: Option<Pixels>,
     #[allow(clippy::type_complexity)]
@@ -57,13 +57,13 @@ pub struct MacroTile {
     tooltip_fn: Option<Box<dyn Fn(&mut Window, &mut App) -> AnyView + 'static>>,
 }
 
-impl MacroTile {
+impl MacroKey {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
             icon: None,
-            display: TileDisplay::Text,
+            display: KeyDisplay::Text,
             disabled: false,
             fixed_width: None,
             on_click: None,
@@ -72,13 +72,13 @@ impl MacroTile {
         }
     }
 
-    /// Switch to icon tile display. Pair with `.icon(codepoint)`.
+    /// Switch to icon key display. Pair with `.icon(codepoint)`.
     pub fn icon_mode(mut self) -> Self {
-        self.display = TileDisplay::Icon;
+        self.display = KeyDisplay::Icon;
         self
     }
 
-    /// Icon codepoint for [`TileDisplay::Icon`]. Falls back to first char of `label` if empty.
+    /// Icon codepoint for [`KeyDisplay::Icon`]. Falls back to first char of `label` if empty.
     pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
         self.icon = Some(icon.into());
         self
@@ -89,8 +89,8 @@ impl MacroTile {
         self
     }
 
-    /// Force a fixed pixel width for [`TileDisplay::Text`] mode (long
-    /// labels truncate). Has no effect on [`TileDisplay::Icon`] mode,
+    /// Force a fixed pixel width for [`KeyDisplay::Text`] mode (long
+    /// labels truncate). Has no effect on [`KeyDisplay::Icon`] mode,
     /// which keeps its `BUTTON_WIDGET_ICON_SIZE` width.
     /// Used by the bottom-dock grid layout for uniform cell sizing.
     pub fn fixed_width(mut self, width: Pixels) -> Self {
@@ -121,7 +121,7 @@ impl MacroTile {
     }
 }
 
-impl RenderOnce for MacroTile {
+impl RenderOnce for MacroKey {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let Self {
             id,
@@ -163,14 +163,14 @@ impl RenderOnce for MacroTile {
         };
 
         let el = match display {
-            TileDisplay::Icon => {
+            KeyDisplay::Icon => {
                 let content: SharedString = icon
                     .filter(|s| !s.is_empty())
                     .or_else(|| label.chars().next().map(|c| c.to_string().into()))
                     .unwrap_or_default();
                 styled.w(px(theme::BUTTON_WIDGET_ICON_SIZE)).child(content)
             }
-            TileDisplay::Text => match fixed_width {
+            KeyDisplay::Text => match fixed_width {
                 Some(w) => styled
                     .w(w)
                     .overflow_hidden()

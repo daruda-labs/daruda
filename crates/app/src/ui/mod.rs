@@ -11,6 +11,7 @@
 //! call site reads as one line: `crate::ui::button_primary("save", "Save")`.
 
 pub mod accordion;
+pub mod agent_status_badge;
 pub mod alert;
 pub mod badge;
 pub mod button;
@@ -24,15 +25,15 @@ pub mod input;
 pub mod input_panel;
 pub mod label;
 pub mod list;
-pub mod macro_tile;
+pub mod macro_key;
 pub mod radio;
 pub mod section_header;
 pub mod select;
-pub mod status_indicator;
 pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
 
+pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, color_for_status};
 pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
@@ -50,10 +51,9 @@ pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,
 };
 pub use label::Label;
-pub use macro_tile::{MacroTile, TileDisplay};
+pub use macro_key::{KeyDisplay, MacroKey};
 pub use radio::{Radio, radio};
 pub use section_header::SectionHeader;
-pub use status_indicator::{IndicatorSize, StatusIndicator, color_for_status};
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};

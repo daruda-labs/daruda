@@ -11,8 +11,8 @@ use crate::path_ext::PathExt;
 use crate::surface::strings;
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
+use crate::workspace::file_viewer::{FileViewMode, PaneFileContent, PaneFileView};
 use crate::workspace::git_status_ops::git_status_color;
-use crate::workspace::pane_file_view::{FileViewMode, PaneFileContent, PaneFileView};
 
 /// Toolbar: path label on the left, Raw/Changes tabs + optional controls + × on the right.
 pub(super) fn render_file_viewer_toolbar(

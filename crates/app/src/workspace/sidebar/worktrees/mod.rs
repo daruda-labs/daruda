@@ -1,6 +1,6 @@
 //! Worktrees view — list of worktrees plus modals for create/remove.
 //!
-//! Renders into the left dock when `sidebar_view == Worktrees`. The
+//! Renders into the left dock when `left_left_sidebar_view == Worktrees`. The
 //! modal state lives on `Workspace` because it needs to outlive any
 //! single render and survive view-tab switches.
 

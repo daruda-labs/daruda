@@ -97,9 +97,9 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.panes.push(pane);
-        self.tabs.push(super::pane::Tab {
+        self.tabs.push(super::pane::TabEntry {
             id: tab_id,
-            layout: PaneLayout::Leaf(pane_id),
+            layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
@@ -116,7 +116,7 @@ impl Workspace {
     /// deduplicated — each `[+ New]` click is a fresh draft.
     pub(in crate::workspace) fn find_task_edit_pane(&self, task_id: &str) -> Option<PaneId> {
         self.panes.iter().find_map(|p| match &p.content {
-            PaneContent::TaskEdit(te) if te.task_id.as_deref() == Some(task_id) => Some(p.id),
+            PaneContent::TaskEditPane(te) if te.task_id.as_deref() == Some(task_id) => Some(p.id),
             _ => None,
         })
     }
@@ -283,7 +283,7 @@ impl Workspace {
 
         Pane {
             id: pane_id,
-            content: PaneContent::TaskEdit(TaskEditContent {
+            content: PaneContent::TaskEditPane(TaskEditContent {
                 task_id,
                 title_input,
                 branch_input,
@@ -408,7 +408,7 @@ impl Workspace {
     ) -> Option<&TaskEditContent> {
         let pane = self.panes.iter().find(|p| p.id == pane_id)?;
         match &pane.content {
-            PaneContent::TaskEdit(te) => Some(te),
+            PaneContent::TaskEditPane(te) => Some(te),
             _ => None,
         }
     }

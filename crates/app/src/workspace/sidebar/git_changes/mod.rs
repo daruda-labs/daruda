@@ -20,7 +20,7 @@ use crate::ui::{
     ButtonVariants as _, ContextMenuItem, IconName, SectionHeader, button, button_bare,
 };
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::LeftDockSnap;
+use crate::workspace::dock_snap::LeftSidebarSnapshot;
 use crate::workspace::git_status_ops::git_status_color;
 use crate::workspace::path_drag::PathDrag;
 use crate::worktree::git::GitFileEntry;
@@ -30,7 +30,10 @@ use crate::worktree::paths::WorktreePaths;
 // Entry point
 // ----------------------------------------------------------------
 
-pub(in crate::workspace) fn render(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &LeftSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let active_id = snap.active_worktree_id;
     let active_wt = snap.worktrees.iter().find(|w| w.id == active_id);
 
@@ -272,7 +275,7 @@ pub(in crate::workspace) fn ordered_visible_paths(
 fn view_header(
     worktree_id: WorktreeId,
     branch: &str,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     use crate::ui::Disableable as _;
@@ -378,7 +381,7 @@ fn summary_bar(
     unstaged_count: usize,
     in_flight: bool,
     worktree_id: WorktreeId,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
@@ -520,7 +523,7 @@ fn dir_header(
     entries: &[UnifiedEntry],
     worktree_id: WorktreeId,
     wt_paths: &WorktreePaths<'_>,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
     let workspace_toggle = snap.workspace.clone();
@@ -680,7 +683,7 @@ fn unified_file_row(
     wt_paths: &WorktreePaths<'_>,
     selected: Option<&(WorktreeId, PathBuf, bool)>,
     is_cursor: bool,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
     let path = entry.path.clone();
@@ -927,7 +930,7 @@ fn unified_file_row(
         )
         // Status badge — single letter (M / A / D / R / ?) coloured by
         // stage state. Same shape as the file-viewer toolbar's status
-        // badge (`render_file_viewer/toolbar.rs`) so the sidebar and
+        // badge (`file_viewer/render/toolbar.rs`) so the sidebar and
         // toolbar share one visual vocabulary.
         .child(
             div()
@@ -1008,7 +1011,7 @@ fn unified_file_row(
 // Commit footer — InputPanel (TextArea + Commit / Push buttons)
 // ----------------------------------------------------------------
 
-fn commit_footer(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> impl IntoElement {
+fn commit_footer(snap: &LeftSidebarSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
     let border = theme::current(cx).git_commit_border;
     div()
         .flex()
@@ -1062,7 +1065,7 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
 
 fn loading_placeholder(
     worktree_id: WorktreeId,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let text_color = theme::current(cx).faint_text;
@@ -1099,7 +1102,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
 
 fn non_git_placeholder(
     worktree_id: WorktreeId,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();

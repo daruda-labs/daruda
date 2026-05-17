@@ -18,8 +18,8 @@
 //! Per-session rows are sorted with the most recently updated session
 //! at the top; cost is computed off the workspace-wide pricing
 //! resolved from `[usage.pricing]` and snapshotted into
-//! `RightDockSnap::usage_pricing` each frame. Gauges and the status
-//! pill draw their data from `RightDockSnap::plan_limits` /
+//! `RightSidebarSnapshot::usage_pricing` each frame. Gauges and the status
+//! pill draw their data from `RightSidebarSnapshot::plan_limits` /
 //! `service_status`, refreshed by `limits_pump` every
 //! `[usage.poll]` interval.
 //!
@@ -37,7 +37,7 @@ use daruda_claude::usage::{SessionUsage, UsagePricing};
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::dock::Dock;
-use super::super::dock_snap::RightDockSnap;
+use super::super::dock_snap::RightSidebarSnapshot;
 use crate::surface::strings;
 use crate::ui::Divider;
 
@@ -54,7 +54,10 @@ use crate::ui::Badge;
 /// When the window filter excludes every session the body falls
 /// back to an empty-state message but still shows the dropdown so
 /// the user can switch to `Lifetime` and see their data.
-pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let usage = &snap.usage;
     let cutoff = snap.usage_window.cutoff(SystemTime::now());
     let pricing = &snap.usage_pricing;
@@ -96,7 +99,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>)
 /// time-window dropdown. Stacking vertically lets the status row
 /// span the dock width while keeping the dropdown reachable on a
 /// dedicated line.
-fn header_row(snap: &RightDockSnap, cx: &gpui::App) -> impl IntoElement {
+fn header_row(snap: &RightSidebarSnapshot, cx: &gpui::App) -> impl IntoElement {
     div()
         .flex()
         .flex_col()

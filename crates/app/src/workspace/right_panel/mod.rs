@@ -1,11 +1,11 @@
 //! Right-dock four-tab panel (Usage / Skills / Tools / Tasks).
 
 use crate::ui::theme;
-use daruda_store::project::RightPanelView;
+use daruda_store::project::RightSidebarView;
 use gpui::{AnyElement, App, Context, IntoElement, ScrollHandle, div, prelude::*, px};
 
 use super::dock::Dock;
-use super::dock_snap::RightDockSnap;
+use super::dock_snap::RightSidebarSnapshot;
 
 pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
@@ -24,12 +24,15 @@ pub(in crate::workspace) mod view_tabs;
 /// dock wrapper sets `overflow_hidden`, which would otherwise clip
 /// without offering any way to scroll. A scrollbar thumb overlay sits
 /// on top of the scroll viewport so the user can see scroll position.
-pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>) -> AnyElement {
-    let body = match snap.right_panel_view {
-        RightPanelView::Usage => usage::render(snap, cx),
-        RightPanelView::Skills => skills::render(snap, cx),
-        RightPanelView::Tasks => tasks::render(snap, cx),
-        RightPanelView::Tools => tools::render(snap, cx),
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
+    let body = match snap.right_sidebar_view {
+        RightSidebarView::Usage => usage::render(snap, cx),
+        RightSidebarView::Skills => skills::render(snap, cx),
+        RightSidebarView::Tasks => tasks::render(snap, cx),
+        RightSidebarView::Tools => tools::render(snap, cx),
     };
     let handle = snap.right_panel_scroll_handle.clone();
     div()

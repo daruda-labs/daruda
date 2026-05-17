@@ -80,27 +80,30 @@ fn test_left_dock_active_panel_matches_default_sidebar_view(cx: &mut TestAppCont
 fn test_set_sidebar_view_updates_sidebar_view(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::GitChanges, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::GitChanges, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.sidebar_view,
-            daruda_store::project::SidebarView::GitChanges
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::GitChanges
         );
     });
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
-    });
-    ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
-    });
-    ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Worktrees, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.sidebar_view,
-            daruda_store::project::SidebarView::Worktrees
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Files
+        );
+    });
+    ws.update(cx, |ws, cx| {
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Worktrees, cx);
+    });
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Worktrees
         );
     });
 }
@@ -110,17 +113,23 @@ fn test_set_sidebar_view_no_op_when_same(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     // First call switches to Files.
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+        assert_eq!(
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Files
+        );
     });
-    // Second call with the same view should be a no-op (sidebar_view unchanged).
+    // Second call with the same view should be a no-op (left_sidebar_view unchanged).
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.sidebar_view, daruda_store::project::SidebarView::Files);
+        assert_eq!(
+            ws.left_sidebar_view,
+            daruda_store::project::LeftSidebarView::Files
+        );
     });
 }
 

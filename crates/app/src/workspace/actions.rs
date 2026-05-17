@@ -139,7 +139,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::SidebarView::Worktrees, cx);
+        self.set_sidebar_view(daruda_store::project::LeftSidebarView::Worktrees, cx);
     }
 
     pub(in crate::workspace) fn on_show_sidebar_git(
@@ -148,7 +148,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::SidebarView::GitChanges, cx);
+        self.set_sidebar_view(daruda_store::project::LeftSidebarView::GitChanges, cx);
     }
 
     pub(in crate::workspace) fn on_show_sidebar_files(
@@ -157,7 +157,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::SidebarView::Files, cx);
+        self.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
     }
 
     // ---- Right panel view switches ----
@@ -168,7 +168,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Usage, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Usage, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_skills(
@@ -177,7 +177,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Skills, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tools(
@@ -186,7 +186,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Tools, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Tools, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tasks(
@@ -195,7 +195,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Tasks, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Tasks, cx);
     }
 
     pub(in crate::workspace) fn on_new_skill(
@@ -204,7 +204,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Skills, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
         self.open_create_skill_modal(None, window, cx);
     }
 
@@ -246,7 +246,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_panel_view(daruda_store::project::RightPanelView::Skills, cx);
+        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
         let handle = self.skill_search_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
     }

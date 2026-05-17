@@ -13,7 +13,7 @@ use super::row::{diff_selectable_row, diff_visual_row};
 use super::virtual_list::virtual_range;
 use crate::surface::strings;
 use crate::workspace::Workspace;
-use crate::workspace::pane_file_view::{
+use crate::workspace::file_viewer::{
     CharSelection, FileViewMode, PaneFileContent, PaneFileView, VisualRow, VisualRowKind,
 };
 

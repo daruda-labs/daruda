@@ -22,10 +22,9 @@ app/src/
 │   ├── actions.rs        # Trivial `on_*` action-handler shims
 │   ├── dock_ops.rs       # Dock toggle + divider / dock drag state
 │   ├── file_tree_ops/    # Sidebar Files view ops (mod.rs + walker.rs)
-│   ├── pane_file_view/   # File-viewer data model + diff parser
+│   ├── file_viewer/      # File-viewer data model + diff parser (mod.rs) + renderers (render/)
 │   ├── persistence.rs    # save_state / restore_state / rebuild_layout / WorktreeRuntime
 │   ├── render/           # GPUI render — impl Render in mod.rs, layout walker in layout.rs
-│   ├── render_file_viewer/ # Pane-area file viewer renderers
 │   ├── resize.rs         # `resize_all_tabs` — propagate viewport size to PTYs + views
 │   ├── worktree_ops.rs   # Worktree create/remove/activate + branch sanitization
 │   ├── sidebar/          # Left-dock sidebar per-view subdirectories
@@ -179,8 +178,9 @@ slot regardless of which fields are visible.
 | `actions.rs` | Trivial `on_*` one-liner shims forwarding to business logic. |
 | `resize.rs` | `resize_all_tabs` — propagates viewport changes to PTY grids and `TerminalView`. |
 | `file_tree_ops/` | Files view ops. `mod.rs`: `VisibleEntry` + workspace ops. `walker.rs`: pure `walk_into`/`visible_from`. |
-| `pane_file_view/mod.rs` | `PaneFileView`, `PaneFileContent`, `FileViewerSearch`, `VisualRow`, `CharSelection`. |
-| `pane_file_view/diff_parser.rs` | `DiffHunk`/`DiffLine`, `parse_diff_hunks`. |
+| `file_viewer/mod.rs` | `PaneFileView`, `PaneFileContent`, `FileViewerSearch`, `VisualRow`, `CharSelection`. |
+| `file_viewer/diff_parser.rs` | `DiffHunk`/`DiffLine`, `parse_diff_hunks`. |
+| `file_viewer/render/` | Pane-area file viewer renderers (`render_pane_file_viewer` entry point). |
 | `dock.rs` | `Dock { position, is_open, size, panels, active_panel }`. |
 | `command_palette.rs` | `Cmd+Shift+P`. `PALETTE_ENTRIES` const array. Substring fuzzy filter. |
 | `status_bar.rs` | `StatusBarData` snapshot. Surfaces cwd, branch, agent status, transient error. |

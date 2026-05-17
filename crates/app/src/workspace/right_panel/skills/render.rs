@@ -1,5 +1,5 @@
 //! Skills tab body — renders the project + personal skill scopes
-//! pulled from `RightDockSnap::skills` (a snapshot of `Workspace::skills`).
+//! pulled from `RightSidebarSnapshot::skills` (a snapshot of `Workspace::skills`).
 //!
 //! Layout:
 //! ```text
@@ -22,14 +22,17 @@ use crate::ui::theme::DarudaTheme;
 use gpui::{AnyElement, Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::super::super::dock::Dock;
-use super::super::super::dock_snap::RightDockSnap;
+use super::super::super::dock_snap::RightSidebarSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
 use crate::ui::Divider;
 use crate::workspace::Workspace;
 
 /// Render the Skills tab body.
-pub(in crate::workspace) fn render(snap: &RightDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &RightSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let skills = &snap.skills;
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();
@@ -147,11 +150,11 @@ fn filter_skills(skills: &[Skill], query_lower: &str) -> Vec<Skill> {
         .collect()
 }
 
-/// Search input row. Wraps `RightDockSnap::skill_search_input` in a
+/// Search input row. Wraps `RightSidebarSnapshot::skill_search_input` in a
 /// relative container so the in-field `✕` button can sit absolutely on
 /// the trailing edge. The icon only renders while the query is
 /// non-empty — the row collapses back to a plain input at rest.
-fn search_row(snap: &RightDockSnap, cx: &gpui::App, t: &DarudaTheme) -> impl IntoElement {
+fn search_row(snap: &RightSidebarSnapshot, cx: &gpui::App, t: &DarudaTheme) -> impl IntoElement {
     let has_query = !snap.skill_search_query.trim().is_empty();
     let chip_text = t.skill_aux_chip_text;
     let chip_hover_text = t.skill_name_text;

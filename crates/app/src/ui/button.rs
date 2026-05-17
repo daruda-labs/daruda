@@ -96,7 +96,7 @@ pub fn button_header_action(
         .label(icon)
 }
 
-/// `+` tile sized to align with [`crate::ui::MacroTile`] icon cells in
+/// `+` tile sized to align with [`crate::ui::MacroKey`] icon cells in
 /// the bottom-dock grid — square footprint with a dashed outline that
 /// fills bg on hover.
 pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {

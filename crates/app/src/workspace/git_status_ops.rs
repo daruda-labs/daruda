@@ -17,7 +17,7 @@ use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
 
-use super::pane_file_view::{FileViewMode, PaneFileContent};
+use super::file_viewer::{FileViewMode, PaneFileContent};
 use super::{CommitChanges, PushChanges, Workspace};
 
 // ----------------------------------------------------------------
@@ -296,9 +296,9 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.panes.push(pane);
-        self.tabs.push(super::pane::Tab {
+        self.tabs.push(super::pane::TabEntry {
             id: tab_id,
-            layout: super::layout::PaneLayout::Leaf(pane_id),
+            layout: super::layout::PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });

@@ -1,4 +1,4 @@
-//! Pane and Tab types + PTY lifecycle management.
+//! Pane and TabEntry types + PTY lifecycle management.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,8 +16,8 @@ use gpui::{
 use portable_pty::MasterPty;
 
 use super::Workspace;
+use super::file_viewer::PaneFileView;
 use super::layout::{PaneId, PaneLayout};
-use super::pane_file_view::PaneFileView;
 use crate::path_ext::PathExt;
 use daruda_terminal::pty::{PtyConfig, PtyError, spawn_pty};
 
@@ -56,7 +56,7 @@ impl std::error::Error for PaneSpawnError {}
 pub(super) enum PaneContent {
     Terminal(TerminalContent),
     File(FileContent),
-    TaskEdit(TaskEditContent),
+    TaskEditPane(TaskEditContent),
 }
 
 /// PTY-backed terminal content. Owns the `TerminalView` entity, the
@@ -108,7 +108,7 @@ pub(super) struct FileContent {
 }
 
 /// Markdown-form editor pane for a single Task — replaces the old
-/// Create / Edit modals (R-19 / I-1). Lives at the same `PaneLayout::Leaf`
+/// Create / Edit modals (R-19 / I-1). Lives at the same `PaneLayout::Pane`
 /// level as Terminal and File so users can split a TaskEdit alongside
 /// a running shell. `task_id = None` means this is a draft (R-19 / I-7):
 /// nothing is persisted to `tasks.json` until the user presses
@@ -305,7 +305,7 @@ impl PaneContent {
         match self {
             PaneContent::Terminal(_) => None,
             PaneContent::File(f) => Some(&f.focus_handle),
-            PaneContent::TaskEdit(te) => Some(&te.focus_handle),
+            PaneContent::TaskEditPane(te) => Some(&te.focus_handle),
         }
     }
 }
@@ -316,7 +316,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_title.clone(),
             PaneContent::File(f) => f.cached_title.clone(),
-            PaneContent::TaskEdit(te) => te.cached_title.clone(),
+            PaneContent::TaskEditPane(te) => te.cached_title.clone(),
         }
     }
 
@@ -330,7 +330,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
             PaneContent::File(f) => f.view.path.parent(),
-            PaneContent::TaskEdit(_) => None,
+            PaneContent::TaskEditPane(_) => None,
         }
     }
 
@@ -348,7 +348,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
-            PaneContent::TaskEdit(te) => te.focus_handle.clone(),
+            PaneContent::TaskEditPane(te) => te.focus_handle.clone(),
         }
     }
 
@@ -360,7 +360,7 @@ impl Pane {
     pub(super) fn terminal_view(&self) -> Option<&Entity<TerminalView>> {
         match &self.content {
             PaneContent::Terminal(t) => Some(&t.view),
-            PaneContent::File(_) | PaneContent::TaskEdit(_) => None,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
         }
     }
 
@@ -376,7 +376,7 @@ impl Pane {
                 Some(tx) => tx.send(bytes.to_vec()).is_ok(),
                 None => false,
             },
-            PaneContent::File(_) | PaneContent::TaskEdit(_) => false,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
         }
     }
 
@@ -384,7 +384,7 @@ impl Pane {
     pub(super) fn file_content(&self) -> Option<&FileContent> {
         match &self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::TaskEdit(_) => None,
+            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
         }
     }
 
@@ -394,7 +394,7 @@ impl Pane {
     pub(super) fn file_content_mut(&mut self) -> Option<&mut FileContent> {
         match &mut self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::TaskEdit(_) => None,
+            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
         }
     }
 
@@ -403,7 +403,7 @@ impl Pane {
     /// and the layout serializer to skip draft panes (R-19 / B-5).
     pub(super) fn task_edit_content(&self) -> Option<&TaskEditContent> {
         match &self.content {
-            PaneContent::TaskEdit(te) => Some(te),
+            PaneContent::TaskEditPane(te) => Some(te),
             PaneContent::Terminal(_) | PaneContent::File(_) => None,
         }
     }
@@ -414,7 +414,7 @@ impl Pane {
     /// pane after a state mutation.
     pub(super) fn task_edit_content_mut(&mut self) -> Option<&mut TaskEditContent> {
         match &mut self.content {
-            PaneContent::TaskEdit(te) => Some(te),
+            PaneContent::TaskEditPane(te) => Some(te),
             PaneContent::Terminal(_) | PaneContent::File(_) => None,
         }
     }
@@ -426,7 +426,7 @@ impl Pane {
     pub(super) fn is_dirty(&self, cx: &App) -> bool {
         match &self.content {
             PaneContent::Terminal(_) | PaneContent::File(_) => false,
-            PaneContent::TaskEdit(te) => te.is_dirty(cx),
+            PaneContent::TaskEditPane(te) => te.is_dirty(cx),
         }
     }
 
@@ -437,7 +437,7 @@ impl Pane {
     pub(super) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
             PaneContent::Terminal(_) | PaneContent::File(_) => false,
-            PaneContent::TaskEdit(te) => {
+            PaneContent::TaskEditPane(te) => {
                 !matches!(te.branch_validation, BranchValidation::Invalid { .. })
                     && !te.title_input.read(cx).value().trim().is_empty()
             }
@@ -472,7 +472,7 @@ impl Pane {
     ) -> bool {
         match &mut self.content {
             PaneContent::Terminal(t) => t.update_cached(new_title, new_cwd),
-            PaneContent::File(_) | PaneContent::TaskEdit(_) => false,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
         }
     }
 
@@ -493,7 +493,7 @@ impl Pane {
             PaneContent::Terminal(t) => {
                 t.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
             }
-            PaneContent::File(_) | PaneContent::TaskEdit(_) => true,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) => true,
         }
     }
 }
@@ -626,7 +626,7 @@ pub(super) fn cwd_basename(cwd: Option<&std::path::Path>) -> Option<SharedString
 }
 
 #[allow(dead_code)]
-pub(super) struct Tab {
+pub(super) struct TabEntry {
     pub(super) id: u64,
     pub(super) layout: PaneLayout,
     pub(super) last_focused_pane: PaneId,

@@ -19,7 +19,7 @@ use syntect::{
     parsing::SyntaxSet,
 };
 
-use super::pane_file_view::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
+use super::file_viewer::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
 use crate::ui::theme as dt_theme;
 
 // ----------------------------------------------------------------
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn highlight_hunks_plain_text_fallback() {
-        use super::super::pane_file_view::parse_diff_hunks;
+        use super::super::file_viewer::parse_diff_hunks;
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // "plain text" syntax produces no meaningful tokens — spans may be empty

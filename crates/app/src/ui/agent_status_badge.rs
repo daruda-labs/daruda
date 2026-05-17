@@ -66,7 +66,7 @@ pub fn color_for_status(status: SessionStatus, cx: &App) -> Hsla {
 
 /// Stateless GPUI element rendering one of four animation modes.
 #[derive(IntoElement)]
-pub struct StatusIndicator {
+pub struct AgentStatusBadge {
     status: SessionStatus,
     size: IndicatorSize,
     color: Hsla,
@@ -75,7 +75,7 @@ pub struct StatusIndicator {
     active: bool,
 }
 
-impl StatusIndicator {
+impl AgentStatusBadge {
     pub fn new(status: SessionStatus, size: IndicatorSize, color: Hsla) -> Self {
         Self {
             status,
@@ -100,7 +100,7 @@ impl StatusIndicator {
     }
 }
 
-impl RenderOnce for StatusIndicator {
+impl RenderOnce for AgentStatusBadge {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let dim = self.size.dim();
         let inner = match self.status {

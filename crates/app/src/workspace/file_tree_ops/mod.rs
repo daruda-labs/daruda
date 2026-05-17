@@ -27,7 +27,7 @@ use daruda_store::project::WorktreeId;
 use gpui::{Context, ScrollStrategy};
 
 use super::Workspace;
-use super::pane_file_view::FileViewMode;
+use super::file_viewer::FileViewMode;
 use crate::files::gitignore::GitignoreSet;
 use crate::files::load::load_dir;
 use crate::files::tree::{EntryId, EntryKind, FileTree, FileTreeError, LoadedEntry};

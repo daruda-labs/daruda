@@ -41,14 +41,14 @@ use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
 use crate::shell_quote::{format_paths_for_drop, quote_path};
-use crate::workspace::bottom::tab_strip::nearest_row_preset;
+use crate::workspace::bottom_panel::tab_strip::nearest_row_preset;
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::BottomDockSnap;
+use crate::workspace::dock_snap::BottomDockSnapshot;
 use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.
 pub(in crate::workspace) fn render_body(
-    snap: &BottomDockSnap,
+    snap: &BottomDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
     let state = snap.terminal_input.clone();

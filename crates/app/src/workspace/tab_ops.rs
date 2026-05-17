@@ -3,7 +3,7 @@ use gpui::{Context, Window};
 use super::Workspace;
 use super::layout::{PaneId, PaneLayout, collect_pane_rects};
 use super::nav::{NavDirection, pane_in_direction};
-use super::pane::Tab;
+use super::pane::TabEntry;
 
 impl Workspace {
     /// Set the user-visible window title (Window > Edit Window Title…).
@@ -31,9 +31,9 @@ impl Workspace {
         let tab_id = self.alloc_id();
 
         self.panes.push(pane);
-        self.tabs.push(Tab {
+        self.tabs.push(TabEntry {
             id: tab_id,
-            layout: PaneLayout::Leaf(pane_id),
+            layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });

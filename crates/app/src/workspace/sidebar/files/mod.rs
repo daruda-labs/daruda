@@ -19,13 +19,16 @@ use crate::files::tree::EntryKind;
 use crate::surface::strings;
 use crate::ui::{ButtonVariants as _, IconName, SectionHeader, button_bare};
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::LeftDockSnap;
+use crate::workspace::dock_snap::LeftSidebarSnapshot;
 use crate::workspace::file_tree_ops::VisibleEntry;
 use crate::workspace::git_status_ops::{git_status_color, git_status_symbol};
 use crate::workspace::path_drag::PathDrag;
 use gpui::UniformListScrollHandle;
 
-pub(in crate::workspace) fn render(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &LeftSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     let active_id = snap.active_worktree_id;
     let visible = snap.cached_visible.clone();
     let count = visible.len();
@@ -171,7 +174,7 @@ fn build_files_scrollbar(
 
 fn view_header(
     _worktree_id: WorktreeId,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();

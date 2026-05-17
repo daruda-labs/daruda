@@ -3,7 +3,7 @@
 //! to click immediately.
 
 use super::{
-    ButtonDisplay, ButtonWidget, PanelTab, PanelsState, SCHEMA_VERSION, TabLayout, Widget,
+    ButtonDisplay, ButtonWidget, MacroKey, PanelTab, PanelsState, SCHEMA_VERSION, TabLayout,
     new_tab_id, new_widget_id,
 };
 
@@ -26,7 +26,7 @@ pub fn seed_default() -> PanelsState {
     let widgets = SEED_AI_ENTRIES
         .iter()
         .map(|(label, send)| {
-            Widget::Button(ButtonWidget {
+            MacroKey::Button(ButtonWidget {
                 id: new_widget_id(),
                 label: (*label).to_string(),
                 send: (*send).to_string(),

@@ -9,7 +9,7 @@ use gpui::{App, div, prelude::*, px};
 
 use super::content_element::FileViewerContentElement;
 use crate::workspace::Workspace;
-use crate::workspace::pane_file_view::{CharSelection, VisualRow, VisualRowKind};
+use crate::workspace::file_viewer::{CharSelection, VisualRow, VisualRowKind};
 
 /// Render a diff hunk-header row (the `@@ -N +M @@` line). Not selectable.
 pub(super) fn diff_visual_row(

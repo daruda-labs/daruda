@@ -1,10 +1,14 @@
-//! Data model and diff parser for the pane-area file viewer.
+//! Data model and diff parser for the file viewer.
 //!
 //! The viewer replaces the terminal area in the focused pane only while
 //! a file or diff is open. PTY processes keep running; removing the view
 //! from the render tree does not affect Entity lifetime.
+//!
+//! Rendering lives in the sibling `render/` module.
 
 mod diff_parser;
+
+pub mod render;
 
 pub(in crate::workspace) use diff_parser::{DiffHunk, DiffLine, parse_diff_hunks};
 

@@ -1,5 +1,5 @@
 //! Worktrees view — list of worktrees plus a section header. Rendered
-//! into the left dock when `sidebar_view == Worktrees`.
+//! into the left dock when `left_left_sidebar_view == Worktrees`.
 //!
 //! W-2 milestone: bootstrap + list render only. Create / remove /
 //! rename flow arrives in W-5, context menu in W-8, git kind upgrade
@@ -20,7 +20,7 @@ use crate::ui::dialog::ButtonVariant;
 use crate::surface::strings as surface_strings;
 use crate::ui::{ButtonVariants as _, ContextMenuItem, IconName, SectionHeader, button_bare};
 use crate::workspace::dock::Dock;
-use crate::workspace::dock_snap::LeftDockSnap;
+use crate::workspace::dock_snap::LeftSidebarSnapshot;
 use crate::worktree::Worktree;
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
@@ -64,7 +64,10 @@ impl Render for DraggedWorktreeGhost {
 // ----------------------------------------------------------------
 
 /// Render the Worktrees view body.
-pub(in crate::workspace) fn render(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    snap: &LeftSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> AnyElement {
     if snap.worktrees.is_empty() {
         return empty_state(cx).into_any_element();
     }
@@ -98,7 +101,10 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnap, cx: &mut Context<Dock>) 
 }
 
 /// "Claude Code integration disabled" banner. Click → install action.
-fn claude_install_banner(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> impl IntoElement + use<> {
+fn claude_install_banner(
+    snap: &LeftSidebarSnapshot,
+    cx: &mut Context<Dock>,
+) -> impl IntoElement + use<> {
     let workspace = snap.workspace.clone();
     let t = theme::current(cx);
     let bg = t.claude_banner_bg;
@@ -172,7 +178,7 @@ fn claude_install_banner(snap: &LeftDockSnap, cx: &mut Context<Dock>) -> impl In
 
 fn section_header(
     any_git: bool,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let workspace = snap.workspace.clone();
@@ -212,7 +218,7 @@ fn section_header(
 
 /// Build the `M3 ?1` change-count badge string for worktree `id` from
 /// the cached git status.  Returns `None` when no status is cached yet.
-fn git_badge_for(snap: &LeftDockSnap, id: WorktreeId) -> Option<String> {
+fn git_badge_for(snap: &LeftSidebarSnapshot, id: WorktreeId) -> Option<String> {
     let status = snap.git_status_cache.get(&id)?;
     // Unstaged entries are identified by the y column, not x.
     let modified = status.staged.len()
@@ -240,7 +246,7 @@ fn worktree_row(
     is_active: bool,
     tab_count: usize,
     git_badge: Option<String>,
-    snap: &LeftDockSnap,
+    snap: &LeftSidebarSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     // Snapshot every row colour from the live theme so the closures

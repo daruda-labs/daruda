@@ -10,11 +10,11 @@
 //! via [`FileViewMode`].
 
 use crate::path_ext::PathExt;
-use crate::workspace::highlighter::{highlight_hunks, highlight_raw_rows};
-use crate::workspace::pane_file_view::{
+use crate::workspace::file_viewer::{
     FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
     parse_diff_hunks,
 };
+use crate::workspace::highlighter::{highlight_hunks, highlight_raw_rows};
 use crate::workspace::word_diff::apply_word_diff;
 
 /// Load file content for the pane-area file viewer. Called from a background task.

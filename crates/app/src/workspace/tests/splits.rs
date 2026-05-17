@@ -79,7 +79,7 @@ async fn test_close_pane_in_split(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.tabs.len(), 1);
         assert_eq!(ws.panes.len(), 1);
-        assert!(matches!(ws.tabs[0].layout, PaneLayout::Leaf(_)));
+        assert!(matches!(ws.tabs[0].layout, PaneLayout::Pane(_)));
     });
 }
 

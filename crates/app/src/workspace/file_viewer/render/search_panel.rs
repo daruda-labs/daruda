@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, IntoElement, MouseButton, MouseDownEvent, div, p
 
 use crate::surface::strings;
 use crate::workspace::Workspace;
-use crate::workspace::pane_file_view::FileViewerSearch;
+use crate::workspace::file_viewer::FileViewerSearch;
 
 /// Floating search panel — top-right corner, below the toolbar.
 pub(super) fn render_search_panel(
