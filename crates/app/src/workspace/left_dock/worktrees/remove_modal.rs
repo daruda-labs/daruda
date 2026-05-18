@@ -113,6 +113,14 @@ impl RemoveWorktreeModal {
         let path: PathBuf = self.plan.path.clone();
         let force = self.allow_force;
         let target_id = self.target_id;
+        let active_project = workspace
+            .upgrade()
+            .map(|w| w.read(cx).active_ref().project)
+            .unwrap_or_default();
+        let target_ref = daruda_store::project::WorktreeRef {
+            project: active_project,
+            worktree: target_id,
+        };
         // Branch deletion only fires when the user explicitly opted
         // in *and* the worktree actually has a named branch.
         let branch_to_delete = if self.delete_branch_too {
@@ -146,7 +154,7 @@ impl RemoveWorktreeModal {
                         Ok(()) => {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(app_cx, |ws, cx| {
-                                    ws.finalize_remove_worktree(target_id, window, cx);
+                                    ws.finalize_remove_worktree(target_ref, window, cx);
                                 });
                             }
                             me.update(app_cx, |modal, cx| {

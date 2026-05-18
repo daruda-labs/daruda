@@ -216,27 +216,30 @@ pub struct Workspace {
     /// 18 sub-fields don't clutter `Workspace`'s top level. See
     /// [`claude_session_ops::ClaudeContext`].
     pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
-    /// Worktrees for this project. Always non-empty when `project` is
-    /// `Some` (Workspace::new_with_project bootstraps one default entry).
-    /// `tabs`/`panes` still live on `Workspace` until W-3 migrates
-    /// them into `Worktree`.
-    pub(in crate::workspace) worktrees: Vec<crate::worktree::Worktree>,
-    /// ID of the visible worktree. Meaningful only when `worktrees`
-    /// is non-empty.
-    pub(in crate::workspace) active_worktree_id: daruda_store::project::WorktreeId,
+    /// Runtime projects in this workspace. Zero entries = empty
+    /// (Welcome screen). One entry = single-project window (current
+    /// behaviour); commit c onward allows multiple. Each project owns
+    /// its own worktrees, so the per-project worktree list is reached
+    /// via `projects[i].worktrees`. `tabs`/`panes` still live on the
+    /// active worktree's `MainAreaContext` slot until W-3 migrates
+    /// them into the runtime struct.
+    pub(in crate::workspace) projects: Vec<crate::project::Project>,
+    /// Active (project, worktree) pair. When `projects` is non-empty,
+    /// always points at a live entry — kept normalized by
+    /// `activate_worktree` and `finalize_remove_*` paths.
+    pub(in crate::workspace) active: daruda_store::project::WorktreeRef,
     /// Bottom dock (terminal panel, problems, output).
     pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
     /// Right dock (file explorer, git changes).
     pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
     /// Command palette state (Cmd+Shift+P).
     pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
-    /// Active project. None = empty workspace (no project root).
-    pub(in crate::workspace) project: Option<daruda_store::project::Project>,
-    /// Cached git status per worktree. Refreshed when the Git Changes
-    /// view is activated or after a commit. Only entries that have been
-    /// fetched at least once are present; missing = "not yet loaded".
+    /// Cached git status per (project, worktree). Refreshed when the
+    /// Git Changes view is activated or after a commit. Only entries
+    /// that have been fetched at least once are present; missing =
+    /// "not yet loaded".
     pub(in crate::workspace) git_status_cache:
-        HashMap<daruda_store::project::WorktreeId, crate::worktree::git::GitStatusData>,
+        HashMap<daruda_store::project::WorktreeRef, crate::worktree::git::GitStatusData>,
     /// Left-dock Files view state — per-worktree lazy tree, watcher,
     /// gitignore matcher, scroll handle, keyboard cursor. Grouped
     /// into one struct so the 12 sub-fields don't clutter
@@ -245,11 +248,11 @@ pub struct Workspace {
     /// Per-worktree "git status currently running" guard. Watcher
     /// events can arrive faster than `git status` can complete on a
     /// large repo; this keeps at most one in-flight task per worktree.
-    pub(in crate::workspace) git_status_in_flight: HashSet<daruda_store::project::WorktreeId>,
+    pub(in crate::workspace) git_status_in_flight: HashSet<daruda_store::project::WorktreeRef>,
     /// Set of worktrees that asked for a status refresh while one was
     /// already running. Drained by the in-flight task on completion,
     /// re-firing once to capture intervening changes.
-    pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::WorktreeId>,
+    pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::WorktreeRef>,
     /// Mirror of `daruda_config::PanelsConfig::grid_columns`. Drives the
     /// bottom-dock macro tile grid column count.
     pub(in crate::workspace) panels_grid_columns: u8,
@@ -330,14 +333,14 @@ pub struct Workspace {
     /// (e.g. `"src/workspace/left_dock"`). In-memory only — collapse state
     /// resets on app restart by design.
     pub(in crate::workspace) git_collapsed_dirs:
-        std::collections::HashMap<daruda_store::project::WorktreeId, HashSet<String>>,
+        std::collections::HashMap<daruda_store::project::WorktreeRef, HashSet<String>>,
     /// Per-worktree keyboard cursor in the Git Changes view, stored as
     /// the file's repo-root-relative path (the same shape git status
     /// porcelain emits, so it round-trips into stage/unstage/diff ops
     /// without conversion). Path-keyed (not index-keyed) so refreshes
     /// that re-sort the list keep the cursor on the same file.
     pub(in crate::workspace) git_changes_cursor:
-        std::collections::HashMap<daruda_store::project::WorktreeId, std::path::PathBuf>,
+        std::collections::HashMap<daruda_store::project::WorktreeRef, std::path::PathBuf>,
     /// Focus handle for the Git Changes panel body. Bound to
     /// `key_context("GitChanges")` so the four arrow / Space / Enter
     /// keybindings only fire when the panel holds focus — otherwise
@@ -686,17 +689,16 @@ impl Workspace {
                 tool_use_failure_counts: HashMap::new(),
                 _limits_pumps: sync::limits::spawn(cx),
             },
-            // Bootstrap worktrees for this project. If git is
-            // installed and the path is a repo, every linked worktree
-            // becomes an entry (the one at project_root sorts to
-            // `id = 0` so it's the active one). Otherwise a single
-            // `Default` worktree is used. Skipped entirely for
-            // project-less windows.
-            worktrees: project
+            // Bootstrap projects for this workspace. When the caller
+            // supplies a project root, wrap it in a single runtime
+            // `Project` (id `0`) with its worktrees discovered from
+            // disk. Otherwise the workspace starts with no projects
+            // (Welcome path).
+            projects: project
                 .as_ref()
-                .map(|p| crate::worktree::Worktree::bootstrap_from_project(&p.root))
+                .map(|p| vec![crate::project::Project::bootstrap(0, p.root.clone())])
                 .unwrap_or_default(),
-            active_worktree_id: 0,
+            active: daruda_store::project::WorktreeRef::default(),
             bottom_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
@@ -706,7 +708,6 @@ impl Workspace {
                 })
             },
             command_palette: command::palette::CommandPaletteState::default(),
-            project: project.clone(),
             git_status_cache: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
                 file_trees: HashMap::new(),
@@ -795,7 +796,7 @@ impl Workspace {
             _settings_global_subscription: cx
                 .observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
                     let store = crate::settings_store::SettingsStore::global(cx);
-                    let worktree = ws.project.as_ref().map(|p| p.root.as_path());
+                    let worktree = ws.active_project().map(|p| p.root.as_path());
                     let effective = store.effective_for(worktree);
                     ws.apply_config(&effective, cx);
                 }),
@@ -895,10 +896,67 @@ impl Workspace {
         self.left_dock_view = view;
         self.mark_dirty_and_save(cx);
         if view == daruda_store::project::LeftDockView::GitChanges {
-            let id = self.active_worktree_id;
-            self.refresh_git_status(id, cx);
+            let target = self.active;
+            self.refresh_git_status(target, cx);
         }
         cx.notify();
+    }
+
+    /// Borrow the currently active project. `None` when the workspace
+    /// has no projects (Welcome state).
+    pub(in crate::workspace) fn active_project(&self) -> Option<&crate::project::Project> {
+        let active = self.active;
+        self.projects.iter().find(|p| p.id == active.project)
+    }
+
+    /// Mutably borrow the currently active project.
+    pub(in crate::workspace) fn active_project_mut(
+        &mut self,
+    ) -> Option<&mut crate::project::Project> {
+        let active = self.active;
+        self.projects.iter_mut().find(|p| p.id == active.project)
+    }
+
+    /// Borrow the currently active worktree (active project's active
+    /// worktree). `None` when no project is loaded.
+    pub(in crate::workspace) fn active_worktree(&self) -> Option<&crate::worktree::Worktree> {
+        let id = self.active.worktree;
+        self.active_project()?.worktree(id)
+    }
+
+    /// Mutably borrow the active worktree.
+    #[allow(dead_code)]
+    pub(in crate::workspace) fn active_worktree_mut(
+        &mut self,
+    ) -> Option<&mut crate::worktree::Worktree> {
+        let id = self.active.worktree;
+        self.active_project_mut()?.worktree_mut(id)
+    }
+
+    /// Resolve a `WorktreeRef` to its runtime worktree.
+    pub(in crate::workspace) fn worktree_for(
+        &self,
+        target: daruda_store::project::WorktreeRef,
+    ) -> Option<&crate::worktree::Worktree> {
+        self.projects
+            .iter()
+            .find(|p| p.id == target.project)?
+            .worktree(target.worktree)
+    }
+
+    /// Borrow the active project's worktree list. Empty when the
+    /// workspace has no projects (Welcome state).
+    pub(in crate::workspace) fn active_worktrees(&self) -> &[crate::worktree::Worktree] {
+        self.active_project()
+            .map(|p| p.worktrees.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// `WorktreeRef` pointing at the workspace's currently active
+    /// worktree. Convenience for call sites that already know the
+    /// active id but want the `WorktreeRef` form for HashMap lookups.
+    pub(in crate::workspace) fn active_ref(&self) -> daruda_store::project::WorktreeRef {
+        self.active
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

@@ -54,10 +54,7 @@ use crate::ui::Badge;
 /// When the window filter excludes every session the body falls
 /// back to an empty-state message but still shows the dropdown so
 /// the user can switch to `Lifetime` and see their data.
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let usage = &snap.usage;
     let cutoff = snap.usage_window.cutoff(SystemTime::now());
     let pricing = &snap.usage_pricing;

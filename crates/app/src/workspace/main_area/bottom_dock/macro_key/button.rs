@@ -14,8 +14,8 @@ use crate::surface::strings as surface_strings;
 use crate::ui::ContextMenuItem;
 use crate::ui::dialog::ButtonVariant;
 use crate::workspace::Workspace;
-use crate::workspace::layout::Dock;
 use crate::workspace::layout::BottomDockSnapshot;
+use crate::workspace::layout::Dock;
 
 /// Render one button widget. Returned element is sized for `flex_wrap`
 /// — text mode is auto-width, icon mode is fixed-square.

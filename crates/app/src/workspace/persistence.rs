@@ -18,8 +18,8 @@ use gpui::{App, Context, Window};
 use crate::path_ext::PathExt;
 
 use super::Workspace;
-use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
+use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
 /// Frozen runtime state of a non-active worktree. `activate_worktree`
 /// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
@@ -40,20 +40,36 @@ pub(in crate::workspace) struct WorktreeRuntime {
 
 impl Workspace {
     /// Serialize the current workspace state for persistence.
+    ///
+    /// During the multi-project rollout the on-disk format is still the
+    /// flat single-project [`daruda_store::project::ProjectState`]; the
+    /// new [`daruda_store::project::WorkspaceState`] shape is constructed
+    /// from this by the persistence-layer adapter. Only the active
+    /// project is serialized — multi-project save support lands in a
+    /// later commit.
     pub fn save_state(&self, cx: &App) -> Option<daruda_store::project::ProjectState> {
-        let project = self.project.as_ref()?;
+        let project = self.active_project()?;
+        let project_id = project.id;
         // Persist every worktree's tab tree. For the active worktree
         // the live `Workspace.tabs`/`panes` are the source; for
         // inactive worktrees the frozen runtime in
         // `inactive_worktree_runtimes` is used.
-        let worktrees: Vec<daruda_store::project::SerializedWorktree> = self
+        let worktrees: Vec<daruda_store::project::SerializedWorktree> = project
             .worktrees
             .iter()
             .map(|wt| {
                 let mut s = wt.to_serialized();
-                let (tabs_src, panes_src, active_idx) = if wt.id == self.active_worktree_id {
-                    (&self.main_area.tabs, &self.main_area.panes, self.main_area.active_tab_index)
-                } else if let Some(rt) = self.main_area.inactive_worktree_runtimes.get(&wt.id) {
+                let wt_ref = daruda_store::project::WorktreeRef {
+                    project: project_id,
+                    worktree: wt.id,
+                };
+                let (tabs_src, panes_src, active_idx) = if self.active == wt_ref {
+                    (
+                        &self.main_area.tabs,
+                        &self.main_area.panes,
+                        self.main_area.active_tab_index,
+                    )
+                } else if let Some(rt) = self.main_area.inactive_worktree_runtimes.get(&wt_ref) {
                     (&rt.tabs, &rt.panes, rt.active_tab_index)
                 } else {
                     return s;
@@ -74,7 +90,7 @@ impl Workspace {
         Some(daruda_store::project::ProjectState {
             root: project.root.clone(),
             worktrees,
-            active_worktree_id: self.active_worktree_id,
+            active_worktree_id: self.active.worktree,
             active_dock_view: self.left_dock_view,
             active_right_panel_view: self.right_dock_view,
             active_usage_window: self.claude.usage_window,
@@ -222,8 +238,10 @@ impl Workspace {
         // had top-level tabs gets its default worktree synthesized by
         // `ProjectState::migrate_legacy` before we get here, so this
         // is always non-empty when the file had any saved session.
-        if !state.worktrees.is_empty() {
-            self.worktrees = state
+        if !state.worktrees.is_empty()
+            && let Some(project) = self.projects.first_mut()
+        {
+            project.worktrees = state
                 .worktrees
                 .iter()
                 .map(crate::worktree::Worktree::from_serialized)
@@ -232,20 +250,23 @@ impl Workspace {
             // Re-apply the git-root → project-subdirectory anchor so
             // that state files saved before the bootstrap fix still
             // match Claude's `cwd` after restore.
-            if let Some(project_root) = self.project.as_ref().map(|p| p.root.as_path()) {
-                anchor_worktree_paths_to_project_root(&mut self.worktrees, project_root);
-            }
+            let project_root = project.root.clone();
+            anchor_worktree_paths_to_project_root(&mut project.worktrees, &project_root);
 
-            self.active_worktree_id = state.active_worktree_id;
+            self.active = daruda_store::project::WorktreeRef {
+                project: project.id,
+                worktree: state.active_worktree_id,
+            };
             // Clamp to a live worktree in case the saved id is stale.
-            if !self
+            if !project
                 .worktrees
                 .iter()
-                .any(|w| w.id == self.active_worktree_id)
-                && let Some(first) = self.worktrees.first()
+                .any(|w| w.id == self.active.worktree)
+                && let Some(first) = project.worktrees.first()
             {
-                self.active_worktree_id = first.id;
+                self.active.worktree = first.id;
             }
+            project.last_active_worktree_id = self.active.worktree;
         }
 
         // Nothing to rebuild — keep the single pane `new_with_project`
@@ -364,7 +385,13 @@ impl Workspace {
                 self.main_area.tab_history = runtime.tab_history;
                 active_focus = Some(runtime.focused_pane_id);
             } else {
-                self.main_area.inactive_worktree_runtimes.insert(swt.id, runtime);
+                let key = daruda_store::project::WorktreeRef {
+                    project: self.active.project,
+                    worktree: swt.id,
+                };
+                self.main_area
+                    .inactive_worktree_runtimes
+                    .insert(key, runtime);
             }
         }
 
@@ -384,8 +411,8 @@ impl Workspace {
         // active — the cache is always empty on startup so the left dock would
         // show the placeholder until the user clicked Refresh manually.
         if self.left_dock_view == daruda_store::project::LeftDockView::GitChanges {
-            let id = self.active_worktree_id;
-            self.refresh_git_status(id, cx);
+            let target = self.active;
+            self.refresh_git_status(target, cx);
         }
 
         // Kick off content loads for any restored File panes in the

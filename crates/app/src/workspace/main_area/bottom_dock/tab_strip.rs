@@ -27,8 +27,8 @@ use crate::ui::dialog::ButtonVariant;
 
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
-use crate::workspace::layout::Dock;
 use crate::workspace::layout::BottomDockSnapshot;
+use crate::workspace::layout::Dock;
 
 /// Row-preset table: dock height → number of macro-tile rows visible.
 /// Order matters: `nearest_row_preset` walks midpoints between adjacent

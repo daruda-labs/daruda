@@ -8,13 +8,13 @@
 //! on `Workspace` (not in this file) because it has to outlive any
 //! single render cycle.
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::{Context, Window};
 
 use super::Workspace;
 use super::WorktreeRuntime;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use crate::workspace::main_area::pane::{self, TabEntry};
+use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 /// Immutable plan produced by `CreateWorktreeModal::validate` — holds
 /// the sanitized branch, derived new-path, and repo_root so the modal
@@ -42,20 +42,34 @@ pub(in crate::workspace) struct RemoveWorktreePlan {
 }
 
 impl Workspace {
-    /// Switch to the nth worktree by left-dock position (0-indexed).
-    /// Worktrees are sorted by `tab_order` so the position matches what
-    /// the user sees in the left dock. No-ops when `index` is out of range.
+    /// Switch to the nth worktree of the active project by left-dock
+    /// position (0-indexed). Worktrees are sorted by `tab_order` so the
+    /// position matches what the user sees in the left dock. No-ops
+    /// when `index` is out of range or no project is loaded.
     pub(in crate::workspace) fn activate_worktree_by_index(
         &mut self,
         index: usize,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let mut ids: Vec<(u32, WorktreeId)> =
-            self.worktrees.iter().map(|w| (w.tab_order, w.id)).collect();
+        let Some(active_project_id) = self.active_project().map(|p| p.id) else {
+            return;
+        };
+        let mut ids: Vec<(u32, WorktreeId)> = self
+            .active_worktrees()
+            .iter()
+            .map(|w| (w.tab_order, w.id))
+            .collect();
         ids.sort_unstable_by_key(|&(order, _)| order);
         if let Some(&(_, id)) = ids.get(index) {
-            self.activate_worktree(id, window, cx);
+            self.activate_worktree(
+                WorktreeRef {
+                    project: active_project_id,
+                    worktree: id,
+                },
+                window,
+                cx,
+            );
         }
     }
 
@@ -69,17 +83,15 @@ impl Workspace {
         }
     }
 
-    /// Validate that `id` is removable and resolve its (repo_root,
+    /// Validate that `target` is removable and resolve its (repo_root,
     /// path) for the shell-out. Pure — does not mutate state, so it's
     /// safe to call from tests or action handlers without side effects.
     pub(in crate::workspace) fn validate_remove_worktree(
         &self,
-        id: daruda_store::project::WorktreeId,
+        target: WorktreeRef,
     ) -> Result<RemoveWorktreePlan, String> {
         let wt = self
-            .worktrees
-            .iter()
-            .find(|w| w.id == id)
+            .worktree_for(target)
             .ok_or_else(|| "Worktree not found.".to_string())?;
         if !Self::worktree_removable(wt) {
             return Err("This worktree cannot be removed.".to_string());
@@ -88,7 +100,6 @@ impl Workspace {
             daruda_store::project::WorktreeKind::Git { repo_root, .. } => repo_root.clone(),
             _ => return Err("Not a git worktree.".to_string()),
         };
-        let _ = id; // id returned via the caller's own variable
         Ok(RemoveWorktreePlan {
             path: wt.path.clone(),
             repo_root,
@@ -98,10 +109,11 @@ impl Workspace {
     /// Post-git cleanup on the UI thread: switch away if active, then
     /// drop the entry and its runtime. Invariant: the active worktree
     /// is always survivable because `validate_remove_worktree` refuses
-    /// main/default kinds, so there's always at least one other entry.
+    /// main/default kinds, so there's always at least one other entry
+    /// in the project.
     pub(in crate::workspace) fn finalize_remove_worktree(
         &mut self,
-        id: daruda_store::project::WorktreeId,
+        target: WorktreeRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -109,31 +121,47 @@ impl Workspace {
         // entries in the `SkillsState` / `McpState` Globals can be
         // pruned — otherwise the BTreeMap grows unbounded across the
         // session as worktrees come and go.
-        let removed_path = self
-            .worktrees
-            .iter()
-            .find(|w| w.id == id)
-            .map(|w| w.path.clone());
+        let removed_path = self.worktree_for(target).map(|w| w.path.clone());
 
-        if self.active_worktree_id == id
-            && let Some(fallback) = self.worktrees.iter().find(|w| w.id != id).map(|w| w.id)
+        if self.active == target
+            && let Some(fallback) = self
+                .projects
+                .iter()
+                .find(|p| p.id == target.project)
+                .and_then(|p| {
+                    p.worktrees
+                        .iter()
+                        .find(|w| w.id != target.worktree)
+                        .map(|w| WorktreeRef {
+                            project: target.project,
+                            worktree: w.id,
+                        })
+                })
         {
             self.activate_worktree(fallback, window, cx);
         }
-        self.main_area.inactive_worktree_runtimes.remove(&id);
+        self.main_area.inactive_worktree_runtimes.remove(&target);
         // W-7 per-worktree state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
         // drops the embedded `RecommendedWatcher`, which stops the
-        // kernel-side watch.
-        self.file_tree.file_trees.remove(&id);
-        self.file_tree.file_watchers.remove(&id);
-        self.file_tree.files_reload_queues.remove(&id);
-        self.file_tree.files_visible_cache.remove(&id);
-        self.file_tree.files_gitignore_index.remove(&id);
-        self.git_status_in_flight.remove(&id);
-        self.git_status_pending_repeat.remove(&id);
-        self.worktrees.retain(|w| w.id != id);
+        // kernel-side watch. The five file_tree HashMaps are still
+        // `WorktreeId`-keyed (single-active-project assumption) until
+        // a later commit promotes them to `WorktreeRef`.
+        let wt_id = target.worktree;
+        self.file_tree.file_trees.remove(&wt_id);
+        self.file_tree.file_watchers.remove(&wt_id);
+        self.file_tree.files_reload_queues.remove(&wt_id);
+        self.file_tree.files_visible_cache.remove(&wt_id);
+        self.file_tree.files_gitignore_index.remove(&wt_id);
+        self.git_status_in_flight.remove(&target);
+        self.git_status_pending_repeat.remove(&target);
+        self.git_status_cache.remove(&target);
+        self.git_collapsed_dirs.remove(&target);
+        self.git_changes_cursor.remove(&target);
+        if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
+            project.worktrees.retain(|w| w.id != target.worktree);
+        }
         if let Some(path) = removed_path {
             use gpui::BorrowAppContext as _;
             cx.update_global::<crate::agent::skills::SkillsState, _>(|s, _| {
@@ -162,12 +190,13 @@ impl Workspace {
         self.mark_dirty_and_save(cx);
     }
 
-    /// Resolve the active git repo_root from the worktree list. Returns
-    /// `None` when the workspace isn't backed by a git repo. Used by
-    /// callers (e.g. the `[+]` button) that need to construct a
-    /// `CreateWorktreeModal` without traversing the worktree list.
+    /// Resolve the active git repo_root from the active project's
+    /// worktree list. Returns `None` when the workspace isn't backed by
+    /// a git repo. Used by callers (e.g. the `[+]` button) that need to
+    /// construct a `CreateWorktreeModal` without traversing the
+    /// worktree list.
     pub(in crate::workspace) fn git_repo_root(&self) -> Option<std::path::PathBuf> {
-        self.worktrees.iter().find_map(|w| match &w.kind {
+        self.active_worktrees().iter().find_map(|w| match &w.kind {
             daruda_store::project::WorktreeKind::Git { repo_root, .. } => Some(repo_root.clone()),
             _ => None,
         })
@@ -192,6 +221,9 @@ impl Workspace {
             base_ref,
             description,
         } = plan;
+        let Some(active_project_id) = self.active_project().map(|p| p.id) else {
+            return Err("No active project.".to_string());
+        };
         let pane = self
             .create_pane_with_cwd(Some(new_path.clone()), window, cx)
             .map_err(|e| e.to_string())?;
@@ -205,7 +237,11 @@ impl Workspace {
         };
 
         let new_id = self.allocate_worktree_id();
-        let order = self.worktrees.len() as u32;
+        let new_ref = WorktreeRef {
+            project: active_project_id,
+            worktree: new_id,
+        };
+        let order = self.active_worktrees().len() as u32;
         // A freshly-added linked worktree's toplevel is exactly
         // `new_path` — `git worktree add` writes the per-worktree
         // `.git` pointer file there. No anchoring happens at this
@@ -221,7 +257,9 @@ impl Workspace {
         );
         wt.base_ref = base_ref;
         wt.description = description;
-        self.worktrees.push(wt);
+        if let Some(project) = self.projects.iter_mut().find(|p| p.id == active_project_id) {
+            project.worktrees.push(wt);
+        }
 
         let runtime = WorktreeRuntime {
             tabs: vec![tab],
@@ -230,8 +268,10 @@ impl Workspace {
             tab_history: Vec::new(),
             focused_pane_id: pane_id,
         };
-        self.main_area.inactive_worktree_runtimes.insert(new_id, runtime);
-        self.activate_worktree(new_id, window, cx);
+        self.main_area
+            .inactive_worktree_runtimes
+            .insert(new_ref, runtime);
+        self.activate_worktree(new_ref, window, cx);
         // New cwd → new `~/.claude/projects/<encoded>/` to watch.
         self.refresh_jsonl_watcher(cx);
         // New worktree root → new project-skills directory to watch.
@@ -244,12 +284,20 @@ impl Workspace {
         Ok(pane_id)
     }
 
-    /// Monotonic worktree id allocator. Walks both the worktree list
-    /// and the stashed inactive runtimes so a phantom key from a
-    /// crash mid-remove never collides with a fresh id.
-    fn allocate_worktree_id(&self) -> daruda_store::project::WorktreeId {
-        let max_list = self.worktrees.iter().map(|w| w.id).max();
-        let max_map = self.main_area.inactive_worktree_runtimes.keys().copied().max();
+    /// Monotonic worktree id allocator scoped to the active project.
+    /// Walks both the worktree list and the stashed inactive runtimes
+    /// so a phantom key from a crash mid-remove never collides with a
+    /// fresh id.
+    fn allocate_worktree_id(&self) -> WorktreeId {
+        let project_id = self.active.project;
+        let max_list = self.active_worktrees().iter().map(|w| w.id).max();
+        let max_map = self
+            .main_area
+            .inactive_worktree_runtimes
+            .keys()
+            .filter(|r| r.project == project_id)
+            .map(|r| r.worktree)
+            .max();
         match (max_list, max_map) {
             (Some(a), Some(b)) => a.max(b) + 1,
             (Some(a), None) => a + 1,
@@ -269,31 +317,31 @@ impl Workspace {
     /// `_stdout_task` moves with the Pane rather than being cloned.
     pub(in crate::workspace) fn activate_worktree(
         &mut self,
-        id: daruda_store::project::WorktreeId,
+        target: WorktreeRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_worktree_id == id {
+        if self.active == target {
             // Same-worktree click is a no-op — the worktree is already
             // active and its tabs (including any file viewer panes)
             // stay in place.
             return;
         }
-        if !self.worktrees.iter().any(|w| w.id == id) {
+        if self.worktree_for(target).is_none() {
             return;
         }
         // Trigger #5 — active worktree change. Both the previous and the
         // incoming visible lists become stale (selection moves with the
         // active id).
-        let previous = self.active_worktree_id;
-        self.invalidate_visible_files_cache(previous);
-        self.invalidate_visible_files_cache(id);
+        let previous = self.active;
+        self.invalidate_visible_files_cache(previous.worktree);
+        self.invalidate_visible_files_cache(target.worktree);
         // Clear keyboard cursor — it lived in the previous worktree's
         // visible list.
         self.file_tree.files_selection = None;
 
         // 1. Freeze the currently active runtime into the inactive map.
-        let current = self.active_worktree_id;
+        let current = self.active;
         let frozen = WorktreeRuntime {
             tabs: std::mem::take(&mut self.main_area.tabs),
             panes: std::mem::take(&mut self.main_area.panes),
@@ -301,19 +349,28 @@ impl Workspace {
             tab_history: std::mem::take(&mut self.main_area.tab_history),
             focused_pane_id: std::mem::take(&mut self.main_area.focused_pane_id),
         };
-        self.main_area.inactive_worktree_runtimes.insert(current, frozen);
+        self.main_area
+            .inactive_worktree_runtimes
+            .insert(current, frozen);
 
         // 2. Pull the target worktree's runtime into the live fields.
         let next = self
-            .main_area.inactive_worktree_runtimes
-            .remove(&id)
+            .main_area
+            .inactive_worktree_runtimes
+            .remove(&target)
             .unwrap_or_default();
         self.main_area.tabs = next.tabs;
         self.main_area.panes = next.panes;
         self.main_area.active_tab_index = next.active_tab_index;
         self.main_area.tab_history = next.tab_history;
         self.main_area.focused_pane_id = next.focused_pane_id;
-        self.active_worktree_id = id;
+        self.active = target;
+        // Update the project's last-active-worktree hint so clicking
+        // the project header in the left dock snaps to the same
+        // worktree the user just left.
+        if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
+            project.last_active_worktree_id = target.worktree;
+        }
         // File viewer panes travel with their worktree's tab list via
         // the `WorktreeRuntime` swap above, so each worktree retains
         // its own open files across activations.
@@ -326,11 +383,7 @@ impl Workspace {
         //    viewport stays empty — still better than a silent black
         //    pane.
         if self.main_area.tabs.is_empty() {
-            let cwd = self
-                .worktrees
-                .iter()
-                .find(|w| w.id == id)
-                .map(|w| w.path.clone());
+            let cwd = self.worktree_for(target).map(|w| w.path.clone());
             match self.create_pane_with_cwd(cwd, window, cx) {
                 Ok(pane) => {
                     let pane_id = pane.id;
@@ -354,7 +407,12 @@ impl Workspace {
 
         // 4. Refocus the active pane and request a resize — the
         //    worktree may have been last seen at a different viewport.
-        if self.main_area.panes.iter().any(|p| p.id == self.main_area.focused_pane_id) {
+        if self
+            .main_area
+            .panes
+            .iter()
+            .any(|p| p.id == self.main_area.focused_pane_id)
+        {
             self.focus_pane(self.main_area.focused_pane_id, window, cx);
         }
         self.main_area.pending_resize = true;
@@ -366,20 +424,21 @@ impl Workspace {
         self.mark_dirty_and_save(cx);
         // 5. If the incoming worktree's tree was modified while
         //    inactive, replay a single Bulk reload to catch up.
-        self.replay_files_dirty(id, cx);
+        self.replay_files_dirty(target.worktree, cx);
         // Project skill scope follows the active worktree's path —
         // re-spawn so the panel switches to the new repo's skills.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
         // Commit button reflects the active worktree's staged count —
-        // recompute now that `active_worktree_id` has flipped.
+        // recompute now that `active` has flipped.
         self.sync_commit_buttons(cx);
         cx.notify();
     }
 
-    /// Move `from_id` immediately before `to_id` in the left dock list,
-    /// renumbering `tab_order` for all worktrees afterwards. No-ops when
-    /// either id is absent or both ids are the same.
+    /// Move `from` immediately before `to` in the left dock list of
+    /// the active project, renumbering `tab_order` for all worktrees
+    /// afterwards. No-ops when either id is absent or both ids are the
+    /// same, or when the active project has no worktrees.
     pub(in crate::workspace) fn reorder_worktree(
         &mut self,
         from_id: WorktreeId,
@@ -389,49 +448,60 @@ impl Workspace {
         if from_id == to_id {
             return;
         }
-        let from_idx = self.worktrees.iter().position(|w| w.id == from_id);
-        let to_idx = self.worktrees.iter().position(|w| w.id == to_id);
+        let Some(project) = self.active_project_mut() else {
+            return;
+        };
+        let from_idx = project.worktrees.iter().position(|w| w.id == from_id);
+        let to_idx = project.worktrees.iter().position(|w| w.id == to_id);
         let (Some(from_idx), Some(to_idx)) = (from_idx, to_idx) else {
             return;
         };
-        let item = self.worktrees.remove(from_idx);
+        let item = project.worktrees.remove(from_idx);
         let insert_at = if from_idx < to_idx {
             to_idx - 1
         } else {
             to_idx
         };
-        self.worktrees.insert(insert_at, item);
-        for (i, w) in self.worktrees.iter_mut().enumerate() {
+        project.worktrees.insert(insert_at, item);
+        for (i, w) in project.worktrees.iter_mut().enumerate() {
             w.tab_order = i as u32;
         }
         self.mark_dirty_and_save(cx);
         cx.notify();
     }
 
-    /// Update the free-form description for `id`. `None` clears it,
-    /// reverting the left dock sublabel to the worktree path.
+    /// Update the free-form description for the active project's
+    /// worktree `id`. `None` clears it, reverting the left dock
+    /// sublabel to the worktree path.
     pub(in crate::workspace) fn set_worktree_description(
         &mut self,
         id: WorktreeId,
         description: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(wt) = self.worktrees.iter_mut().find(|w| w.id == id) {
+        let Some(project) = self.active_project_mut() else {
+            return;
+        };
+        if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
             wt.set_description(description);
             self.mark_dirty_and_save(cx);
             cx.notify();
         }
     }
 
-    /// Update the user-visible display name for `id`. `None` clears it
-    /// and reverts to the branch / path fallback.
+    /// Update the user-visible display name for the active project's
+    /// worktree `id`. `None` clears it and reverts to the branch /
+    /// path fallback.
     pub(in crate::workspace) fn set_worktree_name(
         &mut self,
         id: WorktreeId,
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(wt) = self.worktrees.iter_mut().find(|w| w.id == id) {
+        let Some(project) = self.active_project_mut() else {
+            return;
+        };
+        if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
             wt.set_name(name);
             self.mark_dirty_and_save(cx);
             cx.notify();

@@ -40,7 +40,7 @@ impl Workspace {
 
         let staged_count = self
             .git_status_cache
-            .get(&self.active_worktree_id)
+            .get(&self.active)
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let first_line = message.lines().next().unwrap_or("").to_string();
@@ -75,10 +75,10 @@ impl Workspace {
         wh: gpui::AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let Some(repo_root) = self.git_repo_root_for(self.active_worktree_id) else {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
-        let active_id = self.active_worktree_id;
+        let active_ref = self.active;
 
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
@@ -105,7 +105,7 @@ impl Workspace {
                         {
                             // Window closed during async commit — input no longer exists.
                         }
-                        ws.refresh_git_status(active_id, cx);
+                        ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git commit failed")
@@ -150,7 +150,7 @@ impl Workspace {
             return;
         }
 
-        if self.git_repo_root_for(self.active_worktree_id).is_none() {
+        if self.git_repo_root_for(self.active).is_none() {
             return;
         }
 
@@ -182,10 +182,10 @@ impl Workspace {
         wh: gpui::AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let Some(repo_root) = self.git_repo_root_for(self.active_worktree_id) else {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
-        let active_id = self.active_worktree_id;
+        let active_ref = self.active;
 
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
@@ -211,7 +211,7 @@ impl Workspace {
                         {
                             // Window closed during async amend — input no longer exists.
                         }
-                        ws.refresh_git_status(active_id, cx);
+                        ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git commit --amend failed")
@@ -250,7 +250,7 @@ impl Workspace {
         if self.git_op_in_flight {
             return;
         }
-        if self.git_repo_root_for(self.active_worktree_id).is_none() {
+        if self.git_repo_root_for(self.active).is_none() {
             return;
         }
 
@@ -273,7 +273,7 @@ impl Workspace {
     /// Run `git push` in the background. Caller must have obtained user
     /// confirmation.
     fn do_push(&mut self, cx: &mut Context<Self>) {
-        let Some(repo_root) = self.git_repo_root_for(self.active_worktree_id) else {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
 
@@ -309,7 +309,7 @@ impl Workspace {
         if self.git_op_in_flight {
             return;
         }
-        let Some(repo_root) = self.git_repo_root_for(self.active_worktree_id) else {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
         self.git_op_in_flight = true;
@@ -343,10 +343,10 @@ impl Workspace {
         if self.git_op_in_flight {
             return;
         }
-        let Some(repo_root) = self.git_repo_root_for(self.active_worktree_id) else {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
         };
-        let active_id = self.active_worktree_id;
+        let active_ref = self.active;
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
@@ -359,7 +359,7 @@ impl Workspace {
                 ws.sync_commit_buttons(cx);
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(active_id, cx);
+                        ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git pull failed")

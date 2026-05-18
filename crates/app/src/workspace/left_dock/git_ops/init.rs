@@ -2,7 +2,7 @@
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::Context;
 
 use crate::workspace::Workspace;
@@ -20,7 +20,11 @@ impl Workspace {
         if self.git_op_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         if wt.is_git() {
@@ -46,7 +50,10 @@ impl Workspace {
                         // init defaults to `main`, but a user-configured
                         // `init.defaultBranch` may differ — read what git
                         // actually decided rather than guessing).
-                        if let Some(wt) = ws.worktrees.iter_mut().find(|w| w.id == worktree_id) {
+                        if let Some(wt) = ws
+                            .active_project_mut()
+                            .and_then(|p| p.worktrees.iter_mut().find(|w| w.id == worktree_id))
+                        {
                             let probed_entry = probe
                                 .worktrees
                                 .iter()
@@ -66,7 +73,7 @@ impl Workspace {
                                 worktree_root,
                             };
                         }
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Ok(None) => {
                         // `git init` succeeded — the repo is on disk and

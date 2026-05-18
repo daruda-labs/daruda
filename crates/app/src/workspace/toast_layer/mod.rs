@@ -12,9 +12,9 @@ use std::time::Duration;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{Context, IntoElement, Render, WeakEntity, Window};
 
+use self::overlay::{ErrorToastOverlay, ToastSnapshot};
 use super::Workspace;
 use super::error::toast::{ErrorToastQueue, ToastId};
-use self::overlay::{ErrorToastOverlay, ToastSnapshot};
 
 /// Period of the expiry sweep. 1 Hz: timely enough that the user sees
 /// the toast vanish on schedule; infrequent enough not to burn wakeups
@@ -54,7 +54,6 @@ impl ToastLayer {
             cx.notify();
         }
     }
-
 }
 
 impl Render for ToastLayer {

@@ -6,7 +6,7 @@ use super::*;
 fn test_workspace_without_project_has_no_worktrees(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
-        assert!(ws.worktrees.is_empty());
+        assert!(ws.active_worktrees().is_empty());
     });
 }
 
@@ -19,15 +19,15 @@ fn test_workspace_with_project_bootstraps_one_default_worktree(cx: &mut TestAppC
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.worktrees.len(), 1);
-        assert_eq!(ws.worktrees[0].id, 0);
-        assert_eq!(ws.active_worktree_id, 0);
+        assert_eq!(ws.active_worktrees().len(), 1);
+        assert_eq!(ws.active_worktrees()[0].id, 0);
+        assert_eq!(ws.active.worktree, 0);
         assert_eq!(
-            ws.worktrees[0].kind,
+            ws.active_worktrees()[0].kind,
             daruda_store::project::WorktreeKind::Default
         );
         assert_eq!(
-            ws.worktrees[0].path,
+            ws.active_worktrees()[0].path,
             std::path::PathBuf::from("/tmp/test_bootstrap_wt")
         );
     });
@@ -44,11 +44,16 @@ fn test_activate_worktree_requires_existing_id(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             // Nonexistent id → no-op.
-            ws.activate_worktree(99, window, cx);
-            assert_eq!(ws.active_worktree_id, 0);
+            let proj = ws.active_ref().project;
+            let mk = |id| daruda_store::project::WorktreeRef {
+                project: proj,
+                worktree: id,
+            };
+            ws.activate_worktree(mk(99), window, cx);
+            assert_eq!(ws.active.worktree, 0);
             // Self id → no-op (already active).
-            ws.activate_worktree(0, window, cx);
-            assert_eq!(ws.active_worktree_id, 0);
+            ws.activate_worktree(mk(0), window, cx);
+            assert_eq!(ws.active.worktree, 0);
         });
     })
     .unwrap();
@@ -108,7 +113,12 @@ fn test_validate_remove_worktree_rejects_unknown_id(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        let err = ws.validate_remove_worktree(999).unwrap_err();
+        let proj = ws.active_ref().project;
+        let target = daruda_store::project::WorktreeRef {
+            project: proj,
+            worktree: 999,
+        };
+        let err = ws.validate_remove_worktree(target).unwrap_err();
         assert!(err.contains("not found"));
     });
 }
@@ -123,7 +133,12 @@ fn test_validate_remove_worktree_rejects_default_kind(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         // Bootstrapped default worktree at id 0 — not removable.
-        let err = ws.validate_remove_worktree(0).unwrap_err();
+        let proj = ws.active_ref().project;
+        let target = daruda_store::project::WorktreeRef {
+            project: proj,
+            worktree: 0,
+        };
+        let err = ws.validate_remove_worktree(target).unwrap_err();
         assert!(err.contains("cannot be removed"));
     });
 }
@@ -140,7 +155,12 @@ fn test_validate_remove_worktree_rejects_default(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        let err = ws.validate_remove_worktree(0).unwrap_err();
+        let proj = ws.active_ref().project;
+        let target = daruda_store::project::WorktreeRef {
+            project: proj,
+            worktree: 0,
+        };
+        let err = ws.validate_remove_worktree(target).unwrap_err();
         assert!(err.contains("cannot be removed"));
     });
 }
@@ -162,11 +182,13 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
 
     // Seed a second worktree with empty runtime so we can swap into it.
     ws.update(cx, |ws, _cx| {
-        ws.worktrees
-            .push(crate::worktree::Worktree::default_for_project(
-                1,
-                std::path::PathBuf::from("/tmp/test_wt_swap_b"),
-            ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees
+                .push(crate::worktree::Worktree::default_for_project(
+                    1,
+                    std::path::PathBuf::from("/tmp/test_wt_swap_b"),
+                ));
+        }
     });
 
     // Swap to worktree 1 → the previous runtime lands in the
@@ -177,13 +199,29 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
-            ws.activate_worktree(1, window, cx);
-            assert_eq!(ws.active_worktree_id, 1);
+            let proj = ws.active_ref().project;
+            ws.activate_worktree(
+                daruda_store::project::WorktreeRef {
+                    project: proj,
+                    worktree: 1,
+                },
+                window,
+                cx,
+            );
+            assert_eq!(ws.active.worktree, 1);
             // Lazy seed: exactly one tab/pane materialized.
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
             assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
-            let stashed = ws.main_area.inactive_worktree_runtimes.get(&0).unwrap();
+            let proj = ws.active_ref().project;
+            let stashed = ws
+                .main_area
+                .inactive_worktree_runtimes
+                .get(&daruda_store::project::WorktreeRef {
+                    project: proj,
+                    worktree: 0,
+                })
+                .unwrap();
             assert_eq!(stashed.tabs.len(), 1);
             assert_eq!(stashed.panes.len(), 1);
         });
@@ -195,11 +233,26 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     // the inactive map.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.activate_worktree(0, window, cx);
-            assert_eq!(ws.active_worktree_id, 0);
+            let proj = ws.active_ref().project;
+            ws.activate_worktree(
+                daruda_store::project::WorktreeRef {
+                    project: proj,
+                    worktree: 0,
+                },
+                window,
+                cx,
+            );
+            assert_eq!(ws.active.worktree, 0);
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
-            let stashed = ws.main_area.inactive_worktree_runtimes.get(&1).unwrap();
+            let stashed = ws
+                .main_area
+                .inactive_worktree_runtimes
+                .get(&daruda_store::project::WorktreeRef {
+                    project: proj,
+                    worktree: 1,
+                })
+                .unwrap();
             // Worktree 1 carries its lazy-spawned pane now.
             assert_eq!(stashed.tabs.len(), 1);
             assert_eq!(stashed.panes.len(), 1);
@@ -227,11 +280,13 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
     // worktree 1 has meta only (no tabs). Verify save captures both
     // without duplication.
     ws.update(cx, |ws, _cx| {
-        ws.worktrees
-            .push(crate::worktree::Worktree::default_for_project(
-                1,
-                std::path::PathBuf::from("/tmp/test_wt_save_inactive_b"),
-            ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees
+                .push(crate::worktree::Worktree::default_for_project(
+                    1,
+                    std::path::PathBuf::from("/tmp/test_wt_save_inactive_b"),
+                ));
+        }
     });
 
     let state = ws
@@ -325,12 +380,20 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         // Active worktree is 5 with 2 tabs → Workspace.tabs mirrors it.
-        assert_eq!(ws.active_worktree_id, 5);
+        assert_eq!(ws.active.worktree, 5);
         assert_eq!(ws.main_area.tabs.len(), 2);
         assert_eq!(ws.main_area.active_tab_index, 1);
         // Inactive worktree 0 rebuilt into the inactive map with 1 tab.
         assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
-        let stashed = ws.main_area.inactive_worktree_runtimes.get(&0).unwrap();
+        let proj = ws.active_ref().project;
+        let stashed = ws
+            .main_area
+            .inactive_worktree_runtimes
+            .get(&daruda_store::project::WorktreeRef {
+                project: proj,
+                worktree: 0,
+            })
+            .unwrap();
         assert_eq!(stashed.tabs.len(), 1);
     });
 }
@@ -409,8 +472,8 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.main_area.tabs.len(), 1);
-        assert_eq!(ws.worktrees.len(), 1);
-        assert_eq!(ws.active_worktree_id, 0);
+        assert_eq!(ws.active_worktrees().len(), 1);
+        assert_eq!(ws.active.worktree, 0);
     });
 }
 
@@ -447,7 +510,7 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_worktree_id, 3);
+        assert_eq!(ws.active.worktree, 3);
     });
 }
 

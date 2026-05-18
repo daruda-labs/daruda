@@ -25,11 +25,8 @@ use crate::workspace::left_dock::git_ops::{git_status_color, git_status_symbol};
 use crate::workspace::path_drag::PathDrag;
 use gpui::UniformListScrollHandle;
 
-pub(in crate::workspace) fn render(
-    snap: &LeftDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
-    let active_id = snap.active_worktree_id;
+pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    let active_id = snap.active.worktree;
     let visible = snap.cached_visible.clone();
     let count = visible.len();
     let root_kind = snap.root_kind;

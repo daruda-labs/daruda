@@ -7,7 +7,7 @@ fn test_workspace_project_field(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
         // Default config creates workspace without project.
-        assert!(ws.project.is_none());
+        assert!(ws.active_project().is_none());
     });
 }
 

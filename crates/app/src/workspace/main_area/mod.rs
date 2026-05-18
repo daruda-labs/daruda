@@ -7,13 +7,13 @@
 //! `pane_header` (only called from here) so the two stay in sync.
 
 pub(in crate::workspace) mod bottom_dock;
-pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_tree;
+pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod tab_ops;
 pub(in crate::workspace) mod task_edit_pane;
@@ -31,10 +31,10 @@ use crate::surface::strings as s;
 use crate::ui::ContextMenuItem as CItem;
 use crate::workspace::path_drag::PathDrag;
 
-use super::Workspace;
 use self::file_view_pane::render::render_pane_file_viewer;
-use self::pane_tree::{DIVIDER_PX, PaneId, PaneLayout, SplitDirection};
 use self::pane::Pane;
+use self::pane_tree::{DIVIDER_PX, PaneId, PaneLayout, SplitDirection};
+use super::Workspace;
 
 /// Flex child cell wrapping a pane or nested split in a Split layout.
 fn split_cell(is_horizontal: bool, ratio: f32, child_el: AnyElement) -> gpui::Div {
@@ -257,7 +257,9 @@ pub(in crate::workspace) fn render_layout(
                     cx.listener(move |this, _, window, cx| {
                         if this.main_area.focused_pane_id != id {
                             this.main_area.focused_pane_id = id;
-                            if let Some(tab) = this.main_area.tabs.get_mut(this.main_area.active_tab_index) {
+                            if let Some(tab) =
+                                this.main_area.tabs.get_mut(this.main_area.active_tab_index)
+                            {
                                 tab.last_focused_pane = id;
                             }
                             this.bump_activity(id);

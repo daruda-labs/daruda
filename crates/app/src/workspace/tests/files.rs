@@ -41,7 +41,7 @@ fn child_id_by_name(
     name: &str,
 ) -> crate::files::tree::EntryId {
     ws.read_with(cx, |ws, _| {
-        let id = ws.active_worktree_id;
+        let id = ws.active.worktree;
         let tree = ws.file_tree.file_trees.get(&id).expect("file tree exists");
         for entry in tree.child_entries(tree.root_id) {
             if entry.name == name {
@@ -58,13 +58,13 @@ fn child_id_by_name(
 async fn ensure_file_tree_loads_root_children(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
     ws.update(cx, |ws, cx| {
-        let id = ws.active_worktree_id;
+        let id = ws.active.worktree;
         ws.ensure_file_tree(id, cx);
     });
     cx.run_until_parked();
 
     ws.read_with(cx, |ws, _| {
-        let id = ws.active_worktree_id;
+        let id = ws.active.worktree;
         let tree = ws.file_tree.file_trees.get(&id).expect("tree");
         let names: Vec<&str> = tree
             .child_entries(tree.root_id)
@@ -79,7 +79,7 @@ async fn ensure_file_tree_loads_root_children(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn toggle_dir_lazy_loads_children(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -111,7 +111,7 @@ async fn toggle_dir_lazy_loads_children(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn clicking_file_opens_file_viewer_in_raw_mode(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -140,7 +140,7 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
     // restore_state → file pane comes back with the same path,
     // worktree, and view mode.
     let (wh, ws, temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -199,7 +199,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
     // (dedupe). Closing the viewer goes through Cmd+W; re-clicks
     // never close.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -241,7 +241,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
 #[gpui::test]
 async fn cached_visible_lists_root_children_after_load(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -260,7 +260,7 @@ async fn open_files_entry_opens_file_viewer(cx: &mut TestAppContext) {
     // file therefore should populate the viewer regardless of
     // which row currently shows the selected background.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -283,7 +283,7 @@ async fn keyboard_move_after_mouse_open_clears_old_highlight(cx: &mut TestAppCon
     // background follows `files_selection` only, so moving the
     // cursor moves the bg with it.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -331,7 +331,7 @@ async fn keyboard_move_after_mouse_open_clears_old_highlight(cx: &mut TestAppCon
 #[gpui::test]
 async fn cache_invalidates_on_expand_toggle(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
     let sub_id = child_id_by_name(&ws, cx, "sub");
@@ -350,7 +350,7 @@ async fn cache_invalidates_on_expand_toggle(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_dir_load_result(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     // Snapshot before the root scan returns.
     let v1: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(id));
@@ -366,7 +366,7 @@ async fn cache_invalidates_on_dir_load_result(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_focused_file_change(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -391,19 +391,21 @@ async fn cache_invalidates_on_active_worktree_change(cx: &mut TestAppContext) {
     // multi-worktree setup needs git plumbing; simulating one via
     // direct `worktrees.push` is enough for the cache check.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let original_id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let original_id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(original_id, cx));
     cx.run_until_parked();
 
     // Add a second worktree pointing at the same temp dir; for
     // cache invalidation the path content does not matter.
     let second_id: daruda_store::project::WorktreeId = original_id + 1;
-    let new_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let new_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, cx| {
-        ws.worktrees
-            .push(crate::worktree::Worktree::default_for_project(
-                second_id, new_path,
-            ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees
+                .push(crate::worktree::Worktree::default_for_project(
+                    second_id, new_path,
+                ));
+        }
         // Prime the visible cache for the original.
         let _ = ws.cached_or_rebuild_visible(original_id);
         cx.notify();
@@ -411,7 +413,13 @@ async fn cache_invalidates_on_active_worktree_change(cx: &mut TestAppContext) {
 
     let v1: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(original_id));
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.activate_worktree(second_id, window, cx));
+        ws.update(cx, |ws, cx| {
+            let target = daruda_store::project::WorktreeRef {
+                project: ws.active_ref().project,
+                worktree: second_id,
+            };
+            ws.activate_worktree(target, window, cx)
+        });
     })
     .unwrap();
     let v2: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(original_id));
@@ -424,7 +432,7 @@ async fn cache_invalidates_on_active_worktree_change(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_git_status_update(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -434,8 +442,9 @@ async fn cache_invalidates_on_git_status_update(cx: &mut TestAppContext) {
     // path directly to drive trigger #6 — git_status_cache write
     // followed by invalidation.
     ws.update(cx, |ws, cx| {
+        let active_ref = ws.active_ref();
         ws.git_status_cache.insert(
-            id,
+            active_ref,
             crate::worktree::git::GitStatusData {
                 staged: vec![crate::worktree::git::GitFileEntry {
                     x: 'M',
@@ -467,13 +476,13 @@ async fn cache_invalidates_on_git_status_update(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn watcher_event_creates_entry_in_expanded_dir(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
     // Create a new file on disk; we inject the debounced event
     // directly so the test does not depend on watcher timing.
-    let new_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.join("c.txt"));
+    let new_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.join("c.txt"));
     std::fs::write(&new_path, b"new").unwrap();
     ws.update(cx, |ws, cx| {
         ws.queue_files_event(
@@ -499,7 +508,7 @@ async fn watcher_event_creates_entry_in_expanded_dir(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn inactive_worktree_event_marks_dirty_only(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let active_id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let active_id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_id, cx));
     cx.run_until_parked();
 
@@ -507,13 +516,15 @@ async fn inactive_worktree_event_marks_dirty_only(cx: &mut TestAppContext) {
     // do not need a real second project root; we just need a
     // separate FileTree entry.
     let inactive_id: daruda_store::project::WorktreeId = active_id + 1;
-    let inactive_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let inactive_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, _cx| {
-        ws.worktrees
-            .push(crate::worktree::Worktree::default_for_project(
-                inactive_id,
-                inactive_path.clone(),
-            ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees
+                .push(crate::worktree::Worktree::default_for_project(
+                    inactive_id,
+                    inactive_path.clone(),
+                ));
+        }
         ws.file_tree.file_trees.insert(
             inactive_id,
             crate::files::tree::FileTree::new(inactive_path),
@@ -542,7 +553,7 @@ async fn inactive_worktree_event_marks_dirty_only(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let active_id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let active_id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_id, cx));
     cx.run_until_parked();
 
@@ -555,11 +566,13 @@ async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContex
     let inactive_path = temp2.path().to_path_buf();
 
     ws.update(cx, |ws, _cx| {
-        ws.worktrees
-            .push(crate::worktree::Worktree::default_for_project(
-                inactive_id,
-                inactive_path.clone(),
-            ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees
+                .push(crate::worktree::Worktree::default_for_project(
+                    inactive_id,
+                    inactive_path.clone(),
+                ));
+        }
         ws.file_tree.file_trees.insert(
             inactive_id,
             crate::files::tree::FileTree::new(inactive_path.clone()),
@@ -569,7 +582,13 @@ async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContex
     });
 
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.activate_worktree(inactive_id, window, cx));
+        ws.update(cx, |ws, cx| {
+            let target = daruda_store::project::WorktreeRef {
+                project: ws.active_ref().project,
+                worktree: inactive_id,
+            };
+            ws.activate_worktree(target, window, cx)
+        });
     })
     .unwrap();
     cx.run_until_parked();
@@ -593,56 +612,62 @@ async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContex
 #[gpui::test]
 async fn refresh_git_status_collapses_concurrent_calls(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let _id = ws.read_with(cx, |ws, _| ws.active.worktree);
     // Default worktree (non-git) → refresh_git_status returns
     // before touching the in-flight guard. Switch the worktree's
     // kind so the guard path actually runs.
-    let repo = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let repo = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, _| {
-        ws.worktrees[0].kind = daruda_store::project::WorktreeKind::Git {
-            branch: Some("main".into()),
-            repo_root: repo.clone(),
-            worktree_root: repo,
-        };
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees[0].kind = daruda_store::project::WorktreeKind::Git {
+                branch: Some("main".into()),
+                repo_root: repo.clone(),
+                worktree_root: repo,
+            };
+        }
     });
 
     // First call enters the guard. Second + third calls during
     // the same update cycle hit the "already in flight" branch
     // and request a single repeat.
     ws.update(cx, |ws, cx| {
-        ws.refresh_git_status(id, cx);
-        ws.refresh_git_status(id, cx);
-        ws.refresh_git_status(id, cx);
-        assert!(ws.git_status_in_flight.contains(&id));
-        assert!(ws.git_status_pending_repeat.contains(&id));
+        let target = ws.active_ref();
+        ws.refresh_git_status(target, cx);
+        ws.refresh_git_status(target, cx);
+        ws.refresh_git_status(target, cx);
+        assert!(ws.git_status_in_flight.contains(&target));
+        assert!(ws.git_status_pending_repeat.contains(&target));
     });
     cx.run_until_parked();
     // After the in-flight task completes, the repeat fires and
     // also completes — both flags settle to clear.
     ws.read_with(cx, |ws, _| {
-        assert!(!ws.git_status_in_flight.contains(&id));
-        assert!(!ws.git_status_pending_repeat.contains(&id));
+        let target = ws.active_ref();
+        assert!(!ws.git_status_in_flight.contains(&target));
+        assert!(!ws.git_status_pending_repeat.contains(&target));
     });
 }
 
 #[gpui::test]
 async fn watcher_event_triggers_git_status_refresh(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
-    let repo = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
+    let repo = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, _| {
-        ws.worktrees[0].kind = daruda_store::project::WorktreeKind::Git {
-            branch: Some("main".into()),
-            repo_root: repo.clone(),
-            worktree_root: repo,
-        };
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees[0].kind = daruda_store::project::WorktreeKind::Git {
+                branch: Some("main".into()),
+                repo_root: repo.clone(),
+                worktree_root: repo,
+            };
+        }
     });
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
     // Inject a watcher event; queue_files_event must fan out to
     // refresh_git_status as well as the tree reload.
-    let new_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.join("e.txt"));
+    let new_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.join("e.txt"));
     std::fs::write(&new_path, b"e").unwrap();
     ws.update(cx, |ws, cx| {
         ws.queue_files_event(
@@ -655,7 +680,7 @@ async fn watcher_event_triggers_git_status_refresh(cx: &mut TestAppContext) {
         // Marker that the in-flight guard was touched (i.e.
         // refresh_git_status actually ran rather than no-opping).
         assert!(
-            ws.git_status_in_flight.contains(&id),
+            ws.git_status_in_flight.contains(&ws.active_ref()),
             "watcher event must kick git status refresh"
         );
     });
@@ -678,7 +703,7 @@ async fn toggle_files_show_hidden_filters_dotfiles(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
 
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -703,7 +728,7 @@ async fn toggle_files_show_hidden_filters_dotfiles(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_show_hidden_toggle(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -719,7 +744,7 @@ async fn cache_invalidates_on_show_hidden_toggle(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn alt_click_collapse_drops_descendants_from_expanded(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -750,7 +775,7 @@ async fn alt_click_collapse_drops_descendants_from_expanded(cx: &mut TestAppCont
 #[gpui::test]
 async fn move_files_selection_advances_through_visible(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
     let visible_first = ws.update(cx, |ws, _| ws.cached_or_rebuild_visible(id))[0].entry_id;
@@ -773,7 +798,7 @@ async fn move_files_selection_advances_through_visible(cx: &mut TestAppContext) 
 #[gpui::test]
 async fn files_activate_opens_file_at_cursor(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -803,7 +828,7 @@ async fn files_activate_opens_file_at_cursor(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn files_collapse_at_cursor_drops_expand(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -826,7 +851,7 @@ async fn files_collapse_at_cursor_drops_expand(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_keyboard_selection_move(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -844,23 +869,25 @@ async fn cache_invalidates_on_keyboard_selection_move(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn finalize_remove_worktree_clears_per_worktree_state(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let active_id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let active_id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_id, cx));
     cx.run_until_parked();
 
     // Add a removable git worktree alongside the default. We need
     // a Git kind because validate_remove_worktree refuses defaults.
     let removable_id: daruda_store::project::WorktreeId = active_id + 1;
-    let removable_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let removable_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, cx| {
-        ws.worktrees.push(crate::worktree::Worktree::git(
-            removable_id,
-            removable_path.clone(),
-            Some("feat".into()),
-            removable_path.clone(),
-            removable_path.clone(),
-            1,
-        ));
+        if let Some(p) = ws.active_project_mut() {
+            p.worktrees.push(crate::worktree::Worktree::git(
+                removable_id,
+                removable_path.clone(),
+                Some("feat".into()),
+                removable_path.clone(),
+                removable_path.clone(),
+                1,
+            ));
+        }
         ws.ensure_file_tree(removable_id, cx);
     });
     cx.run_until_parked();
@@ -877,12 +904,20 @@ async fn finalize_remove_worktree_clears_per_worktree_state(cx: &mut TestAppCont
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.finalize_remove_worktree(removable_id, window, cx);
+            let target = daruda_store::project::WorktreeRef {
+                project: ws.active_ref().project,
+                worktree: removable_id,
+            };
+            ws.finalize_remove_worktree(target, window, cx);
         });
     })
     .unwrap();
 
     ws.read_with(cx, |ws, _| {
+        let removable_ref = daruda_store::project::WorktreeRef {
+            project: ws.active_ref().project,
+            worktree: removable_id,
+        };
         assert!(!ws.file_tree.file_trees.contains_key(&removable_id));
         assert!(!ws.file_tree.file_watchers.contains_key(&removable_id));
         assert!(
@@ -892,8 +927,8 @@ async fn finalize_remove_worktree_clears_per_worktree_state(cx: &mut TestAppCont
         );
         assert!(!ws.file_tree.files_reload_queues.contains_key(&removable_id));
         assert!(!ws.file_tree.files_visible_cache.contains_key(&removable_id));
-        assert!(!ws.git_status_in_flight.contains(&removable_id));
-        assert!(!ws.git_status_pending_repeat.contains(&removable_id));
+        assert!(!ws.git_status_in_flight.contains(&removable_ref));
+        assert!(!ws.git_status_pending_repeat.contains(&removable_ref));
     });
 }
 
@@ -914,7 +949,7 @@ async fn gitignore_marks_target_dir_entries_ignored(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
 
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -948,7 +983,7 @@ async fn gitignore_disabled_skips_evaluation(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
 
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -977,7 +1012,7 @@ async fn gitignore_change_event_rebuilds_matcher(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
 
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
@@ -1016,14 +1051,14 @@ async fn gitignore_change_event_rebuilds_matcher(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn cache_invalidates_on_watcher_event(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let id = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let id = ws.read_with(cx, |ws, _| ws.active.worktree);
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
     let v1: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(id));
 
     // Inject a watcher event; the chain queue → kick → load_dir →
     // apply_dir_load_result invalidates the cache at the end.
-    let new_path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.join("d.txt"));
+    let new_path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.join("d.txt"));
     std::fs::write(&new_path, b"d").unwrap();
     ws.update(cx, |ws, cx| {
         ws.queue_files_event(
@@ -1051,23 +1086,25 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
     // There is one worktree at startup. Add two more with shuffled
     // tab_order so the sort inside activate_worktree_by_index is exercised.
     let (_id0, id1, id2) = ws.read_with(cx, |ws, _| {
-        let base = ws.active_worktree_id;
+        let base = ws.active.worktree;
         (base, base + 1, base + 2)
     });
-    let path = ws.read_with(cx, |ws, _| ws.worktrees[0].path.clone());
+    let path = ws.read_with(cx, |ws, _| ws.active_worktrees()[0].path.clone());
     ws.update(cx, |ws, _cx| {
-        // tab_order 0 → id0 is the existing one. Give it order 2.
-        ws.worktrees[0].tab_order = 2;
-        ws.worktrees.push({
-            let mut w = crate::worktree::Worktree::default_for_project(id1, path.clone());
-            w.tab_order = 0;
-            w
-        });
-        ws.worktrees.push({
-            let mut w = crate::worktree::Worktree::default_for_project(id2, path.clone());
-            w.tab_order = 1;
-            w
-        });
+        if let Some(p) = ws.active_project_mut() {
+            // tab_order 0 → id0 is the existing one. Give it order 2.
+            p.worktrees[0].tab_order = 2;
+            p.worktrees.push({
+                let mut w = crate::worktree::Worktree::default_for_project(id1, path.clone());
+                w.tab_order = 0;
+                w
+            });
+            p.worktrees.push({
+                let mut w = crate::worktree::Worktree::default_for_project(id2, path.clone());
+                w.tab_order = 1;
+                w
+            });
+        }
     });
 
     // Index 0 → tab_order 0 → id1.
@@ -1076,10 +1113,7 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_worktree_id, id1,
-            "index 0 should select tab_order 0"
-        );
+        assert_eq!(ws.active.worktree, id1, "index 0 should select tab_order 0");
     });
 
     // Index 1 → tab_order 1 → id2.
@@ -1088,24 +1122,21 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(
-            ws.active_worktree_id, id2,
-            "index 1 should select tab_order 1"
-        );
+        assert_eq!(ws.active.worktree, id2, "index 1 should select tab_order 1");
     });
 }
 
 #[gpui::test]
 fn activate_worktree_by_index_out_of_range_is_noop(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
-    let initial = ws.read_with(cx, |ws, _| ws.active_worktree_id);
+    let initial = ws.read_with(cx, |ws, _| ws.active.worktree);
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.activate_worktree_by_index(99, window, cx));
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.active_worktree_id, initial,
+            ws.active.worktree, initial,
             "out-of-range index must be a no-op"
         );
     });

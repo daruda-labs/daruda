@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use gpui::{Context, Task};
 
-use crate::workspace::Workspace;
 use crate::hooks::pty_tracker::PtyTrackerEvent;
+use crate::workspace::Workspace;
 
 /// 100 ms strikes a balance: short enough that visible state
 /// (sub-row badges, active outline) snaps without perceptible lag,

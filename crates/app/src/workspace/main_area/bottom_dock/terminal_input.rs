@@ -41,9 +41,9 @@ use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
 use crate::shell_quote::{format_paths_for_drop, quote_path};
-use crate::workspace::main_area::bottom_dock::tab_strip::nearest_row_preset;
-use crate::workspace::layout::Dock;
 use crate::workspace::layout::BottomDockSnapshot;
+use crate::workspace::layout::Dock;
+use crate::workspace::main_area::bottom_dock::tab_strip::nearest_row_preset;
 use crate::workspace::path_drag::PathDrag;
 
 /// Build the terminal input panel body.

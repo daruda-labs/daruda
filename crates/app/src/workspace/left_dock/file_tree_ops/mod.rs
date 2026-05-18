@@ -26,12 +26,12 @@ use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::WorktreeId;
 use gpui::{Context, ScrollStrategy};
 
-use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::FileViewMode;
 use crate::files::gitignore::GitignoreSet;
 use crate::files::load::load_dir;
 use crate::files::tree::{EntryId, EntryKind, FileTree, FileTreeError, LoadedEntry};
 use crate::files::watcher::{DebouncedEvent, FileTreeWatcher};
+use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::FileViewMode;
 
 /// Distinguishes the two `apply_dir_load_result` call sites so the
 /// watcher-driven path can stay silent on `NotFound` (the directory was
@@ -87,7 +87,7 @@ impl Workspace {
         worktree_id: WorktreeId,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let Some(wt) = self.active_project().and_then(|p| p.worktree(worktree_id)) else {
             return;
         };
         let root = wt.path.clone();
@@ -286,7 +286,7 @@ impl Workspace {
         ev: DebouncedEvent,
         cx: &mut Context<Self>,
     ) {
-        if worktree_id != self.active_worktree_id {
+        if worktree_id != self.active.worktree {
             if let Some(t) = self.file_tree.file_trees.get_mut(&worktree_id) {
                 t.dirty = true;
             }
@@ -398,7 +398,11 @@ impl Workspace {
         // `should_refresh_git_status` gate skips pure `.git/` noise
         // entirely so the refresh never re-triggers itself.
         if should_refresh_git_status {
-            self.refresh_git_status(worktree_id, cx);
+            let target = daruda_store::project::WorktreeRef {
+                project: self.active.project,
+                worktree: worktree_id,
+            };
+            self.refresh_git_status(target, cx);
         }
     }
 
@@ -541,7 +545,11 @@ impl Workspace {
         q.pending_seen.clear();
         self.kick_files_reload(worktree_id, cx);
         // Activation after dirty also catches up the Git Changes view.
-        self.refresh_git_status(worktree_id, cx);
+        let target = daruda_store::project::WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        self.refresh_git_status(target, cx);
     }
 
     /// Open `path` from the active worktree's tree in a new tab as a
@@ -667,10 +675,14 @@ impl Workspace {
         let Some(tree) = self.file_tree.file_trees.get(&worktree_id) else {
             return Vec::new();
         };
-        let status_index = build_status_index(self.git_status_cache.get(&worktree_id));
+        let target = daruda_store::project::WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let status_index = build_status_index(self.git_status_cache.get(&target));
         // Keyboard cursor only counts on the active worktree; switching
         // worktrees clears the cursor.
-        let keyboard_focus = if worktree_id == self.active_worktree_id {
+        let keyboard_focus = if worktree_id == self.active.worktree {
             self.file_tree.files_selection
         } else {
             None
@@ -718,7 +730,7 @@ impl Workspace {
         delta: isize,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active_worktree_id;
+        let id = self.active.worktree;
         let visible = self.cached_or_rebuild_visible(id);
         if visible.is_empty() {
             return;
@@ -760,7 +772,7 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active_worktree_id;
+        let id = self.active.worktree;
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
@@ -783,7 +795,7 @@ impl Workspace {
     /// Right-arrow on the cursor row: if the row is a collapsed dir,
     /// expand it. Otherwise no-op (parent navigation lives in W-7+).
     pub(in crate::workspace) fn expand_at_files_selection(&mut self, cx: &mut Context<Self>) {
-        let id = self.active_worktree_id;
+        let id = self.active.worktree;
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
@@ -804,7 +816,7 @@ impl Workspace {
     /// Left-arrow on the cursor row: if the row is an expanded dir,
     /// collapse it. Otherwise no-op (move-to-parent lives in W-7+).
     pub(in crate::workspace) fn collapse_at_files_selection(&mut self, cx: &mut Context<Self>) {
-        let id = self.active_worktree_id;
+        let id = self.active.worktree;
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
@@ -825,7 +837,7 @@ impl Workspace {
     /// Manual root re-scan for the active worktree. Used by both the
     /// dock's ⟳ button and the `FilesRefresh` action.
     pub(in crate::workspace) fn refresh_files_root(&mut self, cx: &mut Context<Self>) {
-        let id = self.active_worktree_id;
+        let id = self.active.worktree;
         // Bulk reload via the queue keeps the same serial guarantee
         // watcher-driven reloads use.
         self.queue_files_event(id, DebouncedEvent::Bulk, cx);

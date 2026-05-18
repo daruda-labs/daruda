@@ -34,7 +34,10 @@ pub(in crate::workspace) enum PaneLayout {
 }
 
 impl PaneLayout {
-    pub(in crate::workspace) fn new_split(direction: SplitDirection, children: Vec<PaneLayout>) -> PaneLayout {
+    pub(in crate::workspace) fn new_split(
+        direction: SplitDirection,
+        children: Vec<PaneLayout>,
+    ) -> PaneLayout {
         let n = children.len();
         debug_assert!(n >= 2, "Split must have at least two children");
         let ratios = vec![1.0 / n as f32; n];
@@ -170,7 +173,10 @@ pub(in crate::workspace) fn insert_split_at(
 /// single-child Splits and no Splits sharing direction with their parent.
 ///
 /// Returns true if the target was found and removed.
-pub(in crate::workspace) fn remove_pane_from_layout(layout: &mut PaneLayout, target: PaneId) -> bool {
+pub(in crate::workspace) fn remove_pane_from_layout(
+    layout: &mut PaneLayout,
+    target: PaneId,
+) -> bool {
     let removed = remove_pane_inner(layout, target);
     if removed {
         cleanup_after_remove(layout);

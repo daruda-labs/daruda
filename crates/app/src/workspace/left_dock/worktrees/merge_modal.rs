@@ -155,9 +155,14 @@ impl MergeModal {
         // only a best-effort UX improvement for a friendlier error message.
         let target_is_dirty = if let Some(ws) = self.workspace.upgrade() {
             let target_id = self.target_options[self.selected_idx].wt_id;
-            ws.read(cx)
+            let ws_ref = ws.read(cx);
+            let target_ref = daruda_store::project::WorktreeRef {
+                project: ws_ref.active_ref().project,
+                worktree: target_id,
+            };
+            ws_ref
                 .git_status_cache
-                .get(&target_id)
+                .get(&target_ref)
                 .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty())
         } else {
             false
@@ -182,6 +187,19 @@ impl MergeModal {
         let target_wt_id = target.wt_id;
         let target_path = target.wt_path.clone();
         let remove_after_merge = self.remove_after_merge;
+        let active_project = self
+            .workspace
+            .upgrade()
+            .map(|w| w.read(cx).active_ref().project)
+            .unwrap_or_default();
+        let target_ref = daruda_store::project::WorktreeRef {
+            project: active_project,
+            worktree: target_wt_id,
+        };
+        let source_ref = daruda_store::project::WorktreeRef {
+            project: active_project,
+            worktree: source_wt_id,
+        };
 
         // Clones for use after the first async_cx.update closure.
         let workspace_post = workspace.clone();
@@ -217,7 +235,7 @@ impl MergeModal {
                         Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate) => {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(app_cx, |ws, cx| {
-                                    ws.finalize_merge(target_wt_id, cx);
+                                    ws.finalize_merge(target_ref, cx);
                                     // Show "already up to date" only if we're
                                     // not about to also remove the worktree.
                                     if !remove_after_merge {
@@ -239,7 +257,7 @@ impl MergeModal {
 
                         Ok(crate::worktree::git::MergeOutcome::Success) => {
                             if let Some(ws) = workspace.upgrade() {
-                                ws.update(app_cx, |ws, cx| ws.finalize_merge(target_wt_id, cx));
+                                ws.update(app_cx, |ws, cx| ws.finalize_merge(target_ref, cx));
                             }
                             if !remove_after_merge && let Some(me) = me.upgrade() {
                                 me.update(app_cx, |m, cx| m.dismiss(window, cx));
@@ -251,7 +269,7 @@ impl MergeModal {
                             // Refresh git status so the left dock reflects the
                             // mid-merge state (dirty files + MERGE_HEAD present).
                             if let Some(ws) = workspace.upgrade() {
-                                ws.update(app_cx, |ws, cx| ws.finalize_merge(target_wt_id, cx));
+                                ws.update(app_cx, |ws, cx| ws.finalize_merge(target_ref, cx));
                             }
                             if let Some(me) = me.upgrade() {
                                 me.update(app_cx, |modal, cx| {
@@ -300,7 +318,7 @@ impl MergeModal {
                             ws.update(app_cx, |ws, cx| {
                                 match &remove_result {
                                     Ok(()) => {
-                                        ws.finalize_remove_worktree(source_wt_id, window, cx);
+                                        ws.finalize_remove_worktree(source_ref, window, cx);
                                         if was_up_to_date {
                                             let report = ErrorReport::new(
                                                 surface_strings::MERGE_MODAL_ALREADY_UP_TO_DATE,
@@ -346,6 +364,14 @@ impl MergeModal {
         let target_path = target.wt_path.clone();
         let workspace = self.workspace.clone();
         let me = cx.entity().downgrade();
+        let active_project = workspace
+            .upgrade()
+            .map(|w| w.read(cx).active_ref().project)
+            .unwrap_or_default();
+        let target_ref = daruda_store::project::WorktreeRef {
+            project: active_project,
+            worktree: target_wt_id,
+        };
 
         window
             .spawn(cx, async move |async_cx| {
@@ -357,7 +383,7 @@ impl MergeModal {
                     .await;
                 let _ = async_cx.update(|window, app_cx| {
                     if let Some(ws) = workspace.upgrade() {
-                        ws.update(app_cx, |ws, cx| ws.finalize_merge(target_wt_id, cx));
+                        ws.update(app_cx, |ws, cx| ws.finalize_merge(target_ref, cx));
                     }
                     if let Some(me) = me.upgrade() {
                         me.update(app_cx, |m, cx| m.dismiss(window, cx));
@@ -376,7 +402,13 @@ impl MergeModal {
         cx: &mut Context<Self>,
     ) {
         if let Some(ws) = self.workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.activate_worktree(target_wt_id, window, cx));
+            ws.update(cx, |ws, cx| {
+                let target = daruda_store::project::WorktreeRef {
+                    project: ws.active_ref().project,
+                    worktree: target_wt_id,
+                };
+                ws.activate_worktree(target, window, cx);
+            });
         }
         self.dismiss(window, cx);
     }

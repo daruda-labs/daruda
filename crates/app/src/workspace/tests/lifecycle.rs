@@ -344,8 +344,9 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::PaneSpawnError;
 
     let (window_handle, workspace) = build_workspace(cx);
-    let (tabs_before, panes_before) =
-        workspace.read_with(cx, |ws, _| (ws.main_area.tabs.len(), ws.main_area.panes.len()));
+    let (tabs_before, panes_before) = workspace.read_with(cx, |ws, _| {
+        (ws.main_area.tabs.len(), ws.main_area.panes.len())
+    });
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -359,8 +360,16 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), tabs_before, "tabs should be untouched");
-        assert_eq!(ws.main_area.panes.len(), panes_before, "panes should be untouched");
+        assert_eq!(
+            ws.main_area.tabs.len(),
+            tabs_before,
+            "tabs should be untouched"
+        );
+        assert_eq!(
+            ws.main_area.panes.len(),
+            panes_before,
+            "panes should be untouched"
+        );
         assert!(ws.last_error.is_some());
     });
 }

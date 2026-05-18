@@ -8,12 +8,12 @@ use super::layout::Dock;
 use super::layout::RightDockSnapshot;
 
 pub(in crate::workspace) mod mcp_ops;
-pub(in crate::workspace) mod task_workflow_ops;
 pub(in crate::workspace) mod skill_ops;
 pub(in crate::workspace) mod skills;
 pub(in crate::workspace) mod status_pill;
 pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;
+pub(in crate::workspace) mod task_workflow_ops;
 pub(in crate::workspace) mod tasks;
 pub(in crate::workspace) mod tools;
 pub(in crate::workspace) mod usage;
@@ -27,10 +27,7 @@ pub(in crate::workspace) mod view_tabs;
 /// dock wrapper sets `overflow_hidden`, which would otherwise clip
 /// without offering any way to scroll. A scrollbar thumb overlay sits
 /// on top of the scroll viewport so the user can see scroll position.
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let body = match snap.right_dock_view {
         RightDockView::Usage => usage::render(snap, cx),
         RightDockView::Skills => skills::render(snap, cx),

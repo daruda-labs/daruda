@@ -64,17 +64,14 @@ impl Render for DraggedWorktreeGhost {
 // ----------------------------------------------------------------
 
 /// Render the Worktrees view body.
-pub(in crate::workspace) fn render(
-    snap: &LeftDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     if snap.worktrees.is_empty() {
         return empty_state(cx).into_any_element();
     }
 
     let any_git = snap.worktrees.iter().any(|w| w.is_git());
     let active_tab_count = snap.active_tab_count;
-    let active_id = snap.active_worktree_id;
+    let active_id = snap.active.worktree;
 
     let header = section_header(any_git, snap, cx);
 
@@ -89,6 +86,9 @@ pub(in crate::workspace) fn render(
     let mut body = div().flex().flex_col().w_full().overflow_hidden();
     if snap.claude_install_banner_visible {
         body = body.child(claude_install_banner(snap, cx));
+    }
+    if let Some(name) = snap.active_project_name.clone() {
+        body = body.child(project_header_row(name, cx));
     }
     body = body.child(header).child(list);
 
@@ -176,6 +176,23 @@ fn claude_install_banner(
         }))
 }
 
+/// Single-row project header above the flat worktrees list. Temporary
+/// placeholder for the W-2 flat view — commit f replaces this with a
+/// 2-level Group ▸ Project ▸ Worktree tree.
+fn project_header_row(name: SharedString, cx: &mut Context<Dock>) -> impl IntoElement + use<> {
+    let t = theme::current(cx);
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .w_full()
+        .px(px(theme::WORKTREE_ROW_PAD_X))
+        .py(px(theme::WORKTREE_SECTION_PAD_Y))
+        .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
+        .text_color(t.dock_view_tab_active)
+        .child(name)
+}
+
 fn section_header(
     any_git: bool,
     snap: &LeftDockSnapshot,
@@ -219,7 +236,11 @@ fn section_header(
 /// Build the `M3 ?1` change-count badge string for worktree `id` from
 /// the cached git status.  Returns `None` when no status is cached yet.
 fn git_badge_for(snap: &LeftDockSnapshot, id: WorktreeId) -> Option<String> {
-    let status = snap.git_status_cache.get(&id)?;
+    let target = daruda_store::project::WorktreeRef {
+        project: snap.active.project,
+        worktree: id,
+    };
+    let status = snap.git_status_cache.get(&target)?;
     // Unstaged entries are identified by the y column, not x.
     let modified = status.staged.len()
         + status
@@ -348,6 +369,7 @@ fn worktree_row(
         );
 
     let wt_id: WorktreeId = wt.id;
+    let snap_active = snap.active;
     let wt_path: std::path::PathBuf = wt.path.clone();
     let wt_label_shared = SharedString::from(label.clone());
     let wt_description_current: Option<String> = wt.description.clone();
@@ -370,7 +392,10 @@ fn worktree_row(
     let wt_base_ref: Option<String> = wt.base_ref.clone();
     let wt_is_dirty = snap
         .git_status_cache
-        .get(&wt.id)
+        .get(&daruda_store::project::WorktreeRef {
+            project: snap.active.project,
+            worktree: wt.id,
+        })
         .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty());
     let wt_source_repo_root: Option<std::path::PathBuf> = match &wt.kind {
         daruda_store::project::WorktreeKind::Git { repo_root, .. } => Some(repo_root.clone()),
@@ -402,7 +427,11 @@ fn worktree_row(
         // on_drag without a hysteresis guard.
         .on_click(cx.listener(move |_dock, _ev: &ClickEvent, window, cx| {
             if let Some(ws) = ws_for_click.upgrade() {
-                ws.update(cx, |ws, cx| ws.activate_worktree(wt_id, window, cx));
+                let target = daruda_store::project::WorktreeRef {
+                    project: snap_active.project,
+                    worktree: wt_id,
+                };
+                ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
             }
         }))
         // Drag source — GPUI's built-in on_drag / on_drop pipeline handles
@@ -469,7 +498,11 @@ fn worktree_row(
                 if let Some(ws) = ws_for_close.upgrade() {
                     let ws_for_modal = ws_for_close.clone();
                     ws.update(cx, |ws, cx| {
-                        let Some(wt) = ws.worktrees.iter().find(|w| w.id == wt_id) else {
+                        let target = daruda_store::project::WorktreeRef {
+                            project: snap_active.project,
+                            worktree: wt_id,
+                        };
+                        let Some(wt) = ws.worktree_for(target) else {
                             return;
                         };
                         if !crate::workspace::Workspace::worktree_removable(wt) {
@@ -477,21 +510,18 @@ fn worktree_row(
                         }
                         let label = gpui::SharedString::from(wt.display_name());
                         let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
-                        let plan = match ws.validate_remove_worktree(wt_id) {
+                        let plan = match ws.validate_remove_worktree(target) {
                             Ok(p) => p,
                             Err(_) => return,
                         };
                         // Pull the branch name so the modal can offer "Also
                         // delete branch X" — None for default / detached
                         // worktrees (modal hides the checkbox).
-                        let branch = ws.worktrees.iter().find(|w| w.id == wt_id).and_then(|w| {
-                            match &w.kind {
-                                daruda_store::project::WorktreeKind::Git {
-                                    branch: Some(b),
-                                    ..
-                                } => Some(b.clone()),
-                                _ => None,
-                            }
+                        let branch = ws.worktree_for(target).and_then(|w| match &w.kind {
+                            daruda_store::project::WorktreeKind::Git {
+                                branch: Some(b), ..
+                            } => Some(b.clone()),
+                            _ => None,
                         });
                         crate::workspace::dialog_helpers::open_form_modal(
                             "Remove Worktree",
@@ -656,7 +686,7 @@ fn build_context_menu_items(
 
                         // Build target list: other git worktrees with a branch.
                         let target_options: Vec<super::merge_modal::TargetOption> = ws
-                            .worktrees
+                            .active_worktrees()
                             .iter()
                             .filter(|w| w.id != wt_id)
                             .filter_map(|w| match &w.kind {

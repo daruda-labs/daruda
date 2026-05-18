@@ -9,13 +9,13 @@
 //! `load_raw` / `load_diff` helpers stay private and are selected
 //! via [`FileViewMode`].
 
-use crate::path_ext::PathExt;
+use super::highlighter::{highlight_hunks, highlight_raw_rows};
+use super::word_diff::apply_word_diff;
 use super::{
     FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
     parse_diff_hunks,
 };
-use super::highlighter::{highlight_hunks, highlight_raw_rows};
-use super::word_diff::apply_word_diff;
+use crate::path_ext::PathExt;
 
 /// Load file content for the pane-area file viewer. Called from a background task.
 pub(in crate::workspace) fn load_file_content(

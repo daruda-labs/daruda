@@ -8,7 +8,9 @@
 use gpui::{Context, Pixels, Point, Window};
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::{PaneId, SplitDirection, adjust_divider, find_divider, parent_axis_extent};
+use crate::workspace::main_area::pane_tree::{
+    PaneId, SplitDirection, adjust_divider, find_divider, parent_axis_extent,
+};
 use crate::workspace::{ToggleBottomDock, ToggleLeftDock, ToggleRightDock};
 
 use super::DockPosition;

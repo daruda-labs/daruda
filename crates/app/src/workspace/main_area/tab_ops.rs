@@ -1,9 +1,12 @@
 use gpui::{Context, Window};
 
-use crate::workspace::Workspace;
-use super::pane_tree::{PaneId, PaneLayout, SplitDirection, collect_pane_rects, insert_split_at, remove_pane_from_layout};
 use super::nav::{NavDirection, pane_in_direction};
 use super::pane::{PaneContent, TabEntry};
+use super::pane_tree::{
+    PaneId, PaneLayout, SplitDirection, collect_pane_rects, insert_split_at,
+    remove_pane_from_layout,
+};
+use crate::workspace::Workspace;
 
 impl Workspace {
     /// Set the user-visible window title (Window > Edit Window Title…).
@@ -38,7 +41,9 @@ impl Workspace {
             user_label: None,
         });
 
-        self.main_area.tab_history.push(self.main_area.active_tab_index);
+        self.main_area
+            .tab_history
+            .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
         self.main_area.focused_pane_id = pane_id;
         self.bump_activity(pane_id);
@@ -70,7 +75,10 @@ impl Workspace {
 
         let tab = self.main_area.tabs.remove(index);
         let pane_ids = tab.layout.pane_ids();
-        if pane_ids.iter().any(|&id| self.main_area.zoomed_pane_id == Some(id)) {
+        if pane_ids
+            .iter()
+            .any(|&id| self.main_area.zoomed_pane_id == Some(id))
+        {
             self.main_area.zoomed_pane_id = None;
         }
         for id in &pane_ids {
@@ -130,12 +138,15 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
             // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
             if self.main_area.tab_history.last() != Some(&self.main_area.active_tab_index) {
-                self.main_area.tab_history.push(self.main_area.active_tab_index);
+                self.main_area
+                    .tab_history
+                    .push(self.main_area.active_tab_index);
             }
             // Cap size to bound memory use across long sessions.
             const TAB_HISTORY_CAP: usize = 64;
             if self.main_area.tab_history.len() > TAB_HISTORY_CAP {
-                self.main_area.tab_history
+                self.main_area
+                    .tab_history
                     .drain(..self.main_area.tab_history.len() - TAB_HISTORY_CAP);
             }
             self.main_area.active_tab_index = index;
@@ -187,7 +198,9 @@ impl Workspace {
 
     pub(in crate::workspace) fn bump_activity(&mut self, pane_id: PaneId) {
         self.main_area.activity_tick += 1;
-        self.main_area.activity_counter.insert(pane_id, self.main_area.activity_tick);
+        self.main_area
+            .activity_counter
+            .insert(pane_id, self.main_area.activity_tick);
     }
 
     pub(in crate::workspace) fn focus_next_pane(
@@ -234,9 +247,12 @@ impl Workspace {
         let (w, h) = self.main_area.last_viewport.unwrap_or((1.0, 1.0));
         let mut rects = Vec::new();
         collect_pane_rects(&tab.layout, 0.0, 0.0, w, h, &mut rects);
-        if let Some(target) =
-            pane_in_direction(&rects, self.main_area.focused_pane_id, dir, &self.main_area.activity_counter)
-        {
+        if let Some(target) = pane_in_direction(
+            &rects,
+            self.main_area.focused_pane_id,
+            dir,
+            &self.main_area.activity_counter,
+        ) {
             self.main_area.focused_pane_id = target;
             if let Some(t) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
                 t.last_focused_pane = target;
@@ -310,7 +326,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(tab_index) = self
-            .main_area.tabs
+            .main_area
+            .tabs
             .iter()
             .position(|t| t.layout.pane_ids().contains(&pane_id))
         else {

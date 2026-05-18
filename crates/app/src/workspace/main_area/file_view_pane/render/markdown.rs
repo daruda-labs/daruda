@@ -9,8 +9,8 @@ use gpui::{
 };
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{CharPos, CharSelection};
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan};
+use crate::workspace::main_area::file_view_pane::{CharPos, CharSelection};
 
 /// Top-level Markdown body: a padded column of selectable blocks.
 pub(super) fn render_md_body(

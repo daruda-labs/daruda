@@ -138,10 +138,10 @@ pub(in crate::workspace) struct ClaudeContext {
 
 // ---- Workspace methods that own the claude field ----
 
-use gpui::{Context, Window};
 use crate::workspace::Workspace;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
+use gpui::{Context, Window};
 
 impl Workspace {
     /// Apply one filesystem event from `~/.daruda/status/`. Pumped by

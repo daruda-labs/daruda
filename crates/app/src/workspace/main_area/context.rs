@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::WorktreeRef;
 
-use crate::workspace::WorktreeRuntime;
-use crate::workspace::layout::ops::{ContextMenuAnchor, DividerDrag};
 use super::pane::{Pane, TabEntry};
 use super::pane_tree::PaneId;
+use crate::workspace::WorktreeRuntime;
+use crate::workspace::layout::ops::{ContextMenuAnchor, DividerDrag};
 
 /// Runtime state of the active worktree's main area — TabBar + PaneTree.
 ///
@@ -38,6 +38,5 @@ pub(in crate::workspace) struct MainAreaContext {
     /// Runtime tab/pane state of every inactive worktree. The active
     /// worktree's runtime lives in the fields above; `activate_worktree`
     /// swaps those with the entry in this map.
-    pub inactive_worktree_runtimes: HashMap<WorktreeId, WorktreeRuntime>,
+    pub inactive_worktree_runtimes: HashMap<WorktreeRef, WorktreeRuntime>,
 }
-

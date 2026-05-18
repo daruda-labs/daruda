@@ -3,8 +3,8 @@ use gpui::{App, Context, Window};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::pane::PaneContent;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
     /// Register the platform `on_window_should_close` callback that
@@ -120,7 +120,8 @@ impl Workspace {
         &self,
         cx: &App,
     ) -> Vec<(PaneId, gpui::SharedString, bool)> {
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter()
             .filter_map(|p| {
                 if !p.is_dirty(cx) {

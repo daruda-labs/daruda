@@ -8,7 +8,10 @@ impl Workspace {
     /// subscription installed in `new_with_project`.
     #[cfg(test)]
     pub fn reload_config(&mut self, user: &daruda_config::Config, cx: &mut Context<Self>) {
-        let effective = effective_config_for(self.project.as_ref(), user);
+        let proj = self
+            .active_project()
+            .map(|p| daruda_store::project::Project::from_path(p.root.clone()));
+        let effective = effective_config_for(proj.as_ref(), user);
         self.apply_config(&effective, cx);
     }
 

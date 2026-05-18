@@ -30,11 +30,8 @@ use crate::worktree::paths::WorktreePaths;
 // Entry point
 // ----------------------------------------------------------------
 
-pub(in crate::workspace) fn render(
-    snap: &LeftDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
-    let active_id = snap.active_worktree_id;
+pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    let active_id = snap.active.worktree;
     let active_wt = snap.worktrees.iter().find(|w| w.id == active_id);
 
     if !active_wt.map(|w| w.is_git()).unwrap_or(false) {
@@ -48,7 +45,7 @@ pub(in crate::workspace) fn render(
         })
         .unwrap_or_else(|| app_strings::GIT_DETACHED_LABEL.to_string());
 
-    let status = snap.git_status_cache.get(&active_id);
+    let status = snap.git_status_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
 
     let selected: Option<(WorktreeId, PathBuf, bool)> = snap.focused_file_selection.clone();
@@ -273,7 +270,7 @@ pub(in crate::workspace) fn ordered_visible_paths(
 // ----------------------------------------------------------------
 
 fn view_header(
-    worktree_id: WorktreeId,
+    _worktree_id: WorktreeId,
     branch: &str,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -285,10 +282,11 @@ fn view_header(
     let workspace_fetch = snap.workspace.clone();
     let workspace_push = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
+    let active_ref = snap.active;
 
     let (ahead, behind) = snap
         .git_status_cache
-        .get(&snap.active_worktree_id)
+        .get(&snap.active)
         .map(|s| (s.ahead, s.behind))
         .unwrap_or((0, 0));
 
@@ -297,7 +295,7 @@ fn view_header(
         .icon(IconName::Refresh)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace_refresh.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_git_status(worktree_id, cx));
+                ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
             }
         }));
 
@@ -746,7 +744,7 @@ fn unified_file_row(
     // diffstat tail in that case.
     let diffstat = snap
         .git_status_cache
-        .get(&worktree_id)
+        .get(&snap.active)
         .and_then(|s| s.diffstat.get(&entry.path))
         .copied();
 
@@ -1064,16 +1062,17 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
 // ----------------------------------------------------------------
 
 fn loading_placeholder(
-    worktree_id: WorktreeId,
+    _worktree_id: WorktreeId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
     let text_color = theme::current(cx).faint_text;
     let workspace = snap.workspace.clone();
+    let active_ref = snap.active;
     let refresh_btn = button("git-refresh-fallback", app_strings::GIT_REFRESH_BTN).on_click(
         cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_git_status(worktree_id, cx));
+                ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
             }
         }),
     );

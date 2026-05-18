@@ -216,7 +216,8 @@ async fn test_move_tab_left_right(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> =
+        workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
     assert_eq!(ids.len(), 3);
 
     // Active tab is index 2; move it left → index 1.
@@ -285,7 +286,8 @@ async fn test_close_active_tab_returns_to_last_active(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> =
+        workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
 
     // Close active tab (index 1) — should jump back to previously-active (0).
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -326,7 +328,8 @@ async fn test_move_tab_adjusts_history_indices(cx: &mut TestAppContext) {
         assert_eq!(ws.main_area.tab_history.last(), Some(&1));
     });
 
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
+    let ids: Vec<u64> =
+        workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
 
     // Move tab A (0) to tail position (2): [A,B,C] → [B,C,A]
     cx.update_window(window_handle.into(), |_, _window, cx| {

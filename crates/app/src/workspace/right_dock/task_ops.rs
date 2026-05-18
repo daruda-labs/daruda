@@ -17,8 +17,8 @@ use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{BorrowAppContext, Context, Window};
 
-use crate::workspace::Workspace;
 use super::task_picker_modal::{TaskPickAction, TaskPickerModal};
+use crate::workspace::Workspace;
 
 impl Workspace {
     // ------------------------------------------------------------------
@@ -73,7 +73,8 @@ impl Workspace {
             .any(|t| matches!(t.state, daruda_store::tasks::TaskState::Running { .. }));
         if has_running {
             if self._task_live_tick.is_none() {
-                self._task_live_tick = Some(crate::workspace::right_dock::task_workflow_ops::spawn_task_live_tick(cx));
+                self._task_live_tick =
+                    Some(crate::workspace::right_dock::task_workflow_ops::spawn_task_live_tick(cx));
             }
         } else {
             self._task_live_tick = None;

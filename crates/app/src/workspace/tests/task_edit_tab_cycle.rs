@@ -47,7 +47,11 @@ async fn task_edit_pane_tab_cycle_wires_base_select(cx: &mut TestAppContext) {
     // call gets a chance to mutate the focus handle registry.
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
-            let pane = ws.main_area.panes.last().expect("open_task_edit_pane pushed a pane");
+            let pane = ws
+                .main_area
+                .panes
+                .last()
+                .expect("open_task_edit_pane pushed a pane");
             let pane_id = pane.id;
             let te = match &pane.content {
                 crate::workspace::main_area::pane::PaneContent::TaskEditPane(te) => te,

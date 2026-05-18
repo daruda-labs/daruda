@@ -11,8 +11,8 @@ use crate::path_ext::PathExt;
 use crate::surface::strings;
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 use crate::workspace::left_dock::git_ops::git_status_color;
+use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 
 /// Toolbar: path label on the left, Raw/Changes tabs + optional controls + × on the right.
 pub(super) fn render_file_viewer_toolbar(
@@ -96,7 +96,7 @@ pub(super) fn render_file_viewer_toolbar(
                     cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
                         let ws = cx.entity().downgrade();
                         let wt = this
-                            .worktrees
+                            .active_worktrees()
                             .iter()
                             .find(|wt| wt.id == worktree_id_for_menu);
                         let worktree_root = wt.map(|wt| wt.path.clone());

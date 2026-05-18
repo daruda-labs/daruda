@@ -15,10 +15,10 @@ use gpui::{
 };
 use portable_pty::MasterPty;
 
-use crate::workspace::Workspace;
 use super::file_view_pane::PaneFileView;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use crate::path_ext::PathExt;
+use crate::workspace::Workspace;
+use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use daruda_terminal::pty::{PtyConfig, PtyError, spawn_pty};
 
 /// Errors that can occur while creating a pane.
@@ -149,7 +149,8 @@ pub(in crate::workspace) struct TaskEditContent {
     /// when the task is still in `Backlog` (no worktree yet) or the
     /// file didn't exist at pane-open time. Dropped with the pane —
     /// `PromptFileWatcherHandle` shuts down the underlying threads.
-    pub(in crate::workspace) _prompt_watcher: Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
+    pub(in crate::workspace) _prompt_watcher:
+        Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
     /// GPUI-side pump that polls the watcher's debounced channel and
     /// dispatches `handle_prompt_file_changed` (R-20). Dropped with
     /// the pane.
@@ -682,7 +683,10 @@ fn home_dir() -> Option<PathBuf> {
 /// breaking isolation for fresh starts, restored sessions before
 /// OSC 7 landed, and any `Cmd+T` issued before the focused pane had
 /// a reported cwd.
-pub(in crate::workspace) fn resolve_default_cwd(inherit_cwd: bool, candidates: CwdCandidates) -> Option<PathBuf> {
+pub(in crate::workspace) fn resolve_default_cwd(
+    inherit_cwd: bool,
+    candidates: CwdCandidates,
+) -> Option<PathBuf> {
     if inherit_cwd && let Some(cwd) = candidates.focused_pane {
         return Some(cwd);
     }
@@ -696,16 +700,13 @@ impl Workspace {
     pub(in crate::workspace) fn default_cwd_for_new_pane(&self) -> Option<PathBuf> {
         let candidates = CwdCandidates {
             focused_pane: self
-                .main_area.panes
+                .main_area
+                .panes
                 .iter()
                 .find(|p| p.id == self.main_area.focused_pane_id)
                 .and_then(|p| p.cwd().map(Path::to_path_buf)),
-            active_worktree: self
-                .worktrees
-                .iter()
-                .find(|w| w.id == self.active_worktree_id)
-                .map(|w| w.path.clone()),
-            project_root: self.project.as_ref().map(|p| p.root.clone()),
+            active_worktree: self.active_worktree().map(|w| w.path.clone()),
+            project_root: self.active_project().map(|p| p.root.clone()),
         };
         resolve_default_cwd(self.inherit_cwd, candidates).or_else(home_dir)
     }
@@ -855,7 +856,8 @@ impl Workspace {
                     let _ = cx.update(|_, app_cx| {
                         workspace_for_errors.update(app_cx, |ws, cx| {
                             let cwd = ws
-                                .main_area.panes
+                                .main_area
+                                .panes
                                 .iter()
                                 .find(|p| p.id == pane_id)
                                 .and_then(|p| p.cwd())
@@ -894,7 +896,8 @@ impl Workspace {
                         let title = v.terminal_title().to_string();
                         let cwd = v.terminal_cwd().map(PathBuf::from);
                         workspace.update(cx, |ws, cx| {
-                            if let Some(pane) = ws.main_area.panes.iter_mut().find(|p| p.id == pane_id)
+                            if let Some(pane) =
+                                ws.main_area.panes.iter_mut().find(|p| p.id == pane_id)
                                 && pane.update_cached_terminal(title, cwd)
                             {
                                 cx.notify();
@@ -937,7 +940,12 @@ impl Workspace {
         })
     }
 
-    pub(in crate::workspace) fn focus_pane(&self, pane_id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn focus_pane(
+        &self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) {
             let handle = pane.focus_handle(cx);
             handle.focus(window, cx);

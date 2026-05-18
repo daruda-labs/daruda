@@ -68,7 +68,7 @@ impl Workspace {
     /// `worktree.branch.clone()` when it's a git worktree. `None`
     /// falls through to git's "branch from current HEAD" default.
     fn branch_for_worktree_path(&self, path: &Path) -> Option<String> {
-        self.worktrees
+        self.active_worktrees()
             .iter()
             .find(|w| w.path == path)
             .and_then(|w| match &w.kind {
@@ -88,7 +88,8 @@ impl Workspace {
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         bytes: &[u8],
     ) -> bool {
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter()
             .find(|p| p.id == pane_id)
             .map(|p| p.send_input(bytes))
@@ -359,9 +360,17 @@ impl Workspace {
             return;
         }
 
-        let target_id = self.worktrees.iter().find(|w| w.path == path).map(|w| w.id);
+        let target_id = self
+            .active_worktrees()
+            .iter()
+            .find(|w| w.path == path)
+            .map(|w| w.id);
         if let Some(id) = target_id {
-            self.activate_worktree(id, window, cx);
+            let target = daruda_store::project::WorktreeRef {
+                project: self.active.project,
+                worktree: id,
+            };
+            self.activate_worktree(target, window, cx);
         }
     }
 

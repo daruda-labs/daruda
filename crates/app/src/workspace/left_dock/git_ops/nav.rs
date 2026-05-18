@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
@@ -14,19 +14,15 @@ impl Workspace {
     /// order (sticky conflicts, custom sort) automatically applies to
     /// `↑↓` nav.
     fn git_changes_visible_paths(&self) -> Vec<PathBuf> {
-        let Some(s) = self.git_status_cache.get(&self.active_worktree_id) else {
+        let Some(s) = self.git_status_cache.get(&self.active) else {
             return Vec::new();
         };
-        let Some(wt) = self
-            .worktrees
-            .iter()
-            .find(|w| w.id == self.active_worktree_id)
-        else {
+        let Some(wt) = self.active_worktree() else {
             return Vec::new();
         };
         let collapsed = self
             .git_collapsed_dirs
-            .get(&self.active_worktree_id)
+            .get(&self.active)
             .cloned()
             .unwrap_or_default();
         crate::workspace::left_dock::git_changes::ordered_visible_paths(s, &collapsed, &wt.paths())
@@ -41,7 +37,11 @@ impl Workspace {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        self.git_changes_cursor.insert(worktree_id, path);
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        self.git_changes_cursor.insert(target, path);
         cx.notify();
     }
 
@@ -58,10 +58,10 @@ impl Workspace {
         if visible.is_empty() {
             return;
         }
-        let active_id = self.active_worktree_id;
+        let active_ref = self.active;
         let current_idx = self
             .git_changes_cursor
-            .get(&active_id)
+            .get(&active_ref)
             .and_then(|p| visible.iter().position(|v| v == p));
         let new_idx: usize = match (current_idx, delta) {
             (None, d) if d >= 0 => 0,
@@ -72,7 +72,7 @@ impl Workspace {
             }
         };
         self.git_changes_cursor
-            .insert(active_id, visible[new_idx].clone());
+            .insert(active_ref, visible[new_idx].clone());
         cx.notify();
     }
 
@@ -80,11 +80,12 @@ impl Workspace {
     /// cursor (Space). No-op when the cursor is unset or the file has
     /// vanished from `git status`.
     pub(in crate::workspace) fn toggle_git_changes_cursor_stage(&mut self, cx: &mut Context<Self>) {
-        let active_id = self.active_worktree_id;
-        let Some(cursor) = self.git_changes_cursor.get(&active_id).cloned() else {
+        let active_ref = self.active;
+        let active_id = self.active.worktree;
+        let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
             return;
         };
-        let Some(s) = self.git_status_cache.get(&active_id) else {
+        let Some(s) = self.git_status_cache.get(&active_ref) else {
             return;
         };
         let is_staged = s.staged.iter().any(|e| e.path == cursor);
@@ -101,11 +102,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active_id = self.active_worktree_id;
-        let Some(cursor) = self.git_changes_cursor.get(&active_id).cloned() else {
+        let active_ref = self.active;
+        let active_id = self.active.worktree;
+        let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
             return;
         };
-        let Some(s) = self.git_status_cache.get(&active_id) else {
+        let Some(s) = self.git_status_cache.get(&active_ref) else {
             return;
         };
         let staged_entry = s.staged.iter().find(|e| e.path == cursor);
@@ -119,7 +121,7 @@ impl Workspace {
         // The diff viewer wants the absolute path (it routes through
         // `open_pane_file_view` which loads from the filesystem); resolve
         // the repo-root-relative cursor via WorktreePaths.
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == active_id) else {
+        let Some(wt) = self.active_worktree() else {
             return;
         };
         let abs = wt.paths().from_git_status(&cursor);
@@ -137,7 +139,11 @@ impl Workspace {
         dir: String,
         cx: &mut Context<Self>,
     ) {
-        let set = self.git_collapsed_dirs.entry(worktree_id).or_default();
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let set = self.git_collapsed_dirs.entry(target).or_default();
         if !set.remove(&dir) {
             set.insert(dir);
         }

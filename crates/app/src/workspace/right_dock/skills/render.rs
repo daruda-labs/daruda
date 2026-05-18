@@ -29,10 +29,7 @@ use crate::ui::Divider;
 use crate::workspace::Workspace;
 
 /// Render the Skills tab body.
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let skills = &snap.skills;
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();

@@ -113,7 +113,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let path = dir.join("SKILL.md");
-        let worktree_id = self.active_worktree_id;
+        let worktree_id = self.active.worktree;
         self.open_pane_file_view(
             worktree_id,
             path,

@@ -18,8 +18,8 @@ use daruda_store::tasks::SubTask;
 use gpui::{Context, IntoElement, KeyDownEvent, MouseButton, SharedString, div, prelude::*, px};
 
 use super::super::Workspace;
-use super::pane_tree::PaneId;
 use super::pane::{BranchValidation, TaskEditContent};
+use super::pane_tree::PaneId;
 use crate::surface::strings;
 use crate::ui::select::select;
 use crate::ui::{

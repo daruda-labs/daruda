@@ -28,10 +28,7 @@ use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
 
 /// Render the Tools tab body.
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let mcp = &snap.mcp;
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();

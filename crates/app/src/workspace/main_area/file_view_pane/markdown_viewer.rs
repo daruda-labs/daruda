@@ -8,8 +8,8 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use super::{VisualRow, VisualRowKind};
 use super::highlighter::highlight_raw_rows;
+use super::{VisualRow, VisualRowKind};
 
 // ----------------------------------------------------------------
 // Inline IR

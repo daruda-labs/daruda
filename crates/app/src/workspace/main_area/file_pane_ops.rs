@@ -2,10 +2,10 @@ use gpui::{AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use crate::workspace::Workspace;
 use super::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::Workspace;
 
 impl Workspace {
     // ---- Focused-pane file-viewer accessors ----
@@ -17,7 +17,8 @@ impl Workspace {
 
     pub(in crate::workspace) fn focused_file_view(&self) -> Option<&PaneFileView> {
         let id = self.main_area.focused_pane_id;
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter()
             .find(|p| p.id == id)
             .and_then(|p| p.file_view())
@@ -30,7 +31,8 @@ impl Workspace {
         &self,
     ) -> Option<&gpui::Entity<daruda_terminal::view::TerminalView>> {
         let id = self.main_area.focused_pane_id;
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter()
             .find(|p| p.id == id)
             .and_then(|p| p.terminal_view())
@@ -38,7 +40,8 @@ impl Workspace {
 
     pub(in crate::workspace) fn focused_file_view_mut(&mut self) -> Option<&mut PaneFileView> {
         let id = self.main_area.focused_pane_id;
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter_mut()
             .find(|p| p.id == id)
             .and_then(|p| p.file_view_mut())
@@ -46,7 +49,8 @@ impl Workspace {
 
     pub(in crate::workspace) fn focused_file_content(&self) -> Option<&FileContent> {
         let id = self.main_area.focused_pane_id;
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter()
             .find(|p| p.id == id)
             .and_then(|p| p.file_content())
@@ -54,7 +58,8 @@ impl Workspace {
 
     pub(in crate::workspace) fn focused_file_content_mut(&mut self) -> Option<&mut FileContent> {
         let id = self.main_area.focused_pane_id;
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter_mut()
             .find(|p| p.id == id)
             .and_then(|p| p.file_content_mut())
@@ -67,7 +72,8 @@ impl Workspace {
         for (i, tab) in self.main_area.tabs.iter().enumerate() {
             if let PaneLayout::Pane(pane_id) = tab.layout
                 && self
-                    .main_area.panes
+                    .main_area
+                    .panes
                     .iter()
                     .any(|p| p.id == pane_id && p.file_view().is_some())
             {

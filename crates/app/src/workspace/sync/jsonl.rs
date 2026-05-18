@@ -20,8 +20,8 @@ use daruda_claude::hooks::status_file::{Source, StatusFile};
 use daruda_claude::usage::UsageDelta;
 use gpui::{Context, Task};
 
-use crate::workspace::Workspace;
 use crate::hooks::jsonl_watcher::{self, JsonlEvent, JsonlWatcherHandle};
+use crate::workspace::Workspace;
 
 /// 100 ms — same as `pty_pump`. Short enough that JSONL-only updates
 /// (Claude Code spawned outside daruda's PTY ancestry) feel responsive,
@@ -173,7 +173,7 @@ impl Workspace {
             return;
         };
         let pairs: Vec<(PathBuf, PathBuf)> = self
-            .worktrees
+            .active_worktrees()
             .iter()
             .map(|wt| {
                 (

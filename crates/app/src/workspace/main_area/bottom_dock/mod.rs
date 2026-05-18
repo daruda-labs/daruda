@@ -21,8 +21,8 @@ use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
 
 use self::macro_edit_modal::MacroEditModal;
 use crate::ui::button_add_tile;
-use crate::workspace::layout::Dock;
 use crate::workspace::layout::BottomDockSnapshot;
+use crate::workspace::layout::Dock;
 
 /// Build the bottom dock body for the active tab. Active tab's widgets
 /// render in a fixed-column grid (`snap.grid_columns`, mirrored from

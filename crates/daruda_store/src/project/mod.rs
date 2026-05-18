@@ -56,7 +56,7 @@ impl Project {
 /// Compute a display name from a filesystem path — last path component,
 /// or `"untitled"` for root / empty paths. Shared by [`Project::from_path`]
 /// and [`WorkspaceState::from_legacy`] so both paths produce identical names.
-fn derive_name_from_path(root: &Path) -> String {
+pub fn derive_name_from_path(root: &Path) -> String {
     root.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("untitled")

@@ -30,11 +30,16 @@ use crate::workspace::Workspace;
 /// dock's `impl Render`.
 pub(in crate::workspace) struct LeftDockSnapshot {
     pub left_dock_view: daruda_store::project::LeftDockView,
+    /// Display name of the active project. Surfaced as a single-row
+    /// header above the worktrees list so the flat W-2 list still
+    /// communicates which project the rows belong to ahead of the
+    /// commit-f 2-level tree refactor.
+    pub active_project_name: Option<gpui::SharedString>,
     pub worktrees: Vec<crate::worktree::Worktree>,
-    pub active_worktree_id: daruda_store::project::WorktreeId,
+    pub active: daruda_store::project::WorktreeRef,
     pub active_tab_count: usize,
     pub git_status_cache: std::collections::HashMap<
-        daruda_store::project::WorktreeId,
+        daruda_store::project::WorktreeRef,
         crate::worktree::git::GitStatusData,
     >,
     pub git_stage_in_flight: bool,

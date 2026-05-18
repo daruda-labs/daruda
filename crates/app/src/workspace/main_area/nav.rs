@@ -122,8 +122,8 @@ fn perp_offset(a: &PaneRect, b: &PaneRect, dir: NavDirection) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::workspace::main_area::pane_tree::{PaneLayout, SplitDirection, collect_pane_rects};
     use super::*;
+    use crate::workspace::main_area::pane_tree::{PaneLayout, SplitDirection, collect_pane_rects};
 
     fn split(dir: SplitDirection, children: Vec<PaneLayout>) -> PaneLayout {
         PaneLayout::new_split(dir, children)

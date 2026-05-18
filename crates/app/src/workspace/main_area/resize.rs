@@ -11,9 +11,9 @@
 
 use gpui::{Context, Window};
 
-use crate::workspace::Workspace;
-use super::pane_tree::collect_pane_sizes;
 use super::pane::FontMetricsKey;
+use super::pane_tree::collect_pane_sizes;
+use crate::workspace::Workspace;
 use crate::workspace::status_bar;
 use crate::workspace::{TAB_BAR_HEIGHT, TITLE_BAR_HEIGHT, render};
 use daruda_terminal::view::TerminalLayout;

@@ -18,11 +18,13 @@ use daruda_store::observability::system_info::redact_home;
 use daruda_store::tasks::{Task, TaskId, branch::derive_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
-use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
-use crate::workspace::main_area::pane::{BranchValidation, Pane, PaneContent, TaskEditContent, TaskEditSnapshot};
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
+use crate::workspace::Workspace;
+use crate::workspace::main_area::pane::{
+    BranchValidation, Pane, PaneContent, TaskEditContent, TaskEditSnapshot,
+};
+use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 /// Validate a branch-input string against the same rules as
 /// `daruda_store::tasks::sanitize_branch_name`, but report which
@@ -97,13 +99,17 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.main_area.panes.push(pane);
-        self.main_area.tabs.push(crate::workspace::main_area::pane::TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
-        self.main_area.tab_history.push(self.main_area.active_tab_index);
+        self.main_area
+            .tabs
+            .push(crate::workspace::main_area::pane::TabEntry {
+                id: tab_id,
+                layout: PaneLayout::Pane(pane_id),
+                last_focused_pane: pane_id,
+                user_label: None,
+            });
+        self.main_area
+            .tab_history
+            .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
         self.main_area.focused_pane_id = pane_id;
         self.bump_activity(pane_id);
@@ -382,7 +388,8 @@ impl Workspace {
     }
 
     fn task_edit_content_mut_for(&mut self, pane_id: PaneId) -> Option<&mut TaskEditContent> {
-        self.main_area.panes
+        self.main_area
+            .panes
             .iter_mut()
             .find(|p| p.id == pane_id)?
             .task_edit_content_mut()
@@ -430,7 +437,8 @@ impl Workspace {
             return;
         };
         let already_attached = self
-            .main_area.panes
+            .main_area
+            .panes
             .iter()
             .find(|p| p.id == pane_id)
             .and_then(|p| p.task_edit_content())
@@ -697,7 +705,8 @@ impl Workspace {
         cx: &Context<Self>,
     ) -> Option<TaskEditFormSnapshot> {
         let te = self
-            .main_area.panes
+            .main_area
+            .panes
             .iter()
             .find(|p| p.id == pane_id)?
             .task_edit_content()?;
@@ -982,7 +991,7 @@ impl Workspace {
             return;
         }
         let Some(wt_id) = self
-            .worktrees
+            .active_worktrees()
             .iter()
             .find(|w| path.starts_with(&w.path))
             .map(|w| w.id)
@@ -1014,7 +1023,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(wt) = self
-            .worktrees
+            .active_worktrees()
             .iter()
             .find(|w| path.starts_with(&w.path))
             .map(|w| w.id)
@@ -1032,12 +1041,13 @@ impl Workspace {
 /// `commit_task_edit_pane` can round-trip the user's pick back into
 /// `Task::base_worktree_path: Option<PathBuf>`.
 fn base_worktree_options(ws: &Workspace) -> Vec<SelectOption> {
-    let mut options = Vec::with_capacity(ws.worktrees.len() + 1);
+    let worktrees = ws.active_worktrees();
+    let mut options = Vec::with_capacity(worktrees.len() + 1);
     options.push(SelectOption::new(
         "",
         crate::surface::strings::TASK_EDIT_BASE_ACTIVE_LABEL,
     ));
-    for w in &ws.worktrees {
+    for w in worktrees {
         let Some(path_str) = w.path.to_str() else {
             continue;
         };

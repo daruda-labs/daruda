@@ -5,26 +5,22 @@ use std::path::PathBuf;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::WorktreeRef;
 use gpui::Context;
 
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// Repo root of worktree `id`, or `None` when it isn't git-backed.
-    pub(in crate::workspace) fn git_repo_root_for(&self, id: WorktreeId) -> Option<PathBuf> {
-        self.worktrees
-            .iter()
-            .find(|w| w.id == id)
-            .and_then(|w| match &w.kind {
-                daruda_store::project::WorktreeKind::Git { repo_root, .. } => {
-                    Some(repo_root.clone())
-                }
-                daruda_store::project::WorktreeKind::Default => None,
-            })
+    /// Repo root of the targeted worktree, or `None` when it isn't
+    /// git-backed.
+    pub(in crate::workspace) fn git_repo_root_for(&self, target: WorktreeRef) -> Option<PathBuf> {
+        self.worktree_for(target).and_then(|w| match &w.kind {
+            daruda_store::project::WorktreeKind::Git { repo_root, .. } => Some(repo_root.clone()),
+            daruda_store::project::WorktreeKind::Default => None,
+        })
     }
 
-    /// Kick off a background `git status` for `worktree_id` and update
+    /// Kick off a background `git status` for `target` and update
     /// `git_status_cache` when done. No-op for non-git worktrees.
     ///
     /// Concurrency guard: at most one in-flight task per worktree. A
@@ -36,10 +32,10 @@ impl Workspace {
     /// captures everything that landed during the run.
     pub(in crate::workspace) fn refresh_git_status(
         &mut self,
-        worktree_id: WorktreeId,
+        target: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let path = wt.path.clone();
@@ -47,9 +43,9 @@ impl Workspace {
             return;
         }
 
-        if !self.git_status_in_flight.insert(worktree_id) {
+        if !self.git_status_in_flight.insert(target) {
             // Already running — request a re-fire on completion.
-            self.git_status_pending_repeat.insert(worktree_id);
+            self.git_status_pending_repeat.insert(target);
             return;
         }
 
@@ -58,16 +54,16 @@ impl Workspace {
             cx,
             move || crate::worktree::git::git_status(&path),
             move |ws, result, cx| {
-                ws.git_status_in_flight.remove(&worktree_id);
+                ws.git_status_in_flight.remove(&target);
                 match result {
                     Ok(data) => {
-                        ws.git_status_cache.insert(worktree_id, data);
+                        ws.git_status_cache.insert(target, data);
                         // Trigger #6 — git status refresh updates badges.
-                        ws.invalidate_visible_files_cache(worktree_id);
+                        ws.invalidate_visible_files_cache(target.worktree);
                         // Commit button reflects the active worktree's
                         // staged count — recompute when that worktree's
                         // cache changes.
-                        if worktree_id == ws.active_worktree_id {
+                        if target == ws.active {
                             ws.sync_commit_buttons(cx);
                         }
                     }
@@ -89,8 +85,8 @@ impl Workspace {
                 cx.notify();
                 // Drain the repeat slot — re-fire once to capture
                 // events that landed while the previous run was busy.
-                if ws.git_status_pending_repeat.remove(&worktree_id) {
-                    ws.refresh_git_status(worktree_id, cx);
+                if ws.git_status_pending_repeat.remove(&target) {
+                    ws.refresh_git_status(target, cx);
                 }
             },
         )
@@ -100,10 +96,10 @@ impl Workspace {
     /// Refresh git status for the merge target worktree after a successful merge.
     pub(in crate::workspace) fn finalize_merge(
         &mut self,
-        target_wt_id: WorktreeId,
+        target: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
-        self.refresh_git_status(target_wt_id, cx);
+        self.refresh_git_status(target, cx);
     }
 
     /// Recompute and push the disabled state of the commit footer's
@@ -118,7 +114,7 @@ impl Workspace {
     pub(in crate::workspace) fn sync_commit_buttons(&mut self, cx: &mut Context<Self>) {
         let staged_count = self
             .git_status_cache
-            .get(&self.active_worktree_id)
+            .get(&self.active)
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let in_flight = self.git_op_in_flight;

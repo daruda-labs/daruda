@@ -571,7 +571,8 @@ impl Workspace {
     fn send_to_focused_pane(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let focused_id = self.main_area.focused_pane_id;
         let Some(view) = self
-            .main_area.panes
+            .main_area
+            .panes
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.terminal_view().cloned())

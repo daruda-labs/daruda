@@ -444,7 +444,8 @@ impl CommandPaletteState {
 pub(in crate::workspace) struct CommandPaletteOverlay {
     pub(in crate::workspace) state: CommandPaletteState,
     #[allow(clippy::type_complexity)]
-    pub(in crate::workspace) on_close: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+    pub(in crate::workspace) on_close:
+        Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
 }
 
 impl CommandPaletteOverlay {

@@ -34,10 +34,7 @@ fn view_by_index(ix: usize) -> LeftDockView {
 }
 
 /// Render the ViewSwitcher tab strip for the left dock.
-pub(in crate::workspace) fn render(
-    snap: &LeftDockSnapshot,
-    _cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, _cx: &mut Context<Dock>) -> AnyElement {
     let all = entries();
     let active_ix = all
         .iter()

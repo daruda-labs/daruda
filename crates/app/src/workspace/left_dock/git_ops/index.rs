@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::{Context, Window};
 
 use crate::path_ext::PathExt;
@@ -33,7 +33,11 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -50,7 +54,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git add failed")
@@ -83,7 +87,11 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -100,7 +108,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git restore --staged failed")
@@ -131,7 +139,11 @@ impl Workspace {
         if self.git_stage_in_flight || paths.is_empty() {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -148,7 +160,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git add (paths) failed")
@@ -179,7 +191,11 @@ impl Workspace {
         if self.git_stage_in_flight || paths.is_empty() {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -196,7 +212,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git restore --staged (paths) failed")
@@ -225,7 +241,11 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -241,7 +261,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git add --all failed")
@@ -269,7 +289,11 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -285,7 +309,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let report = ErrorReport::new("git restore --staged . failed")
@@ -321,7 +345,10 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        if !self.worktrees.iter().any(|w| w.id == worktree_id) {
+        if !self
+            .active_project()
+            .is_some_and(|p| p.worktrees.iter().any(|w| w.id == worktree_id))
+        {
             return;
         }
         let filename = path.file_name_lossy();
@@ -368,11 +395,15 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let wt_path = wt.path.clone();
-        let repo_root = self.git_repo_root_for(worktree_id);
+        let repo_root = self.git_repo_root_for(target);
         // `path` is a repo-root-relative pathspec (from git status output).
         // `git restore`/`git clean` must run from the worktree directory with a
         // worktree-relative path — use WorktreePaths for the two-step conversion.
@@ -399,7 +430,7 @@ impl Workspace {
                 ws.git_stage_in_flight = false;
                 match result {
                     Ok(()) => {
-                        ws.refresh_git_status(worktree_id, cx);
+                        ws.refresh_git_status(target, cx);
                     }
                     Err(e) => {
                         let title = if is_untracked {

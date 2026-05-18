@@ -18,17 +18,17 @@ use gpui::{Context, Focusable as _, Window};
 
 use super::Workspace;
 use super::{
-    CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, EditTask,
-    EditWindowTitle, FetchChanges, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh,
-    FilesSelectNext, FilesSelectPrev, FilesToggleHidden, FocusNextPane, FocusPaneDown,
-    FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch,
-    GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage,
-    InstallClaudeHooks, InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill,
-    NewTab, NewTask, NextTab, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
-    PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit,
-    ShowLeftDockWorktrees, SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks,
-    SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen,
-    ToggleZoomPane, UninstallClaudeHooks, ZoomWindow,
+    CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, EditTask, EditWindowTitle,
+    FetchChanges, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext,
+    FilesSelectPrev, FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft,
+    FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch, GitChangesActivate,
+    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InstallClaudeHooks,
+    InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill, NewTab, NewTask,
+    NextTab, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, PullChanges,
+    RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockWorktrees, SplitDown,
+    SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
+    SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane,
+    UninstallClaudeHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -305,8 +305,8 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active_worktree_id;
-        self.refresh_git_status(id, cx);
+        let target = self.active;
+        self.refresh_git_status(target, cx);
     }
 
     pub(in crate::workspace) fn on_commit_amend_action(
@@ -517,7 +517,7 @@ impl Workspace {
     ) {
         use crate::surface::strings as s;
 
-        let Some(project) = &self.project else {
+        let Some(project_root) = self.active_project().map(|p| p.root.clone()) else {
             let report = ErrorReport::new(s::PROJECT_CONFIG_NO_PROJECT)
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
@@ -526,7 +526,7 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         };
-        let Some(path) = daruda_config::project_config_path(&project.root) else {
+        let Some(path) = daruda_config::project_config_path(&project_root) else {
             let report = ErrorReport::new(s::PROJECT_CONFIG_NO_DIR)
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())

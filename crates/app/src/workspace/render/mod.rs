@@ -19,9 +19,7 @@ use gpui::KeyDownEvent;
 
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
-use super::layout::{
-    BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot,
-};
+use super::layout::{BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 use super::main_area::file_view_pane::{CharPos, CharSelection};
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
@@ -227,7 +225,11 @@ impl Render for Workspace {
             .iter()
             .enumerate()
             .map(|(i, tab)| {
-                let pane = self.main_area.panes.iter().find(|p| p.id == tab.last_focused_pane);
+                let pane = self
+                    .main_area
+                    .panes
+                    .iter()
+                    .find(|p| p.id == tab.last_focused_pane);
                 let base_label = tab
                     .user_label
                     .clone()
@@ -259,7 +261,7 @@ impl Render for Workspace {
                 }) {
                     Some((path, wt_id)) => {
                         let root = self
-                            .worktrees
+                            .active_worktrees()
                             .iter()
                             .find(|wt| wt.id == wt_id)
                             .map(|wt| wt.path.clone());
@@ -282,7 +284,12 @@ impl Render for Workspace {
         // cwd is known, just title otherwise (matches iTerm2 default).
         if let Some(label) = self.window_user_label.as_ref() {
             window.set_window_title(label.as_ref());
-        } else if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == self.main_area.focused_pane_id) {
+        } else if let Some(pane) = self
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == self.main_area.focused_pane_id)
+        {
             let pane_title = pane.title();
             let title = match pane.cwd() {
                 Some(cwd) => format!("{} — {}", pane_title.as_ref(), cwd.display()),
@@ -299,31 +306,28 @@ impl Render for Workspace {
         // back through WeakEntity<Workspace>.
 
         // Ensure the file tree is primed before snapshotting its state.
-        if !self
-            .file_tree
-            .file_trees
-            .contains_key(&self.active_worktree_id)
-        {
-            self.ensure_file_tree(self.active_worktree_id, cx);
+        let active_wt_id = self.active.worktree;
+        if !self.file_tree.file_trees.contains_key(&active_wt_id) {
+            self.ensure_file_tree(active_wt_id, cx);
         }
 
         let left_snap = LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
-            worktrees: self.worktrees.clone(),
-            active_worktree_id: self.active_worktree_id,
+            active_project_name: self
+                .active_project()
+                .map(|p| gpui::SharedString::from(p.name.clone())),
+            worktrees: self.active_worktrees().to_vec(),
+            active: self.active,
             active_tab_count: self.main_area.tabs.len(),
             git_status_cache: self.git_status_cache.clone(),
             git_stage_in_flight: self.git_stage_in_flight,
             git_op_in_flight: self.git_op_in_flight,
             git_collapsed_dirs: self
                 .git_collapsed_dirs
-                .get(&self.active_worktree_id)
+                .get(&self.active)
                 .cloned()
                 .unwrap_or_default(),
-            git_changes_cursor: self
-                .git_changes_cursor
-                .get(&self.active_worktree_id)
-                .cloned(),
+            git_changes_cursor: self.git_changes_cursor.get(&self.active).cloned(),
             git_changes_panel_focus: self.git_changes_panel_focus.clone(),
             focused_file_selection: self
                 .focused_file_view()
@@ -333,11 +337,11 @@ impl Render for Workspace {
             files_panel_focus: self.file_tree.files_panel_focus.clone(),
             files_scroll_handle: self.file_tree.files_scroll_handle.clone(),
             files_icon_color_mode: self.file_tree.files_icon_color_mode.clone(),
-            cached_visible: self.cached_or_rebuild_visible(self.active_worktree_id),
+            cached_visible: self.cached_or_rebuild_visible(active_wt_id),
             root_kind: self
                 .file_tree
                 .file_trees
-                .get(&self.active_worktree_id)
+                .get(&active_wt_id)
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
             // Sessions are only surfaced once the PtyTracker has
@@ -362,7 +366,7 @@ impl Render for Workspace {
                     .map(|b| b.session_id.as_str())
                     .collect();
                 let mut map = std::collections::HashMap::new();
-                for wt in &self.worktrees {
+                for wt in self.active_worktrees() {
                     let live_sessions = self
                         .claude
                         .claude_status
@@ -384,7 +388,7 @@ impl Render for Workspace {
                     .map(|b| b.session_id.as_str())
                     .collect();
                 let mut map = std::collections::HashMap::new();
-                for wt in &self.worktrees {
+                for wt in self.active_worktrees() {
                     let sessions: Vec<_> = self
                         .claude
                         .claude_status
@@ -711,10 +715,11 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_OTHER_TABS,
                                         tab_count <= 1,
                                         move |this, win, cx| {
-                                            let indices: Vec<usize> = (0..this.main_area.tabs.len())
-                                                .rev()
-                                                .filter(|&j| j != i)
-                                                .collect();
+                                            let indices: Vec<usize> =
+                                                (0..this.main_area.tabs.len())
+                                                    .rev()
+                                                    .filter(|&j| j != i)
+                                                    .collect();
                                             this.request_close_tabs_bulk(indices, win, cx);
                                             this.mark_dirty_and_save(cx);
                                         },
@@ -884,21 +889,34 @@ impl Render for Workspace {
         // user access to the right-click Unzoom menu. The dim overlay
         // is suppressed (dim_alpha = 0.0) because is_focused is always
         // true for the sole zoomed leaf.
-        let center_content = if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
-            let actual_has_splits = tab.layout.leaf_count() > 1;
-            if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
-                if tab.layout.pane_ids().contains(&zoomed_id) {
-                    let leaf = PaneLayout::Pane(zoomed_id);
-                    render_layout(
-                        &leaf,
-                        &self.main_area.panes,
-                        zoomed_id,
-                        true,
-                        0.0,
-                        SharedString::from(self.font_family.clone()),
-                        None,
-                        cx,
-                    )
+        let center_content =
+            if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
+                let actual_has_splits = tab.layout.leaf_count() > 1;
+                if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
+                    if tab.layout.pane_ids().contains(&zoomed_id) {
+                        let leaf = PaneLayout::Pane(zoomed_id);
+                        render_layout(
+                            &leaf,
+                            &self.main_area.panes,
+                            zoomed_id,
+                            true,
+                            0.0,
+                            SharedString::from(self.font_family.clone()),
+                            None,
+                            cx,
+                        )
+                    } else {
+                        render_layout(
+                            &tab.layout,
+                            &self.main_area.panes,
+                            self.main_area.focused_pane_id,
+                            actual_has_splits,
+                            self.dim_alpha,
+                            SharedString::from(self.font_family.clone()),
+                            self.main_area.zoomed_pane_id,
+                            cx,
+                        )
+                    }
                 } else {
                     render_layout(
                         &tab.layout,
@@ -907,25 +925,13 @@ impl Render for Workspace {
                         actual_has_splits,
                         self.dim_alpha,
                         SharedString::from(self.font_family.clone()),
-                        self.main_area.zoomed_pane_id,
+                        None,
                         cx,
                     )
                 }
             } else {
-                render_layout(
-                    &tab.layout,
-                    &self.main_area.panes,
-                    self.main_area.focused_pane_id,
-                    actual_has_splits,
-                    self.dim_alpha,
-                    SharedString::from(self.font_family.clone()),
-                    None,
-                    cx,
-                )
-            }
-        } else {
-            div().flex_1().w_full().into_any_element()
-        };
+                div().flex_1().w_full().into_any_element()
+            };
 
         // BodyLayout: [LeftDock] [MainArea] [RightDock]
         // Resize handles are absolutely positioned overlays centered
@@ -966,15 +972,18 @@ impl Render for Workspace {
             });
 
         // Status bar
-        let focused_pane = self.main_area.panes.iter().find(|p| p.id == self.main_area.focused_pane_id);
+        let focused_pane = self
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == self.main_area.focused_pane_id);
         // Cheap stat per render — the path is a single file under the
         // user config dir and renders only fire on `cx.notify()`, not
         // in a tight loop.
         let has_project_config = self
-            .project
-            .as_ref()
+            .active_project()
             .and_then(|p| daruda_config::project_config_path(&p.root))
-            .is_some_and(|path| path.exists());
+            .is_some_and(|path: std::path::PathBuf| path.exists());
         let status_data = StatusBarData {
             cwd: focused_pane.and_then(|p| p.display_cwd()),
             title: focused_pane
@@ -1263,7 +1272,8 @@ impl Render for Workspace {
             // opens a Dialog (e.g. discard / amend confirms) leaves the
             // backdrop layered behind the Dialog and steals later clicks.
             .when_some(
-                self.main_area.context_menu
+                self.main_area
+                    .context_menu
                     .as_ref()
                     .map(|m| (m.position, m.corner, wrap_items_with_close(&m.items, cx))),
                 |el, (position, corner, items)| {

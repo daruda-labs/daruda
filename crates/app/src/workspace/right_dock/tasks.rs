@@ -47,10 +47,7 @@ use super::status_pill;
 use crate::surface::strings;
 use crate::ui::{Badge, button, button_primary};
 
-pub(in crate::workspace) fn render(
-    snap: &RightDockSnapshot,
-    cx: &mut Context<Dock>,
-) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     // Pipeline: state filter → search filter → newest-first sort.
     // The search filter is a no-op when the query is blank, so empty
     // searches still go through `filter_by_state` unchanged.
@@ -571,11 +568,7 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 ///
 /// Drops out for terminal states (the row has already settled) and
 /// when no session has crossed the soft threshold yet.
-fn failure_indicator(
-    task: &Task,
-    snap: &RightDockSnapshot,
-    cx: &gpui::App,
-) -> Option<AnyElement> {
+fn failure_indicator(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
     if !matches!(task.state, TaskState::Running { .. }) {
         return None;
     }

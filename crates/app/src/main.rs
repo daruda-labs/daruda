@@ -15,6 +15,7 @@ mod menus;
 mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;
+pub mod project;
 pub mod settings_store;
 pub mod settings_window;
 pub(crate) mod shell_quote;

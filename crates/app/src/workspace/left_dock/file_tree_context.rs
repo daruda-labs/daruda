@@ -15,10 +15,10 @@ use gpui::{FocusHandle, Task, UniformListScrollHandle};
 
 use daruda_store::project::WorktreeId;
 
+use super::file_tree_ops::{FilesReloadQueue, VisibleEntry};
 use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::{EntryId, FileTree};
 use crate::files::watcher::FileTreeWatcher;
-use super::file_tree_ops::{FilesReloadQueue, VisibleEntry};
 
 pub(in crate::workspace) struct FileTreeContext {
     /// Per-worktree lazy file tree for the left-dock Files view. Created
@@ -26,6 +26,10 @@ pub(in crate::workspace) struct FileTreeContext {
     /// terminal/PTY state — purely a snapshot of the worktree's
     /// directory layout, refreshed on expand and (W-7g) by the
     /// `notify` watcher.
+    ///
+    /// Keyed by `WorktreeId` (active-project-local) for now; will be
+    /// promoted to `WorktreeRef` once the workspace holds multiple
+    /// projects (commit c onward).
     pub(in crate::workspace) file_trees: HashMap<WorktreeId, FileTree>,
 
     /// Cached flattened visible-row list per worktree, fed straight to

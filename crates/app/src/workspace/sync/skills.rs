@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use gpui::{BorrowAppContext, Context, Task};
 
-use crate::workspace::Workspace;
 use crate::agent::skills::{SkillScope, SkillsState, scan};
 use crate::hooks::skills_watcher::{self, SkillsEvent};
+use crate::workspace::Workspace;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -72,10 +72,7 @@ impl Workspace {
     /// Project-skills root for the active worktree. `None` when the
     /// workspace has no active worktree (welcome window).
     pub(in crate::workspace) fn active_worktree_root(&self) -> Option<PathBuf> {
-        self.worktrees
-            .iter()
-            .find(|wt| wt.id == self.active_worktree_id)
-            .map(|wt| wt.path.clone())
+        self.active_worktree().map(|wt| wt.path.clone())
     }
 
     /// (Re)spawn the Skills watcher with the current worktree's project

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
@@ -87,7 +87,8 @@ impl Workspace {
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
             let prev_worktree = self
-                .main_area.panes
+                .main_area
+                .panes
                 .iter()
                 .find(|p| p.id == pane_id)
                 .and_then(|p| p.file_view())
@@ -143,13 +144,17 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.main_area.panes.push(pane);
-        self.main_area.tabs.push(crate::workspace::main_area::pane::TabEntry {
-            id: tab_id,
-            layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
-        self.main_area.tab_history.push(self.main_area.active_tab_index);
+        self.main_area
+            .tabs
+            .push(crate::workspace::main_area::pane::TabEntry {
+                id: tab_id,
+                layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
+                last_focused_pane: pane_id,
+                user_label: None,
+            });
+        self.main_area
+            .tab_history
+            .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
         self.main_area.focused_pane_id = pane_id;
         self.bump_activity(pane_id);
@@ -315,7 +320,8 @@ impl Workspace {
     ) {
         let id = self.main_area.focused_pane_id;
         let is_file = self
-            .main_area.panes
+            .main_area
+            .panes
             .iter()
             .any(|p| p.id == id && p.file_content().is_some());
         if !is_file {
@@ -362,7 +368,8 @@ impl Workspace {
     /// Already-loaded panes are skipped, so re-activations are cheap.
     pub(in crate::workspace) fn load_pending_file_panes(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<(WorktreeId, PathBuf, bool, FileViewMode, Option<char>)> = self
-            .main_area.panes
+            .main_area
+            .panes
             .iter()
             .filter_map(|p| p.file_view())
             .filter(|fv| matches!(fv.content, PaneFileContent::Loading))
@@ -395,11 +402,15 @@ impl Workspace {
         file_status: Option<char>,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let wt_path = wt.path.clone();
-        let repo_root = self.git_repo_root_for(worktree_id);
+        let repo_root = self.git_repo_root_for(target);
         let syntax_theme = self.syntax_theme.clone();
 
         let path_bg = path.clone();
@@ -455,7 +466,11 @@ impl Workspace {
         path: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+        let target = WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        };
+        let Some(wt) = self.worktree_for(target) else {
             return;
         };
         let full_path = wt.path.join(&path);

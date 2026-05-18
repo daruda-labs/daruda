@@ -16,9 +16,9 @@ use std::time::Duration;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{BorrowAppContext, Context, Task};
 
-use crate::workspace::Workspace;
 use crate::agent::mcp::{McpScope, McpState, personal_settings_path, project_mcp_path};
 use crate::hooks::mcp_watcher::{self, McpEvent};
+use crate::workspace::Workspace;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 

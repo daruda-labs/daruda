@@ -21,8 +21,8 @@ use daruda_store::observability::error_report::ErrorReport;
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::Context;
 
-use crate::workspace::Workspace;
 use self::toast::ToastId;
+use crate::workspace::Workspace;
 
 /// Cap on the in-memory ring of recent reports. Tuned to fit comfortably
 /// in a future "Show recent errors" command palette entry without
