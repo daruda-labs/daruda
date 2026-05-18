@@ -22,6 +22,7 @@ pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;
+pub(in crate::workspace) mod modal_view;
 mod path_drag;
 mod persistence;
 mod render;
@@ -35,6 +36,7 @@ mod toast_layer;
 mod window_close_ops;
 mod worktree_ops;
 
+pub(in crate::workspace) use modal_view::ModalView;
 pub(in crate::workspace) use persistence::WorktreeRuntime;
 
 use std::collections::{HashMap, HashSet};

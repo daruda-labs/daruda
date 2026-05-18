@@ -29,6 +29,7 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, checkbox, input};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
 
@@ -287,6 +288,8 @@ impl Focusable for CreateSkillModal {
         self.name_input.focus_handle(cx)
     }
 }
+
+impl ModalView for CreateSkillModal {}
 
 impl Render for CreateSkillModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

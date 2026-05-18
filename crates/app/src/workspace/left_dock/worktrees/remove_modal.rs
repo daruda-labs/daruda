@@ -18,6 +18,7 @@ use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{button, button_danger, checkbox};
 
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::worktree_ops::RemoveWorktreePlan;
 
@@ -190,6 +191,8 @@ impl Focusable for RemoveWorktreeModal {
         self.focus_handle.clone()
     }
 }
+
+impl ModalView for RemoveWorktreeModal {}
 
 impl Render for RemoveWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

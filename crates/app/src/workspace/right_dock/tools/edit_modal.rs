@@ -25,6 +25,7 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, checkbox, input};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 fn blank_to_none(s: &str) -> Option<String> {
@@ -291,6 +292,8 @@ impl Focusable for EditMcpServerModal {
         self.command_input.focus_handle(cx)
     }
 }
+
+impl ModalView for EditMcpServerModal {}
 
 impl Render for EditMcpServerModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

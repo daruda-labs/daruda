@@ -33,6 +33,7 @@ use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::button;
+use crate::workspace::ModalView;
 
 /// How long the `Copy report` button shows the `Copied` confirmation
 /// before reverting. Short enough to feel responsive, long enough that
@@ -115,6 +116,8 @@ impl Focusable for ErrorReportModal {
         self.focus_handle.clone()
     }
 }
+
+impl ModalView for ErrorReportModal {}
 
 impl Render for ErrorReportModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

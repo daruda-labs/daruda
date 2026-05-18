@@ -22,6 +22,7 @@ use crate::surface::strings;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 /// Plain-data carrier used to populate the invocation modal. Built by
@@ -154,6 +155,8 @@ impl Focusable for SkillInvocationModal {
         self.panel_focus_handle.clone()
     }
 }
+
+impl ModalView for SkillInvocationModal {}
 
 impl Render for SkillInvocationModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
