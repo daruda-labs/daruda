@@ -278,23 +278,22 @@ pub fn delete_server(
 /// [`extract_servers`](super::parse::extract_servers) reads the same
 /// value via `as_object()` which returns `None` for non-objects.
 fn ensure_mcp_servers_map(root: &mut Value) -> Result<&mut Map<String, Value>, McpPersistError> {
-    if !root.is_object() {
+    let Some(top) = root.as_object_mut() else {
         return Err(McpPersistError::Io(io::Error::new(
             io::ErrorKind::InvalidData,
             "settings file root is not a JSON object",
         )));
-    }
-    let top = root.as_object_mut().expect("root is object");
+    };
     let entry = top
         .entry("mcpServers".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
-    if !entry.is_object() {
+    let Some(map) = entry.as_object_mut() else {
         return Err(McpPersistError::Io(io::Error::new(
             io::ErrorKind::InvalidData,
             "`mcpServers` is not a JSON object",
         )));
-    }
-    Ok(entry.as_object_mut().expect("mcpServers is object"))
+    };
+    Ok(map)
 }
 
 /// Pretty-print + atomic rename. Parent directory is created if
