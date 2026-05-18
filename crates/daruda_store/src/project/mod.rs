@@ -238,6 +238,12 @@ pub struct SerializedProject {
     pub last_active_worktree_id: WorktreeId,
 }
 
+/// Current on-disk schema version for [`WorkspaceState`]. Bumped
+/// whenever the persisted shape changes in a way callers need to
+/// detect (added projects/groups in v2). Legacy [`ProjectState`] files
+/// have no `schema_version` field and are detected by its absence.
+pub const WORKSPACE_SCHEMA_VERSION: u32 = 2;
+
 /// Workspace-level persisted state — a list of projects + optional
 /// groups + workspace chrome. Replaces the flat per-project [`ProjectState`]
 /// as the on-disk shape going forward.
@@ -245,8 +251,17 @@ pub struct SerializedProject {
 /// `migrate_legacy` and the persistence layer translate older JSON
 /// (top-level `tabs` only, or `worktrees` without project framing) into
 /// this shape transparently, so callers always see a normalized struct.
+///
+/// Always serialized with an explicit `schema_version` so the loader
+/// can distinguish a deliberately-empty new-shape file from a legacy
+/// one without resorting to "is the projects array empty" heuristics.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkspaceState {
+    /// Discriminator for legacy vs. new on-disk shape — see
+    /// [`WORKSPACE_SCHEMA_VERSION`]. Always serialized; absent in
+    /// legacy files (decodes as `0` via `#[serde(default)]`).
+    #[serde(default)]
+    pub schema_version: u32,
     #[serde(default)]
     pub projects: Vec<SerializedProject>,
     #[serde(default)]
@@ -290,6 +305,7 @@ pub struct WorkspaceState {
 impl Default for WorkspaceState {
     fn default() -> Self {
         Self {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
             projects: Vec::new(),
             groups: Vec::new(),
             active: WorktreeRef::default(),
@@ -330,6 +346,7 @@ impl WorkspaceState {
             worktrees: legacy.worktrees,
         };
         Self {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
             projects: vec![project],
             groups: Vec::new(),
             active: WorktreeRef {
@@ -411,7 +428,10 @@ impl WorkspaceState {
     /// 1. Missing project → fall back to `projects[0]`.
     /// 2. Missing worktree inside the chosen project → fall back to
     ///    the project's `last_active_worktree_id`, then `worktrees[0]`.
-    /// 3. No projects at all → leave `active` at its default (caller
+    /// 3. Chosen project has no worktrees at all → reset
+    ///    `active.worktree` to `0` so the stale id cannot leak into
+    ///    runtime via [`into_primary_project_state`](Self::into_primary_project_state).
+    /// 4. No projects at all → leave `active` at its default (caller
     ///    routes to the Welcome screen).
     pub fn normalize_active(&mut self) {
         if self.projects.is_empty() {
@@ -439,6 +459,12 @@ impl WorkspaceState {
             self.active.worktree = project.last_active_worktree_id;
         } else if let Some(first) = project.worktrees.first() {
             self.active.worktree = first.id;
+        } else {
+            // Project exists but has no worktrees — a stale `active.worktree`
+            // here would survive into the legacy adapter and surface as a
+            // wrong worktree id at the next restore. Reset to 0 so the
+            // adapter routes to a fresh default worktree instead.
+            self.active.worktree = 0;
         }
     }
 

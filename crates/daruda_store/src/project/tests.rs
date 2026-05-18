@@ -1027,6 +1027,7 @@ fn sample_default_worktree(id: WorktreeId, path: &str) -> SerializedWorktree {
 
 fn sample_workspace_state() -> WorkspaceState {
     WorkspaceState {
+        schema_version: WORKSPACE_SCHEMA_VERSION,
         projects: vec![SerializedProject {
             id: 0,
             root: PathBuf::from("/tmp/wsproj"),
@@ -1404,6 +1405,64 @@ fn load_legacy_json_returns_migrated_project_state() {
     assert_eq!(loaded.root, root);
     assert_eq!(loaded.worktrees.len(), 1);
     assert_eq!(loaded.worktrees[0].tabs.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn normalize_active_resets_worktree_when_project_has_none() {
+    // Regression: a project that survives but loses every worktree
+    // must not leave `active.worktree` pointing at a deleted id —
+    // otherwise the legacy adapter forwards the stale id into
+    // `restore_state` and the wrong worktree gets reconstructed.
+    let mut ws = sample_workspace_state();
+    ws.projects[0].worktrees.clear();
+    ws.projects[0].last_active_worktree_id = 0;
+    ws.active.worktree = 42; // stale
+
+    ws.normalize_active();
+    assert_eq!(ws.active.project, 0);
+    assert_eq!(
+        ws.active.worktree, 0,
+        "empty-worktrees project must reset active.worktree to 0"
+    );
+}
+
+#[test]
+fn empty_new_shape_file_survives_round_trip_without_legacy_fallback() {
+    // Regression: a saved `WorkspaceState` with no projects (e.g.
+    // future "user closed every project" state) must reload as the
+    // new shape — it has a non-zero `schema_version` so the loader
+    // does not retry it as a legacy `ProjectState`. Without the
+    // schema discriminator the legacy fallback would fail to parse
+    // (missing `root` field) and surface as Corrupt in logs.
+    let dir = std::env::temp_dir().join("daruda_test_empty_workspace_state");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let data_dir = dir.join("data");
+    let root = dir.join("nowhere");
+    std::fs::create_dir_all(&root).unwrap();
+
+    // Hand-write a deliberately-empty WorkspaceState to disk.
+    let projects_dir = data_dir.join("projects");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let hash = path_hash(&root);
+    let path = projects_dir.join(format!("{hash}.json"));
+    let empty_state = WorkspaceState::default();
+    let json = serde_json::to_string_pretty(&empty_state).unwrap();
+    std::fs::write(&path, json).unwrap();
+
+    // Must load — returning an empty ProjectState (no worktrees,
+    // empty root) rather than `None` from a Corrupt parse error.
+    let loaded = persistence::load_state_in(&data_dir, &root);
+    assert!(
+        loaded.is_some(),
+        "empty new-shape state must load cleanly, not fall through to legacy parse error"
+    );
+    let loaded = loaded.unwrap();
+    assert!(loaded.worktrees.is_empty());
+    assert_eq!(loaded.root, PathBuf::new());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -51,20 +51,21 @@ pub fn save_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<(
 /// error → logged then `None` so the caller falls back to a fresh
 /// session.
 ///
-/// Tries the new [`WorkspaceState`] shape first. If the on-disk JSON
-/// has no `projects` field (legacy file written before the multi-project
-/// rollout), falls back to parsing it as [`ProjectState`] and migrates
-/// forward. The returned [`ProjectState`] is the primary project's
-/// flat view — runtime API stays unchanged while the disk format
-/// advances.
+/// Tries the new [`WorkspaceState`] shape first and discriminates
+/// against legacy files via the `schema_version` field — new-shape
+/// files emit `WORKSPACE_SCHEMA_VERSION`, legacy files have no such
+/// key and decode as `0`. A genuinely-empty new-shape file (no
+/// projects, but schema_version set) therefore takes the new path,
+/// not the legacy fallback. Returns the primary project's flat view
+/// so runtime API stays unchanged while the disk format advances.
 pub fn load_state_in(data_dir: &Path, root: &Path) -> Option<ProjectState> {
     let path = state_path_in(data_dir, root);
-    // Try the new shape first. All fields default, so a legacy file
-    // also parses as `WorkspaceState` — we distinguish via the presence
-    // of `projects` entries (legacy files have none).
+    // Both shapes use `#[serde(default)]` on every field, so this
+    // first parse succeeds for legacy files too. We then dispatch on
+    // `schema_version` (legacy = 0) rather than guessing from emptiness.
     match load_json_file::<WorkspaceState>("project", &path) {
         LoadOutcome::Parsed(mut workspace) => {
-            if !workspace.projects.is_empty() {
+            if workspace.schema_version > 0 {
                 workspace.migrate_legacy();
                 return Some(workspace.into_primary_project_state());
             }
