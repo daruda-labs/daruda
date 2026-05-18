@@ -4,9 +4,10 @@
 //! list, and "New Empty Window" button.
 
 use crate::ui::theme;
+use crate::window_registry::WindowRegistry;
 use gpui::{
-    Context, FocusHandle, IntoElement, MouseButton, Render, SharedString, Window, actions, div,
-    prelude::*, px,
+    App, Context, FocusHandle, IntoElement, MouseButton, Render, SharedString, Window, actions,
+    div, prelude::*, px,
 };
 
 use crate::surface::strings as s;
@@ -29,7 +30,17 @@ pub struct WelcomeScreen {
 }
 
 impl WelcomeScreen {
-    pub fn new(recent: Vec<daruda_store::project::RecentEntry>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        recent: Vec<daruda_store::project::RecentEntry>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let weak = cx.entity().downgrade();
+        WindowRegistry::register_welcome(window.window_handle(), weak, cx);
+        cx.on_release(move |_: &mut WelcomeScreen, cx: &mut App| {
+            WindowRegistry::clear_welcome(cx);
+        })
+        .detach();
         Self {
             focus_handle: cx.focus_handle(),
             recent,

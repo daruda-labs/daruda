@@ -132,20 +132,22 @@ pub(crate) fn open_welcome_window(
 ) {
     let recent = daruda_store::project::persistence::load_recent();
     let cfg_for_welcome = config.clone();
-    let welcome_entity_holder: std::sync::Arc<
-        std::sync::Mutex<Option<gpui::Entity<welcome::WelcomeScreen>>>,
-    > = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let holder_for_window = welcome_entity_holder.clone();
 
-    let welcome_window = cx
-        .open_window(opts, |_window, cx| {
-            let entity = cx.new(|cx| welcome::WelcomeScreen::new(recent, cx));
-            *holder_for_window.lock().unwrap() = Some(entity.clone());
-            entity
-        })
-        .unwrap();
+    // WelcomeScreen::new registers itself in WindowRegistry; retrieve the
+    // entity from the registry after open_window returns instead of
+    // shuttling it through Arc<Mutex<>>.
+    let Ok(welcome_window) = cx.open_window(opts, |window, cx| {
+        cx.new(|cx| welcome::WelcomeScreen::new(recent, window, cx))
+    }) else {
+        LogWriter::log(
+            ErrorReport::new("failed to open welcome window")
+                .at(file!(), line!())
+                .build(),
+        );
+        return;
+    };
 
-    let Some(welcome_entity) = welcome_entity_holder.lock().unwrap().clone() else {
+    let Some(welcome_entity) = WindowRegistry::welcome(cx).and_then(|h| h.upgrade()) else {
         return;
     };
     let ww_handle = welcome_window;
@@ -306,8 +308,8 @@ pub(crate) fn prompt_and_open_folder(
 /// registry).
 fn active_window_to_close(cx: &App) -> Option<gpui::AnyWindowHandle> {
     WindowRegistry::active_workspace_handle(cx).or_else(|| {
-        cx.active_window()
-            .filter(|h| h.downcast::<welcome::WelcomeScreen>().is_some())
+        let active = cx.active_window()?;
+        WindowRegistry::welcome_window(cx).filter(|&h| h == active)
     })
 }
 

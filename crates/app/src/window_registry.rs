@@ -43,9 +43,10 @@
 
 use std::collections::HashSet;
 
-use gpui::{AnyWindowHandle, App, AppContext, Context, Global, WeakEntity, Window};
+use gpui::{AnyWindowHandle, App, AppContext, Context, Entity, Global, WeakEntity, Window};
 
 use crate::settings_window::SettingsWindow;
+use crate::welcome::WelcomeScreen;
 use crate::workspace::Workspace;
 
 /// Bundled `(window handle, inner entity)` pair for the Settings singleton.
@@ -75,6 +76,26 @@ impl SettingsHandle {
     }
 }
 
+/// Bundled `(window handle, inner entity)` pair for the Welcome singleton.
+/// Mirrors [`SettingsHandle`]: the Welcome window root is `WelcomeScreen`
+/// directly (no `gpui_component::Root` wrapper), so the inner entity could
+/// also be recovered via `downcast`, but storing it here avoids that fragile
+/// path and makes the lifecycle symmetric with the other singletons.
+#[derive(Clone)]
+pub(crate) struct WelcomeHandle {
+    window: AnyWindowHandle,
+    inner: WeakEntity<WelcomeScreen>,
+}
+
+impl WelcomeHandle {
+    /// Upgrade to a strong entity reference. Returns `None` only if the
+    /// window was closed between registration and this call — practically
+    /// impossible immediately after `open_window` succeeds.
+    pub(crate) fn upgrade(&self) -> Option<Entity<WelcomeScreen>> {
+        self.inner.upgrade()
+    }
+}
+
 /// GPUI global that tracks every open Workspace window by pairing its
 /// `AnyWindowHandle` with a `WeakEntity<Workspace>` so broadcast and close
 /// operations are typed and do not require `downcast` at the call site. Also
@@ -88,6 +109,7 @@ impl SettingsHandle {
 pub(crate) struct WindowRegistry {
     workspaces: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
     settings: Option<SettingsHandle>,
+    welcome: Option<WelcomeHandle>,
 }
 
 impl Global for WindowRegistry {}
@@ -212,6 +234,41 @@ impl WindowRegistry {
     /// front instead of opening a second one.
     pub(crate) fn settings(cx: &App) -> Option<SettingsHandle> {
         cx.try_global::<WindowRegistry>()?.settings.clone()
+    }
+
+    /// Record the live Welcome singleton. Called from `WelcomeScreen::new`
+    /// so the entry is in place before the first render. Replaces any
+    /// previous entry (at most one Welcome window is open at a time).
+    pub(crate) fn register_welcome(
+        window: AnyWindowHandle,
+        inner: WeakEntity<WelcomeScreen>,
+        cx: &mut App,
+    ) {
+        cx.default_global::<WindowRegistry>().welcome = Some(WelcomeHandle { window, inner });
+    }
+
+    /// Drop the Welcome singleton entry. Called from the `cx.on_release`
+    /// hook wired in `WelcomeScreen::new`.
+    pub(crate) fn clear_welcome(cx: &mut App) {
+        if cx.try_global::<WindowRegistry>().is_some() {
+            cx.global_mut::<WindowRegistry>().welcome = None;
+        }
+    }
+
+    /// Return a clone of the Welcome handle if a Welcome window is open.
+    /// Used by `open_welcome_window` to retrieve the entity for subscription.
+    pub(crate) fn welcome(cx: &App) -> Option<WelcomeHandle> {
+        cx.try_global::<WindowRegistry>()?.welcome.clone()
+    }
+
+    /// Return the window handle of the open Welcome window, if any.
+    /// Used by `active_window_to_close` to detect whether the frontmost
+    /// window is the Welcome screen.
+    pub(crate) fn welcome_window(cx: &App) -> Option<AnyWindowHandle> {
+        cx.try_global::<WindowRegistry>()?
+            .welcome
+            .as_ref()
+            .map(|h| h.window)
     }
 }
 
