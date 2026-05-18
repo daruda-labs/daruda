@@ -51,6 +51,25 @@ scripts/lint-direct-gpui-component.sh
 scripts/lint-no-eprintln.sh
 ```
 
+## Coding Best Practices
+
+**Priority order** when trade-offs arise: Correctness > Maintainability > Performance > Brevity
+
+### Task Complexity Assessment
+Before starting, classify the task:
+- **Trivial** (single file, obvious change) → execute immediately
+- **Moderate** (2–5 files, clear scope) → brief plan then execute
+- **Complex** (architectural impact, ambiguous requirements) → full research first
+
+### Architectural Constraints
+- Before adding any feature, determine which layer owns the responsibility
+- Before changing a business rule, grep all downstream consumers, verify the change is valid for each, and report before proceeding
+
+### Anti-patterns
+- ❌ Multiplying `if` branches for quick fixes — prefer polymorphism or the strategy pattern
+- ❌ A type with more than one reason to change (SRP violation)
+- ❌ Bypassing existing abstractions with direct calls (breaks encapsulation)
+
 ## Development rules
 
 - **License**: AGPL-3.0-only.
