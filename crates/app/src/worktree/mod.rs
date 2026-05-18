@@ -31,7 +31,7 @@ pub struct Worktree {
     /// Ref the worktree was branched from (e.g. `main`,
     /// `origin/main`). `None` = current HEAD at creation. Persisted.
     pub base_ref: Option<String>,
-    /// Free-form description shown as the sidebar row sublabel.
+    /// Free-form description shown as the dock row sublabel.
     pub description: Option<String>,
 }
 
@@ -95,7 +95,7 @@ impl Worktree {
     /// every linked worktree becomes an entry (bare checkouts are
     /// filtered out); the one at `project_root` sorts first so it
     /// becomes the active one. Non-git paths yield a single
-    /// `Default` worktree so the sidebar always has at least one row.
+    /// `Default` worktree so the left dock always has at least one row.
     pub fn bootstrap_from_project(project_root: &std::path::Path) -> Vec<Worktree> {
         match git::probe_repo(project_root) {
             Some(probe) => Self::from_repo_probe(project_root, probe).unwrap_or_else(|| {
@@ -263,7 +263,7 @@ impl Worktree {
         self.name = name;
     }
 
-    /// Overwrite the free-form description shown in the sidebar
+    /// Overwrite the free-form description shown in the left dock
     /// sublabel. `None` removes it and reverts to the worktree path.
     pub fn set_description(&mut self, description: Option<String>) {
         self.description = description;

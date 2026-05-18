@@ -110,7 +110,7 @@ pub(crate) fn open_workspace_window(
 
     cx.open_window(window_opts, |window, cx| {
         let workspace: gpui::Entity<Workspace> = cx.new(|cx| {
-            let data_dir = daruda_store::project::persistence::default_data_dir();
+            let data_dir = daruda_store::persistence::default_data_dir();
             let mut ws = Workspace::new_with_project(&config, project, data_dir, window, cx);
             if let Some(state) = saved_state {
                 ws.restore_state(&state, window, cx);

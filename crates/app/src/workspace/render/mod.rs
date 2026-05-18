@@ -20,11 +20,11 @@ use gpui::KeyDownEvent;
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
 use super::layout::{
-    BottomDockSnapshot, DockSnapshot, LeftSidebarSnapshot, RightSidebarSnapshot,
+    BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot,
 };
 use super::main_area::file_view_pane::{CharPos, CharSelection};
-use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
-use crate::workspace::main_area::pane::PaneContent;
+use super::main_area::pane::PaneContent;
+use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, TAB_BAR_HEIGHT,
@@ -307,8 +307,8 @@ impl Render for Workspace {
             self.ensure_file_tree(self.active_worktree_id, cx);
         }
 
-        let left_snap = LeftSidebarSnapshot {
-            left_sidebar_view: self.left_sidebar_view,
+        let left_snap = LeftDockSnapshot {
+            left_dock_view: self.left_dock_view,
             worktrees: self.worktrees.clone(),
             active_worktree_id: self.active_worktree_id,
             active_tab_count: self.main_area.tabs.len(),
@@ -495,8 +495,8 @@ impl Render for Workspace {
             .filter(|&(_, &n)| n > 0)
             .map(|(sid, &n)| (sid.clone(), n))
             .collect();
-        let right_snap = RightSidebarSnapshot {
-            right_sidebar_view: self.right_sidebar_view,
+        let right_snap = RightDockSnapshot {
+            right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
             usage: self.claude.usage.clone(),
             usage_pricing: self.claude.usage_pricing.clone(),
@@ -927,7 +927,7 @@ impl Render for Workspace {
             div().flex_1().w_full().into_any_element()
         };
 
-        // BodyLayout: [LeftSidebar] [MainArea] [RightSidebar]
+        // BodyLayout: [LeftDock] [MainArea] [RightDock]
         // Resize handles are absolutely positioned overlays centered
         // on each dock's border (see `dock_resize_handle`) — they don't
         // consume flex space, so toggling docks doesn't reflow layout.
@@ -1196,9 +1196,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_bottom_dock))
             .on_action(cx.listener(Self::on_toggle_right_dock))
             .on_action(cx.listener(Self::on_toggle_command_palette))
-            .on_action(cx.listener(Self::on_show_sidebar_worktrees))
-            .on_action(cx.listener(Self::on_show_sidebar_git))
-            .on_action(cx.listener(Self::on_show_sidebar_files))
+            .on_action(cx.listener(Self::on_show_left_dock_worktrees))
+            .on_action(cx.listener(Self::on_show_left_dock_git))
+            .on_action(cx.listener(Self::on_show_left_dock_files))
             .on_action(cx.listener(Self::on_switch_right_panel_usage))
             .on_action(cx.listener(Self::on_switch_right_panel_skills))
             .on_action(cx.listener(Self::on_switch_right_panel_tools))
@@ -1209,9 +1209,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_focus_skill_search))
             .on_action(cx.listener(Self::on_invoke_skill_palette))
             .on_action(cx.listener(Self::on_refresh_git_status_action))
-            .on_action(cx.listener(Self::on_commit_changes_action))
+            .on_action(cx.listener(Self::on_commit_changes))
             .on_action(cx.listener(Self::on_commit_amend_action))
-            .on_action(cx.listener(Self::on_push_changes_action))
+            .on_action(cx.listener(Self::on_push_changes))
             .on_action(cx.listener(Self::on_fetch_action))
             .on_action(cx.listener(Self::on_pull_action))
             .on_action(cx.listener(Self::on_files_toggle_hidden))

@@ -144,7 +144,7 @@ pub const RIGHT_PANEL_TAB_TOOLS: &str = "Tools";
 pub const RIGHT_PANEL_TAB_TASKS: &str = "Tasks";
 
 // ============================================================================
-// Sidebar (left dock) tab labels
+// Dock (left dock) tab labels
 // ============================================================================
 
 pub const SIDEBAR_TAB_WORKTREES: &str = "Worktrees";
@@ -438,7 +438,7 @@ pub const WELCOME_NEW_EMPTY: &str = "New Empty Window";
 pub const WELCOME_NO_RECENT: &str = "No recent projects";
 
 // ============================================================================
-// File viewer (pane-area viewer opened from Git Changes sidebar)
+// File viewer (pane-area viewer opened from Git Changes dock)
 // ============================================================================
 
 pub const FILE_VIEWER_LOADING: &str = "Loading…";
@@ -577,7 +577,7 @@ pub const WORKTREES_SECTION_HEADER: &str = "WORKTREES";
 pub const WORKTREES_EMPTY_STATE: &str = "No project open";
 
 // ----------------------------------------------------------------
-// Claude integration banner (sidebar prompt to install hooks)
+// Claude integration banner (dock prompt to install hooks)
 // ----------------------------------------------------------------
 
 pub const CLAUDE_BANNER_ICON: &str = "ⓘ";
@@ -764,7 +764,7 @@ pub const SETTINGS_SECTION_FILE_VIEWER: &str = "FILE VIEWER";
 pub const SETTINGS_LABEL_SYNTAX_THEME: &str = "Syntax Theme";
 
 // ----------------------------------------------------------------
-// Sidebar nav labels — title-case for the new left-rail section list.
+// Dock nav labels — title-case for the new left-rail section list.
 // (The uppercase `SETTINGS_SECTION_*` consts above are still used as
 //  body-area headers inside each rendered section.)
 // ----------------------------------------------------------------
@@ -774,7 +774,7 @@ pub const SETTINGS_NAV_CURSOR: &str = "Cursor";
 pub const SETTINGS_NAV_SHELL: &str = "Shell";
 pub const SETTINGS_NAV_WINDOW: &str = "Window";
 pub const SETTINGS_NAV_TERMINAL: &str = "Terminal";
-pub const SETTINGS_NAV_SIDEBAR: &str = "Sidebar";
+pub const SETTINGS_NAV_SIDEBAR: &str = "Dock";
 pub const SETTINGS_NAV_FILE_VIEWER: &str = "File Viewer";
 pub const SETTINGS_NAV_CLIPBOARD: &str = "Clipboard";
 pub const SETTINGS_NAV_PANELS: &str = "Panels";

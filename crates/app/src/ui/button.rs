@@ -88,7 +88,7 @@ pub fn button_header_action(
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
         .foreground(t.muted_text)
-        .hover(t.sidebar_view_tab_active);
+        .hover(t.dock_view_tab_active);
     Button::new(id)
         .xsmall()
         .tab_stop(false)

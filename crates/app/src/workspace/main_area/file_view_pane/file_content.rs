@@ -49,7 +49,7 @@ fn load_raw(
             return PaneFileContent::Error("No git repository root".to_owned());
         }
         // git show :path requires a repo-root-relative path.
-        // `path` is absolute (set at the sidebar entry point); strip the repo root
+        // `path` is absolute (set at the left-dock entry point); strip the repo root
         // prefix.  For legacy relative paths (old session state) use as-is.
         let repo_rel: std::path::PathBuf = if path.is_absolute() {
             let r = repo_root.unwrap_or(wt_path);
@@ -68,7 +68,7 @@ fn load_raw(
         };
         crate::worktree::git::git_show_staged(wt_path, &repo_rel).map_err(|e| e.to_string())
     } else {
-        // `path` is absolute when opened from the sidebar; fall back via
+        // `path` is absolute when opened from the left dock; fall back via
         // WorktreePaths::from_git_status for legacy relative paths from old session state.
         let full: std::borrow::Cow<'_, std::path::Path> = if path.is_absolute() {
             std::borrow::Cow::Borrowed(path)
@@ -142,7 +142,7 @@ fn load_diff(
     // Untracked files produce no output from `git diff`; use --no-index to
     // show the file content as entirely new (all added lines).
     let is_untracked = file_status == Some('?') && !staged;
-    // `path` is absolute when opened from the sidebar.  git diff accepts
+    // `path` is absolute when opened from the left dock.  git diff accepts
     // absolute paths when run from the repo root, so we pass it directly.
     // For legacy relative paths from old session state, behaviour is unchanged.
     let repo = repo_root.expect("repo_root is Some: is_git() was checked at function entry");

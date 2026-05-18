@@ -28,7 +28,7 @@
 //! `globals::register_settings_observer`.
 
 use crate::window_registry::WindowRegistry;
-use crate::{hooks, panels_watcher, watchers};
+use crate::{hooks, panels_watcher, watcher_pumps};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::App;
@@ -53,7 +53,7 @@ fn spawn_claude_status(cx: &mut App) {
         }
         Ok(status_dir) => {
             let status_rx = hooks::watcher::spawn_status_watcher(status_dir);
-            watchers::spawn_event_fanout_pump(
+            watcher_pumps::spawn_event_fanout_pump(
                 "claude-status",
                 status_rx,
                 std::time::Duration::from_millis(100),
@@ -67,7 +67,7 @@ fn spawn_claude_status(cx: &mut App) {
 }
 
 fn spawn_needs_attention_demote(cx: &mut App) {
-    watchers::spawn_periodic_pump(
+    watcher_pumps::spawn_periodic_pump(
         "needs-attention-demote",
         std::time::Duration::from_secs(30),
         |cx: &mut App| {
@@ -81,7 +81,7 @@ fn spawn_needs_attention_demote(cx: &mut App) {
 
 fn spawn_panels_reload(cx: &mut App) {
     let panels_reload_rx = panels_watcher::spawn_panels_watcher();
-    watchers::spawn_drain_burst_pump(
+    watcher_pumps::spawn_drain_burst_pump(
         "panels-reload",
         panels_reload_rx,
         std::time::Duration::from_millis(250),

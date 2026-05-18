@@ -12,7 +12,7 @@ Built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and
 
 - **Worktree isolation** — every agent runs in its own git worktree, tab group, and working directory. No branch-switching, no `target/` cache thrashing between concurrent sessions.
 - **Live Claude Code status** — real-time Working / NeedsAttention / Idle indicators per worktree, driven by Claude Code hooks (push) with JSONL polling as fallback. Detects active sessions via PTY process tree.
-- **Sidebar IDE** — Worktrees, Git Changes, and File Explorer in one dock. Syntax-highlighted file viewer with word-level diff. 88 Material Design file icons. Event-driven git status (no polling).
+- **Left-dock IDE** — Worktrees, Git Changes, and File Explorer in one dock. Syntax-highlighted file viewer with word-level diff. 88 Material Design file icons. Event-driven git status (no polling).
 - **Right panel** — token usage + cost estimate, slash-command CRUD (Skills), MCP server manager (Tools), and agent task tracker (Tasks) — all without leaving the terminal.
 - **Macro panel** — bottom dock with user-defined macro tabs. Click or press a shortcut to send any command to the focused pane. Full GUI editor, shortcut record mode.
 - **Notification surface** — dock bounce, desktop notifications (via `osascript`; no Developer ID required), and long-running command alerts via OSC 1337 / OSC 9 / OSC 777.
@@ -59,7 +59,7 @@ Each AI agent runs in its own worktree. daruda tracks which agent lives in which
 - `Cmd+F` — scrollback search with highlight and prev/next navigation
 - `Cmd+Shift+H` — command history picker (FTCS B/C/D, fuzzy match, exit-code badge, jump to row)
 
-### Left sidebar
+### Left dock
 
 **Worktrees view**
 - One row per git worktree; `Cmd+Ctrl+1–9` to jump
@@ -71,7 +71,7 @@ Each AI agent runs in its own worktree. daruda tracks which agent lives in which
 
 **Git Changes view**
 - `git status --porcelain` staged / unstaged diff, inline accordion
-- Commit, push, refresh — all from the sidebar
+- Commit, push, refresh — all from the dock
 - Event-driven refresh (FS watcher + app-side git commands + tab switch); no polling
 
 **Files view**
@@ -115,7 +115,7 @@ Customizable macro tabs — click or press a shortcut to send text to the focuse
 
 ### Session restore
 
-All tabs, panes, docks, sidebar state, and worktree assignments persist across restarts (cold restore).
+All tabs, panes, docks, dock view state, and worktree assignments persist across restarts (cold restore).
 
 ### Theme
 
@@ -202,7 +202,7 @@ close_pane_on_exit = true
 [scrollback]
 # lines = 10000
 
-[sidebar]
+[left_dock]
 files_show_hidden = false
 files_use_gitignore = true
 file_icon_color_mode = "color"   # color | monochrome
@@ -229,7 +229,7 @@ A per-project layer can be placed at `~/.config/daruda/projects/<name>/config.to
 ```
 daruda/
 ├── crates/
-│   ├── app/              # binary — GPUI entry point, workspace, sidebar, panels
+│   ├── app/              # binary — GPUI entry point, workspace, docks, panels
 │   ├── daruda_terminal/  # TerminalView + TerminalSession (GPUI rendering + VT parsing glue)
 │   ├── daruda_claude/    # Claude Code hook FSM + JSONL fallback parser (GPUI-free)
 │   ├── daruda_config/    # TOML config loader (GPUI-free)
@@ -275,7 +275,7 @@ GPUI event loop (Metal)
 | `Cmd+D` | Split right |
 | `Cmd+Shift+D` | Split down |
 | `Cmd+Alt+←/→/↑/↓` | Focus pane by direction |
-| `Cmd+B` | Toggle left sidebar |
+| `Cmd+B` | Toggle left dock |
 | `Cmd+J` | Toggle bottom panel |
 | `Cmd+Shift+B` | Toggle right panel |
 | `Cmd+Ctrl+1–9` | Jump to worktree N |

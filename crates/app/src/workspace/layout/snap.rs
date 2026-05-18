@@ -18,7 +18,7 @@ use std::sync::Arc;
 use gpui::{FocusHandle, UniformListScrollHandle, WeakEntity};
 
 use crate::files::tree::EntryKind;
-use crate::workspace::left_sidebar::file_tree_ops::VisibleEntry;
+use crate::workspace::left_dock::file_tree_ops::VisibleEntry;
 
 use crate::workspace::Workspace;
 
@@ -28,8 +28,8 @@ use crate::workspace::Workspace;
 
 /// Point-in-time copy of `Workspace` fields consumed by the left
 /// dock's `impl Render`.
-pub(in crate::workspace) struct LeftSidebarSnapshot {
-    pub left_sidebar_view: daruda_store::project::LeftSidebarView,
+pub(in crate::workspace) struct LeftDockSnapshot {
+    pub left_dock_view: daruda_store::project::LeftDockView,
     pub worktrees: Vec<crate::worktree::Worktree>,
     pub active_worktree_id: daruda_store::project::WorktreeId,
     pub active_tab_count: usize,
@@ -54,7 +54,7 @@ pub(in crate::workspace) struct LeftSidebarSnapshot {
     /// the panel holds focus.
     pub git_changes_panel_focus: FocusHandle,
     /// `(worktree, path, staged)` of the focused file viewer's pane,
-    /// or `None` when no file pane is focused. Sidebar rows render a
+    /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
     pub focused_file_selection:
         Option<(daruda_store::project::WorktreeId, std::path::PathBuf, bool)>,
@@ -123,14 +123,14 @@ pub(in crate::workspace) struct BottomDockSnapshot {
 
 /// Point-in-time copy of `Workspace` fields consumed by the right
 /// dock's `impl Render`.
-pub(in crate::workspace) struct RightSidebarSnapshot {
+pub(in crate::workspace) struct RightDockSnapshot {
     /// Active right-panel tab. The tab strip in the dock header reads
     /// this to highlight the current tab; the body match-arm reads it
     /// to pick the renderer.
-    pub right_sidebar_view: daruda_store::project::RightSidebarView,
+    pub right_dock_view: daruda_store::project::RightDockView,
     /// Back-reference to the owning `Workspace`, mirrored from the
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
-    /// `set_right_sidebar_view` without re-entering the dock context.
+    /// `set_right_dock_view` without re-entering the dock context.
     pub workspace: WeakEntity<Workspace>,
     /// Snapshot of `Workspace::usage` for the Usage tab renderer.
     /// Carried in the snap so the per-tab body can read it without
@@ -223,19 +223,18 @@ pub(in crate::workspace) struct RightSidebarSnapshot {
 // Discriminated union stored on Dock
 // ----------------------------------------------------------------
 
-/// The staging field on `Dock`.  Each `Dock` holds exactly one
-/// variant corresponding to its `DockPosition`.  Initialized to
-/// `None` and overwritten by `Workspace::render` before `Dock::render`
-/// is invoked.
+/// The staging field on `Dock`. Each `Dock` holds exactly one variant
+/// corresponding to its `DockPosition`. Initialized to `None` and
+/// overwritten by `Workspace::render` before `Dock::render` is invoked.
 ///
-/// `Left` and `Right` are `Box`ed because `LeftSidebarSnapshot` (~416 B)
-/// and `RightSidebarSnapshot` (~776 B) dwarf the other variants — leaving
+/// `Left` and `Right` are `Box`ed because `LeftDockSnapshot` (~416 B)
+/// and `RightDockSnapshot` (~776 B) dwarf the other variants — leaving
 /// them inline would inflate every `DockSnapshot` slot, including the
 /// cleared `None` state, well past clippy's variant-size threshold.
 pub(in crate::workspace) enum DockSnapshot {
-    Left(Box<LeftSidebarSnapshot>),
+    Left(Box<LeftDockSnapshot>),
     Bottom(BottomDockSnapshot),
-    Right(Box<RightSidebarSnapshot>),
+    Right(Box<RightDockSnapshot>),
     /// Initial / cleared state — `Dock::render` returns an empty
     /// element when the snap is absent (first frame safety net).
     None,

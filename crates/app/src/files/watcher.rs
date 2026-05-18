@@ -1,4 +1,4 @@
-//! File-system watcher for the sidebar Files view.
+//! File-system watcher for the left-dock Files view.
 //!
 //! Per-worktree `notify::RecommendedWatcher` with recursive watch (macOS
 //! FSEvents). Raw events are debounced on a dedicated thread (30 ms

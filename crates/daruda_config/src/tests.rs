@@ -11,19 +11,19 @@ fn default_config_is_valid() {
     assert!(!cfg.window.blur);
     assert_eq!(cfg.scrollback.lines, 10_000);
     assert!(cfg.keybindings.bindings.is_empty());
-    assert_eq!(cfg.sidebar.left_default_width, 220.0);
-    assert!(cfg.sidebar.left_collapsed_by_default);
+    assert_eq!(cfg.left_dock.left_default_width, 220.0);
+    assert!(cfg.left_dock.left_collapsed_by_default);
 }
 
 #[test]
-fn sidebar_parses_from_toml() {
+fn left_dock_parses_from_toml() {
     let input = "\
-[sidebar]\n\
+[left_dock]\n\
 left_default_width = 260.0\n\
 left_collapsed_by_default = false\n";
     let cfg: Config = toml::from_str(input).unwrap();
-    assert_eq!(cfg.sidebar.left_default_width, 260.0);
-    assert!(!cfg.sidebar.left_collapsed_by_default);
+    assert_eq!(cfg.left_dock.left_default_width, 260.0);
+    assert!(!cfg.left_dock.left_collapsed_by_default);
 }
 
 #[test]
@@ -46,16 +46,16 @@ fn panels_grid_columns_clamps_to_range() {
 }
 
 #[test]
-fn sidebar_width_clamps_to_range() {
-    let input = "[sidebar]\nleft_default_width = 9999.0\n";
+fn left_dock_width_clamps_to_range() {
+    let input = "[left_dock]\nleft_default_width = 9999.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.sidebar.left_default_width, 400.0);
+    assert_eq!(cfg.left_dock.left_default_width, 400.0);
 
-    let input = "[sidebar]\nleft_default_width = 10.0\n";
+    let input = "[left_dock]\nleft_default_width = 10.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();
     cfg.clamp();
-    assert_eq!(cfg.sidebar.left_default_width, 150.0);
+    assert_eq!(cfg.left_dock.left_default_width, 150.0);
 }
 
 #[test]

@@ -1,0 +1,426 @@
+//! Index mutations — stage / unstage / discard.
+
+use std::path::PathBuf;
+
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::system_info::redact_home;
+use daruda_store::project::WorktreeId;
+use gpui::{Context, Window};
+
+use crate::path_ext::PathExt;
+use crate::surface::strings as app_strings;
+use crate::ui::ButtonVariant;
+use crate::workspace::Workspace;
+use crate::workspace::dialog_helpers::open_confirm_dialog;
+
+impl Workspace {
+    /// Stage a single file from the working tree into the index.
+    ///
+    /// Runs from the worktree's git toplevel so:
+    /// (a) linked worktrees stage into their own per-worktree index
+    ///     rather than the shared `repo_root` (which `git_repo_root_for`
+    ///     returns and which is wrong for any non-primary worktree); and
+    /// (b) an anchored main worktree (where `wt.path` points at a
+    ///     subdirectory the user opened) still gets the porcelain-path
+    ///     base correct — `git status --porcelain` paths are
+    ///     toplevel-relative, so `git add` must run from there.
+    pub(in crate::workspace) fn stage_file(
+        &mut self,
+        worktree_id: WorktreeId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let path_for_report = path.clone();
+        let wt_for_report = wt_top.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_add(&wt_top, &path),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git add failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.stage")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Remove a file from the index (unstage), keeping working-tree changes.
+    ///
+    /// Runs from the worktree's git toplevel — see [`Self::stage_file`] for
+    /// why `wt.path` and the shared `repo_root` are both unsuitable.
+    pub(in crate::workspace) fn unstage_file(
+        &mut self,
+        worktree_id: WorktreeId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let path_for_report = path.clone();
+        let wt_for_report = wt_top.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_restore_staged(&wt_top, &path),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git restore --staged failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.unstage")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Stage every path in `paths` in one git invocation. Used by the
+    /// per-directory "stage all in this dir" checkbox.
+    pub(in crate::workspace) fn stage_paths(
+        &mut self,
+        worktree_id: WorktreeId,
+        paths: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight || paths.is_empty() {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let wt_for_report = wt_top.clone();
+        let paths_count = paths.len();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_add_paths(&wt_top, &paths),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git add (paths) failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("count", paths_count.to_string())
+                            .dedup("git.stage_paths")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Unstage every path in `paths` in one git invocation. Companion to
+    /// [`Self::stage_paths`] for the per-dir "unstage all" toggle.
+    pub(in crate::workspace) fn unstage_paths(
+        &mut self,
+        worktree_id: WorktreeId,
+        paths: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight || paths.is_empty() {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let wt_for_report = wt_top.clone();
+        let paths_count = paths.len();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_restore_staged_paths(&wt_top, &paths),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git restore --staged (paths) failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("count", paths_count.to_string())
+                            .dedup("git.unstage_paths")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Stage all unstaged and untracked files (`git add --all`).
+    pub(in crate::workspace) fn stage_all(
+        &mut self,
+        worktree_id: WorktreeId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let path_for_report = wt_top.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_add_all(&wt_top),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git add --all failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.stage_all")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Unstage all files (`git restore --staged .`).
+    pub(in crate::workspace) fn unstage_all(
+        &mut self,
+        worktree_id: WorktreeId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let path_for_report = wt_top.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::worktree::git::git_restore_all_staged(&wt_top),
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let report = ErrorReport::new("git restore --staged . failed")
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path_for_report))
+                            .dedup("git.unstage_all")
+                            .build();
+                        ws.report_error(report, cx);
+                    }
+                }
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
+    /// Open a confirm dialog before discarding working-tree changes for a
+    /// file. The actual git operation runs in [`Self::do_discard_file`] only
+    /// after the user confirms. Both untracked deletes (`git clean -f`)
+    /// and tracked restores (`git restore`) are irreversible, so the
+    /// confirm body spells out which one the user is about to do.
+    pub(in crate::workspace) fn on_discard_file(
+        &mut self,
+        worktree_id: WorktreeId,
+        path: PathBuf,
+        is_untracked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_context_menu(cx);
+        if self.git_stage_in_flight {
+            return;
+        }
+        if !self.worktrees.iter().any(|w| w.id == worktree_id) {
+            return;
+        }
+        let filename = path.file_name_lossy();
+        let body = if is_untracked {
+            format!(
+                "Delete untracked file \"{filename}\"? This file is not in git and cannot be recovered."
+            )
+        } else {
+            format!(
+                "Discard working-tree changes to \"{filename}\"? The committed version will replace your edits."
+            )
+        };
+
+        let weak = cx.weak_entity();
+        open_confirm_dialog(
+            app_strings::GIT_CONFIRM_DISCARD_TITLE,
+            body,
+            app_strings::GIT_CONFIRM_DISCARD_OK,
+            ButtonVariant::Danger,
+            move |_, _window, app_cx| {
+                if let Some(ws) = weak.upgrade() {
+                    let path = path.clone();
+                    ws.update(app_cx, |ws, cx| {
+                        ws.do_discard_file(worktree_id, path, is_untracked, cx)
+                    });
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Discard working-tree changes for a file. For untracked files, deletes
+    /// the file (`git clean -f`); for tracked files, restores the last committed
+    /// state (`git restore`). Caller must have obtained user confirmation via
+    /// [`Self::on_discard_file`].
+    fn do_discard_file(
+        &mut self,
+        worktree_id: WorktreeId,
+        path: PathBuf,
+        is_untracked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_stage_in_flight {
+            return;
+        }
+        let Some(wt) = self.worktrees.iter().find(|w| w.id == worktree_id) else {
+            return;
+        };
+        let wt_path = wt.path.clone();
+        let repo_root = self.git_repo_root_for(worktree_id);
+        // `path` is a repo-root-relative pathspec (from git status output).
+        // `git restore`/`git clean` must run from the worktree directory with a
+        // worktree-relative path — use WorktreePaths for the two-step conversion.
+        let paths = crate::worktree::paths::WorktreePaths {
+            wt_path: &wt_path,
+            repo_root: repo_root.as_deref(),
+        };
+        let abs = paths.from_git_status(&path);
+        let wt_rel_path = paths.to_wt_relative(&abs).unwrap_or(path);
+        self.git_stage_in_flight = true;
+        cx.notify();
+        let path_for_report = wt_path.clone();
+        let rel_for_report = wt_rel_path.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || {
+                if is_untracked {
+                    crate::worktree::git::git_clean_untracked(&wt_path, &wt_rel_path)
+                } else {
+                    crate::worktree::git::git_discard_working(&wt_path, &wt_rel_path)
+                }
+            },
+            move |ws, result, cx| {
+                ws.git_stage_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        ws.refresh_git_status(worktree_id, cx);
+                    }
+                    Err(e) => {
+                        let title = if is_untracked {
+                            "git clean -f failed"
+                        } else {
+                            "git restore failed"
+                        };
+                        let report = ErrorReport::new(title)
+                            .severity(ErrorSeverity::Error)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path_for_report))
+                            .with_context("file", redact_home(&rel_for_report))
+                            .dedup("git.discard")
+                            .build();
+                        ws.report_error(report, cx);
+                        cx.notify();
+                    }
+                }
+            },
+        )
+        .detach();
+    }
+}

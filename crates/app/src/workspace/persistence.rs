@@ -75,8 +75,8 @@ impl Workspace {
             root: project.root.clone(),
             worktrees,
             active_worktree_id: self.active_worktree_id,
-            active_sidebar_view: self.left_sidebar_view,
-            active_right_panel_view: self.right_sidebar_view,
+            active_dock_view: self.left_dock_view,
+            active_right_panel_view: self.right_dock_view,
             active_usage_window: self.claude.usage_window,
             // Top-level `tabs` stays empty from W-2 onward — the data
             // now lives on the active worktree. `skip_serializing_if`
@@ -178,8 +178,8 @@ impl Workspace {
                 d.size = left_size;
             }
         });
-        self.left_sidebar_view = state.active_sidebar_view;
-        self.right_sidebar_view = state.active_right_panel_view;
+        self.left_dock_view = state.active_dock_view;
+        self.right_dock_view = state.active_right_panel_view;
         self.claude.usage_window = state.active_usage_window;
         // Resync the dropdown so its visible selection matches the
         // restored state (the entity was constructed with the
@@ -380,10 +380,10 @@ impl Workspace {
         }
         self.main_area.pending_resize = true;
 
-        // Auto-refresh git status when restoring with the Git Changes sidebar
-        // active — the cache is always empty on startup so the sidebar would
+        // Auto-refresh git status when restoring with the Git Changes dock
+        // active — the cache is always empty on startup so the left dock would
         // show the placeholder until the user clicked Refresh manually.
-        if self.left_sidebar_view == daruda_store::project::LeftSidebarView::GitChanges {
+        if self.left_dock_view == daruda_store::project::LeftDockView::GitChanges {
             let id = self.active_worktree_id;
             self.refresh_git_status(id, cx);
         }

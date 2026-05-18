@@ -13,7 +13,7 @@ mod seed;
 mod tests;
 
 pub use persistence::{
-    default_data_dir, load_panels, load_panels_in, panels_path_in, save_panels, save_panels_in,
+    load_panels, load_panels_in, panels_path_in, save_panels, save_panels_in,
 };
 pub use seed::seed_default;
 

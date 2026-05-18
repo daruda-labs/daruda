@@ -64,16 +64,10 @@ pub fn save_panels_in(data_dir: &Path, state: &PanelsState) -> std::io::Result<(
 
 /// Production convenience — load from the default data dir.
 pub fn load_panels() -> Option<PanelsState> {
-    load_panels_in(&default_data_dir())
+    load_panels_in(&crate::persistence::default_data_dir())
 }
 
 /// Production convenience — save to the default data dir.
 pub fn save_panels(state: &PanelsState) -> std::io::Result<()> {
-    save_panels_in(&default_data_dir(), state)
-}
-
-/// Back-compat shim — new code should call
-/// [`crate::persistence::default_data_dir`] directly.
-pub fn default_data_dir() -> PathBuf {
-    crate::persistence::default_data_dir()
+    save_panels_in(&crate::persistence::default_data_dir(), state)
 }

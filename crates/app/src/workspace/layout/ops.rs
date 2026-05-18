@@ -1,7 +1,7 @@
 //! Dock toggle handlers and divider/dock resize drag state.
 //!
 //! Pulls the GPUI mouse-event plumbing out of `mod.rs` so the
-//! workspace entity stays focused on tabs / panes / sidebar /
+//! workspace entity stays focused on tabs / panes / docks /
 //! worktrees. Drag state (`DividerDrag`, `DockDrag`) lives here
 //! because it is exclusively read by these methods plus `render.rs`.
 

@@ -75,18 +75,18 @@ impl Workspace {
                 view.set_background_alpha(config.window.opacity);
             });
         }
-        // Trigger #7 — sidebar config affecting filter state changed.
+        // Trigger #7 — left-dock config affecting filter state changed.
         let mut filter_changed = false;
-        if self.file_tree.files_show_hidden != config.sidebar.files_show_hidden {
-            self.file_tree.files_show_hidden = config.sidebar.files_show_hidden;
+        if self.file_tree.files_show_hidden != config.left_dock.files_show_hidden {
+            self.file_tree.files_show_hidden = config.left_dock.files_show_hidden;
             filter_changed = true;
         }
-        if self.file_tree.files_use_gitignore != config.sidebar.files_use_gitignore {
-            self.file_tree.files_use_gitignore = config.sidebar.files_use_gitignore;
+        if self.file_tree.files_use_gitignore != config.left_dock.files_use_gitignore {
+            self.file_tree.files_use_gitignore = config.left_dock.files_use_gitignore;
             filter_changed = true;
         }
-        if self.file_tree.files_icon_color_mode != config.sidebar.file_icon_color_mode {
-            self.file_tree.files_icon_color_mode = config.sidebar.file_icon_color_mode.clone();
+        if self.file_tree.files_icon_color_mode != config.left_dock.file_icon_color_mode {
+            self.file_tree.files_icon_color_mode = config.left_dock.file_icon_color_mode.clone();
             cx.notify();
         }
         if self.panels_grid_columns != config.panels.grid_columns {

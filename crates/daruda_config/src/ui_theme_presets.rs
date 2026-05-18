@@ -1,4 +1,4 @@
-//! Built-in UI theme presets — workspace chrome, sidebar, modal,
+//! Built-in UI theme presets — workspace chrome, docks, modal,
 //! status bar, dock, agent panels, etc.
 //!
 //! Separate from `theme_presets` (terminal color palette) because the

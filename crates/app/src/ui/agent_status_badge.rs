@@ -31,7 +31,7 @@ use gpui::{
 /// Size variant of the indicator.
 #[derive(Clone, Copy)]
 pub enum IndicatorSize {
-    /// Sidebar leading indicator on a worktree row.
+    /// Left-dock leading indicator on a worktree row.
     Leading,
     /// Phase D sub-row per-session badge.
     Badge,

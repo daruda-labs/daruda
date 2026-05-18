@@ -93,7 +93,7 @@ daruda follows **Conventional Commits**:
 | `chore` | Build, CI, dependency updates |
 | `docs` | Documentation only |
 
-**Scope** is the crate or subsystem: `theme`, `workspace`, `sidebar`, `tasks`, `git`, `config`, `terminal`, etc.
+**Scope** is the crate or subsystem: `theme`, `workspace`, `dock`, `tasks`, `git`, `config`, `terminal`, etc.
 
 Examples from the project history:
 ```
@@ -124,7 +124,7 @@ PR title follows the same `type(scope): summary` format as commit messages.
 ```
 daruda/
 ├── crates/
-│   ├── app/              # binary — GPUI entry, workspace, sidebar, panels
+│   ├── app/              # binary — GPUI entry, workspace, docks, panels
 │   ├── daruda_terminal/  # TerminalView + TerminalSession
 │   ├── daruda_claude/    # Claude Code hook FSM + JSONL parser (GPUI-free)
 │   ├── daruda_config/    # TOML config (GPUI-free)

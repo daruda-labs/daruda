@@ -1,4 +1,4 @@
-//! Per-worktree gitignore matcher for the sidebar Files view.
+//! Per-worktree gitignore matcher for the left-dock Files view.
 //!
 //! Supports nested `.gitignore` files: each subdirectory that contains a
 //! `.gitignore` gets its own `Gitignore` object anchored to that directory.

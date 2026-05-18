@@ -34,7 +34,7 @@
 //! `/Users/me/My File.txt` reaches the shell as a single token. Two
 //! sources are handled:
 //!
-//! - [`PathDrag`] — internal sidebar (Files / Git Changes) row drag.
+//! - [`PathDrag`] — internal left-dock (Files / Git Changes) row drag.
 //! - [`gpui::ExternalPaths`] — Finder / desktop / other-app file drops.
 
 use crate::ui::theme;

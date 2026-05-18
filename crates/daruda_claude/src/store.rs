@@ -1,7 +1,7 @@
 //! In-memory mirror of `~/.daruda/status/*.json`.
 //!
 //! GPUI-free. The watcher (`app/src/hooks/watcher.rs`) feeds events
-//! in; renderers (sidebar) and consumers query by cwd or session id.
+//! in; renderers (left dock) and consumers query by cwd or session id.
 //!
 //! Race policy: hook wins over jsonl when both report on the same
 //! session. The jsonl path is a lag-prone fallback, so:

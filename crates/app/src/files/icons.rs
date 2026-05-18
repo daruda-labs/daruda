@@ -1,4 +1,4 @@
-//! Extension-to-icon-path mapping for the Files sidebar.
+//! Extension-to-icon-path mapping for the Files dock.
 //!
 //! `icon_path` returns an asset path key understood by `DarudaAssets::load`.
 //! Callers pass the returned string directly to `gpui::svg().path(...)` (monochrome)

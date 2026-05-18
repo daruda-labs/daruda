@@ -25,7 +25,7 @@ pub struct GitFileEntry {
     /// File path (renamed files: destination / new name).
     pub path: PathBuf,
     /// Original path for renames / copies. `None` for non-rename entries.
-    /// Lets the sidebar render `old → new` for `R`/`C` status without a
+    /// Lets the left dock render `old → new` for `R`/`C` status without a
     /// second git invocation.
     pub original_path: Option<PathBuf>,
 }
@@ -123,7 +123,7 @@ pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
         let y = line.chars().nth(1).unwrap_or(' ');
         let path_str = &line[3..];
         // Renamed / copied files appear as `old -> new`; capture both
-        // sides so the sidebar can render `old → new`. The destination
+        // sides so the left dock can render `old → new`. The destination
         // is the canonical path for stage / unstage / diff ops.
         let (display, original) = match path_str.rfind(" -> ") {
             Some(i) => (
@@ -159,7 +159,7 @@ pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
 /// PATH` form show the destination.
 ///
 /// The diffstat call is non-fatal — a fresh `git init` repo has no HEAD,
-/// so the call errors and `diffstat` stays empty (sidebar simply omits
+/// so the call errors and `diffstat` stays empty (dock simply omits
 /// the `+N −M` column for that worktree until the first commit lands).
 pub fn git_status(path: &Path) -> Result<GitStatusData, GitError> {
     let raw = run_git(path, ["status", "--porcelain=v1", "--branch"])?;
@@ -174,11 +174,11 @@ pub fn git_status(path: &Path) -> Result<GitStatusData, GitError> {
 
 /// `git diff HEAD --numstat` — `(added, removed, path)` per tracked file
 /// with any working-tree or staged divergence from HEAD. Binary files
-/// emit `-\t-\t<path>`; the parser maps those to `(0, 0)` so the sidebar
+/// emit `-\t-\t<path>`; the parser maps those to `(0, 0)` so the left dock
 /// row can decide whether to show a stat at all (typically not, since
 /// "+0 −0" implies "no change" which is misleading for binary diffs).
 ///
-/// Failure is non-fatal for the sidebar: a brand-new repo with no
+/// Failure is non-fatal for the left dock: a brand-new repo with no
 /// commits has no HEAD, and `git diff HEAD` exits non-zero. Callers
 /// surface this as "no diffstat available" rather than an error.
 pub fn git_diff_numstat(wt_path: &Path) -> Result<Vec<(u32, u32, PathBuf)>, GitError> {

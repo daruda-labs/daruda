@@ -42,7 +42,7 @@ impl From<BuiltinSection> for SettingsSection {
 }
 
 /// Built-in settings page kinds. Order in `ALL` is the order they
-/// appear in the sidebar.
+/// appear in the left dock.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum BuiltinSection {
     #[default]
@@ -52,7 +52,7 @@ pub enum BuiltinSection {
     Shell,
     Window,
     Terminal,
-    Sidebar,
+    LeftDock,
     FileViewer,
     Clipboard,
     Panels,
@@ -63,7 +63,7 @@ pub enum BuiltinSection {
 }
 
 impl BuiltinSection {
-    /// Sidebar order. Add a variant here to make it discoverable.
+    /// Dock order. Add a variant here to make it discoverable.
     pub const ALL: &'static [Self] = &[
         Self::General,
         Self::Font,
@@ -71,7 +71,7 @@ impl BuiltinSection {
         Self::Shell,
         Self::Window,
         Self::Terminal,
-        Self::Sidebar,
+        Self::LeftDock,
         Self::FileViewer,
         Self::Clipboard,
         Self::Panels,
@@ -93,7 +93,7 @@ impl BuiltinSection {
             Self::Shell => "shell",
             Self::Window => "window",
             Self::Terminal => "terminal",
-            Self::Sidebar => "sidebar",
+            Self::LeftDock => "left_dock",
             Self::FileViewer => "file_viewer",
             Self::Clipboard => "clipboard",
             Self::Panels => "panels",

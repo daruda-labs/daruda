@@ -64,8 +64,8 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
-        id: "open_settings.sidebar",
-        label: "Settings: Sidebar",
+        id: "open_settings.dock",
+        label: "Settings: Dock",
         shortcut: "",
     },
     PaletteEntry {
@@ -165,7 +165,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     },
     PaletteEntry {
         id: "toggle_left_dock",
-        label: "Toggle Left Sidebar",
+        label: "Toggle Left Dock",
         shortcut: "Cmd+B",
     },
     PaletteEntry {
@@ -175,7 +175,7 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     },
     PaletteEntry {
         id: "toggle_right_dock",
-        label: "Toggle Right Sidebar",
+        label: "Toggle Right Dock",
         shortcut: "Cmd+Shift+B",
     },
     PaletteEntry {
@@ -279,17 +279,17 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "Cmd+Ctrl+9",
     },
     PaletteEntry {
-        id: "show_sidebar_worktrees",
+        id: "show_left_dock_worktrees",
         label: "Show Worktrees",
         shortcut: "",
     },
     PaletteEntry {
-        id: "show_sidebar_git",
+        id: "show_left_dock_git",
         label: "Show Git Changes",
         shortcut: "",
     },
     PaletteEntry {
-        id: "show_sidebar_files",
+        id: "show_left_dock_files",
         label: "Show Files",
         shortcut: "",
     },

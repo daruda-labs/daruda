@@ -11,7 +11,7 @@ pub(in crate::workspace) mod snap;
 // Re-export snapshot types so callers use `crate::workspace::layout::*Snapshot`
 // without reaching into the `snap` submodule directly.
 pub(in crate::workspace) use self::snap::{
-    BottomDockSnapshot, DockSnapshot, LeftSidebarSnapshot, RightSidebarSnapshot,
+    BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot,
 };
 
 use crate::ui::theme;
@@ -133,14 +133,14 @@ pub(super) struct Dock {
     /// Registered panels. Heterogeneous via `PanelHandle` — adding a new
     /// panel type requires no enum change, only `add_panel(MyPanel)`.
     pub panels: Vec<Box<dyn PanelHandle>>,
-    /// Index into `panels`. Tab-based docks (left = left_sidebar_view,
-    /// right = right_sidebar_view) drive selection from `Workspace`
+    /// Index into `panels`. Tab-based docks (left = left_dock_view,
+    /// right = right_dock_view) drive selection from `Workspace`
     /// state instead, so this index is currently exercised by the
     /// panel-registration tests only.
     #[allow(dead_code)]
     pub active_panel: usize,
     /// Back-reference to the owning `Workspace`. Read by `Workspace::render`
-    /// when staging each `DockSnapshot` so event handlers in sidebar and bottom
+    /// when staging each `DockSnapshot` so event handlers in left/right dock and bottom
     /// renderers can route calls back to `Workspace` without going through
     /// `cx.entity()` (which would give `Entity<Dock>` in that context).
     pub(in crate::workspace) workspace: WeakEntity<Workspace>,
@@ -226,16 +226,16 @@ impl Render for Dock {
 
         let (header_el, content_el) = match &self.snap {
             DockSnapshot::Left(snap) => {
-                let header = crate::workspace::left_sidebar::view_tabs::render(snap, cx);
-                let content: gpui::AnyElement = match snap.left_sidebar_view {
-                    daruda_store::project::LeftSidebarView::Worktrees => {
-                        crate::workspace::left_sidebar::worktrees::render(snap, cx)
+                let header = crate::workspace::left_dock::view_tabs::render(snap, cx);
+                let content: gpui::AnyElement = match snap.left_dock_view {
+                    daruda_store::project::LeftDockView::Worktrees => {
+                        crate::workspace::left_dock::worktrees::render(snap, cx)
                     }
-                    daruda_store::project::LeftSidebarView::GitChanges => {
-                        crate::workspace::left_sidebar::git_changes::render(snap, cx)
+                    daruda_store::project::LeftDockView::GitChanges => {
+                        crate::workspace::left_dock::git_changes::render(snap, cx)
                     }
-                    daruda_store::project::LeftSidebarView::Files => {
-                        crate::workspace::left_sidebar::files::render(snap, cx)
+                    daruda_store::project::LeftDockView::Files => {
+                        crate::workspace::left_dock::files::render(snap, cx)
                     }
                 };
                 (header, content)
@@ -246,8 +246,8 @@ impl Render for Dock {
                 (header, body)
             }
             DockSnapshot::Right(snap) => {
-                let header = crate::workspace::right_sidebar::view_tabs::render(snap, cx);
-                let content = crate::workspace::right_sidebar::render(snap, cx);
+                let header = crate::workspace::right_dock::view_tabs::render(snap, cx);
+                let content = crate::workspace::right_dock::render(snap, cx);
                 (header, content)
             }
             DockSnapshot::None => {

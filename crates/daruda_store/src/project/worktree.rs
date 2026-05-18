@@ -14,11 +14,11 @@ use super::SerializedTab;
 /// Stable identifier for a worktree within a project.
 pub type WorktreeId = u64;
 
-/// Which view the sidebar is currently showing. Persisted so the app
+/// Which view the left dock is currently showing. Persisted so the app
 /// restores the user's last-used view on restart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LeftSidebarView {
+pub enum LeftDockView {
     #[default]
     Worktrees,
     GitChanges,
@@ -29,7 +29,7 @@ pub enum LeftSidebarView {
 /// app restores the user's last-used right-panel tab on restart.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RightSidebarView {
+pub enum RightDockView {
     #[default]
     Usage,
     Skills,
@@ -209,7 +209,7 @@ pub struct SerializedWorktree {
     pub base_ref: Option<String>,
     /// Free-form description set at creation time (e.g.
     /// "PR #123 review", "feat/sidebar TextInput IME"). Surfaced as
-    /// the worktree row sublabel in the sidebar so an idle worktree
+    /// the worktree row sublabel in the left dock so an idle worktree
     /// from last week is still self-describing.
     #[serde(default, alias = "task")]
     pub description: Option<String>,

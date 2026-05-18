@@ -1,7 +1,7 @@
 //! Reusable section-header row.
 //!
 //! Pulled out of three near-identical chains in
-//! `workspace/sidebar/{worktrees/list, git_changes/mod, files/mod}.rs`.
+//! `workspace/left_dock/{worktrees/list, git_changes/mod, files/mod}.rs`.
 //! Each rendered the same shape — `flex_row + items_center +
 //! justify_between + theme::WORKTREE_SECTION_HEADER_FONT_SIZE +
 //! DOCK_HEADER_TEXT + label + optional actions` — only differing in

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub struct ClaudeStatusConfig {
     /// Render the indicator on each worktree row. When false, the
     /// hook handler still records status (so toggling back on shows
-    /// fresh data immediately) but the sidebar skips the indicator
+    /// fresh data immediately) but the left dock skips the indicator
     /// cell entirely.
     pub enable: bool,
 

@@ -80,8 +80,8 @@ fn project_state_round_trip() {
         root: PathBuf::from("/tmp/myproject"),
         worktrees: vec![worktree],
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::GitChanges,
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::GitChanges,
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::default(),
         tabs: Vec::new(),
         active_tab_index: 0,
@@ -248,8 +248,8 @@ fn save_and_load_state_round_trip() {
         root: root.clone(),
         worktrees: Vec::new(),
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::default(),
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::default(),
         tabs: vec![],
         active_tab_index: 0,
@@ -472,33 +472,33 @@ fn worktree_status_defaults_to_idle() {
 }
 
 #[test]
-fn sidebar_view_default_is_worktrees() {
-    assert_eq!(LeftSidebarView::default(), LeftSidebarView::Worktrees);
+fn dock_view_default_is_worktrees() {
+    assert_eq!(LeftDockView::default(), LeftDockView::Worktrees);
 }
 
 #[test]
-fn sidebar_view_round_trips_as_snake_case() {
+fn dock_view_round_trips_as_snake_case() {
     for (v, expect) in [
-        (LeftSidebarView::Worktrees, "\"worktrees\""),
-        (LeftSidebarView::GitChanges, "\"git_changes\""),
-        (LeftSidebarView::Files, "\"files\""),
+        (LeftDockView::Worktrees, "\"worktrees\""),
+        (LeftDockView::GitChanges, "\"git_changes\""),
+        (LeftDockView::Files, "\"files\""),
     ] {
         let json = serde_json::to_string(&v).unwrap();
         assert_eq!(json, expect);
-        let back: LeftSidebarView = serde_json::from_str(&json).unwrap();
+        let back: LeftDockView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, v);
     }
 }
 
 #[test]
-fn project_state_persists_active_sidebar_view() {
+fn project_state_persists_active_dock_view() {
     let worktree = SerializedWorktree::default_for_path(0, PathBuf::from("/tmp"));
     let state = ProjectState {
         root: PathBuf::from("/tmp"),
         worktrees: vec![worktree],
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::Files,
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::Files,
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::default(),
         tabs: Vec::new(),
         active_tab_index: 0,
@@ -512,12 +512,12 @@ fn project_state_persists_active_sidebar_view() {
     };
     let json = serde_json::to_string(&state).unwrap();
     let back: ProjectState = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.active_sidebar_view, LeftSidebarView::Files);
+    assert_eq!(back.active_dock_view, LeftDockView::Files);
 }
 
 #[test]
-fn legacy_json_without_active_sidebar_view_defaults_to_worktrees() {
-    // Files written before the LeftSidebarView field existed must load
+fn legacy_json_without_active_dock_view_defaults_to_worktrees() {
+    // Files written before the LeftDockView field existed must load
     // without error and default to Worktrees.
     let legacy_json = r#"{
         "root": "/tmp/legacy",
@@ -535,25 +535,25 @@ fn legacy_json_without_active_sidebar_view_defaults_to_worktrees() {
         "horizontal_spacing": 1.0
     }"#;
     let state: ProjectState = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(state.active_sidebar_view, LeftSidebarView::Worktrees);
+    assert_eq!(state.active_dock_view, LeftDockView::Worktrees);
 }
 
 #[test]
 fn right_panel_view_default_is_usage() {
-    assert_eq!(RightSidebarView::default(), RightSidebarView::Usage);
+    assert_eq!(RightDockView::default(), RightDockView::Usage);
 }
 
 #[test]
 fn right_panel_view_round_trips_as_snake_case() {
     for (v, expect) in [
-        (RightSidebarView::Usage, "\"usage\""),
-        (RightSidebarView::Skills, "\"skills\""),
-        (RightSidebarView::Tools, "\"tools\""),
-        (RightSidebarView::Tasks, "\"tasks\""),
+        (RightDockView::Usage, "\"usage\""),
+        (RightDockView::Skills, "\"skills\""),
+        (RightDockView::Tools, "\"tools\""),
+        (RightDockView::Tasks, "\"tasks\""),
     ] {
         let json = serde_json::to_string(&v).unwrap();
         assert_eq!(json, expect);
-        let back: RightSidebarView = serde_json::from_str(&json).unwrap();
+        let back: RightDockView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, v);
     }
 }
@@ -565,8 +565,8 @@ fn project_state_persists_active_right_panel_view() {
         root: PathBuf::from("/tmp"),
         worktrees: vec![worktree],
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::default(),
-        active_right_panel_view: RightSidebarView::Tools,
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::Tools,
         active_usage_window: UsageWindow::default(),
         tabs: Vec::new(),
         active_tab_index: 0,
@@ -580,7 +580,7 @@ fn project_state_persists_active_right_panel_view() {
     };
     let json = serde_json::to_string(&state).unwrap();
     let back: ProjectState = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.active_right_panel_view, RightSidebarView::Tools);
+    assert_eq!(back.active_right_panel_view, RightDockView::Tools);
 }
 
 #[test]
@@ -651,8 +651,8 @@ fn project_state_persists_active_usage_window() {
         root: PathBuf::from("/tmp"),
         worktrees: vec![worktree],
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::default(),
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::Last24h,
         tabs: Vec::new(),
         active_tab_index: 0,
@@ -692,7 +692,7 @@ fn legacy_json_without_active_usage_window_defaults_to_last_7d() {
 
 #[test]
 fn legacy_json_without_active_right_panel_view_defaults_to_usage() {
-    // Files written before the RightSidebarView field existed must load
+    // Files written before the RightDockView field existed must load
     // without error and default to Usage.
     let legacy_json = r#"{
         "root": "/tmp/legacy",
@@ -710,7 +710,7 @@ fn legacy_json_without_active_right_panel_view_defaults_to_usage() {
         "horizontal_spacing": 1.0
     }"#;
     let state: ProjectState = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(state.active_right_panel_view, RightSidebarView::Usage);
+    assert_eq!(state.active_right_panel_view, RightDockView::Usage);
 }
 
 // ---- ProjectState migration ----
@@ -732,8 +732,8 @@ fn legacy_state_with_tabs(tabs: Vec<SerializedTab>) -> ProjectState {
         root: PathBuf::from("/tmp/legacy"),
         worktrees: Vec::new(),
         active_worktree_id: 0,
-        active_sidebar_view: LeftSidebarView::default(),
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::default(),
         tabs,
         active_tab_index: 0,
@@ -892,8 +892,8 @@ fn migrate_legacy_noop_when_worktrees_already_present() {
         root: PathBuf::from("/tmp/repo"),
         worktrees: vec![pre_existing],
         active_worktree_id: 7,
-        active_sidebar_view: LeftSidebarView::default(),
-        active_right_panel_view: RightSidebarView::default(),
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
         active_usage_window: UsageWindow::default(),
         tabs: vec![sample_tab(1)], // legacy noise — should not migrate
         active_tab_index: 0,

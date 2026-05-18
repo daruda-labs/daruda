@@ -324,7 +324,7 @@ impl Pane {
     /// File: the file's parent directory). The Files-view "show parent
     /// of focused file" affordance reuses this. TaskEdit panes don't
     /// have a meaningful cwd until the task transitions to `Running`
-    /// and a worktree is materialised — return `None` so sidebar
+    /// and a worktree is materialised — return `None` so dock
     /// affordances skip TaskEdit panes.
     pub(in crate::workspace) fn cwd(&self) -> Option<&Path> {
         match &self.content {

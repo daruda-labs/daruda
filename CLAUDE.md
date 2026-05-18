@@ -121,7 +121,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
 Workspace
 ├── TitleBar
 ├── BodyLayout
-│   ├── LeftSidebar
+│   ├── LeftDock
 │   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip
 │   │   ├── WorktreesView            — worktree list (create / delete / merge)
 │   │   ├── GitChangesView
@@ -140,7 +140,7 @@ Workspace
 │   │       ├── TerminalInputDock    — multiline input + submit / action buttons
 │   │       └── MacroDock            — N-column macro key grid
 │   │           └── MacroKey         — macro key (icon or text mode)
-│   └── RightSidebar
+│   └── RightDock
 │       ├── ViewSwitcher             — Usage / Skills / Tasks / Tools tab strip
 │       ├── UsageView
 │       ├── SkillsView
@@ -157,12 +157,12 @@ Workspace
 
 | Hierarchy name | Code identifier | Location |
 |---|---|---|
-| `LeftSidebar` | `left_dock` / `LeftDock` entity | `workspace/layout/mod.rs`, `render/mod.rs` |
-| `RightSidebar` | `right_dock` / `RightDock` entity | `workspace/layout/mod.rs`, `render/mod.rs` |
-| `ViewSwitcher` | `render()` in `view_tabs.rs` (both sidebars) | `left_sidebar/view_tabs.rs`, `right_sidebar/view_tabs.rs` |
+| `LeftDock` | `left_dock` field / `Dock` entity (position=Left) | `workspace/left_dock/`, `workspace/layout/mod.rs`, `render/mod.rs` |
+| `RightDock` | `right_dock` field / `Dock` entity (position=Right) | `workspace/right_dock/`, `workspace/layout/mod.rs`, `render/mod.rs` |
+| `ViewSwitcher` | `render()` in `view_tabs.rs` (both docks) | `left_dock/view_tabs.rs`, `right_dock/view_tabs.rs` |
 | `DockSwitcher` | `PanelTabStrip` | `main_area/bottom_dock/tab_strip.rs` |
 | `TerminalInputDock` | `TerminalInputPanel` | `main_area/bottom_dock/terminal_input.rs` |
-| `MacroKey` | `MacroKey` | `ui/macro_tile.rs` |
+| `MacroKey` | `MacroKey` | `ui/macro_key.rs` |
 | `PaneTree` | `PaneLayout` enum | `workspace/main_area/pane_tree.rs` |
 | `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
 | `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane.rs` |

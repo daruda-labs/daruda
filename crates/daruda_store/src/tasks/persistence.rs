@@ -69,20 +69,12 @@ pub fn save_tasks_in(data_dir: &Path, state: &TasksState) -> std::io::Result<()>
     save_json_atomic(data_dir, &path, state)
 }
 
-/// Production convenience — load from `default_data_dir()`.
+/// Production convenience — load from `crate::persistence::default_data_dir()`.
 pub fn load_tasks() -> Option<TasksState> {
-    load_tasks_in(&default_data_dir())
+    load_tasks_in(&crate::persistence::default_data_dir())
 }
 
-/// Production convenience — save to `default_data_dir()`.
+/// Production convenience — save to `crate::persistence::default_data_dir()`.
 pub fn save_tasks(state: &TasksState) -> std::io::Result<()> {
-    save_tasks_in(&default_data_dir(), state)
-}
-
-/// Back-compat shim — new code should call
-/// [`crate::persistence::default_data_dir`] directly. Kept here so
-/// existing `daruda_store::tasks::persistence::default_data_dir()`
-/// callers still resolve.
-pub fn default_data_dir() -> PathBuf {
-    crate::persistence::default_data_dir()
+    save_tasks_in(&crate::persistence::default_data_dir(), state)
 }

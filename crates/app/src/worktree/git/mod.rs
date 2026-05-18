@@ -271,7 +271,7 @@ pub fn add_worktree(
 ///
 /// Exit 128 with "is not a working tree" means the directory is already
 /// gone (manual deletion or a prior interrupted removal). Treat that as
-/// success so the UI can clean up the stale sidebar entry.
+/// success so the UI can clean up the stale dock entry.
 pub fn remove_worktree(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
     if force {
@@ -374,7 +374,7 @@ fn parse_worktree_list(text: &str) -> Result<Vec<GitWorktreeInfo>, GitError> {
             }
         }
         // Silently skip unknown keys (locked, prunable, …) — we only
-        // need path/branch/HEAD for the sidebar.
+        // need path/branch/HEAD for the left dock.
     }
     flush(&mut cur, &mut out);
     Ok(out)

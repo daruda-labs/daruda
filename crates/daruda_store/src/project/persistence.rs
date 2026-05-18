@@ -17,12 +17,6 @@ use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
 
 use super::{ProjectState, RECENT_MAX, RecentEntry, path_hash};
 
-/// Back-compat shim — new code should call
-/// [`crate::persistence::default_data_dir`] directly.
-pub fn default_data_dir() -> PathBuf {
-    crate::persistence::default_data_dir()
-}
-
 fn projects_dir_in(data_dir: &Path) -> PathBuf {
     data_dir.join("projects")
 }
@@ -119,37 +113,37 @@ pub fn prune_recent_in(data_dir: &Path) -> std::io::Result<()> {
 
 /// Save project state to disk.
 pub fn save_state(state: &ProjectState) -> std::io::Result<()> {
-    save_state_in(&default_data_dir(), state)
+    save_state_in(&crate::persistence::default_data_dir(), state)
 }
 
 /// Load project state from disk. Returns `None` on any error. Applies
 /// `migrate_legacy` so the returned state always uses the worktree shape.
 pub fn load_state(root: &Path) -> Option<ProjectState> {
-    load_state_in(&default_data_dir(), root)
+    load_state_in(&crate::persistence::default_data_dir(), root)
 }
 
 /// Delete a project's state file.
 pub fn delete_state(root: &Path) -> std::io::Result<()> {
-    delete_state_in(&default_data_dir(), root)
+    delete_state_in(&crate::persistence::default_data_dir(), root)
 }
 
 /// Load the recent projects list. Returns empty vec on any error.
 pub fn load_recent() -> Vec<RecentEntry> {
-    load_recent_in(&default_data_dir())
+    load_recent_in(&crate::persistence::default_data_dir())
 }
 
 /// Save the recent projects list to disk.
 pub fn save_recent(entries: &[RecentEntry]) -> std::io::Result<()> {
-    save_recent_in(&default_data_dir(), entries)
+    save_recent_in(&crate::persistence::default_data_dir(), entries)
 }
 
 /// Add or update a project in the recent list. Moves existing entries
 /// to the front; trims to RECENT_MAX.
 pub fn touch_recent(root: &Path) -> std::io::Result<()> {
-    touch_recent_in(&default_data_dir(), root)
+    touch_recent_in(&crate::persistence::default_data_dir(), root)
 }
 
 /// Remove stale entries (directories that no longer exist).
 pub fn prune_recent() -> std::io::Result<()> {
-    prune_recent_in(&default_data_dir())
+    prune_recent_in(&crate::persistence::default_data_dir())
 }

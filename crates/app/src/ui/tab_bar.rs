@@ -17,7 +17,7 @@
 //!
 //! `prefix` / `menu` are intentionally out of scope. `suffix` is
 //! reserved for the bottom dock's `+` action chip (panel-tab creation);
-//! every other tab strip (sidebar, right panel) keeps action chips in
+//! every other tab strip (left/right dock) keeps action chips in
 //! the panel body's section header.
 
 use gpui::{ElementId, SharedString, Styled as _};

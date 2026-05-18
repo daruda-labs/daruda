@@ -6,7 +6,7 @@
 //! | Origin | Base | Example |
 //! |---|---|---|
 //! | `git status --porcelain` | `repo_root` | `daruda/crates/foo.rs` |
-//! | `FileTree` (Files sidebar) | `wt.path` | `crates/foo.rs` |
+//! | `FileTree` (Files dock) | `wt.path` | `crates/foo.rs` |
 //! | Drag / external open | absolute | `/term/daruda/crates/foo.rs` |
 //!
 //! When `wt.path == repo_root` (the common case where the user opens the repo

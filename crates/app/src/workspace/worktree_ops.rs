@@ -30,7 +30,7 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     /// to (current HEAD when paired with `-b`).
     pub base_ref: Option<String>,
     /// Free-form description captured at creation time.
-    /// Surfaced as the worktree row sublabel in the sidebar.
+    /// Surfaced as the worktree row sublabel in the left dock.
     pub description: Option<String>,
 }
 
@@ -42,9 +42,9 @@ pub(in crate::workspace) struct RemoveWorktreePlan {
 }
 
 impl Workspace {
-    /// Switch to the nth worktree by sidebar position (0-indexed).
+    /// Switch to the nth worktree by left-dock position (0-indexed).
     /// Worktrees are sorted by `tab_order` so the position matches what
-    /// the user sees in the sidebar. No-ops when `index` is out of range.
+    /// the user sees in the left dock. No-ops when `index` is out of range.
     pub(in crate::workspace) fn activate_worktree_by_index(
         &mut self,
         index: usize,
@@ -377,7 +377,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Move `from_id` immediately before `to_id` in the sidebar list,
+    /// Move `from_id` immediately before `to_id` in the left dock list,
     /// renumbering `tab_order` for all worktrees afterwards. No-ops when
     /// either id is absent or both ids are the same.
     pub(in crate::workspace) fn reorder_worktree(
@@ -409,7 +409,7 @@ impl Workspace {
     }
 
     /// Update the free-form description for `id`. `None` clears it,
-    /// reverting the sidebar sublabel to the worktree path.
+    /// reverting the left dock sublabel to the worktree path.
     pub(in crate::workspace) fn set_worktree_description(
         &mut self,
         id: WorktreeId,

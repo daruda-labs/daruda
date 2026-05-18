@@ -4,7 +4,7 @@
 //! keyed by process PID, containing the authoritative `sessionId`.
 //! daruda's PTY tracker (`app/src/hooks/pty_tracker.rs`) walks
 //! descendants of each pane's PTY, finds the `claude` process, and
-//! looks up its session_id here so the sidebar can:
+//! looks up its session_id here so the left dock can:
 //!
 //! - Highlight the session matching the focused tab (active badge)
 //! - Drop a session from the in-memory store as soon as its `claude`

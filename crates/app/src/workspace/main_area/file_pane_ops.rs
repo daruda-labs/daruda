@@ -12,7 +12,7 @@ impl Workspace {
     //
     // Each open file lives in its own `Pane` carrying
     // `PaneContent::File(FileContent)`; "the file viewer" — for
-    // action handlers, key contexts, sidebar highlighting — is
+    // action handlers, key contexts, dock highlighting — is
     // whichever file pane currently has focus.
 
     pub(in crate::workspace) fn focused_file_view(&self) -> Option<&PaneFileView> {

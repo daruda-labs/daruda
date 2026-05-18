@@ -163,7 +163,7 @@ pub const RIGHT_PANEL_SUBTASK_PROGRESS_GLYPH: &str = "☑";
 
 /// Glyph trailing the session-id badge while the matching Claude
 /// session is generating tokens or running a tool — matches the
-/// "spinning" indicator vocabulary used in the worktree sidebar.
+/// "spinning" indicator vocabulary used in the worktree dock.
 pub const RIGHT_PANEL_TASK_SESSION_STATUS_WORKING: &str = "⟳";
 
 /// Glyph trailing the session-id badge while the session is idle

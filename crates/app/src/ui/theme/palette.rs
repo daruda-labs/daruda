@@ -1,8 +1,8 @@
-//! App-side UI palette — workspace chrome, sidebar, status bar, docks.
+//! App-side UI palette — workspace chrome, docks, status bar, docks.
 //!
 //! Lives in the `app` crate (not `daruda_terminal::ux::theme`) because
 //! it describes colours / metrics for daruda-bespoke chrome widgets:
-//! tab bar, sidebar view tabs, worktrees list, status bar, dock
+//! tab bar, dock view tabs, worktrees list, status bar, dock
 //! panels. The terminal-side palette (cell fg/bg, cursor, search
 //! overlay, scrollback search, terminal scrollbar) stays in
 //! `daruda_terminal::ux::theme` because the `view/` rendering code
@@ -48,10 +48,10 @@ pub const TITLE_BAR_BG: Hsla = hsla(0.0, 0.0, 0.10, 1.0);
 /// Tab bar background.
 pub const TAB_BAR_BG: Hsla = hsla(0.0, 0.0, 0.12, 1.0);
 
-/// Tab bar bottom hairline. Matches sidebar `gpui_component::TabBar`'s
+/// Tab bar bottom hairline. Matches dock `gpui_component::TabBar`'s
 /// `cx.theme().border` (which `apply_daruda_palette` binds to
 /// `MODAL_PANEL_BORDER`, lightness 0.30) so the terminal tab bar and
-/// the sidebar tab strip share the same separator color.
+/// the dock tab strip share the same separator color.
 pub const TAB_BAR_BORDER: Hsla = hsla(0.0, 0.0, 0.30, 1.0);
 
 /// Active tab background.
@@ -141,28 +141,28 @@ pub const DOCK_ICON_HOVER: Hsla = hsla(0.0, 0.0, 0.70, 1.0);
 /// Dock toggle icon active background.
 pub const DOCK_ICON_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.235, 1.0);
 
-/// Sidebar view tab strip — inactive tab text color.
-pub const SIDEBAR_VIEW_TAB_INACTIVE: Hsla = hsla(0.0, 0.0, 0.50, 1.0);
+/// Dock view tab strip — inactive tab text color.
+pub const DOCK_VIEW_TAB_INACTIVE: Hsla = hsla(0.0, 0.0, 0.50, 1.0);
 
-/// Sidebar view tab strip — active tab text color.
-pub const SIDEBAR_VIEW_TAB_ACTIVE: Hsla = hsla(0.0, 0.0, 0.95, 1.0);
+/// Dock view tab strip — active tab text color.
+pub const DOCK_VIEW_TAB_ACTIVE: Hsla = hsla(0.0, 0.0, 0.95, 1.0);
 
-/// Sidebar view tab strip — active underline accent.
-pub const SIDEBAR_VIEW_TAB_ACCENT: Hsla = hsla(210.0, 0.70, 0.60, 1.0);
+/// Dock view tab strip — active underline accent.
+pub const DOCK_VIEW_TAB_ACCENT: Hsla = hsla(210.0, 0.70, 0.60, 1.0);
 
-/// Sidebar view tab strip — hover background.
-pub const SIDEBAR_VIEW_TAB_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
+/// Dock view tab strip — hover background.
+pub const DOCK_VIEW_TAB_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 
-/// Sidebar view tab strip — horizontal padding per tab (px).
-pub const SIDEBAR_VIEW_TAB_PAD_X: f32 = 10.0;
+/// Dock view tab strip — horizontal padding per tab (px).
+pub const DOCK_VIEW_TAB_PAD_X: f32 = 10.0;
 
-/// Sidebar view tab strip — font size (px).
-pub const SIDEBAR_VIEW_TAB_FONT_SIZE: f32 = 11.0;
+/// Dock view tab strip — font size (px).
+pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = 11.0;
 
-/// Sidebar view tab strip — active underline thickness (px).
-pub const SIDEBAR_VIEW_TAB_ACCENT_H: f32 = 2.0;
+/// Dock view tab strip — active underline thickness (px).
+pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
 
-// Worktrees list (left sidebar Worktrees view)
+// Worktrees list (left dock Worktrees view)
 /// Worktrees list — row height (px).
 pub const WORKTREE_ROW_HEIGHT: f32 = 44.0;
 /// Worktrees list — horizontal padding (px).
@@ -374,14 +374,14 @@ pub const RIGHT_PANEL_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Width of the section-nav sidebar (px). Sized to fit `Claude Status`
 /// (the longest builtin nav label) at the body font size with comfort.
 pub const SETTINGS_SIDEBAR_W: f32 = 168.0;
-/// Sidebar background — slightly darker than the panel body so the
+/// Dock background — slightly darker than the panel body so the
 /// active row's highlight reads cleanly.
 pub const SETTINGS_SIDEBAR_BG: Hsla = hsla(0.0, 0.0, 0.0, 0.18);
-/// Vertical padding inside the sidebar list.
+/// Vertical padding inside the left dock list.
 pub const SETTINGS_SIDEBAR_PAD_Y: f32 = 6.0;
-/// Per-row horizontal padding inside the sidebar.
+/// Per-row horizontal padding inside the left dock.
 pub const SETTINGS_SIDEBAR_ROW_PAD_X: f32 = 14.0;
-/// Per-row vertical padding inside the sidebar.
+/// Per-row vertical padding inside the left dock.
 pub const SETTINGS_SIDEBAR_ROW_PAD_Y: f32 = 6.0;
 /// Active row background — same family as MODAL_PANEL_BG accent.
 pub const SETTINGS_SIDEBAR_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.10);
@@ -627,18 +627,18 @@ pub const FILES_ICON_W: f32 = 16.0;
 pub const FILES_ROW_GAP: f32 = 4.0;
 /// Font size for the file tree row name (px).
 pub const FILES_ROW_FONT_SIZE: f32 = 12.0;
-/// Width of the sidebar scrollbar thumb (px). Shared by every left-dock
-/// sidebar view (Files, Git Changes, Worktrees) so the scrollbars feel
+/// Width of the dock scrollbar thumb (px). Shared by every left-dock
+/// left-dock view (Files, Git Changes, Worktrees) so the scrollbars feel
 /// consistent.
-pub const SIDEBAR_SCROLLBAR_W: f32 = 6.0;
+pub const DOCK_SCROLLBAR_W: f32 = 6.0;
 /// Right margin between the thumb and the panel edge (px).
-pub const SIDEBAR_SCROLLBAR_MARGIN_R: f32 = 2.0;
+pub const DOCK_SCROLLBAR_MARGIN_R: f32 = 2.0;
 /// Minimum thumb height so very long lists keep a draggable target (px).
-pub const SIDEBAR_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
+pub const DOCK_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
 /// Scrollbar thumb fill — same alpha curve as the file viewer's thumb
-/// so the sidebar scrollbars feel consistent.
-pub const SIDEBAR_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
-pub const SIDEBAR_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
+/// so the dock scrollbars feel consistent.
+pub const DOCK_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
+pub const DOCK_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Focused pane header background.
 pub const PANE_HEADER_FOCUSED_BG: Hsla = hsla(0.0, 0.0, 0.176, 1.0);
 /// Unfocused pane header background.
@@ -1137,7 +1137,7 @@ pub const TOAST_MIN_W: f32 = 240.0;
 pub const TOAST_MAX_W: f32 = 480.0;
 /// Distance from the window bottom edge (px).
 pub const TOAST_BOTTOM_MARGIN: f32 = 24.0;
-/// Info-level toast accent — neutral cyan, matches sidebar info banners.
+/// Info-level toast accent — neutral cyan, matches left-dock info banners.
 pub const TOAST_TINT_INFO: Hsla = hsla(200.0, 0.55, 0.65, 1.0);
 /// Warning-level toast accent — amber, matches search "no matches" tone.
 pub const TOAST_TINT_WARNING: Hsla = hsla(38.0, 0.85, 0.60, 1.0);

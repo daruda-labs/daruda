@@ -21,7 +21,7 @@ use super::Workspace;
 /// the spawned [`Task<()>`]; callers either store it in a struct
 /// field (so dropping the workspace cancels in-flight work) or
 /// `.detach()` it (fire-and-forget — the existing convention for
-/// `git_status_ops`-style spawns).
+/// `git_ops`-style spawns).
 ///
 /// Type parameters:
 /// - `R` — value the blocking work returns. Lands as the second

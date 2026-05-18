@@ -1,4 +1,4 @@
-//! Drag payload for sidebar path items (Files + Git Changes).
+//! Drag payload for left-dock path items (Files + Git Changes).
 //!
 //! `PathDrag` is registered as the drag value on each file/directory row.
 //! `TextArea` drop zones receive it via `on_drop::<PathDrag>` and insert
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::ui::theme;
 use gpui::{Context, IntoElement, Pixels, Point, Render, Window, div, prelude::*, px};
 
-/// The value carried during a sidebar → TextArea drag operation.
+/// The value carried during a dock → TextArea drag operation.
 #[derive(Clone)]
 pub(in crate::workspace) struct PathDrag {
     pub path: PathBuf,

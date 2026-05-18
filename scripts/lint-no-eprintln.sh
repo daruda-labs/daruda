@@ -11,7 +11,7 @@
 # A small allow-list covers four legitimate `eprintln!` callers (do
 # not extend this list without updating CLAUDE.md):
 #   - bootstrap.rs panic-hook stderr fallback (must survive a dead LogWriter)
-#   - watchers.rs pump-exit log (normal-shutdown signal, not an error)
+#   - watcher_pumps.rs pump-exit log (normal-shutdown signal, not an error)
 #   - hooks/handler.rs external hook subprocess stderr (boundary)
 #   - daruda_store/src/observability/log_writer.rs bootstrap fallbacks
 #     (LogWriter cannot log to itself)
@@ -28,7 +28,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-ALLOW='\bcrates/app/src/bootstrap\.rs|\bcrates/app/src/watchers\.rs|\bcrates/app/src/hooks/handler\.rs|\bcrates/daruda_store/src/observability/log_writer\.rs'
+ALLOW='\bcrates/app/src/bootstrap\.rs|\bcrates/app/src/watcher_pumps\.rs|\bcrates/app/src/hooks/handler\.rs|\bcrates/daruda_store/src/observability/log_writer\.rs'
 
 # Scan only first-party crates. Vendored gpui_component is excluded —
 # it is upstream code with its own logging conventions.

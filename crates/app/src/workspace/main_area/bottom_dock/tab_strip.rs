@@ -2,7 +2,7 @@
 //! switch the active tab.
 //!
 //! Built on `crate::ui::{tab, tab_bar}` so the strip matches the
-//! sidebar / right-panel underline TabBars. The built-in "Input" tab
+//! dock / right-panel underline TabBars. The built-in "Input" tab
 //! occupies index 0; user-defined macro tabs follow. The `+` create
 //! chip rides on `TabBar::suffix` — the one place the wrapper permits
 //! suffix usage (see `crate::ui::tab_bar` doc comment).
@@ -78,12 +78,12 @@ struct DraggedPanelTabGhost {
 impl Render for DraggedPanelTabGhost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
-        let text_color = t.sidebar_view_tab_active;
+        let text_color = t.dock_view_tab_active;
         let bg = t.panel_tab_drop_target_bg;
         div()
-            .px(px(theme::SIDEBAR_VIEW_TAB_PAD_X))
+            .px(px(theme::DOCK_VIEW_TAB_PAD_X))
             .py(px(theme::WORKTREE_DRAG_GHOST_PAD_Y))
-            .text_size(px(theme::SIDEBAR_VIEW_TAB_FONT_SIZE))
+            .text_size(px(theme::DOCK_VIEW_TAB_FONT_SIZE))
             .text_color(text_color)
             .bg(bg)
             .rounded(px(theme::MODAL_BUTTON_RADIUS))
@@ -155,7 +155,7 @@ pub(in crate::workspace) fn render(
                 .items_center()
                 .h_full()
                 .gap(px(theme::PANEL_BODY_GAP))
-                .px(px(theme::SIDEBAR_VIEW_TAB_PAD_X))
+                .px(px(theme::DOCK_VIEW_TAB_PAD_X))
                 .child(add_tab_button(snap, cx))
                 .when(!terminal_input_visible, |el| {
                     el.child(row_preset_button(snap, cx))

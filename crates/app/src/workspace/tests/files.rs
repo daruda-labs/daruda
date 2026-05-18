@@ -255,7 +255,7 @@ async fn cached_visible_lists_root_children_after_load(cx: &mut TestAppContext) 
 
 #[gpui::test]
 async fn open_files_entry_opens_file_viewer(cx: &mut TestAppContext) {
-    // Sidebar selection follows the keyboard cursor (driven by
+    // Left-dock selection follows the keyboard cursor (driven by
     // `files_selection`), not the focused file pane. Opening a
     // file therefore should populate the viewer regardless of
     // which row currently shows the selected background.
@@ -279,7 +279,7 @@ async fn open_files_entry_opens_file_viewer(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn keyboard_move_after_mouse_open_clears_old_highlight(cx: &mut TestAppContext) {
     // Reproduces: mouse-click highlight stayed on the old file
-    // after the user pressed an arrow key. The fix: sidebar
+    // after the user pressed an arrow key. The fix: dock
     // background follows `files_selection` only, so moving the
     // cursor moves the bg with it.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
@@ -318,7 +318,7 @@ async fn keyboard_move_after_mouse_open_clears_old_highlight(cx: &mut TestAppCon
         // Some other row now holds the cursor.
         assert!(visible.iter().any(|v| v.is_keyboard_focused));
         // The file viewer stays open on a.txt — its tab is
-        // independent of the sidebar selection bg.
+        // independent of the left-dock selection bg.
         assert_eq!(
             ws.focused_file_view().unwrap().path.as_path(),
             std::path::Path::new("a.txt")
@@ -941,7 +941,7 @@ async fn gitignore_disabled_skips_evaluation(cx: &mut TestAppContext) {
     std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
     std::fs::create_dir(root.join("target")).unwrap();
     let mut config = daruda_config::Config::default();
-    config.sidebar.files_use_gitignore = false;
+    config.left_dock.files_use_gitignore = false;
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)

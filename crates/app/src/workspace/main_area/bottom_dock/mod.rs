@@ -1,6 +1,6 @@
 //! Bottom dock UI — user-managed panel tabs (macros, future widgets).
 //!
-//! Composition mirrors the left dock's sidebar:
+//! Composition mirrors the left dock's dock:
 //!   * `tab_strip::render` returns the header (one tab per
 //!     `panels.tabs` entry, click switches the active tab).
 //!   * `render_body` returns the body — fixed-column grid of widget

@@ -118,7 +118,7 @@ pub const SEARCH_LABEL_COUNTER: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 // ============================================================================
 
 // ============================================================================
-// Git Changes view (left-dock sidebar panel)
+// Git Changes view (left-dock dock panel)
 // ============================================================================
 
 // ============================================================================
@@ -323,11 +323,11 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // ============================================================================
 
 // ----------------------------------------------------------------
-// Drag ghost pill (sidebar path drag)
+// Drag ghost pill (dock path drag)
 // ----------------------------------------------------------------
 
 // ============================================================================
-// Claude Code status indicator (sidebar worktree row)
+// Claude Code status indicator (dock worktree row)
 // ============================================================================
 // 4 states (Working / NeedsAttention / Idle / Connecting). Mockup:
 // `Claude-Code-Status-Indicator-Mockup.html`. Palette A — classic

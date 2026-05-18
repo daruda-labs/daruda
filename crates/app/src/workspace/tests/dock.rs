@@ -45,7 +45,7 @@ fn test_toggle_right_dock(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_left_dock_registers_three_sidebar_panels(cx: &mut TestAppContext) {
+fn test_left_dock_registers_three_panels(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, cx| {
         let d = ws.left_dock.read(cx);
@@ -63,8 +63,8 @@ fn test_left_dock_registers_three_sidebar_panels(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_left_dock_active_panel_matches_default_sidebar_view(cx: &mut TestAppContext) {
-    // Default sidebar view is Worktrees → index 0.
+fn test_left_dock_active_panel_matches_default_dock_view(cx: &mut TestAppContext) {
+    // Default dock view is Worktrees → index 0.
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, cx| {
         let d = ws.left_dock.read(cx);
@@ -77,58 +77,58 @@ fn test_left_dock_active_panel_matches_default_sidebar_view(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-fn test_set_sidebar_view_updates_sidebar_view(cx: &mut TestAppContext) {
+fn test_set_dock_view_updates_dock_view(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::GitChanges, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.left_sidebar_view,
-            daruda_store::project::LeftSidebarView::GitChanges
+            ws.left_dock_view,
+            daruda_store::project::LeftDockView::GitChanges
         );
     });
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.left_sidebar_view,
-            daruda_store::project::LeftSidebarView::Files
+            ws.left_dock_view,
+            daruda_store::project::LeftDockView::Files
         );
     });
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Worktrees, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::Worktrees, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.left_sidebar_view,
-            daruda_store::project::LeftSidebarView::Worktrees
+            ws.left_dock_view,
+            daruda_store::project::LeftDockView::Worktrees
         );
     });
 }
 
 #[gpui::test]
-fn test_set_sidebar_view_no_op_when_same(cx: &mut TestAppContext) {
+fn test_set_dock_view_no_op_when_same(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     // First call switches to Files.
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.left_sidebar_view,
-            daruda_store::project::LeftSidebarView::Files
+            ws.left_dock_view,
+            daruda_store::project::LeftDockView::Files
         );
     });
-    // Second call with the same view should be a no-op (left_sidebar_view unchanged).
+    // Second call with the same view should be a no-op (left_dock_view unchanged).
     ws.update(cx, |ws, cx| {
-        ws.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.left_sidebar_view,
-            daruda_store::project::LeftSidebarView::Files
+            ws.left_dock_view,
+            daruda_store::project::LeftDockView::Files
         );
     });
 }

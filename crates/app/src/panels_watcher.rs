@@ -1,7 +1,7 @@
 //! File-system watcher for `panels.json` live reload.
 //!
 //! Mirrors `config_watcher` but targets the bottom-dock panels file.
-//! On each debounced reload signal, the dispatcher in `main.rs`
+//! On each debounced reload signal, `watchers_lifecycle::spawn_panels_reload`
 //! reloads `PanelsState` from disk and pushes it to every open
 //! `Workspace`. Self-write suppression is handled by comparing the
 //! reloaded JSON against the current state and skipping the notify
@@ -27,7 +27,7 @@ pub fn spawn_panels_watcher() -> mpsc::Receiver<()> {
 
     let (tx, rx) = mpsc::channel();
     let panels_path =
-        daruda_store::panels::panels_path_in(&daruda_store::panels::default_data_dir());
+        daruda_store::panels::panels_path_in(&daruda_store::persistence::default_data_dir());
 
     std::thread::spawn(move || {
         // Watch the parent directory — atomic-rename saves (which is

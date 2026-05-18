@@ -31,7 +31,7 @@ impl Workspace {
         // Subtract open dock sizes from the available content area.
         // Dock resize handles are absolute overlays (render.rs), so
         // they don't eat flex space — no handle subtraction needed.
-        // Left dock always renders via sidebar content/header overrides
+        // Left dock always renders via dock content/header overrides
         // regardless of panels, so check is_open only.
         let left_open = self.left_dock.read(cx).is_open;
         let left_size = self.left_dock.read(cx).size;

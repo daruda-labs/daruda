@@ -14,27 +14,26 @@
 //! tab cells and pane headers; do not rename it back to `tab_title`.
 
 mod actions;
-mod claude_context;
-mod config_ops;
+mod claude_session_ops;
 pub(in crate::workspace) mod command;
+mod config_ops;
 pub(in crate::workspace) mod dialog_helpers;
 pub(in crate::workspace) mod error;
 pub(in crate::workspace) mod layout;
-mod left_sidebar;
+mod left_dock;
 pub(in crate::workspace) mod main_area;
 mod path_drag;
 mod persistence;
 mod render;
-mod right_sidebar;
+mod right_dock;
 mod spawn_helpers;
 pub(crate) mod status_bar;
 pub(in crate::workspace) mod sync;
-mod toast_layer;
 #[cfg(test)]
 mod tests;
+mod toast_layer;
 mod window_close_ops;
 mod worktree_ops;
-
 
 pub(in crate::workspace) use persistence::WorktreeRuntime;
 
@@ -44,8 +43,6 @@ use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
 use daruda_terminal::TerminalConfig;
 
-use main_area::pane_tree::{PaneLayout, SplitDirection};
-
 // ----------------------------------------------------------------
 // Actions
 // ----------------------------------------------------------------
@@ -53,8 +50,8 @@ use main_area::pane_tree::{PaneLayout, SplitDirection};
 /// Parameterized action — fires when a user-defined macro shortcut
 /// is pressed. Carries the shortcut string so the handler can resolve
 /// it back to the macro at dispatch time (the binding is set up by
-/// `panels_ops::register_macro_shortcuts`, which can register the
-/// same shortcut without recompiling).
+/// `main_area::bottom_dock::macro_ops::register_macro_shortcuts`,
+/// which can register the same shortcut without recompiling).
 ///
 /// `no_json` skips the keymap-deserialize derive — this action is
 /// only constructed at runtime by the registrar, never loaded from a
@@ -119,9 +116,9 @@ actions!(
         ActivateWorktree7,
         ActivateWorktree8,
         ActivateWorktree9,
-        ShowSidebarWorktrees,
-        ShowSidebarGit,
-        ShowSidebarFiles,
+        ShowLeftDockWorktrees,
+        ShowLeftDockGit,
+        ShowLeftDockFiles,
         SwitchRightPanelUsage,
         SwitchRightPanelSkills,
         SwitchRightPanelTools,
@@ -205,20 +202,20 @@ pub struct Workspace {
     /// Primary font family from config. Applied to each new pane's
     /// TerminalView so user-specified fonts take effect.
     pub(in crate::workspace) font_family: String,
-    /// Left sidebar dock (worktree list, git changes, files — the
-    /// active view is picked by `left_sidebar_view`).
+    /// Left dock (worktree list, git changes, files — the
+    /// active view is picked by `left_dock_view`).
     pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
-    pub(in crate::workspace) left_sidebar_view: daruda_store::project::LeftSidebarView,
+    pub(in crate::workspace) left_dock_view: daruda_store::project::LeftDockView,
     /// Active tab inside the right dock (Usage / Skills / Tools /
     /// Tasks). Persisted via ProjectState.
-    pub(in crate::workspace) right_sidebar_view: daruda_store::project::RightSidebarView,
+    pub(in crate::workspace) right_dock_view: daruda_store::project::RightDockView,
     /// Claude Code integration state — usage / plan-limits / service-
     /// status / session-status / PTY tracker / JSONL fallback +
     /// associated background tasks. Grouped into one struct so the
     /// 18 sub-fields don't clutter `Workspace`'s top level. See
-    /// [`claude_context::ClaudeContext`].
-    pub(in crate::workspace) claude: claude_context::ClaudeContext,
+    /// [`claude_session_ops::ClaudeContext`].
+    pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
     /// Worktrees for this project. Always non-empty when `project` is
     /// `Some` (Workspace::new_with_project bootstraps one default entry).
     /// `tabs`/`panes` still live on `Workspace` until W-3 migrates
@@ -240,11 +237,11 @@ pub struct Workspace {
     /// fetched at least once are present; missing = "not yet loaded".
     pub(in crate::workspace) git_status_cache:
         HashMap<daruda_store::project::WorktreeId, crate::worktree::git::GitStatusData>,
-    /// Sidebar Files-view state — per-worktree lazy tree, watcher,
+    /// Left-dock Files view state — per-worktree lazy tree, watcher,
     /// gitignore matcher, scroll handle, keyboard cursor. Grouped
     /// into one struct so the 12 sub-fields don't clutter
-    /// `Workspace`'s top level. See [`left_sidebar::file_tree_context::FileTreeContext`].
-    pub(in crate::workspace) file_tree: left_sidebar::file_tree_context::FileTreeContext,
+    /// `Workspace`'s top level. See [`left_dock::file_tree_context::FileTreeContext`].
+    pub(in crate::workspace) file_tree: left_dock::file_tree_context::FileTreeContext,
     /// Per-worktree "git status currently running" guard. Watcher
     /// events can arrive faster than `git status` can complete on a
     /// large repo; this keeps at most one in-flight task per worktree.
@@ -309,7 +306,7 @@ pub struct Workspace {
     /// Syntect theme name for syntax highlighting in the file viewer.
     /// Updated on every config reload; threaded into background load tasks.
     pub(in crate::workspace) syntax_theme: String,
-    /// When true, clicking a file in the sidebar reuses the single
+    /// When true, clicking a file in the left dock reuses the single
     /// existing file-viewer tab instead of opening one per file.
     /// Mirrors `daruda_config::FileViewerConfig::preview_tab`.
     pub(in crate::workspace) file_viewer_preview_tab: bool,
@@ -330,7 +327,7 @@ pub struct Workspace {
     pub(in crate::workspace) git_stage_in_flight: bool,
     /// Per-worktree set of collapsed dir groups in the Git Changes view.
     /// Keyed by the worktree-relative dir string emitted by `group_by_dir`
-    /// (e.g. `"src/workspace/sidebar"`). In-memory only — collapse state
+    /// (e.g. `"src/workspace/left_dock"`). In-memory only — collapse state
     /// resets on app restart by design.
     pub(in crate::workspace) git_collapsed_dirs:
         std::collections::HashMap<daruda_store::project::WorktreeId, HashSet<String>>,
@@ -353,7 +350,8 @@ pub struct Workspace {
     /// Customizable bottom-dock panels — user-managed tabs of macro
     /// widgets. Loaded from `panels.json` on construction (or seeded
     /// with Claude/Codex/Gemini on first launch). Mutations route
-    /// through `panels_ops` and persist via `panels_ops::save_panels`.
+    /// through `main_area::bottom_dock::macro_ops` and persist via
+    /// `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
     /// Subscription that calls `cx.notify()` whenever the app-wide
     /// `GlobalTasks` changes — so the Tasks tab in this workspace
@@ -396,13 +394,13 @@ pub struct Workspace {
     /// Search query input rendered atop the right-bar Skills tab.
     /// Cleared on `Esc`; substring-filters Project / Personal / Plugin
     /// scopes simultaneously. The renderer reads the current text via
-    /// `RightSidebarSnapshot::skill_search_query` (captured per frame) so the
+    /// `RightDockSnapshot::skill_search_query` (captured per frame) so the
     /// panel render closure never re-enters the workspace.
     pub(in crate::workspace) skill_search_input: gpui::Entity<crate::ui::InputState>,
     /// Search query input rendered atop the right-bar Tasks tab. Same
     /// pattern as `skill_search_input` — substring-filters task rows
     /// over `title / prompt / notes / branch_name`. The renderer reads
-    /// the current text via `RightSidebarSnapshot::task_search_query`
+    /// the current text via `RightDockSnapshot::task_search_query`
     /// (captured per frame).
     pub(in crate::workspace) task_search_input: gpui::Entity<crate::ui::InputState>,
     /// Plugin ids (`<plugin>@<marketplace>`) whose accordion section
@@ -628,9 +626,9 @@ impl Workspace {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
                     let mut d = layout::Dock::new(layout::DockPosition::Left, ws);
-                    d.resize(config.sidebar.left_default_width);
-                    d.is_open = !config.sidebar.left_collapsed_by_default;
-                    // Register the three sidebar view panels in the same order
+                    d.resize(config.left_dock.left_default_width);
+                    d.is_open = !config.left_dock.left_collapsed_by_default;
+                    // Register the three left-dock view panels in the same order
                     // as `view_tabs::entries()` so `active_panel` and the
                     // tab strip always agree on which view is shown.
                     d.add_panel(layout::WorktreesPanel);
@@ -639,9 +637,9 @@ impl Workspace {
                     d
                 })
             },
-            left_sidebar_view: daruda_store::project::LeftSidebarView::default(),
-            right_sidebar_view: daruda_store::project::RightSidebarView::default(),
-            claude: claude_context::ClaudeContext {
+            left_dock_view: daruda_store::project::LeftDockView::default(),
+            right_dock_view: daruda_store::project::RightDockView::default(),
+            claude: claude_session_ops::ClaudeContext {
                 usage: daruda_claude::usage::UsageState::default(),
                 usage_pricing: config_ops::usage_pricing_from_config(&config.usage.pricing),
                 usage_poll: config.usage.poll.clone(),
@@ -710,17 +708,17 @@ impl Workspace {
             command_palette: command::palette::CommandPaletteState::default(),
             project: project.clone(),
             git_status_cache: HashMap::new(),
-            file_tree: left_sidebar::file_tree_context::FileTreeContext {
+            file_tree: left_dock::file_tree_context::FileTreeContext {
                 file_trees: HashMap::new(),
                 files_visible_cache: HashMap::new(),
                 file_watchers: HashMap::new(),
                 files_reload_queues: HashMap::new(),
                 files_watcher_poll: None,
-                files_show_hidden: config.sidebar.files_show_hidden,
+                files_show_hidden: config.left_dock.files_show_hidden,
                 files_panel_focus: cx.focus_handle(),
                 files_selection: None,
-                files_use_gitignore: config.sidebar.files_use_gitignore,
-                files_icon_color_mode: config.sidebar.file_icon_color_mode.clone(),
+                files_use_gitignore: config.left_dock.files_use_gitignore,
+                files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
                 files_gitignore_index: HashMap::new(),
                 files_scroll_handle: gpui::UniformListScrollHandle::new(),
             },
@@ -868,7 +866,7 @@ impl Workspace {
     /// Notify that workspace state has changed and should be persisted.
     ///
     /// Always deferred: `save_state` reads all three dock entities, and this
-    /// method is reachable from Dock event listeners (sidebar clicks). At that
+    /// method is reachable from Dock event listeners (dock clicks). At that
     /// point the Dock entity is still in `EntityState::Mut` on the GPUI call
     /// stack, so a synchronous `.read(cx)` on the same entity would panic.
     /// Deferring schedules the persist for the next effect cycle, by which time
@@ -886,32 +884,32 @@ impl Workspace {
         id
     }
 
-    pub(in crate::workspace) fn set_sidebar_view(
+    pub(in crate::workspace) fn set_left_dock_view(
         &mut self,
-        view: daruda_store::project::LeftSidebarView,
+        view: daruda_store::project::LeftDockView,
         cx: &mut Context<Self>,
     ) {
-        if self.left_sidebar_view == view {
+        if self.left_dock_view == view {
             return;
         }
-        self.left_sidebar_view = view;
+        self.left_dock_view = view;
         self.mark_dirty_and_save(cx);
-        if view == daruda_store::project::LeftSidebarView::GitChanges {
+        if view == daruda_store::project::LeftDockView::GitChanges {
             let id = self.active_worktree_id;
             self.refresh_git_status(id, cx);
         }
         cx.notify();
     }
 
-    pub(in crate::workspace) fn set_right_sidebar_view(
+    pub(in crate::workspace) fn set_right_dock_view(
         &mut self,
-        view: daruda_store::project::RightSidebarView,
+        view: daruda_store::project::RightDockView,
         cx: &mut Context<Self>,
     ) {
-        if self.right_sidebar_view == view {
+        if self.right_dock_view == view {
             return;
         }
-        self.right_sidebar_view = view;
+        self.right_dock_view = view;
         self.mark_dirty_and_save(cx);
         cx.notify();
     }
@@ -928,27 +926,27 @@ impl Workspace {
                 "new_task" => self.on_new_task(&NewTask, window, cx),
                 "edit_task" => self.on_edit_task(&EditTask, window, cx),
                 "start_task" => self.open_task_picker_modal(
-                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Start,
+                    crate::workspace::right_dock::task_picker_modal::TaskPickAction::Start,
                     window,
                     cx,
                 ),
                 "cancel_task" => self.open_task_picker_modal(
-                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Cancel,
+                    crate::workspace::right_dock::task_picker_modal::TaskPickAction::Cancel,
                     window,
                     cx,
                 ),
                 "reopen_task" => self.open_task_picker_modal(
-                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Reopen,
+                    crate::workspace::right_dock::task_picker_modal::TaskPickAction::Reopen,
                     window,
                     cx,
                 ),
                 "retry_task" => self.open_task_picker_modal(
-                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Retry,
+                    crate::workspace::right_dock::task_picker_modal::TaskPickAction::Retry,
                     window,
                     cx,
                 ),
                 "delete_task" => self.open_task_picker_modal(
-                    crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Delete,
+                    crate::workspace::right_dock::task_picker_modal::TaskPickAction::Delete,
                     window,
                     cx,
                 ),
@@ -972,14 +970,14 @@ impl Workspace {
                 "focus_pane_down" => self.on_focus_pane_down(&FocusPaneDown, window, cx),
                 "move_tab_left" => self.on_move_tab_left(&MoveTabLeft, window, cx),
                 "move_tab_right" => self.on_move_tab_right(&MoveTabRight, window, cx),
-                "show_sidebar_worktrees" => {
-                    self.on_show_sidebar_worktrees(&ShowSidebarWorktrees, window, cx);
+                "show_left_dock_worktrees" => {
+                    self.on_show_left_dock_worktrees(&ShowLeftDockWorktrees, window, cx);
                 }
-                "show_sidebar_git" => {
-                    self.on_show_sidebar_git(&ShowSidebarGit, window, cx);
+                "show_left_dock_git" => {
+                    self.on_show_left_dock_git(&ShowLeftDockGit, window, cx);
                 }
-                "show_sidebar_files" => {
-                    self.on_show_sidebar_files(&ShowSidebarFiles, window, cx);
+                "show_left_dock_files" => {
+                    self.on_show_left_dock_files(&ShowLeftDockFiles, window, cx);
                 }
                 "switch_right_panel_usage" => {
                     self.on_switch_right_panel_usage(&SwitchRightPanelUsage, window, cx);
@@ -1033,4 +1031,3 @@ impl Workspace {
         }
     }
 }
-

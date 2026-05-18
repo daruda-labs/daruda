@@ -153,23 +153,23 @@
       "$ref": "#/$defs/Rgba",
       "default": "#3c3c3cff"
     },
-    "sidebar_view_tab_inactive": {
-      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_INACTIVE`.",
+    "dock_view_tab_inactive": {
+      "description": "Maps to `palette::DOCK_VIEW_TAB_INACTIVE`.",
       "$ref": "#/$defs/Rgba",
       "default": "#808080ff"
     },
-    "sidebar_view_tab_active": {
-      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_ACTIVE`.",
+    "dock_view_tab_active": {
+      "description": "Maps to `palette::DOCK_VIEW_TAB_ACTIVE`.",
       "$ref": "#/$defs/Rgba",
       "default": "#f2f2f2ff"
     },
-    "sidebar_view_tab_accent": {
-      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_ACCENT`.",
+    "dock_view_tab_accent": {
+      "description": "Maps to `palette::DOCK_VIEW_TAB_ACCENT`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5299e0ff"
     },
-    "sidebar_view_tab_hover_bg": {
-      "description": "Maps to `palette::SIDEBAR_VIEW_TAB_HOVER_BG`.",
+    "dock_view_tab_hover_bg": {
+      "description": "Maps to `palette::DOCK_VIEW_TAB_HOVER_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#2e2e2eff"
     },
@@ -473,13 +473,13 @@
       "$ref": "#/$defs/Rgba",
       "default": "#264d734d"
     },
-    "sidebar_scrollbar_thumb": {
-      "description": "Maps to `palette::SIDEBAR_SCROLLBAR_THUMB`.",
+    "dock_scrollbar_thumb": {
+      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
-    "sidebar_scrollbar_thumb_hover": {
-      "description": "Maps to `palette::SIDEBAR_SCROLLBAR_THUMB_HOVER`.",
+    "dock_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },

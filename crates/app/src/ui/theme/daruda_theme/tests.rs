@@ -43,14 +43,14 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.dock_icon_hover, palette::DOCK_ICON_HOVER);
     assert_eq!(t.dock_icon_active_bg, palette::DOCK_ICON_ACTIVE_BG);
     assert_eq!(
-        t.sidebar_view_tab_inactive,
-        palette::SIDEBAR_VIEW_TAB_INACTIVE
+        t.dock_view_tab_inactive,
+        palette::DOCK_VIEW_TAB_INACTIVE
     );
-    assert_eq!(t.sidebar_view_tab_active, palette::SIDEBAR_VIEW_TAB_ACTIVE);
-    assert_eq!(t.sidebar_view_tab_accent, palette::SIDEBAR_VIEW_TAB_ACCENT);
+    assert_eq!(t.dock_view_tab_active, palette::DOCK_VIEW_TAB_ACTIVE);
+    assert_eq!(t.dock_view_tab_accent, palette::DOCK_VIEW_TAB_ACCENT);
     assert_eq!(
-        t.sidebar_view_tab_hover_bg,
-        palette::SIDEBAR_VIEW_TAB_HOVER_BG
+        t.dock_view_tab_hover_bg,
+        palette::DOCK_VIEW_TAB_HOVER_BG
     );
     assert_eq!(t.worktree_accent_active, palette::WORKTREE_ACCENT_ACTIVE);
     assert_eq!(t.worktree_unread, palette::WORKTREE_UNREAD);
@@ -148,10 +148,10 @@ fn default_clones_compile_time_palette() {
         palette::INPUT_PANEL_DROP_TARGET_BG
     );
     assert_eq!(t.terminal_drop_target_bg, palette::TERMINAL_DROP_TARGET_BG);
-    assert_eq!(t.sidebar_scrollbar_thumb, palette::SIDEBAR_SCROLLBAR_THUMB);
+    assert_eq!(t.dock_scrollbar_thumb, palette::DOCK_SCROLLBAR_THUMB);
     assert_eq!(
-        t.sidebar_scrollbar_thumb_hover,
-        palette::SIDEBAR_SCROLLBAR_THUMB_HOVER
+        t.dock_scrollbar_thumb_hover,
+        palette::DOCK_SCROLLBAR_THUMB_HOVER
     );
     assert_eq!(t.pane_header_focused_bg, palette::PANE_HEADER_FOCUSED_BG);
     assert_eq!(

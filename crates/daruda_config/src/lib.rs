@@ -18,7 +18,7 @@ pub mod project;
 pub mod scrollback;
 pub mod settings_section;
 pub mod shell;
-pub mod sidebar;
+pub mod left_dock;
 pub mod theme_presets;
 pub mod ui_theme_presets;
 pub mod usage;
@@ -44,7 +44,7 @@ pub use project::{ProjectConfig, project_config_dir, project_config_path, projec
 pub use scrollback::ScrollbackConfig;
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
-pub use sidebar::{IconColorMode, SidebarConfig};
+pub use left_dock::{IconColorMode, LeftDockConfig};
 pub use theme_presets::{PRESETS as THEME_PRESETS, ThemePreset};
 pub use ui_theme_presets::{PRESETS as UI_THEME_PRESETS, UiThemePreset};
 pub use usage::{PollConfig, PricingConfig, UsageConfig};
@@ -53,7 +53,7 @@ pub use window::WindowConfig;
 /// Which built-in presets to use for the two independent theme axes
 /// — `terminal_preset` controls the cell palette (foreground /
 /// background / ANSI 16), `ui_preset` controls workspace chrome
-/// (tab bar, sidebar, modal, status bar, dock, agent panels).
+/// (tab bar, dock, modal, status bar, dock, agent panels).
 ///
 /// `terminal_preset = "custom"` falls through to the `[colors]`
 /// section. `terminal_preset = "default"` uses xterm-compatible
@@ -93,7 +93,7 @@ pub struct Config {
     pub scrollback: ScrollbackConfig,
     pub keybindings: KeybindingConfig,
     pub shell: ShellConfig,
-    pub sidebar: SidebarConfig,
+    pub left_dock: LeftDockConfig,
     pub file_viewer: FileViewerConfig,
     pub claude_status: ClaudeStatusConfig,
     pub notifications: NotificationsConfig,
@@ -126,7 +126,7 @@ impl Config {
     fn clamp(&mut self) {
         self.font.clamp();
         self.window.clamp();
-        self.sidebar.clamp();
+        self.left_dock.clamp();
         self.claude_status.clamp();
         self.panels.clamp();
     }
@@ -250,9 +250,9 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         t["max_rows"] = toml_edit::value(config.scrollback.max_rows as i64);
     });
 
-    patch_section(&mut doc, "sidebar", |t| {
-        t["files_show_hidden"] = toml_edit::value(config.sidebar.files_show_hidden);
-        t["files_use_gitignore"] = toml_edit::value(config.sidebar.files_use_gitignore);
+    patch_section(&mut doc, "left_dock", |t| {
+        t["files_show_hidden"] = toml_edit::value(config.left_dock.files_show_hidden);
+        t["files_use_gitignore"] = toml_edit::value(config.left_dock.files_use_gitignore);
     });
 
     patch_section(&mut doc, "file_viewer", |t| {

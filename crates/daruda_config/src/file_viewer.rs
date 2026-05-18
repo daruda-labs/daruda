@@ -12,7 +12,7 @@ pub struct FileViewerConfig {
     /// "Solarized (dark)", "Solarized (light)".
     /// Unknown names fall back to "base16-ocean.dark".
     pub syntax_theme: String,
-    /// When true (default), clicking a file in the sidebar reuses the
+    /// When true (default), clicking a file in the left dock reuses the
     /// existing file-viewer tab instead of opening a new one. The tab
     /// content is replaced in place; Cmd+W still closes it.
     /// Set to false to open a separate tab for every file.

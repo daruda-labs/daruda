@@ -11,7 +11,7 @@
 //! Dark-only for now; light-mode mapping is a Phase-10+ follow-up.
 //!
 //! Sibling [`palette`] holds the app-side UI palette constants
-//! (workspace chrome, sidebar, status bar, dock chrome) that are
+//! (workspace chrome, docks, status bar) that are
 //! independent of the terminal-side color model in
 //! `daruda_terminal::ux::theme`.
 //!
@@ -33,7 +33,7 @@ pub use daruda_theme::DarudaTheme;
 /// existing `theme::TAB_BAR_BG` const path.
 ///
 /// Phase 3-C migrates the workspace-chrome call sites (tab strip,
-/// pane header, sidebar, status bar, worktrees list) to this helper;
+/// pane header, dock, status bar, worktrees list) to this helper;
 /// the long tail of modal / agent / right-panel sites keeps reading
 /// the underlying `palette::FOO` const until a follow-up pass moves
 /// them too. Both paths return the same colour today — Phase 3-D
@@ -245,7 +245,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
 
     // ---------------------------------------------------------------
     // Tab — daruda renders its own tab strip; these cover gpui_component
-    // sub-tab usage (sidebar / right-panel view tabs, segmented controls).
+    // sub-tab usage (left/right dock view tabs, segmented controls).
     // ---------------------------------------------------------------
     t.tab = d.tab_inactive_bg;
     t.tab_active = d.tab_active_bg;

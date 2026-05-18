@@ -332,8 +332,8 @@ impl SettingsWindow {
             opacity_input,
             window_blur: config.window.blur,
             scrollback_input,
-            files_show_hidden: config.sidebar.files_show_hidden,
-            files_use_gitignore: config.sidebar.files_use_gitignore,
+            files_show_hidden: config.left_dock.files_show_hidden,
+            files_use_gitignore: config.left_dock.files_use_gitignore,
             syntax_theme_select,
             clipboard_streaming_input,
             panels_grid_columns_input,
@@ -500,8 +500,8 @@ impl SettingsWindow {
             .filter(|&v| (1_000..=500_000).contains(&v))
             .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_SCROLLBACK))?;
 
-        config.sidebar.files_show_hidden = self.files_show_hidden;
-        config.sidebar.files_use_gitignore = self.files_use_gitignore;
+        config.left_dock.files_show_hidden = self.files_show_hidden;
+        config.left_dock.files_use_gitignore = self.files_use_gitignore;
 
         config.file_viewer.syntax_theme = self
             .syntax_theme_select
@@ -584,7 +584,7 @@ impl SettingsWindow {
             BuiltinSection::General
             | BuiltinSection::Cursor
             | BuiltinSection::Shell
-            | BuiltinSection::Sidebar
+            | BuiltinSection::LeftDock
             | BuiltinSection::FileViewer
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Notifications

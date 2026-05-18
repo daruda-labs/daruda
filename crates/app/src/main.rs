@@ -5,12 +5,12 @@
 
 pub mod agent;
 mod assets;
+mod bind_keys;
 mod bootstrap;
 mod config_watcher;
 pub mod files;
 mod globals;
 mod hooks;
-mod keybindings;
 mod menus;
 mod panels_watcher;
 pub(crate) mod path_ext;
@@ -23,7 +23,7 @@ pub mod surface;
 #[cfg(test)]
 mod test_support;
 pub mod ui;
-mod watchers;
+mod watcher_pumps;
 mod watchers_lifecycle;
 pub mod welcome;
 pub(crate) mod window_registry;
@@ -175,7 +175,7 @@ fn main() {
     let app = bootstrap::new_application();
     app.run(|cx: &mut App| {
         globals::init_all(cx);
-        keybindings::register_static_bindings(cx);
+        bind_keys::register_static_bindings(cx);
 
         // SettingsStore is the single source of truth — read the
         // user layer directly instead of re-reading disk.
@@ -184,7 +184,7 @@ fn main() {
 
         let window_opts = windows::build_window_options(&config);
 
-        keybindings::register_global_actions(cx, config.clone());
+        bind_keys::register_global_actions(cx, config.clone());
         register_recent_actions(cx, config.clone());
 
         window_startup::open_first_window(config, window_opts, cx);

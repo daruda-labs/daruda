@@ -17,21 +17,21 @@ use daruda_store::observability::system_info::redact_home;
 use gpui::{Context, Focusable as _, Window};
 
 use super::Workspace;
-use crate::workspace::main_area::pane_tree::SplitDirection;
-use crate::workspace::main_area::nav::NavDirection;
 use super::{
-    CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, CommitChanges, EditTask,
+    CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, EditTask,
     EditWindowTitle, FetchChanges, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh,
     FilesSelectNext, FilesSelectPrev, FilesToggleHidden, FocusNextPane, FocusPaneDown,
     FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch,
     GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage,
     InstallClaudeHooks, InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill,
     NewTab, NewTask, NextTab, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
-    PullChanges, PushChanges, RefreshGitStatus, ShowSidebarFiles, ShowSidebarGit,
-    ShowSidebarWorktrees, SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks,
+    PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit,
+    ShowLeftDockWorktrees, SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks,
     SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen,
     ToggleZoomPane, UninstallClaudeHooks, ZoomWindow,
 };
+use crate::workspace::main_area::nav::NavDirection;
+use crate::workspace::main_area::pane_tree::SplitDirection;
 
 impl Workspace {
     // ---- Tabs ----
@@ -63,7 +63,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.main_area.tabs.len() > 1 {
-            self.activate_tab((self.main_area.active_tab_index + 1) % self.main_area.tabs.len(), window, cx);
+            self.activate_tab(
+                (self.main_area.active_tab_index + 1) % self.main_area.tabs.len(),
+                window,
+                cx,
+            );
         }
     }
 
@@ -131,33 +135,33 @@ impl Workspace {
         self.mark_dirty_and_save(cx);
     }
 
-    // ---- Sidebar view switches ----
+    // ---- Left-dock view switches ----
 
-    pub(in crate::workspace) fn on_show_sidebar_worktrees(
+    pub(in crate::workspace) fn on_show_left_dock_worktrees(
         &mut self,
-        _: &ShowSidebarWorktrees,
+        _: &ShowLeftDockWorktrees,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::LeftSidebarView::Worktrees, cx);
+        self.set_left_dock_view(daruda_store::project::LeftDockView::Worktrees, cx);
     }
 
-    pub(in crate::workspace) fn on_show_sidebar_git(
+    pub(in crate::workspace) fn on_show_left_dock_git(
         &mut self,
-        _: &ShowSidebarGit,
+        _: &ShowLeftDockGit,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::LeftSidebarView::GitChanges, cx);
+        self.set_left_dock_view(daruda_store::project::LeftDockView::GitChanges, cx);
     }
 
-    pub(in crate::workspace) fn on_show_sidebar_files(
+    pub(in crate::workspace) fn on_show_left_dock_files(
         &mut self,
-        _: &ShowSidebarFiles,
+        _: &ShowLeftDockFiles,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_sidebar_view(daruda_store::project::LeftSidebarView::Files, cx);
+        self.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     }
 
     // ---- Right panel view switches ----
@@ -168,7 +172,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Usage, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Usage, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_skills(
@@ -177,7 +181,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tools(
@@ -186,7 +190,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Tools, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Tools, cx);
     }
 
     pub(in crate::workspace) fn on_switch_right_panel_tasks(
@@ -195,7 +199,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Tasks, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Tasks, cx);
     }
 
     pub(in crate::workspace) fn on_new_skill(
@@ -204,8 +208,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
-        self.open_create_skill_modal(None, window, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
+        crate::workspace::right_dock::skills::open_create_skill_modal(self, None, window, cx);
     }
 
     /// Bound to the [`NewTask`] action — opens a fresh TaskEdit pane
@@ -231,7 +235,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_task_picker_modal(
-            crate::workspace::right_sidebar::task_picker_modal::TaskPickAction::Edit,
+            crate::workspace::right_dock::task_picker_modal::TaskPickAction::Edit,
             window,
             cx,
         );
@@ -246,7 +250,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_right_sidebar_view(daruda_store::project::RightSidebarView::Skills, cx);
+        self.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
         let handle = self.skill_search_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
     }
@@ -293,7 +297,7 @@ impl Workspace {
         );
     }
 
-    // ---- Git ops shims (delegate to `git_status_ops.rs` workers) ----
+    // ---- Git ops shims (delegate to `git_ops/` workers) ----
 
     pub(in crate::workspace) fn on_refresh_git_status_action(
         &mut self,
@@ -303,24 +307,6 @@ impl Workspace {
     ) {
         let id = self.active_worktree_id;
         self.refresh_git_status(id, cx);
-    }
-
-    pub(in crate::workspace) fn on_commit_changes_action(
-        &mut self,
-        _: &CommitChanges,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.on_commit_changes(&CommitChanges, window, cx);
-    }
-
-    pub(in crate::workspace) fn on_push_changes_action(
-        &mut self,
-        _: &PushChanges,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.on_push_changes(&PushChanges, window, cx);
     }
 
     pub(in crate::workspace) fn on_commit_amend_action(
@@ -668,7 +654,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let idx = self.main_area.active_tab_index;
-        let indices: Vec<usize> = (0..self.main_area.tabs.len()).rev().filter(|&i| i != idx).collect();
+        let indices: Vec<usize> = (0..self.main_area.tabs.len())
+            .rev()
+            .filter(|&i| i != idx)
+            .collect();
         self.request_close_tabs_bulk(indices, window, cx);
         self.mark_dirty_and_save(cx);
     }
