@@ -122,10 +122,17 @@ impl Workspace {
             }
             self.activate_tab(tab_idx, window, cx);
             self.focus_pane(pane_id, window, cx);
+            let project = self.active.project;
             if let Some(prev_id) = prev_worktree {
-                self.invalidate_visible_files_cache(prev_id);
+                self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+                    project,
+                    worktree: prev_id,
+                });
             }
-            self.invalidate_visible_files_cache(worktree_id);
+            self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+                project,
+                worktree: worktree_id,
+            });
             cx.notify();
             self.load_pane_file_content(worktree_id, path, staged, effective_mode, file_status, cx);
             return;
@@ -161,7 +168,10 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
 
         // Trigger #4 — selection moved (dock row gets selected BG).
-        self.invalidate_visible_files_cache(worktree_id);
+        self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        });
         cx.notify();
 
         self.load_pane_file_content(worktree_id, path, staged, effective_mode, file_status, cx);
@@ -241,7 +251,10 @@ impl Workspace {
         self.bump_activity(new_pane_id);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
-        self.invalidate_visible_files_cache(worktree_id);
+        self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+            project: self.active.project,
+            worktree: worktree_id,
+        });
         cx.notify();
 
         self.load_pane_file_content(worktree_id, path, false, effective_mode, None, cx);

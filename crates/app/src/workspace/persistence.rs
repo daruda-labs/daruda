@@ -39,21 +39,58 @@ pub(in crate::workspace) struct WorktreeRuntime {
 }
 
 impl Workspace {
-    /// Serialize the current workspace state for persistence.
+    /// Serialize the current workspace state for persistence as the
+    /// multi-project [`daruda_store::project::WorkspaceState`] shape.
     ///
-    /// During the multi-project rollout the on-disk format is still the
-    /// flat single-project [`daruda_store::project::ProjectState`]; the
-    /// new [`daruda_store::project::WorkspaceState`] shape is constructed
-    /// from this by the persistence-layer adapter. Only the active
-    /// project is serialized — multi-project save support lands in a
-    /// later commit.
-    pub fn save_state(&self, cx: &App) -> Option<daruda_store::project::ProjectState> {
-        let project = self.active_project()?;
+    /// Returns `None` when `self.projects` is empty (Welcome state) —
+    /// nothing to write. Each project's worktrees are walked; the
+    /// active worktree's tab tree comes from `self.main_area`, inactive
+    /// worktrees from `self.main_area.inactive_worktree_runtimes`.
+    pub fn save_state(&self, cx: &App) -> Option<daruda_store::project::WorkspaceState> {
+        if self.projects.is_empty() {
+            return None;
+        }
+        let projects: Vec<daruda_store::project::SerializedProject> = self
+            .projects
+            .iter()
+            .map(|project| self.serialize_project(project))
+            .collect();
+        Some(daruda_store::project::WorkspaceState {
+            schema_version: daruda_store::project::WORKSPACE_SCHEMA_VERSION,
+            projects,
+            groups: self.groups.clone(),
+            active: self.active,
+            next_project_id: self.next_project_id,
+            next_group_id: self.next_group_id,
+            window_open_policy: self.window_open_policy,
+            focused_pane_id: self.main_area.focused_pane_id,
+            active_dock_view: self.left_dock_view,
+            active_right_panel_view: self.right_dock_view,
+            active_usage_window: self.claude.usage_window,
+            docks: daruda_store::project::DockStates {
+                left_open: self.left_dock.read(cx).is_open,
+                left_size: self.left_dock.read(cx).size,
+                bottom_open: self.bottom_dock.read(cx).is_open,
+                bottom_size: self.bottom_dock.read(cx).size,
+                right_open: self.right_dock.read(cx).is_open,
+                right_size: self.right_dock.read(cx).size,
+            },
+            window: self.cached_window_bounds.clone().unwrap_or_default(),
+            window_user_label: self.window_user_label.as_ref().map(|s| s.to_string()),
+            font_size: self.terminal_config.font_size,
+            vertical_spacing: self.terminal_config.vertical_spacing,
+            horizontal_spacing: self.terminal_config.horizontal_spacing,
+        })
+    }
+
+    /// Project-scoped portion of [`save_state`]. Walks the project's
+    /// worktrees and captures each one's tab tree from either the live
+    /// `main_area` (active worktree) or `inactive_worktree_runtimes`.
+    fn serialize_project(
+        &self,
+        project: &crate::project::Project,
+    ) -> daruda_store::project::SerializedProject {
         let project_id = project.id;
-        // Persist every worktree's tab tree. For the active worktree
-        // the live `Workspace.tabs`/`panes` are the source; for
-        // inactive worktrees the frozen runtime in
-        // `inactive_worktree_runtimes` is used.
         let worktrees: Vec<daruda_store::project::SerializedWorktree> = project
             .worktrees
             .iter()
@@ -86,34 +123,16 @@ impl Workspace {
                 s
             })
             .collect();
-
-        Some(daruda_store::project::ProjectState {
+        daruda_store::project::SerializedProject {
+            id: project.id,
             root: project.root.clone(),
+            name: project.name.clone(),
+            color: project.color.clone(),
+            tab_order: project.tab_order,
+            group_id: project.group_id,
             worktrees,
-            active_worktree_id: self.active.worktree,
-            active_dock_view: self.left_dock_view,
-            active_right_panel_view: self.right_dock_view,
-            active_usage_window: self.claude.usage_window,
-            // Top-level `tabs` stays empty from W-2 onward — the data
-            // now lives on the active worktree. `skip_serializing_if`
-            // keeps it out of the JSON.
-            tabs: Vec::new(),
-            active_tab_index: 0,
-            focused_pane_id: self.main_area.focused_pane_id,
-            docks: daruda_store::project::DockStates {
-                left_open: self.left_dock.read(cx).is_open,
-                left_size: self.left_dock.read(cx).size,
-                bottom_open: self.bottom_dock.read(cx).is_open,
-                bottom_size: self.bottom_dock.read(cx).size,
-                right_open: self.right_dock.read(cx).is_open,
-                right_size: self.right_dock.read(cx).size,
-            },
-            window: self.cached_window_bounds.clone().unwrap_or_default(),
-            window_user_label: self.window_user_label.as_ref().map(|s| s.to_string()),
-            font_size: self.terminal_config.font_size,
-            vertical_spacing: self.terminal_config.vertical_spacing,
-            horizontal_spacing: self.terminal_config.horizontal_spacing,
-        })
+            last_active_worktree_id: project.last_active_worktree_id,
+        }
     }
 
     /// Sample the current window's windowed bounds (position + size)
@@ -140,24 +159,34 @@ impl Workspace {
     }
 
     /// Persist state to disk (debounce handled by caller).
+    ///
+    /// Writes the workspace state under every project root in the
+    /// workspace so any of them can be reopened via the recent list to
+    /// restore the same multi-project shape. Each `touch_recent_in`
+    /// call freshens that project's recent entry.
     pub fn persist_state(&self, cx: &App) {
-        if let Some(state) = self.save_state(cx) {
-            if let Err(e) =
-                daruda_store::project::persistence::save_state_in(&self.data_dir, &state)
-            {
+        let Some(state) = self.save_state(cx) else {
+            return;
+        };
+        for project in &state.projects {
+            if let Err(e) = daruda_store::project::persistence::save_workspace_state_in(
+                &self.data_dir,
+                &project.root,
+                &state,
+            ) {
                 LogWriter::log(
                     ErrorReport::new("Failed to persist workspace state")
                         .severity(ErrorSeverity::Error)
                         .from_error(&e)
                         .at(file!(), line!())
                         .with_context("data_dir", redact_home(&self.data_dir))
-                        .with_context("project_root", redact_home(&state.root))
+                        .with_context("project_root", redact_home(&project.root))
                         .dedup("project.state.save")
                         .build(),
                 );
             }
             if let Err(e) =
-                daruda_store::project::persistence::touch_recent_in(&self.data_dir, &state.root)
+                daruda_store::project::persistence::touch_recent_in(&self.data_dir, &project.root)
             {
                 LogWriter::log(
                     ErrorReport::new("Failed to update recent projects list")
@@ -165,7 +194,7 @@ impl Workspace {
                         .from_error(&e)
                         .at(file!(), line!())
                         .with_context("data_dir", redact_home(&self.data_dir))
-                        .with_context("project_root", redact_home(&state.root))
+                        .with_context("project_root", redact_home(&project.root))
                         .dedup("project.recent.touch")
                         .build(),
                 );
@@ -173,15 +202,15 @@ impl Workspace {
         }
     }
 
-    /// Restore workspace from a saved state. Rebuilds dock open/size,
-    /// font settings, and the full tab / split-tree layout. Each
-    /// restored leaf starts at its serialized cwd so the shell opens
-    /// where it was last tracked. On any pane spawn failure, falls
-    /// back to a single fresh tab and surfaces the error in the
-    /// status bar.
+    /// Restore workspace from a saved multi-project state. Rebuilds
+    /// every project's worktrees, dock open/size, font settings, and
+    /// the full tab / split-tree layout. Each restored leaf starts at
+    /// its serialized cwd so the shell opens where it was last tracked.
+    /// On any pane spawn failure, falls back to a single fresh tab and
+    /// surfaces the error in the status bar.
     pub fn restore_state(
         &mut self,
-        state: &daruda_store::project::ProjectState,
+        state: &daruda_store::project::WorkspaceState,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -234,47 +263,38 @@ impl Workspace {
             .as_ref()
             .map(|s| gpui::SharedString::from(s.clone()));
 
-        // Restore worktrees (metadata only). A legacy file that only
-        // had top-level tabs gets its default worktree synthesized by
-        // `ProjectState::migrate_legacy` before we get here, so this
-        // is always non-empty when the file had any saved session.
-        if !state.worktrees.is_empty()
-            && let Some(project) = self.projects.first_mut()
-        {
-            project.worktrees = state
-                .worktrees
-                .iter()
-                .map(crate::worktree::Worktree::from_serialized)
-                .collect();
+        // Restore workspace-level multi-project metadata.
+        self.window_open_policy = state.window_open_policy;
+        self.next_project_id = state.next_project_id;
+        self.next_group_id = state.next_group_id;
+        self.groups = state.groups.clone();
 
-            // Re-apply the git-root → project-subdirectory anchor so
-            // that state files saved before the bootstrap fix still
-            // match Claude's `cwd` after restore.
-            let project_root = project.root.clone();
-            anchor_worktree_paths_to_project_root(&mut project.worktrees, &project_root);
-
-            self.active = daruda_store::project::WorktreeRef {
-                project: project.id,
-                worktree: state.active_worktree_id,
-            };
-            // Clamp to a live worktree in case the saved id is stale.
-            if !project
-                .worktrees
-                .iter()
-                .any(|w| w.id == self.active.worktree)
-                && let Some(first) = project.worktrees.first()
-            {
-                self.active.worktree = first.id;
-            }
-            project.last_active_worktree_id = self.active.worktree;
-        }
-
-        // Nothing to rebuild — keep the single pane `new_with_project`
-        // already created.
-        if state.worktrees.is_empty() {
+        // No projects to restore — keep whatever `new_with_project`
+        // bootstrapped (typically a single default project + one pane,
+        // or nothing for an empty Welcome-bound workspace).
+        if state.projects.is_empty() {
             self.main_area.pending_resize = true;
             return;
         }
+
+        // Replace runtime projects with the persisted shape, anchoring
+        // each project's worktree paths so old saves whose worktree
+        // paths point at the git root (rather than the project
+        // subdirectory) still resolve correctly.
+        self.projects = state
+            .projects
+            .iter()
+            .map(|sp| {
+                let mut p = crate::project::Project::from_serialized(sp);
+                let root = p.root.clone();
+                anchor_worktree_paths_to_project_root(&mut p.worktrees, &root);
+                p
+            })
+            .collect();
+
+        // Pick the active (project, worktree). Falls back through the
+        // same ladder as `WorkspaceState::normalize_active`.
+        self.active = self.resolve_active(state.active);
 
         // Drop bootstrapped pane/tab; we're about to rebuild every
         // worktree's runtime from scratch.
@@ -283,115 +303,119 @@ impl Workspace {
         self.main_area.activity_counter.clear();
         self.main_area.inactive_worktree_runtimes.clear();
 
-        // Rebuild each serialized worktree into a WorktreeRuntime.
-        // `rebuild_layout` appends spawned panes onto `self.main_area.panes`, so
-        // we split them off at the end of each worktree to keep them
-        // segregated.
         let mut active_focus: Option<pane_tree::PaneId> = None;
-        for swt in &state.worktrees {
-            // If the worktree's checkout is no longer on disk, warn via the
-            // status bar. Inactive worktrees skip layout rebuild — their
-            // runtime is built lazily on first activation (the PTY layer
-            // then falls back to $HOME for the missing path). The active
-            // worktree still rebuilds so the workspace is never blank; its
-            // panes likewise start at $HOME.
-            if !swt.path.is_accessible_dir() {
-                let report = ErrorReport::new("Worktree path not found")
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .with_context("path", redact_home(&swt.path))
-                    .dedup("worktree.restore.missing_path")
-                    .build();
-                self.report_error(report, cx);
-                if swt.id != state.active_worktree_id {
-                    continue;
-                }
-            }
-
-            let panes_start = self.main_area.panes.len();
-            let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
-            let mut tabs: Vec<TabEntry> = Vec::new();
-            let mut failed = false;
-
-            for stab in &swt.tabs {
-                let panes_before = self.main_area.panes.len();
-                // Pass the worktree's own path as the fallback cwd so
-                // restore never lands a pane at the parent process's
-                // cwd (HOME when daruda is launched from Finder/Dock).
-                // This matters when the saved state has `cwd = None`
-                // for a leaf — typical when the workspace was
-                // serialized before the shell first emitted OSC 7.
-                match self.rebuild_layout(&stab.layout, Some(&swt.path), &mut id_map, window, cx) {
-                    Ok(layout) => {
-                        let last_focus = id_map
-                            .get(&stab.last_focused_pane)
-                            .copied()
-                            .unwrap_or_else(|| layout.first_leaf());
-                        let tab_id = self.alloc_id();
-                        tabs.push(TabEntry {
-                            id: tab_id,
-                            layout,
-                            last_focused_pane: last_focus,
-                            user_label: stab
-                                .user_label
-                                .as_ref()
-                                .map(|s| gpui::SharedString::from(s.clone())),
-                        });
-                    }
-                    Err(e) => {
-                        self.main_area.panes.truncate(panes_before);
-                        self.report_pane_error("restore", e, cx);
-                        failed = true;
-                        break;
-                    }
-                }
-            }
-            if failed {
+        let mut early_exit = false;
+        for sp in &state.projects {
+            if early_exit {
                 break;
             }
-
-            let wt_panes = self.main_area.panes.split_off(panes_start);
-            let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
-            // Focus defaults to the tab's last focused pane; only the
-            // active worktree honours the top-level `focused_pane_id`
-            // hint from the saved state.
-            let focused = if swt.id == state.active_worktree_id {
-                let focused_tab = tabs.get(wt_active_tab);
-                let leaves = focused_tab.map(|t| t.layout.pane_ids());
-                id_map
-                    .get(&state.focused_pane_id)
-                    .copied()
-                    .filter(|id| leaves.as_ref().is_some_and(|l| l.contains(id)))
-                    .unwrap_or_else(|| focused_tab.map(|t| t.last_focused_pane).unwrap_or_default())
-            } else {
-                tabs.get(wt_active_tab)
-                    .map(|t| t.last_focused_pane)
-                    .unwrap_or_default()
-            };
-
-            let runtime = WorktreeRuntime {
-                tabs,
-                panes: wt_panes,
-                active_tab_index: wt_active_tab,
-                tab_history: Vec::new(),
-                focused_pane_id: focused,
-            };
-
-            if swt.id == state.active_worktree_id {
-                self.main_area.tabs = runtime.tabs;
-                self.main_area.panes = runtime.panes;
-                self.main_area.active_tab_index = runtime.active_tab_index;
-                self.main_area.focused_pane_id = runtime.focused_pane_id;
-                self.main_area.tab_history = runtime.tab_history;
-                active_focus = Some(runtime.focused_pane_id);
-            } else {
-                let key = daruda_store::project::WorktreeRef {
-                    project: self.active.project,
+            for swt in &sp.worktrees {
+                if early_exit {
+                    break;
+                }
+                let wt_ref = daruda_store::project::WorktreeRef {
+                    project: sp.id,
                     worktree: swt.id,
                 };
-                self.main_area
-                    .inactive_worktree_runtimes
-                    .insert(key, runtime);
+                // If the worktree's checkout is no longer on disk, warn
+                // via the toast pipeline. Inactive worktrees skip layout
+                // rebuild — their runtime is built lazily on first
+                // activation. The active worktree still rebuilds so the
+                // workspace is never blank.
+                if !swt.path.is_accessible_dir() {
+                    let report = ErrorReport::new("Worktree path not found")
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&swt.path))
+                        .dedup("worktree.restore.missing_path")
+                        .build();
+                    self.report_error(report, cx);
+                    if wt_ref != self.active {
+                        continue;
+                    }
+                }
+
+                let panes_start = self.main_area.panes.len();
+                let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
+                let mut tabs: Vec<TabEntry> = Vec::new();
+                let mut failed = false;
+
+                for stab in &swt.tabs {
+                    let panes_before = self.main_area.panes.len();
+                    match self.rebuild_layout(
+                        &stab.layout,
+                        Some(&swt.path),
+                        &mut id_map,
+                        window,
+                        cx,
+                    ) {
+                        Ok(layout) => {
+                            let last_focus = id_map
+                                .get(&stab.last_focused_pane)
+                                .copied()
+                                .unwrap_or_else(|| layout.first_leaf());
+                            let tab_id = self.alloc_id();
+                            tabs.push(TabEntry {
+                                id: tab_id,
+                                layout,
+                                last_focused_pane: last_focus,
+                                user_label: stab
+                                    .user_label
+                                    .as_ref()
+                                    .map(|s| gpui::SharedString::from(s.clone())),
+                            });
+                        }
+                        Err(e) => {
+                            self.main_area.panes.truncate(panes_before);
+                            self.report_pane_error("restore", e, cx);
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+                if failed {
+                    early_exit = true;
+                    break;
+                }
+
+                let wt_panes = self.main_area.panes.split_off(panes_start);
+                let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
+                let focused = if wt_ref == self.active {
+                    let focused_tab = tabs.get(wt_active_tab);
+                    let leaves = focused_tab.map(|t| t.layout.pane_ids());
+                    id_map
+                        .get(&state.focused_pane_id)
+                        .copied()
+                        .filter(|id| leaves.as_ref().is_some_and(|l| l.contains(id)))
+                        .unwrap_or_else(|| {
+                            focused_tab.map(|t| t.last_focused_pane).unwrap_or_default()
+                        })
+                } else {
+                    tabs.get(wt_active_tab)
+                        .map(|t| t.last_focused_pane)
+                        .unwrap_or_default()
+                };
+
+                let runtime = WorktreeRuntime {
+                    tabs,
+                    panes: wt_panes,
+                    active_tab_index: wt_active_tab,
+                    tab_history: Vec::new(),
+                    focused_pane_id: focused,
+                };
+
+                if wt_ref == self.active {
+                    self.main_area.tabs = runtime.tabs;
+                    self.main_area.panes = runtime.panes;
+                    self.main_area.active_tab_index = runtime.active_tab_index;
+                    self.main_area.focused_pane_id = runtime.focused_pane_id;
+                    self.main_area.tab_history = runtime.tab_history;
+                    active_focus = Some(runtime.focused_pane_id);
+                } else {
+                    self.main_area
+                        .inactive_worktree_runtimes
+                        .insert(wt_ref, runtime);
+                }
             }
         }
 
@@ -421,6 +445,47 @@ impl Workspace {
         self.load_pending_file_panes(cx);
 
         cx.notify();
+    }
+
+    /// Pick the right (project, worktree) when restoring. Falls back
+    /// through: requested pair → project's `last_active_worktree_id` →
+    /// project's first worktree → workspace's first project's first
+    /// worktree. Same ladder as
+    /// [`daruda_store::project::WorkspaceState::normalize_active`].
+    fn resolve_active(
+        &self,
+        requested: daruda_store::project::WorktreeRef,
+    ) -> daruda_store::project::WorktreeRef {
+        if let Some(project) = self.projects.iter().find(|p| p.id == requested.project) {
+            if project.worktrees.iter().any(|w| w.id == requested.worktree) {
+                return requested;
+            }
+            if project
+                .worktrees
+                .iter()
+                .any(|w| w.id == project.last_active_worktree_id)
+            {
+                return daruda_store::project::WorktreeRef {
+                    project: project.id,
+                    worktree: project.last_active_worktree_id,
+                };
+            }
+            if let Some(first) = project.worktrees.first() {
+                return daruda_store::project::WorktreeRef {
+                    project: project.id,
+                    worktree: first.id,
+                };
+            }
+        }
+        if let Some(first_project) = self.projects.first()
+            && let Some(first_worktree) = first_project.worktrees.first()
+        {
+            return daruda_store::project::WorktreeRef {
+                project: first_project.id,
+                worktree: first_worktree.id,
+            };
+        }
+        daruda_store::project::WorktreeRef::default()
     }
 
     /// Recursively rebuild a `PaneLayout` from its serialized form.

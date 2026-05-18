@@ -59,7 +59,7 @@ impl Workspace {
                     Ok(data) => {
                         ws.git_status_cache.insert(target, data);
                         // Trigger #6 — git status refresh updates badges.
-                        ws.invalidate_visible_files_cache(target.worktree);
+                        ws.invalidate_visible_files_cache(target);
                         // Commit button reflects the active worktree's
                         // staged count — recompute when that worktree's
                         // cache changes.

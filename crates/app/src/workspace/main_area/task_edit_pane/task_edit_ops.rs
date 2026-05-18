@@ -1005,7 +1005,11 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         };
-        self.open_files_entry(wt_id, path, window, cx);
+        let wt_ref = daruda_store::project::WorktreeRef {
+            project: self.active.project,
+            worktree: wt_id,
+        };
+        self.open_files_entry(wt_ref, path, window, cx);
     }
 
     /// Helper used by the R-20 conflict prompt's `[Diff]` branch.

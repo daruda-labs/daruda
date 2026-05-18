@@ -11,7 +11,8 @@ pub(in crate::workspace) mod snap;
 // Re-export snapshot types so callers use `crate::workspace::layout::*Snapshot`
 // without reaching into the `snap` submodule directly.
 pub(in crate::workspace) use self::snap::{
-    BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot,
+    BottomDockSnapshot, DockSnapshot, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot,
+    RightDockSnapshot,
 };
 
 use crate::ui::theme;

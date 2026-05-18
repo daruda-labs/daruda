@@ -9,7 +9,7 @@
 
 use crate::ui::theme;
 use daruda_config::IconColorMode;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{WorktreeId, WorktreeRef};
 use gpui::{
     AnyElement, ClickEvent, Context, Hsla, IntoElement, div, img, prelude::*, px, svg, uniform_list,
 };
@@ -27,6 +27,7 @@ use gpui::UniformListScrollHandle;
 
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let active_id = snap.active.worktree;
+    let active_ref = snap.active;
     let visible = snap.cached_visible.clone();
     let count = visible.len();
     let root_kind = snap.root_kind;
@@ -79,7 +80,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                     .map(|v| {
                         render_row(
                             &v,
-                            active_id,
+                            active_ref,
                             &worktree_root,
                             &color_mode,
                             workspace_for_renderer.clone(),
@@ -196,12 +197,13 @@ fn view_header(
 
 fn render_row(
     v: &VisibleEntry,
-    worktree_id: WorktreeId,
+    wt_ref: WorktreeRef,
     worktree_root: &std::path::Path,
     color_mode: &IconColorMode,
     workspace: gpui::WeakEntity<crate::workspace::Workspace>,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
+    let worktree_id = wt_ref.worktree;
     let entry_id = v.entry_id;
     let kind = v.kind;
     let path = v.path.clone();
@@ -250,7 +252,7 @@ fn render_row(
                     let panel = ws.file_tree.files_panel_focus.clone();
                     panel.focus(window, cx);
                     ws.file_tree.files_selection = Some(entry_id);
-                    ws.invalidate_visible_files_cache(worktree_id);
+                    ws.invalidate_visible_files_cache(wt_ref);
 
                     if click_count >= 2 {
                         if !kind.is_dir() {
@@ -261,13 +263,13 @@ fn render_row(
                     // Alt+click on an expanded dir collapses the entire
                     // subtree in one shot.
                     if kind.is_dir() && alt {
-                        ws.collapse_files_subtree(worktree_id, entry_id, cx);
+                        ws.collapse_files_subtree(wt_ref, entry_id, cx);
                         return;
                     }
                     if kind.is_dir() {
-                        ws.toggle_files_expand(worktree_id, entry_id, cx);
+                        ws.toggle_files_expand(wt_ref, entry_id, cx);
                     } else {
-                        ws.open_files_entry(worktree_id, worktree_root_buf.join(&path), window, cx);
+                        ws.open_files_entry(wt_ref, worktree_root_buf.join(&path), window, cx);
                     }
                 });
             }

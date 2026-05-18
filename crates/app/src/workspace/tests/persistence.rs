@@ -29,11 +29,17 @@ fn test_save_state_with_project(cx: &mut TestAppContext) {
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, app_cx| {
         let state = ws.save_state(app_cx).unwrap();
-        assert_eq!(state.root, std::path::PathBuf::from("/tmp/test_project"));
+        assert_eq!(
+            state.primary_project().unwrap().root,
+            std::path::PathBuf::from("/tmp/test_project")
+        );
         // Tabs now live inside the active worktree.
-        assert!(state.tabs.is_empty());
-        assert_eq!(state.worktrees.len(), 1);
-        assert!(!state.worktrees[0].tabs.is_empty());
+        assert_eq!(state.primary_project().unwrap().worktrees.len(), 1);
+        assert!(
+            !state.primary_project().unwrap().worktrees[0]
+                .tabs
+                .is_empty()
+        );
         assert_eq!(state.font_size, config.font.size);
     });
 }
@@ -69,7 +75,8 @@ fn test_restore_state_applies_dock_sizes(cx: &mut TestAppContext) {
             vertical_spacing: 1.2,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = window_handle.root(cx).unwrap();
@@ -121,8 +128,9 @@ fn test_save_state_serializes_leaf_layout(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, app_cx| {
         let state = ws.save_state(app_cx).unwrap();
         // Tabs moved onto the active worktree in W-2.
-        assert_eq!(state.worktrees.len(), 1);
-        let wt_tabs = &state.worktrees[0].tabs;
+        let primary = state.primary_project().unwrap();
+        assert_eq!(primary.worktrees.len(), 1);
+        let wt_tabs = &primary.worktrees[0].tabs;
         assert_eq!(wt_tabs.len(), 1);
         match &wt_tabs[0].layout {
             daruda_store::project::SerializedLayout::Leaf { .. } => {}
@@ -193,7 +201,8 @@ fn test_restore_state_rebuilds_horizontal_split(cx: &mut TestAppContext) {
     let window_handle = cx.add_window(|window, cx| {
         let mut ws =
             Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx);
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = window_handle.root(cx).unwrap();
@@ -278,7 +287,8 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
     let window_handle = cx.add_window(|window, cx| {
         let mut ws =
             Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx);
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = window_handle.root(cx).unwrap();
@@ -329,7 +339,8 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
     let window_handle = cx.add_window(|window, cx| {
         let mut ws =
             Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx);
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = window_handle.root(cx).unwrap();
@@ -359,8 +370,11 @@ fn test_save_restore_round_trip_preserves_layout(cx: &mut TestAppContext) {
 
     // Capture the serialized shape. Tabs now live on the active worktree.
     let original = ws.read_with(cx, |ws, app_cx| ws.save_state(app_cx).unwrap());
-    assert_eq!(original.worktrees.len(), 1);
-    assert_eq!(original.worktrees[0].tabs.len(), 2);
+    assert_eq!(original.primary_project().unwrap().worktrees.len(), 1);
+    assert_eq!(
+        original.primary_project().unwrap().worktrees[0].tabs.len(),
+        2
+    );
 
     // Rebuild into a fresh workspace and verify topology matches.
     let window_handle2 = cx.add_window(|window, cx| {

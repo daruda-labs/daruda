@@ -207,6 +207,13 @@ pub const WORKTREE_ROW_GAP: f32 = 8.0;
 pub const WORKTREE_PLACEHOLDER_GIT_INIT_MT: f32 = 4.0;
 /// Gap between lines inside the non-git info placeholder (px).
 pub const WORKTREE_PLACEHOLDER_LINE_GAP: f32 = 6.0;
+/// Extra left indent applied to member project rows nested under a
+/// group accordion (px). Surfaces the Group ▸ Project hierarchy.
+pub const WORKTREE_GROUP_INDENT_X: f32 = 12.0;
+/// Diameter of the optional color dot rendered in a group header (px).
+pub const WORKTREE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
+/// Corner radius of the group color dot (px). Half the size to render a circle.
+pub const WORKTREE_GROUP_COLOR_DOT_RADIUS: f32 = 4.0;
 
 // ============================================================================
 // Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)

@@ -97,9 +97,9 @@ impl Workspace {
             cx.notify();
         }
         if filter_changed {
-            let ids: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
-            for id in ids {
-                self.invalidate_visible_files_cache(id);
+            let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
+            for wt_ref in refs {
+                self.invalidate_visible_files_cache(wt_ref);
             }
         }
         // Picks up `claude_status.enable` flips.

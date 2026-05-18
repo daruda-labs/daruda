@@ -12,9 +12,7 @@ mod seed;
 #[cfg(test)]
 mod tests;
 
-pub use persistence::{
-    load_panels, load_panels_in, panels_path_in, save_panels, save_panels_in,
-};
+pub use persistence::{load_panels, load_panels_in, panels_path_in, save_panels, save_panels_in};
 pub use seed::seed_default;
 
 /// Migrate seed-button state in a loaded `PanelsState`.

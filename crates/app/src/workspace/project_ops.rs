@@ -1,0 +1,304 @@
+//! Project-level mutation ops on [`Workspace`] — add / close / move.
+//!
+//! Worktree-scoped operations live in `worktree_ops.rs`; this module
+//! owns the project boundary itself (registering a new project root
+//! with the workspace, removing one without tearing down the window).
+
+use std::path::PathBuf;
+
+use daruda_store::project::{ProjectId, WindowOpenPolicy, WorktreeRef};
+use gpui::{AppContext as _, Context, Window};
+
+use super::Workspace;
+
+impl Workspace {
+    /// Add a freshly-opened project to this workspace and activate its
+    /// first worktree.
+    ///
+    /// Mints a new [`ProjectId`] from the monotonic `next_project_id`
+    /// counter, walks the filesystem at `root` to discover git
+    /// worktrees (or falls back to one default), and pushes the result
+    /// onto `self.projects`. Then routes through `activate_worktree`
+    /// to swap the live `MainAreaContext` over to the new worktree —
+    /// the previous active runtime is preserved in the inactive map.
+    ///
+    /// **Pre-condition (caller):** the duplicate-root check
+    /// ([`crate::window_registry::WindowRegistry::find_workspace_by_root`])
+    /// already ran and matched none of the live windows. Calling this
+    /// with a root already in `self.projects` will produce a second
+    /// runtime project under a new id — the UI then renders the same
+    /// folder twice. The Open Project flow guarantees a single source
+    /// of truth by gating on the registry check first.
+    pub(crate) fn add_project(
+        &mut self,
+        root: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<WorktreeRef> {
+        let new_id: ProjectId = self.next_project_id;
+        self.next_project_id = self.next_project_id.checked_add(1)?;
+        let tab_order = self.projects.len() as u32;
+        let mut project = crate::project::Project::bootstrap(new_id, root);
+        project.tab_order = tab_order;
+        let target = project.first_worktree_ref();
+        self.projects.push(project);
+        // Activate the new worktree. When `self.projects` was empty
+        // before this call there is no prior runtime to freeze, but
+        // `activate_worktree` is still the right path: it lazy-seeds
+        // a pane at the new worktree's path so the user lands on a
+        // live shell immediately.
+        if let Some(t) = target {
+            // First project case: `self.active` is the default
+            // (project=0, worktree=0). `activate_worktree` skips when
+            // `self.active == target`, but with monotonic ids the new
+            // project's id is always > 0 the first time so this fires.
+            // Manually set `self.active` to a sentinel that differs
+            // from `target` so the swap path runs even when the
+            // workspace previously had no live runtime to freeze.
+            if self.projects.len() == 1 {
+                self.active = WorktreeRef::default();
+            }
+            self.activate_worktree(t, window, cx);
+        }
+        self.mark_dirty_and_save(cx);
+        target
+    }
+
+    /// Replace the workspace-level `window_open_policy` and persist.
+    /// Called by the Open Project chooser modal when the user ticks
+    /// "Don't ask again" after picking AddHere / NewWindow.
+    pub(crate) fn set_window_open_policy(
+        &mut self,
+        policy: WindowOpenPolicy,
+        cx: &mut Context<Self>,
+    ) {
+        if self.window_open_policy == policy {
+            return;
+        }
+        self.window_open_policy = policy;
+        self.mark_dirty_and_save(cx);
+    }
+
+    /// Current workspace-level "Open Project" policy. Read by the
+    /// global `OpenFolder` handler to decide between adding to the
+    /// current window vs. opening a fresh one.
+    pub(crate) fn window_open_policy(&self) -> WindowOpenPolicy {
+        self.window_open_policy
+    }
+
+    /// Remove the active project and route the workspace to the next
+    /// project (or signal "close this window" when none remain).
+    ///
+    /// Returns `true` when the workspace still has at least one
+    /// project after the removal — the caller should keep the window
+    /// open. Returns `false` when removing the active project emptied
+    /// the workspace; the caller should close the window.
+    ///
+    /// Inactive worktrees from the removed project also drop out of
+    /// `inactive_worktree_runtimes` so memory does not leak.
+    pub(crate) fn close_active_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(project_id) = self.active_project().map(|p| p.id) else {
+            return false;
+        };
+        // Forget every inactive runtime that belonged to the removed
+        // project — the WorktreeRefs become dangling once the project
+        // is gone.
+        self.main_area
+            .inactive_worktree_runtimes
+            .retain(|key, _| key.project != project_id);
+        // Drop per-worktree caches for the closing project so they do
+        // not leak across project deletes.
+        self.git_status_cache
+            .retain(|key, _| key.project != project_id);
+        self.git_status_in_flight
+            .retain(|key| key.project != project_id);
+        self.git_status_pending_repeat
+            .retain(|key| key.project != project_id);
+        self.git_collapsed_dirs
+            .retain(|key, _| key.project != project_id);
+        self.git_changes_cursor
+            .retain(|key, _| key.project != project_id);
+        // Five FileTreeContext caches keyed by WorktreeRef — drop every
+        // entry belonging to the removed project. The notify watchers
+        // stop when their entries drop; the gitignore matchers and
+        // visible-row caches are pure data, free to discard.
+        self.file_tree
+            .file_trees
+            .retain(|key, _| key.project != project_id);
+        self.file_tree
+            .files_visible_cache
+            .retain(|key, _| key.project != project_id);
+        self.file_tree
+            .file_watchers
+            .retain(|key, _| key.project != project_id);
+        self.file_tree
+            .files_reload_queues
+            .retain(|key, _| key.project != project_id);
+        self.file_tree
+            .files_gitignore_index
+            .retain(|key, _| key.project != project_id);
+
+        self.projects.retain(|p| p.id != project_id);
+
+        // No more projects — clear the active runtime fields and tell
+        // the caller to close the window.
+        if self.projects.is_empty() {
+            self.main_area.tabs.clear();
+            self.main_area.panes.clear();
+            self.main_area.active_tab_index = 0;
+            self.main_area.tab_history.clear();
+            self.main_area.focused_pane_id = 0;
+            self.active = WorktreeRef::default();
+            return false;
+        }
+
+        // Pick a fallback project (the first remaining) and snap to its
+        // last-active worktree. Set `self.active` to a sentinel so
+        // `activate_worktree` runs its swap path even though the live
+        // runtime fields are now stale (they belonged to the removed
+        // project's active worktree).
+        let next_target = self
+            .projects
+            .first()
+            .and_then(|p| p.snap_target())
+            .unwrap_or_default();
+        // Reset live runtime; the removed project's panes are gone for
+        // good and their TabEntry ids hold no PaneIds we can reuse.
+        self.main_area.tabs.clear();
+        self.main_area.panes.clear();
+        self.main_area.active_tab_index = 0;
+        self.main_area.tab_history.clear();
+        self.main_area.focused_pane_id = 0;
+        self.active = WorktreeRef::default();
+        self.activate_worktree(next_target, window, cx);
+        self.mark_dirty_and_save(cx);
+        true
+    }
+
+    /// Disk-cleanup variant of [`Self::close_active_project`]. Runs
+    /// `git worktree remove` for every linked worktree of the active
+    /// project on the background executor, then strips the project
+    /// directory via `fs::remove_dir_all` for any default-kind / left
+    /// over directories. UI bookkeeping (`close_active_project` +
+    /// window removal when it was the last project) happens after the
+    /// disk work finishes.
+    ///
+    /// Errors are toast-reported; the project still gets unregistered
+    /// even when one or more worktrees fail to remove on disk — the
+    /// dock entry going stale is the worse failure mode.
+    pub(crate) fn delete_active_project_on_disk(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.active_project() else {
+            return;
+        };
+        let project_id = project.id;
+        let project_path = project.root.clone();
+        // Snapshot the (repo_root, worktree_root) pairs for the git
+        // worktrees we'll remove. Default-kind worktrees are skipped —
+        // they're not git-managed, so `fs::remove_dir_all` on
+        // `project_path` is sufficient.
+        let removals: Vec<(PathBuf, PathBuf)> = project
+            .worktrees
+            .iter()
+            .filter_map(|wt| {
+                if let daruda_store::project::WorktreeKind::Git {
+                    repo_root,
+                    worktree_root,
+                    ..
+                } = &wt.kind
+                {
+                    Some((repo_root.clone(), worktree_root.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let window_handle = window.window_handle();
+
+        cx.spawn(async move |_this, async_cx| {
+            let executor = async_cx.background_executor().clone();
+            let mut errors: Vec<(PathBuf, String)> = Vec::new();
+            for (repo, wt_root) in removals {
+                let repo_clone = repo.clone();
+                let wt_clone = wt_root.clone();
+                let result = executor
+                    .spawn(async move {
+                        crate::worktree::git::remove_worktree(&repo_clone, &wt_clone, false)
+                    })
+                    .await;
+                if let Err(e) = result {
+                    errors.push((wt_root, e.to_string()));
+                }
+            }
+            // Default-kind project directory or any leftover (e.g. the
+            // primary worktree under a subdirectory anchor) gets a
+            // best-effort recursive delete. Already-gone is fine.
+            let path_for_rm = project_path.clone();
+            let rm_err: std::io::Result<()> = executor
+                .spawn(async move {
+                    if path_for_rm.is_dir() {
+                        std::fs::remove_dir_all(&path_for_rm)
+                    } else {
+                        Ok(())
+                    }
+                })
+                .await;
+            if let Err(e) = rm_err {
+                errors.push((project_path.clone(), e.to_string()));
+            }
+
+            let _ = async_cx.update(|app_cx| {
+                let _ = app_cx.update_window(window_handle, |_, window, cx_w| {
+                    let Some(ws) = _this.upgrade() else {
+                        return;
+                    };
+                    let close_window = ws.update(cx_w, |ws, cx| {
+                        for (path, message) in &errors {
+                            let report = daruda_store::observability::error_report::ErrorReport::new(
+                                "Worktree disk cleanup failed",
+                            )
+                            .severity(
+                                daruda_store::observability::error_report::ErrorSeverity::Warning,
+                            )
+                            .at(file!(), line!())
+                            .with_context(
+                                "path",
+                                daruda_store::observability::system_info::redact_home(path),
+                            )
+                            .with_context("error", message.clone())
+                            .dedup("project.delete.disk")
+                            .build();
+                            ws.report_error(report, cx);
+                        }
+                        // Active may have shifted while disk work ran;
+                        // if our project is no longer active, drop its
+                        // registered state directly without going
+                        // through the activate path.
+                        if ws.active.project != project_id {
+                            ws.projects.retain(|p| p.id != project_id);
+                            ws.main_area
+                                .inactive_worktree_runtimes
+                                .retain(|key, _| key.project != project_id);
+                            ws.mark_dirty_and_save(cx);
+                            return ws.projects.is_empty();
+                        }
+                        let keep = ws.close_active_project(window, cx);
+                        !keep
+                    });
+                    if close_window {
+                        window.remove_window();
+                        crate::windows::ensure_welcome_if_last(cx_w);
+                    }
+                });
+            });
+        })
+        .detach();
+    }
+}

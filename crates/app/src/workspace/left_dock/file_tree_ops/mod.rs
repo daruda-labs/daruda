@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::WorktreeRef;
 use gpui::{Context, ScrollStrategy};
 
 use crate::files::gitignore::GitignoreSet;
@@ -84,15 +84,15 @@ enum ReloadTask {
 impl Workspace {
     pub(in crate::workspace) fn ensure_file_tree(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.active_project().and_then(|p| p.worktree(worktree_id)) else {
+        let Some(wt) = self.worktree_for(wt_ref) else {
             return;
         };
         let root = wt.path.clone();
 
-        let needs_load = match self.file_tree.file_trees.get(&worktree_id) {
+        let needs_load = match self.file_tree.file_trees.get(&wt_ref) {
             Some(tree) => tree
                 .entry(tree.root_id)
                 .map(|e| matches!(e.kind, EntryKind::UnloadedDir))
@@ -100,47 +100,43 @@ impl Workspace {
             None => {
                 self.file_tree
                     .file_trees
-                    .insert(worktree_id, FileTree::new(root.clone()));
+                    .insert(wt_ref, FileTree::new(root.clone()));
                 true
             }
         };
 
         if needs_load {
-            if let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id)
+            if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref)
                 && let Some(entry) = tree.entry_mut(EntryId(0))
                 && matches!(entry.kind, EntryKind::UnloadedDir)
             {
                 entry.kind = EntryKind::PendingDir;
             }
-            self.invalidate_visible_files_cache(worktree_id);
-            self.kick_dir_load(worktree_id, EntryId(0), root.clone(), cx);
+            self.invalidate_visible_files_cache(wt_ref);
+            self.kick_dir_load(wt_ref, EntryId(0), root.clone(), cx);
         }
 
         // Start a watcher the first time this worktree's tree is
         // touched. The watcher itself is GPUI-free; the polling task
         // belongs to Workspace and is created lazily on demand.
-        if !self.file_tree.file_watchers.contains_key(&worktree_id) {
-            self.spawn_files_watcher(worktree_id, root.clone(), cx);
+        if !self.file_tree.file_watchers.contains_key(&wt_ref) {
+            self.spawn_files_watcher(wt_ref, root.clone(), cx);
         }
         // Build the gitignore matcher once on a background thread.
         // Rebuilt when `.gitignore` changes (see `queue_files_event`).
-        if !self
-            .file_tree
-            .files_gitignore_index
-            .contains_key(&worktree_id)
-        {
-            self.kick_gitignore_build(worktree_id, root.clone(), cx);
+        if !self.file_tree.files_gitignore_index.contains_key(&wt_ref) {
+            self.kick_gitignore_build(wt_ref, root.clone(), cx);
         }
     }
 
     pub(in crate::workspace) fn toggle_files_expand(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         entry_id: EntryId,
         cx: &mut Context<Self>,
     ) {
         let to_load: Option<PathBuf> = {
-            let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id) else {
+            let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) else {
                 return;
             };
             let now_expanded = tree.toggle_expand(entry_id);
@@ -163,16 +159,16 @@ impl Workspace {
             }
         };
         // Trigger #1 — expand toggle.
-        self.invalidate_visible_files_cache(worktree_id);
+        self.invalidate_visible_files_cache(wt_ref);
         cx.notify();
         if let Some(abs_path) = to_load {
-            self.kick_dir_load(worktree_id, entry_id, abs_path, cx);
+            self.kick_dir_load(wt_ref, entry_id, abs_path, cx);
         }
     }
 
     pub(in crate::workspace) fn kick_dir_load(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         parent_id: EntryId,
         abs_path: PathBuf,
         cx: &mut Context<Self>,
@@ -181,24 +177,18 @@ impl Workspace {
             cx,
             move || load_dir(&abs_path),
             move |ws, result, cx| {
-                ws.apply_dir_load_result(
-                    worktree_id,
-                    parent_id,
-                    result,
-                    DirLoadSource::UserExpand,
-                    cx,
-                );
+                ws.apply_dir_load_result(wt_ref, parent_id, result, DirLoadSource::UserExpand, cx);
             },
         )
         .detach();
     }
 
-    /// Rebuild the gitignore matcher for `worktree_id` on a background
+    /// Rebuild the gitignore matcher for `wt_ref` on a background
     /// thread. The existing entry (if any) stays in place until the new
     /// one is ready, so gitignore filtering never lapses during the build.
     pub(in crate::workspace) fn kick_gitignore_build(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         root: PathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -206,10 +196,8 @@ impl Workspace {
             cx,
             move || GitignoreSet::build(&root),
             move |ws, gi_set, cx| {
-                ws.file_tree
-                    .files_gitignore_index
-                    .insert(worktree_id, gi_set);
-                ws.invalidate_visible_files_cache(worktree_id);
+                ws.file_tree.files_gitignore_index.insert(wt_ref, gi_set);
+                ws.invalidate_visible_files_cache(wt_ref);
                 cx.notify();
             },
         )
@@ -220,12 +208,12 @@ impl Workspace {
     // Watcher / event queue / serial reload (W-7g)
     // ------------------------------------------------------------
 
-    /// Create a `FileTreeWatcher` for `worktree_id` and start (or
+    /// Create a `FileTreeWatcher` for `wt_ref` and start (or
     /// reuse) the workspace-level polling task that drains every
     /// watcher's `events_rx` once per tick.
     pub(in crate::workspace) fn spawn_files_watcher(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         root: PathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -243,7 +231,7 @@ impl Workspace {
                 return;
             }
         };
-        self.file_tree.file_watchers.insert(worktree_id, watcher);
+        self.file_tree.file_watchers.insert(wt_ref, watcher);
         if self.file_tree.files_watcher_poll.is_none() {
             let task = cx.spawn(async move |this, cx| {
                 loop {
@@ -266,28 +254,28 @@ impl Workspace {
     /// without blocking, dispatching each debounced event into the
     /// per-worktree reload queue.
     pub(in crate::workspace) fn drain_files_watcher_events(&mut self, cx: &mut Context<Self>) {
-        let mut events: Vec<(WorktreeId, DebouncedEvent)> = Vec::new();
-        for (id, watcher) in &self.file_tree.file_watchers {
+        let mut events: Vec<(WorktreeRef, DebouncedEvent)> = Vec::new();
+        for (wt_ref, watcher) in &self.file_tree.file_watchers {
             while let Ok(ev) = watcher.events_rx.try_recv() {
-                events.push((*id, ev));
+                events.push((*wt_ref, ev));
             }
         }
-        for (id, ev) in events {
-            self.queue_files_event(id, ev, cx);
+        for (wt_ref, ev) in events {
+            self.queue_files_event(wt_ref, ev, cx);
         }
     }
 
-    /// Enqueue one debounced event for `worktree_id`. Inactive
-    /// worktrees only mark `dirty = true`; active ones append to the
-    /// reload queue and kick the drain task.
+    /// Enqueue one debounced event for `wt_ref`. Inactive worktrees
+    /// only mark `dirty = true`; active ones append to the reload
+    /// queue and kick the drain task.
     pub(in crate::workspace) fn queue_files_event(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         ev: DebouncedEvent,
         cx: &mut Context<Self>,
     ) {
-        if worktree_id != self.active.worktree {
-            if let Some(t) = self.file_tree.file_trees.get_mut(&worktree_id) {
+        if wt_ref != self.active {
+            if let Some(t) = self.file_tree.file_trees.get_mut(&wt_ref) {
                 t.dirty = true;
             }
             return;
@@ -306,19 +294,19 @@ impl Workspace {
         let root = self
             .file_tree
             .file_trees
-            .get(&worktree_id)
+            .get(&wt_ref)
             .map(|t| t.root.clone());
         let bulk_pending = self
             .file_tree
             .files_reload_queues
-            .get(&worktree_id)
+            .get(&wt_ref)
             .is_some_and(|q| q.pending_bulk);
         match ev {
             DebouncedEvent::Bulk => {
                 let q = self
                     .file_tree
                     .files_reload_queues
-                    .entry(worktree_id)
+                    .entry(wt_ref)
                     .or_default();
                 q.pending_bulk = true;
                 q.pending_parents.clear();
@@ -331,14 +319,14 @@ impl Workspace {
                 // debounce window arrive as a separate Changed event
                 // and trigger the parent reload normally.
                 let Some(root) = root.clone() else { return };
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id) {
+                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) {
                     for abs in paths {
                         if let Ok(rel) = abs.strip_prefix(&root) {
                             tree.remove_subtree(rel);
                         }
                     }
                 }
-                self.invalidate_visible_files_cache(worktree_id);
+                self.invalidate_visible_files_cache(wt_ref);
             }
             DebouncedEvent::Removed { .. } => {}
             DebouncedEvent::Changed { paths } if !bulk_pending => {
@@ -362,13 +350,13 @@ impl Workspace {
                     }
                 }
                 if gitignore_dirty {
-                    self.kick_gitignore_build(worktree_id, root.clone(), cx);
-                    self.invalidate_visible_files_cache(worktree_id);
+                    self.kick_gitignore_build(wt_ref, root.clone(), cx);
+                    self.invalidate_visible_files_cache(wt_ref);
                 }
                 let q = self
                     .file_tree
                     .files_reload_queues
-                    .entry(worktree_id)
+                    .entry(wt_ref)
                     .or_default();
                 for p in paths {
                     let parent = p
@@ -392,32 +380,28 @@ impl Workspace {
                 return;
             }
         }
-        self.kick_files_reload(worktree_id, cx);
+        self.kick_files_reload(wt_ref, cx);
         // Watcher events also stale the Git Changes view. The
         // refresh's own in-flight guard collapses bursts, but the
         // `should_refresh_git_status` gate skips pure `.git/` noise
         // entirely so the refresh never re-triggers itself.
         if should_refresh_git_status {
-            let target = daruda_store::project::WorktreeRef {
-                project: self.active.project,
-                worktree: worktree_id,
-            };
-            self.refresh_git_status(target, cx);
+            self.refresh_git_status(wt_ref, cx);
         }
     }
 
-    /// Drive the reload queue for `worktree_id`. Idempotent — calling
+    /// Drive the reload queue for `wt_ref`. Idempotent — calling
     /// while a drain task is already running is a no-op (the running
     /// task picks up the new entries on its next iteration).
     pub(in crate::workspace) fn kick_files_reload(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
         let q = self
             .file_tree
             .files_reload_queues
-            .entry(worktree_id)
+            .entry(wt_ref)
             .or_default();
         if q.running {
             return;
@@ -430,7 +414,7 @@ impl Workspace {
             loop {
                 let task = this
                     .update(cx, |ws, _| {
-                        let q = ws.file_tree.files_reload_queues.get_mut(&worktree_id)?;
+                        let q = ws.file_tree.files_reload_queues.get_mut(&wt_ref)?;
                         if q.pending_bulk {
                             q.pending_bulk = false;
                             return Some(ReloadTask::Bulk);
@@ -453,7 +437,7 @@ impl Workspace {
                         // holds.
                         let plan = this
                             .update(cx, |ws, _| {
-                                let tree = ws.file_tree.file_trees.get(&worktree_id)?;
+                                let tree = ws.file_tree.file_trees.get(&wt_ref)?;
                                 let mut targets: Vec<(EntryId, PathBuf)> =
                                     vec![(tree.root_id, tree.root.clone())];
                                 for &eid in tree.expanded_ids() {
@@ -474,7 +458,7 @@ impl Workspace {
                                 .await;
                             let _ = this.update(cx, |ws, cx| {
                                 ws.apply_dir_load_result(
-                                    worktree_id,
+                                    wt_ref,
                                     parent_id,
                                     result,
                                     DirLoadSource::WatcherReload,
@@ -486,7 +470,7 @@ impl Workspace {
                     ReloadTask::Parent(abs) => {
                         let parent_id = this
                             .update(cx, |ws, _| {
-                                let tree = ws.file_tree.file_trees.get(&worktree_id)?;
+                                let tree = ws.file_tree.file_trees.get(&wt_ref)?;
                                 let rel = abs.strip_prefix(&tree.root).ok()?;
                                 tree.id_for_path(rel)
                             })
@@ -500,7 +484,7 @@ impl Workspace {
                             .await;
                         let _ = this.update(cx, |ws, cx| {
                             ws.apply_dir_load_result(
-                                worktree_id,
+                                wt_ref,
                                 parent_id,
                                 result,
                                 DirLoadSource::WatcherReload,
@@ -514,18 +498,18 @@ impl Workspace {
         .detach();
     }
 
-    /// Replay the queued `dirty` flag for `worktree_id` (called on
+    /// Replay the queued `dirty` flag for `wt_ref` (called on
     /// activation). When the worktree was modified while inactive, a
     /// single Bulk reload covers all changes.
     pub(in crate::workspace) fn replay_files_dirty(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
         let dirty = self
             .file_tree
             .file_trees
-            .get_mut(&worktree_id)
+            .get_mut(&wt_ref)
             .map(|t| {
                 let was = t.dirty;
                 t.dirty = false;
@@ -538,18 +522,14 @@ impl Workspace {
         let q = self
             .file_tree
             .files_reload_queues
-            .entry(worktree_id)
+            .entry(wt_ref)
             .or_default();
         q.pending_bulk = true;
         q.pending_parents.clear();
         q.pending_seen.clear();
-        self.kick_files_reload(worktree_id, cx);
+        self.kick_files_reload(wt_ref, cx);
         // Activation after dirty also catches up the Git Changes view.
-        let target = daruda_store::project::WorktreeRef {
-            project: self.active.project,
-            worktree: worktree_id,
-        };
-        self.refresh_git_status(target, cx);
+        self.refresh_git_status(wt_ref, cx);
     }
 
     /// Open `path` from the active worktree's tree in a new tab as a
@@ -560,13 +540,13 @@ impl Workspace {
     /// invalidation logic stays in one place.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         path: PathBuf,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         self.open_pane_file_view(
-            worktree_id,
+            wt_ref.worktree,
             path,
             /* staged = */ false,
             /* file_status = */ None,
@@ -578,7 +558,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn apply_dir_load_result(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         parent_id: EntryId,
         result: Result<Vec<LoadedEntry>, FileTreeError>,
         source: DirLoadSource,
@@ -586,7 +566,7 @@ impl Workspace {
     ) {
         let error_msg = match result {
             Ok(loaded) => {
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id) {
+                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) {
                     tree.apply_dir_load(parent_id, loaded);
                 }
                 None
@@ -595,9 +575,9 @@ impl Workspace {
                 let is_root = self
                     .file_tree
                     .file_trees
-                    .get(&worktree_id)
+                    .get(&wt_ref)
                     .is_some_and(|t| t.root_id == parent_id);
-                if let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id)
+                if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref)
                     && let Some(entry) = tree.entry_mut(parent_id)
                     && matches!(entry.kind, EntryKind::PendingDir)
                 {
@@ -640,7 +620,7 @@ impl Workspace {
             self.report_error(report, cx);
         }
         // Trigger #2 — load result (success or revert-on-error).
-        self.invalidate_visible_files_cache(worktree_id);
+        self.invalidate_visible_files_cache(wt_ref);
         cx.notify();
     }
 
@@ -648,47 +628,43 @@ impl Workspace {
     // Visible-list cache
     // ------------------------------------------------------------
 
-    /// Drop the cached visible list for `worktree_id`. Trigger sites
-    /// are enumerated in the module-level doc comment.
-    pub(in crate::workspace) fn invalidate_visible_files_cache(&mut self, worktree_id: WorktreeId) {
-        self.file_tree.files_visible_cache.remove(&worktree_id);
+    /// Drop the cached visible list for `wt_ref`. Trigger sites are
+    /// enumerated in the module-level doc comment.
+    pub(in crate::workspace) fn invalidate_visible_files_cache(&mut self, wt_ref: WorktreeRef) {
+        self.file_tree.files_visible_cache.remove(&wt_ref);
     }
 
-    /// Return the cached `Arc<Vec<VisibleEntry>>` for `worktree_id`,
+    /// Return the cached `Arc<Vec<VisibleEntry>>` for `wt_ref`,
     /// rebuilding it from the live tree + git status if missing.
     pub(in crate::workspace) fn cached_or_rebuild_visible(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
     ) -> Arc<Vec<VisibleEntry>> {
-        if let Some(cached) = self.file_tree.files_visible_cache.get(&worktree_id) {
+        if let Some(cached) = self.file_tree.files_visible_cache.get(&wt_ref) {
             return cached.clone();
         }
-        let visible = self.build_visible_for(worktree_id);
+        let visible = self.build_visible_for(wt_ref);
         let arc = Arc::new(visible);
         self.file_tree
             .files_visible_cache
-            .insert(worktree_id, arc.clone());
+            .insert(wt_ref, arc.clone());
         arc
     }
 
-    fn build_visible_for(&self, worktree_id: WorktreeId) -> Vec<VisibleEntry> {
-        let Some(tree) = self.file_tree.file_trees.get(&worktree_id) else {
+    fn build_visible_for(&self, wt_ref: WorktreeRef) -> Vec<VisibleEntry> {
+        let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
             return Vec::new();
         };
-        let target = daruda_store::project::WorktreeRef {
-            project: self.active.project,
-            worktree: worktree_id,
-        };
-        let status_index = build_status_index(self.git_status_cache.get(&target));
+        let status_index = build_status_index(self.git_status_cache.get(&wt_ref));
         // Keyboard cursor only counts on the active worktree; switching
         // worktrees clears the cursor.
-        let keyboard_focus = if worktree_id == self.active.worktree {
+        let keyboard_focus = if wt_ref == self.active {
             self.file_tree.files_selection
         } else {
             None
         };
         let gitignore = if self.file_tree.files_use_gitignore {
-            self.file_tree.files_gitignore_index.get(&worktree_id)
+            self.file_tree.files_gitignore_index.get(&wt_ref)
         } else {
             None
         };
@@ -711,9 +687,9 @@ impl Workspace {
     /// and request a render. Wired to `FilesToggleHidden`.
     pub(in crate::workspace) fn toggle_files_show_hidden(&mut self, cx: &mut Context<Self>) {
         self.file_tree.files_show_hidden = !self.file_tree.files_show_hidden;
-        let ids: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
-        for id in ids {
-            self.invalidate_visible_files_cache(id);
+        let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
+        for wt_ref in refs {
+            self.invalidate_visible_files_cache(wt_ref);
         }
         cx.notify();
     }
@@ -730,8 +706,8 @@ impl Workspace {
         delta: isize,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active.worktree;
-        let visible = self.cached_or_rebuild_visible(id);
+        let wt_ref = self.active_ref();
+        let visible = self.cached_or_rebuild_visible(wt_ref);
         if visible.is_empty() {
             return;
         }
@@ -757,7 +733,7 @@ impl Workspace {
         let new_id = visible[new_index].entry_id;
         if self.file_tree.files_selection != Some(new_id) {
             self.file_tree.files_selection = Some(new_id);
-            self.invalidate_visible_files_cache(id);
+            self.invalidate_visible_files_cache(wt_ref);
             self.file_tree
                 .files_scroll_handle
                 .scroll_to_item(new_index, ScrollStrategy::Nearest);
@@ -772,12 +748,12 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active.worktree;
+        let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
         let (kind, path) = {
-            let Some(tree) = self.file_tree.file_trees.get(&id) else {
+            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -786,21 +762,21 @@ impl Workspace {
             (entry.kind, entry.path.clone())
         };
         if kind.is_dir() {
-            self.toggle_files_expand(id, sel, cx);
+            self.toggle_files_expand(wt_ref, sel, cx);
         } else {
-            self.open_files_entry(id, path, window, cx);
+            self.open_files_entry(wt_ref, path, window, cx);
         }
     }
 
     /// Right-arrow on the cursor row: if the row is a collapsed dir,
     /// expand it. Otherwise no-op (parent navigation lives in W-7+).
     pub(in crate::workspace) fn expand_at_files_selection(&mut self, cx: &mut Context<Self>) {
-        let id = self.active.worktree;
+        let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
         let should_toggle = {
-            let Some(tree) = self.file_tree.file_trees.get(&id) else {
+            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -809,19 +785,19 @@ impl Workspace {
             entry.kind.is_dir() && !tree.is_expanded(sel)
         };
         if should_toggle {
-            self.toggle_files_expand(id, sel, cx);
+            self.toggle_files_expand(wt_ref, sel, cx);
         }
     }
 
     /// Left-arrow on the cursor row: if the row is an expanded dir,
     /// collapse it. Otherwise no-op (move-to-parent lives in W-7+).
     pub(in crate::workspace) fn collapse_at_files_selection(&mut self, cx: &mut Context<Self>) {
-        let id = self.active.worktree;
+        let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
             return;
         };
         let should_toggle = {
-            let Some(tree) = self.file_tree.file_trees.get(&id) else {
+            let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
                 return;
             };
             let Some(entry) = tree.entry(sel) else {
@@ -830,17 +806,17 @@ impl Workspace {
             entry.kind.is_dir() && tree.is_expanded(sel)
         };
         if should_toggle {
-            self.toggle_files_expand(id, sel, cx);
+            self.toggle_files_expand(wt_ref, sel, cx);
         }
     }
 
     /// Manual root re-scan for the active worktree. Used by both the
     /// dock's ⟳ button and the `FilesRefresh` action.
     pub(in crate::workspace) fn refresh_files_root(&mut self, cx: &mut Context<Self>) {
-        let id = self.active.worktree;
+        let wt_ref = self.active_ref();
         // Bulk reload via the queue keeps the same serial guarantee
         // watcher-driven reloads use.
-        self.queue_files_event(id, DebouncedEvent::Bulk, cx);
+        self.queue_files_event(wt_ref, DebouncedEvent::Bulk, cx);
     }
 
     /// Recursive collapse: drop `entry_id` from the expanded set
@@ -851,12 +827,12 @@ impl Workspace {
     /// dir falls through to the regular toggle.
     pub(in crate::workspace) fn collapse_files_subtree(
         &mut self,
-        worktree_id: WorktreeId,
+        wt_ref: WorktreeRef,
         entry_id: EntryId,
         cx: &mut Context<Self>,
     ) {
         let invalidated = {
-            let Some(tree) = self.file_tree.file_trees.get_mut(&worktree_id) else {
+            let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) else {
                 return;
             };
             if !tree.is_expanded(entry_id) {
@@ -872,7 +848,7 @@ impl Workspace {
             true
         };
         if invalidated {
-            self.invalidate_visible_files_cache(worktree_id);
+            self.invalidate_visible_files_cache(wt_ref);
             cx.notify();
         }
     }

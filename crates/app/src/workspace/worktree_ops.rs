@@ -145,15 +145,12 @@ impl Workspace {
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
         // drops the embedded `RecommendedWatcher`, which stops the
-        // kernel-side watch. The five file_tree HashMaps are still
-        // `WorktreeId`-keyed (single-active-project assumption) until
-        // a later commit promotes them to `WorktreeRef`.
-        let wt_id = target.worktree;
-        self.file_tree.file_trees.remove(&wt_id);
-        self.file_tree.file_watchers.remove(&wt_id);
-        self.file_tree.files_reload_queues.remove(&wt_id);
-        self.file_tree.files_visible_cache.remove(&wt_id);
-        self.file_tree.files_gitignore_index.remove(&wt_id);
+        // kernel-side watch.
+        self.file_tree.file_trees.remove(&target);
+        self.file_tree.file_watchers.remove(&target);
+        self.file_tree.files_reload_queues.remove(&target);
+        self.file_tree.files_visible_cache.remove(&target);
+        self.file_tree.files_gitignore_index.remove(&target);
         self.git_status_in_flight.remove(&target);
         self.git_status_pending_repeat.remove(&target);
         self.git_status_cache.remove(&target);
@@ -334,8 +331,8 @@ impl Workspace {
         // incoming visible lists become stale (selection moves with the
         // active id).
         let previous = self.active;
-        self.invalidate_visible_files_cache(previous.worktree);
-        self.invalidate_visible_files_cache(target.worktree);
+        self.invalidate_visible_files_cache(previous);
+        self.invalidate_visible_files_cache(target);
         // Clear keyboard cursor — it lived in the previous worktree's
         // visible list.
         self.file_tree.files_selection = None;
@@ -424,7 +421,7 @@ impl Workspace {
         self.mark_dirty_and_save(cx);
         // 5. If the incoming worktree's tree was modified while
         //    inactive, replay a single Bulk reload to catch up.
-        self.replay_files_dirty(target.worktree, cx);
+        self.replay_files_dirty(target, cx);
         // Project skill scope follows the active worktree's path —
         // re-spawn so the panel switches to the new repo's skills.
         self.refresh_skills_watcher(cx);

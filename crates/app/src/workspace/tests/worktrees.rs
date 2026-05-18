@@ -292,14 +292,14 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
     let state = ws
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
-    assert_eq!(state.worktrees.len(), 2);
+    let primary = state.primary_project().unwrap();
+    assert_eq!(primary.worktrees.len(), 2);
     // Active worktree 0 has its tab.
-    let wt0 = state.worktrees.iter().find(|w| w.id == 0).unwrap();
+    let wt0 = primary.worktrees.iter().find(|w| w.id == 0).unwrap();
     assert!(!wt0.tabs.is_empty());
     // Inactive worktree 1 has no runtime → serialized tabs empty.
-    let wt1 = state.worktrees.iter().find(|w| w.id == 1).unwrap();
+    let wt1 = primary.worktrees.iter().find(|w| w.id == 1).unwrap();
     assert!(wt1.tabs.is_empty());
-    assert!(state.tabs.is_empty());
 }
 
 #[gpui::test]
@@ -374,7 +374,8 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = wh.root(cx).unwrap();
@@ -409,16 +410,16 @@ fn test_save_state_captures_bootstrapped_worktree(cx: &mut TestAppContext) {
     let state = ws
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
-    assert_eq!(state.worktrees.len(), 1);
-    assert_eq!(state.worktrees[0].id, 0);
+    let primary = state.primary_project().unwrap();
+    assert_eq!(primary.worktrees.len(), 1);
+    assert_eq!(primary.worktrees[0].id, 0);
     assert_eq!(
-        state.worktrees[0].path,
+        primary.worktrees[0].path,
         std::path::PathBuf::from("/tmp/test_save_wt")
     );
-    assert_eq!(state.active_worktree_id, 0);
+    assert_eq!(state.active.worktree, 0);
     // Tabs live inside the active worktree from W-2 onward.
-    assert!(!state.worktrees[0].tabs.is_empty());
-    assert!(state.tabs.is_empty());
+    assert!(!primary.worktrees[0].tabs.is_empty());
 }
 
 #[gpui::test]
@@ -466,7 +467,8 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = wh.root(cx).unwrap();
@@ -505,7 +507,8 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = wh.root(cx).unwrap();
@@ -592,7 +595,8 @@ fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = wh.root(cx).unwrap();
@@ -648,7 +652,8 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
         };
-        ws.restore_state(&state, window, cx);
+        let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+        ws.restore_state(&workspace_state, window, cx);
         ws
     });
     let ws = wh.root(cx).unwrap();
@@ -714,7 +719,8 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 vertical_spacing: 1.0,
                 horizontal_spacing: 1.0,
             };
-            ws.restore_state(&state, window, cx);
+            let workspace_state = daruda_store::project::WorkspaceState::from_legacy(state);
+            ws.restore_state(&workspace_state, window, cx);
         });
     });
     ws.read_with(cx, |ws, cx_inner| {

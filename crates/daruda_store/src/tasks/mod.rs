@@ -28,9 +28,7 @@ pub mod task;
 mod tests;
 
 pub use branch::derive_branch_name;
-pub use persistence::{
-    load_tasks, load_tasks_in, save_tasks, save_tasks_in, tasks_path_in,
-};
+pub use persistence::{load_tasks, load_tasks_in, save_tasks, save_tasks_in, tasks_path_in};
 pub use prompt_file::{
     build_claude_command, render_task_prompt, task_prompt_file_path, write_prompt_file,
 };

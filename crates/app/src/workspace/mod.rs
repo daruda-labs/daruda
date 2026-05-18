@@ -17,13 +17,17 @@ mod actions;
 mod claude_session_ops;
 pub(in crate::workspace) mod command;
 mod config_ops;
+pub(crate) mod delete_project_modal;
 pub(in crate::workspace) mod dialog_helpers;
 pub(in crate::workspace) mod error;
+mod group_ops;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;
+pub(crate) mod open_project_modal;
 mod path_drag;
 mod persistence;
+mod project_ops;
 mod render;
 mod right_dock;
 mod spawn_helpers;
@@ -228,6 +232,20 @@ pub struct Workspace {
     /// always points at a live entry — kept normalized by
     /// `activate_worktree` and `finalize_remove_*` paths.
     pub(in crate::workspace) active: daruda_store::project::WorktreeRef,
+    /// User-defined groups in the left dock. Each project's
+    /// `group_id` links into this list. Empty during the early
+    /// multi-project rollout — Group CRUD lands in a later commit.
+    pub(in crate::workspace) groups: Vec<daruda_store::project::SerializedGroup>,
+    /// Monotonic counter for the next `ProjectId` minted by
+    /// [`Workspace::add_project`]. Deleted ids are never reused.
+    pub(in crate::workspace) next_project_id: daruda_store::project::ProjectId,
+    /// Monotonic counter for the next `GroupId` minted by Group CRUD.
+    pub(in crate::workspace) next_group_id: daruda_store::project::GroupId,
+    /// User policy for the "Open Project…" affordance. Read by the
+    /// global `OpenFolder` handler to decide between adding to the
+    /// current window vs. opening a new one; mutated when the user
+    /// ticks "Don't ask again" inside the chooser modal.
+    pub(in crate::workspace) window_open_policy: daruda_store::project::WindowOpenPolicy,
     /// Bottom dock (terminal panel, problems, output).
     pub(in crate::workspace) bottom_dock: gpui::Entity<layout::Dock>,
     /// Right dock (file explorer, git changes).
@@ -699,6 +717,10 @@ impl Workspace {
                 .map(|p| vec![crate::project::Project::bootstrap(0, p.root.clone())])
                 .unwrap_or_default(),
             active: daruda_store::project::WorktreeRef::default(),
+            groups: Vec::new(),
+            next_project_id: if project.is_some() { 1 } else { 0 },
+            next_group_id: 0,
+            window_open_policy: daruda_store::project::WindowOpenPolicy::default(),
             bottom_dock: {
                 let ws = ws_weak.clone();
                 cx.new(|_| {
@@ -957,6 +979,40 @@ impl Workspace {
     /// active id but want the `WorktreeRef` form for HashMap lookups.
     pub(in crate::workspace) fn active_ref(&self) -> daruda_store::project::WorktreeRef {
         self.active
+    }
+
+    /// Display name of the currently active project. `None` when the
+    /// workspace has no projects.
+    pub(crate) fn active_project_name(&self) -> Option<String> {
+        self.active_project().map(|p| p.name.clone())
+    }
+
+    /// True when any project in this workspace already has `root` as
+    /// its checkout. Used by [`crate::window_registry::WindowRegistry::find_workspace_by_root`]
+    /// so the duplicate-root check on Open Project can focus the live
+    /// window instead of spawning a second copy. Compares both as-given
+    /// and canonicalized so the symlinked `/tmp` vs `/private/tmp`
+    /// flavours on macOS still match.
+    pub(crate) fn has_project_root(&self, root: &std::path::Path) -> bool {
+        let canonical = std::fs::canonicalize(root).ok();
+        self.projects.iter().any(|p| {
+            if p.root == root {
+                return true;
+            }
+            let p_canon = std::fs::canonicalize(&p.root).ok();
+            match (canonical.as_ref(), p_canon.as_ref()) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            }
+        })
+    }
+
+    /// Read-only slice of every runtime project currently in this
+    /// workspace. Used by menu / palette code that needs to list project
+    /// metadata without going through `WorkspaceState`.
+    #[allow(dead_code)]
+    pub(crate) fn projects(&self) -> &[crate::project::Project] {
+        &self.projects
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

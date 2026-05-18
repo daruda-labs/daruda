@@ -20,12 +20,13 @@ pub(crate) fn open_first_window(
     cx: &mut App,
 ) {
     let recent = daruda_store::project::persistence::load_recent();
-    let restored_state = recent
-        .first()
-        .and_then(|entry| daruda_store::project::persistence::load_state(&entry.root));
+    let restored = recent.first().and_then(|entry| {
+        daruda_store::project::persistence::load_workspace_state(&entry.root)
+            .map(|state| (entry.root.clone(), state))
+    });
 
-    if let Some(state) = restored_state {
-        let project = daruda_store::project::Project::from_path(&state.root);
+    if let Some((root, state)) = restored {
+        let project = daruda_store::project::Project::from_path(&root);
         open_workspace_window(config.clone(), Some(project), Some(state), window_opts, cx);
     } else {
         open_welcome_window(config, window_opts, cx);

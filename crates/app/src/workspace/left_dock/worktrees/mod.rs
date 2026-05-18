@@ -4,10 +4,14 @@
 //! modal state lives on `Workspace` because it needs to outlive any
 //! single render and survive view-tab switches.
 
+pub(in crate::workspace) mod banner;
 pub(in crate::workspace) mod claude_badges;
+pub(in crate::workspace) mod context_menu;
 pub(in crate::workspace) mod create_modal;
+pub(in crate::workspace) mod drag;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod merge_modal;
 pub(in crate::workspace) mod remove_modal;
+pub(in crate::workspace) mod rows;
 
 pub(in crate::workspace) use list::render;

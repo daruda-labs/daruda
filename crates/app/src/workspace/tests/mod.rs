@@ -6,6 +6,7 @@ mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;
 mod persistence;
+mod projects;
 mod pure_ops;
 mod splits;
 mod task_edit_tab_cycle;

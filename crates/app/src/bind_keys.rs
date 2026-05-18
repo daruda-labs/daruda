@@ -11,9 +11,10 @@
 //! wins over a focused Workspace's bubble phase.
 
 use crate::surface::{self, keybindings as k};
+use crate::window_registry::WindowRegistry;
 use crate::windows::{
-    OpenMode, build_window_options, close_all_workspace_windows, open_workspace_window,
-    prompt_and_open_folder,
+    OpenMode, build_window_options, close_all_workspace_windows, ensure_welcome_if_last,
+    open_workspace_window, prompt_and_open_folder, prompt_and_open_folder_with_policy,
 };
 use crate::workspace::{
     ClosePane, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, FilesActivate,
@@ -29,7 +30,7 @@ use crate::{
     OpenGithubRepo, OpenReportIssue, Quit,
 };
 use daruda_terminal::view::{Copy, Paste, SelectAll};
-use gpui::{App, KeyBinding};
+use gpui::{App, AppContext as _, KeyBinding};
 
 pub(crate) fn register_static_bindings(cx: &mut App) {
     cx.bind_keys([
@@ -187,17 +188,22 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.open_url(surface::strings::URL_GITHUB_REPO);
     });
 
-    // Global OpenFolder handler — picks a folder and either
-    // replaces the current workspace or opens a new window,
-    // depending on the action variant. `cx.stop_propagation()`
-    // blocks the action from re-firing in the focused Workspace's
-    // element tree (bubble phase runs after the global capture
-    // phase in GPUI's dispatch pipeline).
+    // Global OpenFolder handler — routes through the policy-aware
+    // chooser: AddHere adds to the current window, NewWindow opens a
+    // fresh one, Ask surfaces the chooser modal. A duplicate root that
+    // is already open in some window short-circuits to focusing that
+    // window. `cx.stop_propagation()` blocks the action from
+    // re-firing in the focused Workspace's element tree (bubble phase
+    // runs after the global capture phase in GPUI's dispatch pipeline).
     let cfg_for_open = config.clone();
     cx.on_action(move |_: &OpenFolder, cx: &mut App| {
-        prompt_and_open_folder(cfg_for_open.clone(), OpenMode::ReplaceCurrent, cx);
+        prompt_and_open_folder_with_policy(cfg_for_open.clone(), cx);
         cx.stop_propagation();
     });
+    // `cmd-shift-o` forces a new window regardless of policy — the
+    // duplicate-root focus shortcut still applies, so opening an
+    // already-open root in a new window is silently coalesced into
+    // focusing the existing window.
     let cfg_for_open_new = config.clone();
     cx.on_action(move |_: &OpenFolderInNewWindow, cx: &mut App| {
         prompt_and_open_folder(cfg_for_open_new.clone(), OpenMode::NewWindow, cx);
@@ -213,14 +219,65 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         cx.stop_propagation();
     });
 
-    // Global CloseProject handler — iTerm2 convention: close
-    // all Workspace windows and let the app stay alive in the
-    // background. User reopens via File > New Window / Open…
-    // / Open Recent / Dock-click. `QuitMode::Default` (macOS
-    // Explicit) keeps the app running past the last closed
-    // window so there's no need to auto-spawn welcome.
+    // Global CloseProject handler — surfaces the DeleteProjectModal
+    // so the user picks between "Remove from Daruda only" (safe) and
+    // "Remove worktrees and delete on disk" (destructive). The
+    // workspace mutation runs on the modal's submit callback.
+    //
+    // Fallback for "no active workspace" (e.g. only Welcome is open)
+    // is to close every Workspace window — matches the previous
+    // semantics so the user is never stuck with an unresponsive
+    // shortcut. `QuitMode::Default` (macOS Explicit) keeps the app
+    // running past the last closed window.
     cx.on_action(move |_: &CloseProject, cx: &mut App| {
-        close_all_workspace_windows(cx);
+        let Some((handle, weak)) = WindowRegistry::active_workspace(cx) else {
+            close_all_workspace_windows(cx);
+            cx.stop_propagation();
+            return;
+        };
+        let project_name = match weak.upgrade() {
+            Some(ws) => {
+                let read_res = cx.update_window(handle, |_, _, cx_w| {
+                    ws.read(cx_w).active_project_name().unwrap_or_default()
+                });
+                read_res.unwrap_or_default()
+            }
+            None => String::new(),
+        };
+        if project_name.is_empty() {
+            cx.stop_propagation();
+            return;
+        }
+        let weak_for_modal = weak.clone();
+        let _ = cx.update_window(handle, |_, window, cx_w| {
+            crate::workspace::delete_project_modal::open_delete_project_modal(
+                project_name,
+                move |choice, _window, app_cx| {
+                    let Some(ws) = weak_for_modal.upgrade() else {
+                        return;
+                    };
+                    let _ = app_cx.update_window(handle, |_, window, cx_w| {
+                        match choice {
+                            crate::workspace::delete_project_modal::DeleteProjectChoice::KeepOnDisk => {
+                                let keep =
+                                    ws.update(cx_w, |ws, cx| ws.close_active_project(window, cx));
+                                if !keep {
+                                    window.remove_window();
+                                    ensure_welcome_if_last(cx_w);
+                                }
+                            }
+                            crate::workspace::delete_project_modal::DeleteProjectChoice::DeleteOnDisk => {
+                                ws.update(cx_w, |ws, cx| {
+                                    ws.delete_active_project_on_disk(window, cx);
+                                });
+                            }
+                        }
+                    });
+                },
+                window,
+                cx_w,
+            );
+        });
         cx.stop_propagation();
     });
 }

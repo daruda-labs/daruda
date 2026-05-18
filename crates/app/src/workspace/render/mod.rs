@@ -306,9 +306,9 @@ impl Render for Workspace {
         // back through WeakEntity<Workspace>.
 
         // Ensure the file tree is primed before snapshotting its state.
-        let active_wt_id = self.active.worktree;
-        if !self.file_tree.file_trees.contains_key(&active_wt_id) {
-            self.ensure_file_tree(active_wt_id, cx);
+        let active_ref = self.active_ref();
+        if !self.file_tree.file_trees.contains_key(&active_ref) {
+            self.ensure_file_tree(active_ref, cx);
         }
 
         let left_snap = LeftDockSnapshot {
@@ -317,6 +317,44 @@ impl Render for Workspace {
                 .active_project()
                 .map(|p| gpui::SharedString::from(p.name.clone())),
             worktrees: self.active_worktrees().to_vec(),
+            projects: {
+                let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
+                    .projects
+                    .iter()
+                    .map(|p| crate::workspace::layout::snap::ProjectSnapshot {
+                        id: p.id,
+                        name: gpui::SharedString::from(p.name.clone()),
+                        group_id: p.group_id,
+                        color: p
+                            .color
+                            .as_ref()
+                            .map(|c| gpui::SharedString::from(c.clone())),
+                        tab_order: p.tab_order,
+                        worktrees: p.worktrees.clone(),
+                        last_active_worktree_id: p.last_active_worktree_id,
+                    })
+                    .collect();
+                projects.sort_by_key(|p| p.tab_order);
+                projects
+            },
+            groups: {
+                let mut groups: Vec<crate::workspace::layout::snap::GroupSnapshot> = self
+                    .groups
+                    .iter()
+                    .map(|g| crate::workspace::layout::snap::GroupSnapshot {
+                        id: g.id,
+                        name: gpui::SharedString::from(g.name.clone()),
+                        color: g
+                            .color
+                            .as_ref()
+                            .map(|c| gpui::SharedString::from(c.clone())),
+                        tab_order: g.tab_order,
+                        is_collapsed: g.is_collapsed,
+                    })
+                    .collect();
+                groups.sort_by_key(|g| g.tab_order);
+                groups
+            },
             active: self.active,
             active_tab_count: self.main_area.tabs.len(),
             git_status_cache: self.git_status_cache.clone(),
@@ -337,11 +375,11 @@ impl Render for Workspace {
             files_panel_focus: self.file_tree.files_panel_focus.clone(),
             files_scroll_handle: self.file_tree.files_scroll_handle.clone(),
             files_icon_color_mode: self.file_tree.files_icon_color_mode.clone(),
-            cached_visible: self.cached_or_rebuild_visible(active_wt_id),
+            cached_visible: self.cached_or_rebuild_visible(active_ref),
             root_kind: self
                 .file_tree
                 .file_trees
-                .get(&active_wt_id)
+                .get(&active_ref)
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
             // Sessions are only surfaced once the PtyTracker has

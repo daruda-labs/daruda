@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use gpui::{FocusHandle, Task, UniformListScrollHandle};
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::WorktreeRef;
 
 use super::file_tree_ops::{FilesReloadQueue, VisibleEntry};
 use crate::files::gitignore::GitignoreSet;
@@ -27,25 +27,24 @@ pub(in crate::workspace) struct FileTreeContext {
     /// directory layout, refreshed on expand and (W-7g) by the
     /// `notify` watcher.
     ///
-    /// Keyed by `WorktreeId` (active-project-local) for now; will be
-    /// promoted to `WorktreeRef` once the workspace holds multiple
-    /// projects (commit c onward).
-    pub(in crate::workspace) file_trees: HashMap<WorktreeId, FileTree>,
+    /// Keyed by `WorktreeRef { project, worktree }` so two projects can
+    /// each hold a worktree with id `0` without colliding.
+    pub(in crate::workspace) file_trees: HashMap<WorktreeRef, FileTree>,
 
     /// Cached flattened visible-row list per worktree, fed straight to
     /// `uniform_list`. Rebuilt only at the seven trigger points
     /// enumerated in `file_tree_ops`. Other `cx.notify()` calls reuse
     /// the existing `Arc`.
-    pub(in crate::workspace) files_visible_cache: HashMap<WorktreeId, Arc<Vec<VisibleEntry>>>,
+    pub(in crate::workspace) files_visible_cache: HashMap<WorktreeRef, Arc<Vec<VisibleEntry>>>,
 
     /// Per-worktree `notify` watcher. Created on first
     /// `ensure_file_tree`; dropped when the worktree is removed (the
     /// `notify` watcher in turn stops the kernel watch).
-    pub(in crate::workspace) file_watchers: HashMap<WorktreeId, FileTreeWatcher>,
+    pub(in crate::workspace) file_watchers: HashMap<WorktreeRef, FileTreeWatcher>,
 
     /// Per-worktree FIFO of pending reloads. The drain task is
     /// serial — at most one in-flight `load_dir` per worktree.
-    pub(in crate::workspace) files_reload_queues: HashMap<WorktreeId, FilesReloadQueue>,
+    pub(in crate::workspace) files_reload_queues: HashMap<WorktreeRef, FilesReloadQueue>,
 
     /// Workspace-level polling task that fans out across every
     /// `file_watchers` entry. Held in a field so it stops when the
@@ -80,7 +79,7 @@ pub(in crate::workspace) struct FileTreeContext {
     /// Compiled gitignore matcher per worktree. Built lazily in
     /// `ensure_file_tree`; rebuilt when `.gitignore` changes (watcher
     /// path filter inside `queue_files_event`).
-    pub(in crate::workspace) files_gitignore_index: HashMap<WorktreeId, GitignoreSet>,
+    pub(in crate::workspace) files_gitignore_index: HashMap<WorktreeRef, GitignoreSet>,
 
     /// Scroll handle shared between the `uniform_list` and the
     /// dock's scrollbar overlay. Cloning is cheap (shared `Rc`).

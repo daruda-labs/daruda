@@ -34,52 +34,68 @@ fn state_path_in(data_dir: &Path, root: &Path) -> PathBuf {
 // Project state — path-explicit API (use in tests / custom data dirs)
 // ============================================================================
 
-/// Save workspace state under `data_dir` atomically (tempfile + rename).
-///
-/// Accepts the legacy [`ProjectState`] shape for runtime compatibility
-/// during the multi-project rollout — internally promotes to the new
-/// [`WorkspaceState`] format before serialization, so the on-disk file
-/// is always the new shape going forward.
-pub fn save_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<()> {
+/// Save a [`WorkspaceState`] under `data_dir`, keyed by `root`,
+/// atomically (tempfile + rename). Production callers
+/// (`Workspace::persist_state`) write the same workspace state once
+/// per project root so opening any of them via the recent list
+/// restores the whole multi-project shape.
+pub fn save_workspace_state_in(
+    data_dir: &Path,
+    root: &Path,
+    state: &WorkspaceState,
+) -> std::io::Result<()> {
     let dir = projects_dir_in(data_dir);
-    let path = state_path_in(data_dir, &state.root);
-    let workspace = WorkspaceState::from_legacy(state.clone());
-    save_json_atomic(&dir, &path, &workspace)
+    let path = state_path_in(data_dir, root);
+    save_json_atomic(&dir, &path, state)
 }
 
-/// Load workspace state from `data_dir`. Missing file → `None`. Parse
-/// error → logged then `None` so the caller falls back to a fresh
-/// session.
+/// Load a [`WorkspaceState`] from `data_dir`. Missing file → `None`.
+/// Parse error → logged then `None` so the caller falls back to a
+/// fresh session.
 ///
 /// Tries the new [`WorkspaceState`] shape first and discriminates
 /// against legacy files via the `schema_version` field — new-shape
 /// files emit `WORKSPACE_SCHEMA_VERSION`, legacy files have no such
 /// key and decode as `0`. A genuinely-empty new-shape file (no
 /// projects, but schema_version set) therefore takes the new path,
-/// not the legacy fallback. Returns the primary project's flat view
-/// so runtime API stays unchanged while the disk format advances.
-pub fn load_state_in(data_dir: &Path, root: &Path) -> Option<ProjectState> {
+/// not the legacy fallback. Legacy [`ProjectState`] files are
+/// promoted via [`WorkspaceState::from_legacy`] so callers always
+/// receive the new shape.
+pub fn load_workspace_state_in(data_dir: &Path, root: &Path) -> Option<WorkspaceState> {
     let path = state_path_in(data_dir, root);
-    // Both shapes use `#[serde(default)]` on every field, so this
-    // first parse succeeds for legacy files too. We then dispatch on
-    // `schema_version` (legacy = 0) rather than guessing from emptiness.
     match load_json_file::<WorkspaceState>("project", &path) {
         LoadOutcome::Parsed(mut workspace) => {
             if workspace.schema_version > 0 {
                 workspace.migrate_legacy();
-                return Some(workspace.into_primary_project_state());
+                return Some(workspace);
             }
-            // Legacy file: re-parse as `ProjectState` and migrate.
+            // Legacy file: re-parse as `ProjectState` and promote.
             match load_json_file::<ProjectState>("project", &path) {
-                LoadOutcome::Parsed(mut state) => {
-                    state.migrate_legacy();
-                    Some(state)
+                LoadOutcome::Parsed(state) => {
+                    let mut ws = WorkspaceState::from_legacy(state);
+                    ws.migrate_legacy();
+                    Some(ws)
                 }
                 LoadOutcome::Missing | LoadOutcome::Corrupt => None,
             }
         }
         LoadOutcome::Missing | LoadOutcome::Corrupt => None,
     }
+}
+
+/// Backward-compatible single-project save. Accepts the legacy
+/// [`ProjectState`] shape, promotes via [`WorkspaceState::from_legacy`],
+/// and writes the new-shape file.
+pub fn save_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<()> {
+    let workspace = WorkspaceState::from_legacy(state.clone());
+    save_workspace_state_in(data_dir, &state.root, &workspace)
+}
+
+/// Backward-compatible single-project load. Returns the primary
+/// project's flat view via [`WorkspaceState::into_primary_project_state`]
+/// so test code that still constructs [`ProjectState`] keeps working.
+pub fn load_state_in(data_dir: &Path, root: &Path) -> Option<ProjectState> {
+    load_workspace_state_in(data_dir, root).map(|ws| ws.into_primary_project_state())
 }
 
 /// Delete a project's state file under `data_dir`.
@@ -146,6 +162,14 @@ pub fn save_state(state: &ProjectState) -> std::io::Result<()> {
 /// `migrate_legacy` so the returned state always uses the worktree shape.
 pub fn load_state(root: &Path) -> Option<ProjectState> {
     load_state_in(&crate::persistence::default_data_dir(), root)
+}
+
+/// Load the full multi-project [`WorkspaceState`] from disk. Production
+/// callers use this directly; the [`load_state`] adapter is kept for
+/// the welcome / recent-list paths that still hand the runtime a single
+/// flat [`ProjectState`].
+pub fn load_workspace_state(root: &Path) -> Option<WorkspaceState> {
+    load_workspace_state_in(&crate::persistence::default_data_dir(), root)
 }
 
 /// Delete a project's state file.

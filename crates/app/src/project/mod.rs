@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use daruda_store::project::{
     GroupId, ProjectId, SerializedProject, WorktreeId, WorktreeRef, derive_name_from_path,
 };
+use gpui::BackgroundExecutor;
 
 use crate::worktree::Worktree;
 
@@ -117,6 +118,41 @@ impl Project {
             worktree: w.id,
         })
     }
+
+    /// Bootstrap N projects in parallel on `executor`. Each root spawns
+    /// its own blocking task (the underlying `bootstrap_from_project`
+    /// shells out to `git worktree list`), so the wall-time of restoring
+    /// a multi-project workspace converges on `max(times)` instead of
+    /// `sum(times)`.
+    ///
+    /// `ids` is paired with `roots` so each spawned `Project` lands on
+    /// its persisted [`ProjectId`] rather than the default `0`. Caller
+    /// must ensure `ids.len() == roots.len()`; mismatched lengths panic
+    /// to prevent silent re-id of the wrong project.
+    pub async fn bootstrap_many(
+        ids: Vec<ProjectId>,
+        roots: Vec<PathBuf>,
+        executor: &BackgroundExecutor,
+    ) -> Vec<Project> {
+        assert_eq!(
+            ids.len(),
+            roots.len(),
+            "bootstrap_many: ids and roots length mismatch"
+        );
+        if roots.is_empty() {
+            return Vec::new();
+        }
+        let tasks: Vec<_> = ids
+            .into_iter()
+            .zip(roots.into_iter())
+            .map(|(id, root)| executor.spawn(async move { Project::bootstrap(id, root) }))
+            .collect();
+        let mut out = Vec::with_capacity(tasks.len());
+        for t in tasks {
+            out.push(t.await);
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +182,33 @@ mod tests {
         assert_eq!(snap.project, 7);
         assert_eq!(snap.worktree, p.worktrees[0].id);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[gpui::test]
+    async fn bootstrap_many_assigns_each_id(cx: &mut gpui::TestAppContext) {
+        let dir_a = std::env::temp_dir().join("daruda_bootstrap_many_a");
+        let dir_b = std::env::temp_dir().join("daruda_bootstrap_many_b");
+        let _ = std::fs::remove_dir_all(&dir_a);
+        let _ = std::fs::remove_dir_all(&dir_b);
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        let executor = cx.executor();
+        let projects =
+            Project::bootstrap_many(vec![3, 5], vec![dir_a.clone(), dir_b.clone()], &executor)
+                .await;
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].id, 3);
+        assert_eq!(projects[0].root, dir_a);
+        assert_eq!(projects[1].id, 5);
+        assert_eq!(projects[1].root, dir_b);
+        let _ = std::fs::remove_dir_all(&dir_a);
+        let _ = std::fs::remove_dir_all(&dir_b);
+    }
+
+    #[gpui::test]
+    async fn bootstrap_many_empty_returns_empty(cx: &mut gpui::TestAppContext) {
+        let executor = cx.executor();
+        let projects = Project::bootstrap_many(Vec::new(), Vec::new(), &executor).await;
+        assert!(projects.is_empty());
     }
 }

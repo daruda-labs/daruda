@@ -187,6 +187,52 @@ impl WindowRegistry {
             .map(|(h, _)| *h)
     }
 
+    /// Return `(handle, weak_entity)` for the active workspace. Used by
+    /// the global `OpenFolder` / `CloseProject` action handlers to enter
+    /// the workspace and mutate it (add a project, close one) without
+    /// looping the entire registry.
+    pub(crate) fn active_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
+        let active = cx.active_window()?;
+        cx.try_global::<WindowRegistry>()?
+            .workspaces
+            .iter()
+            .find(|(h, _)| *h == active)
+            .map(|(h, w)| (*h, w.clone()))
+    }
+
+    /// Find a workspace window that already hosts a project at `root`.
+    ///
+    /// Walks every registered Workspace and inspects each project's
+    /// `root` path. Returns the first match so the caller can focus the
+    /// existing window instead of opening a duplicate. Used by the
+    /// "Open Project" flow when the user picks a folder that is already
+    /// open somewhere — policy is ignored and the live window wins.
+    pub(crate) fn find_workspace_by_root(
+        cx: &mut App,
+        root: &std::path::Path,
+    ) -> Option<AnyWindowHandle> {
+        let pairs: Vec<(AnyWindowHandle, WeakEntity<Workspace>)> = cx
+            .try_global::<WindowRegistry>()
+            .map(|r| r.workspaces.clone())
+            .unwrap_or_default();
+        let mut found: Option<AnyWindowHandle> = None;
+        for (handle, weak) in pairs {
+            if found.is_some() {
+                break;
+            }
+            let _ = cx.update_window(handle, |_root, _window, cx_w| {
+                let Some(ws) = weak.upgrade() else {
+                    return;
+                };
+                let matched = ws.read(cx_w).has_project_root(root);
+                if matched {
+                    found = Some(handle);
+                }
+            });
+        }
+        found
+    }
+
     /// Record the live Settings singleton. Called from
     /// `SettingsWindow::new_with_section` so the entry is in place before the
     /// first render. Replaces any previous entry (the caller path guarantees

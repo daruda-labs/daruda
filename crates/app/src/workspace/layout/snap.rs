@@ -26,16 +26,66 @@ use crate::workspace::Workspace;
 // Left dock
 // ----------------------------------------------------------------
 
+/// Plain-data snapshot of one project for the left-dock worktrees
+/// tree. Mirrors the runtime [`crate::project::Project`] fields the
+/// render needs, plus the worktrees list copied by value so dock
+/// render can iterate without re-entering the workspace entity.
+#[derive(Clone)]
+pub(in crate::workspace) struct ProjectSnapshot {
+    pub id: daruda_store::project::ProjectId,
+    pub name: gpui::SharedString,
+    /// Group membership. When `Some`, the project renders nested under
+    /// its group's accordion in the left dock; ungrouped projects sit
+    /// at the top level.
+    pub group_id: Option<daruda_store::project::GroupId>,
+    /// Per-project tint surfaced by the upcoming group/project chrome.
+    /// Render layer does not consume it yet.
+    #[allow(dead_code)]
+    pub color: Option<gpui::SharedString>,
+    pub tab_order: u32,
+    pub worktrees: Vec<crate::worktree::Worktree>,
+    /// Last-active worktree id, mirrored from the runtime project so
+    /// future tab restore can avoid an entity read. Unused until that
+    /// path lands.
+    #[allow(dead_code)]
+    pub last_active_worktree_id: daruda_store::project::WorktreeId,
+}
+
+/// Plain-data snapshot of one group for the left-dock tree.
+///
+/// Drives the accordion header rendered in the Worktrees view: caret
+/// flips on `is_collapsed`, optional color dot keyed off `color`, and
+/// member projects fold/unfold based on the same flag.
+#[derive(Clone)]
+pub(in crate::workspace) struct GroupSnapshot {
+    pub id: daruda_store::project::GroupId,
+    pub name: gpui::SharedString,
+    pub color: Option<gpui::SharedString>,
+    pub tab_order: u32,
+    pub is_collapsed: bool,
+}
+
 /// Point-in-time copy of `Workspace` fields consumed by the left
 /// dock's `impl Render`.
 pub(in crate::workspace) struct LeftDockSnapshot {
     pub left_dock_view: daruda_store::project::LeftDockView,
-    /// Display name of the active project. Surfaced as a single-row
-    /// header above the worktrees list so the flat W-2 list still
-    /// communicates which project the rows belong to ahead of the
-    /// commit-f 2-level tree refactor.
+    /// Display name of the active project. Superseded by per-project
+    /// headers driven off `projects` once the multi-project tree
+    /// landed; kept around so any pending consumer (status bar,
+    /// header rebuilds) can still read it. Unused inside the
+    /// worktrees view itself.
+    #[allow(dead_code)]
     pub active_project_name: Option<gpui::SharedString>,
     pub worktrees: Vec<crate::worktree::Worktree>,
+    /// Every project in the workspace, in `tab_order` order. Drives
+    /// the multi-project tree render — each entry's `worktrees` slice
+    /// is shown under its project header. Empty when the workspace is
+    /// in the Welcome state.
+    pub projects: Vec<ProjectSnapshot>,
+    /// Every group in the workspace, in `tab_order` order. Group
+    /// headers interleave with ungrouped projects in the top-level
+    /// tree via the shared `tab_order` pool.
+    pub groups: Vec<GroupSnapshot>,
     pub active: daruda_store::project::WorktreeRef,
     pub active_tab_count: usize,
     pub git_status_cache: std::collections::HashMap<
