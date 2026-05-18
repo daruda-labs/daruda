@@ -29,6 +29,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::system_info;
+use crate::project::ProjectId;
 
 /// Severity buckets driving toast colour, auto-dismiss timer, and log
 /// filtering.
@@ -99,6 +100,12 @@ pub struct ErrorReport {
     pub dedup_key: Option<String>,
     /// Severity bucket (toast colour + auto-dismiss).
     pub severity: ErrorSeverity,
+    /// Project the failure is attributable to, when the workspace has
+    /// more than one project loaded. Populated by callers in the app
+    /// crate once the multi-project runtime lands; emitted to the
+    /// NDJSON log so post-mortems can group errors by project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
 }
 
 impl ErrorReport {
@@ -116,6 +123,7 @@ impl ErrorReport {
             context: BTreeMap::new(),
             dedup_key: None,
             severity: ErrorSeverity::Error,
+            project_id: None,
         }
     }
 
@@ -243,6 +251,7 @@ pub struct ErrorReportBuilder {
     context: BTreeMap<String, String>,
     dedup_key: Option<String>,
     severity: ErrorSeverity,
+    project_id: Option<ProjectId>,
 }
 
 impl ErrorReportBuilder {
@@ -291,6 +300,14 @@ impl ErrorReportBuilder {
         self
     }
 
+    /// Tag the report with the [`ProjectId`] the failure is attributable
+    /// to. Only meaningful once the workspace has more than one project
+    /// loaded; single-project callers leave this unset.
+    pub fn project_id(mut self, id: ProjectId) -> Self {
+        self.project_id = Some(id);
+        self
+    }
+
     /// Inherit message + source chain from an existing error. The
     /// builder's message slot is overwritten only if currently empty.
     pub fn from_error<E: Error + ?Sized>(mut self, err: &E) -> Self {
@@ -317,6 +334,7 @@ impl ErrorReportBuilder {
             timestamp: Utc::now(),
             dedup_key: self.dedup_key,
             severity: self.severity,
+            project_id: self.project_id,
         }
     }
 }
@@ -478,6 +496,35 @@ mod tests {
         assert!(!txt.contains("context:"));
         assert!(!txt.contains("backtrace:"));
         assert!(!txt.contains("location:"));
+    }
+
+    #[test]
+    fn project_id_is_attached_via_builder_and_round_trips() {
+        let r = ErrorReport::new("Worktree probe failed")
+            .severity(ErrorSeverity::Warning)
+            .message("permission denied")
+            .project_id(7)
+            .build();
+        assert_eq!(r.project_id, Some(7));
+
+        let line = r.to_ndjson_line();
+        let trimmed = line.trim_end_matches('\n');
+        let value: serde_json::Value = serde_json::from_str(trimmed).expect("valid JSON");
+        assert_eq!(value["project_id"], 7);
+
+        let parsed: ErrorReport = serde_json::from_str(trimmed).expect("deserializes");
+        assert_eq!(parsed.project_id, Some(7));
+    }
+
+    #[test]
+    fn project_id_absent_is_omitted_from_json() {
+        let r = ErrorReport::new("Bare").build();
+        assert!(r.project_id.is_none());
+        let line = r.to_ndjson_line();
+        assert!(
+            !line.contains("\"project_id\""),
+            "absent project_id must not be serialized, got: {line}"
+        );
     }
 
     #[test]

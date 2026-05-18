@@ -1017,6 +1017,397 @@ fn save_then_load_applies_migration_for_legacy_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ============================================================================
+// WorkspaceState — new multi-project shape
+// ============================================================================
+
+fn sample_default_worktree(id: WorktreeId, path: &str) -> SerializedWorktree {
+    SerializedWorktree::default_for_path(id, PathBuf::from(path))
+}
+
+fn sample_workspace_state() -> WorkspaceState {
+    WorkspaceState {
+        projects: vec![SerializedProject {
+            id: 0,
+            root: PathBuf::from("/tmp/wsproj"),
+            name: "wsproj".into(),
+            color: None,
+            tab_order: 0,
+            group_id: None,
+            worktrees: vec![sample_default_worktree(0, "/tmp/wsproj")],
+            last_active_worktree_id: 0,
+        }],
+        groups: Vec::new(),
+        active: WorktreeRef {
+            project: 0,
+            worktree: 0,
+        },
+        next_project_id: 1,
+        next_group_id: 0,
+        window_open_policy: WindowOpenPolicy::default(),
+        focused_pane_id: 0,
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
+        active_usage_window: UsageWindow::default(),
+        docks: DockStates::default(),
+        window: WindowState::default(),
+        window_user_label: None,
+        font_size: 13.0,
+        vertical_spacing: 1.0,
+        horizontal_spacing: 1.0,
+    }
+}
+
+#[test]
+fn workspace_state_round_trip_preserves_shape() {
+    let state = sample_workspace_state();
+    let json = serde_json::to_string(&state).unwrap();
+    // New on-disk shape must use the `projects` key — distinguishes
+    // it from the legacy flat layout at load time.
+    assert!(json.contains("\"projects\""));
+    let back: WorkspaceState = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.projects.len(), 1);
+    assert_eq!(back.projects[0].id, 0);
+    assert_eq!(back.active.project, 0);
+    assert_eq!(back.active.worktree, 0);
+    assert_eq!(back.next_project_id, 1);
+}
+
+#[test]
+fn workspace_state_serializes_groups_and_group_id() {
+    let mut state = sample_workspace_state();
+    state.groups.push(SerializedGroup {
+        id: 0,
+        name: "Frontend work".into(),
+        color: Some("#ff8800".into()),
+        tab_order: 0,
+        is_collapsed: false,
+    });
+    state.next_group_id = 1;
+    state.projects[0].group_id = Some(0);
+
+    let json = serde_json::to_string(&state).unwrap();
+    let back: WorkspaceState = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.groups.len(), 1);
+    assert_eq!(back.groups[0].name, "Frontend work");
+    assert_eq!(back.projects[0].group_id, Some(0));
+    assert_eq!(back.next_group_id, 1);
+}
+
+#[test]
+fn worktree_ref_default_is_zero_zero() {
+    let r = WorktreeRef::default();
+    assert_eq!(r.project, 0);
+    assert_eq!(r.worktree, 0);
+}
+
+#[test]
+fn window_open_policy_default_is_ask() {
+    assert_eq!(WindowOpenPolicy::default(), WindowOpenPolicy::Ask);
+    let json = serde_json::to_string(&WindowOpenPolicy::AddHere).unwrap();
+    assert_eq!(json, "\"add_here\"");
+    let json = serde_json::to_string(&WindowOpenPolicy::NewWindow).unwrap();
+    assert_eq!(json, "\"new_window\"");
+}
+
+// ---- Migration: 3 legacy cases per the rollout plan ----
+
+#[test]
+fn migration_case_a_top_level_tabs_only_folds_into_default_worktree() {
+    // Case (A): pre-worktree files have only top-level `tabs`.
+    // `from_legacy` must fold them into a single Default worktree
+    // under a single project.
+    let mut legacy = legacy_state_with_tabs(vec![sample_tab(1), sample_tab(2)]);
+    legacy.active_tab_index = 1;
+    let ws = WorkspaceState::from_legacy(legacy);
+
+    assert_eq!(ws.projects.len(), 1);
+    let project = &ws.projects[0];
+    assert_eq!(project.id, 0);
+    assert_eq!(project.root, PathBuf::from("/tmp/legacy"));
+    assert_eq!(project.worktrees.len(), 1);
+    let wt = &project.worktrees[0];
+    assert_eq!(wt.kind, WorktreeKind::Default);
+    assert_eq!(wt.tabs.len(), 2);
+    assert_eq!(wt.active_tab_index, 1);
+    assert_eq!(ws.active.project, 0);
+    assert_eq!(ws.active.worktree, wt.id);
+    assert_eq!(ws.next_project_id, 1);
+}
+
+#[test]
+fn migration_case_b_worktrees_without_project_shape() {
+    // Case (B): files already on the worktree shape but predating the
+    // project wrapper. `from_legacy` keeps the worktrees verbatim and
+    // wraps them in one project.
+    let worktree = SerializedWorktree {
+        id: 5,
+        kind: WorktreeKind::Git {
+            branch: Some("main".into()),
+            repo_root: PathBuf::from("/tmp/repo"),
+            worktree_root: PathBuf::from("/tmp/repo"),
+        },
+        path: PathBuf::from("/tmp/repo"),
+        name: None,
+        tab_order: 0,
+        is_unread: false,
+        last_activity: 0,
+        tabs: vec![sample_tab(9)],
+        active_tab_index: 0,
+        base_ref: None,
+        description: None,
+    };
+    let legacy = ProjectState {
+        root: PathBuf::from("/tmp/repo"),
+        worktrees: vec![worktree.clone()],
+        active_worktree_id: 5,
+        active_dock_view: LeftDockView::default(),
+        active_right_panel_view: RightDockView::default(),
+        active_usage_window: UsageWindow::default(),
+        tabs: Vec::new(),
+        active_tab_index: 0,
+        focused_pane_id: 9,
+        docks: DockStates::default(),
+        window: WindowState::default(),
+        window_user_label: None,
+        font_size: 13.0,
+        vertical_spacing: 1.0,
+        horizontal_spacing: 1.0,
+    };
+    let ws = WorkspaceState::from_legacy(legacy);
+    assert_eq!(ws.projects.len(), 1);
+    assert_eq!(ws.projects[0].worktrees.len(), 1);
+    assert_eq!(ws.projects[0].worktrees[0].id, 5);
+    assert_eq!(ws.projects[0].last_active_worktree_id, 5);
+    assert_eq!(ws.active.worktree, 5);
+}
+
+#[test]
+fn migration_case_c_partial_new_shape_is_idempotent() {
+    // Case (C): a previous run wrote the new shape but with stale
+    // pointers (e.g. user deleted a project on disk). `migrate_legacy`
+    // is idempotent — running it twice yields the same JSON. The active
+    // ref normalizes onto the first available project / worktree.
+    let mut ws = sample_workspace_state();
+    ws.active.project = 99; // stale — no such project
+    ws.active.worktree = 42; // stale — no such worktree
+    ws.migrate_legacy();
+    let snapshot = serde_json::to_string(&ws).unwrap();
+
+    // Active should have snapped onto the surviving entry.
+    assert_eq!(ws.active.project, 0);
+    assert_eq!(ws.active.worktree, 0);
+
+    ws.migrate_legacy();
+    let after = serde_json::to_string(&ws).unwrap();
+    assert_eq!(snapshot, after);
+}
+
+#[test]
+fn normalize_active_falls_back_to_last_active_worktree_id() {
+    let mut ws = sample_workspace_state();
+    // Add a second worktree and set it as last_active.
+    ws.projects[0].worktrees.push(SerializedWorktree {
+        id: 7,
+        ..sample_default_worktree(7, "/tmp/wsproj/sidekick")
+    });
+    ws.projects[0].last_active_worktree_id = 7;
+    // Set active.worktree to a stale id.
+    ws.active.worktree = 999;
+
+    ws.normalize_active();
+    assert_eq!(ws.active.worktree, 7);
+}
+
+#[test]
+fn normalize_active_falls_back_to_worktrees_first_when_no_last_active() {
+    let mut ws = sample_workspace_state();
+    ws.projects[0].worktrees.push(SerializedWorktree {
+        id: 7,
+        ..sample_default_worktree(7, "/tmp/wsproj/sidekick")
+    });
+    ws.projects[0].last_active_worktree_id = 555; // also stale
+    ws.active.worktree = 999; // stale
+
+    ws.normalize_active();
+    // Falls back to the first worktree's id.
+    assert_eq!(ws.active.worktree, 0);
+}
+
+#[test]
+fn normalize_active_with_no_projects_resets_to_default() {
+    let mut ws = WorkspaceState {
+        active: WorktreeRef {
+            project: 99,
+            worktree: 99,
+        },
+        ..WorkspaceState::default()
+    };
+    ws.normalize_active();
+    assert_eq!(ws.active, WorktreeRef::default());
+}
+
+#[test]
+fn ensure_counters_advance_ratchets_past_max_id() {
+    // Hand-craft a state where stored counters trail the actual IDs.
+    let mut ws = sample_workspace_state();
+    ws.projects.push(SerializedProject {
+        id: 10,
+        root: PathBuf::from("/tmp/p10"),
+        name: "p10".into(),
+        color: None,
+        tab_order: 1,
+        group_id: None,
+        worktrees: Vec::new(),
+        last_active_worktree_id: 0,
+    });
+    ws.next_project_id = 1; // wrong — would collide with id=10's successor
+
+    ws.groups.push(SerializedGroup {
+        id: 4,
+        name: "g4".into(),
+        color: None,
+        tab_order: 0,
+        is_collapsed: false,
+    });
+    ws.next_group_id = 0; // also wrong
+
+    ws.ensure_counters_advance();
+    assert_eq!(ws.next_project_id, 11, "next_project_id must exceed max id");
+    assert_eq!(ws.next_group_id, 5, "next_group_id must exceed max id");
+}
+
+#[test]
+fn into_primary_project_state_preserves_chrome() {
+    let mut ws = sample_workspace_state();
+    ws.font_size = 16.0;
+    ws.vertical_spacing = 1.3;
+    ws.horizontal_spacing = 1.1;
+    ws.docks.left_open = true;
+    ws.docks.left_size = 240.0;
+    ws.window_user_label = Some("hello".into());
+    let project_root = ws.projects[0].root.clone();
+    let legacy = ws.into_primary_project_state();
+    assert_eq!(legacy.root, project_root);
+    assert_eq!(legacy.font_size, 16.0);
+    assert!(legacy.docks.left_open);
+    assert_eq!(legacy.docks.left_size, 240.0);
+    assert_eq!(legacy.window_user_label.as_deref(), Some("hello"));
+    assert_eq!(legacy.worktrees.len(), 1);
+    assert_eq!(legacy.active_worktree_id, 0);
+}
+
+#[test]
+fn into_primary_project_state_with_empty_workspace_is_blank() {
+    let ws = WorkspaceState::default();
+    let legacy = ws.into_primary_project_state();
+    assert!(legacy.worktrees.is_empty());
+    assert_eq!(legacy.root, PathBuf::new());
+}
+
+#[test]
+fn primary_project_returns_active_or_first() {
+    let mut ws = sample_workspace_state();
+    // Single project — active points at it.
+    assert!(ws.primary_project().is_some());
+    assert_eq!(ws.primary_project().unwrap().id, 0);
+
+    // Active stale → fall back to first project.
+    ws.active.project = 999;
+    assert_eq!(ws.primary_project().unwrap().id, 0);
+
+    // Empty projects → None.
+    ws.projects.clear();
+    assert!(ws.primary_project().is_none());
+}
+
+#[test]
+fn save_workspace_state_persists_new_shape_to_disk() {
+    let dir = std::env::temp_dir().join("daruda_test_workspace_state_save");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let data_dir = dir.join("data");
+    let root = dir.join("project");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut state = legacy_state_with_tabs(vec![sample_tab(1)]);
+    state.root = root.clone();
+    state.migrate_legacy();
+    persistence::save_state_in(&data_dir, &state).unwrap();
+
+    // The file on disk must use the new shape — verify by reading raw.
+    let hash = path_hash(&root);
+    let path = data_dir.join("projects").join(format!("{hash}.json"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        raw.contains("\"projects\""),
+        "saved JSON must use the new shape, got: {raw}"
+    );
+    assert!(
+        raw.contains("\"window_open_policy\""),
+        "saved JSON must include the new window_open_policy field"
+    );
+
+    // Load round-trips back into the legacy struct via the adapter so
+    // app-side runtime sees identical data.
+    let loaded = persistence::load_state_in(&data_dir, &root).expect("load should succeed");
+    assert_eq!(loaded.root, root);
+    assert_eq!(loaded.worktrees.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_legacy_json_returns_migrated_project_state() {
+    // A handwritten legacy file (no `projects` field) must still load —
+    // persistence falls back to parsing as `ProjectState` and migrates.
+    let dir = std::env::temp_dir().join("daruda_test_workspace_state_legacy_load");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let data_dir = dir.join("data");
+    let root = dir.join("legacy_project");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let projects_dir = data_dir.join("projects");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let hash = path_hash(&root);
+    let path = projects_dir.join(format!("{hash}.json"));
+    let legacy_json = format!(
+        r#"{{
+            "root": "{}",
+            "tabs": [
+                {{
+                    "layout": {{ "type": "Leaf", "pane_id": 1, "cwd": "{}" }},
+                    "last_focused_pane": 1
+                }}
+            ],
+            "active_tab_index": 0,
+            "focused_pane_id": 1,
+            "docks": {{
+                "left_open": false, "left_size": 0.0,
+                "bottom_open": false, "bottom_size": 0.0,
+                "right_open": false, "right_size": 0.0
+            }},
+            "window": {{ "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0 }},
+            "font_size": 13.0,
+            "vertical_spacing": 1.0,
+            "horizontal_spacing": 1.0
+        }}"#,
+        root.display(),
+        root.display(),
+    );
+    std::fs::write(&path, legacy_json).unwrap();
+
+    let loaded = persistence::load_state_in(&data_dir, &root).expect("legacy file must load");
+    assert_eq!(loaded.root, root);
+    assert_eq!(loaded.worktrees.len(), 1);
+    assert_eq!(loaded.worktrees[0].tabs.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn touch_and_load_recent_integration() {
     let dir = std::env::temp_dir().join("daruda_test_touch_recent");

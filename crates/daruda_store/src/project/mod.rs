@@ -2,6 +2,16 @@
 //!
 //! A **project** is a root directory plus saved workspace state. This
 //! crate is GPUI-free so persistence logic stays unit-testable.
+//!
+//! Two on-disk shapes coexist during the multi-project rollout:
+//!
+//! - [`ProjectState`] — the legacy flat shape (single project per file).
+//!   Still used by the app crate's runtime; persistence converts to/from
+//!   it transparently.
+//! - [`WorkspaceState`] — the new shape with `projects: Vec<SerializedProject>`,
+//!   `groups: Vec<SerializedGroup>`, and a [`WorktreeRef`]-based active
+//!   pointer. Written to disk going forward; legacy files are migrated
+//!   on load.
 
 pub mod persistence;
 pub mod worktree;
@@ -17,6 +27,16 @@ pub use worktree::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Stable identifier for a project within a workspace. Monotonic per
+/// workspace — deleted IDs are never reused so stale references fail
+/// the [`WorkspaceState::normalize_active`] lookup instead of silently
+/// targeting a different project.
+pub type ProjectId = u64;
+
+/// Stable identifier for a group within a workspace. Same monotonic
+/// rule as [`ProjectId`].
+pub type GroupId = u64;
+
 /// A project = a root directory.
 #[derive(Clone, Debug)]
 pub struct Project {
@@ -28,13 +48,19 @@ impl Project {
     /// Create a project from a directory path. Name = last path component.
     pub fn from_path(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        let name = root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("untitled")
-            .to_string();
+        let name = derive_name_from_path(&root);
         Self { root, name }
     }
+}
+
+/// Compute a display name from a filesystem path — last path component,
+/// or `"untitled"` for root / empty paths. Shared by [`Project::from_path`]
+/// and [`WorkspaceState::from_legacy`] so both paths produce identical names.
+fn derive_name_from_path(root: &Path) -> String {
+    root.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("untitled")
+        .to_string()
 }
 
 // ============================================================================
@@ -139,6 +165,309 @@ impl ProjectState {
         };
         self.active_worktree_id = worktree.id;
         self.worktrees.push(worktree);
+    }
+}
+
+// ============================================================================
+// Multi-project / Group shape (forward-only — written to disk going forward;
+// legacy `ProjectState` files migrate on load via `WorkspaceState::from_legacy`).
+// ============================================================================
+
+/// Active-tab pointer in the multi-project model. A workspace always
+/// points at exactly one (project, worktree) pair; an invalid pair is
+/// repaired by [`WorkspaceState::normalize_active`] at load time so
+/// downstream code never has to handle dangling refs.
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeRef {
+    pub project: ProjectId,
+    pub worktree: WorktreeId,
+}
+
+/// User policy for the "Open Project…" affordance. Persists across
+/// launches so the user can opt out of the modal by ticking "Don't
+/// ask again" once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowOpenPolicy {
+    /// Show the chooser modal (default).
+    #[default]
+    Ask,
+    /// Always add the new project to the current window.
+    AddHere,
+    /// Always open the new project in a fresh window.
+    NewWindow,
+}
+
+/// User-defined group of projects in the left dock. Groups carry only
+/// visual metadata (name, optional color, collapsed state, tab order);
+/// projects reference their group via [`SerializedProject::group_id`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SerializedGroup {
+    pub id: GroupId,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub tab_order: u32,
+    #[serde(default)]
+    pub is_collapsed: bool,
+}
+
+/// A project entry inside [`WorkspaceState`]. Each project owns its own
+/// worktrees and tracks which worktree was last active so clicking the
+/// project header in the left dock can snap to that worktree.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SerializedProject {
+    pub id: ProjectId,
+    pub root: PathBuf,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub tab_order: u32,
+    /// `None` = ungrouped (rendered at top level alongside groups in
+    /// the same `tab_order` pool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<GroupId>,
+    #[serde(default)]
+    pub worktrees: Vec<SerializedWorktree>,
+    /// Last worktree the user activated inside this project. Used as a
+    /// snap hint when the project becomes active without a specific
+    /// worktree pick.
+    #[serde(default)]
+    pub last_active_worktree_id: WorktreeId,
+}
+
+/// Workspace-level persisted state — a list of projects + optional
+/// groups + workspace chrome. Replaces the flat per-project [`ProjectState`]
+/// as the on-disk shape going forward.
+///
+/// `migrate_legacy` and the persistence layer translate older JSON
+/// (top-level `tabs` only, or `worktrees` without project framing) into
+/// this shape transparently, so callers always see a normalized struct.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceState {
+    #[serde(default)]
+    pub projects: Vec<SerializedProject>,
+    #[serde(default)]
+    pub groups: Vec<SerializedGroup>,
+    #[serde(default)]
+    pub active: WorktreeRef,
+    /// Monotonic counter for the next [`ProjectId`] to mint. Persisted
+    /// so deletions never recycle IDs across sessions — stale refs from
+    /// other state (recents, error reports, ...) stay distinguishable.
+    #[serde(default)]
+    pub next_project_id: ProjectId,
+    /// Same monotonic rule as `next_project_id`, for groups.
+    #[serde(default)]
+    pub next_group_id: GroupId,
+    #[serde(default)]
+    pub window_open_policy: WindowOpenPolicy,
+
+    // -- Workspace chrome — shared across projects within this window.
+    #[serde(default)]
+    pub focused_pane_id: u64,
+    #[serde(default)]
+    pub active_dock_view: LeftDockView,
+    #[serde(default)]
+    pub active_right_panel_view: RightDockView,
+    #[serde(default)]
+    pub active_usage_window: UsageWindow,
+    #[serde(default)]
+    pub docks: DockStates,
+    #[serde(default)]
+    pub window: WindowState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_user_label: Option<String>,
+    #[serde(default)]
+    pub font_size: f32,
+    #[serde(default)]
+    pub vertical_spacing: f32,
+    #[serde(default)]
+    pub horizontal_spacing: f32,
+}
+
+impl Default for WorkspaceState {
+    fn default() -> Self {
+        Self {
+            projects: Vec::new(),
+            groups: Vec::new(),
+            active: WorktreeRef::default(),
+            next_project_id: 0,
+            next_group_id: 0,
+            window_open_policy: WindowOpenPolicy::default(),
+            focused_pane_id: 0,
+            active_dock_view: LeftDockView::default(),
+            active_right_panel_view: RightDockView::default(),
+            active_usage_window: UsageWindow::default(),
+            docks: DockStates::default(),
+            window: WindowState::default(),
+            window_user_label: None,
+            font_size: 0.0,
+            vertical_spacing: 0.0,
+            horizontal_spacing: 0.0,
+        }
+    }
+}
+
+impl WorkspaceState {
+    /// Convert a legacy [`ProjectState`] into the new shape. Runs the
+    /// caller's `migrate_legacy` so any pre-worktree `tabs` are folded
+    /// into a default worktree first, then wraps the result in a single
+    /// `SerializedProject` (id `0`, derived name).
+    pub fn from_legacy(mut legacy: ProjectState) -> Self {
+        legacy.migrate_legacy();
+        let project_id: ProjectId = 0;
+        let active_worktree = legacy.active_worktree_id;
+        let project = SerializedProject {
+            id: project_id,
+            root: legacy.root.clone(),
+            name: derive_name_from_path(&legacy.root),
+            color: None,
+            tab_order: 0,
+            group_id: None,
+            last_active_worktree_id: active_worktree,
+            worktrees: legacy.worktrees,
+        };
+        Self {
+            projects: vec![project],
+            groups: Vec::new(),
+            active: WorktreeRef {
+                project: project_id,
+                worktree: active_worktree,
+            },
+            next_project_id: 1,
+            next_group_id: 0,
+            window_open_policy: WindowOpenPolicy::default(),
+            focused_pane_id: legacy.focused_pane_id,
+            active_dock_view: legacy.active_dock_view,
+            active_right_panel_view: legacy.active_right_panel_view,
+            active_usage_window: legacy.active_usage_window,
+            docks: legacy.docks,
+            window: legacy.window,
+            window_user_label: legacy.window_user_label,
+            font_size: legacy.font_size,
+            vertical_spacing: legacy.vertical_spacing,
+            horizontal_spacing: legacy.horizontal_spacing,
+        }
+    }
+
+    /// Collapse to the legacy single-project shape — used by the
+    /// persistence layer to keep the app crate's runtime API stable
+    /// during the multi-project rollout. Picks the primary project
+    /// (first by `tab_order`, then by index) and projects its worktrees
+    /// onto the flat fields.
+    ///
+    /// An empty workspace produces a fully-default `ProjectState` so the
+    /// caller can detect "no project" via `state.root.as_os_str().is_empty()`
+    /// or `state.worktrees.is_empty()`.
+    pub fn into_primary_project_state(mut self) -> ProjectState {
+        self.normalize_active();
+        let primary = self
+            .projects
+            .iter()
+            .position(|p| p.id == self.active.project)
+            .or_else(|| (!self.projects.is_empty()).then_some(0));
+        let (root, worktrees, active_worktree_id) = match primary {
+            Some(idx) => {
+                let p = self.projects.swap_remove(idx);
+                (p.root, p.worktrees, self.active.worktree)
+            }
+            None => (PathBuf::new(), Vec::new(), 0),
+        };
+        ProjectState {
+            root,
+            worktrees,
+            active_worktree_id,
+            active_dock_view: self.active_dock_view,
+            active_right_panel_view: self.active_right_panel_view,
+            active_usage_window: self.active_usage_window,
+            tabs: Vec::new(),
+            active_tab_index: 0,
+            focused_pane_id: self.focused_pane_id,
+            docks: self.docks,
+            window: self.window,
+            window_user_label: self.window_user_label,
+            font_size: self.font_size,
+            vertical_spacing: self.vertical_spacing,
+            horizontal_spacing: self.horizontal_spacing,
+        }
+    }
+
+    /// Idempotent post-load normalization:
+    /// 1. delegates to each worktree's `migrate_legacy_tabs` (no-op today
+    ///    — placeholder for future per-worktree shape changes),
+    /// 2. fixes invalid `active` references via [`normalize_active`](Self::normalize_active),
+    /// 3. ratchets monotonic counters past the max observed ID so
+    ///    subsequent inserts never collide with surviving entries.
+    pub fn migrate_legacy(&mut self) {
+        self.normalize_active();
+        self.ensure_counters_advance();
+    }
+
+    /// Repair `active` when it points at a project or worktree that
+    /// doesn't exist anymore (deleted between sessions, hand-edited
+    /// state file, etc.). Order:
+    /// 1. Missing project → fall back to `projects[0]`.
+    /// 2. Missing worktree inside the chosen project → fall back to
+    ///    the project's `last_active_worktree_id`, then `worktrees[0]`.
+    /// 3. No projects at all → leave `active` at its default (caller
+    ///    routes to the Welcome screen).
+    pub fn normalize_active(&mut self) {
+        if self.projects.is_empty() {
+            self.active = WorktreeRef::default();
+            return;
+        }
+        if !self.projects.iter().any(|p| p.id == self.active.project) {
+            self.active.project = self.projects[0].id;
+        }
+        let Some(project) = self.projects.iter().find(|p| p.id == self.active.project) else {
+            return;
+        };
+        if project
+            .worktrees
+            .iter()
+            .any(|w| w.id == self.active.worktree)
+        {
+            return;
+        }
+        if project
+            .worktrees
+            .iter()
+            .any(|w| w.id == project.last_active_worktree_id)
+        {
+            self.active.worktree = project.last_active_worktree_id;
+        } else if let Some(first) = project.worktrees.first() {
+            self.active.worktree = first.id;
+        }
+    }
+
+    /// Bump monotonic counters past the largest observed ID. Keeps
+    /// `next_*_id` strictly greater than any existing entry so inserts
+    /// never collide with surviving state.
+    pub fn ensure_counters_advance(&mut self) {
+        let max_project = self.projects.iter().map(|p| p.id).max();
+        if let Some(m) = max_project
+            && self.next_project_id <= m
+        {
+            self.next_project_id = m + 1;
+        }
+        let max_group = self.groups.iter().map(|g| g.id).max();
+        if let Some(m) = max_group
+            && self.next_group_id <= m
+        {
+            self.next_group_id = m + 1;
+        }
+    }
+
+    /// Reference to the workspace's primary project (the project the
+    /// `active` ref points at, with `projects[0]` as a fallback). `None`
+    /// when the workspace has no projects — caller renders Welcome.
+    pub fn primary_project(&self) -> Option<&SerializedProject> {
+        self.projects
+            .iter()
+            .find(|p| p.id == self.active.project)
+            .or_else(|| self.projects.first())
     }
 }
 
