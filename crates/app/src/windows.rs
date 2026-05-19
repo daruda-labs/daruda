@@ -510,6 +510,8 @@ fn add_path_to_workspace(
                 .build(),
         );
     }
+    // SILENT-OK: failure was logged above; this discards the Result so the
+    // outer fn doesn't have to thread one through the menus-refresh tail.
     let _ = update_result;
     if let Err(e) = daruda_store::project::persistence::touch_recent(&path_for_recent) {
         log_touch_recent_err(&path_for_recent, e);
@@ -546,6 +548,10 @@ fn open_chooser_modal(
     cx: &mut App,
 ) {
     let weak_for_modal = weak.clone();
+    // `handle` is consumed by `try_update_workspace_window` below; the inner
+    // modal callback no longer needs it because it re-enters the workspace
+    // via the callback's live `&mut Window` directly (matches zed's
+    // `update_in` pattern — see `app/CLAUDE.md` G9).
     try_update_workspace_window(handle, cx, "open_chooser_modal", move |window, cx_w| {
         let config = config.clone();
         crate::workspace::open_project_modal::open_choose_window_modal(
@@ -592,9 +598,6 @@ fn open_chooser_modal(
                         open_new_workspace_for_path(config.clone(), &picked_path, app_cx);
                     }
                 }
-                let _ = handle; // captured for symmetry with the AddHere
-                // direct branch in `handle_picked_folder`; modal flow no
-                // longer needs it.
             },
             window,
             cx_w,

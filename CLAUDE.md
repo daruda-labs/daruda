@@ -51,6 +51,7 @@ scripts/lint-paint-scope.sh
 scripts/lint-reentrant-reads.sh
 scripts/lint-direct-gpui-component.sh
 scripts/lint-no-eprintln.sh
+scripts/lint-no-silent-update.sh
 ```
 
 ## Coding Best Practices
@@ -205,5 +206,5 @@ Workspace
 | Project (runtime) | `crate::project::Project` | `crates/app/src/project/mod.rs` |
 | Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `crates/daruda_store/src/project/` + `workspace/group_ops.rs` |
 | Active focus ref | `daruda_store::project::WorktreeRef { project, worktree }` | `daruda_store/src/project/`; per-worktree caches keyed by ref in `workspace/mod.rs` |
-| `WorktreesView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` | `workspace/left_dock/worktrees/rows.rs` |
-| Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/worktrees/drag.rs`, `workspace/dnd_ops.rs` |
+| `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` | `workspace/left_dock/projects/rows.rs` |
+| Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/projects/drag.rs`, `workspace/dnd_ops.rs` |

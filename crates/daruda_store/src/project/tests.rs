@@ -1037,6 +1037,7 @@ fn sample_workspace_state() -> WorkspaceState {
             group_id: None,
             worktrees: vec![sample_default_worktree(0, "/tmp/wsproj")],
             last_active_worktree_id: 0,
+            is_collapsed: false,
         }],
         groups: Vec::new(),
         active: WorktreeRef {
@@ -1261,6 +1262,7 @@ fn ensure_counters_advance_ratchets_past_max_id() {
         group_id: None,
         worktrees: Vec::new(),
         last_active_worktree_id: 0,
+        is_collapsed: false,
     });
     ws.next_project_id = 1; // wrong — would collide with id=10's successor
 

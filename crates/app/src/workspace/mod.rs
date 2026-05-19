@@ -22,7 +22,7 @@ pub(in crate::workspace) mod dialog_helpers;
 mod dnd_ops;
 pub(in crate::workspace) mod error;
 mod group_ops;
-pub(in crate::workspace) mod group_picker_modal;
+pub(in crate::workspace) mod group_select_modal;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;

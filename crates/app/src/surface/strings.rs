@@ -575,17 +575,11 @@ pub const BOTTOM_INPUT_PLACEHOLDER: &str = "Type to send to terminal\u{2026}";
 pub const BOTTOM_INPUT_SEND_BUTTON: &str = "Submit";
 
 // ----------------------------------------------------------------
-// Worktrees view — section header + empty state
+// Projects view — section header + empty state
 // ----------------------------------------------------------------
 
-pub const WORKTREES_SECTION_HEADER: &str = "PROJECTS";
-pub const WORKTREES_EMPTY_STATE: &str = "No project open";
-
-/// Affordance row rendered at the bottom of each git-backed project's
-/// worktree list. Clicking it activates that project and opens the
-/// `CreateWorktreeModal` so the new worktree lands in the clicked
-/// project rather than whichever one was active before (§5.1).
-pub const WORKTREES_ADD_ROW_LABEL: &str = "+ new worktree";
+pub const PROJECTS_SECTION_HEADER: &str = "PROJECTS";
+pub const PROJECTS_EMPTY_STATE: &str = "No project open";
 
 /// Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
 /// flat context menu instead of dispatching straight to the folder

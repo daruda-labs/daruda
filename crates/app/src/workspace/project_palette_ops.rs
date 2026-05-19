@@ -5,19 +5,21 @@
 //! [`open_single_field_dialog`] and delegate to
 //! [`Workspace::add_group`] / [`Workspace::rename_active_project`].
 //!
-//! `MoveActiveProjectToGroup` opens [`GroupPickerModal`] — a list-based
-//! picker that surfaces every existing group plus an "Ungrouped" row.
-//! Free-text input was the previous shape but allowed a typo to
-//! silently mint a fresh group (C-2 review); the picker constrains
-//! the pick to existing rows so accidental group proliferation is no
-//! longer reachable from this action. Use `NewGroup` (`Cmd+Shift+N`)
-//! to create groups deliberately.
+//! `MoveActiveProjectToGroup` opens [`GroupSelectModal`] — a dropdown
+//! over every existing group plus an "Ungrouped" row. Free-text input
+//! was the original shape but allowed a typo to silently mint a fresh
+//! group (C-2 review); a follow-up searchable picker was tried but the
+//! query input added noise without aiding discovery, so the dropdown
+//! is the current resting shape. The dropdown constrains the pick to
+//! existing rows so accidental group proliferation is no longer
+//! reachable from this action. Use `NewGroup` (`Cmd+Shift+N`) to
+//! create groups deliberately.
 
 use gpui::{Context, Window};
 
 use super::{MoveActiveProjectToGroup, NewGroup, RenameActiveProject, Workspace};
 use crate::workspace::dialog_helpers::{open_form_modal, open_single_field_dialog};
-use crate::workspace::group_picker_modal::GroupPickerModal;
+use crate::workspace::group_select_modal::GroupSelectModal;
 
 impl Workspace {
     pub(in crate::workspace) fn on_new_group(
@@ -78,15 +80,16 @@ impl Workspace {
         let Some(project_id) = self.active_project().map(|p| p.id) else {
             return;
         };
-        // Build the picker rows now, while the workspace borrow is in
-        // scope — passing them into the modal constructor avoids a
-        // re-entrant read from inside the entity (G2 / pitfall §4).
-        let items = GroupPickerModal::build_items(self, project_id);
+        // Build the dropdown options + initial value now, while the
+        // workspace borrow is in scope — passing them into the modal
+        // constructor avoids a re-entrant read from inside the entity
+        // (G2 / pitfall §4).
+        let (options, initial) = GroupSelectModal::build_options(self, project_id);
         let weak = cx.entity().downgrade();
         open_form_modal(
             "Move Project to Group",
             None,
-            move |window, cx| GroupPickerModal::new(weak, project_id, items, window, cx),
+            move |window, cx| GroupSelectModal::new(weak, project_id, options, initial, window, cx),
             window,
             cx,
         );

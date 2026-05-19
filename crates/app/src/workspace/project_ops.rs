@@ -61,14 +61,6 @@ impl Workspace {
             self.activate_worktree(t, window, cx);
         }
         self.mark_dirty_and_save(cx);
-        // `activate_worktree` already issues `cx.notify()`, but it is
-        // skipped when `target` is `None` (a project bootstrapped with
-        // an empty worktree list) — left-dock would otherwise miss the
-        // freshly-pushed project until the next unrelated render. Fire
-        // an unconditional notify so the dock re-renders for both
-        // paths; the duplicate notify on the activate branch is a
-        // harmless no-op for GPUI's effect coalescing.
-        cx.notify();
         target
     }
 
@@ -378,4 +370,17 @@ impl Workspace {
         })
         .detach();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // Behaviour for `add_project` / `toggle_project_collapse` /
+    // `rename_active_project` / `close_active_project` /
+    // `open_project_in_new_window` is exercised end-to-end through the
+    // workspace fixtures in `workspace::tests::projects` and
+    // `workspace::tests::dnd` (group / move-to-group / activation), which
+    // share the same `gpui::TestAppContext` plumbing required to drive
+    // these `&mut Window` / `&mut Context<Self>` methods. A local stub
+    // here would either duplicate that scaffolding or skip the actual
+    // GPUI surface — the parent suites are the better seam.
 }

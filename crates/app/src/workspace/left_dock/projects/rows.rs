@@ -207,6 +207,22 @@ pub(in crate::workspace) fn group_header_row(
         )
 }
 
+/// Per-row state passed into [`project_header_row`].
+///
+/// Keeps the seven row-shape inputs (project id, name, group/active/git
+/// flags, collapsed flag, and the snap-target worktree) grouped at the
+/// call site so the header signature stays readable as additional
+/// per-project flags accumulate.
+pub(in crate::workspace) struct ProjectHeaderArgs {
+    pub project_id: ProjectId,
+    pub name: SharedString,
+    pub is_ungrouped: bool,
+    pub is_active: bool,
+    pub is_git: bool,
+    pub is_collapsed: bool,
+    pub last_active_worktree_id: WorktreeId,
+}
+
 /// Single-row project header above the worktrees list for one
 /// project. Drag source for `DragPayload::Project` and drop target for
 /// project / group payloads. The `is_ungrouped` flag gates whether a
@@ -224,18 +240,20 @@ pub(in crate::workspace) fn group_header_row(
 /// handler that toggles the flag; the rest of the row stays bound to
 /// `activate_worktree(last_active)` so a header click still snaps the
 /// focus per §5.5.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn project_header_row(
-    project_id: ProjectId,
-    name: SharedString,
-    is_ungrouped: bool,
-    is_active: bool,
-    is_git: bool,
-    is_collapsed: bool,
-    last_active_worktree_id: WorktreeId,
+    args: ProjectHeaderArgs,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
+    let ProjectHeaderArgs {
+        project_id,
+        name,
+        is_ungrouped,
+        is_active,
+        is_git,
+        is_collapsed,
+        last_active_worktree_id,
+    } = args;
     let t = theme::current(cx);
     let label_color = if is_active {
         t.dock_view_tab_active
@@ -436,15 +454,15 @@ pub(in crate::workspace) fn section_header(
         .icon(IconName::Plus)
         .on_click(cx.listener(move |_dock, ev: &ClickEvent, _window, cx| {
             let position: Point<Pixels> = ev.position();
-            let ws_for_project = workspace.clone();
             let ws_for_group = workspace.clone();
             let items = vec![
                 ContextMenuItem::new(
                     surface_strings::SECTION_ADD_MENU_PROJECT,
                     move |_, _window, app_cx| {
-                        // No window context needed — the global
-                        // open-folder flow drives the picker async.
-                        let _ = ws_for_project;
+                        // No workspace handle needed — the global open-folder
+                        // flow reads its config from `SettingsStore` and the
+                        // resulting picker runs async without a captured
+                        // entity.
                         let config =
                             crate::settings_store::SettingsStore::global(app_cx).user_arc();
                         crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
@@ -466,7 +484,7 @@ pub(in crate::workspace) fn section_header(
             }
         }));
 
-    SectionHeader::new(surface_strings::WORKTREES_SECTION_HEADER)
+    SectionHeader::new(surface_strings::PROJECTS_SECTION_HEADER)
         .padding(theme::WORKTREE_ROW_PAD_X, theme::WORKTREE_SECTION_PAD_Y)
         .actions(add_button)
 }

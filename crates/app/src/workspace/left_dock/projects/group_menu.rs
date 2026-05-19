@@ -135,3 +135,23 @@ const COLOR_PRESETS: &[(&str, &str)] = &[
     (s::GROUP_MENU_COLOR_BLUE, s::GROUP_PRESET_BLUE),
     (s::GROUP_MENU_COLOR_PURPLE, s::GROUP_PRESET_PURPLE),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::COLOR_PRESETS;
+
+    /// Sanity check the preset table — the count is referenced indirectly
+    /// by the `[+] color presets` UI (six swatch rows + Clear) so an
+    /// accidental drop here would silently shrink the menu.
+    #[test]
+    fn color_presets_table_has_six_entries() {
+        assert_eq!(COLOR_PRESETS.len(), 6);
+        for (label, hex) in COLOR_PRESETS {
+            assert!(!label.is_empty(), "preset label must not be empty");
+            assert!(
+                hex.starts_with('#') && hex.len() == 7,
+                "preset hex must be `#RRGGBB`, got {hex:?}",
+            );
+        }
+    }
+}

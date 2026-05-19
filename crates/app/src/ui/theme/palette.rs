@@ -226,6 +226,9 @@ pub const WORKTREE_GROUP_INDENT_X: f32 = 12.0;
 pub const WORKTREE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 /// Corner radius of the group color dot (px). Half the size to render a circle.
 pub const WORKTREE_GROUP_COLOR_DOT_RADIUS: f32 = 4.0;
+/// Height of the 1px horizontal divider rendered between adjacent
+/// top-level rows (groups + ungrouped projects) in the worktrees view.
+pub const WORKTREE_TOP_ROW_DIVIDER_H: f32 = 1.0;
 
 // ============================================================================
 // Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)

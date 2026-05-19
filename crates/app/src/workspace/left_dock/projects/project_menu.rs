@@ -158,3 +158,16 @@ pub(in crate::workspace) fn build_project_menu_items(
 
     items
 }
+
+#[cfg(test)]
+mod tests {
+    // `build_project_menu_items` is pure plumbing: it consumes a
+    // `WeakEntity<Workspace>` (only constructible inside a GPUI test
+    // context) and returns context-menu items whose handlers delegate to
+    // `Workspace::on_rename_active_project` /
+    // `on_move_active_project_to_group` / `close_active_project` /
+    // `open_project_in_new_window`. Those ops are covered by
+    // `workspace::tests::projects` against the same workspace fixtures
+    // the menu would dispatch into, so a duplicate inline harness would
+    // not add coverage.
+}

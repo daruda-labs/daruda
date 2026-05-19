@@ -85,7 +85,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         if ix > 0 {
             body = body.child(
                 div()
-                    .h(px(1.0))
+                    .h(px(theme::WORKTREE_TOP_ROW_DIVIDER_H))
                     .w_full()
                     .bg(divider_color)
                     .my(px(theme::WORKTREE_SECTION_PAD_Y)),
@@ -144,13 +144,15 @@ fn ungrouped_project_block(
         .iter()
         .any(|w| matches!(&w.kind, daruda_store::project::WorktreeKind::Git { .. }));
     block = block.child(project_header_row(
-        project.id,
-        project.name.clone(),
-        project.group_id.is_none(),
-        is_active_project,
-        project_is_git,
-        project.is_collapsed,
-        project.last_active_worktree_id,
+        super::rows::ProjectHeaderArgs {
+            project_id: project.id,
+            name: project.name.clone(),
+            is_ungrouped: project.group_id.is_none(),
+            is_active: is_active_project,
+            is_git: project_is_git,
+            is_collapsed: project.is_collapsed,
+            last_active_worktree_id: project.last_active_worktree_id,
+        },
         snap,
         cx,
     ));
@@ -202,5 +204,5 @@ fn empty_state(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(surface_strings::WORKTREES_EMPTY_STATE)
+        .child(surface_strings::PROJECTS_EMPTY_STATE)
 }
