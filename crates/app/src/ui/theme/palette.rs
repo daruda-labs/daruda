@@ -170,14 +170,10 @@ pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = 11.0;
 pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
 
 // Worktrees list (left dock Worktrees view)
-/// Worktrees list — row height (px).
-pub const WORKTREE_ROW_HEIGHT: f32 = 44.0;
+/// Worktrees list — row height (px). Compact preset (Premium Card redesign).
+pub const WORKTREE_ROW_HEIGHT: f32 = 30.0;
 /// Worktrees list — horizontal padding (px).
 pub const WORKTREE_ROW_PAD_X: f32 = 10.0;
-/// Worktrees list — left accent bar width (px).
-pub const WORKTREE_ACCENT_W: f32 = 2.0;
-/// Worktrees list — active row accent color (primary).
-pub const WORKTREE_ACCENT_ACTIVE: Hsla = hsla(210.0, 0.70, 0.60, 1.0);
 /// Worktrees list — unread marker tint (warning).
 pub const WORKTREE_UNREAD: Hsla = hsla(30.0, 0.80, 0.60, 1.0);
 /// Worktrees list — inactive row hover background.
@@ -219,16 +215,46 @@ pub const WORKTREE_ROW_GAP: f32 = 8.0;
 pub const WORKTREE_PLACEHOLDER_GIT_INIT_MT: f32 = 4.0;
 /// Gap between lines inside the non-git info placeholder (px).
 pub const WORKTREE_PLACEHOLDER_LINE_GAP: f32 = 6.0;
-/// Extra left indent applied to member project rows nested under a
-/// group accordion (px). Surfaces the Group ▸ Project hierarchy.
-pub const WORKTREE_GROUP_INDENT_X: f32 = 12.0;
 /// Diameter of the optional color dot rendered in a group header (px).
 pub const WORKTREE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 /// Corner radius of the group color dot (px). Half the size to render a circle.
 pub const WORKTREE_GROUP_COLOR_DOT_RADIUS: f32 = 4.0;
-/// Height of the 1px horizontal divider rendered between adjacent
-/// top-level rows (groups + ungrouped projects) in the worktrees view.
-pub const WORKTREE_TOP_ROW_DIVIDER_H: f32 = 1.0;
+
+// ----------------------------------------------------------------------------
+// Premium Card surface tokens (Worktrees redesign)
+// ----------------------------------------------------------------------------
+
+/// Worktrees card — outer corner radius (px).
+pub const WORKTREE_CARD_RADIUS: f32 = 10.0;
+/// Worktrees card — vertical gap between adjacent cards (px).
+pub const WORKTREE_CARD_GAP: f32 = 6.0;
+/// Worktrees card — inner horizontal padding (px).
+pub const WORKTREE_CARD_PAD_X: f32 = 10.0;
+/// Worktrees card — inner vertical padding (px).
+pub const WORKTREE_CARD_PAD_Y: f32 = 6.0;
+/// Worktrees row — corner radius applied to hover/active background fills
+/// so the highlight reads as a rounded chip instead of a hard rectangle.
+pub const WORKTREE_ROW_RADIUS: f32 = 6.0;
+/// Worktrees card — horizontal outer margin so cards don't hug the dock
+/// edges; gives the surface visible left/right breathing room.
+pub const WORKTREE_CARD_MARGIN_X: f32 = 8.0;
+/// Worktrees list — vertical gap between adjacent worktree rows inside
+/// a project block so consecutive rows don't read as a single block.
+pub const WORKTREE_LIST_GAP_Y: f32 = 3.0;
+/// Worktrees card — border width (px).
+pub const WORKTREE_CARD_BORDER_W: f32 = 1.0;
+/// Worktrees card — base background. Sits a step above `DOCK_BG` (#0a)
+/// so the card edge is visible without leaning on the border alone.
+pub const WORKTREE_CARD_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
+/// Worktrees card — border at 8% alpha. Higher than the original 4%
+/// so the card outline reads on the dark dock surface.
+pub const WORKTREE_CARD_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
+/// Worktrees card — hover background (one tonal step above the base).
+pub const WORKTREE_CARD_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
+/// Worktrees active row — subtle bg only (no left bar / no glow).
+pub const WORKTREE_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
+/// Group label font size (px) — uppercase eyebrow.
+pub const WORKTREE_GROUP_LABEL_FONT_SIZE: f32 = 11.0;
 
 // ============================================================================
 // Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)

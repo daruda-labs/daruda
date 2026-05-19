@@ -55,7 +55,6 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.dock_view_tab_active, palette::DOCK_VIEW_TAB_ACTIVE);
     assert_eq!(t.dock_view_tab_accent, palette::DOCK_VIEW_TAB_ACCENT);
     assert_eq!(t.dock_view_tab_hover_bg, palette::DOCK_VIEW_TAB_HOVER_BG);
-    assert_eq!(t.worktree_accent_active, palette::WORKTREE_ACCENT_ACTIVE);
     assert_eq!(t.worktree_unread, palette::WORKTREE_UNREAD);
     assert_eq!(t.worktree_row_hover_bg, palette::WORKTREE_ROW_HOVER_BG);
     assert_eq!(t.worktree_drop_target_bg, palette::WORKTREE_DROP_TARGET_BG);

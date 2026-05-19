@@ -17,6 +17,7 @@ use crate::surface::strings as s;
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_single_field_dialog;
+use crate::workspace::group_ops::GROUP_COLOR_PRESETS;
 
 /// Build the flat menu for a group header.
 pub(in crate::workspace) fn build_group_menu_items(
@@ -60,7 +61,7 @@ pub(in crate::workspace) fn build_group_menu_items(
     items.push(ContextMenuItem::separator());
 
     // -- Color presets --
-    for (label, hex) in COLOR_PRESETS {
+    for (label, hex) in GROUP_COLOR_PRESETS {
         let ws_color = ws.clone();
         items.push(ContextMenuItem::new(*label, move |_, _window, app_cx| {
             let Some(workspace) = ws_color.upgrade() else {
@@ -127,26 +128,21 @@ pub(in crate::workspace) fn build_group_menu_items(
     items
 }
 
-const COLOR_PRESETS: &[(&str, &str)] = &[
-    (s::GROUP_MENU_COLOR_RED, s::GROUP_PRESET_RED),
-    (s::GROUP_MENU_COLOR_ORANGE, s::GROUP_PRESET_ORANGE),
-    (s::GROUP_MENU_COLOR_YELLOW, s::GROUP_PRESET_YELLOW),
-    (s::GROUP_MENU_COLOR_GREEN, s::GROUP_PRESET_GREEN),
-    (s::GROUP_MENU_COLOR_BLUE, s::GROUP_PRESET_BLUE),
-    (s::GROUP_MENU_COLOR_PURPLE, s::GROUP_PRESET_PURPLE),
-];
-
 #[cfg(test)]
 mod tests {
-    use super::COLOR_PRESETS;
+    use crate::workspace::group_ops::GROUP_COLOR_PRESETS;
 
-    /// Sanity check the preset table — the count is referenced indirectly
-    /// by the `[+] color presets` UI (six swatch rows + Clear) so an
-    /// accidental drop here would silently shrink the menu.
+    /// Sanity check the shared preset table — the count is referenced
+    /// indirectly by the `[+] color presets` UI so an accidental drop
+    /// here would silently shrink the menu.
     #[test]
-    fn color_presets_table_has_six_entries() {
-        assert_eq!(COLOR_PRESETS.len(), 6);
-        for (label, hex) in COLOR_PRESETS {
+    fn color_presets_table_is_well_formed() {
+        assert!(
+            GROUP_COLOR_PRESETS.len() >= 6,
+            "expected at least six preset colors, got {}",
+            GROUP_COLOR_PRESETS.len()
+        );
+        for (label, hex) in GROUP_COLOR_PRESETS {
             assert!(!label.is_empty(), "preset label must not be empty");
             assert!(
                 hex.starts_with('#') && hex.len() == 7,

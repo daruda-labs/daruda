@@ -21,13 +21,45 @@
 use daruda_store::project::{GroupId, ProjectId, SerializedGroup};
 use gpui::Context;
 
+use crate::surface::strings as s;
+
 use super::Workspace;
+
+/// Built-in color presets surfaced in both the group context menu and
+/// the auto-color path that fills in unspecified colours on group
+/// creation. `(label, hex)` pairs — label drives the menu copy, hex is
+/// what lands in `SerializedGroup::color` and the left-dock chip.
+pub(in crate::workspace) const GROUP_COLOR_PRESETS: &[(&str, &str)] = &[
+    (s::GROUP_MENU_COLOR_RED, s::GROUP_PRESET_RED),
+    (s::GROUP_MENU_COLOR_ORANGE, s::GROUP_PRESET_ORANGE),
+    (s::GROUP_MENU_COLOR_YELLOW, s::GROUP_PRESET_YELLOW),
+    (s::GROUP_MENU_COLOR_LIME, s::GROUP_PRESET_LIME),
+    (s::GROUP_MENU_COLOR_GREEN, s::GROUP_PRESET_GREEN),
+    (s::GROUP_MENU_COLOR_TEAL, s::GROUP_PRESET_TEAL),
+    (s::GROUP_MENU_COLOR_CYAN, s::GROUP_PRESET_CYAN),
+    (s::GROUP_MENU_COLOR_BLUE, s::GROUP_PRESET_BLUE),
+    (s::GROUP_MENU_COLOR_INDIGO, s::GROUP_PRESET_INDIGO),
+    (s::GROUP_MENU_COLOR_PURPLE, s::GROUP_PRESET_PURPLE),
+    (s::GROUP_MENU_COLOR_PINK, s::GROUP_PRESET_PINK),
+];
+
+/// Pick an auto-assigned preset hex for a freshly created group. Cycles
+/// through `GROUP_COLOR_PRESETS` by group id so consecutive groups land
+/// on distinct colours, and the choice is deterministic (test-friendly).
+fn auto_color_for_group(group_id: GroupId) -> &'static str {
+    GROUP_COLOR_PRESETS[(group_id as usize) % GROUP_COLOR_PRESETS.len()].1
+}
 
 impl Workspace {
     /// Append a new group with a fresh monotonic id and place it at
     /// the end of the shared (group, ungrouped-project) tab-order
     /// pool. Returns the new id so callers (modal, palette) can focus
     /// or rename the entry immediately.
+    ///
+    /// `color: None` triggers auto-assignment from the preset palette
+    /// (round-robin by id) so a brand-new group always lands with a
+    /// visible chip — the dot is what tells groups apart at a glance,
+    /// so leaving it blank by default would defeat the redesign.
     pub(crate) fn add_group(
         &mut self,
         name: String,
@@ -40,6 +72,7 @@ impl Workspace {
         // saturation keeps the counter monotonic even at the edge.
         self.next_group_id = self.next_group_id.saturating_add(1);
         let tab_order = self.next_top_row_tab_order();
+        let color = color.or_else(|| Some(auto_color_for_group(id).to_string()));
         self.groups.push(SerializedGroup {
             id,
             name,

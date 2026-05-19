@@ -70,52 +70,50 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     let header = section_header(any_git, snap, cx);
 
-    let mut body = div().flex().flex_col().w_full().overflow_hidden();
+    let mut body = div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(theme::WORKTREE_CARD_GAP))
+        .overflow_hidden();
     if snap.claude_install_banner_visible {
         body = body.child(claude_install_banner(snap, cx));
     }
     body = body.child(header);
 
-    let divider_color = theme::current(cx).status_bar_border;
-    for (ix, row) in top_rows.iter().enumerate() {
-        // Thin 1px horizontal divider between top-level rows so each
-        // group / ungrouped project is visually separable. Skipped
-        // before the first row so the section header sits flush
-        // against the first entry.
-        if ix > 0 {
-            body = body.child(
-                div()
-                    .h(px(theme::WORKTREE_TOP_ROW_DIVIDER_H))
-                    .w_full()
-                    .bg(divider_color)
-                    .my(px(theme::WORKTREE_SECTION_PAD_Y)),
-            );
-        }
+    for row in &top_rows {
         match row {
             TopRow::Group(group, members) => {
-                body = body.child(group_header_row(group, snap, cx));
-                if !group.is_collapsed {
-                    for project in members {
-                        body = body.child(grouped_project_block(
-                            project,
-                            active_project,
-                            active_worktree,
-                            active_tab_count,
-                            snap,
-                            cx,
-                        ));
+                let header = group_header_row(group, snap, cx).into_any_element();
+                let members_block = {
+                    let mut inner = div().flex().flex_col().w_full();
+                    if !group.is_collapsed {
+                        for project in members {
+                            inner = inner.child(grouped_project_block(
+                                project,
+                                active_project,
+                                active_worktree,
+                                active_tab_count,
+                                snap,
+                                cx,
+                            ));
+                        }
                     }
-                }
+                    inner.into_any_element()
+                };
+                body = body.child(super::card::group_card(header, members_block, cx));
             }
             TopRow::UngroupedProject(project) => {
-                body = body.child(ungrouped_project_block(
+                let inner = ungrouped_project_block(
                     project,
                     active_project,
                     active_worktree,
                     active_tab_count,
                     snap,
                     cx,
-                ));
+                )
+                .into_any_element();
+                body = body.child(super::card::ungrouped_shell(inner, cx));
             }
         }
     }
@@ -157,7 +155,11 @@ fn ungrouped_project_block(
         cx,
     ));
     if !project.is_collapsed {
-        let mut list = div().flex().flex_col().w_full();
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap(px(theme::WORKTREE_LIST_GAP_Y));
         for wt in &project.worktrees {
             let is_active = project.id == active_project && wt.id == active_worktree;
             let tab_count = if is_active { active_tab_count } else { 0 };
@@ -171,8 +173,9 @@ fn ungrouped_project_block(
     block
 }
 
-/// Same as `ungrouped_project_block` but indented to surface the
-/// Group ▸ Project hierarchy under an expanded group header.
+/// Member project block inside an expanded group card. Layout is the
+/// same as the ungrouped variant — the wrapping card supplies the
+/// padding that used to come from a left indent.
 fn grouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
@@ -185,7 +188,6 @@ fn grouped_project_block(
         .flex()
         .flex_col()
         .w_full()
-        .pl(px(theme::WORKTREE_GROUP_INDENT_X))
         .child(ungrouped_project_block(
             project,
             active_project,

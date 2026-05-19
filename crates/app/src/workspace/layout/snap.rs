@@ -122,16 +122,21 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub files_icon_color_mode: daruda_config::IconColorMode,
     pub cached_visible: Arc<Vec<VisibleEntry>>,
     pub root_kind: Option<EntryKind>,
-    /// Aggregate Claude status per worktree id. Empty when the
+    /// Aggregate Claude status per worktree. Keyed by `WorktreeRef`
+    /// so worktree ids in distinct projects (each project numbers its
+    /// worktrees from 0) don't collide. Empty when the
     /// `claude_status.enable` config flag is off, no Claude session is
     /// running, or the worktree has no matching cwd.
-    pub claude_status_per_worktree:
-        std::collections::HashMap<daruda_store::project::WorktreeId, daruda_claude::SessionStatus>,
+    pub claude_status_per_worktree: std::collections::HashMap<
+        daruda_store::project::WorktreeRef,
+        daruda_claude::SessionStatus,
+    >,
     /// Per-session statuses for worktrees that have ≥ 2 active Claude
     /// sessions. Phase D sub-row badges read this. Worktrees with 0 or
     /// 1 sessions are absent (the leading indicator covers them).
+    /// Keyed by `WorktreeRef` for the same cross-project reason.
     pub claude_per_session_per_worktree: std::collections::HashMap<
-        daruda_store::project::WorktreeId,
+        daruda_store::project::WorktreeRef,
         Vec<(String, daruda_claude::SessionStatus)>,
     >,
     /// `session_id` of the claude process living inside the focused

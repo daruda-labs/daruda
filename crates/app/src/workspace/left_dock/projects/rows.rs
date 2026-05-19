@@ -68,6 +68,7 @@ pub(in crate::workspace) fn group_header_row(
     let t = theme::current(cx);
     let label_color = t.dock_view_tab_active;
     let row_hover_bg = t.worktree_row_hover_bg;
+    let row_active_bg = t.worktree_row_active_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
     let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
@@ -105,19 +106,66 @@ pub(in crate::workspace) fn group_header_row(
         id: group_id,
         label: group.name.clone(),
     };
-    div()
-        .id(("group-header", group_id as usize))
+    let row_group_key = SharedString::from(format!("group-row-{group_id}"));
+
+    // Whether the focused project lives inside this group — drives the
+    // active row highlight on the header so users can tell which group
+    // owns the current focus at a glance.
+    let active_in_group = snap
+        .projects
+        .iter()
+        .any(|p| p.group_id == Some(group_id) && p.id == snap.active.project);
+
+    let label_row = div()
         .flex()
         .flex_row()
         .items_center()
         .w_full()
         .gap(px(theme::WORKTREE_LABEL_GAP))
+        .text_size(px(theme::WORKTREE_GROUP_LABEL_FONT_SIZE))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(label_color)
+        .when_some(color_dot, |d, dot| d.child(dot))
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(SharedString::from(group.name.to_uppercase())),
+        )
+        .child(
+            // Chevron uses `button_bare` so its chrome (ghost padding /
+            // hover / hit area) matches every `[+]` button on the row.
+            // Hidden until row hover; collapsed groups keep it visible
+            // as an expand affordance.
+            button_bare(("group-chevron", group_id as usize))
+                .ghost()
+                .icon(caret_icon)
+                .invisible()
+                .group_hover(row_group_key.clone(), |this| this.visible())
+                .when(group_is_collapsed, |b| b.visible())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_chevron.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
+                    }
+                })),
+        );
+
+    div()
+        .id(("group-header", group_id as usize))
+        .group(row_group_key.clone())
+        .flex()
+        .flex_col()
+        .w_full()
         .px(px(theme::WORKTREE_ROW_PAD_X))
         .py(px(theme::WORKTREE_SECTION_PAD_Y))
-        .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
-        .text_color(label_color)
+        .rounded(px(theme::WORKTREE_ROW_RADIUS))
         .cursor_pointer()
-        .hover(move |d| d.bg(row_hover_bg))
+        .when(!active_in_group, move |d| {
+            d.hover(move |d| d.bg(row_hover_bg))
+        })
+        .when(active_in_group, move |d| d.bg(row_active_bg))
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
@@ -181,30 +229,7 @@ pub(in crate::workspace) fn group_header_row(
                 }
             }),
         )
-        .when_some(color_dot, |d, dot| d.child(dot))
-        .child(
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(group.name.clone()),
-        )
-        .child(
-            // Chevron uses `button_bare` so its chrome (ghost padding /
-            // hover / hit area) matches every `[+]` button on the row.
-            // Row click already toggles via the outer `on_click`, but
-            // routing the chevron through its own button keeps the
-            // header visually uniform with project rows.
-            button_bare(("group-chevron", group_id as usize))
-                .ghost()
-                .icon(caret_icon)
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    cx.stop_propagation();
-                    if let Some(ws) = ws_for_chevron.upgrade() {
-                        ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
-                    }
-                })),
-        )
+        .child(label_row)
 }
 
 /// Per-row state passed into [`project_header_row`].
@@ -366,12 +391,15 @@ pub(in crate::workspace) fn project_header_row(
                 IconName::ChevronDown
             };
             // Same `button_bare` chrome as the group chevron + `[+]`
-            // button on this row — chevron toggles the project's
-            // collapsed flag while the rest of the row stays bound to
-            // `activate_worktree` (snap to last_active).
+            // button on this row. Hidden until row hover; collapsed
+            // projects keep it visible as an expand affordance.
+            let row_group_for_chev = row_group.clone();
             button_bare(("project-chevron", project_id as usize))
                 .ghost()
                 .icon(chevron_icon)
+                .invisible()
+                .group_hover(row_group_for_chev, |this| this.visible())
+                .when(is_collapsed, |b| b.visible())
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     cx.stop_propagation();
                     if let Some(ws) = ws_for_chevron.upgrade() {
@@ -501,13 +529,13 @@ pub(in crate::workspace) fn worktree_row(
     // Snapshot every row colour from the live theme so the closures
     // below (hover, drag_over) capture stable values.
     let t = theme::current(cx);
-    let accent_active = t.worktree_accent_active;
     let unread_dot_color = t.worktree_unread;
     let label_active = t.dock_view_tab_active;
     let label_inactive = t.muted_text;
     let git_badge_text = t.git_badge_text;
     let sublabel_color = t.faint_text;
     let row_hover_bg = t.worktree_row_hover_bg;
+    let row_active_bg = t.worktree_row_active_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
     let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
@@ -518,13 +546,6 @@ pub(in crate::workspace) fn worktree_row(
         .clone()
         .unwrap_or_else(|| wt.path.to_str().map(|s| s.to_string()).unwrap_or_default());
 
-    // Left accent bar — painted only for the active row.
-    let accent = div()
-        .flex_none()
-        .w(px(theme::WORKTREE_ACCENT_W))
-        .h_full()
-        .when(is_active, |d| d.bg(accent_active));
-
     // Unread marker sits to the right of the label.
     let unread_dot = div()
         .flex_none()
@@ -533,7 +554,7 @@ pub(in crate::workspace) fn worktree_row(
         .rounded(px(theme::WORKTREE_UNREAD_DOT_RADIUS))
         .bg(unread_dot_color);
 
-    // Body (label + sublabel).
+    // Body — label row + sublabel row + optional Claude multi-session sub-row.
     let body = div()
         .flex_1()
         .flex()
@@ -553,6 +574,7 @@ pub(in crate::workspace) fn worktree_row(
                 })
                 .child(
                     div()
+                        .flex_1()
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .child(label.clone()),
@@ -566,6 +588,18 @@ pub(in crate::workspace) fn worktree_row(
                             .text_color(git_badge_text)
                             .child(badge),
                     )
+                })
+                .when(tab_count > 0, |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+                            .text_color(sublabel_color)
+                            .child(format!(
+                                "{tab_count} tab{}",
+                                if tab_count == 1 { "" } else { "s" }
+                            )),
+                    )
                 }),
         )
         .child(
@@ -578,16 +612,14 @@ pub(in crate::workspace) fn worktree_row(
                 .text_color(sublabel_color)
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(sublabel)
-                .when(tab_count > 0, |d| {
-                    d.child(format!(
-                        "• {tab_count} tab{}",
-                        if tab_count == 1 { "" } else { "s" }
-                    ))
-                }),
+                .child(sublabel),
         )
         .when_some(
-            snap.claude_per_session_per_worktree.get(&wt.id),
+            snap.claude_per_session_per_worktree
+                .get(&daruda_store::project::WorktreeRef {
+                    project: project_id,
+                    worktree: wt.id,
+                }),
             |d, sessions| {
                 d.child(claude_badges_row(
                     sessions,
@@ -663,8 +695,10 @@ pub(in crate::workspace) fn worktree_row(
         .min_h(px(theme::WORKTREE_ROW_HEIGHT))
         .px(px(theme::WORKTREE_ROW_PAD_X))
         .gap(px(theme::WORKTREE_ROW_GAP))
+        .rounded(px(theme::WORKTREE_ROW_RADIUS))
         .cursor_pointer()
         .when(!is_active, move |d| d.hover(move |d| d.bg(row_hover_bg)))
+        .when(is_active, move |d| d.bg(row_active_bg))
         // on_click fires only when the mousedown + mouseup happen at the
         // same position (no drag movement), so it coexists safely with
         // on_drag without a hysteresis guard.
@@ -734,9 +768,13 @@ pub(in crate::workspace) fn worktree_row(
                 }
             }),
         )
-        .child(accent)
         .child(claude_status_cell(
-            snap.claude_status_per_worktree.get(&wt.id).copied(),
+            snap.claude_status_per_worktree
+                .get(&daruda_store::project::WorktreeRef {
+                    project: project_id,
+                    worktree: wt.id,
+                })
+                .copied(),
             cx,
         ))
         .child(body);

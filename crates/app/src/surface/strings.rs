@@ -594,9 +594,14 @@ pub const GROUP_MENU_RENAME: &str = "Rename Group\u{2026}";
 pub const GROUP_MENU_COLOR_RED: &str = "Color: Red";
 pub const GROUP_MENU_COLOR_ORANGE: &str = "Color: Orange";
 pub const GROUP_MENU_COLOR_YELLOW: &str = "Color: Yellow";
+pub const GROUP_MENU_COLOR_LIME: &str = "Color: Lime";
 pub const GROUP_MENU_COLOR_GREEN: &str = "Color: Green";
+pub const GROUP_MENU_COLOR_TEAL: &str = "Color: Teal";
+pub const GROUP_MENU_COLOR_CYAN: &str = "Color: Cyan";
 pub const GROUP_MENU_COLOR_BLUE: &str = "Color: Blue";
+pub const GROUP_MENU_COLOR_INDIGO: &str = "Color: Indigo";
 pub const GROUP_MENU_COLOR_PURPLE: &str = "Color: Purple";
+pub const GROUP_MENU_COLOR_PINK: &str = "Color: Pink";
 pub const GROUP_MENU_COLOR_CLEAR: &str = "Clear color";
 pub const GROUP_MENU_COLLAPSE: &str = "Collapse";
 pub const GROUP_MENU_EXPAND: &str = "Expand";
@@ -611,9 +616,14 @@ pub const GROUP_RENAME_DIALOG_PLACEHOLDER: &str = "Group name";
 pub const GROUP_PRESET_RED: &str = "#f87171";
 pub const GROUP_PRESET_ORANGE: &str = "#fb923c";
 pub const GROUP_PRESET_YELLOW: &str = "#facc15";
+pub const GROUP_PRESET_LIME: &str = "#a3e635";
 pub const GROUP_PRESET_GREEN: &str = "#4ade80";
+pub const GROUP_PRESET_TEAL: &str = "#2dd4bf";
+pub const GROUP_PRESET_CYAN: &str = "#22d3ee";
 pub const GROUP_PRESET_BLUE: &str = "#60a5fa";
+pub const GROUP_PRESET_INDIGO: &str = "#818cf8";
 pub const GROUP_PRESET_PURPLE: &str = "#a78bfa";
+pub const GROUP_PRESET_PINK: &str = "#f472b6";
 
 // Project context menu (§5.1) — rename / move to group / delete /
 // open in new window.

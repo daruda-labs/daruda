@@ -396,16 +396,28 @@ impl Render for Workspace {
                     .map(|b| b.session_id.as_str())
                     .collect();
                 let mut map = std::collections::HashMap::new();
-                for wt in self.active_worktrees() {
-                    let live_sessions = self
-                        .claude
-                        .claude_status
-                        .per_session_states_for_cwd(&wt.path)
-                        .into_iter()
-                        .filter(|(sid, _)| live.contains(sid.as_str()));
-                    if let Some(state) = live_sessions.map(|(_, s)| s).max_by_key(|s| s.priority())
-                    {
-                        map.insert(wt.id, state);
+                // Iterate every project's worktrees, not just the
+                // active project's — the left dock renders every
+                // project and each project numbers worktrees from 0,
+                // so keying by bare `WorktreeId` would alias status
+                // across projects.
+                for project in &self.projects {
+                    for wt in &project.worktrees {
+                        let live_sessions = self
+                            .claude
+                            .claude_status
+                            .per_session_states_for_cwd(&wt.path)
+                            .into_iter()
+                            .filter(|(sid, _)| live.contains(sid.as_str()));
+                        if let Some(state) =
+                            live_sessions.map(|(_, s)| s).max_by_key(|s| s.priority())
+                        {
+                            let key = daruda_store::project::WorktreeRef {
+                                project: project.id,
+                                worktree: wt.id,
+                            };
+                            map.insert(key, state);
+                        }
                     }
                 }
                 map
@@ -418,19 +430,26 @@ impl Render for Workspace {
                     .map(|b| b.session_id.as_str())
                     .collect();
                 let mut map = std::collections::HashMap::new();
-                for wt in self.active_worktrees() {
-                    let sessions: Vec<_> = self
-                        .claude
-                        .claude_status
-                        .per_session_states_for_cwd(&wt.path)
-                        .into_iter()
-                        .filter(|(sid, _)| live.contains(sid.as_str()))
-                        .collect();
-                    // Only worktrees with ≥ 2 PID-confirmed sessions
-                    // get a sub-row; single-session worktrees are
-                    // fully described by the leading indicator.
-                    if sessions.len() >= 2 {
-                        map.insert(wt.id, sessions);
+                for project in &self.projects {
+                    for wt in &project.worktrees {
+                        let sessions: Vec<_> = self
+                            .claude
+                            .claude_status
+                            .per_session_states_for_cwd(&wt.path)
+                            .into_iter()
+                            .filter(|(sid, _)| live.contains(sid.as_str()))
+                            .collect();
+                        // Only worktrees with ≥ 2 PID-confirmed
+                        // sessions get a sub-row; single-session
+                        // worktrees are fully described by the leading
+                        // indicator.
+                        if sessions.len() >= 2 {
+                            let key = daruda_store::project::WorktreeRef {
+                                project: project.id,
+                                worktree: wt.id,
+                            };
+                            map.insert(key, sessions);
+                        }
                     }
                 }
                 map
