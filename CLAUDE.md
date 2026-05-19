@@ -4,6 +4,8 @@ Run multiple AI agents in parallel — each in its own git worktree, branch, and
 
 **Worktree isolation is the core UX**: 1 worktree = 1 directory = 1 HEAD = 1 tab group = 1 Claude session.
 
+**Multi-project workspace**: one window holds N `Project`s (each opened repo root). Projects can be bundled into user-defined `Group`s in the left dock; ungrouped projects render at the same rank as groups. The active focus is a single `WorktreeRef { project, worktree }`, so cross-project state (`MainAreaContext` swap key, per-worktree caches) is keyed by ref rather than worktree id alone.
+
 ## Project layout
 
 ```
@@ -142,7 +144,10 @@ Workspace
 ├── BodyLayout
 │   ├── LeftDock
 │   │   ├── ViewSwitcher             — Worktrees / Git / Files tab strip
-│   │   ├── WorktreesView            — worktree list (create / delete / merge)
+│   │   ├── WorktreesView            — 2-level tree: Group ▸ Project ▸ Worktree
+│   │   │   ├── GroupHeader          — collapsible accordion (color, name, ▼/▶, context menu)
+│   │   │   ├── ProjectHeader        — project row (inside a group, or ungrouped at top rank)
+│   │   │   └── WorktreeRow          — leaf (create / delete / merge actions, Claude badges)
 │   │   ├── GitChangesView
 │   │   └── FilesView
 │   ├── MainArea
@@ -188,3 +193,8 @@ Workspace
 | `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane.rs` |
 | `TaskEditPane` | `PaneContent::TaskEditPane` | `workspace/main_area/pane.rs` |
 | `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
+| Project (runtime) | `crate::project::Project` | `crates/app/src/project/mod.rs` |
+| Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `crates/daruda_store/src/project/` + `workspace/group_ops.rs` |
+| Active focus ref | `daruda_store::project::WorktreeRef { project, worktree }` | `daruda_store/src/project/`; per-worktree caches keyed by ref in `workspace/mod.rs` |
+| `WorktreesView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` | `workspace/left_dock/worktrees/rows.rs` |
+| Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/worktrees/drag.rs`, `workspace/dnd_ops.rs` |

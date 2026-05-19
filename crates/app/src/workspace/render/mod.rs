@@ -280,21 +280,12 @@ impl Render for Workspace {
             .collect();
 
         // Window title — user override (Window > Edit Window Title…) wins;
-        // otherwise derive from focused pane: "title — /path/to/cwd" when
-        // cwd is known, just title otherwise (matches iTerm2 default).
+        // otherwise show `<project> · <branch>` for the active worktree
+        // (active project only, no aggregate count). Welcome state
+        // (no projects) leaves the title untouched.
         if let Some(label) = self.window_user_label.as_ref() {
             window.set_window_title(label.as_ref());
-        } else if let Some(pane) = self
-            .main_area
-            .panes
-            .iter()
-            .find(|p| p.id == self.main_area.focused_pane_id)
-        {
-            let pane_title = pane.title();
-            let title = match pane.cwd() {
-                Some(cwd) => format!("{} — {}", pane_title.as_ref(), cwd.display()),
-                None => pane_title.to_string(),
-            };
+        } else if let Some(title) = self.window_title_label() {
             window.set_window_title(&title);
         }
 
@@ -1023,11 +1014,11 @@ impl Render for Workspace {
             .and_then(|p| daruda_config::project_config_path(&p.root))
             .is_some_and(|path: std::path::PathBuf| path.exists());
         let status_data = StatusBarData {
-            cwd: focused_pane.and_then(|p| p.display_cwd()),
+            project_branch: self.active_project_branch_label().map(Into::into),
+            is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
             title: focused_pane
                 .map(|p| p.title())
                 .unwrap_or_else(|| "shell".into()),
-            git_branch: None, // TODO: detect git branch from cwd
             error: self.last_error.clone(),
             has_project_config,
         };
@@ -1285,6 +1276,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_close_other_tabs))
             .on_action(cx.listener(Self::on_close_tabs_to_right))
             .on_action(cx.listener(Self::on_toggle_zoom_pane))
+            .on_action(cx.listener(Self::on_new_group))
+            .on_action(cx.listener(Self::on_rename_active_project))
+            .on_action(cx.listener(Self::on_move_active_project_to_group))
             .size_full()
             .flex()
             .flex_col()

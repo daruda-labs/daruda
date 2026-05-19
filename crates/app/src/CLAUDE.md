@@ -10,12 +10,16 @@ config/keybinding wiring.
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions, welcome
 ├── agent/                # Agent-side data models — MCP, skills, tasks (GPUI-free cores + Global wrappers)
+├── project/              # Runtime Project model — `Vec<Worktree>` + group/color/tab_order (GPUI-free)
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
 ├── ui/                   # Reusable widget primitives — gpui_component wrappers + preserved daruda widgets
-├── workspace/            # Workspace entity — tabs, panes, docks
+├── workspace/            # Workspace entity — projects, tabs, panes, docks
 │   ├── command/          # Command palette + history picker
+│   ├── group_ops.rs      # Group CRUD (add/rename/recolor/collapse/delete + move_project_to_group)
+│   ├── project_ops.rs    # Project CRUD (add/close/delete-on-disk/rename + window_open_policy)
+│   ├── project_palette_ops.rs  # Palette handlers: New Group / Rename Project / Move Project to Group…
 │   ├── layout/           # Dock entities (left/right/bottom), drag/toggle ops, snapshots
-│   ├── left_dock/        # Left-dock views — worktrees, git changes, files
+│   ├── left_dock/        # Left-dock views — worktrees (2-level tree), git changes, files
 │   ├── main_area/        # TabBar + PaneTree runtime
 │   │   ├── bottom_dock/  # Macro grid, terminal input, tab strip
 │   │   ├── file_view_pane/  # File-viewer data + renderers
@@ -90,14 +94,24 @@ mixed widget types without resetting; reuse the same index pool
 across chip-driven branches so the user lands on the same logical
 slot regardless of which fields are visible.
 
+## `project/`
+
+Runtime [`Project`] — the workspace-visible counterpart to
+`daruda_store::project::SerializedProject`. Owns the project root, its
+non-empty `Vec<Worktree>`, the `last_active_worktree_id` snap target,
+and visual metadata (color, `tab_order`, `group_id`). GPUI-free. The
+dependency order is `workspace/ → project/ → worktree/`; `project/`
+never imports from `workspace/`.
+
 ## `workspace/`
 
 The Workspace entity and its subsystems.
 
-- **Entity & actions** — `Workspace` struct, construction (`new_with_project`), config apply, `on_*` action shims, command palette + history picker, modal openers (`dialog_helpers`), persistence (save/restore/rebuild + `WorktreeRuntime`), status-bar snapshot, worktree create/remove/activate.
+- **Entity & actions** — `Workspace` struct, construction (`new_with_project`), config apply, `on_*` action shims, command palette + history picker, modal openers (`dialog_helpers`), persistence (save/restore/rebuild + `WorktreeRuntime`), status-bar snapshot, worktree create/remove/activate. Holds `projects: Vec<Project>` + `groups: Vec<SerializedGroup>` + `active: WorktreeRef`; per-worktree caches (`git_status_cache`, `file_tree.*`, etc.) key by `WorktreeRef` rather than `WorktreeId`.
+- **`project_ops.rs` / `group_ops.rs` / `project_palette_ops.rs`** — Project CRUD (add / close / delete-on-disk / rename + `window_open_policy`), Group CRUD (add/rename/recolor/collapse/delete + `move_project_to_group`), and palette dialog plumbing (`New Group`, `Rename Project`, `Move Project to Group…`).
 - **`layout/`** — `Dock` entity (left/bottom/right; named `left_dock`/`right_dock`/`bottom_dock` on `Workspace`), divider + dock drag ops, plain-data snapshots for re-entrancy-safe render.
 - **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, TaskEdit prompt-file watcher, and the recursive `PaneLayout` renderer. Sub-domains: `file_view_pane/` (file viewer), `task_edit_pane/` (task form), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
-- **`left_dock/`** — Worktrees list + create/remove modals, git-changes view, files view, lazy file-tree context + walker, git-status fetch.
+- **`left_dock/`** — Worktrees view rendered as a 2-level tree (`TopRow::Group(GroupId)` / `TopRow::UngroupedProject(ProjectId)` at the top rank, expanding into project headers and worktree rows). Group/Project drag payloads share a single `Vec<TopRow>` ordering pool with 0..N renumbering on drop; intra-project worktree DnD stays within its project. Also git-changes view, files view, lazy file-tree context + walker, git-status fetch.
 - **`right_dock/`** — Usage / skills / tasks / tools views.
 - **`render/`** — `impl Render for Workspace`. Reads only plain-data snapshots — no re-entrant entity reads.
 - **`sync/`** — Background event pumps: PTY drain (tick), JSONL NDJSON watcher, HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.
@@ -212,12 +226,20 @@ Enforced by `scripts/lint-inline-literals.sh`. When porting from reference imple
 
 ```
 main.rs → menus.rs, windows.rs → workspace/, welcome.rs
-  → agent/, worktree/, surface/, pty.rs, config_watcher.rs
+  → agent/, project/, worktree/, surface/, pty.rs, config_watcher.rs
+
+project/ → worktree/
 ```
 
 - `surface/` imports nothing from siblings (except `action_map.rs` → workspace action types).
-- `worktree/` imports nothing from `workspace/` or `agent/`.
+- `worktree/` imports nothing from `workspace/`, `project/`, or `agent/`.
+- `project/` imports `worktree/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports nothing from `workspace/`.
+
+When a function references a worktree across module boundaries, pass
+the full `daruda_store::project::WorktreeRef { project, worktree }` —
+plain `WorktreeId` is only valid inside `Project::*` methods where the
+project context is implicit in `self`.
 
 ### G9 — Modals go through `gpui_component::Dialog`
 

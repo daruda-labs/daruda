@@ -106,6 +106,9 @@ pub const SHORTCUT_OPEN_FOLDER: &str = "cmd-o";
 pub const SHORTCUT_OPEN_FOLDER_IN_NEW_WINDOW: &str = "cmd-shift-o";
 pub const SHORTCUT_NEW_WINDOW: &str = "cmd-n";
 pub const SHORTCUT_CLOSE_PROJECT: &str = "cmd-shift-w";
+pub const SHORTCUT_NEW_GROUP: &str = "cmd-shift-n";
+pub const SHORTCUT_RENAME_PROJECT: &str = "cmd-shift-r";
+pub const SHORTCUT_MOVE_PROJECT_TO_GROUP: &str = "cmd-shift-m";
 
 // ============================================================================
 // Worktrees

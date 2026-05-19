@@ -9,11 +9,16 @@
 //! has every field the UI needs. CRUD here mutates it in place and
 //! routes through `mark_dirty_and_save` so changes round-trip.
 //!
-//! Production callers (left-dock context menu, command palette) wire
-//! up in commit f; until then these methods are exercised only via
-//! the workspace test suite. Drop the module-level `dead_code` allow
-//! once that commit lands.
-#![allow(dead_code)]
+//! Production wiring:
+//! - `add_group` / `move_project_to_group` — Command Palette
+//!   (`project_palette_ops::on_new_group`,
+//!   `on_move_active_project_to_group`).
+//! - `toggle_group_collapse` — left-dock group accordion header
+//!   (`worktrees/rows.rs`).
+//! - `rename_group` / `recolor_group` / `delete_group` — reserved for
+//!   the left-dock group context menu; currently exercised only by
+//!   `workspace::tests::projects`. The function-scoped
+//!   `#[allow(dead_code)]` will fall off as each menu entry lands.
 
 use daruda_store::project::{GroupId, ProjectId, SerializedGroup};
 use gpui::Context;
@@ -67,6 +72,7 @@ impl Workspace {
 
     /// Rename the group with `group_id`. No-op when the id is unknown
     /// or the name is unchanged.
+    #[allow(dead_code)] // wired by the left-dock group context menu
     pub(crate) fn rename_group(
         &mut self,
         group_id: GroupId,
@@ -86,6 +92,7 @@ impl Workspace {
 
     /// Set or clear the group's accent color. `None` removes the
     /// override (left-dock falls back to the default chip color).
+    #[allow(dead_code)] // wired by the left-dock group context menu
     pub(crate) fn recolor_group(
         &mut self,
         group_id: GroupId,
@@ -115,6 +122,7 @@ impl Workspace {
     /// (`group_id = None`) so they keep their place in the shared
     /// tab-order pool. No data loss — only the visual grouping
     /// disappears.
+    #[allow(dead_code)] // wired by the left-dock group context menu
     pub(crate) fn delete_group(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
         let existed = self.groups.iter().any(|g| g.id == group_id);
         if !existed {

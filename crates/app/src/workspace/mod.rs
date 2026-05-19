@@ -22,6 +22,7 @@ pub(in crate::workspace) mod dialog_helpers;
 mod dnd_ops;
 pub(in crate::workspace) mod error;
 mod group_ops;
+pub(in crate::workspace) mod group_picker_modal;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;
@@ -30,6 +31,7 @@ pub(crate) mod open_project_modal;
 mod path_drag;
 mod persistence;
 mod project_ops;
+mod project_palette_ops;
 mod render;
 mod right_dock;
 mod spawn_helpers;
@@ -82,6 +84,19 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
+
+/// Active worktree's branch state, derived once per render and shared
+/// by the status bar (text label + inline detached chip) and the
+/// macOS window title (text only — chip cannot ride along).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum BranchStatus {
+    /// Git-backed worktree with an attached branch.
+    Branch(String),
+    /// Git-backed worktree on a detached HEAD (no branch).
+    Detached,
+    /// Non-git project (default-kind worktree) or no active project.
+    NotGit,
+}
 
 actions!(
     workspace,
@@ -174,6 +189,19 @@ actions!(
         /// task gets a TaskEdit pane via `open_task_edit_pane`.
         /// Configurable as a keybinding via `[keybindings] edit_task`.
         EditTask,
+        /// Prompt for a group name and create an empty group in the
+        /// shared (group + ungrouped-project) tab-order pool. Wired
+        /// from the Command Palette `new_group` entry.
+        NewGroup,
+        /// Rename the active workspace project via a single-field
+        /// modal. Wired from the Command Palette `rename_project`
+        /// entry.
+        RenameActiveProject,
+        /// Move the active project into a group selected by name
+        /// (blank input = ungrouped, unknown name creates a fresh
+        /// group). Wired from the Command Palette
+        /// `move_project_to_group` entry.
+        MoveActiveProjectToGroup,
     ]
 );
 
@@ -990,6 +1018,52 @@ impl Workspace {
         self.active_project().map(|p| p.name.clone())
     }
 
+    /// Active worktree's branch status, split into the three cases
+    /// the status bar / window title care about: attached git branch,
+    /// detached HEAD, or non-git default kind. Returned as a small
+    /// enum so call-site renderers can decide whether to draw an
+    /// inline "detached" chip in addition to the textual label.
+    pub(in crate::workspace) fn active_branch_status(&self) -> BranchStatus {
+        let Some(wt) = self.active_worktree() else {
+            return BranchStatus::NotGit;
+        };
+        match &wt.kind {
+            daruda_store::project::WorktreeKind::Git {
+                branch: Some(b), ..
+            } => BranchStatus::Branch(b.clone()),
+            daruda_store::project::WorktreeKind::Git { branch: None, .. } => BranchStatus::Detached,
+            _ => BranchStatus::NotGit,
+        }
+    }
+
+    /// Text portion of the status-bar project-branch slot. Returns
+    /// `<project>/<branch>` for attached branches and `<project>`
+    /// otherwise; the detached state is signalled separately by an
+    /// inline chip ([`StatusBarData::is_detached`]), not folded into
+    /// this string.
+    pub(in crate::workspace) fn active_project_branch_label(&self) -> Option<String> {
+        self.project_branch_label_with("/", false)
+    }
+
+    /// Window title fallback (`window_user_label` overrides this).
+    /// Folds the detached marker into the text — macOS window titles
+    /// are plain strings, so the chip cannot ride along the way it
+    /// does in the status bar.
+    pub(in crate::workspace) fn window_title_label(&self) -> Option<String> {
+        self.project_branch_label_with(" · ", true)
+    }
+
+    fn project_branch_label_with(&self, sep: &str, mark_detached_inline: bool) -> Option<String> {
+        let project = self.active_project()?;
+        Some(match self.active_branch_status() {
+            BranchStatus::Branch(b) => format!("{}{sep}{}", project.name, b),
+            BranchStatus::Detached if mark_detached_inline => {
+                format!("{} (detached)", project.name)
+            }
+            BranchStatus::Detached | BranchStatus::NotGit => project.name.clone(),
+        })
+    }
+
     /// True when any project in this workspace already has `root` as
     /// its checkout. Used by [`crate::window_registry::WindowRegistry::find_workspace_by_root`]
     /// so the duplicate-root check on Open Project can focus the live
@@ -1125,6 +1199,19 @@ impl Workspace {
                 }
                 "open_command_history" => {
                     self.on_open_command_history(&OpenCommandHistory, window, cx);
+                }
+                "open_folder" => {
+                    window.dispatch_action(Box::new(crate::OpenFolder), cx);
+                }
+                "close_project" => {
+                    window.dispatch_action(Box::new(crate::CloseProject), cx);
+                }
+                "new_group" => self.on_new_group(&NewGroup, window, cx),
+                "rename_project" => {
+                    self.on_rename_active_project(&RenameActiveProject, window, cx);
+                }
+                "move_project_to_group" => {
+                    self.on_move_active_project_to_group(&MoveActiveProjectToGroup, window, cx);
                 }
                 "quit" => cx.quit(),
                 _ => {

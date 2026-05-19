@@ -68,6 +68,16 @@
       "$ref": "#/$defs/Rgba",
       "default": "#4dcbcbff"
     },
+    "status_bar_detached_bg": {
+      "description": "Maps to `palette::STATUS_BAR_DETACHED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#513c1fff"
+    },
+    "status_bar_detached_text": {
+      "description": "Maps to `palette::STATUS_BAR_DETACHED_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f4c27bff"
+    },
     "dock_bg": {
       "description": "Maps to `palette::DOCK_BG`.",
       "$ref": "#/$defs/Rgba",

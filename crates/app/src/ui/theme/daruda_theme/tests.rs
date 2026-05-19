@@ -22,6 +22,11 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.status_bar_border, palette::STATUS_BAR_BORDER);
     assert_eq!(t.status_bar_error, palette::STATUS_BAR_ERROR);
     assert_eq!(t.status_bar_project_dot, palette::STATUS_BAR_PROJECT_DOT);
+    assert_eq!(t.status_bar_detached_bg, palette::STATUS_BAR_DETACHED_BG);
+    assert_eq!(
+        t.status_bar_detached_text,
+        palette::STATUS_BAR_DETACHED_TEXT
+    );
     assert_eq!(t.dock_bg, palette::DOCK_BG);
     assert_eq!(t.dock_border, palette::DOCK_BORDER);
     assert_eq!(t.dock_header_text, palette::DOCK_HEADER_TEXT);

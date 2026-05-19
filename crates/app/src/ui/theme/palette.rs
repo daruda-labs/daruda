@@ -87,6 +87,13 @@ pub const STATUS_BAR_ERROR: Hsla = hsla(0.0, 0.7, 0.55, 1.0);
 /// informational, not as an alert.
 pub const STATUS_BAR_PROJECT_DOT: Hsla = hsla(180.0, 0.55, 0.55, 1.0);
 
+/// Inline "detached" chip background and text — shown next to the
+/// project/branch label when the active git worktree is on a detached
+/// HEAD. Amber-leaning so it signals *attention* without rising to
+/// the red-error tier; the state is uncommon but not destructive.
+pub const STATUS_BAR_DETACHED_BG: Hsla = hsla(35.0, 0.45, 0.22, 1.0);
+pub const STATUS_BAR_DETACHED_TEXT: Hsla = hsla(35.0, 0.85, 0.72, 1.0);
+
 /// Dock panel background.
 pub const DOCK_BG: Hsla = hsla(0.0, 0.0, 0.12, 1.0);
 
@@ -562,8 +569,6 @@ pub const PANE_HEADER_CLOSE_FONT_SIZE: f32 = 10.0;
 pub const STATUS_BAR_FONT_SIZE: f32 = 11.0;
 /// Status bar horizontal padding (px).
 pub const STATUS_BAR_PAD_X: f32 = 10.0;
-/// Status bar git branch icon font size (px).
-pub const STATUS_BAR_GIT_ICON_SIZE: f32 = 10.0;
 /// Dock panel header font size (px).
 pub const DOCK_HEADER_FONT_SIZE: f32 = 11.0;
 /// Dock panel header horizontal padding (px).
@@ -690,8 +695,6 @@ pub const NEW_TAB_RADIUS: f32 = 4.0;
 pub const DOCK_ICON_GROUP_GAP: f32 = 2.0;
 /// Status bar item gap (px).
 pub const STATUS_BAR_GAP: f32 = 8.0;
-/// Status bar git branch inner gap (px).
-pub const STATUS_BAR_GIT_GAP: f32 = 4.0;
 /// Command palette input padding X (px).
 pub const PALETTE_INPUT_PAD_X: f32 = 12.0;
 /// Command palette input padding Y (px).
@@ -730,6 +733,13 @@ pub const TAB_BAR_HEIGHT: f32 = 28.0;
 pub const STATUS_BAR_HEIGHT: f32 = 22.0;
 /// Diameter of the project-config indicator dot.
 pub const STATUS_BAR_PROJECT_DOT_SIZE: f32 = 6.0;
+/// Inline detached-HEAD chip — font size, horizontal padding,
+/// vertical padding, corner radius. Sized to sit flush with the
+/// 22px status bar height without forcing a row-height increase.
+pub const STATUS_BAR_DETACHED_FONT_SIZE: f32 = 10.0;
+pub const STATUS_BAR_DETACHED_PAD_X: f32 = 5.0;
+pub const STATUS_BAR_DETACHED_PAD_Y: f32 = 1.0;
+pub const STATUS_BAR_DETACHED_RADIUS: f32 = 3.0;
 /// Agent activity log entry font size (px).
 pub const AGENT_LOG_FONT_SIZE: f32 = 12.0;
 /// Agent activity log icon column width (px).

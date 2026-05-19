@@ -79,6 +79,8 @@ daruda_theme_fields! {
     status_bar_border => STATUS_BAR_BORDER,
     status_bar_error => STATUS_BAR_ERROR,
     status_bar_project_dot => STATUS_BAR_PROJECT_DOT,
+    status_bar_detached_bg => STATUS_BAR_DETACHED_BG,
+    status_bar_detached_text => STATUS_BAR_DETACHED_TEXT,
     dock_bg => DOCK_BG,
     dock_border => DOCK_BORDER,
     dock_header_text => DOCK_HEADER_TEXT,

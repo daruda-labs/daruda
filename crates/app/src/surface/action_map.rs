@@ -3,17 +3,18 @@
 
 use gpui::KeyBinding;
 
-use crate::Quit;
 use crate::workspace::{
     ClosePane, CloseTab, CommitAmend, CommitChanges, EditTask, FilesActivate, FilesCollapse,
     FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden, FocusNextPane,
     FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, GitChangesActivate,
-    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, MoveTabLeft, MoveTabRight,
-    NewSkill, NewTab, NewTask, NextTab, OpenCommandHistory, OpenSettings, PrevTab, PushChanges,
-    RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockWorktrees, SplitDown,
-    SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
-    SwitchRightPanelUsage, ToggleBottomDock, ToggleCommandPalette, ToggleLeftDock, ToggleRightDock,
+    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, MoveActiveProjectToGroup,
+    MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenCommandHistory,
+    OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject, ShowLeftDockFiles,
+    ShowLeftDockGit, ShowLeftDockWorktrees, SplitDown, SplitRight, SwitchRightPanelSkills,
+    SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
+    ToggleCommandPalette, ToggleLeftDock, ToggleRightDock,
 };
+use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
 
 /// Apply user keybinding overrides from config. Each binding is
@@ -109,6 +110,11 @@ pub fn apply_keybinding_overrides(
             "commit_amend" => CommitAmend,
             "push_changes" => PushChanges,
             "open_command_history" => OpenCommandHistory,
+            "open_folder" => OpenFolder,
+            "close_project" => CloseProject,
+            "new_group" => NewGroup,
+            "rename_project" => RenameActiveProject,
+            "move_project_to_group" => MoveActiveProjectToGroup,
         );
     }
 }
@@ -173,6 +179,11 @@ fn known_actions() -> Vec<&'static str> {
         "open_command_history",
         "new_task",
         "edit_task",
+        "open_folder",
+        "close_project",
+        "new_group",
+        "rename_project",
+        "move_project_to_group",
     ];
     v.extend(crate::tab_slot_table!(@names));
     v.extend(crate::worktree_slot_table!(@names));

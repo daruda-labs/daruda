@@ -21,9 +21,10 @@ use crate::workspace::{
     FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
     FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
     FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
-    GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewTab,
-    NextTab, OpenCommandHistory, OpenSettings, PrevTab, SplitDown, SplitRight, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
+    GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
+    MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
+    PrevTab, RenameActiveProject, SplitDown, SplitRight, ToggleBottomDock, ToggleCommandPalette,
+    ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -97,6 +98,13 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         ),
         KeyBinding::new(k::SHORTCUT_NEW_WINDOW, NewEmptyWindow, None),
         KeyBinding::new(k::SHORTCUT_CLOSE_PROJECT, CloseProject, None),
+        KeyBinding::new(k::SHORTCUT_NEW_GROUP, NewGroup, None),
+        KeyBinding::new(k::SHORTCUT_RENAME_PROJECT, RenameActiveProject, None),
+        KeyBinding::new(
+            k::SHORTCUT_MOVE_PROJECT_TO_GROUP,
+            MoveActiveProjectToGroup,
+            None,
+        ),
         // Files view (global toggle)
         KeyBinding::new(k::SHORTCUT_FILES_TOGGLE_HIDDEN, FilesToggleHidden, None),
         // Files panel keyboard navigation — only fires when the

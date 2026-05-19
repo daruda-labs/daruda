@@ -86,6 +86,25 @@ impl Workspace {
         self.window_open_policy
     }
 
+    /// Rename the currently active project. No-op when the workspace
+    /// has no projects (Welcome state) or when the new name equals the
+    /// current one. Returns `true` when the rename mutated state.
+    pub(in crate::workspace) fn rename_active_project(
+        &mut self,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(project) = self.active_project_mut() else {
+            return false;
+        };
+        if project.name == name {
+            return false;
+        }
+        project.name = name;
+        self.mark_dirty_and_save(cx);
+        true
+    }
+
     /// Remove the active project and route the workspace to the next
     /// project (or signal "close this window" when none remain).
     ///

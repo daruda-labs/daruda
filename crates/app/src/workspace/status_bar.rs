@@ -1,5 +1,5 @@
-//! Bottom status bar — displays shell state, cwd, and git branch.
-//! Always visible at the bottom of the workspace.
+//! Bottom status bar — displays project/branch context and focused
+//! pane title. Always visible at the bottom of the workspace.
 
 use crate::ui::theme;
 use gpui::{App, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px};
@@ -11,9 +11,18 @@ pub(super) const STATUS_BAR_HEIGHT: f32 = theme::STATUS_BAR_HEIGHT;
 /// avoid entity reads during element construction (GPUI re-entrant
 /// panic prevention).
 pub(super) struct StatusBarData {
-    pub cwd: Option<SharedString>,
+    /// `<project>/<branch>` for git-backed active worktrees, just
+    /// `<project>` for non-git or detached HEAD, `None` in Welcome
+    /// state (no project loaded). The detached marker is rendered
+    /// separately via [`Self::is_detached`].
+    pub project_branch: Option<SharedString>,
+    /// True when the active worktree is git-backed but on a detached
+    /// HEAD. Drives the inline "detached" chip rendered next to
+    /// `project_branch`; harmless when `project_branch` is `None`
+    /// (the chip suppresses itself).
+    pub is_detached: bool,
+    /// Focused pane title (process name / shell prompt).
     pub title: SharedString,
-    pub git_branch: Option<SharedString>,
     /// Transient error string (pane spawn failures, etc.). When set,
     /// shows in the right section so the user actually notices the
     /// failure.
@@ -22,24 +31,6 @@ pub(super) struct StatusBarData {
     /// disk. Drives a small dot in the right section so the user sees
     /// at a glance that some user-global keys are being shadowed.
     pub has_project_config: bool,
-}
-
-impl StatusBarData {
-    /// Build from a focused pane. Extracts cwd basename and title.
-    #[allow(dead_code)]
-    pub fn from_pane(title: &str, cwd: Option<&std::path::Path>) -> Self {
-        Self {
-            title: SharedString::from(title.to_string()),
-            cwd: cwd.and_then(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| SharedString::from(s.to_string()))
-            }),
-            git_branch: None,
-            error: None,
-            has_project_config: false,
-        }
-    }
 }
 
 /// GPUI render-once wrapper for the status bar element.
@@ -58,28 +49,57 @@ impl RenderOnce for StatusBar {
         let faint = t.faint_text;
         let project_dot = t.status_bar_project_dot;
         let error_color = t.status_bar_error;
+        let detached_bg = t.status_bar_detached_bg;
+        let detached_text = t.status_bar_detached_text;
         let bg = t.status_bar_bg;
         let border = t.status_bar_border;
+
+        // Detached chip is meaningful only when there's a
+        // project/branch slot to anchor next to; in Welcome state
+        // (`project_branch` is `None`) suppress the chip too.
+        let show_detached = data.is_detached && data.project_branch.is_some();
 
         let left = div()
             .flex()
             .flex_row()
             .items_center()
             .gap(px(theme::STATUS_BAR_GAP))
+            .when_some(data.project_branch.clone(), |el, pb| {
+                el.child(
+                    div()
+                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+                        .text_color(muted)
+                        .child(pb),
+                )
+            })
+            .when(show_detached, |el| {
+                el.child(
+                    div()
+                        .px(px(theme::STATUS_BAR_DETACHED_PAD_X))
+                        .py(px(theme::STATUS_BAR_DETACHED_PAD_Y))
+                        .rounded(px(theme::STATUS_BAR_DETACHED_RADIUS))
+                        .bg(detached_bg)
+                        .text_size(px(theme::STATUS_BAR_DETACHED_FONT_SIZE))
+                        .text_color(detached_text)
+                        .child(SharedString::from(
+                            crate::surface::strings::STATUS_BAR_DETACHED_CHIP,
+                        )),
+                )
+            })
+            .when(data.project_branch.is_some(), |el| {
+                el.child(
+                    div()
+                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+                        .text_color(faint)
+                        .child(SharedString::from("—")),
+                )
+            })
             .child(
                 div()
                     .text_size(px(theme::STATUS_BAR_FONT_SIZE))
                     .text_color(muted)
                     .child(data.title.clone()),
-            )
-            .when_some(data.cwd.clone(), |el, cwd| {
-                el.child(
-                    div()
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(faint)
-                        .child(cwd),
-                )
-            });
+            );
 
         let right = div()
             .flex()
@@ -105,23 +125,6 @@ impl RenderOnce for StatusBar {
                         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
                         .text_color(error_color)
                         .child(err),
-                )
-            })
-            .when_some(data.git_branch.clone(), |el, branch| {
-                el.child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(theme::STATUS_BAR_GIT_GAP))
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(muted)
-                        .child(
-                            div()
-                                .text_size(px(theme::STATUS_BAR_GIT_ICON_SIZE))
-                                .child("⎇"),
-                        )
-                        .child(branch),
                 )
             });
 
@@ -153,37 +156,48 @@ mod tests {
     }
 
     #[test]
-    fn from_pane_extracts_cwd_basename() {
-        let data = StatusBarData::from_pane(
-            "zsh",
-            Some(std::path::Path::new("/Users/test/projects/daruda")),
-        );
-        assert_eq!(data.title.as_ref(), "zsh");
-        assert_eq!(data.cwd.as_ref().map(|s| s.as_ref()), Some("daruda"));
-    }
-
-    #[test]
-    fn from_pane_handles_no_cwd() {
-        let data = StatusBarData::from_pane("bash", None);
-        assert_eq!(data.title.as_ref(), "bash");
-        assert!(data.cwd.is_none());
-    }
-
-    #[test]
-    fn from_pane_handles_root_path() {
-        let data = StatusBarData::from_pane("zsh", Some(std::path::Path::new("/")));
-        assert!(data.cwd.is_none());
-    }
-
-    #[test]
-    fn git_branch_defaults_to_none() {
-        let data = StatusBarData::from_pane("zsh", None);
-        assert!(data.git_branch.is_none());
-    }
-
-    #[test]
-    fn error_defaults_to_none() {
-        let data = StatusBarData::from_pane("zsh", None);
+    fn data_defaults_to_no_project_branch() {
+        let data = StatusBarData {
+            project_branch: None,
+            is_detached: false,
+            title: "zsh".into(),
+            error: None,
+            has_project_config: false,
+        };
+        assert!(data.project_branch.is_none());
+        assert!(!data.is_detached);
         assert!(data.error.is_none());
+        assert_eq!(data.title.as_ref(), "zsh");
+    }
+
+    #[test]
+    fn data_carries_project_and_branch() {
+        let data = StatusBarData {
+            project_branch: Some("daruda/main".into()),
+            is_detached: false,
+            title: "zsh".into(),
+            error: None,
+            has_project_config: false,
+        };
+        assert_eq!(
+            data.project_branch.as_ref().map(|s| s.as_ref()),
+            Some("daruda/main")
+        );
+    }
+
+    #[test]
+    fn data_marks_detached_when_branch_missing() {
+        let data = StatusBarData {
+            project_branch: Some("daruda".into()),
+            is_detached: true,
+            title: "zsh".into(),
+            error: None,
+            has_project_config: false,
+        };
+        assert!(data.is_detached);
+        assert_eq!(
+            data.project_branch.as_ref().map(|s| s.as_ref()),
+            Some("daruda")
+        );
     }
 }

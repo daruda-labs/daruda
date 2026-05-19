@@ -437,6 +437,13 @@ pub const WELCOME_RECENT: &str = "Recent Projects";
 pub const WELCOME_NEW_EMPTY: &str = "New Empty Window";
 pub const WELCOME_NO_RECENT: &str = "No recent projects";
 
+/// Short changelog line shown at the bottom of the welcome panel.
+/// Announces the post-multi-project shortcut semantics — `Cmd+O` now
+/// adds the project to the current window (policy-aware) instead of
+/// spawning a new one. Plain text; no Markdown rendering.
+pub const WELCOME_CHANGELOG_OPEN_POLICY: &str =
+    "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window";
+
 // ============================================================================
 // File viewer (pane-area viewer opened from Git Changes dock)
 // ============================================================================
@@ -709,6 +716,11 @@ pub const PROJECT_CONFIG_NO_DIR: &str = "Cannot resolve project config directory
 /// project-layer config file exists for the active project.
 pub const STATUS_BAR_PROJECT_CONFIG_TOOLTIP: &str =
     "Project config active — this workspace's [shell] section is overridden.";
+
+/// Inline chip label shown in the status bar when the active git
+/// worktree is on a detached HEAD. Lowercase so it reads as a state
+/// tag, not a sentence.
+pub const STATUS_BAR_DETACHED_CHIP: &str = "detached";
 
 /// Initial contents of a freshly-created
 /// `~/.config/daruda/projects/<repo>-<hash>/config.toml`. The user

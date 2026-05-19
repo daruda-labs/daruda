@@ -201,6 +201,11 @@ impl Render for WelcomeScreen {
             )
             .child(s::WELCOME_NEW_EMPTY);
 
+        let changelog = div()
+            .text_size(px(theme::WELCOME_VERSION_FONT_SIZE))
+            .text_color(faint_text)
+            .child(s::WELCOME_CHANGELOG_OPEN_POLICY);
+
         // Main layout — centered panel.
         div()
             .track_focus(&self.focus_handle)
@@ -220,7 +225,8 @@ impl Render for WelcomeScreen {
                     .child(title)
                     .child(open_folder_btn)
                     .child(recent_section)
-                    .child(new_empty_btn),
+                    .child(new_empty_btn)
+                    .child(changelog),
             )
     }
 }

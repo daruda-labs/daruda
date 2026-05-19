@@ -279,6 +279,31 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "Cmd+Ctrl+9",
     },
     PaletteEntry {
+        id: "open_folder",
+        label: "Open Project\u{2026}",
+        shortcut: "Cmd+O",
+    },
+    PaletteEntry {
+        id: "new_group",
+        label: "New Group",
+        shortcut: "Cmd+Shift+N",
+    },
+    PaletteEntry {
+        id: "rename_project",
+        label: "Rename Project\u{2026}",
+        shortcut: "Cmd+Shift+R",
+    },
+    PaletteEntry {
+        id: "move_project_to_group",
+        label: "Move Project to Group\u{2026}",
+        shortcut: "Cmd+Shift+M",
+    },
+    PaletteEntry {
+        id: "close_project",
+        label: "Close Project",
+        shortcut: "Cmd+Shift+W",
+    },
+    PaletteEntry {
         id: "show_left_dock_worktrees",
         label: "Show Worktrees",
         shortcut: "",
