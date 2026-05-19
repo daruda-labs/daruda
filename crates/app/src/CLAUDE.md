@@ -126,7 +126,7 @@ Runtime `Worktree` model (id / path / status / `base_ref` / description) plus a 
 | New dock view | `LeftDockView` variant (or `RightDockView`) → `view_tabs.rs` → `left_dock/<view>/mod.rs` (export `render`) → `mod.rs` action + handler → `render.rs` match arm → test |
 | New global action + keybinding | `actions!()` → handler in ops file → `surface/keybindings.rs` const → `main.rs` bind_keys → `action_map.rs` arm → `command/palette.rs` entry |
 | New dock panel | `PlaceholderKind` variant → `Workspace::new_with_project` push → renderer module → `render.rs` dock match arm → persistence if needed |
-| New modal | See G9. `impl Render + Focusable` + `.tab_group()` on root; open via `dialog_helpers::*`. |
+| New modal | See G9. `impl ModalView` + `.tab_group()` on root; open via `dialog_helpers::*`. |
 | New pane content kind | `PaneContent` variant + struct in `main_area/pane.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip |
 | Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace + the Settings window |
 | Worktree drag/context menu | Data ops in `worktree/mod.rs` → `WorktreeDrag` in `layout/ops.rs` → actions in `worktree_ops.rs` → UI in `left_dock/worktrees/list.rs` |
@@ -222,7 +222,9 @@ main.rs → menus.rs, windows.rs → workspace/, welcome.rs
 ### G9 — Modals go through `gpui_component::Dialog`
 
 - Every modal entity opens via `crate::workspace::dialog_helpers::*` — `open_form_modal` (entity owns full body), `open_single_field_dialog` (one input + OK/Cancel), `open_confirm_dialog` (title + body + OK/Cancel). All wrap `gpui_component::WindowExt::open_dialog`; Dialog handles backdrop, Escape, and outer chrome.
-- New modal entity: `impl Render + Focusable` only. No `Modal` trait, no `EventEmitter<DismissEvent>`, no `ModalLayer`.
+- New modal entity: `impl ModalView` (supertrait of `Render + Focusable`) for entities passed to `open_form_modal`. No `Modal` trait, no `EventEmitter<DismissEvent>`, no `ModalLayer`.
+- `ModalView` applies to `open_form_modal` only; `open_confirm_dialog` / `open_alert_dialog` / `open_single_field_dialog` do not use it.
+- Focus is automatically restored to the previously focused element when the dialog closes (handled by `gpui_component::Root`).
 - Entity owns only the body (fields, validation banner, footer buttons). Never re-render Dialog's chrome (`bg`/`border`/`p`/`rounded`/title) inside the entity.
 - Dismiss via `window.close_dialog(cx)`. In `cx.defer` / async paths without a live `&mut Window`, capture `window.window_handle()` and re-enter via `cx.update_window(handle, ...)`.
 - Async continuations: never nest two `entity.update` on the same `app_cx`. Run workspace finalize first, then update modal.

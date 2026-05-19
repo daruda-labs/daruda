@@ -19,6 +19,7 @@ use crate::ui::theme;
 
 use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
+use crate::workspace::ModalView;
 
 /// One row in the picker. Holds the underlying entry plus a
 /// pre-formatted label so [`FilteredItem::label`] is a cheap clone.
@@ -113,6 +114,8 @@ impl Focusable for CommandHistoryModal {
         self.list_state.focus_handle(cx)
     }
 }
+
+impl ModalView for CommandHistoryModal {}
 
 impl Render for CommandHistoryModal {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {

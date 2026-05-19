@@ -26,7 +26,7 @@ use std::rc::Rc;
 use crate::ui::theme;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels, Render,
+    App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels,
     SharedString, WeakEntity, Window, px,
 };
 
@@ -36,6 +36,7 @@ use crate::ui::dialog::{ButtonVariant, DialogButtonProps};
 use crate::ui::{InputState, input};
 use crate::workspace::Workspace;
 use crate::workspace::error::modal::ErrorReportModal;
+use crate::workspace::modal_view::ModalView;
 
 /// Open a Dialog with one labelled `gpui_component::Input` and a
 /// Cancel / OK footer. On OK the callback receives the trimmed text
@@ -204,7 +205,7 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
     window: &mut Window,
     cx: &mut App,
 ) where
-    E: Render + Focusable + 'static,
+    E: ModalView + 'static,
     B: FnOnce(&mut Window, &mut Context<E>) -> E + 'static,
 {
     let title: SharedString = title.into();

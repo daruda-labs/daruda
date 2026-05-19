@@ -21,6 +21,7 @@ use gpui::{
 use crate::agent::skills::Skill;
 use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 /// One row in the picker. Carries the full [`Skill`] so the confirm
@@ -172,6 +173,8 @@ impl Focusable for SkillPickerModal {
         self.list_state.focus_handle(cx)
     }
 }
+
+impl ModalView for SkillPickerModal {}
 
 impl Render for SkillPickerModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

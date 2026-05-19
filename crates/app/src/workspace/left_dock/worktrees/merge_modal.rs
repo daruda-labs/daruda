@@ -31,6 +31,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{button, button_danger, button_primary, checkbox};
 
 use crate::surface::strings as surface_strings;
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 // ----------------------------------------------------------------
@@ -460,6 +461,8 @@ impl Focusable for MergeModal {
         self.focus_handle.clone()
     }
 }
+
+impl ModalView for MergeModal {}
 
 impl Render for MergeModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

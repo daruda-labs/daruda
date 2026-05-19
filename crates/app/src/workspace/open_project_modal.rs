@@ -22,6 +22,7 @@ use gpui::{
 
 use crate::ui::theme;
 use crate::ui::{ActiveTheme, WindowExt as _, button, button_primary, checkbox, radio};
+use crate::workspace::ModalView;
 use crate::workspace::dialog_helpers::open_form_modal;
 
 /// User's pick on the Open Project chooser. Mirrors the runtime
@@ -103,6 +104,8 @@ impl Focusable for OpenProjectModal {
         self.panel_focus_handle.clone()
     }
 }
+
+impl ModalView for OpenProjectModal {}
 
 impl Render for OpenProjectModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

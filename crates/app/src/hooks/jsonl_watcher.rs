@@ -304,7 +304,15 @@ fn process_jsonl_file(
     // race policy correctly orders JSONL against hook events.
     let timestamp = last_meaningful_timestamp(&entries).unwrap_or_else(Utc::now);
     let usage = {
-        let mut tracker = usage_tracker.lock().expect("usage tracker poisoned");
+        let Ok(mut tracker) = usage_tracker.lock() else {
+            LogWriter::log(
+                ErrorReport::new("usage tracker mutex poisoned; skipping JSONL event")
+                    .at(file!(), line!())
+                    .dedup("jsonl.usage_tracker.poisoned")
+                    .build(),
+            );
+            return None;
+        };
         extract_new_usage_delta(&entries, &stem, &mut tracker)
     };
     Some(JsonlEvent {

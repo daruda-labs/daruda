@@ -119,6 +119,7 @@ where
     // full pipe buffer while we're polling `try_wait`. Each handle
     // returns the bytes it captured up to EOF (which the child closes
     // on exit, so the threads always terminate cleanly after `wait`).
+    // Invariant: Stdio::piped() was set above; stdlib guarantees Some after successful spawn().
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let stdout_thread = thread::spawn(move || {

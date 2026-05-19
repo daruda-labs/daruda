@@ -32,6 +32,7 @@ use gpui::{
 use crate::ui::WindowExt as _;
 use crate::ui::checkbox;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 pub struct MacroEditModal {
@@ -353,6 +354,8 @@ impl Focusable for MacroEditModal {
         self.label_input.focus_handle(cx)
     }
 }
+
+impl ModalView for MacroEditModal {}
 
 impl Render for MacroEditModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

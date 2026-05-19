@@ -25,6 +25,7 @@ use gpui::{
 
 use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
 /// Which action runs after the user picks a task.
@@ -227,6 +228,8 @@ impl Focusable for TaskPickerModal {
         self.list_state.focus_handle(cx)
     }
 }
+
+impl ModalView for TaskPickerModal {}
 
 impl Render for TaskPickerModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

@@ -21,6 +21,7 @@ use gpui::{
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::worktree_ops::{CreateWorktreePlan, sanitize_branch_name};
 
@@ -241,6 +242,8 @@ impl Focusable for CreateWorktreeModal {
         self.branch_input.focus_handle(cx)
     }
 }
+
+impl ModalView for CreateWorktreeModal {}
 
 impl Render for CreateWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

@@ -20,6 +20,7 @@ use gpui::{
 
 use crate::ui::theme;
 use crate::ui::{ActiveTheme, WindowExt as _, button, button_danger, radio};
+use crate::workspace::ModalView;
 use crate::workspace::dialog_helpers::open_form_modal;
 
 /// User's pick on the delete-project chooser.
@@ -79,6 +80,8 @@ impl Focusable for DeleteProjectModal {
         self.panel_focus_handle.clone()
     }
 }
+
+impl ModalView for DeleteProjectModal {}
 
 impl Render for DeleteProjectModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
