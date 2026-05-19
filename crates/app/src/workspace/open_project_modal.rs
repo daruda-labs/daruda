@@ -94,8 +94,26 @@ impl OpenProjectModal {
         let choice = self.choice;
         let dont_ask = self.dont_ask;
         let path = self.path.clone();
+        let wh = window.window_handle();
         window.close_dialog(cx);
-        (on_submit)(choice, dont_ask, path, window, cx);
+        // Defer the on_submit fire — close_dialog only schedules the
+        // modal entity's teardown, so calling on_submit synchronously
+        // here re-enters update_window from inside a still-alive modal
+        // entity's borrow and GPUI returns "window not found". Capture
+        // the window handle and re-enter on the next effect cycle once
+        // the modal has been dropped (G9: capture
+        // `window.window_handle()` and re-enter via
+        // `cx.update_window(handle, ...)`).
+        cx.defer(move |app_cx| {
+            crate::windows::try_update_workspace_window(
+                wh,
+                app_cx,
+                "open_project_modal.submit",
+                move |window, cx_w| {
+                    (on_submit)(choice, dont_ask, path, window, cx_w);
+                },
+            );
+        });
     }
 }
 

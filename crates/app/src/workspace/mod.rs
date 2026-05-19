@@ -930,6 +930,14 @@ impl Workspace {
         cx.defer(move |cx| {
             weak.update(cx, |ws, cx| ws.persist_state(cx)).ok();
         });
+        // Persistence-worthy mutations always change something the UI
+        // renders too — left-dock tree, status bar, window title, etc.
+        // Without an explicit `cx.notify()` the dock keeps the stale
+        // snapshot until an unrelated event fires (the May-2026
+        // add-project / add-group regressions both had this shape).
+        // Keep notify here so every call site (group/project CRUD,
+        // worktree DnD, policy updates) gets a render for free.
+        cx.notify();
     }
 
     fn alloc_id(&mut self) -> u64 {

@@ -257,35 +257,44 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
             return;
         }
         let weak_for_modal = weak.clone();
-        let _ = cx.update_window(handle, |_, window, cx_w| {
-            crate::workspace::delete_project_modal::open_delete_project_modal(
-                project_name,
-                move |choice, _window, app_cx| {
-                    let Some(ws) = weak_for_modal.upgrade() else {
-                        return;
-                    };
-                    let _ = app_cx.update_window(handle, |_, window, cx_w| {
-                        match choice {
-                            crate::workspace::delete_project_modal::DeleteProjectChoice::KeepOnDisk => {
-                                let keep =
-                                    ws.update(cx_w, |ws, cx| ws.close_active_project(window, cx));
-                                if !keep {
-                                    window.remove_window();
-                                    ensure_welcome_if_last(cx_w);
+        crate::windows::try_update_workspace_window(
+            handle,
+            cx,
+            "close_project.open_modal",
+            |window, cx_w| {
+                crate::workspace::delete_project_modal::open_delete_project_modal(
+                    project_name,
+                    move |choice, _window, app_cx| {
+                        let Some(ws) = weak_for_modal.upgrade() else {
+                            return;
+                        };
+                        crate::windows::try_update_workspace_window(
+                            handle,
+                            app_cx,
+                            "close_project.modal_callback",
+                            |window, cx_w| match choice {
+                                crate::workspace::delete_project_modal::DeleteProjectChoice::KeepOnDisk => {
+                                    let keep = ws.update(cx_w, |ws, cx| {
+                                        ws.close_active_project(window, cx)
+                                    });
+                                    if !keep {
+                                        window.remove_window();
+                                        ensure_welcome_if_last(cx_w);
+                                    }
                                 }
-                            }
-                            crate::workspace::delete_project_modal::DeleteProjectChoice::DeleteOnDisk => {
-                                ws.update(cx_w, |ws, cx| {
-                                    ws.delete_active_project_on_disk(window, cx);
-                                });
-                            }
-                        }
-                    });
-                },
-                window,
-                cx_w,
-            );
-        });
+                                crate::workspace::delete_project_modal::DeleteProjectChoice::DeleteOnDisk => {
+                                    ws.update(cx_w, |ws, cx| {
+                                        ws.delete_active_project_on_disk(window, cx);
+                                    });
+                                }
+                            },
+                        );
+                    },
+                    window,
+                    cx_w,
+                );
+            },
+        );
         cx.stop_propagation();
     });
 }

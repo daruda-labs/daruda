@@ -31,6 +31,37 @@ fn log_touch_recent_err(path: &std::path::Path, e: std::io::Error) {
     );
 }
 
+/// Enter `handle`'s window context to run `f`. Failures route through
+/// the on-disk log (Layer 3) with `site` as the dedup tag, so the
+/// May-2026 silent-failure class — `let _ = cx.update_window(...)`
+/// swallowing a "window not found" inside a modal callback — can no
+/// longer hide. Every new caller that needs to re-enter a window from
+/// outside its event loop must go through this helper or a
+/// `match`/`?` of its own; `scripts/lint-no-silent-update.sh` enforces.
+pub(crate) fn try_update_workspace_window<F>(
+    handle: gpui::AnyWindowHandle,
+    cx: &mut App,
+    site: &'static str,
+    f: F,
+) where
+    F: FnOnce(&mut gpui::Window, &mut App),
+{
+    match cx.update_window(handle, move |_, window, cx_w| f(window, cx_w)) {
+        Ok(()) => {}
+        Err(e) => {
+            LogWriter::log(
+                ErrorReport::new("Failed to enter window context")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context("site", site)
+                    .with_context("error", format!("{e}"))
+                    .dedup(format!("window.update_failed.{site}"))
+                    .build(),
+            );
+        }
+    }
+}
+
 /// Where to land a project opened via File menu / recent list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OpenMode {
@@ -159,6 +190,7 @@ pub(crate) fn open_welcome_window(
         let cfg = cfg_for_welcome.clone();
         // Close welcome after opening a successor window.
         let close_welcome = move |cx: &mut App| {
+            // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
             let _ = cx.update_window(ww_handle.into(), |_, window, _cx| {
                 window.remove_window();
             });
@@ -184,6 +216,7 @@ pub(crate) fn open_welcome_window(
                             log_touch_recent_err(path, e);
                         }
                         let saved = daruda_store::project::persistence::load_workspace_state(path);
+                        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
                         let _ = cx.update(|cx| {
                             let opts = build_window_options(&cfg2);
                             open_workspace_window(cfg2.clone(), Some(project), saved, opts, cx);
@@ -277,6 +310,7 @@ pub(crate) fn prompt_and_open_folder(
     });
     cx.spawn(async move |cx| {
         let selected = paths.await;
+        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
         let _ = cx.update(|cx| {
             if let Ok(Ok(Some(paths))) = selected
                 && let Some(path) = paths.first()
@@ -335,6 +369,7 @@ pub(crate) fn prompt_and_open_folder_with_policy(
     });
     cx.spawn(async move |cx| {
         let selected = paths.await;
+        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
         let _ = cx.update(|cx| {
             if let Ok(Ok(Some(paths))) = selected
                 && let Some(path) = paths.first()
@@ -381,6 +416,7 @@ fn handle_picked_folder(
 /// the duplicate-root check so the user sees their existing project
 /// instead of getting a second copy in a new window.
 fn activate_existing(handle: gpui::AnyWindowHandle, cx: &mut App) {
+    // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
     let _ = cx.update_window(handle, |_, window, _| {
         window.activate_window();
     });
@@ -411,16 +447,70 @@ fn add_path_to_workspace(
     path: std::path::PathBuf,
     cx: &mut App,
 ) {
+    // The handle captured by `handle_picked_folder` can go stale by the
+    // time the chooser modal's submit callback fires — GPUI considers
+    // the window "not found" inside `update_window` even though the
+    // workspace itself is still alive (the modal entity's lifecycle
+    // appears to invalidate the cached handle as part of close_dialog).
+    // Probe first, then fall back to whichever workspace window the
+    // registry currently considers active. The weak entity stays the
+    // authoritative pointer; only the handle is re-resolved.
+    let target_handle = match cx.update_window(handle, |_, _, _| {}) {
+        Ok(()) => handle,
+        Err(_) => match WindowRegistry::active_workspace(cx) {
+            Some((fresh, _)) => {
+                LogWriter::log(
+                    ErrorReport::new(
+                        "trace.add_project_flow: handle re-resolved via active_workspace",
+                    )
+                    .severity(ErrorSeverity::Info)
+                    .at(file!(), line!())
+                    .dedup("trace.add_project_flow.handle_refresh")
+                    .build(),
+                );
+                fresh
+            }
+            None => {
+                LogWriter::log(
+                    ErrorReport::new("trace.add_project_flow: no active workspace to receive add")
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("trace.add_project_flow.no_target")
+                        .build(),
+                );
+                return;
+            }
+        },
+    };
     let weak = weak.clone();
     let path_for_recent = path.clone();
-    let _ = cx.update_window(handle, move |_, window, cx_w| {
+    let update_result = cx.update_window(target_handle, move |_, window, cx_w| {
         if let Some(ws) = weak.upgrade() {
             ws.update(cx_w, |ws, cx| {
                 ws.add_project(path, window, cx);
             });
+        } else {
+            LogWriter::log(
+                ErrorReport::new("trace.add_project_flow: weak.upgrade=None (workspace dropped)")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("trace.add_project_flow.weak_dropped")
+                    .build(),
+            );
         }
         window.activate_window();
     });
+    if let Err(e) = &update_result {
+        LogWriter::log(
+            ErrorReport::new("trace.add_project_flow: update_window failed")
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .with_context("error", format!("{e:?}"))
+                .dedup("trace.add_project_flow.update_window_err")
+                .build(),
+        );
+    }
+    let _ = update_result;
     if let Err(e) = daruda_store::project::persistence::touch_recent(&path_for_recent) {
         log_touch_recent_err(&path_for_recent, e);
     }
@@ -456,12 +546,12 @@ fn open_chooser_modal(
     cx: &mut App,
 ) {
     let weak_for_modal = weak.clone();
-    let _ = cx.update_window(handle, move |_, window, cx_w| {
+    try_update_workspace_window(handle, cx, "open_chooser_modal", move |window, cx_w| {
         let config = config.clone();
         crate::workspace::open_project_modal::open_choose_window_modal(
             path,
             crate::workspace::open_project_modal::OpenProjectChoice::AddHere,
-            move |choice, dont_ask, picked_path, _window, app_cx| {
+            move |choice, dont_ask, picked_path, window, app_cx| {
                 if dont_ask && let Some(ws) = weak_for_modal.upgrade() {
                     ws.update(app_cx, |ws, cx| {
                         let policy = match choice {
@@ -477,12 +567,34 @@ fn open_chooser_modal(
                 }
                 match choice {
                     crate::workspace::open_project_modal::OpenProjectChoice::AddHere => {
-                        add_path_to_workspace(handle, &weak_for_modal, picked_path, app_cx);
+                        // The modal callback already runs inside the
+                        // workspace window's context (OpenProjectModal::submit
+                        // re-enters via `cx.defer` + `update_window` on the
+                        // workspace handle). Calling `add_path_to_workspace`
+                        // here would re-enter `update_window` a second time
+                        // on the same window — GPUI flags that as "window
+                        // not found". Use the live `window` + `weak entity`
+                        // directly (matches zed's `update_in` pattern).
+                        if let Some(ws) = weak_for_modal.upgrade() {
+                            ws.update(app_cx, |ws, cx| {
+                                ws.add_project(picked_path.clone(), window, cx);
+                            });
+                            window.activate_window();
+                        }
+                        if let Err(e) =
+                            daruda_store::project::persistence::touch_recent(&picked_path)
+                        {
+                            log_touch_recent_err(&picked_path, e);
+                        }
+                        crate::menus::refresh_recent_menu(app_cx);
                     }
                     crate::workspace::open_project_modal::OpenProjectChoice::NewWindow => {
                         open_new_workspace_for_path(config.clone(), &picked_path, app_cx);
                     }
                 }
+                let _ = handle; // captured for symmetry with the AddHere
+                // direct branch in `handle_picked_folder`; modal flow no
+                // longer needs it.
             },
             window,
             cx_w,
@@ -533,7 +645,9 @@ pub(crate) fn open_project_with_mode(
     // `remove_window` on the next tick targets only the captured handle,
     // never the newcomer.
     cx.spawn(async move |cx| {
+        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
         let _ = cx.update(|cx| {
+            // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
             let _ = cx.update_window(handle, |_, window, _| {
                 window.remove_window();
             });
@@ -595,6 +709,7 @@ pub(crate) fn open_settings_window(
 /// closes a project.
 pub(crate) fn ensure_welcome_if_last(cx: &mut App) {
     cx.spawn(async move |cx| {
+        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
         let _ = cx.update(|cx| {
             if !WindowRegistry::all_handles(cx).is_empty() {
                 return;
@@ -621,8 +736,10 @@ pub(crate) fn close_all_workspace_windows(cx: &mut App) {
         return;
     }
     cx.spawn(async move |cx| {
+        // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
         let _ = cx.update(|cx| {
             for handle in targets {
+                // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
                 let _ = cx.update_window(handle, |_, window, _| {
                     window.remove_window();
                 });

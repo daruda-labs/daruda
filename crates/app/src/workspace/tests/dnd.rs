@@ -235,40 +235,65 @@ fn reorder_project_before_inside_same_group_swaps_order(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn reorder_project_before_adjacent_target_is_identity_noop(cx: &mut TestAppContext) {
-    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_adj_a");
+fn reorder_project_before_downward_lands_after_target(cx: &mut TestAppContext) {
+    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_down_adj_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_proj_adj_b").unwrap();
+    std::fs::create_dir_all("/tmp/daruda_dnd_proj_down_adj_b").unwrap();
     let _ = cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_proj_adj_b"),
+                std::path::PathBuf::from("/tmp/daruda_dnd_proj_down_adj_b"),
                 window,
                 cx,
             )
         })
     });
-    // pa already sits immediately before pb in the top-level pool.
-    // Dropping pa before pb is a visual no-op; tab_orders and group
-    // membership must be left untouched.
-    let (pa, pb, before_state) = ws.read_with(cx, |ws, _| {
-        let pa = ws.projects[0].id;
-        let pb = ws.projects[1].id;
-        let state: Vec<(ProjectId, u32, Option<GroupId>)> = ws
-            .projects
-            .iter()
-            .map(|p| (p.id, p.tab_order, p.group_id))
-            .collect();
-        (pa, pb, state)
-    });
+    // Before: [pa=0, pb=1]. Drag pa downward onto pb's slot. Standard
+    // list-DnD convention: dropping X onto Y makes X take Y's row, so
+    // pa must land AFTER pb → [pb=0, pa=1]. Regression guard for the
+    // "drag-down silently no-ops because insert-before reproduces the
+    // original order" bug.
+    let (pa, pb) = ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[1].id));
     ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pb, cx));
-    let after_state: Vec<(ProjectId, u32, Option<GroupId>)> = ws.read_with(cx, |ws, _| {
-        ws.projects
-            .iter()
-            .map(|p| (p.id, p.tab_order, p.group_id))
-            .collect()
+    ws.read_with(cx, |ws, _| {
+        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
+        let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        assert!(pb_t < pa_t, "pa must land after pb on a downward drop");
+        let mut orders: Vec<u32> = vec![pa_t, pb_t];
+        orders.sort();
+        assert_eq!(orders, vec![0, 1]);
     });
-    assert_eq!(before_state, after_state);
+}
+
+#[gpui::test]
+fn reorder_project_before_downward_across_multiple_lands_after_target(cx: &mut TestAppContext) {
+    let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_down_multi_a");
+    let ws = wh.root(cx).unwrap();
+    for sub in ["b", "c"] {
+        let path = format!("/tmp/daruda_dnd_proj_down_multi_{sub}");
+        std::fs::create_dir_all(&path).unwrap();
+        let _ = cx.update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.add_project(std::path::PathBuf::from(path), window, cx)
+            })
+        });
+    }
+    // Before: [pa=0, pb=1, pc=2]. Drag pa onto pc (down past pb).
+    // Expected: pa lands AFTER pc → [pb=0, pc=1, pa=2]. The pre-fix
+    // behavior produced [pb=0, pa=1, pc=2] (one slot short of the
+    // drop target), which is exactly the "1 → 3 goes to slot 2" report.
+    let (pa, pb, pc) = ws.read_with(cx, |ws, _| {
+        (ws.projects[0].id, ws.projects[1].id, ws.projects[2].id)
+    });
+    ws.update(cx, |ws, cx| ws.reorder_project_before(pa, pc, cx));
+    ws.read_with(cx, |ws, _| {
+        let pa_t = ws.projects.iter().find(|p| p.id == pa).unwrap().tab_order;
+        let pb_t = ws.projects.iter().find(|p| p.id == pb).unwrap().tab_order;
+        let pc_t = ws.projects.iter().find(|p| p.id == pc).unwrap().tab_order;
+        assert_eq!(pb_t, 0);
+        assert_eq!(pc_t, 1);
+        assert_eq!(pa_t, 2);
+    });
 }
 
 #[gpui::test]

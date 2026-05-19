@@ -203,6 +203,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#264d7359"
     },
+    "worktree_drop_target_rejected_bg": {
+      "description": "Maps to `palette::WORKTREE_DROP_TARGET_REJECTED_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#7e252533"
+    },
     "modal_panel_bg": {
       "description": "Maps to `palette::MODAL_PANEL_BG`.",
       "$ref": "#/$defs/Rgba",

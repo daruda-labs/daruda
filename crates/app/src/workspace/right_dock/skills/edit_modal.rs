@@ -169,7 +169,9 @@ impl EditSkillModal {
                         body.trim_start_matches('\n').to_string()
                     })
                     .await;
+                // SILENT-OK: modal may close during async skill edit
                 let _ = async_cx.update(|app_cx| {
+                    // SILENT-OK: modal may close during async skill edit
                     let _ = app_cx.update_window(wh, |_, window, cx| {
                         body_editor.update(cx, |inp, cx_state| {
                             // Only fill the body if the user hasn't begun
@@ -258,6 +260,7 @@ impl EditSkillModal {
             .spawn(cx, async move |async_cx| {
                 let result = persist::write_skill(&draft, project_root.as_deref(), true)
                     .map_err(|e| e.to_string());
+                // SILENT-OK: modal may close during async skill edit
                 let _ = async_cx.update(|window, cx| {
                     let Some(me) = me.upgrade() else { return };
                     me.update(cx, |modal, cx| {

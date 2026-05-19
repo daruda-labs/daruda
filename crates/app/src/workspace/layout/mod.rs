@@ -230,7 +230,7 @@ impl Render for Dock {
                 let header = crate::workspace::left_dock::view_tabs::render(snap, cx);
                 let content: gpui::AnyElement = match snap.left_dock_view {
                     daruda_store::project::LeftDockView::Worktrees => {
-                        crate::workspace::left_dock::worktrees::render(snap, cx)
+                        crate::workspace::left_dock::projects::render(snap, cx)
                     }
                     daruda_store::project::LeftDockView::GitChanges => {
                         crate::workspace::left_dock::git_changes::render(snap, cx)

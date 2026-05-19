@@ -76,7 +76,21 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     }
     body = body.child(header);
 
-    for row in &top_rows {
+    let divider_color = theme::current(cx).status_bar_border;
+    for (ix, row) in top_rows.iter().enumerate() {
+        // Thin 1px horizontal divider between top-level rows so each
+        // group / ungrouped project is visually separable. Skipped
+        // before the first row so the section header sits flush
+        // against the first entry.
+        if ix > 0 {
+            body = body.child(
+                div()
+                    .h(px(1.0))
+                    .w_full()
+                    .bg(divider_color)
+                    .my(px(theme::WORKTREE_SECTION_PAD_Y)),
+            );
+        }
         match row {
             TopRow::Group(group, members) => {
                 body = body.child(group_header_row(group, snap, cx));
@@ -124,23 +138,35 @@ fn ungrouped_project_block(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let mut block = div().flex().flex_col().w_full();
+    let is_active_project = project.id == active_project;
+    let project_is_git = project
+        .worktrees
+        .iter()
+        .any(|w| matches!(&w.kind, daruda_store::project::WorktreeKind::Git { .. }));
     block = block.child(project_header_row(
         project.id,
         project.name.clone(),
         project.group_id.is_none(),
+        is_active_project,
+        project_is_git,
+        project.is_collapsed,
+        project.last_active_worktree_id,
         snap,
         cx,
     ));
-    let mut list = div().flex().flex_col().w_full();
-    for wt in &project.worktrees {
-        let is_active = project.id == active_project && wt.id == active_worktree;
-        let tab_count = if is_active { active_tab_count } else { 0 };
-        let git_badge = git_badge_for(snap, project.id, wt.id);
-        list = list.child(worktree_row(
-            wt, project.id, is_active, tab_count, git_badge, snap, cx,
-        ));
+    if !project.is_collapsed {
+        let mut list = div().flex().flex_col().w_full();
+        for wt in &project.worktrees {
+            let is_active = project.id == active_project && wt.id == active_worktree;
+            let tab_count = if is_active { active_tab_count } else { 0 };
+            let git_badge = git_badge_for(snap, project.id, wt.id);
+            list = list.child(worktree_row(
+                wt, project.id, is_active, tab_count, git_badge, snap, cx,
+            ));
+        }
+        block = block.child(list);
     }
-    block.child(list)
+    block
 }
 
 /// Same as `ungrouped_project_block` but indented to surface the

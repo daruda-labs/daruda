@@ -10,5 +10,5 @@ pub(in crate::workspace) mod file_tree_ops;
 pub(super) mod files;
 pub(super) mod git_changes;
 pub(in crate::workspace) mod git_ops;
+pub(super) mod projects;
 pub(super) mod view_tabs;
-pub(super) mod worktrees;

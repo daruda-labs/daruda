@@ -60,6 +60,7 @@ impl Workspace {
             window
                 .spawn(app, async move |cx| {
                     let answer = receiver.await.unwrap_or(2);
+                    // SILENT-OK: workspace may drop during async save-dialog wait
                     let _ = weak_inner.update_in(cx, |this, window, cx| {
                         this.window_close_in_flight = false;
                         match answer {

@@ -909,6 +909,7 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
                     let Some(pane) = this.main_area.panes.iter().find(|p| p.id == pane_id) else {

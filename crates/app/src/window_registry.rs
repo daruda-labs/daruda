@@ -242,6 +242,7 @@ impl WindowRegistry {
             if found.is_some() {
                 break;
             }
+            // SILENT-OK: stale window in registry — skip and continue iteration
             let _ = cx.update_window(handle, |_root, _window, cx_w| {
                 let Some(ws) = weak.upgrade() else {
                     return;

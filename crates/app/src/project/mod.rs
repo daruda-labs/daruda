@@ -40,6 +40,10 @@ pub struct Project {
     /// Sort order within `Workspace::projects`. Renumbered to `0..N`
     /// by DnD operations so the integer is dense.
     pub tab_order: u32,
+    /// True when the user has collapsed the project header in the
+    /// left dock. The worktree list is hidden when collapsed; click on
+    /// the project chevron toggles. Persisted across sessions.
+    pub is_collapsed: bool,
 }
 
 impl Project {
@@ -61,6 +65,7 @@ impl Project {
             group_id: None,
             color: None,
             tab_order: 0,
+            is_collapsed: false,
         }
     }
 
@@ -78,6 +83,7 @@ impl Project {
             group_id: s.group_id,
             color: s.color.clone(),
             tab_order: s.tab_order,
+            is_collapsed: s.is_collapsed,
         }
     }
 

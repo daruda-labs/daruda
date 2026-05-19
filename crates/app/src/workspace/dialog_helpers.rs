@@ -117,6 +117,7 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
     let handle = state_for_focus.read(cx).focus_handle(cx);
     let wh = window.window_handle();
     cx.defer(move |cx| {
+        // SILENT-OK: focus restore on possibly-dismissed dialog
         let _ = cx.update_window(wh, |_, window, cx| window.focus(&handle, cx));
     });
 }
@@ -232,6 +233,7 @@ pub(in crate::workspace) fn open_form_modal<E, B>(
     let handle = entity_for_focus.read(cx).focus_handle(cx);
     let wh = window.window_handle();
     cx.defer(move |cx| {
+        // SILENT-OK: focus restore on possibly-dismissed dialog
         let _ = cx.update_window(wh, |_, window, cx| window.focus(&handle, cx));
     });
 }

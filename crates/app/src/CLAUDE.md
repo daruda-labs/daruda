@@ -132,6 +132,7 @@ Runtime `Worktree` model (id / path / status / `base_ref` / description) plus a 
 - **Re-entry guards** — `OPEN_IN_PROGRESS` around folder picker; modal key handlers must `cx.stop_propagation()`.
 - **Tests alongside code** — new modules add `#[cfg(test)] mod tests`.
 - **Errors flow through `report_error` / `LogWriter::log`** — `eprintln!` and `let _ = …` are forbidden in new code. Inside `Workspace` use `self.report_error(report, cx)` (toast + history + log); from GPUI-free / pre-Workspace sites use `LogWriter::log(report)` (log only). See the project root `CLAUDE.md` §Error reporting for the builder shape and `dedup` key conventions.
+- **GPUI Result handling** — `cx.update_window` / `cx.update` / `entity.update_in` return `Result<T>`. Use `match`, `?`, or `crate::windows::try_update_workspace_window(handle, cx, "site", |w, cx| …)` (auto-logs failures). Bare `let _ = cx.update_window(…)` is forbidden — it silently swallows "window not found" errors raised by modal-callback re-entry and async race conditions. Mark intentional ignores with `// SILENT-OK: <reason>` on the previous line. Enforced by `scripts/lint-no-silent-update.sh`.
 
 ## Extension recipes (quick reference)
 
@@ -143,7 +144,7 @@ Runtime `Worktree` model (id / path / status / `base_ref` / description) plus a 
 | New modal | See G9. `impl ModalView` + `.tab_group()` on root; open via `dialog_helpers::*`. |
 | New pane content kind | `PaneContent` variant + struct in `main_area/pane.rs` → match arms (title/cwd/focus_handle/resize) → `main_area/mod.rs` walker arm → `daruda_project` persistence mirror + `#[serde(default)]` → `create_*_pane` constructor → `workspace/tests` round-trip |
 | Skills / Tools / Tasks tab feature | Mutate the relevant Global via `cx.update_global::<SkillsState\|McpState\|GlobalTasks, _>(...)` → renderer reads through the snapshot in `RightDockSnapshot` → `cx.observe_global` rebroadcasts to every Workspace + the Settings window |
-| Worktree drag/context menu | Data ops in `worktree/mod.rs` → `WorktreeDrag` in `layout/ops.rs` → actions in `worktree_ops.rs` → UI in `left_dock/worktrees/list.rs` |
+| Worktree drag/context menu | Data ops in `worktree/mod.rs` → `WorktreeDrag` in `layout/ops.rs` → actions in `worktree_ops.rs` → UI in `left_dock/projects/list.rs` |
 
 ## Where things go (decision matrix)
 
@@ -251,3 +252,14 @@ project context is implicit in `self`.
 - Dismiss via `window.close_dialog(cx)`. In `cx.defer` / async paths without a live `&mut Window`, capture `window.window_handle()` and re-enter via `cx.update_window(handle, ...)`.
 - Async continuations: never nest two `entity.update` on the same `app_cx`. Run workspace finalize first, then update modal.
 - Text input: `Entity<crate::ui::InputState>` rendered via `crate::ui::input(&state, cx, tab)`. IME is handled by `gpui_component`.
+- **Modal callback `&mut Window` is live — use it, don't recapture handles**. When a modal's submit/dismiss callback fires with `(…, &mut Window, &mut App)`, that `Window` is the live workspace window inside its own update cycle. Re-entering `cx.update_window(captured_handle, …)` from the callback triggers a *nested* re-entry on the same window and GPUI returns `"window not found"` — the May-2026 add-project regression. Use the callback's `window` directly with `weak_workspace.update(cx, |ws, cx| ws.action(path, window, cx))`. Captured `AnyWindowHandle` is for `cx.defer` continuations where no `&mut Window` is in scope.
+
+### G10 — Debugging policy
+
+Reference: `superpowers:systematic-debugging` skill (Iron Law: no fixes before root cause).
+
+- **Trace before fix** — `cx.update_window` failures, modal-callback hangs, dock not updating, etc. start with `LogWriter::log(Info)` traces at each component boundary (`prompt_and_open_folder_with_policy` → `handle_picked_folder` → `add_path_to_workspace` → `add_project`). Read `~/.daruda/logs/<profile>/daruda-YYYY-MM-DD.log`, grep the dedup tag prefix, identify the layer that breaks. Only then propose a fix.
+- **Fix counter ≥ 2 = stop** — if two consecutive fixes have failed, the architecture is wrong, not the patch. Compare against reference (zed: `/Users/woo/Downloads/term/zed-0.231.2/crates/{workspace,gpui}/`). Don't try a third patch in the same vein.
+- **Reference comparison early** — for any GPUI domain question (window contexts, async re-entry, modal lifecycle, async/spawn shape) read zed's implementation before reasoning. zed's `workspace::update_in`, `cx.spawn_in(window, ...)`, modal patterns are the closest reference.
+- **Callback signature check** — when reading or writing a callback, account for **every** parameter. `_window` / `_cx` underscored prefixes are silent acceptances that the parameter is unused. If the parameter is `&mut Window`, suspect that you should be using it instead of capturing a handle.
+- **Domain unfamiliar → admit + read references** — "I don't fully understand X" goes in the message, not pretending. Skip ahead only when you can name the reference you checked.

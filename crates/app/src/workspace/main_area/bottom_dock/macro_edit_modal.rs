@@ -519,6 +519,7 @@ mod tests {
         s: &str,
     ) {
         let state = modal.read_with(cx, |m, _| field(m));
+        // SILENT-OK: focus restore on possibly-dismissed dialog
         let _ = wh.update(cx, |_root, window, cx| {
             state.update(cx, |i, cx_state| {
                 i.set_value(s.to_string(), window, cx_state);

@@ -123,8 +123,17 @@ impl Workspace {
         // session as worktrees come and go.
         let removed_path = self.worktree_for(target).map(|w| w.path.clone());
 
-        if self.active == target
-            && let Some(fallback) = self
+        // Pick the fallback `WorktreeRef` to activate when the removal
+        // strips the currently active worktree. Prefer a sibling
+        // worktree in the same project (Project membership stays put),
+        // then fall back to *another* project's snap target so the
+        // status bar / window title / pane runtime never wedge on a
+        // dangling ref. Returning `None` here only happens in the
+        // degenerate case where the workspace is about to be empty —
+        // the section-header `[+]` is hidden for non-git workspaces so
+        // in practice main worktrees keep at least one per project.
+        let fallback_target: Option<WorktreeRef> = if self.active == target {
+            let same_project = self
                 .projects
                 .iter()
                 .find(|p| p.id == target.project)
@@ -136,8 +145,18 @@ impl Workspace {
                             project: target.project,
                             worktree: w.id,
                         })
-                })
-        {
+                });
+            let cross_project = || {
+                self.projects
+                    .iter()
+                    .find(|p| p.id != target.project)
+                    .and_then(|p| p.snap_target())
+            };
+            same_project.or_else(cross_project)
+        } else {
+            None
+        };
+        if let Some(fallback) = fallback_target {
             self.activate_worktree(fallback, window, cx);
         }
         self.main_area.inactive_worktree_runtimes.remove(&target);
@@ -185,6 +204,11 @@ impl Workspace {
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
         self.mark_dirty_and_save(cx);
+        // Force a render even when no fallback fired — the worktree
+        // list shrank by one and the dock would otherwise hold a row
+        // for the now-removed worktree until an unrelated render.
+        // Same defensive notify shape `add_project` uses.
+        cx.notify();
     }
 
     /// Resolve the active git repo_root from the active project's
@@ -459,13 +483,17 @@ impl Workspace {
         let (Some(from_idx), Some(to_idx)) = (from_idx, to_idx) else {
             return;
         };
+        // Insert at `to`'s ORIGINAL index. Direction-aware via the
+        // implicit shift caused by `remove`: when `from_idx < to_idx`
+        // (downward drag) the removal shifts `to` down one slot, so
+        // inserting at `to_idx` lands AFTER the now-shifted `to`;
+        // when `from_idx > to_idx` (upward drag) `to` keeps its
+        // index, so inserting at `to_idx` lands BEFORE `to`. This
+        // matches the standard list-DnD expectation that "drop X
+        // onto Y's slot" makes X take Y's row regardless of drag
+        // direction.
         let item = project.worktrees.remove(from_idx);
-        let insert_at = if from_idx < to_idx {
-            to_idx - 1
-        } else {
-            to_idx
-        };
-        project.worktrees.insert(insert_at, item);
+        project.worktrees.insert(to_idx, item);
         for (i, w) in project.worktrees.iter_mut().enumerate() {
             w.tab_order = i as u32;
         }

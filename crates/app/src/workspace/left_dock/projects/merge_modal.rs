@@ -231,6 +231,7 @@ impl MergeModal {
                     Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate)
                 );
 
+                // SILENT-OK: workspace may drop after merge modal closes
                 let _ = async_cx.update(|window, app_cx| {
                     match merge_result {
                         Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate) => {
@@ -314,6 +315,7 @@ impl MergeModal {
                         })
                         .await;
 
+                    // SILENT-OK: workspace may drop after merge modal closes
                     let _ = async_cx.update(|window, app_cx| {
                         if let Some(ws) = workspace_post.upgrade() {
                             ws.update(app_cx, |ws, cx| {
@@ -382,6 +384,7 @@ impl MergeModal {
                         let _ = crate::worktree::git::git_merge_abort(&target_path);
                     })
                     .await;
+                // SILENT-OK: workspace may drop after merge modal closes
                 let _ = async_cx.update(|window, app_cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(app_cx, |ws, cx| ws.finalize_merge(target_ref, cx));

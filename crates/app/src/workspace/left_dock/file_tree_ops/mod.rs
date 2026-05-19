@@ -456,7 +456,7 @@ impl Workspace {
                                 .background_executor()
                                 .spawn(async move { load_dir(&abs_clone) })
                                 .await;
-                            let _ = this.update(cx, |ws, cx| {
+                            if let Err(e) = this.update(cx, |ws, cx| {
                                 ws.apply_dir_load_result(
                                     wt_ref,
                                     parent_id,
@@ -464,7 +464,18 @@ impl Workspace {
                                     DirLoadSource::WatcherReload,
                                     cx,
                                 );
-                            });
+                            }) {
+                                daruda_store::observability::log_writer::LogWriter::log(
+                                    daruda_store::observability::error_report::ErrorReport::new(
+                                        "File tree bulk reload could not reach workspace",
+                                    )
+                                    .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
+                                    .at(file!(), line!())
+                                    .with_context("error", format!("{e}"))
+                                    .dedup("file_tree.bulk_reload.workspace_dropped")
+                                    .build(),
+                                );
+                            }
                         }
                     }
                     ReloadTask::Parent(abs) => {
@@ -482,7 +493,7 @@ impl Workspace {
                             .background_executor()
                             .spawn(async move { load_dir(&abs_clone) })
                             .await;
-                        let _ = this.update(cx, |ws, cx| {
+                        if let Err(e) = this.update(cx, |ws, cx| {
                             ws.apply_dir_load_result(
                                 wt_ref,
                                 parent_id,
@@ -490,7 +501,18 @@ impl Workspace {
                                 DirLoadSource::WatcherReload,
                                 cx,
                             );
-                        });
+                        }) {
+                            daruda_store::observability::log_writer::LogWriter::log(
+                                daruda_store::observability::error_report::ErrorReport::new(
+                                    "File tree parent reload could not reach workspace",
+                                )
+                                .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
+                                .at(file!(), line!())
+                                .with_context("error", format!("{e}"))
+                                .dedup("file_tree.parent_reload.workspace_dropped")
+                                .build(),
+                            );
+                        }
                     }
                 }
             }

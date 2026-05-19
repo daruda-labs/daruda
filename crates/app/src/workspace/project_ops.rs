@@ -61,6 +61,14 @@ impl Workspace {
             self.activate_worktree(t, window, cx);
         }
         self.mark_dirty_and_save(cx);
+        // `activate_worktree` already issues `cx.notify()`, but it is
+        // skipped when `target` is `None` (a project bootstrapped with
+        // an empty worktree list) — left-dock would otherwise miss the
+        // freshly-pushed project until the next unrelated render. Fire
+        // an unconditional notify so the dock re-renders for both
+        // paths; the duplicate notify on the activate branch is a
+        // harmless no-op for GPUI's effect coalescing.
+        cx.notify();
         target
     }
 
@@ -79,11 +87,59 @@ impl Workspace {
         self.mark_dirty_and_save(cx);
     }
 
+    /// Toggle the collapsed flag on a project. The project's worktree
+    /// list is hidden under its header when collapsed; clicking the
+    /// project chevron in the left dock drives this. Persists through
+    /// `mark_dirty_and_save`.
+    pub(in crate::workspace) fn toggle_project_collapse(
+        &mut self,
+        project_id: ProjectId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+            return;
+        };
+        project.is_collapsed = !project.is_collapsed;
+        self.mark_dirty_and_save(cx);
+    }
+
     /// Current workspace-level "Open Project" policy. Read by the
     /// global `OpenFolder` handler to decide between adding to the
     /// current window vs. opening a fresh one.
     pub(crate) fn window_open_policy(&self) -> WindowOpenPolicy {
         self.window_open_policy
+    }
+
+    /// Open the project's root in a fresh daruda window without
+    /// touching the current workspace. Used by the left-dock Project
+    /// context menu's "Open in New Window" entry (§5.1).
+    ///
+    /// Same-root duplicate guarding is handled inside
+    /// `open_project_with_mode` — when the user already has a window
+    /// pointing at this root, it will be focused instead of spawning
+    /// a second one (matches the OpenFolder policy path).
+    pub(in crate::workspace) fn open_project_in_new_window(
+        &self,
+        project_id: ProjectId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.projects.iter().find(|p| p.id == project_id) else {
+            return;
+        };
+        let root = project.root.clone();
+        let config = crate::settings_store::SettingsStore::global(cx).user_arc();
+        let store_project = daruda_store::project::Project::from_path(&root);
+        let saved = daruda_store::project::persistence::load_workspace_state(&root);
+        let opts = crate::windows::build_window_options(&config);
+        crate::windows::open_project_with_mode(
+            config,
+            Some(store_project),
+            saved,
+            opts,
+            crate::windows::OpenMode::NewWindow,
+            None,
+            cx,
+        );
     }
 
     /// Rename the currently active project. No-op when the workspace
@@ -273,7 +329,9 @@ impl Workspace {
                 errors.push((project_path.clone(), e.to_string()));
             }
 
+            // SILENT-OK: workspace may drop during background disk cleanup
             let _ = async_cx.update(|app_cx| {
+                // SILENT-OK: workspace may drop during background disk cleanup
                 let _ = app_cx.update_window(window_handle, |_, window, cx_w| {
                     let Some(ws) = _this.upgrade() else {
                         return;

@@ -106,6 +106,7 @@ daruda_theme_fields! {
     worktree_unread => WORKTREE_UNREAD,
     worktree_row_hover_bg => WORKTREE_ROW_HOVER_BG,
     worktree_drop_target_bg => WORKTREE_DROP_TARGET_BG,
+    worktree_drop_target_rejected_bg => WORKTREE_DROP_TARGET_REJECTED_BG,
     modal_panel_bg => MODAL_PANEL_BG,
     modal_panel_border => MODAL_PANEL_BORDER,
     modal_input_bg => MODAL_INPUT_BG,

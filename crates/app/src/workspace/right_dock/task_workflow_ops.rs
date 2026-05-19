@@ -178,7 +178,7 @@ impl Workspace {
                     })
                     .await;
 
-                let _ = async_cx.update(|window, app_cx| {
+                let update_result = async_cx.update(|window, app_cx| {
                     let Some(workspace) = me.upgrade() else {
                         return;
                     };
@@ -224,6 +224,16 @@ impl Workspace {
                         }
                     });
                 });
+                if let Err(e) = update_result {
+                    daruda_store::observability::log_writer::LogWriter::log(
+                        ErrorReport::new("Task workflow completion could not reach workspace")
+                            .severity(ErrorSeverity::Warning)
+                            .at(file!(), line!())
+                            .with_context("error", format!("{e}"))
+                            .dedup("task_workflow.completion.update_failed")
+                            .build(),
+                    );
+                }
             })
             .detach();
     }

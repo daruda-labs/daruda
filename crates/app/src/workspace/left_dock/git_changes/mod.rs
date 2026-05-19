@@ -17,7 +17,8 @@ use gpui::{
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuItem, IconName, SectionHeader, button, button_bare,
+    ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button,
+    button_bare,
 };
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
@@ -212,13 +213,23 @@ fn build_unified_list(staged: &[GitFileEntry], unstaged: &[GitFileEntry]) -> Vec
     map.into_values().collect()
 }
 
-/// Group a sorted unified list by worktree-relative parent directory.
-/// Files with no parent dir (root-level) are placed in a `None` group at the start.
+/// Group a unified list by worktree-relative parent directory.
+///
+/// Output order: directory groups first (alphabetical by dir path),
+/// then a single root-level group (no parent dir) at the end. Files
+/// within each group are sorted alphabetically by their full path.
+/// Putting root files last separates "files in a folder" from
+/// "loose files at the repo root" visually instead of interleaving
+/// them with directory groups by raw string order.
 fn group_by_dir(
     entries: Vec<UnifiedEntry>,
     wt_paths: &WorktreePaths<'_>,
 ) -> Vec<(Option<String>, Vec<UnifiedEntry>)> {
-    let mut groups: Vec<(Option<String>, Vec<UnifiedEntry>)> = Vec::new();
+    use std::collections::BTreeMap;
+
+    let mut dirs: BTreeMap<String, Vec<UnifiedEntry>> = BTreeMap::new();
+    let mut root: Vec<UnifiedEntry> = Vec::new();
+
     for entry in entries {
         let abs = wt_paths.from_git_status(&entry.path);
         let dir = abs
@@ -226,13 +237,21 @@ fn group_by_dir(
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.to_string_lossy().into_owned());
-        if let Some(last) = groups.last_mut()
-            && last.0 == dir
-        {
-            last.1.push(entry);
-            continue;
+        match dir {
+            Some(d) => dirs.entry(d).or_default().push(entry),
+            None => root.push(entry),
         }
-        groups.push((dir, vec![entry]));
+    }
+
+    for v in dirs.values_mut() {
+        v.sort_by(|a, b| a.path.cmp(&b.path));
+    }
+    root.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let mut groups: Vec<(Option<String>, Vec<UnifiedEntry>)> =
+        dirs.into_iter().map(|(k, v)| (Some(k), v)).collect();
+    if !root.is_empty() {
+        groups.push((None, root));
     }
     groups
 }
@@ -538,7 +557,11 @@ fn dir_header(
     let dir_label_color = t.faint_text;
     let dir_label_hover = t.muted_text;
 
-    let chevron = if is_collapsed { "▸" } else { "▾" };
+    let chevron_icon = if is_collapsed {
+        IconName::ChevronRight
+    } else {
+        IconName::ChevronDown
+    };
 
     // Paths to operate on — always the git-status form (repo-root
     // relative) so they round-trip into git_add / git_restore_staged.
@@ -637,12 +660,7 @@ fn dir_header(
                         }
                     }),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(theme::GIT_STATUS_CHAR_W))
-                        .child(chevron),
-                )
+                .child(Icon::new(chevron_icon).xsmall().text_color(dir_label_color))
                 .child(
                     div()
                         .flex_1()
@@ -1176,11 +1194,12 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                PathBuf::from("Cargo.toml"),
-                PathBuf::from("src/foo/a.rs"),
                 PathBuf::from("src/lib.rs"),
+                PathBuf::from("src/foo/a.rs"),
+                PathBuf::from("Cargo.toml"),
             ],
-            "root entries first, then descending dir order; alphabetical within each group"
+            "directory groups first (alphabetical by dir path), then root \
+             entries last; alphabetical within each group"
         );
     }
 
@@ -1202,8 +1221,9 @@ mod tests {
         let paths = ordered_visible_paths(&status, &collapsed, &paths_for(root));
         assert_eq!(
             paths,
-            vec![PathBuf::from("Cargo.toml"), PathBuf::from("src/lib.rs"),],
-            "src/foo entries hidden; root + src/lib.rs remain"
+            vec![PathBuf::from("src/lib.rs"), PathBuf::from("Cargo.toml"),],
+            "src/foo entries hidden; src/lib.rs remains as dir group, \
+             Cargo.toml stays last as a root entry"
         );
     }
 

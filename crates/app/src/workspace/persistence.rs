@@ -132,6 +132,7 @@ impl Workspace {
             group_id: project.group_id,
             worktrees,
             last_active_worktree_id: project.last_active_worktree_id,
+            is_collapsed: project.is_collapsed,
         }
     }
 

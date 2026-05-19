@@ -149,6 +149,7 @@ impl RemoveWorktreeModal {
                     })
                     .await;
 
+                // SILENT-OK: workspace may drop after remove modal closes
                 let _ = async_cx.update(|window, app_cx| {
                     let Some(me) = me.upgrade() else { return };
                     match result {

@@ -236,6 +236,12 @@ pub struct SerializedProject {
     /// worktree pick.
     #[serde(default)]
     pub last_active_worktree_id: WorktreeId,
+    /// True when the project header is rendered in the left dock with
+    /// its worktree list hidden. Click on the chevron toggles. Forward-
+    /// only addition (`#[serde(default)]` so legacy state files load as
+    /// expanded).
+    #[serde(default)]
+    pub is_collapsed: bool,
 }
 
 /// Current on-disk schema version for [`WorkspaceState`]. Bumped
@@ -344,6 +350,7 @@ impl WorkspaceState {
             group_id: None,
             last_active_worktree_id: active_worktree,
             worktrees: legacy.worktrees,
+            is_collapsed: false,
         };
         Self {
             schema_version: WORKSPACE_SCHEMA_VERSION,

@@ -9,8 +9,10 @@ pub(in crate::workspace) mod claude_badges;
 pub(in crate::workspace) mod context_menu;
 pub(in crate::workspace) mod create_modal;
 pub(in crate::workspace) mod drag;
+pub(in crate::workspace) mod group_menu;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod merge_modal;
+pub(in crate::workspace) mod project_menu;
 pub(in crate::workspace) mod remove_modal;
 pub(in crate::workspace) mod rows;
 

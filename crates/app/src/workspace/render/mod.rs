@@ -323,6 +323,7 @@ impl Render for Workspace {
                         tab_order: p.tab_order,
                         worktrees: p.worktrees.clone(),
                         last_active_worktree_id: p.last_active_worktree_id,
+                        is_collapsed: p.is_collapsed,
                     })
                     .collect();
                 projects.sort_by_key(|p| p.tab_order);

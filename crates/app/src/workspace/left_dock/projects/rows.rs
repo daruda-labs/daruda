@@ -12,7 +12,8 @@ use gpui::{
 use daruda_store::project::{ProjectId, WorktreeId};
 
 use crate::surface::strings as surface_strings;
-use crate::ui::{ButtonVariants as _, IconName, SectionHeader, button_bare};
+use crate::ui::{ButtonVariants as _, ContextMenuItem, IconName, SectionHeader, button_bare};
+use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
 use crate::worktree::Worktree;
 
@@ -68,16 +69,12 @@ pub(in crate::workspace) fn group_header_row(
     let label_color = t.dock_view_tab_active;
     let row_hover_bg = t.worktree_row_hover_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
+    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
-    let caret = if group.is_collapsed {
-        surface_strings::FILES_CHEVRON_COLLAPSED
-    } else {
-        surface_strings::FILES_CHEVRON_EXPANDED
-    };
-
-    // Optional color dot — silently skip when the stored value is not a
-    // parseable hex string. Group color is purely cosmetic; a malformed
-    // value should never break the header render.
+    // Color dot rendered at the left of the group row (right-aligned
+    // chevron carries the collapse state, so color is its own glyph
+    // again). Silently skipped when the stored value is not parseable
+    // hex.
     let color_dot = group
         .color
         .as_ref()
@@ -91,9 +88,19 @@ pub(in crate::workspace) fn group_header_row(
                 .bg(rgba)
         });
 
+    let caret_icon = if group.is_collapsed {
+        IconName::ChevronRight
+    } else {
+        IconName::ChevronDown
+    };
+
     let group_id = group.id;
+    let group_name_for_menu = group.name.clone();
+    let group_is_collapsed = group.is_collapsed;
     let workspace = snap.workspace.clone();
     let ws_for_drop = workspace.clone();
+    let ws_for_menu = workspace.clone();
+    let ws_for_chevron = workspace.clone();
     let drag_payload = DragPayload::Group {
         id: group_id,
         label: group.name.clone(),
@@ -116,6 +123,23 @@ pub(in crate::workspace) fn group_header_row(
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
             }
         }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+                let position: Point<Pixels> = ev.position;
+                let Some(ws) = ws_for_menu.upgrade() else {
+                    return;
+                };
+                let items = super::group_menu::build_group_menu_items(
+                    group_id,
+                    group_name_for_menu.clone(),
+                    group_is_collapsed,
+                    ws_for_menu.clone(),
+                );
+                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
+            }),
+        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -126,10 +150,14 @@ pub(in crate::workspace) fn group_header_row(
         //   - a different Group (reorder at top level)
         // Worktree payloads are rejected — a worktree never leaves its
         // project, so a group header is never a valid target for it.
+        // Rejected payloads still get a tint (rejected_bg) so the user
+        // sees "the row noticed me but won't accept the drop" instead
+        // of mistaking silent absence-of-highlight for a working drop
+        // target.
         .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
             DragPayload::Project { .. } => style.bg(drop_target_bg),
             DragPayload::Group { id, .. } if *id != group_id => style.bg(drop_target_bg),
-            _ => style,
+            _ => style.bg(drop_target_rejected_bg),
         })
         .on_drop(
             cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
@@ -153,7 +181,6 @@ pub(in crate::workspace) fn group_header_row(
                 }
             }),
         )
-        .child(div().flex_none().child(caret))
         .when_some(color_dot, |d, dot| d.child(dot))
         .child(
             div()
@@ -161,6 +188,22 @@ pub(in crate::workspace) fn group_header_row(
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .child(group.name.clone()),
+        )
+        .child(
+            // Chevron uses `button_bare` so its chrome (ghost padding /
+            // hover / hit area) matches every `[+]` button on the row.
+            // Row click already toggles via the outer `on_click`, but
+            // routing the chevron through its own button keeps the
+            // header visually uniform with project rows.
+            button_bare(("group-chevron", group_id as usize))
+                .ghost()
+                .icon(caret_icon)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_chevron.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
+                    }
+                })),
         )
 }
 
@@ -170,34 +213,92 @@ pub(in crate::workspace) fn group_header_row(
 /// dragged group can land here — groups only sit at the top level, so
 /// dropping a group on a project nested inside another group must
 /// silently no-op.
+///
+/// `is_git` enables the trailing `[+]` button (per-project "create
+/// worktree" affordance — the previous `+ new worktree` row at the
+/// bottom of the worktree list was folded into this header so the
+/// project row carries every project-scoped action).
+///
+/// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
+/// and `ChevronRight` (collapsed). The chevron carries its own click
+/// handler that toggles the flag; the rest of the row stays bound to
+/// `activate_worktree(last_active)` so a header click still snaps the
+/// focus per §5.5.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn project_header_row(
     project_id: ProjectId,
     name: SharedString,
     is_ungrouped: bool,
+    is_active: bool,
+    is_git: bool,
+    is_collapsed: bool,
+    last_active_worktree_id: WorktreeId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let label_color = t.dock_view_tab_active;
+    let label_color = if is_active {
+        t.dock_view_tab_active
+    } else {
+        t.muted_text
+    };
+    let row_hover_bg = t.worktree_row_hover_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
+    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
     let workspace = snap.workspace.clone();
+    let ws_for_click = workspace.clone();
     let ws_for_drop = workspace.clone();
+    let ws_for_menu = workspace.clone();
     let drag_payload = DragPayload::Project {
         id: project_id,
         label: name.clone(),
     };
 
+    let row_group = SharedString::from(format!("project-row-{project_id}"));
     div()
         .id(("project-header", project_id as usize))
+        .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
+        .gap(px(theme::WORKTREE_LABEL_GAP))
         .w_full()
         .px(px(theme::WORKTREE_ROW_PAD_X))
         .py(px(theme::WORKTREE_SECTION_PAD_Y))
         .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
         .text_color(label_color)
+        .cursor_pointer()
+        .when(!is_active, move |d| d.hover(move |d| d.bg(row_hover_bg)))
+        // Header click snaps the workspace focus to this project's
+        // last-active worktree (§5.5). No-op when the click lands on
+        // the already-active project — the snap target would equal
+        // the current focus and `activate_worktree` short-circuits.
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+            if let Some(ws) = ws_for_click.upgrade() {
+                let target = daruda_store::project::WorktreeRef {
+                    project: project_id,
+                    worktree: last_active_worktree_id,
+                };
+                ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+                let position: Point<Pixels> = ev.position;
+                let Some(ws) = ws_for_menu.upgrade() else {
+                    return;
+                };
+                let items = super::project_menu::build_project_menu_items(
+                    project_id,
+                    last_active_worktree_id,
+                    ws_for_menu.clone(),
+                );
+                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
+            }),
+        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -209,14 +310,15 @@ pub(in crate::workspace) fn project_header_row(
         //   - a Group, but only when this project is itself ungrouped
         //     (groups live at the top level and may only interleave
         //     with ungrouped projects there).
-        // Worktree payloads are rejected — worktrees stay inside their
-        // own project's list.
+        // Worktree payloads, group-on-grouped-project, and self-project
+        // drops fall through to the rejected tint so the user sees the
+        // row noticed the drag but won't accept it.
         .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
             DragPayload::Project { id: from, .. } if *from != project_id => {
                 style.bg(drop_target_bg)
             }
             DragPayload::Group { .. } if is_ungrouped => style.bg(drop_target_bg),
-            _ => style,
+            _ => style.bg(drop_target_rejected_bg),
         })
         .on_drop(
             cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
@@ -238,47 +340,135 @@ pub(in crate::workspace) fn project_header_row(
                 }
             }),
         )
-        .child(name)
+        .child({
+            let ws_for_chevron = snap.workspace.clone();
+            let chevron_icon = if is_collapsed {
+                IconName::ChevronRight
+            } else {
+                IconName::ChevronDown
+            };
+            // Same `button_bare` chrome as the group chevron + `[+]`
+            // button on this row — chevron toggles the project's
+            // collapsed flag while the rest of the row stays bound to
+            // `activate_worktree` (snap to last_active).
+            button_bare(("project-chevron", project_id as usize))
+                .ghost()
+                .icon(chevron_icon)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = ws_for_chevron.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
+                    }
+                }))
+        })
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(name),
+        )
+        .when(is_git, |row| {
+            let ws_for_add = snap.workspace.clone();
+            let row_group_for_btn = row_group.clone();
+            row.child(
+                button_bare(("project-add-worktree", project_id as usize))
+                    .ghost()
+                    .icon(IconName::Plus)
+                    .invisible()
+                    .group_hover(row_group_for_btn, |this| this.visible())
+                    .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                        // Stop the row activate handler so the [+]
+                        // doesn't double-fire as a "snap to project"
+                        // click.
+                        cx.stop_propagation();
+                        if let Some(ws) = ws_for_add.upgrade() {
+                            let workspace_for_modal = ws_for_add.clone();
+                            ws.update(cx, |ws, cx| {
+                                // Activate this project first so
+                                // `finalize_create_worktree` lands the
+                                // new worktree under it (matches the
+                                // old `add_worktree_row` semantics).
+                                let target = daruda_store::project::WorktreeRef {
+                                    project: project_id,
+                                    worktree: last_active_worktree_id,
+                                };
+                                ws.activate_worktree(target, window, cx);
+                                let Some(repo_root) = ws.git_repo_root() else {
+                                    return;
+                                };
+                                crate::workspace::dialog_helpers::open_form_modal(
+                                    "Create Worktree",
+                                    None,
+                                    move |window, cx| {
+                                        super::create_modal::CreateWorktreeModal::new(
+                                            workspace_for_modal.clone(),
+                                            repo_root,
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    })),
+            )
+        })
 }
 
 pub(in crate::workspace) fn section_header(
-    any_git: bool,
+    _any_git: bool,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
+    // Section-level `[+]` is a toggle: clicking it opens a flat
+    // context menu with "Add Project…" / "New Group…" so the user can
+    // pick between adding a project (folder picker routed through
+    // `prompt_and_open_folder_with_policy`, policy-aware) and
+    // creating a group (previously only reachable via Cmd+Shift+N or
+    // the Command Palette). Per-project worktree creation lives on
+    // each project's `[+ new worktree]` row.
     let workspace = snap.workspace.clone();
-    // `[+]` button is hidden for non-git folders per the plan.
-    let add_button = button_bare("worktree-add-button")
+    let add_button = button_bare("section-add-toggle")
         .ghost()
         .icon(IconName::Plus)
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+        .on_click(cx.listener(move |_dock, ev: &ClickEvent, _window, cx| {
+            let position: Point<Pixels> = ev.position();
+            let ws_for_project = workspace.clone();
+            let ws_for_group = workspace.clone();
+            let items = vec![
+                ContextMenuItem::new(
+                    surface_strings::SECTION_ADD_MENU_PROJECT,
+                    move |_, _window, app_cx| {
+                        // No window context needed — the global
+                        // open-folder flow drives the picker async.
+                        let _ = ws_for_project;
+                        let config =
+                            crate::settings_store::SettingsStore::global(app_cx).user_arc();
+                        crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
+                    },
+                ),
+                ContextMenuItem::new(
+                    surface_strings::SECTION_ADD_MENU_GROUP,
+                    move |_, window, app_cx| {
+                        if let Some(ws) = ws_for_group.upgrade() {
+                            ws.update(app_cx, |ws, cx| {
+                                ws.on_new_group(&NewGroup, window, cx);
+                            });
+                        }
+                    },
+                ),
+            ];
             if let Some(ws) = workspace.upgrade() {
-                let workspace_for_modal = workspace.clone();
-                ws.update(cx, |ws, cx| {
-                    let Some(repo_root) = ws.git_repo_root() else {
-                        return;
-                    };
-                    crate::workspace::dialog_helpers::open_form_modal(
-                        "Create Worktree",
-                        None,
-                        move |window, cx| {
-                            super::create_modal::CreateWorktreeModal::new(
-                                workspace_for_modal.clone(),
-                                repo_root,
-                                window,
-                                cx,
-                            )
-                        },
-                        window,
-                        cx,
-                    );
-                });
+                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
             }
         }));
 
     SectionHeader::new(surface_strings::WORKTREES_SECTION_HEADER)
         .padding(theme::WORKTREE_ROW_PAD_X, theme::WORKTREE_SECTION_PAD_Y)
-        .when(any_git, |h| h.actions(add_button))
+        .actions(add_button)
 }
 
 pub(in crate::workspace) fn worktree_row(
@@ -301,6 +491,7 @@ pub(in crate::workspace) fn worktree_row(
     let sublabel_color = t.faint_text;
     let row_hover_bg = t.worktree_row_hover_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
+    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
     let label = wt.display_name();
     // Sublabel priority: user-set description → path.
@@ -435,8 +626,19 @@ pub(in crate::workspace) fn worktree_row(
     let ws_for_click = workspace.clone();
     let ws_for_drop = workspace.clone();
     let ws_for_rclick = workspace.clone();
+    // Worktree IDs reset to 0 per project (`Worktree::bootstrap_from_project`
+    // numbers each project's worktrees from 0), so `("worktree-row", wt_id)`
+    // collides across projects — GPUI sees the same ElementId for the first
+    // worktree of every project and routes the click to only one of them
+    // (the first project's row), which is why clicking a 2nd project's
+    // worktree never reaches `activate_worktree`. Encode both ids into the
+    // id string so each row is uniquely addressable.
+    let row_group = SharedString::from(format!("worktree-row-{project_id}-{wt_id}"));
     let mut row = div()
-        .id(("worktree-row", wt_id as usize))
+        .id(SharedString::from(format!(
+            "worktree-row-{project_id}-{wt_id}"
+        )))
+        .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
@@ -465,15 +667,16 @@ pub(in crate::workspace) fn worktree_row(
             })
         })
         // Drop target — highlight only when the in-flight payload is a
-        // worktree from the same project. Cross-project worktree drops
-        // are rejected by the workspace op below; mirroring that here
-        // keeps the dock from advertising a drop it would silently
-        // discard.
+        // worktree from the same project. Cross-project worktrees, plus
+        // any project/group payload, are rejected — drawn with the
+        // rejected tint so the user sees the row noticed the drag but
+        // won't accept it (the workspace op would silently discard
+        // these without the tint).
         .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
             DragPayload::Worktree { target, .. } if target.project == project_id => {
                 style.bg(drop_target_bg)
             }
-            _ => style,
+            _ => style.bg(drop_target_rejected_bg),
         })
         .on_drop(
             cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
@@ -522,63 +725,68 @@ pub(in crate::workspace) fn worktree_row(
 
     if removable {
         let ws_for_close = workspace.clone();
-        let close = button_bare(("wt-remove", wt_id as usize))
-            .ghost()
-            .icon(IconName::Close)
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-                // Stop the row's activate handler from firing —
-                // clicking × should never also switch to the
-                // worktree we're about to remove.
-                cx.stop_propagation();
-                if let Some(ws) = ws_for_close.upgrade() {
-                    let ws_for_modal = ws_for_close.clone();
-                    ws.update(cx, |ws, cx| {
-                        let target = daruda_store::project::WorktreeRef {
-                            project: project_id,
-                            worktree: wt_id,
-                        };
-                        let Some(wt) = ws.worktree_for(target) else {
-                            return;
-                        };
-                        if !crate::workspace::Workspace::worktree_removable(wt) {
-                            return;
-                        }
-                        let label = gpui::SharedString::from(wt.display_name());
-                        let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
-                        let plan = match ws.validate_remove_worktree(target) {
-                            Ok(p) => p,
-                            Err(_) => return,
-                        };
-                        // Pull the branch name so the modal can offer "Also
-                        // delete branch X" — None for default / detached
-                        // worktrees (modal hides the checkbox).
-                        let branch = ws.worktree_for(target).and_then(|w| match &w.kind {
-                            daruda_store::project::WorktreeKind::Git {
-                                branch: Some(b), ..
-                            } => Some(b.clone()),
-                            _ => None,
-                        });
-                        crate::workspace::dialog_helpers::open_form_modal(
-                            "Remove Worktree",
-                            None,
-                            move |window, cx| {
-                                super::remove_modal::RemoveWorktreeModal::new(
-                                    ws_for_modal.clone(),
-                                    wt_id,
-                                    label,
-                                    path,
-                                    plan,
-                                    window,
-                                    cx,
-                                )
-                                .with_branch(branch)
-                            },
-                            window,
-                            cx,
-                        );
+        let row_group_for_close = row_group.clone();
+        let close = button_bare(SharedString::from(format!(
+            "wt-remove-{project_id}-{wt_id}"
+        )))
+        .ghost()
+        .icon(IconName::Close)
+        .invisible()
+        .group_hover(row_group_for_close, |this| this.visible())
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+            // Stop the row's activate handler from firing —
+            // clicking × should never also switch to the
+            // worktree we're about to remove.
+            cx.stop_propagation();
+            if let Some(ws) = ws_for_close.upgrade() {
+                let ws_for_modal = ws_for_close.clone();
+                ws.update(cx, |ws, cx| {
+                    let target = daruda_store::project::WorktreeRef {
+                        project: project_id,
+                        worktree: wt_id,
+                    };
+                    let Some(wt) = ws.worktree_for(target) else {
+                        return;
+                    };
+                    if !crate::workspace::Workspace::worktree_removable(wt) {
+                        return;
+                    }
+                    let label = gpui::SharedString::from(wt.display_name());
+                    let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
+                    let plan = match ws.validate_remove_worktree(target) {
+                        Ok(p) => p,
+                        Err(_) => return,
+                    };
+                    // Pull the branch name so the modal can offer "Also
+                    // delete branch X" — None for default / detached
+                    // worktrees (modal hides the checkbox).
+                    let branch = ws.worktree_for(target).and_then(|w| match &w.kind {
+                        daruda_store::project::WorktreeKind::Git {
+                            branch: Some(b), ..
+                        } => Some(b.clone()),
+                        _ => None,
                     });
-                }
-            }));
+                    crate::workspace::dialog_helpers::open_form_modal(
+                        "Remove Worktree",
+                        None,
+                        move |window, cx| {
+                            super::remove_modal::RemoveWorktreeModal::new(
+                                ws_for_modal.clone(),
+                                wt_id,
+                                label,
+                                path,
+                                plan,
+                                window,
+                                cx,
+                            )
+                            .with_branch(branch)
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            }
+        }));
         row = row.child(close);
     }
 

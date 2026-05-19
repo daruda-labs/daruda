@@ -853,7 +853,15 @@ impl Workspace {
                 }
                 if !errors.is_empty() {
                     let workspace_for_errors = workspace.clone();
-                    let _ = cx.update(|_, app_cx| {
+                    // If the workspace window has dropped before this
+                    // drain catches up (process exit, last-tab-close
+                    // race) the toast pipeline becomes unreachable —
+                    // the per-report `report_error` calls would
+                    // surface as toasts otherwise. Surface the path
+                    // loss on NDJSON so we don't lose track of the
+                    // fact that errors were dropped (Iron Law: no
+                    // silent failure).
+                    let update_result = cx.update(|_, app_cx| {
                         workspace_for_errors.update(app_cx, |ws, cx| {
                             let cwd = ws
                                 .main_area
@@ -873,6 +881,21 @@ impl Workspace {
                             }
                         });
                     });
+                    if let Err(e) = update_result {
+                        daruda_store::observability::log_writer::LogWriter::log(
+                            daruda_store::observability::error_report::ErrorReport::new(
+                                "Pane background errors could not reach the workspace toast layer",
+                            )
+                            .severity(
+                                daruda_store::observability::error_report::ErrorSeverity::Warning,
+                            )
+                            .at(file!(), line!())
+                            .with_context("pane", pane_id.to_string())
+                            .with_context("error", format!("{e}"))
+                            .dedup("pane.background_error.update_failed")
+                            .build(),
+                        );
+                    }
                 }
 
                 // Treat both "sender signaled" and "sender gone" as
@@ -926,6 +949,7 @@ impl Workspace {
                         // before its owner is freed.
                         let workspace_close = workspace.clone();
                         cx.spawn(async move |cx| {
+                            // SILENT-OK: pane owner may drop during async task cleanup
                             let _ = cx.update(|window, app_cx| {
                                 workspace_close.update(app_cx, |ws, cx| {
                                     ws.close_pane_by_id(pane_id, window, cx);

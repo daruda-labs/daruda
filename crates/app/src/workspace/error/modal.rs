@@ -88,6 +88,7 @@ impl ErrorReportModal {
 
         self._copied_revert_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(COPIED_LABEL_DURATION).await;
+            // SILENT-OK: modal may drop before auto-dismiss timer fires
             let _ = this.update(cx, |this, cx| {
                 if this.copied {
                     this.copied = false;

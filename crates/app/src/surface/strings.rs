@@ -132,7 +132,7 @@ pub const DOCK_PANEL_FILES: &str = "Files";
 pub const DOCK_PANEL_GIT: &str = "Git";
 pub const DOCK_PANEL_MACROS: &str = "Macros";
 pub const DOCK_PANEL_OUTPUT: &str = "Output";
-pub const DOCK_PANEL_WORKTREES: &str = "Worktrees";
+pub const DOCK_PANEL_WORKTREES: &str = "Projects";
 
 // ============================================================================
 // Right panel tab labels
@@ -147,7 +147,7 @@ pub const RIGHT_PANEL_TAB_TASKS: &str = "Tasks";
 // Dock (left dock) tab labels
 // ============================================================================
 
-pub const SIDEBAR_TAB_WORKTREES: &str = "Worktrees";
+pub const SIDEBAR_TAB_WORKTREES: &str = "Projects";
 pub const SIDEBAR_TAB_GIT: &str = "Git";
 pub const SIDEBAR_TAB_FILES: &str = "Files";
 
@@ -511,8 +511,6 @@ pub const FILES_REFRESH_GLYPH: &str = "⟳";
 pub const FILES_LOADING: &str = "Loading…";
 pub const FILES_EMPTY_DIR: &str = "(empty)";
 pub const FILES_LOAD_ERROR_PREFIX: &str = "Cannot read:";
-pub const FILES_CHEVRON_COLLAPSED: &str = "▸";
-pub const FILES_CHEVRON_EXPANDED: &str = "▾";
 pub const FILES_CHEVRON_PENDING: &str = "…";
 
 // ----------------------------------------------------------------
@@ -580,8 +578,55 @@ pub const BOTTOM_INPUT_SEND_BUTTON: &str = "Submit";
 // Worktrees view — section header + empty state
 // ----------------------------------------------------------------
 
-pub const WORKTREES_SECTION_HEADER: &str = "WORKTREES";
+pub const WORKTREES_SECTION_HEADER: &str = "PROJECTS";
 pub const WORKTREES_EMPTY_STATE: &str = "No project open";
+
+/// Affordance row rendered at the bottom of each git-backed project's
+/// worktree list. Clicking it activates that project and opens the
+/// `CreateWorktreeModal` so the new worktree lands in the clicked
+/// project rather than whichever one was active before (§5.1).
+pub const WORKTREES_ADD_ROW_LABEL: &str = "+ new worktree";
+
+/// Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
+/// flat context menu instead of dispatching straight to the folder
+/// picker so the user can pick between adding a Project (existing
+/// behaviour) or creating a Group (previously only reachable via the
+/// `Cmd+Shift+N` shortcut / Command Palette).
+pub const SECTION_ADD_MENU_PROJECT: &str = "Add Project\u{2026}";
+pub const SECTION_ADD_MENU_GROUP: &str = "New Group\u{2026}";
+
+// Group context menu (§5.1) — rename / recolor / collapse / delete.
+pub const GROUP_MENU_RENAME: &str = "Rename Group\u{2026}";
+pub const GROUP_MENU_COLOR_RED: &str = "Color: Red";
+pub const GROUP_MENU_COLOR_ORANGE: &str = "Color: Orange";
+pub const GROUP_MENU_COLOR_YELLOW: &str = "Color: Yellow";
+pub const GROUP_MENU_COLOR_GREEN: &str = "Color: Green";
+pub const GROUP_MENU_COLOR_BLUE: &str = "Color: Blue";
+pub const GROUP_MENU_COLOR_PURPLE: &str = "Color: Purple";
+pub const GROUP_MENU_COLOR_CLEAR: &str = "Clear color";
+pub const GROUP_MENU_COLLAPSE: &str = "Collapse";
+pub const GROUP_MENU_EXPAND: &str = "Expand";
+pub const GROUP_MENU_DELETE: &str = "Delete Group";
+pub const GROUP_RENAME_DIALOG_TITLE: &str = "Rename Group";
+pub const GROUP_RENAME_DIALOG_PLACEHOLDER: &str = "Group name";
+
+/// Color presets exposed by the Group context menu. Hex strings are
+/// stored on `SerializedGroup::color` so the dock's group header
+/// chip can decode them via `gpui::Rgba::try_from(...)` without any
+/// daruda-specific palette lookup.
+pub const GROUP_PRESET_RED: &str = "#f87171";
+pub const GROUP_PRESET_ORANGE: &str = "#fb923c";
+pub const GROUP_PRESET_YELLOW: &str = "#facc15";
+pub const GROUP_PRESET_GREEN: &str = "#4ade80";
+pub const GROUP_PRESET_BLUE: &str = "#60a5fa";
+pub const GROUP_PRESET_PURPLE: &str = "#a78bfa";
+
+// Project context menu (§5.1) — rename / move to group / delete /
+// open in new window.
+pub const PROJECT_MENU_RENAME: &str = "Rename Project\u{2026}";
+pub const PROJECT_MENU_MOVE_TO_GROUP: &str = "Move to Group\u{2026}";
+pub const PROJECT_MENU_DELETE: &str = "Delete Project\u{2026}";
+pub const PROJECT_MENU_OPEN_IN_NEW_WINDOW: &str = "Open in New Window";
 
 // ----------------------------------------------------------------
 // Claude integration banner (dock prompt to install hooks)

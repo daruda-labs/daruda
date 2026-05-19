@@ -99,7 +99,7 @@ Before starting, classify the task:
 3. **Zig FFI**: Ghostty enums are `u16`. Always range-check before casting.
 4. **IME**: printable characters must go through `replace_text_in_range` → `commit_text` → PTY. Never send directly from `on_key_down`.
 5. **GPUI Entity reentrancy**: calling `.read(cx)` on the same entity during `render()` or `entity.update()` panics. `persist_state` must only be called via `mark_dirty_and_save` (`cx.defer`).
-6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, and gpui-ghostty implement the same concept.
+6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, **zed** (`/Users/woo/Downloads/term/zed-0.231.2/crates/{workspace,gpui}/`), and gpui-ghostty implement the same concept. For GPUI-specific patterns (entity lifecycles, window contexts, async re-entry) zed is the closest reference.
 7. **Text pixel mapping**: never use `index = offset_px / glyph_advance`. Always use the shaper's reverse-mapping API.
 8. **Paint-scope state**: `window.text_style()` / `window.rem_size()` are invalid outside the paint walk. Share metrics via `cell_dimensions()`.
 9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `app/src/ui/theme.rs` is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
@@ -112,6 +112,15 @@ Before starting, classify the task:
 |-------|-----|
 | Inside `Workspace` | `self.report_error(report, cx)` |
 | GPUI-free / pre-Workspace | `LogWriter::log(report)` |
+
+**GPUI Result handling**: `cx.update_window` / `cx.update` / `entity.update` / `entity.update_in` return `Result<T>` (the target window/entity can be gone by the time async or modal-callback code re-enters). `let _ = cx.update_window(...)` is **forbidden** — it silently swallows "window not found" failures and leaves users with no signal. Required forms:
+
+- `match cx.update_window(handle, ...) { Ok(_) => …, Err(e) => report_error / LogWriter::log }`
+- `cx.update_window(handle, ...)?` (when the enclosing fn returns `Result`)
+- `crate::windows::try_update_workspace_window(handle, cx, "site_label", |window, cx| …)` — auto-logs failures with the site label
+- `// SILENT-OK: <concrete reason>` on the previous line — reserved for cases where the failure genuinely doesn't matter (focus restore on a possibly-closed window, test fixtures, etc.). Bare `// SILENT-OK:` without a reason is a review failure.
+
+Enforced by `scripts/lint-no-silent-update.sh`.
 
 Reference: `crates/app/src/workspace/error_ops.rs`, `crates/daruda_store/src/observability/`
 

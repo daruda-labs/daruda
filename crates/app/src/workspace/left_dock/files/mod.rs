@@ -17,7 +17,7 @@ use gpui::{
 use crate::files::icons::icon_path;
 use crate::files::tree::EntryKind;
 use crate::surface::strings;
-use crate::ui::{ButtonVariants as _, IconName, SectionHeader, button_bare};
+use crate::ui::{ButtonVariants as _, Icon, IconName, SectionHeader, Sizable as _, button_bare};
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::file_tree_ops::VisibleEntry;
@@ -208,7 +208,7 @@ fn render_row(
     let kind = v.kind;
     let path = v.path.clone();
     let worktree_root_buf = worktree_root.to_path_buf();
-    let chevron = chevron_glyph(kind, v.is_expanded);
+    // chevron element built below after we have the row's text colors.
     let icon_asset = icon_path(kind, v.is_symlink, v.is_expanded, &v.name);
     let is_keyboard_focused = v.is_keyboard_focused;
     let is_ignored = v.is_ignored;
@@ -274,13 +274,7 @@ fn render_row(
                 });
             }
         }))
-        .child(
-            div()
-                .flex_none()
-                .w(px(theme::FILES_CHEVRON_W))
-                .text_color(faint)
-                .child(chevron),
-        )
+        .child(chevron_element(kind, v.is_expanded, faint))
         .child(file_icon(icon_asset, row_text_color, color_mode))
         .child(
             div()
@@ -320,17 +314,31 @@ fn render_row(
     .into_any_element()
 }
 
-fn chevron_glyph(kind: EntryKind, is_expanded: bool) -> &'static str {
+/// Leading slot for a file row: chevron icon for directories, the
+/// pending glyph while a directory is loading, or an empty slot for
+/// regular files (preserves indent alignment).
+fn chevron_element(kind: EntryKind, is_expanded: bool, color: Hsla) -> AnyElement {
+    let slot = div()
+        .flex_none()
+        .w(px(theme::FILES_CHEVRON_W))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(color);
     match kind {
         EntryKind::Dir | EntryKind::UnloadedDir => {
-            if is_expanded {
-                strings::FILES_CHEVRON_EXPANDED
+            let icon = if is_expanded {
+                IconName::ChevronDown
             } else {
-                strings::FILES_CHEVRON_COLLAPSED
-            }
+                IconName::ChevronRight
+            };
+            slot.child(Icon::new(icon).xsmall().text_color(color))
+                .into_any_element()
         }
-        EntryKind::PendingDir => strings::FILES_CHEVRON_PENDING,
-        EntryKind::File => "",
+        EntryKind::PendingDir => slot
+            .child(strings::FILES_CHEVRON_PENDING)
+            .into_any_element(),
+        EntryKind::File => slot.into_any_element(),
     }
 }
 

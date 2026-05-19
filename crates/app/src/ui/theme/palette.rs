@@ -200,6 +200,11 @@ pub const WORKTREE_DRAG_GHOST_PAD_Y: f32 = 4.0;
 /// Highlight color applied to a drop target row while a worktree is being
 /// dragged over it.
 pub const WORKTREE_DROP_TARGET_BG: Hsla = hsla(210.0, 0.50, 0.30, 0.35);
+/// Rejection tint applied when the in-flight payload cannot land on
+/// the hovered row (cross-project worktree drag, group dropped on a
+/// grouped project, etc.). Desaturated red at low alpha so it reads
+/// as "not here" rather than as a hard error.
+pub const WORKTREE_DROP_TARGET_REJECTED_BG: Hsla = hsla(0.0, 0.55, 0.32, 0.20);
 /// Unread indicator dot diameter (px).
 pub const WORKTREE_UNREAD_DOT_SIZE: f32 = 6.0;
 /// Unread indicator dot corner radius (px).

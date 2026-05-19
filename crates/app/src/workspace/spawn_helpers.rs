@@ -34,10 +34,10 @@ use super::Workspace;
 ///   `Send` because GPUI's foreground tasks stay on the main
 ///   thread.
 ///
-/// The returned task silently no-ops if the workspace was dropped
-/// between the background work finishing and the foreground update
-/// — that matches the `let _ = this.update(...)` pattern used by
-/// every existing call site.
+/// The returned task no-ops if the workspace was dropped between the
+/// background work finishing and the foreground update — workspace
+/// teardown is the expected terminal state, not an error worth
+/// surfacing. Marked `SILENT-OK` for the lint script.
 pub(in crate::workspace) fn spawn_bg_work_and_mutate<R, F, G>(
     cx: &mut Context<Workspace>,
     bg: F,
@@ -50,6 +50,7 @@ where
 {
     cx.spawn(async move |this, cx| {
         let result = cx.background_executor().spawn(async move { bg() }).await;
+        // SILENT-OK: workspace teardown is the expected terminal state for this generic helper
         let _ = this.update(cx, |ws, cx| on_result(ws, result, cx));
     })
 }

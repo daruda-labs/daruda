@@ -209,6 +209,7 @@ impl CreateSkillModal {
             .spawn(cx, async move |async_cx| {
                 let result = persist::write_skill(&draft, project_root.as_deref(), false)
                     .map_err(|e| e.to_string());
+                // SILENT-OK: modal may close during async skill create
                 let _ = async_cx.update(|window, cx| {
                     let Some(me) = me.upgrade() else { return };
                     me.update(cx, |modal, cx| {

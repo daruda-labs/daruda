@@ -45,10 +45,12 @@ pub(in crate::workspace) struct ProjectSnapshot {
     pub tab_order: u32,
     pub worktrees: Vec<crate::worktree::Worktree>,
     /// Last-active worktree id, mirrored from the runtime project so
-    /// future tab restore can avoid an entity read. Unused until that
-    /// path lands.
-    #[allow(dead_code)]
+    /// the dock can snap the active focus back to it when the user
+    /// clicks the project header (§5.5).
     pub last_active_worktree_id: daruda_store::project::WorktreeId,
+    /// Whether the project's worktree list is hidden under its header.
+    /// Toggled by the project header chevron click.
+    pub is_collapsed: bool,
 }
 
 /// Plain-data snapshot of one group for the left-dock tree.

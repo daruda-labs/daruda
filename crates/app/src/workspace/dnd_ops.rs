@@ -31,12 +31,23 @@ pub(in crate::workspace) enum TopRow {
 }
 
 impl Workspace {
-    /// Move project `from` to the slot occupied by `to`, inheriting
+    /// Move project `from` onto the slot occupied by `to`, inheriting
     /// `to`'s `group_id`. Dropping onto a grouped project re-parents
-    /// `from` into that group at the same position; dropping onto an
-    /// ungrouped project demotes `from` to the top-level pool at the
-    /// same position. No-ops when either id is unknown or the move is
-    /// a self-drop.
+    /// `from` into that group; dropping onto an ungrouped project
+    /// demotes `from` to the top-level pool. No-ops when either id is
+    /// unknown or the move is a self-drop.
+    ///
+    /// Direction-aware within the same pool: dragging downward (from
+    /// precedes to) lands `from` AFTER `to`, dragging upward lands
+    /// `from` BEFORE `to`. Cross-pool drops always land at `to`'s slot
+    /// (before `to`). This matches the typical list-DnD expectation
+    /// that "drop X onto Y's slot" makes X take Y's row regardless of
+    /// drag direction. Implementation trick: inserting `from` at
+    /// `to`'s ORIGINAL index gives both behaviors uniformly — when
+    /// `from` precedes `to` in the same pool, the retain shifts `to`
+    /// down one slot, so inserting at `to`'s original index lands
+    /// after the now-shifted `to`; in every other case, `to` keeps its
+    /// index and the insert lands before it.
     pub(in crate::workspace) fn reorder_project_before(
         &mut self,
         from: ProjectId,
@@ -66,18 +77,15 @@ impl Workspace {
         // Stage the destination pool's new ordering before touching any
         // project record. `retain` is a no-op when `from` lives in a
         // different pool (cross-pool move), so the same pipeline serves
-        // both same-group and cross-group cases. Compare against the
-        // original ordering to short-circuit identity reorders — drops
-        // where `from` is already adjacent to `to` would otherwise burn
-        // a persist + render cycle for a no-visible-change move.
+        // both same-group and cross-group cases.
         match to_group {
             Some(gid) => {
                 let original = self.group_member_order(gid);
+                let Some(to_pos) = original.iter().position(|id| *id == to) else {
+                    unreachable!("`to` belongs to group `gid`");
+                };
                 let mut new = original.clone();
                 new.retain(|id| *id != from);
-                let Some(to_pos) = new.iter().position(|id| *id == to) else {
-                    unreachable!("`to` belongs to group `gid` and survives the retain");
-                };
                 new.insert(to_pos, from);
                 if from_group_old == to_group && new == original {
                     return;
@@ -89,9 +97,7 @@ impl Workspace {
             }
             None => {
                 let original = self.top_row_order();
-                let mut new = original.clone();
-                new.retain(|row| !matches!(row, TopRow::Project(id) if *id == from));
-                let Some(to_pos) = new
+                let Some(to_pos) = original
                     .iter()
                     .position(|row| matches!(row, TopRow::Project(id) if *id == to))
                 else {
@@ -99,6 +105,8 @@ impl Workspace {
                         "`to` is ungrouped (to_group is None) so it must appear in the top-row pool"
                     );
                 };
+                let mut new = original.clone();
+                new.retain(|row| !matches!(row, TopRow::Project(id) if *id == from));
                 new.insert(to_pos, TopRow::Project(from));
                 if from_group_old == to_group && new == original {
                     return;
@@ -161,11 +169,20 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Move group `from` immediately before `before` in the shared
-    /// top-level pool. `before` may be another group or an ungrouped
-    /// project. No-op when `from == before`, when `before` is a grouped
-    /// project (groups never sit inside other groups), or when either
-    /// id is unknown.
+    /// Move group `from` onto the slot occupied by `before` in the
+    /// shared top-level pool. `before` may be another group or an
+    /// ungrouped project. No-op when `from == before`, when `before`
+    /// is a grouped project (groups never sit inside other groups), or
+    /// when either id is unknown.
+    ///
+    /// Direction-aware (see [`Self::reorder_project_before`] for the
+    /// full rationale): dragging downward lands `from` AFTER `before`,
+    /// dragging upward lands `from` BEFORE `before`. Inserting at
+    /// `before`'s ORIGINAL index gives both behaviors uniformly — the
+    /// retain only shifts `before` down when `from` precedes it, so
+    /// inserting at the captured original index lands either after the
+    /// shifted `before` (down) or at the unchanged slot of `before`
+    /// (up).
     pub(in crate::workspace) fn reorder_group_before_top_row(
         &mut self,
         from: GroupId,
@@ -183,11 +200,11 @@ impl Workspace {
         }
 
         let original = self.top_row_order();
-        let mut new = original.clone();
-        new.retain(|row| !matches!(row, TopRow::Group(id) if *id == from));
-        let Some(to_pos) = new.iter().position(|row| *row == before) else {
+        let Some(to_pos) = original.iter().position(|row| *row == before) else {
             unreachable!("`before` was verified in the top-row pool above");
         };
+        let mut new = original.clone();
+        new.retain(|row| !matches!(row, TopRow::Group(id) if *id == from));
         new.insert(to_pos, TopRow::Group(from));
         if new == original {
             return;

@@ -189,6 +189,7 @@ impl CreateWorktreeModal {
                     })
                     .await;
 
+                // SILENT-OK: workspace may drop after create modal closes / dialog dismiss on focus restore
                 let _ = async_cx.update(|window, app_cx| {
                     let Some(me) = me.upgrade() else { return };
                     // Nested entity.update calls must not overlap, so
@@ -354,6 +355,7 @@ mod tests {
         s: &str,
     ) {
         let state = modal.read_with(cx, |m, _| field(m));
+        // SILENT-OK: workspace may drop after create modal closes / dialog dismiss on focus restore
         let _ = wh.update(cx, |_root, window, cx| {
             state.update(cx, |i, cx_state| {
                 i.set_value(s.to_string(), window, cx_state);

@@ -711,6 +711,7 @@ impl SettingsWindow {
                 .background_executor()
                 .spawn(async move { std::fs::read_to_string(&path_for_task) })
                 .await;
+            // SILENT-OK: settings modal may close before async defer fires
             let _ = this.update(cx, |this, cx| {
                 if let Some(view) = this.plugin_view_skill.as_mut() {
                     // Verify the response is still for the file the user
@@ -762,6 +763,7 @@ impl SettingsWindow {
                     )
                 })
                 .await;
+            // SILENT-OK: settings modal may close before async defer fires
             let _ = this.update(cx, |this, cx| {
                 this.plugin_ops_in_flight.remove(&plugin_id);
                 if let Err(e) = result {

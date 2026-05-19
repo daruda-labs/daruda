@@ -433,6 +433,7 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
                     this.commit_dirty_panes_with_failure_toast(&dirty, cx);
@@ -514,6 +515,7 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
                     this.commit_dirty_panes_with_failure_toast(&dirty, cx);
@@ -578,6 +580,7 @@ impl Workspace {
             let Ok(answer) = receiver.await else {
                 return;
             };
+            // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 // can_save=false means the form is invalid. Leave the pane open.
                 0 if can_save => this.save_task_edit_pane(pane_id, false, window, cx),

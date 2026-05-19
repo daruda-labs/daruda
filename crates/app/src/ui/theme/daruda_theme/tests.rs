@@ -27,6 +27,10 @@ fn default_clones_compile_time_palette() {
         t.status_bar_detached_text,
         palette::STATUS_BAR_DETACHED_TEXT
     );
+    assert_eq!(
+        t.worktree_drop_target_rejected_bg,
+        palette::WORKTREE_DROP_TARGET_REJECTED_BG,
+    );
     assert_eq!(t.dock_bg, palette::DOCK_BG);
     assert_eq!(t.dock_border, palette::DOCK_BORDER);
     assert_eq!(t.dock_header_text, palette::DOCK_HEADER_TEXT);

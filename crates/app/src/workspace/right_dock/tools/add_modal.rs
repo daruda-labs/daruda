@@ -239,6 +239,7 @@ impl AddMcpServerModal {
                 let result = ws.add_mcp_server(scope, draft, cx_inner);
                 let me = me.clone();
                 cx_inner.defer(move |cx| {
+                    // SILENT-OK: modal may close during async tool save
                     let _ = cx.update_window(window_handle, |_, window, cx| {
                         let Some(me) = me.upgrade() else { return };
                         match result {
