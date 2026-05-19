@@ -6,14 +6,15 @@
 //! when the group is expanded.
 
 use crate::ui::theme;
-use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px};
 
 use crate::surface::strings as surface_strings;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
 
 use super::banner::claude_install_banner;
 use super::rows::{
-    git_badge_for, group_header_row, non_git_placeholder, section_header, worktree_row,
+    git_badge_for, group_header_row, non_git_placeholder, project_header_row, section_header,
+    worktree_row,
 };
 
 /// Top-level entry rendered in the worktrees tree. Groups carry their
@@ -123,7 +124,13 @@ fn ungrouped_project_block(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let mut block = div().flex().flex_col().w_full();
-    block = block.child(project_header_row(project.name.clone(), cx));
+    block = block.child(project_header_row(
+        project.id,
+        project.name.clone(),
+        project.group_id.is_none(),
+        snap,
+        cx,
+    ));
     let mut list = div().flex().flex_col().w_full();
     for wt in &project.worktrees {
         let is_active = project.id == active_project && wt.id == active_worktree;
@@ -159,21 +166,6 @@ fn grouped_project_block(
             snap,
             cx,
         ))
-}
-
-/// Single-row project header above the worktrees list for one project.
-fn project_header_row(name: SharedString, cx: &mut Context<Dock>) -> impl IntoElement + use<> {
-    let t = theme::current(cx);
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .px(px(theme::WORKTREE_ROW_PAD_X))
-        .py(px(theme::WORKTREE_SECTION_PAD_Y))
-        .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
-        .text_color(t.dock_view_tab_active)
-        .child(name)
 }
 
 fn empty_state(cx: &gpui::App) -> impl IntoElement {

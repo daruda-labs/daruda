@@ -26,8 +26,8 @@ use std::rc::Rc;
 use crate::ui::theme;
 use daruda_store::observability::error_report::ErrorReport;
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels,
-    SharedString, WeakEntity, Window, px,
+    App, AppContext as _, ClickEvent, Context, Focusable, ParentElement as _, Pixels, SharedString,
+    WeakEntity, Window, px,
 };
 
 use crate::surface::strings as s;

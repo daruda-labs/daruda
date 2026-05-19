@@ -347,11 +347,15 @@ fn ensure_object<'a>(value: &'a mut Value, key: &str) -> &'a mut serde_json::Map
     let obj = value.as_object_mut().expect("assigned Object above");
     obj.entry(key.to_string())
         .or_insert_with(|| Value::Object(Default::default()));
-    let entry = obj.get_mut(key).expect("or_insert_with guarantees presence");
+    let entry = obj
+        .get_mut(key)
+        .expect("or_insert_with guarantees presence");
     if !entry.is_object() {
         *entry = Value::Object(Default::default());
     }
-    entry.as_object_mut().expect("assigned Object to entry above")
+    entry
+        .as_object_mut()
+        .expect("assigned Object to entry above")
 }
 
 /// Filter Notification events to only the subtypes that mean the

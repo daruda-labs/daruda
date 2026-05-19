@@ -1,31 +1,57 @@
-//! Drag payload + ghost preview for worktree rows.
+//! Drag payload + ghost preview for the worktrees view tree.
 //!
-//! `DraggedWorktree` is the value passed through GPUI's `on_drag` /
-//! `on_drop` chain. `DraggedWorktreeGhost` is the minimal element
-//! shown under the cursor while a row is being dragged.
+//! `DragPayload` discriminates the three drag sources the tree
+//! supports — a worktree row, a project header, and a group header.
+//! Each carries its own identifier alongside a display label so the
+//! ghost preview can render without re-reading the workspace mid-flight.
+//!
+//! Drop handlers branch on the variant to enforce the placement rules
+//! from the multi-project plan (worktrees stay in their project,
+//! projects move freely between groups and the top-level pool, groups
+//! reorder only at the top level).
 
 use crate::ui::theme;
 use gpui::{Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::{GroupId, ProjectId, WorktreeRef};
 
-/// Data carried by a worktree row during a drag operation. The
-/// `label` is used by the ghost preview so it does not need to
-/// re-read the worktree list while the drag is in flight.
+/// Payload exchanged through GPUI's `on_drag` / `on_drop` chain. The
+/// label is purely for the ghost preview; the identifier carries the
+/// actual move semantics.
 #[derive(Clone, Debug)]
-pub(in crate::workspace) struct DraggedWorktree {
-    pub id: WorktreeId,
-    pub label: SharedString,
+pub(in crate::workspace) enum DragPayload {
+    Worktree {
+        target: WorktreeRef,
+        label: SharedString,
+    },
+    Project {
+        id: ProjectId,
+        label: SharedString,
+    },
+    Group {
+        id: GroupId,
+        label: SharedString,
+    },
+}
+
+impl DragPayload {
+    pub(in crate::workspace) fn label(&self) -> SharedString {
+        match self {
+            DragPayload::Worktree { label, .. }
+            | DragPayload::Project { label, .. }
+            | DragPayload::Group { label, .. } => label.clone(),
+        }
+    }
 }
 
 /// Minimal ghost element shown under the cursor while a row is being
 /// dragged. Renders a single-line label styled to match the left dock
 /// row.
-pub(super) struct DraggedWorktreeGhost {
+pub(super) struct DragGhost {
     pub(super) label: SharedString,
 }
 
-impl Render for DraggedWorktreeGhost {
+impl Render for DragGhost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
         div()

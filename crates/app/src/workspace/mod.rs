@@ -19,6 +19,7 @@ pub(in crate::workspace) mod command;
 mod config_ops;
 pub(crate) mod delete_project_modal;
 pub(in crate::workspace) mod dialog_helpers;
+mod dnd_ops;
 pub(in crate::workspace) mod error;
 mod group_ops;
 pub(in crate::workspace) mod layout;

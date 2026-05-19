@@ -1,3 +1,4 @@
+mod dnd;
 mod dock;
 mod error_modal;
 mod error_ops;

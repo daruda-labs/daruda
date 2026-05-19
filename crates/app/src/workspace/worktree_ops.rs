@@ -432,24 +432,30 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Move `from` immediately before `to` in the left dock list of
-    /// the active project, renumbering `tab_order` for all worktrees
-    /// afterwards. No-ops when either id is absent or both ids are the
-    /// same, or when the active project has no worktrees.
+    /// Move `from` immediately before `to` in the worktrees list of
+    /// the project they share, renumbering `tab_order` for all
+    /// worktrees afterwards. Worktree DnD is intentionally scoped to a
+    /// single project — cross-project drops are rejected as a no-op so
+    /// a worktree never migrates between projects through the dock.
+    /// Also no-ops when `from == to`, when the project is missing, or
+    /// when either id is not present in that project.
     pub(in crate::workspace) fn reorder_worktree(
         &mut self,
-        from_id: WorktreeId,
-        to_id: WorktreeId,
+        from: WorktreeRef,
+        to: WorktreeRef,
         cx: &mut Context<Self>,
     ) {
-        if from_id == to_id {
+        if from == to {
             return;
         }
-        let Some(project) = self.active_project_mut() else {
+        if from.project != to.project {
+            return;
+        }
+        let Some(project) = self.projects.iter_mut().find(|p| p.id == from.project) else {
             return;
         };
-        let from_idx = project.worktrees.iter().position(|w| w.id == from_id);
-        let to_idx = project.worktrees.iter().position(|w| w.id == to_id);
+        let from_idx = project.worktrees.iter().position(|w| w.id == from.worktree);
+        let to_idx = project.worktrees.iter().position(|w| w.id == to.worktree);
         let (Some(from_idx), Some(to_idx)) = (from_idx, to_idx) else {
             return;
         };

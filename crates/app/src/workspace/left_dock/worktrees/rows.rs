@@ -18,7 +18,8 @@ use crate::worktree::Worktree;
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
 use super::context_menu::build_context_menu_items;
-use super::drag::{DraggedWorktree, DraggedWorktreeGhost};
+use super::drag::{DragGhost, DragPayload};
+use crate::workspace::dnd_ops::TopRow;
 
 /// Build the `M3 ?1` change-count badge string for worktree `id` from
 /// the cached git status.  Returns `None` when no status is cached yet.
@@ -66,6 +67,7 @@ pub(in crate::workspace) fn group_header_row(
     let t = theme::current(cx);
     let label_color = t.dock_view_tab_active;
     let row_hover_bg = t.worktree_row_hover_bg;
+    let drop_target_bg = t.worktree_drop_target_bg;
 
     let caret = if group.is_collapsed {
         surface_strings::FILES_CHEVRON_COLLAPSED
@@ -91,6 +93,11 @@ pub(in crate::workspace) fn group_header_row(
 
     let group_id = group.id;
     let workspace = snap.workspace.clone();
+    let ws_for_drop = workspace.clone();
+    let drag_payload = DragPayload::Group {
+        id: group_id,
+        label: group.name.clone(),
+    };
     div()
         .id(("group-header", group_id as usize))
         .flex()
@@ -109,6 +116,43 @@ pub(in crate::workspace) fn group_header_row(
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
             }
         }))
+        .on_drag(drag_payload, |dragged, _offset, _window, cx| {
+            cx.new(|_| DragGhost {
+                label: dragged.label(),
+            })
+        })
+        // Group header accepts:
+        //   - any Project (becomes the last child of this group)
+        //   - a different Group (reorder at top level)
+        // Worktree payloads are rejected — a worktree never leaves its
+        // project, so a group header is never a valid target for it.
+        .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
+            DragPayload::Project { .. } => style.bg(drop_target_bg),
+            DragPayload::Group { id, .. } if *id != group_id => style.bg(drop_target_bg),
+            _ => style,
+        })
+        .on_drop(
+            cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
+                let Some(ws) = ws_for_drop.upgrade() else {
+                    return;
+                };
+                match dragged {
+                    DragPayload::Project { id: from, .. } => {
+                        let from = *from;
+                        ws.update(cx, |ws, cx| {
+                            ws.move_project_to_group_end(from, group_id, cx)
+                        });
+                    }
+                    DragPayload::Group { id: from, .. } if *from != group_id => {
+                        let from = *from;
+                        ws.update(cx, |ws, cx| {
+                            ws.reorder_group_before_top_row(from, TopRow::Group(group_id), cx)
+                        });
+                    }
+                    _ => {}
+                }
+            }),
+        )
         .child(div().flex_none().child(caret))
         .when_some(color_dot, |d, dot| d.child(dot))
         .child(
@@ -118,6 +162,83 @@ pub(in crate::workspace) fn group_header_row(
                 .whitespace_nowrap()
                 .child(group.name.clone()),
         )
+}
+
+/// Single-row project header above the worktrees list for one
+/// project. Drag source for `DragPayload::Project` and drop target for
+/// project / group payloads. The `is_ungrouped` flag gates whether a
+/// dragged group can land here — groups only sit at the top level, so
+/// dropping a group on a project nested inside another group must
+/// silently no-op.
+pub(in crate::workspace) fn project_header_row(
+    project_id: ProjectId,
+    name: SharedString,
+    is_ungrouped: bool,
+    snap: &LeftDockSnapshot,
+    cx: &mut Context<Dock>,
+) -> impl IntoElement + use<> {
+    let t = theme::current(cx);
+    let label_color = t.dock_view_tab_active;
+    let drop_target_bg = t.worktree_drop_target_bg;
+
+    let workspace = snap.workspace.clone();
+    let ws_for_drop = workspace.clone();
+    let drag_payload = DragPayload::Project {
+        id: project_id,
+        label: name.clone(),
+    };
+
+    div()
+        .id(("project-header", project_id as usize))
+        .flex()
+        .flex_row()
+        .items_center()
+        .w_full()
+        .px(px(theme::WORKTREE_ROW_PAD_X))
+        .py(px(theme::WORKTREE_SECTION_PAD_Y))
+        .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
+        .text_color(label_color)
+        .on_drag(drag_payload, |dragged, _offset, _window, cx| {
+            cx.new(|_| DragGhost {
+                label: dragged.label(),
+            })
+        })
+        // Project header accepts:
+        //   - a different Project (reorder, inheriting this project's
+        //     group membership);
+        //   - a Group, but only when this project is itself ungrouped
+        //     (groups live at the top level and may only interleave
+        //     with ungrouped projects there).
+        // Worktree payloads are rejected — worktrees stay inside their
+        // own project's list.
+        .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
+            DragPayload::Project { id: from, .. } if *from != project_id => {
+                style.bg(drop_target_bg)
+            }
+            DragPayload::Group { .. } if is_ungrouped => style.bg(drop_target_bg),
+            _ => style,
+        })
+        .on_drop(
+            cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
+                let Some(ws) = ws_for_drop.upgrade() else {
+                    return;
+                };
+                match dragged {
+                    DragPayload::Project { id: from, .. } if *from != project_id => {
+                        let from = *from;
+                        ws.update(cx, |ws, cx| ws.reorder_project_before(from, project_id, cx));
+                    }
+                    DragPayload::Group { id: from, .. } if is_ungrouped => {
+                        let from = *from;
+                        ws.update(cx, |ws, cx| {
+                            ws.reorder_group_before_top_row(from, TopRow::Project(project_id), cx)
+                        });
+                    }
+                    _ => {}
+                }
+            }),
+        )
+        .child(name)
 }
 
 pub(in crate::workspace) fn section_header(
@@ -302,8 +423,12 @@ pub(in crate::workspace) fn worktree_row(
     let workspace = snap.workspace.clone();
 
     // Drag payload — captured once so on_drag + on_drop share the same Arc.
-    let drag_payload = DraggedWorktree {
-        id: wt_id,
+    let wt_ref = daruda_store::project::WorktreeRef {
+        project: project_id,
+        worktree: wt_id,
+    };
+    let drag_payload = DragPayload::Worktree {
+        target: wt_ref,
         label: wt_label_shared.clone(),
     };
 
@@ -335,16 +460,28 @@ pub(in crate::workspace) fn worktree_row(
         // Drag source — GPUI's built-in on_drag / on_drop pipeline handles
         // reordering without any manual drag-state tracking.
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
-            cx.new(|_| DraggedWorktreeGhost {
-                label: dragged.label.clone(),
+            cx.new(|_| DragGhost {
+                label: dragged.label(),
             })
         })
-        // Drop target — highlight while a worktree is hovering over this row.
-        .drag_over::<DraggedWorktree>(move |style, _dragged, _window, _cx| style.bg(drop_target_bg))
+        // Drop target — highlight only when the in-flight payload is a
+        // worktree from the same project. Cross-project worktree drops
+        // are rejected by the workspace op below; mirroring that here
+        // keeps the dock from advertising a drop it would silently
+        // discard.
+        .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
+            DragPayload::Worktree { target, .. } if target.project == project_id => {
+                style.bg(drop_target_bg)
+            }
+            _ => style,
+        })
         .on_drop(
-            cx.listener(move |_dock, dragged: &DraggedWorktree, _window, cx| {
-                if let Some(ws) = ws_for_drop.upgrade() {
-                    ws.update(cx, |ws, cx| ws.reorder_worktree(dragged.id, wt_id, cx));
+            cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
+                if let DragPayload::Worktree { target, .. } = dragged
+                    && let Some(ws) = ws_for_drop.upgrade()
+                {
+                    let from = *target;
+                    ws.update(cx, |ws, cx| ws.reorder_worktree(from, wt_ref, cx));
                 }
             }),
         )
