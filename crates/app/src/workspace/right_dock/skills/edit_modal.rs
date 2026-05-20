@@ -345,9 +345,10 @@ impl Render for EditSkillModal {
         let scope_label = match self.scope {
             SkillScope::Project => strings::SKILLS_PROJECT,
             SkillScope::Personal => strings::SKILLS_PERSONAL,
-            // Plugin scope is read-only — `Workspace::open_edit_skill_modal`
-            // refuses to open the modal for plugin skills, so this arm
-            // is unreachable in practice. The value is purely defensive.
+            // Plugin scope is read-only — `open_edit_skill_modal` (the
+            // free fn this modal opens through) refuses to open for
+            // plugin skills, so this arm is unreachable in practice.
+            // The value is purely defensive.
             SkillScope::Plugin => strings::SKILLS_PLUGIN,
         };
         let user_invocable = self.user_invocable;
