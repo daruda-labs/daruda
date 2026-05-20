@@ -1,5 +1,6 @@
-//! Runtime [`Project`] — the workspace-visible counterpart to
-//! [`daruda_store::project::SerializedProject`].
+//! Runtime [`Project`] — the workspace-visible counterpart to the
+//! persisted [`daruda_store::project::ProjectState`] plus the
+//! per-workspace [`daruda_store::project::ProjectOverride`].
 //!
 //! A project owns a root directory, a non-empty list of runtime
 //! [`crate::worktree::Worktree`]s, a "last active worktree" hint for
@@ -7,13 +8,15 @@
 //!
 //! GPUI-free: lives alongside [`crate::worktree`] in dependency order
 //! `workspace/ → project/ → worktree/`. Workspace assembles a
-//! `Vec<Project>` at construction time; persistence reads/writes the
-//! serialized mirror in [`daruda_store::project::SerializedProject`].
+//! `Vec<Project>` at construction time; persistence reads/writes via
+//! [`crate::workspace::Workspace::snapshot_for_disk`] and
+//! [`crate::workspace::Workspace::restore_from_disk`].
 
 use std::path::PathBuf;
 
 use daruda_store::project::{
-    GroupId, ProjectId, SerializedProject, WorktreeId, WorktreeRef, derive_name_from_path,
+    GroupId, ProjectId, ProjectOverride, ProjectState, ProjectUuid, WorktreeId, WorktreeRef,
+    derive_name_from_path,
 };
 use gpui::BackgroundExecutor;
 
@@ -25,6 +28,10 @@ use crate::worktree::Worktree;
 #[derive(Debug)]
 pub struct Project {
     pub id: ProjectId,
+    /// Stable cross-session identifier — matches the UUID stored on
+    /// disk at `projects/<uuid>.json`. Independent of the runtime
+    /// `id` (which is per-workspace and not stable across sessions).
+    pub uuid: ProjectUuid,
     pub root: PathBuf,
     pub name: String,
     pub worktrees: Vec<Worktree>,
@@ -58,6 +65,7 @@ impl Project {
         let last_active_worktree_id = worktrees.first().map(|w| w.id).unwrap_or(0);
         Self {
             id,
+            uuid: ProjectUuid::new(),
             root,
             name,
             worktrees,
@@ -69,21 +77,52 @@ impl Project {
         }
     }
 
-    /// Hydrate a runtime project from its persisted shape. Worktrees
-    /// inflate via [`Worktree::from_serialized`]; tabs/panes are
-    /// rebuilt separately by the workspace restore path.
-    pub fn from_serialized(s: &SerializedProject) -> Self {
-        let worktrees = s.worktrees.iter().map(Worktree::from_serialized).collect();
+    /// Build a runtime project with a caller-supplied UUID. Used by
+    /// code paths that need to attach this runtime entry to an existing
+    /// on-disk [`daruda_store::project::ProjectState`] (policy B: the
+    /// same root may appear in multiple workspaces, but each shares a
+    /// single ProjectState identified by its UUID). Worktree discovery
+    /// is identical to [`Project::bootstrap`].
+    pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf) -> Self {
+        let name = derive_name_from_path(&root);
+        let worktrees = Worktree::bootstrap_from_project(&root);
+        let last_active_worktree_id = worktrees.first().map(|w| w.id).unwrap_or(0);
         Self {
-            id: s.id,
-            root: s.root.clone(),
-            name: s.name.clone(),
+            id,
+            uuid,
+            root,
+            name,
             worktrees,
-            last_active_worktree_id: s.last_active_worktree_id,
-            group_id: s.group_id,
-            color: s.color.clone(),
-            tab_order: s.tab_order,
-            is_collapsed: s.is_collapsed,
+            last_active_worktree_id,
+            group_id: None,
+            color: None,
+            tab_order: 0,
+            is_collapsed: false,
+        }
+    }
+
+    /// Hydrate a runtime project from the UUID-keyed on-disk shape —
+    /// a [`ProjectState`] (intrinsic per-project fields) plus the
+    /// per-workspace [`ProjectOverride`] (cosmetic decoration). Used
+    /// by [`crate::workspace::Workspace::restore_from_disk`].
+    pub fn from_disk(id: ProjectId, ps: &ProjectState, ov: &ProjectOverride) -> Self {
+        let worktrees = ps.worktrees.iter().map(Worktree::from_serialized).collect();
+        Self {
+            id,
+            uuid: ps.uuid,
+            root: ps.root.clone(),
+            name: ps.name.clone().unwrap_or_default(),
+            worktrees,
+            last_active_worktree_id: ps.last_active_worktree_id,
+            group_id: ov.group_id,
+            color: ov.color.clone(),
+            // `ProjectOverride::tab_order` is persisted as `usize` for
+            // schema-level forward-compat (BTree keys, JSON numbers);
+            // the runtime field is `u32` because every reordering op
+            // works in `0..N` range. Cast is safe: `tab_order` is
+            // bounded by project count.
+            tab_order: ov.tab_order as u32,
+            is_collapsed: ov.is_collapsed,
         }
     }
 

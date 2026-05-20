@@ -45,23 +45,27 @@ pub(crate) fn build_recent_submenu(
         .take(OPEN_RECENT_SLOTS)
         .enumerate()
         .map(|(idx, entry)| {
-            let path = entry.root.display().to_string();
-            recent_action_for_slot(idx, gpui::SharedString::from(path), mode)
+            recent_action_for_slot(
+                idx,
+                gpui::SharedString::from(entry.display_name.clone()),
+                mode,
+            )
         })
         .collect()
 }
 
 /// Re-load the recent-projects list from disk and refresh the entire
-/// menu bar. Call after every successful `touch_recent` so File >
+/// menu bar. Call after every successful `touch_recent_in` so File >
 /// Open Recent stays current without requiring a relaunch.
 pub(crate) fn refresh_recent_menu(cx: &mut App) {
-    let recent = daruda_store::project::persistence::load_recent();
+    let recent =
+        daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
     cx.set_menus(build_menu_bar(&recent));
 }
 
 /// Build the entire native menu bar. Kept in one helper so the File
 /// menu's Recent submenu can be rebuilt with fresh data on launch and
-/// after each `touch_recent` via [`refresh_recent_menu`].
+/// after each `touch_recent_in` via [`refresh_recent_menu`].
 pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> Vec<Menu> {
     vec![
         Menu {

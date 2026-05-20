@@ -235,7 +235,7 @@ mod tests {
     /// Smoke test — write to the personal file and confirm a Reload
     /// event lands in the receiver. Skipped on non-macOS for brevity.
     #[test]
-    #[cfg_attr(not(target_os = "macos"), ignore)]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn personal_change_triggers_reload() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let dir = tempfile::tempdir().unwrap();

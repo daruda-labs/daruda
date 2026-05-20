@@ -226,6 +226,8 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         open_workspace_window(cfg_for_new.clone(), None, None, opts, cx);
         cx.stop_propagation();
     });
+    // `open_workspace_window` now reads `(saved, project, opts)`:
+    //   - saved = None, project = None → fully empty window.
 
     // Global CloseProject handler — surfaces the DeleteProjectModal
     // so the user picks between "Remove from Daruda only" (safe) and

@@ -2,7 +2,7 @@ use gpui::{AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use super::file_view_pane::{CharPos, CharSelection, FileViewMode, PaneFileContent, PaneFileView};
+use super::file_view_pane::{CharPos, FileViewMode, PaneFileContent, PaneFileView};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
 use crate::workspace::Workspace;
@@ -190,9 +190,9 @@ impl Workspace {
     }
 
     /// View-dispatched mouse-down handler for the file viewer.
-    /// Coordinate-to-byte conversion is done in the View; this method
-    /// owns the resulting state transition (set anchor, set selection,
-    /// possibly start drag). No-op if no file viewer is focused.
+    /// Coordinate-to-byte conversion is done in the View; the state
+    /// transition lives on `PaneFileView::handle_mouse_down`. No-op
+    /// when no file viewer is focused.
     pub(in crate::workspace) fn file_view_mouse_down(
         &mut self,
         hit: CharPos,
@@ -202,32 +202,13 @@ impl Workspace {
         let Some(fv) = self.focused_file_view_mut() else {
             return;
         };
-        if shift {
-            let anchor = fv.char_anchor.unwrap_or(hit);
-            fv.char_selection = Some(CharSelection {
-                anchor,
-                active: hit,
-            });
-        } else {
-            fv.char_anchor = Some(hit);
-            fv.char_selection = Some(CharSelection {
-                anchor: hit,
-                active: hit,
-            });
-            fv.is_drag_selecting = true;
-        }
+        fv.handle_mouse_down(hit, shift);
         cx.notify();
     }
 
-    /// View-dispatched mouse-move/drag handler for the file viewer.
-    /// `still_pressed` is true when the left button is held; `hovered`
-    /// is true when the cursor is inside the row hitbox. Branch order
-    /// matches the pre-refactor closure exactly:
-    ///   1. drag in progress but button released → reset flag, notify
-    ///   2. not drag-selecting OR cursor outside hitbox → noop
-    ///   3. no anchor → noop
-    ///   4. new selection differs from current → set, notify
-    ///   5. otherwise → noop (no notify)
+    /// View-dispatched mouse-move/drag handler. State transition lives
+    /// on `PaneFileView::handle_mouse_drag`; we only forward the result
+    /// to `cx.notify()` when the model actually changed.
     pub(in crate::workspace) fn file_view_mouse_drag(
         &mut self,
         active: CharPos,
@@ -238,20 +219,7 @@ impl Workspace {
         let Some(fv) = self.focused_file_view_mut() else {
             return;
         };
-        if fv.is_drag_selecting && !still_pressed {
-            fv.is_drag_selecting = false;
-            cx.notify();
-            return;
-        }
-        if !fv.is_drag_selecting || !hovered {
-            return;
-        }
-        let Some(anchor) = fv.char_anchor else {
-            return;
-        };
-        let new_sel = CharSelection { anchor, active };
-        if fv.char_selection.as_ref() != Some(&new_sel) {
-            fv.char_selection = Some(new_sel);
+        if fv.handle_mouse_drag(active, still_pressed, hovered) {
             cx.notify();
         }
     }

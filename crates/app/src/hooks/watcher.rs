@@ -129,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn watcher_emits_changed_on_atomic_write() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let dir = tempfile::TempDir::new().unwrap();
@@ -150,6 +151,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn watcher_emits_removed_on_delete() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let dir = tempfile::TempDir::new().unwrap();
@@ -176,6 +178,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn non_json_files_are_ignored() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let dir = tempfile::TempDir::new().unwrap();

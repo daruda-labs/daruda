@@ -498,7 +498,13 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&project_path);
     let window_handle = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = window_handle.root(cx).unwrap();
 

@@ -393,6 +393,60 @@ impl PaneFileView {
         }
     }
 
+    /// Apply a mouse-down hit. `shift=true` extends the existing
+    /// selection from `char_anchor` (or `hit` if no anchor) to `hit`;
+    /// otherwise resets anchor + selection to `hit` and starts a drag.
+    /// Caller is responsible for `cx.notify()` afterwards.
+    pub(in crate::workspace) fn handle_mouse_down(&mut self, hit: CharPos, shift: bool) {
+        if shift {
+            let anchor = self.char_anchor.unwrap_or(hit);
+            self.char_selection = Some(CharSelection {
+                anchor,
+                active: hit,
+            });
+        } else {
+            self.char_anchor = Some(hit);
+            self.char_selection = Some(CharSelection {
+                anchor: hit,
+                active: hit,
+            });
+            self.is_drag_selecting = true;
+        }
+    }
+
+    /// Apply a mouse-move event during (or after) a drag-select.
+    /// Returns `true` when internal state changed so the caller can
+    /// decide whether to `cx.notify()`. Branch order matches the
+    /// pre-refactor View closure exactly:
+    ///   1. drag in progress but button released → reset flag (true)
+    ///   2. not drag-selecting OR cursor outside hitbox → noop (false)
+    ///   3. no anchor → noop (false)
+    ///   4. new selection differs from current → set (true)
+    ///   5. otherwise → noop (false)
+    pub(in crate::workspace) fn handle_mouse_drag(
+        &mut self,
+        active: CharPos,
+        still_pressed: bool,
+        hovered: bool,
+    ) -> bool {
+        if self.is_drag_selecting && !still_pressed {
+            self.is_drag_selecting = false;
+            return true;
+        }
+        if !self.is_drag_selecting || !hovered {
+            return false;
+        }
+        let Some(anchor) = self.char_anchor else {
+            return false;
+        };
+        let new_sel = CharSelection { anchor, active };
+        if self.char_selection.as_ref() != Some(&new_sel) {
+            self.char_selection = Some(new_sel);
+            return true;
+        }
+        false
+    }
+
     /// Number of selectable units. Used by Cmd+A select-all.
     pub(in crate::workspace) fn visible_row_count(&self) -> usize {
         if let PaneFileContent::LoadedMarkdown { blocks, .. } = &self.content
@@ -949,5 +1003,77 @@ diff --git a/bar.rs b/bar.rs
         }
         assert!(fv.search.as_ref().unwrap().matches.is_empty());
         assert!(fv.search.as_ref().unwrap().focused.is_none());
+    }
+
+    // ------------------------------------------------------------
+    // Mouse-down / mouse-drag state transitions
+    // ------------------------------------------------------------
+
+    #[test]
+    fn mouse_down_clears_anchor_and_starts_drag() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 5 }, false);
+        assert_eq!(fv.char_anchor, Some(CharPos { row: 0, byte: 5 }));
+        assert_eq!(
+            fv.char_selection,
+            Some(CharSelection {
+                anchor: CharPos { row: 0, byte: 5 },
+                active: CharPos { row: 0, byte: 5 },
+            })
+        );
+        assert!(fv.is_drag_selecting);
+    }
+
+    #[test]
+    fn shift_click_extends_selection_without_starting_drag() {
+        let mut fv = raw_viewer(&["hello world"]);
+        // Prime: plain click at (0, 0).
+        fv.handle_mouse_down(CharPos { row: 0, byte: 0 }, false);
+        // Drop the drag flag so we can observe shift-click in isolation.
+        fv.is_drag_selecting = false;
+
+        fv.handle_mouse_down(CharPos { row: 0, byte: 10 }, true);
+
+        assert_eq!(
+            fv.char_anchor,
+            Some(CharPos { row: 0, byte: 0 }),
+            "anchor unchanged by shift-click"
+        );
+        assert_eq!(
+            fv.char_selection.as_ref().map(|s| s.active),
+            Some(CharPos { row: 0, byte: 10 })
+        );
+        assert!(!fv.is_drag_selecting, "shift-click does not start a drag");
+    }
+
+    #[test]
+    fn drag_released_resets_is_drag_selecting() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
+
+        // mouse-move with button released.
+        let changed = fv.handle_mouse_drag(CharPos { row: 0, byte: 7 }, false, true);
+        assert!(changed, "releasing flag must report state changed");
+        assert!(!fv.is_drag_selecting);
+        assert!(
+            fv.char_selection.is_some(),
+            "selection from mouse-down is preserved"
+        );
+    }
+
+    #[test]
+    fn drag_outside_hitbox_does_not_update_selection() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
+        let baseline = fv.char_selection.clone();
+
+        // drag while not hovered.
+        let changed = fv.handle_mouse_drag(CharPos { row: 0, byte: 50 }, true, false);
+        assert!(!changed, "out-of-hitbox drag must not change state");
+        assert_eq!(fv.char_selection, baseline, "selection unchanged");
+        assert!(
+            fv.is_drag_selecting,
+            "drag flag still set while button held"
+        );
     }
 }

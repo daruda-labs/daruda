@@ -1,199 +1,182 @@
-//! File-based persistence for project state and recent list. Read/
-//! write plumbing lives in [`crate::persistence`]; this module owns
-//! only the path layout and the per-project hash → filename mapping.
+//! Disk persistence for the UUID-keyed workspace/project schema.
 //!
-//! Storage layout:
+//! Layout under `<data_dir>/`:
 //! ```text
-//! ~/.config/daruda/
-//! ├── projects/
-//! │   ├── {hash}.json    # per-project state
-//! │   └── ...
-//! └── recent.json        # recent projects list
+//! workspaces/<workspace_uuid>.json
+//! projects/<project_uuid>.json        # legacy <hex_hash>.json files
+//!                                     # coexist here but are skipped
+//! recent-workspaces.json
 //! ```
+//!
+//! UUID files are filtered by filename pattern (36 chars with hyphens
+//! at positions 8-13-18-23). Anything else in `projects/` (including
+//! legacy fnv1a-hashed files) is ignored during scans.
 
 use std::path::{Path, PathBuf};
 
 use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
 
-use super::{ProjectState, RECENT_MAX, RecentEntry, WorkspaceState, path_hash};
+use super::types::{ProjectState, ProjectUuid, RecentEntry, WorkspaceState, WorkspaceUuid};
 
-fn projects_dir_in(data_dir: &Path) -> PathBuf {
-    data_dir.join("projects")
+const WORKSPACES_DIRNAME: &str = "workspaces";
+const PROJECTS_DIRNAME: &str = "projects";
+const RECENT_FILENAME: &str = "recent-workspaces.json";
+
+pub const RECENT_MAX: usize = 20;
+
+pub fn workspaces_dir_in(data_dir: &Path) -> PathBuf {
+    data_dir.join(WORKSPACES_DIRNAME)
 }
 
-fn recent_path_in(data_dir: &Path) -> PathBuf {
-    data_dir.join("recent.json")
+pub fn projects_dir_in(data_dir: &Path) -> PathBuf {
+    data_dir.join(PROJECTS_DIRNAME)
 }
 
-fn state_path_in(data_dir: &Path, root: &Path) -> PathBuf {
-    let hash = path_hash(root);
-    projects_dir_in(data_dir).join(format!("{hash}.json"))
+pub fn recent_path_in(data_dir: &Path) -> PathBuf {
+    data_dir.join(RECENT_FILENAME)
 }
 
-// ============================================================================
-// Project state — path-explicit API (use in tests / custom data dirs)
-// ============================================================================
+fn workspace_path_in(data_dir: &Path, uuid: WorkspaceUuid) -> PathBuf {
+    workspaces_dir_in(data_dir).join(format!("{}.json", uuid.as_inner()))
+}
 
-/// Save a [`WorkspaceState`] under `data_dir`, keyed by `root`,
-/// atomically (tempfile + rename). Production callers
-/// (`Workspace::persist_state`) write the same workspace state once
-/// per project root so opening any of them via the recent list
-/// restores the whole multi-project shape.
-pub fn save_workspace_state_in(
-    data_dir: &Path,
-    root: &Path,
-    state: &WorkspaceState,
-) -> std::io::Result<()> {
-    let dir = projects_dir_in(data_dir);
-    let path = state_path_in(data_dir, root);
+fn project_path_in(data_dir: &Path, uuid: ProjectUuid) -> PathBuf {
+    projects_dir_in(data_dir).join(format!("{}.json", uuid.as_inner()))
+}
+
+/// Returns true iff `stem` is a canonical lowercase UUID (8-4-4-4-12
+/// hex with hyphens). Used to skip legacy `<hex_hash>.json` files
+/// coexisting in `projects/`.
+pub fn is_uuid_filename_stem(stem: &str) -> bool {
+    if stem.len() != 36 {
+        return false;
+    }
+    let bytes = stem.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        let want_hyphen = matches!(i, 8 | 13 | 18 | 23);
+        if want_hyphen {
+            if *b != b'-' {
+                return false;
+            }
+        } else if !matches!(b, b'0'..=b'9' | b'a'..=b'f') {
+            return false;
+        }
+    }
+    true
+}
+
+// ---- WorkspaceState ----
+
+pub fn save_workspace_state_in(data_dir: &Path, state: &WorkspaceState) -> std::io::Result<()> {
+    let dir = workspaces_dir_in(data_dir);
+    let path = workspace_path_in(data_dir, state.uuid);
     save_json_atomic(&dir, &path, state)
 }
 
-/// Load a [`WorkspaceState`] from `data_dir`. Missing file → `None`.
-/// Parse error → logged then `None` so the caller falls back to a
-/// fresh session.
-///
-/// Tries the new [`WorkspaceState`] shape first and discriminates
-/// against legacy files via the `schema_version` field — new-shape
-/// files emit `WORKSPACE_SCHEMA_VERSION`, legacy files have no such
-/// key and decode as `0`. A genuinely-empty new-shape file (no
-/// projects, but schema_version set) therefore takes the new path,
-/// not the legacy fallback. Legacy [`ProjectState`] files are
-/// promoted via [`WorkspaceState::from_legacy`] so callers always
-/// receive the new shape.
-pub fn load_workspace_state_in(data_dir: &Path, root: &Path) -> Option<WorkspaceState> {
-    let path = state_path_in(data_dir, root);
-    match load_json_file::<WorkspaceState>("project", &path) {
-        LoadOutcome::Parsed(mut workspace) => {
-            if workspace.schema_version > 0 {
-                workspace.migrate_legacy();
-                return Some(workspace);
-            }
-            // Legacy file: re-parse as `ProjectState` and promote.
-            match load_json_file::<ProjectState>("project", &path) {
-                LoadOutcome::Parsed(state) => {
-                    let mut ws = WorkspaceState::from_legacy(state);
-                    ws.migrate_legacy();
-                    Some(ws)
-                }
-                LoadOutcome::Missing | LoadOutcome::Corrupt => None,
-            }
-        }
+pub fn load_workspace_state_in(data_dir: &Path, uuid: WorkspaceUuid) -> Option<WorkspaceState> {
+    let path = workspace_path_in(data_dir, uuid);
+    match load_json_file::<WorkspaceState>("workspace", &path) {
+        LoadOutcome::Parsed(ws) => Some(ws),
         LoadOutcome::Missing | LoadOutcome::Corrupt => None,
     }
 }
 
-/// Backward-compatible single-project save. Accepts the legacy
-/// [`ProjectState`] shape, promotes via [`WorkspaceState::from_legacy`],
-/// and writes the new-shape file.
-pub fn save_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<()> {
-    let workspace = WorkspaceState::from_legacy(state.clone());
-    save_workspace_state_in(data_dir, &state.root, &workspace)
-}
-
-/// Backward-compatible single-project load. Returns the primary
-/// project's flat view via [`WorkspaceState::into_primary_project_state`]
-/// so test code that still constructs [`ProjectState`] keeps working.
-pub fn load_state_in(data_dir: &Path, root: &Path) -> Option<ProjectState> {
-    load_workspace_state_in(data_dir, root).map(|ws| ws.into_primary_project_state())
-}
-
-/// Delete a project's state file under `data_dir`.
-pub fn delete_state_in(data_dir: &Path, root: &Path) -> std::io::Result<()> {
-    let path = state_path_in(data_dir, root);
+pub fn delete_workspace_state_in(data_dir: &Path, uuid: WorkspaceUuid) -> std::io::Result<()> {
+    let path = workspace_path_in(data_dir, uuid);
     if path.exists() {
         std::fs::remove_file(path)?;
     }
     Ok(())
 }
 
-// ============================================================================
-// Recent projects — path-explicit API
-// ============================================================================
+/// Iterate every workspace file in `<data_dir>/workspaces/`. Used
+/// by lookup paths (e.g. `find_existing_project_uuid_for_root`).
+pub fn for_each_workspace_state_in<F: FnMut(WorkspaceState)>(data_dir: &Path, mut f: F) {
+    let dir = workspaces_dir_in(data_dir);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !is_uuid_filename_stem(stem) {
+            continue;
+        }
+        if let LoadOutcome::Parsed(ws) = load_json_file::<WorkspaceState>("workspace", &path) {
+            f(ws);
+        }
+    }
+}
 
-/// Load the recent projects list from `data_dir`. Empty vec on missing
-/// file. A parse error is logged and treated as empty so a hand-edited
-/// `recent.json` won't crash the welcome screen — but the corruption
-/// is at least visible in the daruda log instead of being swallowed.
+// ---- ProjectState ----
+
+pub fn save_project_state_in(data_dir: &Path, state: &ProjectState) -> std::io::Result<()> {
+    let dir = projects_dir_in(data_dir);
+    let path = project_path_in(data_dir, state.uuid);
+    save_json_atomic(&dir, &path, state)
+}
+
+pub fn load_project_state_in(data_dir: &Path, uuid: ProjectUuid) -> Option<ProjectState> {
+    let path = project_path_in(data_dir, uuid);
+    match load_json_file::<ProjectState>("project", &path) {
+        LoadOutcome::Parsed(p) => Some(p),
+        LoadOutcome::Missing | LoadOutcome::Corrupt => None,
+    }
+}
+
+pub fn delete_project_state_in(data_dir: &Path, uuid: ProjectUuid) -> std::io::Result<()> {
+    let path = project_path_in(data_dir, uuid);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+/// Iterate every project file in `<data_dir>/projects/` that has a
+/// canonical-UUID stem. Legacy hex-hash files in the same folder are
+/// silently skipped.
+pub fn for_each_project_state_in<F: FnMut(ProjectState)>(data_dir: &Path, mut f: F) {
+    let dir = projects_dir_in(data_dir);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !is_uuid_filename_stem(stem) {
+            continue;
+        }
+        if let LoadOutcome::Parsed(p) = load_json_file::<ProjectState>("project", &path) {
+            f(p);
+        }
+    }
+}
+
+// ---- Recent ----
+
 pub fn load_recent_in(data_dir: &Path) -> Vec<RecentEntry> {
-    let path = recent_path_in(data_dir);
-    match load_json_file::<Vec<RecentEntry>>("recent", &path) {
+    match load_json_file::<Vec<RecentEntry>>("recent_workspaces", &recent_path_in(data_dir)) {
         LoadOutcome::Parsed(v) => v,
         LoadOutcome::Missing | LoadOutcome::Corrupt => Vec::new(),
     }
 }
 
-/// Save the recent projects list to `data_dir` atomically.
 pub fn save_recent_in(data_dir: &Path, entries: &[RecentEntry]) -> std::io::Result<()> {
-    let path = recent_path_in(data_dir);
-    save_json_atomic(data_dir, &path, &entries)
+    save_json_atomic(data_dir, &recent_path_in(data_dir), &entries)
 }
 
-/// Add or update a project in the recent list under `data_dir`.
-pub fn touch_recent_in(data_dir: &Path, root: &Path) -> std::io::Result<()> {
+pub fn touch_recent_in(
+    data_dir: &Path,
+    workspace_uuid: WorkspaceUuid,
+    display_name: String,
+) -> std::io::Result<()> {
     let mut entries = load_recent_in(data_dir);
-    entries.retain(|e| e.root != root);
-    entries.insert(0, RecentEntry::now(root));
+    entries.retain(|e| e.workspace_uuid != workspace_uuid);
+    entries.insert(0, RecentEntry::now(workspace_uuid, display_name));
     entries.truncate(RECENT_MAX);
     save_recent_in(data_dir, &entries)
-}
-
-/// Remove stale entries (directories that no longer exist) under `data_dir`.
-pub fn prune_recent_in(data_dir: &Path) -> std::io::Result<()> {
-    let mut entries = load_recent_in(data_dir);
-    let before = entries.len();
-    entries.retain(|e| e.root.is_dir());
-    if entries.len() != before {
-        save_recent_in(data_dir, &entries)?;
-    }
-    Ok(())
-}
-
-// ============================================================================
-// Production convenience wrappers (use the default config dir)
-// ============================================================================
-
-/// Save project state to disk.
-pub fn save_state(state: &ProjectState) -> std::io::Result<()> {
-    save_state_in(&crate::persistence::default_data_dir(), state)
-}
-
-/// Load project state from disk. Returns `None` on any error. Applies
-/// `migrate_legacy` so the returned state always uses the worktree shape.
-pub fn load_state(root: &Path) -> Option<ProjectState> {
-    load_state_in(&crate::persistence::default_data_dir(), root)
-}
-
-/// Load the full multi-project [`WorkspaceState`] from disk. Production
-/// callers use this directly; the [`load_state`] adapter is kept for
-/// the welcome / recent-list paths that still hand the runtime a single
-/// flat [`ProjectState`].
-pub fn load_workspace_state(root: &Path) -> Option<WorkspaceState> {
-    load_workspace_state_in(&crate::persistence::default_data_dir(), root)
-}
-
-/// Delete a project's state file.
-pub fn delete_state(root: &Path) -> std::io::Result<()> {
-    delete_state_in(&crate::persistence::default_data_dir(), root)
-}
-
-/// Load the recent projects list. Returns empty vec on any error.
-pub fn load_recent() -> Vec<RecentEntry> {
-    load_recent_in(&crate::persistence::default_data_dir())
-}
-
-/// Save the recent projects list to disk.
-pub fn save_recent(entries: &[RecentEntry]) -> std::io::Result<()> {
-    save_recent_in(&crate::persistence::default_data_dir(), entries)
-}
-
-/// Add or update a project in the recent list. Moves existing entries
-/// to the front; trims to RECENT_MAX.
-pub fn touch_recent(root: &Path) -> std::io::Result<()> {
-    touch_recent_in(&crate::persistence::default_data_dir(), root)
-}
-
-/// Remove stale entries (directories that no longer exist).
-pub fn prune_recent() -> std::io::Result<()> {
-    prune_recent_in(&crate::persistence::default_data_dir())
 }

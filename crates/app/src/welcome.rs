@@ -2,9 +2,15 @@
 //!
 //! Displays the daruda logo, "Open Folder" button, recent projects
 //! list, and "New Empty Window" button.
+//!
+//! Recent entries are keyed by `WorkspaceUuid` under the new schema —
+//! clicking a row dispatches a `WelcomeEvent::OpenRecent(uuid)` which
+//! [`crate::windows::open_recent_workspace`] resolves to a full
+//! `(WorkspaceState, Vec<ProjectState>)` payload.
 
 use crate::ui::theme;
 use crate::window_registry::WindowRegistry;
+use daruda_store::project::{RecentEntry, WorkspaceUuid};
 use gpui::{
     App, Context, FocusHandle, IntoElement, MouseButton, Render, SharedString, Window, actions,
     div, prelude::*, px,
@@ -17,7 +23,10 @@ actions!(welcome, [OpenFolder, NewEmptyWindow]);
 /// Events emitted by the welcome screen.
 pub enum WelcomeEvent {
     OpenFolder,
-    OpenProject(std::path::PathBuf),
+    /// User clicked a recent-projects row. Payload is the workspace
+    /// UUID; resolution to `WorkspaceState` / `ProjectState`s happens
+    /// in [`crate::windows::open_recent_workspace`].
+    OpenRecent(WorkspaceUuid),
     NewEmpty,
 }
 
@@ -26,15 +35,11 @@ impl gpui::EventEmitter<WelcomeEvent> for WelcomeScreen {}
 /// Welcome screen entity.
 pub struct WelcomeScreen {
     focus_handle: FocusHandle,
-    recent: Vec<daruda_store::project::RecentEntry>,
+    recent: Vec<RecentEntry>,
 }
 
 impl WelcomeScreen {
-    pub fn new(
-        recent: Vec<daruda_store::project::RecentEntry>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(recent: Vec<RecentEntry>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let weak = cx.entity().downgrade();
         WindowRegistry::register_welcome(window.window_handle(), weak, cx);
         cx.on_release(move |_: &mut WelcomeScreen, cx: &mut App| {
@@ -110,21 +115,7 @@ impl Render for WelcomeScreen {
                 .iter()
                 .enumerate()
                 .map(|(i, entry)| {
-                    let name = SharedString::from(entry.name.clone());
-                    let path_display = SharedString::from(
-                        entry
-                            .root
-                            .parent()
-                            .and_then(|p| {
-                                // Abbreviate home dir to ~
-                                let home = dirs::home_dir()?;
-                                p.strip_prefix(&home)
-                                    .ok()
-                                    .map(|rel| format!("~/{}", rel.display()))
-                                    .or_else(|| Some(p.display().to_string()))
-                            })
-                            .unwrap_or_default(),
-                    );
+                    let display = SharedString::from(entry.display_name.clone());
 
                     div()
                         .id(("recent", i))
@@ -142,7 +133,7 @@ impl Render for WelcomeScreen {
                             MouseButton::Left,
                             cx.listener(move |this, _, _window, cx| {
                                 if let Some(entry) = this.recent.get(i) {
-                                    cx.emit(WelcomeEvent::OpenProject(entry.root.clone()));
+                                    cx.emit(WelcomeEvent::OpenRecent(entry.workspace_uuid));
                                 }
                             }),
                         )
@@ -150,13 +141,7 @@ impl Render for WelcomeScreen {
                             div()
                                 .text_size(px(theme::WELCOME_RECENT_FONT_SIZE))
                                 .text_color(welcome_text)
-                                .child(name),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(theme::WELCOME_RECENT_FONT_SIZE))
-                                .text_color(faint_text)
-                                .child(path_display),
+                                .child(display),
                         )
                 })
                 .collect::<Vec<_>>();
@@ -175,9 +160,22 @@ impl Render for WelcomeScreen {
                 .children(entries)
         } else {
             div()
-                .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
-                .text_color(faint_text)
-                .child(s::WELCOME_NO_RECENT)
+                .flex()
+                .flex_col()
+                .gap(px(theme::WELCOME_GAP_TIGHT))
+                .w_full()
+                .child(
+                    div()
+                        .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
+                        .text_color(faint_text)
+                        .child(s::WELCOME_NO_RECENT),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::WELCOME_VERSION_FONT_SIZE))
+                        .text_color(faint_text)
+                        .child(s::WELCOME_EMPTY_RECENT_HINT),
+                )
         };
 
         let new_empty_btn = div()

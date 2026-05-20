@@ -34,8 +34,27 @@ fn make_workspace_with_dirs(
     std::fs::create_dir_all(primary).unwrap();
     let project = daruda_store::project::Project::from_path(primary);
     cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     })
+}
+
+/// Add a second project directly into the workspace without going
+/// through `add_project` (which triggers `activate_worktree`, file-tree
+/// setup, and terminal pane spawn — none of which the DnD reorder ops
+/// care about). The returned id matches what production would mint.
+fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
+    let id = ws.next_project_id;
+    ws.next_project_id = ws.next_project_id.checked_add(1).unwrap();
+    let mut p = crate::project::Project::bootstrap(id, std::path::PathBuf::from(root));
+    p.tab_order = ws.projects.len() as u32;
+    ws.projects.push(p);
+    id
 }
 
 // ---- reorder_worktree ----
@@ -76,15 +95,8 @@ fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
 fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_wt_cross_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_wt_cross_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_wt_cross_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_wt_cross_b");
     });
     // Snapshot tab_order before the cross-project move attempt.
     let before: Vec<(ProjectId, WorktreeId, u32)> = ws.read_with(cx, |ws, _| {
@@ -131,15 +143,8 @@ fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
 fn reorder_project_before_in_top_level_swaps_positions(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_top_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_proj_top_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_proj_top_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_top_b");
     });
     let (pa, pb) = ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[1].id));
     // Before: [a=0, b=1]. Move b before a → [b=0, a=1].
@@ -158,15 +163,8 @@ fn reorder_project_before_in_top_level_swaps_positions(cx: &mut TestAppContext) 
 fn reorder_project_before_inherits_target_group(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_inherit_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_proj_inherit_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_proj_inherit_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_inherit_b");
     });
     let (pa, pb, gid) = ws.update(cx, |ws, cx| {
         let gid: GroupId = ws.add_group("g".to_string(), None, cx);
@@ -197,15 +195,8 @@ fn reorder_project_before_inherits_target_group(cx: &mut TestAppContext) {
 fn reorder_project_before_inside_same_group_swaps_order(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_same_grp_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_proj_same_grp_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_proj_same_grp_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_same_grp_b");
     });
     let (pa, pb, gid) = ws.update(cx, |ws, cx| {
         let gid = ws.add_group("g".to_string(), None, cx);
@@ -238,15 +229,8 @@ fn reorder_project_before_inside_same_group_swaps_order(cx: &mut TestAppContext)
 fn reorder_project_before_downward_lands_after_target(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_down_adj_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_proj_down_adj_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_proj_down_adj_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_proj_down_adj_b");
     });
     // Before: [pa=0, pb=1]. Drag pa downward onto pb's slot. Standard
     // list-DnD convention: dropping X onto Y makes X take Y's row, so
@@ -269,15 +253,11 @@ fn reorder_project_before_downward_lands_after_target(cx: &mut TestAppContext) {
 fn reorder_project_before_downward_across_multiple_lands_after_target(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_proj_down_multi_a");
     let ws = wh.root(cx).unwrap();
-    for sub in ["b", "c"] {
-        let path = format!("/tmp/daruda_dnd_proj_down_multi_{sub}");
-        std::fs::create_dir_all(&path).unwrap();
-        let _ = cx.update_window(wh.into(), |_, window, cx| {
-            ws.update(cx, |ws, cx| {
-                ws.add_project(std::path::PathBuf::from(path), window, cx)
-            })
-        });
-    }
+    ws.update(cx, |ws, _cx| {
+        for sub in ["b", "c"] {
+            push_project_in_memory(ws, &format!("/tmp/daruda_dnd_proj_down_multi_{sub}"));
+        }
+    });
     // Before: [pa=0, pb=1, pc=2]. Drag pa onto pc (down past pb).
     // Expected: pa lands AFTER pc → [pb=0, pc=1, pa=2]. The pre-fix
     // behavior produced [pb=0, pa=1, pc=2] (one slot short of the
@@ -325,15 +305,8 @@ fn reorder_project_before_self_is_noop(cx: &mut TestAppContext) {
 fn move_project_to_group_end_appends_and_renumbers_top_pool(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_move_end_a");
     let ws = wh.root(cx).unwrap();
-    std::fs::create_dir_all("/tmp/daruda_dnd_move_end_b").unwrap();
-    let _ = cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.add_project(
-                std::path::PathBuf::from("/tmp/daruda_dnd_move_end_b"),
-                window,
-                cx,
-            )
-        })
+    ws.update(cx, |ws, _cx| {
+        push_project_in_memory(ws, "/tmp/daruda_dnd_move_end_b");
     });
     let (pa, pb, gid) = ws.update(cx, |ws, cx| {
         let gid = ws.add_group("g".to_string(), None, cx);

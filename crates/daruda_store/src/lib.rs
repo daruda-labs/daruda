@@ -13,5 +13,6 @@
 pub mod observability;
 pub mod panels;
 pub mod persistence;
+pub(crate) mod profile;
 pub mod project;
 pub mod tasks;

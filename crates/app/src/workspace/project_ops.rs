@@ -4,12 +4,34 @@
 //! owns the project boundary itself (registering a new project root
 //! with the workspace, removing one without tearing down the window).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use daruda_store::project::{ProjectId, WindowOpenPolicy, WorktreeRef};
+use daruda_store::project::{ProjectId, ProjectUuid, WindowOpenPolicy, WorktreeRef};
 use gpui::{AppContext as _, Context, Window};
 
 use super::Workspace;
+
+/// Scan the on-disk `projects/` pool for a `ProjectState` whose `root`
+/// matches `root`. If found, return its UUID so a new workspace can
+/// reference the same `ProjectState` file (policy B: shared intrinsic
+/// project data, workspace-local overrides).
+///
+/// Returns `None` if no existing project file references this root.
+/// Disk cost: one scan of `projects/` per call; small in practice
+/// (single-digit MS for typical project counts). If profiling shows
+/// this becoming a hotspot, cache the mapping in a `Workspace` field.
+pub(in crate::workspace) fn find_existing_project_uuid_for_root(
+    data_dir: &Path,
+    root: &Path,
+) -> Option<ProjectUuid> {
+    let mut found = None;
+    daruda_store::project::for_each_project_state_in(data_dir, |p| {
+        if found.is_none() && p.root == root {
+            found = Some(p.uuid);
+        }
+    });
+    found
+}
 
 impl Workspace {
     /// Add a freshly-opened project to this workspace and activate its
@@ -22,13 +44,15 @@ impl Workspace {
     /// to swap the live `MainAreaContext` over to the new worktree —
     /// the previous active runtime is preserved in the inactive map.
     ///
-    /// **Pre-condition (caller):** the duplicate-root check
-    /// ([`crate::window_registry::WindowRegistry::find_workspace_by_root`])
-    /// already ran and matched none of the live windows. Calling this
-    /// with a root already in `self.projects` will produce a second
-    /// runtime project under a new id — the UI then renders the same
-    /// folder twice. The Open Project flow guarantees a single source
-    /// of truth by gating on the registry check first.
+    /// **Pre-condition (caller):** the same-workspace duplicate-root
+    /// check has already run. Policy B explicitly allows the same root
+    /// across multiple windows (each shares the on-disk `ProjectState`
+    /// via a reused UUID — see `find_existing_project_uuid_for_root`),
+    /// so the cross-window registry guard no longer applies. Same-window
+    /// dedup is still the caller's responsibility: invoking this with a
+    /// root already in `self.projects` will register a second runtime
+    /// project under a new id and the UI then renders the same folder
+    /// twice.
     pub(crate) fn add_project(
         &mut self,
         root: PathBuf,
@@ -38,7 +62,18 @@ impl Workspace {
         let new_id: ProjectId = self.next_project_id;
         self.next_project_id = self.next_project_id.checked_add(1)?;
         let tab_order = self.projects.len() as u32;
-        let mut project = crate::project::Project::bootstrap(new_id, root);
+        // Policy B: when this root already has a `ProjectState` on disk
+        // (from another workspace), reuse its UUID so the new runtime
+        // project points at the canonical shared file. Worktree-list
+        // mutations from either workspace flow through the same
+        // `<data_dir>/projects/<uuid>.json`.
+        //
+        // `ProjectUuid::default()` is the nil sentinel — we need a
+        // freshly-minted v4, hence the explicit closure.
+        #[allow(clippy::unwrap_or_default)]
+        let uuid = find_existing_project_uuid_for_root(&self.data_dir, &root)
+            .unwrap_or_else(ProjectUuid::new);
+        let mut project = crate::project::Project::new_with_uuid(new_id, uuid, root);
         project.tab_order = tab_order;
         let target = project.first_worktree_ref();
         self.projects.push(project);
@@ -109,10 +144,11 @@ impl Workspace {
     /// touching the current workspace. Used by the left-dock Project
     /// context menu's "Open in New Window" entry (§5.1).
     ///
-    /// Same-root duplicate guarding is handled inside
-    /// `open_project_with_mode` — when the user already has a window
-    /// pointing at this root, it will be focused instead of spawning
-    /// a second one (matches the OpenFolder policy path).
+    /// Policy B explicitly allows the same root in multiple windows
+    /// (the two workspaces share the on-disk `ProjectState` via UUID
+    /// reuse — see `find_existing_project_uuid_for_root`), so this
+    /// path always spawns a fresh window without a cross-window dedup
+    /// check.
     pub(in crate::workspace) fn open_project_in_new_window(
         &self,
         project_id: ProjectId,
@@ -124,12 +160,17 @@ impl Workspace {
         let root = project.root.clone();
         let config = crate::settings_store::SettingsStore::global(cx).user_arc();
         let store_project = daruda_store::project::Project::from_path(&root);
-        let saved = daruda_store::project::persistence::load_workspace_state(&root);
+        // Policy B: the new workspace will reuse this project's
+        // existing UUID when it scans `<data_dir>/projects/` on first
+        // `add_project` (or recreate the file fresh if scrub'd). No
+        // cross-window dedup applies here — by construction the user
+        // explicitly asked for a second window pointing at the same
+        // root.
         let opts = crate::windows::build_window_options(&config);
         crate::windows::open_project_with_mode(
             config,
+            None,
             Some(store_project),
-            saved,
             opts,
             crate::windows::OpenMode::NewWindow,
             None,

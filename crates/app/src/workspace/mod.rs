@@ -18,10 +18,10 @@ mod claude_session_ops;
 pub(in crate::workspace) mod command;
 mod config_ops;
 mod config_sync;
-mod durable;
 pub(crate) mod delete_project_modal;
 pub(in crate::workspace) mod dialog_helpers;
 mod dnd_ops;
+mod durable;
 pub(in crate::workspace) mod error;
 mod group_ops;
 pub(in crate::workspace) mod group_select_modal;
@@ -216,6 +216,15 @@ const TITLE_BAR_HEIGHT: f32 = crate::ui::theme::TITLE_BAR_HEIGHT;
 const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 
 pub struct Workspace {
+    /// Stable cross-session identifier — matches the UUID stored on
+    /// disk at `workspaces/<uuid>.json`. Minted at construction (or
+    /// adopted from a restored [`daruda_store::project::WorkspaceState`]
+    /// in a later task) and never changes for the lifetime of the
+    /// `Workspace` entity. Read by the v3 persistence path; the legacy
+    /// save path still keys by `path_hash`, so the field is currently
+    /// unread by anything other than tests.
+    #[allow(dead_code)]
+    pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
     /// TabBar + PaneTree runtime state. Holds tabs, panes, focus,
     /// drag/context-menu overlays, and inactive worktree runtimes.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
@@ -504,6 +513,62 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::new_with_project_impl(config, project, data_dir, window, cx, false)
+    }
+
+    /// Test-only constructor that skips the heavy runtime systems:
+    /// initial tab + PTY spawn, JSONL/skills/MCP filesystem watchers,
+    /// `tasks_global::load_from_dir`, `persist_state`, macro-shortcut
+    /// registration, and `WindowRegistry` register. Tests that exercise
+    /// any of those must opt in by calling the matching `refresh_*` /
+    /// `add_tab` / `persist_state` method after construction.
+    ///
+    /// Rationale: 8-thread parallelism × (3 notify FS watchers + PTY
+    /// shell fork/exec + sync disk I/O) is what makes the suite take
+    /// ~60 s instead of <30 s.
+    #[cfg(test)]
+    pub fn new_with_project_for_test(
+        config: &daruda_config::Config,
+        project: Option<daruda_store::project::Project>,
+        data_dir: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_project_impl(config, project, data_dir, window, cx, true)
+    }
+
+    /// Variant of [`Self::new_with_project_for_test`] that additionally
+    /// runs the two pieces of heavy init that persistence + worktree
+    /// tests assume: opening the initial tab and writing the first
+    /// `persist_state` snapshot. Other heavy work (FS watchers, macro
+    /// shortcut registration, `WindowRegistry`) is still skipped.
+    #[cfg(test)]
+    pub fn new_with_project_for_test_full(
+        config: &daruda_config::Config,
+        project: Option<daruda_store::project::Project>,
+        data_dir: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut ws = Self::new_with_project_impl(config, project, data_dir, window, cx, true);
+        ws.add_tab(window, cx);
+        // `persist_state` snapshots `cached_window_bounds`; production
+        // captures them between `install_window_close_hook` and the
+        // first persist. Mirror that here so the saved state has real
+        // geometry instead of `None`.
+        ws.capture_window_bounds(window);
+        ws.persist_state(cx); // lint-reentrant-reads: test-only constructor, no dock entity is in EntityState::Mut
+        ws
+    }
+
+    fn new_with_project_impl(
+        config: &daruda_config::Config,
+        project: Option<daruda_store::project::Project>,
+        data_dir: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        for_test: bool,
+    ) -> Self {
         // Layer the project-local override (Phase 1: `[shell]` only)
         // on top of the user-global config so the workspace boots with
         // the right shell program for its project.
@@ -638,6 +703,7 @@ impl Workspace {
         let pty_event_pump = sync::pty::spawn(pty_rx, cx);
 
         let mut ws = Self {
+            uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
             next_id: 0,
             focus_handle,
@@ -848,6 +914,19 @@ impl Workspace {
                     ws.apply_config(&effective, cx);
                 }),
         };
+        // Test-only short-circuit: every line below this point spawns a
+        // background thread (PTY, FS watchers) or performs sync disk I/O
+        // (persist_state, tasks_global::load_from_dir). Tests that need
+        // any of these must invoke them explicitly after construction;
+        // skipping them by default is what brings the suite under 30 s.
+        if for_test {
+            // Render snapshots read `GlobalTasks`; registering an empty
+            // one here costs nothing and prevents
+            // "no state of type GlobalTasks exists" panics on the first
+            // `cx.notify()` triggered by any test mutation.
+            crate::agent::tasks_global::init(cx);
+            return ws;
+        }
         ws.add_tab(window, cx);
         // After tabs/worktrees are seeded, decide whether the JSONL
         // fallback watcher should run for this Workspace and start it.
@@ -956,6 +1035,35 @@ impl Workspace {
             self.refresh_git_status(target, cx);
         }
         cx.notify();
+    }
+
+    /// Human-readable name for this workspace in the recent list.
+    /// Uses the active project's name when available, otherwise the
+    /// first project's directory name, appending " +N more" when
+    /// the workspace holds multiple projects.
+    pub(in crate::workspace) fn recent_display_name(&self) -> String {
+        let primary = self
+            .projects
+            .iter()
+            .find(|p| p.id == self.active.project)
+            .or_else(|| self.projects.first());
+
+        let label = match primary {
+            Some(p) if !p.name.is_empty() => p.name.clone(),
+            Some(p) => p
+                .root
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "?".into()),
+            None => "empty".into(),
+        };
+
+        let rest = self.projects.len().saturating_sub(1);
+        if rest == 0 {
+            label
+        } else {
+            format!("{label} +{rest} more")
+        }
     }
 
     /// Borrow the currently active project. `None` when the workspace
@@ -1068,11 +1176,13 @@ impl Workspace {
     }
 
     /// True when any project in this workspace already has `root` as
-    /// its checkout. Used by [`crate::window_registry::WindowRegistry::find_workspace_by_root`]
-    /// so the duplicate-root check on Open Project can focus the live
-    /// window instead of spawning a second copy. Compares both as-given
-    /// and canonicalized so the symlinked `/tmp` vs `/private/tmp`
-    /// flavours on macOS still match.
+    /// its checkout. Used by the `AddHere` policy path so opening the
+    /// same folder twice in the same window focuses the existing
+    /// window instead of registering a duplicate runtime project.
+    /// (Policy B explicitly permits the same root across separate
+    /// windows — the cross-window guard no longer applies.) Compares
+    /// both as-given and canonicalized so the symlinked `/tmp` vs
+    /// `/private/tmp` flavours on macOS still match.
     pub(crate) fn has_project_root(&self, root: &std::path::Path) -> bool {
         let canonical = std::fs::canonicalize(root).ok();
         self.projects.iter().any(|p| {

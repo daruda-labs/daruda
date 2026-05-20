@@ -7,9 +7,7 @@
 use gpui::Context;
 
 use crate::workspace::Workspace;
-use crate::workspace::layout::snap::{
-    BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot,
-};
+use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 
 impl Workspace {
     pub(super) fn prepare_left_dock_snapshot(

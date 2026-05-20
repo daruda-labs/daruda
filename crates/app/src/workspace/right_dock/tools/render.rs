@@ -297,7 +297,9 @@ fn row_actions(
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
                     let n = name_for_delete.clone();
-                    ws.update(cx, |ws, cx| ws.open_delete_mcp_server_confirm(scope, n, window, cx));
+                    ws.update(cx, |ws, cx| {
+                        ws.open_delete_mcp_server_confirm(scope, n, window, cx)
+                    });
                 }
             },
         ))

@@ -128,23 +128,64 @@ pub fn save_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> s
     Ok(())
 }
 
-/// Default daruda data directory under the platform config dir. All
-/// three subsystems point here so a single env override (future) flips
-/// every read/write at once.
+/// Env var that overrides the data directory wholesale. For tests,
+/// CI, or portable installs.
+pub(crate) const DARUDA_DATA_DIR_ENV: &str = "DARUDA_DATA_DIR";
+
+/// Default daruda data directory. Resolution order:
+///
+/// 1. `DARUDA_DATA_DIR` env — full override, used verbatim.
+/// 2. Platform config dir (`dirs::config_dir()`) joined with
+///    `daruda` (release profile) or `daruda-<profile>` (anything else).
+///    Profile resolved from `DARUDA_PROFILE` env or `cfg!(debug_assertions)`
+///    via `crate::profile::resolve_profile_from`.
+/// 3. Fallback to `./daruda` if the platform dir is unresolvable, with
+///    a warning written to the daruda log.
+///
+/// `release` is treated specially so existing users keep their data
+/// in `Application Support/daruda/` without any migration. All other
+/// profile names (including `debug`) get a `daruda-<profile>` suffix.
+///
+/// Reads env exactly once per call at this site; pure layout logic
+/// lives in `default_data_dir_from` so tests can exercise every branch
+/// without touching process state.
 pub fn default_data_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| {
-            LogWriter::log(
-                ErrorReport::new("Config directory unresolved — using ./daruda")
-                    .severity(ErrorSeverity::Warning)
-                    .message("dirs::config_dir() returned None; falling back to ./daruda")
-                    .at(file!(), line!())
-                    .dedup("store.config_dir.fallback")
-                    .build(),
-            );
-            PathBuf::from(".")
-        })
-        .join("daruda")
+    let override_env = std::env::var(DARUDA_DATA_DIR_ENV).ok();
+    let profile_env = std::env::var(crate::profile::DARUDA_PROFILE_ENV).ok();
+
+    let base = dirs::config_dir().unwrap_or_else(|| {
+        LogWriter::log(
+            ErrorReport::new("Config directory unresolved — using ./daruda")
+                .severity(ErrorSeverity::Warning)
+                .message("dirs::config_dir() returned None; falling back to ./daruda")
+                .at(file!(), line!())
+                .dedup("store.config_dir.fallback")
+                .build(),
+        );
+        PathBuf::from(".")
+    });
+
+    default_data_dir_from(override_env.as_deref(), profile_env.as_deref(), &base)
+}
+
+/// Pure layout resolver — no env reads, no fs reads. Returns the
+/// path that `default_data_dir()` would produce for the given inputs.
+/// Crate-visible so unit tests drive every branch deterministically.
+pub(crate) fn default_data_dir_from(
+    override_env: Option<&str>,
+    profile_env: Option<&str>,
+    base: &std::path::Path,
+) -> PathBuf {
+    if let Some(dir) = override_env {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    match crate::profile::resolve_profile_from(profile_env) {
+        crate::profile::RELEASE_PROFILE => base.join("daruda"),
+        other => base.join(format!("daruda-{other}")),
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +237,43 @@ mod tests {
         assert!(c.into_option().is_none());
         let p: LoadOutcome<Sample> = LoadOutcome::Parsed(Sample { x: 7 });
         assert_eq!(p.into_option(), Some(Sample { x: 7 }));
+    }
+
+    // Pure-resolver tests — no process env mutation, parallel-safe.
+
+    #[test]
+    fn default_data_dir_release_keeps_legacy_path() {
+        let base = std::path::PathBuf::from("/base");
+        let dir = super::default_data_dir_from(None, Some("release"), &base);
+        assert_eq!(dir, base.join("daruda"));
+        assert!(
+            !dir.to_string_lossy().contains("daruda-"),
+            "release must not get a profile suffix, got {dir:?}"
+        );
+    }
+
+    #[test]
+    fn default_data_dir_debug_profile_uses_suffix() {
+        let base = std::path::PathBuf::from("/base");
+        let dir = super::default_data_dir_from(None, Some("debug"), &base);
+        assert_eq!(dir, base.join("daruda-debug"));
+    }
+
+    #[test]
+    fn default_data_dir_named_profile_uses_suffix() {
+        let base = std::path::PathBuf::from("/base");
+        let dir = super::default_data_dir_from(None, Some("staging"), &base);
+        assert_eq!(dir, base.join("daruda-staging"));
+    }
+
+    #[test]
+    fn default_data_dir_full_override_beats_profile() {
+        let base = std::path::PathBuf::from("/base");
+        let dir = super::default_data_dir_from(
+            Some("/tmp/daruda-test-abc"),
+            Some("debug"), // ignored because override wins
+            &base,
+        );
+        assert_eq!(dir, std::path::PathBuf::from("/tmp/daruda-test-abc"));
     }
 }

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::observability::system_info::redact_home;
+use daruda_store::project::{ProjectState, WorkspaceState, WorkspaceUuid};
 use gpui::{
     App, Bounds, Point, Size, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
     WindowOptions, point, prelude::*, px,
@@ -18,18 +18,6 @@ use crate::settings_window::SettingsWindow;
 use crate::welcome;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
-
-fn log_touch_recent_err(path: &std::path::Path, e: std::io::Error) {
-    LogWriter::log(
-        ErrorReport::new("Failed to update recent projects list")
-            .severity(ErrorSeverity::Info)
-            .from_error(&e)
-            .at(file!(), line!())
-            .with_context("path", redact_home(path))
-            .dedup("recent.touch")
-            .build(),
-    );
-}
 
 /// Enter `handle`'s window context to run `f`. Failures route through
 /// the on-disk log (Layer 3) with `site` as the dedup tag, so the
@@ -125,36 +113,89 @@ pub(crate) fn build_window_options(config: &daruda_config::Config) -> WindowOpti
     opts
 }
 
+/// Open a workspace window for the new UUID-keyed schema.
+///
+/// - `saved = Some((workspace, projects))` — restore an existing
+///   workspace (recent list, startup, OpenRecent menu); `project` is
+///   ignored.
+/// - `saved = None, project = Some(_)` — fresh workspace seeded with
+///   one project (folder picker, "New Window" path).
+/// - `saved = None, project = None` — fully empty workspace
+///   (`NewEmptyWindow`).
 pub(crate) fn open_workspace_window(
     config: std::sync::Arc<daruda_config::Config>,
+    saved: Option<(WorkspaceState, Vec<ProjectState>)>,
     project: Option<daruda_store::project::Project>,
-    saved_state: Option<daruda_store::project::WorkspaceState>,
     mut window_opts: WindowOptions,
     cx: &mut App,
 ) {
     // Apply saved window geometry before opening so the new window
     // spawns at its previous position/size instead of the default.
-    if let Some(state) = saved_state.as_ref()
-        && state.window.is_valid()
+    if let Some((ws, _)) = saved.as_ref()
+        && ws.window.is_valid()
     {
         window_opts.window_bounds = Some(WindowBounds::Windowed(Bounds::new(
-            Point::new(px(state.window.x), px(state.window.y)),
-            Size::new(px(state.window.width), px(state.window.height)),
+            Point::new(px(ws.window.x), px(ws.window.y)),
+            Size::new(px(ws.window.width), px(ws.window.height)),
         )));
     }
 
     cx.open_window(window_opts, |window, cx| {
         let workspace: gpui::Entity<Workspace> = cx.new(|cx| {
             let data_dir = daruda_store::persistence::default_data_dir();
-            let mut ws = Workspace::new_with_project(&config, project, data_dir, window, cx);
-            if let Some(state) = saved_state {
-                ws.restore_state(&state, window, cx);
+            // Mirror the legacy split: when restoring, build the
+            // workspace without an initial project (restore will
+            // populate `self.projects`); otherwise seed with the
+            // caller-supplied project (or None for an empty window).
+            let seed = if saved.is_some() { None } else { project };
+            let mut ws = Workspace::new_with_project(&config, seed, data_dir, window, cx);
+            if let Some((ws_state, project_states)) = saved {
+                ws.restore_from_disk(&ws_state, &project_states, window, cx);
             }
             ws
         });
         cx.new(|cx| gpui_component::Root::new(workspace, window, cx))
     })
     .unwrap();
+}
+
+/// Resolve a recent-list `WorkspaceUuid` to its `(WorkspaceState,
+/// Vec<ProjectState>)` payload and open it. Stale UUIDs (the workspace
+/// JSON has been removed) are removed from the recent list and the
+/// call becomes a silent no-op (matches macOS conventions for stale
+/// Open Recent entries).
+pub(crate) fn open_recent_workspace(
+    uuid: WorkspaceUuid,
+    config: std::sync::Arc<daruda_config::Config>,
+    cx: &mut App,
+) {
+    let data_dir = daruda_store::persistence::default_data_dir();
+    let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {
+        // Workspace file gone — prune the recent list so the same
+        // dead row doesn't keep returning to the menu.
+        let mut entries = daruda_store::project::load_recent_in(&data_dir);
+        entries.retain(|e| e.workspace_uuid != uuid);
+        if let Err(e) = daruda_store::project::save_recent_in(&data_dir, &entries) {
+            LogWriter::log(
+                ErrorReport::new("Failed to prune stale recent entry")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("workspace_uuid", uuid.as_inner().to_string())
+                    .dedup("recent.prune_missing")
+                    .build(),
+            );
+        }
+        crate::menus::refresh_recent_menu(cx);
+        return;
+    };
+    let project_states: Vec<_> = ws_state
+        .project_ids
+        .iter()
+        .filter_map(|p| daruda_store::project::load_project_state_in(&data_dir, *p))
+        .collect();
+    let opts = build_window_options(&config);
+    open_workspace_window(config, Some((ws_state, project_states)), None, opts, cx);
 }
 
 /// Open the welcome screen and wire its buttons/recent-list clicks to
@@ -165,7 +206,8 @@ pub(crate) fn open_welcome_window(
     opts: WindowOptions,
     cx: &mut App,
 ) {
-    let recent = daruda_store::project::persistence::load_recent();
+    let recent =
+        daruda_store::project::load_recent_in(&daruda_store::persistence::default_data_dir());
     let cfg_for_welcome = config.clone();
 
     // WelcomeScreen::new registers itself in WindowRegistry; retrieve the
@@ -212,14 +254,10 @@ pub(crate) fn open_welcome_window(
                         && let Some(path) = selected.first()
                     {
                         let project = daruda_store::project::Project::from_path(path);
-                        if let Err(e) = daruda_store::project::persistence::touch_recent(path) {
-                            log_touch_recent_err(path, e);
-                        }
-                        let saved = daruda_store::project::persistence::load_workspace_state(path);
                         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
                         let _ = cx.update(|cx| {
                             let opts = build_window_options(&cfg2);
-                            open_workspace_window(cfg2.clone(), Some(project), saved, opts, cx);
+                            open_workspace_window(cfg2.clone(), None, Some(project), opts, cx);
                             close_welcome(cx);
                             crate::menus::refresh_recent_menu(cx);
                         });
@@ -227,14 +265,8 @@ pub(crate) fn open_welcome_window(
                 })
                 .detach();
             }
-            welcome::WelcomeEvent::OpenProject(path) => {
-                let project = daruda_store::project::Project::from_path(path);
-                if let Err(e) = daruda_store::project::persistence::touch_recent(path) {
-                    log_touch_recent_err(path, e);
-                }
-                let saved = daruda_store::project::persistence::load_workspace_state(path);
-                let opts = build_window_options(&cfg);
-                open_workspace_window(cfg, Some(project), saved, opts, cx);
+            welcome::WelcomeEvent::OpenRecent(uuid) => {
+                open_recent_workspace(*uuid, cfg.clone(), cx);
                 close_welcome(cx);
                 crate::menus::refresh_recent_menu(cx);
             }
@@ -248,10 +280,10 @@ pub(crate) fn open_welcome_window(
     .detach();
 }
 
-/// Open the recent project at `idx`. Missing index / stale path is a
-/// silent no-op (matches macOS conventions for stale Open Recent).
-/// `mode` controls whether the active workspace window is closed
-/// after the new one opens.
+/// Open the recent project at `idx`. Missing index / stale workspace
+/// is a silent no-op (matches macOS conventions for stale Open
+/// Recent). `mode` controls whether the active workspace window is
+/// closed after the new one opens.
 pub(crate) fn open_recent_idx(
     idx: usize,
     recent: std::sync::Arc<Vec<daruda_store::project::RecentEntry>>,
@@ -267,16 +299,38 @@ pub(crate) fn open_recent_idx(
         return;
     };
     let initiating_window = active_window_to_close(cx);
-    let project = daruda_store::project::Project::from_path(&entry.root);
-    if let Err(e) = daruda_store::project::persistence::touch_recent(&entry.root) {
-        log_touch_recent_err(&entry.root, e);
-    }
-    let saved = daruda_store::project::persistence::load_workspace_state(&entry.root);
+    let uuid = entry.workspace_uuid;
+    let data_dir = daruda_store::persistence::default_data_dir();
+    let Some(ws_state) = daruda_store::project::load_workspace_state_in(&data_dir, uuid) else {
+        // Stale recent entry — prune and bail. The user perceives
+        // this as the menu row vanishing on next refresh.
+        let mut entries = daruda_store::project::load_recent_in(&data_dir);
+        entries.retain(|e| e.workspace_uuid != uuid);
+        if let Err(e) = daruda_store::project::save_recent_in(&data_dir, &entries) {
+            LogWriter::log(
+                ErrorReport::new("Failed to prune stale recent entry")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("workspace_uuid", uuid.as_inner().to_string())
+                    .dedup("recent.prune_missing")
+                    .build(),
+            );
+        }
+        crate::menus::refresh_recent_menu(cx);
+        leave_open();
+        return;
+    };
+    let project_states: Vec<_> = ws_state
+        .project_ids
+        .iter()
+        .filter_map(|p| daruda_store::project::load_project_state_in(&data_dir, *p))
+        .collect();
     let opts = build_window_options(&config);
     open_project_with_mode(
         config.clone(),
-        Some(project),
-        saved,
+        Some((ws_state, project_states)),
+        None,
         opts,
         mode,
         initiating_window,
@@ -315,21 +369,18 @@ pub(crate) fn prompt_and_open_folder(
             if let Ok(Ok(Some(paths))) = selected
                 && let Some(path) = paths.first()
             {
-                if let Some(handle) = WindowRegistry::find_workspace_by_root(cx, path) {
-                    activate_existing(handle, cx);
-                    leave_open();
-                    return;
-                }
+                // Policy B: the same root may legitimately appear in
+                // multiple windows (each share the on-disk
+                // `ProjectState` via UUID reuse). This entry point —
+                // `OpenFolderInNewWindow` / recent-list menu — wants a
+                // fresh window regardless of any workspace-level
+                // policy, so no cross-window dedup branch fires here.
                 let project = daruda_store::project::Project::from_path(path);
-                if let Err(e) = daruda_store::project::persistence::touch_recent(path) {
-                    log_touch_recent_err(path, e);
-                }
-                let saved = daruda_store::project::persistence::load_workspace_state(path);
                 let opts = build_window_options(&config);
                 open_project_with_mode(
                     config.clone(),
+                    None,
                     Some(project),
-                    saved,
                     opts,
                     mode,
                     initiating_window,
@@ -345,15 +396,19 @@ pub(crate) fn prompt_and_open_folder(
 
 /// Policy-driven entry point for the `cmd-o` Open Project action.
 ///
-/// Prompts the user for a folder, then dispatches based on:
-///   1. **Duplicate root** — already open in some workspace? Focus
-///      that window and exit.
-///   2. **Active workspace's `WindowOpenPolicy`** —
-///      `AddHere` → call `Workspace::add_project` on the active window;
-///      `NewWindow` → open a fresh window;
-///      `Ask` → surface the [`OpenProjectModal`] chooser.
-///   3. **No active workspace** — open a fresh window (the `NewWindow`
-///      branch).
+/// Prompts the user for a folder, then dispatches based on the active
+/// workspace's `WindowOpenPolicy`:
+///   - `AddHere` → call `Workspace::add_project` on the active window
+///     (same-window dedup is enforced inside the `AddHere` path);
+///   - `NewWindow` → open a fresh window;
+///   - `Ask` → surface the [`OpenProjectModal`] chooser.
+///
+/// **No active workspace** — open a fresh window (the `NewWindow`
+/// branch).
+///
+/// Policy B: the same root may legitimately appear in multiple windows
+/// (each share the on-disk `ProjectState` via UUID reuse), so no
+/// cross-window dedup branch fires here.
 pub(crate) fn prompt_and_open_folder_with_policy(
     config: std::sync::Arc<daruda_config::Config>,
     cx: &mut App,
@@ -390,10 +445,6 @@ fn handle_picked_folder(
     path: std::path::PathBuf,
     cx: &mut App,
 ) {
-    if let Some(existing) = WindowRegistry::find_workspace_by_root(cx, &path) {
-        activate_existing(existing, cx);
-        return;
-    }
     let Some((handle, weak)) = WindowRegistry::active_workspace(cx) else {
         open_new_workspace_for_path(config, &path, cx);
         return;
@@ -401,6 +452,14 @@ fn handle_picked_folder(
     let policy = workspace_policy(handle, &weak, cx);
     match policy {
         daruda_store::project::WindowOpenPolicy::AddHere => {
+            // Policy B allows the same root in multiple windows, but
+            // adding it twice to the *same* window would render the
+            // folder twice. Focus the active window if its workspace
+            // already owns this root; otherwise add.
+            if workspace_has_root(handle, &weak, &path, cx) {
+                activate_existing(handle, cx);
+                return;
+            }
             add_path_to_workspace(handle, &weak, path, cx);
         }
         daruda_store::project::WindowOpenPolicy::NewWindow => {
@@ -439,8 +498,33 @@ fn workspace_policy(
     .unwrap_or_default()
 }
 
+/// True when the workspace referenced by `weak` already hosts a project
+/// at `root`. Used by the `AddHere` policy path to keep the same-window
+/// dedup intact under policy B (the cross-window dedup is intentionally
+/// gone). Returns `false` if the entity is gone or the read fails — the
+/// add path will run and the worst case is the workspace gracefully
+/// rejects the redundant entry on its own.
+fn workspace_has_root(
+    handle: gpui::AnyWindowHandle,
+    weak: &gpui::WeakEntity<crate::workspace::Workspace>,
+    root: &std::path::Path,
+    cx: &mut App,
+) -> bool {
+    let weak = weak.clone();
+    let root = root.to_path_buf();
+    cx.update_window(handle, move |_, _, cx_w| {
+        weak.upgrade()
+            .map(|ws| ws.read(cx_w).has_project_root(&root))
+            .unwrap_or(false)
+    })
+    .unwrap_or(false)
+}
+
 /// AddHere path — drive [`Workspace::add_project`] inside the active
-/// window's render cycle.
+/// window's render cycle. `Workspace::add_project` triggers
+/// `persist_state` via `mutate_durable`, which writes the new project
+/// file and updates the recent list in one shot, so no explicit
+/// `touch_recent_in` is needed here.
 fn add_path_to_workspace(
     handle: gpui::AnyWindowHandle,
     weak: &gpui::WeakEntity<crate::workspace::Workspace>,
@@ -483,7 +567,6 @@ fn add_path_to_workspace(
         },
     };
     let weak = weak.clone();
-    let path_for_recent = path.clone();
     let update_result = cx.update_window(target_handle, move |_, window, cx_w| {
         if let Some(ws) = weak.upgrade() {
             ws.update(cx_w, |ws, cx| {
@@ -513,26 +596,21 @@ fn add_path_to_workspace(
     // SILENT-OK: failure was logged above; this discards the Result so the
     // outer fn doesn't have to thread one through the menus-refresh tail.
     let _ = update_result;
-    if let Err(e) = daruda_store::project::persistence::touch_recent(&path_for_recent) {
-        log_touch_recent_err(&path_for_recent, e);
-    }
     crate::menus::refresh_recent_menu(cx);
 }
 
-/// NewWindow path — open a fresh workspace window seeded with `path`,
-/// loading any saved state. Does NOT close existing windows.
+/// NewWindow path — open a fresh workspace window seeded with `path`.
+/// The new workspace's `persist_state` is responsible for writing the
+/// initial workspace file and refreshing the recent list (via
+/// `touch_recent_in`); we don't pre-write either here.
 fn open_new_workspace_for_path(
     config: std::sync::Arc<daruda_config::Config>,
     path: &std::path::Path,
     cx: &mut App,
 ) {
     let project = daruda_store::project::Project::from_path(path);
-    if let Err(e) = daruda_store::project::persistence::touch_recent(path) {
-        log_touch_recent_err(path, e);
-    }
-    let saved = daruda_store::project::persistence::load_workspace_state(path);
     let opts = build_window_options(&config);
-    open_workspace_window(config.clone(), Some(project), saved, opts, cx);
+    open_workspace_window(config.clone(), None, Some(project), opts, cx);
     crate::menus::refresh_recent_menu(cx);
 }
 
@@ -587,11 +665,6 @@ fn open_chooser_modal(
                             });
                             window.activate_window();
                         }
-                        if let Err(e) =
-                            daruda_store::project::persistence::touch_recent(&picked_path)
-                        {
-                            log_touch_recent_err(&picked_path, e);
-                        }
                         crate::menus::refresh_recent_menu(app_cx);
                     }
                     crate::workspace::open_project_modal::OpenProjectChoice::NewWindow => {
@@ -624,8 +697,8 @@ fn active_window_to_close(cx: &App) -> Option<gpui::AnyWindowHandle> {
 /// `Open…` path does not route through Welcome's own event handler.
 pub(crate) fn open_project_with_mode(
     config: std::sync::Arc<daruda_config::Config>,
+    saved: Option<(WorkspaceState, Vec<ProjectState>)>,
     project: Option<daruda_store::project::Project>,
-    saved_state: Option<daruda_store::project::WorkspaceState>,
     opts: WindowOptions,
     mode: OpenMode,
     window_to_close: Option<gpui::AnyWindowHandle>,
@@ -639,7 +712,7 @@ pub(crate) fn open_project_with_mode(
     } else {
         None
     };
-    open_workspace_window(config, project, saved_state, opts, cx);
+    open_workspace_window(config, saved, project, opts, cx);
     let Some(handle) = target else {
         return;
     };

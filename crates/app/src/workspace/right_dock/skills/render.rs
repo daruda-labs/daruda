@@ -636,7 +636,9 @@ fn skill_row(
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_delete.upgrade() {
                         let dir = dir_delete.clone();
-                        ws.update(cx, |ws, cx| ws.open_delete_skill_confirm(scope, dir, window, cx));
+                        ws.update(cx, |ws, cx| {
+                            ws.open_delete_skill_confirm(scope, dir, window, cx)
+                        });
                     }
                 }),
             )

@@ -126,10 +126,8 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// worktrees from 0) don't collide. Empty when the
     /// `claude_status.enable` config flag is off, no Claude session is
     /// running, or the worktree has no matching cwd.
-    pub claude_status_per_worktree: std::collections::HashMap<
-        daruda_store::project::WorktreeRef,
-        daruda_claude::SessionStatus,
-    >,
+    pub claude_status_per_worktree:
+        std::collections::HashMap<daruda_store::project::WorktreeRef, daruda_claude::SessionStatus>,
     /// Per-session statuses for worktrees that have ≥ 2 active Claude
     /// sessions. Phase D sub-row badges read this. Worktrees with 0 or
     /// 1 sessions are absent (the leading indicator covers them).

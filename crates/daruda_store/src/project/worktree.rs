@@ -183,7 +183,7 @@ pub enum WorktreeStatus {
 /// On-disk representation of a worktree. Each worktree owns its own
 /// tab list and active-tab index; a `ProjectState` is a collection of
 /// these worktrees plus shared workspace chrome state.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedWorktree {
     pub id: WorktreeId,
     pub kind: WorktreeKind,

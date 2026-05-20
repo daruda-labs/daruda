@@ -97,14 +97,12 @@ impl Default for LogPolicy {
     }
 }
 
-/// Build profile bucket. `debug` for `cfg!(debug_assertions)` builds,
-/// `release` otherwise.
+/// Build/runtime profile bucket — `debug` for `cfg!(debug_assertions)`
+/// builds, `release` otherwise, unless overridden by `DARUDA_PROFILE`.
+/// Mirrors `crate::profile::active_profile()` so data and logs share
+/// a single source of truth.
 pub fn log_profile() -> &'static str {
-    if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    }
+    crate::profile::active_profile()
 }
 
 /// Resolve `~/.daruda/logs/<profile>/`. Returns `None` when the home

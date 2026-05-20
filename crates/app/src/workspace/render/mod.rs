@@ -516,8 +516,10 @@ impl Render for Workspace {
                                         is_last,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                let indices: Vec<usize> =
-                                                    (i + 1..ws.main_area.tabs.len()).rev().collect();
+                                                let indices: Vec<usize> = (i + 1
+                                                    ..ws.main_area.tabs.len())
+                                                    .rev()
+                                                    .collect();
                                                 ws.request_close_tabs_bulk(indices, win, cx);
                                             });
                                         },

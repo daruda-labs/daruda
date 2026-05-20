@@ -116,7 +116,9 @@ macro_rules! recent_slot_table {
                     let cfg_replace = config.clone();
                     cx.on_action(move |_: &$replace, cx: &mut App| {
                         let recent = std::sync::Arc::new(
-                            daruda_store::project::persistence::load_recent(),
+                            daruda_store::project::load_recent_in(
+                                &daruda_store::persistence::default_data_dir(),
+                            ),
                         );
                         windows::open_recent_idx(
                             $idx,
@@ -132,7 +134,9 @@ macro_rules! recent_slot_table {
                     let cfg_new = config.clone();
                     cx.on_action(move |_: &$new_window, cx: &mut App| {
                         let recent = std::sync::Arc::new(
-                            daruda_store::project::persistence::load_recent(),
+                            daruda_store::project::load_recent_in(
+                                &daruda_store::persistence::default_data_dir(),
+                            ),
                         );
                         windows::open_recent_idx(
                             $idx,

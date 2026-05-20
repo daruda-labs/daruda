@@ -437,6 +437,13 @@ pub const WELCOME_RECENT: &str = "Recent Projects";
 pub const WELCOME_NEW_EMPTY: &str = "New Empty Window";
 pub const WELCOME_NO_RECENT: &str = "No recent projects";
 
+/// Hint shown beneath the recent-projects placeholder when the list is
+/// empty under the new UUID-keyed schema. Legacy hash-keyed files are
+/// deliberately not auto-migrated; this string explains the situation
+/// without alarming the user.
+pub const WELCOME_EMPTY_RECENT_HINT: &str = "이전 버전 데이터는 보존되어 있습니다 (자동 마이그레이션 없음).\n\
+     신규 워크스페이스를 만들거나 폴더를 여세요.";
+
 /// Short changelog line shown at the bottom of the welcome panel.
 /// Announces the post-multi-project shortcut semantics — `Cmd+O` now
 /// adds the project to the current window (policy-aware) instead of

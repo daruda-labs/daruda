@@ -27,7 +27,13 @@ fn build_workspace_with_temp_project(
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = wh.root(cx).unwrap();
     (wh, ws, temp)
@@ -154,9 +160,12 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
 
     // Capture the current state — the file pane is now part of the
     // active worktree's tab list.
-    let saved = ws.read_with(cx, |ws, app_cx| ws.save_state(app_cx).unwrap());
-    assert_eq!(saved.primary_project().unwrap().worktrees.len(), 1);
-    let saved_tabs = &saved.primary_project().unwrap().worktrees[0].tabs;
+    let (saved_workspace, saved_projects) = ws
+        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
+        .expect("snapshot_for_disk");
+    assert_eq!(saved_projects.len(), 1);
+    assert_eq!(saved_projects[0].worktrees.len(), 1);
+    let saved_tabs = &saved_projects[0].worktrees[0].tabs;
     assert!(
         saved_tabs.iter().any(|t| matches!(
             &t.layout,
@@ -172,9 +181,14 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(temp.path());
     let wh2 = cx.add_window(|window, cx| {
-        let mut ws =
-            Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx);
-        ws.restore_state(&saved, window, cx);
+        let mut ws = Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        );
+        ws.restore_from_disk(&saved_workspace, &saved_projects, window, cx);
         ws
     });
     let ws2 = wh2.root(cx).unwrap();
@@ -711,7 +725,13 @@ async fn toggle_files_show_hidden_filters_dotfiles(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = wh.root(cx).unwrap();
 
@@ -961,7 +981,13 @@ async fn gitignore_marks_target_dir_entries_ignored(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = wh.root(cx).unwrap();
 
@@ -995,7 +1021,13 @@ async fn gitignore_disabled_skips_evaluation(cx: &mut TestAppContext) {
     config.left_dock.files_use_gitignore = false;
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = wh.root(cx).unwrap();
 
@@ -1024,7 +1056,13 @@ async fn gitignore_change_event_rebuilds_matcher(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path(&root);
     let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     });
     let ws = wh.root(cx).unwrap();
 

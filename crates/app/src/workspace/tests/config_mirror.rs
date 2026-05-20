@@ -26,10 +26,22 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
 
     // Assert all five mirrors flipped / updated.
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.mirrors.panels_grid_columns, new_config.panels.grid_columns);
-        assert_eq!(ws.mirrors.close_pane_on_exit, new_config.shell.close_pane_on_exit);
-        assert_eq!(ws.mirrors.files_show_hidden, new_config.left_dock.files_show_hidden);
-        assert_eq!(ws.mirrors.files_use_gitignore, new_config.left_dock.files_use_gitignore);
+        assert_eq!(
+            ws.mirrors.panels_grid_columns,
+            new_config.panels.grid_columns
+        );
+        assert_eq!(
+            ws.mirrors.close_pane_on_exit,
+            new_config.shell.close_pane_on_exit
+        );
+        assert_eq!(
+            ws.mirrors.files_show_hidden,
+            new_config.left_dock.files_show_hidden
+        );
+        assert_eq!(
+            ws.mirrors.files_use_gitignore,
+            new_config.left_dock.files_use_gitignore
+        );
         assert_eq!(
             ws.mirrors.files_icon_color_mode,
             new_config.left_dock.file_icon_color_mode

@@ -36,11 +36,7 @@ impl Workspace {
     /// changes persisted workspace state (projects, groups, worktrees,
     /// tabs, panes, dock geometry, window title, claude session
     /// bindings).
-    pub(in crate::workspace) fn mutate_durable<F, R>(
-        &mut self,
-        cx: &mut Context<Self>,
-        f: F,
-    ) -> R
+    pub(in crate::workspace) fn mutate_durable<F, R>(&mut self, cx: &mut Context<Self>, f: F) -> R
     where
         F: FnOnce(&mut Self, &mut Context<Self>) -> R,
     {

@@ -337,6 +337,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn spawn_emits_event_when_skill_md_appears_under_personal() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let tmp = tempfile::tempdir().unwrap();
@@ -361,6 +362,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn spawn_with_project_dir_routes_each_scope_correctly() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let project_root = tempfile::tempdir().unwrap();
@@ -393,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn debounce_collapses_burst_to_one_event() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let tmp = tempfile::tempdir().unwrap();
@@ -451,6 +454,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn watcher_subscribes_via_parent_when_skills_dir_missing() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         // Personal root doesn't have a `skills/` subdir yet, but the
@@ -479,6 +483,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
     fn handle_drop_terminates_threads_cleanly() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         // No assertion on threads (Rust gives no JoinHandle by default

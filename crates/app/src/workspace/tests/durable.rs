@@ -4,12 +4,21 @@
 
 use super::*;
 
-fn make_workspace_with_dirs(cx: &mut TestAppContext, primary: &str) -> gpui::WindowHandle<Workspace> {
+fn make_workspace_with_dirs(
+    cx: &mut TestAppContext,
+    primary: &str,
+) -> gpui::WindowHandle<Workspace> {
     let config = daruda_config::Config::default();
     std::fs::create_dir_all(primary).unwrap();
     let project = daruda_store::project::Project::from_path(primary);
     cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), fresh_test_data_dir(), window, cx)
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
     })
 }
 
