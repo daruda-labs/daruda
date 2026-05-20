@@ -267,25 +267,46 @@ impl Workspace {
             return false;
         }
 
-        // Pick a fallback project (the first remaining) and snap to its
-        // last-active worktree. Set `self.active` to a sentinel so
-        // `activate_worktree` runs its swap path even though the live
-        // runtime fields are now stale (they belonged to the removed
-        // project's active worktree).
-        let next_target = self
-            .projects
-            .first()
-            .and_then(|p| p.snap_target())
-            .unwrap_or_default();
+        // Pick a fallback project (first remaining with a usable
+        // worktree). Iterating finds a valid snap_target even when
+        // the natural first project's worktree list is somehow empty.
+        let Some(next_target) = self.projects.iter().find_map(|p| p.snap_target()) else {
+            // No surviving project has any worktree — leave main_area
+            // cleared and let the caller decide. Extremely unlikely in
+            // practice (every Project bootstraps with at least one
+            // worktree); reaching this branch implies bug or manual
+            // worktree-list corruption.
+            self.main_area.tabs.clear();
+            self.main_area.panes.clear();
+            self.main_area.active_tab_index = 0;
+            self.main_area.tab_history.clear();
+            self.main_area.focused_pane_id = 0;
+            self.mutate_durable(cx, |_, _| {});
+            return true;
+        };
         // Reset live runtime; the removed project's panes are gone for
         // good and their TabEntry ids hold no PaneIds we can reuse.
+        // `self.active` is intentionally left pointing at the deleted
+        // project's worktree ref — its project_id is guaranteed
+        // distinct from `next_target.project` (we just removed it from
+        // `self.projects`), so `activate_worktree`'s same-target guard
+        // doesn't fire. Resetting to `WorktreeRef::default()` here would
+        // collide with the natural (project=0, worktree=0) target of
+        // the surviving first project and false-trigger the guard,
+        // leaving main_area empty (regression covered by
+        // `close_active_project_keeps_window_when_other_remain`).
         self.main_area.tabs.clear();
         self.main_area.panes.clear();
         self.main_area.active_tab_index = 0;
         self.main_area.tab_history.clear();
         self.main_area.focused_pane_id = 0;
-        self.active = WorktreeRef::default();
         self.activate_worktree(next_target, window, cx);
+        // `activate_worktree`'s freeze step wrote a dangling empty
+        // runtime under the deleted project's worktree ref. Drop it so
+        // `inactive_worktree_runtimes` stays clean.
+        self.main_area
+            .inactive_worktree_runtimes
+            .retain(|key, _| key.project != project_id);
         self.mutate_durable(cx, |_, _| {});
         true
     }
