@@ -15,6 +15,7 @@ pub(in crate::workspace) mod task_ops;
 pub(in crate::workspace) mod task_picker_modal;
 pub(in crate::workspace) mod task_workflow_ops;
 pub(in crate::workspace) mod tasks;
+pub(in crate::workspace) mod tasks_ops;
 pub(in crate::workspace) mod tools;
 pub(in crate::workspace) mod usage;
 pub(in crate::workspace) mod view_tabs;

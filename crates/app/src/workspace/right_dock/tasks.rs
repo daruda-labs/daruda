@@ -197,12 +197,7 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
                         // stop is belt-and-braces.
                         cx.stop_propagation();
                         if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws: &mut Workspace, cx| {
-                                ws.task_search_input.update(cx, |input, cx_state| {
-                                    input.set_value("".to_string(), window, cx_state);
-                                });
-                                cx.notify();
-                            });
+                            ws.update(cx, |ws, cx| ws.clear_task_search(window, cx));
                         }
                     }),
             )

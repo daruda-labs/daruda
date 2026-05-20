@@ -99,10 +99,8 @@ pub(super) fn render_search_panel(
                     .hover(|s| s.text_color(text_color))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |_this, _: &MouseDownEvent, window, cx| {
-                            clear_input
-                                .update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
-                            cx.notify();
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            this.clear_file_view_search(clear_input.clone(), window, cx);
                             cx.stop_propagation();
                         }),
                     )
@@ -164,12 +162,7 @@ pub(super) fn render_search_panel(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                        if let Some(fv) = this.focused_file_view_mut() {
-                            fv.search_close();
-                        }
-                        close_input.update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
-                        this.focus_pane(this.main_area.focused_pane_id, window, cx);
-                        cx.notify();
+                        this.close_file_view_search(close_input.clone(), window, cx);
                         cx.stop_propagation();
                     }),
                 )
