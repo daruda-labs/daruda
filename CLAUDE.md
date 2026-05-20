@@ -73,6 +73,14 @@ Before starting, classify the task:
 - ❌ A type with more than one reason to change (SRP violation)
 - ❌ Bypassing existing abstractions with direct calls (breaks encapsulation)
 
+### MVU-flavored guiding rules
+
+Daruda is not strict MVU, but the architecture leans on three rules. Treat them as the default; deviate only with a `// SAFETY:`-style comment that names the exception.
+
+- **View purity** — `render()` and the event-handler closures it builds must not carry state-transition logic. Closure bodies are one-line dispatches: `weak_ws.update(cx, |ws, cx| ws.method(args, cx))`. Same Model → same screen. *Exception*: layout-geometry caching inside `canvas()` (bounds, hitbox, scroll offsets) is allowed — GPUI requires it. Don't smuggle Model changes through this exception.
+- **One-way data flow** — Views dispatch; only `Workspace` (and `*_ops.rs`) modify Model. "Modify" covers every state-change verb — `add_*`, `remove_*`, `set_*`, `insert_*`, `delete_*`, `clear_*`, `toggle_*`, `update_*`, `open_*`, `close_*`. The View calls one of these by name; the body lives in `Workspace` / `*_ops.rs`, not in the closure. A View must not reach across entities to write child state directly.
+- **Single source of truth** — When state is mirrored (e.g. config → cached field), there is exactly one update site. Adding a new mirror means extending that one entry point — not a parallel sync path.
+
 ## Development rules
 
 - **License**: AGPL-3.0-only.
