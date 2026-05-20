@@ -282,9 +282,7 @@ fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> 
         .child(strings::SKILLS_NEW_BUTTON)
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws: &mut Workspace, cx| {
-                    super::open_create_skill_modal(ws, None, window, cx)
-                });
+                ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
             }
         })
 }
@@ -628,9 +626,7 @@ fn skill_row(
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_edit.upgrade() {
                         let dir = dir_edit.clone();
-                        ws.update(cx, |ws: &mut Workspace, cx| {
-                            super::open_edit_skill_modal(ws, dir, window, cx)
-                        });
+                        ws.update(cx, |ws, cx| ws.open_edit_skill(dir, window, cx));
                     }
                 }),
             )
@@ -645,9 +641,7 @@ fn skill_row(
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_delete.upgrade() {
                         let dir = dir_delete.clone();
-                        ws.update(cx, |ws: &mut Workspace, cx| {
-                            super::open_delete_skill_confirm(ws, scope, dir, window, cx)
-                        });
+                        ws.update(cx, |ws, cx| ws.open_delete_skill_confirm(scope, dir, window, cx));
                     }
                 }),
             )
