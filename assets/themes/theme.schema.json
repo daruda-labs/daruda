@@ -183,11 +183,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#2e2e2eff"
     },
-    "worktree_accent_active": {
-      "description": "Maps to `palette::WORKTREE_ACCENT_ACTIVE`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#5299e0ff"
-    },
     "worktree_unread": {
       "description": "Maps to `palette::WORKTREE_UNREAD`.",
       "$ref": "#/$defs/Rgba",
@@ -207,6 +202,31 @@
       "description": "Maps to `palette::WORKTREE_DROP_TARGET_REJECTED_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#7e252533"
+    },
+    "worktree_card_bg": {
+      "description": "Maps to `palette::WORKTREE_CARD_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#212121ff"
+    },
+    "worktree_card_border": {
+      "description": "Maps to `palette::WORKTREE_CARD_BORDER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff14"
+    },
+    "worktree_card_hover_bg": {
+      "description": "Maps to `palette::WORKTREE_CARD_HOVER_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#292929ff"
+    },
+    "worktree_card_active_bg": {
+      "description": "Maps to `palette::WORKTREE_CARD_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#333333ff"
+    },
+    "worktree_row_active_bg": {
+      "description": "Maps to `palette::WORKTREE_ROW_ACTIVE_BG`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff14"
     },
     "modal_panel_bg": {
       "description": "Maps to `palette::MODAL_PANEL_BG`.",
@@ -378,10 +398,20 @@
       "$ref": "#/$defs/Rgba",
       "default": "#666666ff"
     },
-    "git_badge_text": {
-      "description": "Maps to `palette::GIT_BADGE_TEXT`.",
+    "git_badge_pill_bg": {
+      "description": "Maps to `palette::GIT_BADGE_PILL_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
+      "default": "#ffffff1a"
+    },
+    "git_badge_pill_text": {
+      "description": "Maps to `palette::GIT_BADGE_PILL_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ebebebff"
+    },
+    "git_badge_arrow_text": {
+      "description": "Maps to `palette::GIT_BADGE_ARROW_TEXT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#a6a6a6ff"
     },
     "git_staged_color": {
       "description": "Maps to `palette::GIT_STAGED_COLOR`.",

@@ -89,7 +89,6 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// tree via the shared `tab_order` pool.
     pub groups: Vec<GroupSnapshot>,
     pub active: daruda_store::project::WorktreeRef,
-    pub active_tab_count: usize,
     pub git_status_cache: std::collections::HashMap<
         daruda_store::project::WorktreeRef,
         crate::worktree::git::GitStatusData,

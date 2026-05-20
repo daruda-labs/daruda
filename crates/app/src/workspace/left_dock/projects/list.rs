@@ -44,7 +44,6 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .iter()
         .flat_map(|p| &p.worktrees)
         .any(|w| w.is_git());
-    let active_tab_count = snap.active_tab_count;
     let active_project = snap.active.project;
     let active_worktree = snap.active.worktree;
 
@@ -84,6 +83,12 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     for row in &top_rows {
         match row {
             TopRow::Group(group, members) => {
+                // Card-level active fill: lit when the focused project
+                // is a member of this group. Computed against the full
+                // member list (not collapsed-filtered) so a collapsed
+                // group whose active member is hidden still reads as
+                // selected.
+                let card_is_active = members.iter().any(|p| p.id == active_project);
                 let header = group_header_row(group, snap, cx).into_any_element();
                 let members_block = {
                     let mut inner = div().flex().flex_col().w_full();
@@ -93,7 +98,6 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                                 project,
                                 active_project,
                                 active_worktree,
-                                active_tab_count,
                                 snap,
                                 cx,
                             ));
@@ -101,18 +105,17 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                     }
                     inner.into_any_element()
                 };
-                body = body.child(super::card::group_card(header, members_block, cx));
+                body = body.child(super::card::group_card(
+                    header,
+                    members_block,
+                    card_is_active,
+                    cx,
+                ));
             }
             TopRow::UngroupedProject(project) => {
-                let inner = ungrouped_project_block(
-                    project,
-                    active_project,
-                    active_worktree,
-                    active_tab_count,
-                    snap,
-                    cx,
-                )
-                .into_any_element();
+                let inner =
+                    ungrouped_project_block(project, active_project, active_worktree, snap, cx)
+                        .into_any_element();
                 body = body.child(super::card::ungrouped_shell(inner, cx));
             }
         }
@@ -131,11 +134,18 @@ fn ungrouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
     active_worktree: daruda_store::project::WorktreeId,
-    active_tab_count: usize,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
-    let mut block = div().flex().flex_col().w_full();
+    // Same vertical gap as between adjacent worktree rows — keeps the
+    // project header from sitting flush against its first worktree, so
+    // header / list reads as the same rhythm the worktree list uses
+    // internally.
+    let mut block = div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(theme::WORKTREE_LIST_GAP_Y));
     let is_active_project = project.id == active_project;
     let project_is_git = project
         .worktrees
@@ -162,11 +172,8 @@ fn ungrouped_project_block(
             .gap(px(theme::WORKTREE_LIST_GAP_Y));
         for wt in &project.worktrees {
             let is_active = project.id == active_project && wt.id == active_worktree;
-            let tab_count = if is_active { active_tab_count } else { 0 };
             let git_badge = git_badge_for(snap, project.id, wt.id);
-            list = list.child(worktree_row(
-                wt, project.id, is_active, tab_count, git_badge, snap, cx,
-            ));
+            list = list.child(worktree_row(wt, project.id, is_active, git_badge, snap, cx));
         }
         block = block.child(list);
     }
@@ -180,7 +187,6 @@ fn grouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
     active_worktree: daruda_store::project::WorktreeId,
-    active_tab_count: usize,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
@@ -192,7 +198,6 @@ fn grouped_project_block(
             project,
             active_project,
             active_worktree,
-            active_tab_count,
             snap,
             cx,
         ))

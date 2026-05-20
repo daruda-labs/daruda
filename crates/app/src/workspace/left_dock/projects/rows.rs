@@ -12,7 +12,9 @@ use gpui::{
 use daruda_store::project::{ProjectId, WorktreeId};
 
 use crate::surface::strings as surface_strings;
-use crate::ui::{ButtonVariants as _, ContextMenuItem, IconName, SectionHeader, button_bare};
+use crate::ui::{
+    ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
+};
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
 use crate::worktree::Worktree;
@@ -22,13 +24,33 @@ use super::context_menu::build_context_menu_items;
 use super::drag::{DragGhost, DragPayload};
 use crate::workspace::dnd_ops::TopRow;
 
-/// Build the `M3 ?1` change-count badge string for worktree `id` from
-/// the cached git status.  Returns `None` when no status is cached yet.
+/// Compact summary of a worktree's git status for the row badge — rolled
+/// up into a single change count plus ahead/behind divergence so the
+/// dock row can render a GitHub-Desktop-style chip
+/// (`↑N ↓N [total]`). `None` means "show nothing" (clean tree + no
+/// divergence, or no status cached yet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) struct GitBadgeData {
+    /// Modified + staged + untracked, rolled up. The previous design
+    /// split these into `M` / `?` letters; the GH-Desktop pill collapses
+    /// them into a single count so the chip stays narrow.
+    pub total: u32,
+    /// Commits ahead of the configured upstream (zero when no upstream
+    /// is set or HEAD is detached).
+    pub ahead: u32,
+    /// Commits behind the configured upstream.
+    pub behind: u32,
+}
+
+/// Build the GH-Desktop-style change/divergence summary for worktree
+/// `id` from the cached git status. Returns `None` when no status is
+/// cached yet or the worktree is fully clean (no changes + no
+/// divergence) so the row stays uncluttered.
 pub(in crate::workspace) fn git_badge_for(
     snap: &LeftDockSnapshot,
     project_id: ProjectId,
     id: WorktreeId,
-) -> Option<String> {
+) -> Option<GitBadgeData> {
     let target = daruda_store::project::WorktreeRef {
         project: project_id,
         worktree: id,
@@ -42,17 +64,15 @@ pub(in crate::workspace) fn git_badge_for(
             .filter(|e| e.y != ' ' && e.y != '?')
             .count();
     let untracked = status.unstaged.iter().filter(|e| e.x == '?').count();
-    if modified == 0 && untracked == 0 {
+    let total = (modified + untracked) as u32;
+    if total == 0 && status.ahead == 0 && status.behind == 0 {
         return None;
     }
-    let mut parts = Vec::new();
-    if modified > 0 {
-        parts.push(format!("M{modified}"));
-    }
-    if untracked > 0 {
-        parts.push(format!("?{untracked}"));
-    }
-    Some(parts.join(" "))
+    Some(GitBadgeData {
+        total,
+        ahead: status.ahead,
+        behind: status.behind,
+    })
 }
 
 /// Single-row group header that opens / closes the accordion for the
@@ -68,7 +88,6 @@ pub(in crate::workspace) fn group_header_row(
     let t = theme::current(cx);
     let label_color = t.dock_view_tab_active;
     let row_hover_bg = t.worktree_row_hover_bg;
-    let row_active_bg = t.worktree_row_active_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
     let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
 
@@ -107,14 +126,6 @@ pub(in crate::workspace) fn group_header_row(
         label: group.name.clone(),
     };
     let row_group_key = SharedString::from(format!("group-row-{group_id}"));
-
-    // Whether the focused project lives inside this group — drives the
-    // active row highlight on the header so users can tell which group
-    // owns the current focus at a glance.
-    let active_in_group = snap
-        .projects
-        .iter()
-        .any(|p| p.group_id == Some(group_id) && p.id == snap.active.project);
 
     let label_row = div()
         .flex()
@@ -162,10 +173,11 @@ pub(in crate::workspace) fn group_header_row(
         .py(px(theme::WORKTREE_SECTION_PAD_Y))
         .rounded(px(theme::WORKTREE_ROW_RADIUS))
         .cursor_pointer()
-        .when(!active_in_group, move |d| {
-            d.hover(move |d| d.bg(row_hover_bg))
-        })
-        .when(active_in_group, move |d| d.bg(row_active_bg))
+        // Active highlight is expressed by the wrapping `group_card`
+        // (see `card::group_card`), so the header row only carries the
+        // hover lift. Painting an active bg here too would double-up
+        // with the card fill and read as a brighter inner chip.
+        .hover(move |d| d.bg(row_hover_bg))
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
@@ -286,8 +298,14 @@ pub(in crate::workspace) fn project_header_row(
         t.muted_text
     };
     let row_hover_bg = t.worktree_row_hover_bg;
+    let row_active_bg = t.worktree_card_active_bg;
     let drop_target_bg = t.worktree_drop_target_bg;
     let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
+    // Active highlight lands on this header only when the project is
+    // ungrouped — grouped projects rely on the wrapping `group_card`
+    // active fill instead, so painting an inner row chip would double
+    // up the highlight.
+    let show_active_bg = is_active && is_ungrouped;
 
     let workspace = snap.workspace.clone();
     let ws_for_click = workspace.clone();
@@ -309,10 +327,14 @@ pub(in crate::workspace) fn project_header_row(
         .w_full()
         .px(px(theme::WORKTREE_ROW_PAD_X))
         .py(px(theme::WORKTREE_SECTION_PAD_Y))
+        .rounded(px(theme::WORKTREE_ROW_RADIUS))
         .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
         .text_color(label_color)
         .cursor_pointer()
-        .when(!is_active, move |d| d.hover(move |d| d.bg(row_hover_bg)))
+        .when(!show_active_bg, move |d| {
+            d.hover(move |d| d.bg(row_hover_bg))
+        })
+        .when(show_active_bg, move |d| d.bg(row_active_bg))
         // Header click snaps the workspace focus to this project's
         // last-active worktree (§5.5). No-op when the click lands on
         // the already-active project — the snap target would equal
@@ -517,12 +539,75 @@ pub(in crate::workspace) fn section_header(
         .actions(add_button)
 }
 
+/// GitHub-Desktop-style badge cluster rendered on the right of a
+/// worktree row's label. Layout (left to right, each group omitted when
+/// its count is zero):
+///
+/// - `▲N` — ahead arrow + count
+/// - `▼N` — behind arrow + count
+/// - `[N]` — rolled-up change count inside a neutral grey pill
+///
+/// Color tokens are passed in so the parent can snapshot the live
+/// theme once per render and reuse the values across rows without
+/// touching `cx` again here.
+fn git_badge_view(
+    badge: GitBadgeData,
+    arrow_color: gpui::Hsla,
+    pill_bg: gpui::Hsla,
+    pill_text: gpui::Hsla,
+) -> impl IntoElement {
+    let arrow_size = px(theme::GIT_BADGE_ARROW_SIZE);
+    let arrow_group = move |icon: IconName, count: u32| {
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::GIT_BADGE_ARROW_NUM_GAP))
+            .text_size(px(theme::GIT_BADGE_FONT_SIZE))
+            .text_color(arrow_color)
+            .child(
+                Icon::new(icon)
+                    .with_size(arrow_size)
+                    .text_color(arrow_color),
+            )
+            .child(format!("{count}"))
+    };
+
+    div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::GIT_BADGE_GAP))
+        .when(badge.ahead > 0, |d| {
+            d.child(arrow_group(IconName::ArrowUp, badge.ahead))
+        })
+        .when(badge.behind > 0, |d| {
+            d.child(arrow_group(IconName::ArrowDown, badge.behind))
+        })
+        .when(badge.total > 0, |d| {
+            d.child(
+                div()
+                    .flex_none()
+                    .min_w(px(theme::GIT_BADGE_PILL_MIN_W))
+                    .px(px(theme::GIT_BADGE_PILL_PAD_X))
+                    .py(px(theme::GIT_BADGE_PILL_PAD_Y))
+                    .rounded(px(theme::GIT_BADGE_PILL_RADIUS))
+                    .bg(pill_bg)
+                    .text_size(px(theme::GIT_BADGE_FONT_SIZE))
+                    .text_color(pill_text)
+                    .text_center()
+                    .child(format!("{}", badge.total)),
+            )
+        })
+}
+
 pub(in crate::workspace) fn worktree_row(
     wt: &Worktree,
     project_id: ProjectId,
     is_active: bool,
-    tab_count: usize,
-    git_badge: Option<String>,
+    git_badge: Option<GitBadgeData>,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -532,7 +617,9 @@ pub(in crate::workspace) fn worktree_row(
     let unread_dot_color = t.worktree_unread;
     let label_active = t.dock_view_tab_active;
     let label_inactive = t.muted_text;
-    let git_badge_text = t.git_badge_text;
+    let badge_pill_bg = t.git_badge_pill_bg;
+    let badge_pill_text = t.git_badge_pill_text;
+    let badge_arrow_text = t.git_badge_arrow_text;
     let sublabel_color = t.faint_text;
     let row_hover_bg = t.worktree_row_hover_bg;
     let row_active_bg = t.worktree_row_active_bg;
@@ -581,25 +668,12 @@ pub(in crate::workspace) fn worktree_row(
                 )
                 .when(wt.is_unread, |d| d.child(unread_dot))
                 .when_some(git_badge, |d, badge| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(theme::GIT_BADGE_FONT_SIZE))
-                            .text_color(git_badge_text)
-                            .child(badge),
-                    )
-                })
-                .when(tab_count > 0, |d| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
-                            .text_color(sublabel_color)
-                            .child(format!(
-                                "{tab_count} tab{}",
-                                if tab_count == 1 { "" } else { "s" }
-                            )),
-                    )
+                    d.child(git_badge_view(
+                        badge,
+                        badge_arrow_text,
+                        badge_pill_bg,
+                        badge_pill_text,
+                    ))
                 }),
         )
         .child(
@@ -692,8 +766,13 @@ pub(in crate::workspace) fn worktree_row(
         .flex()
         .flex_row()
         .items_center()
-        .min_h(px(theme::WORKTREE_ROW_HEIGHT))
+        // Vertical padding matches the project/group header rows
+        // (`WORKTREE_SECTION_PAD_Y`) so all three row kinds share the
+        // same breathing room regardless of body height — a `min_h`
+        // approach collapsed to zero padding once the Claude
+        // multi-session sub-row grew the row past the floor.
         .px(px(theme::WORKTREE_ROW_PAD_X))
+        .py(px(theme::WORKTREE_SECTION_PAD_Y))
         .gap(px(theme::WORKTREE_ROW_GAP))
         .rounded(px(theme::WORKTREE_ROW_RADIUS))
         .cursor_pointer()

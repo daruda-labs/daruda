@@ -170,8 +170,6 @@ pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = 11.0;
 pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
 
 // Worktrees list (left dock Worktrees view)
-/// Worktrees list — row height (px). Compact preset (Premium Card redesign).
-pub const WORKTREE_ROW_HEIGHT: f32 = 30.0;
 /// Worktrees list — horizontal padding (px).
 pub const WORKTREE_ROW_PAD_X: f32 = 10.0;
 /// Worktrees list — unread marker tint (warning).
@@ -251,6 +249,11 @@ pub const WORKTREE_CARD_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
 pub const WORKTREE_CARD_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
 /// Worktrees card — hover background (one tonal step above the base).
 pub const WORKTREE_CARD_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
+/// Worktrees card — active background when this card holds the focused
+/// project (group card with an active member, or the ungrouped shell's
+/// project row). One tonal step above hover so "selected" reads
+/// distinct from "hovered" without competing with row-level highlights.
+pub const WORKTREE_CARD_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
 /// Worktrees active row — subtle bg only (no left bar / no glow).
 pub const WORKTREE_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
 /// Group label font size (px) — uppercase eyebrow.
@@ -487,8 +490,32 @@ pub const GIT_FILE_ROW_GAP: f32 = 6.0;
 pub const GIT_STATUS_CHAR_W: f32 = 14.0;
 /// Git status badge font size shown in the Worktrees list (px).
 pub const GIT_BADGE_FONT_SIZE: f32 = 10.0;
-/// Git status badge text color (muted gray).
-pub const GIT_BADGE_TEXT: Hsla = hsla(0.0, 0.0, 0.50, 1.0);
+/// Git badge — GH-Desktop-style pill background fill (white at low alpha
+/// so it lifts above the row but stays neutral, no color signal).
+pub const GIT_BADGE_PILL_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.10);
+/// Git badge — pill text color. Brighter than the muted arrow text so
+/// the change count reads as the primary number.
+pub const GIT_BADGE_PILL_TEXT: Hsla = hsla(0.0, 0.0, 0.92, 1.0);
+/// Git badge — ahead/behind arrow + number text color. Softer than the
+/// pill text so the pill stays the visual anchor.
+pub const GIT_BADGE_ARROW_TEXT: Hsla = hsla(0.0, 0.0, 0.65, 1.0);
+/// Git badge — pill corner radius (px). Rolled-up "chip" rounding.
+pub const GIT_BADGE_PILL_RADIUS: f32 = 9.0;
+/// Git badge — pill horizontal padding (px).
+pub const GIT_BADGE_PILL_PAD_X: f32 = 6.0;
+/// Git badge — pill vertical padding (px).
+pub const GIT_BADGE_PILL_PAD_Y: f32 = 0.0;
+/// Git badge — minimum pill width (px) so a single-digit count still
+/// reads as a chip instead of a tight circle.
+pub const GIT_BADGE_PILL_MIN_W: f32 = 16.0;
+/// Git badge — ahead/behind arrow icon size (px). Sized just below
+/// the 10px badge font so the arrow + digit pair reads as one chip.
+pub const GIT_BADGE_ARROW_SIZE: f32 = 9.0;
+/// Git badge — gap between the ahead/behind groups and the pill (px).
+pub const GIT_BADGE_GAP: f32 = 4.0;
+/// Git badge — gap between an arrow icon and its number (px). Tighter
+/// than the inter-group gap so each `↑N` reads as one unit.
+pub const GIT_BADGE_ARROW_NUM_GAP: f32 = 1.0;
 /// Staged-file status char color (green).
 pub const GIT_STAGED_COLOR: Hsla = hsla(135.0, 0.55, 0.55, 1.0);
 /// Unstaged-modified status char color (amber).

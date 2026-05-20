@@ -348,7 +348,6 @@ impl Render for Workspace {
                 groups
             },
             active: self.active,
-            active_tab_count: self.main_area.tabs.len(),
             git_status_cache: self.git_status_cache.clone(),
             git_stage_in_flight: self.git_stage_in_flight,
             git_op_in_flight: self.git_op_in_flight,

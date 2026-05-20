@@ -113,7 +113,9 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.palette_entry_text, palette::PALETTE_ENTRY_TEXT);
     assert_eq!(t.palette_shortcut_text, palette::PALETTE_SHORTCUT_TEXT);
     assert_eq!(t.palette_empty_text, palette::PALETTE_EMPTY_TEXT);
-    assert_eq!(t.git_badge_text, palette::GIT_BADGE_TEXT);
+    assert_eq!(t.git_badge_pill_bg, palette::GIT_BADGE_PILL_BG);
+    assert_eq!(t.git_badge_pill_text, palette::GIT_BADGE_PILL_TEXT);
+    assert_eq!(t.git_badge_arrow_text, palette::GIT_BADGE_ARROW_TEXT);
     assert_eq!(t.git_staged_color, palette::GIT_STAGED_COLOR);
     assert_eq!(t.git_unstaged_color, palette::GIT_UNSTAGED_COLOR);
     assert_eq!(t.git_untracked_color, palette::GIT_UNTRACKED_COLOR);
