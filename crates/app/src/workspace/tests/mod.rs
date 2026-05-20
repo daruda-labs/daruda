@@ -1,7 +1,10 @@
+mod config_mirror;
 mod dnd;
+mod durable;
 mod dock;
 mod error_modal;
 mod error_ops;
+mod file_view_drag_select;
 mod files;
 mod lifecycle;
 mod modal_tab_containment;

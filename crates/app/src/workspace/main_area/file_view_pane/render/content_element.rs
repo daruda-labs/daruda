@@ -304,25 +304,10 @@ impl gpui::Element for FileViewerContentElement {
             } else {
                 0
             };
+            let hit = CharPos { row: row_idx, byte };
+            let shift = ev.modifiers.shift;
             workspace_down.update(cx, |ws, cx| {
-                if let Some(fv) = ws.focused_file_view_mut() {
-                    let pos = CharPos { row: row_idx, byte };
-                    if ev.modifiers.shift {
-                        let anchor = fv.char_anchor.unwrap_or(pos);
-                        fv.char_selection = Some(CharSelection {
-                            anchor,
-                            active: pos,
-                        });
-                    } else {
-                        fv.char_anchor = Some(pos);
-                        fv.char_selection = Some(CharSelection {
-                            anchor: pos,
-                            active: pos,
-                        });
-                        fv.is_drag_selecting = true;
-                    }
-                    cx.notify();
-                }
+                ws.file_view_mouse_down(hit, shift, cx);
             });
         });
 
@@ -330,33 +315,17 @@ impl gpui::Element for FileViewerContentElement {
             if phase != DispatchPhase::Bubble {
                 return;
             }
+            let local_x = (ev.position.x - origin_x).max(px(0.));
+            let byte = if let Some(s) = shaped_move.as_ref() {
+                s.closest_index_for_x(local_x)
+            } else {
+                0
+            };
+            let active = CharPos { row: row_idx, byte };
+            let still_pressed = ev.pressed_button == Some(MouseButton::Left);
+            let hovered = hitbox_move.is_hovered(window);
             workspace_move.update(cx, |ws, cx| {
-                let Some(fv) = ws.focused_file_view_mut() else {
-                    return;
-                };
-                if fv.is_drag_selecting && ev.pressed_button != Some(MouseButton::Left) {
-                    fv.is_drag_selecting = false;
-                    cx.notify();
-                    return;
-                }
-                if !fv.is_drag_selecting || !hitbox_move.is_hovered(window) {
-                    return;
-                }
-                let Some(anchor) = fv.char_anchor else {
-                    return;
-                };
-                let local_x = (ev.position.x - origin_x).max(px(0.));
-                let byte = if let Some(s) = shaped_move.as_ref() {
-                    s.closest_index_for_x(local_x)
-                } else {
-                    0
-                };
-                let active = CharPos { row: row_idx, byte };
-                let new_sel = CharSelection { anchor, active };
-                if fv.char_selection.as_ref() != Some(&new_sel) {
-                    fv.char_selection = Some(new_sel);
-                    cx.notify();
-                }
+                ws.file_view_mouse_drag(active, still_pressed, hovered, cx);
             });
         });
     }

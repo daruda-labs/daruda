@@ -42,8 +42,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.add_tab(window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.add_tab(window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_close_tab(
@@ -52,8 +53,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request_close_tab(self.main_area.active_tab_index, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            let idx = ws.main_area.active_tab_index;
+            ws.request_close_tab(idx, window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_next_tab(
@@ -111,8 +114,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.split_focused_pane(SplitDirection::Horizontal, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_split_down(
@@ -121,8 +125,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.split_focused_pane(SplitDirection::Vertical, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.split_focused_pane(SplitDirection::Vertical, window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_close_pane(
@@ -131,8 +136,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_focused_pane(window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.close_focused_pane(window, cx);
+        });
     }
 
     // ---- Left-dock view switches ----
@@ -653,13 +659,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let idx = self.main_area.active_tab_index;
-        let indices: Vec<usize> = (0..self.main_area.tabs.len())
-            .rev()
-            .filter(|&i| i != idx)
-            .collect();
-        self.request_close_tabs_bulk(indices, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            let idx = ws.main_area.active_tab_index;
+            let indices: Vec<usize> = (0..ws.main_area.tabs.len())
+                .rev()
+                .filter(|&i| i != idx)
+                .collect();
+            ws.request_close_tabs_bulk(indices, window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_close_tabs_to_right(
@@ -668,10 +675,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let idx = self.main_area.active_tab_index;
-        let indices: Vec<usize> = (idx + 1..self.main_area.tabs.len()).rev().collect();
-        self.request_close_tabs_bulk(indices, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            let idx = ws.main_area.active_tab_index;
+            let indices: Vec<usize> = (idx + 1..ws.main_area.tabs.len()).rev().collect();
+            ws.request_close_tabs_bulk(indices, window, cx);
+        });
     }
 
     pub(in crate::workspace) fn on_toggle_zoom_pane(
@@ -766,8 +774,9 @@ impl Workspace {
     ) {
         let from = self.main_area.active_tab_index;
         if from > 0 {
-            self.move_tab(from, from - 1, cx);
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |ws, cx| {
+                ws.move_tab(from, from - 1, cx);
+            });
         }
     }
 
@@ -779,8 +788,9 @@ impl Workspace {
     ) {
         let from = self.main_area.active_tab_index;
         if from + 1 < self.main_area.tabs.len() {
-            self.move_tab(from, from + 1, cx);
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |ws, cx| {
+                ws.move_tab(from, from + 1, cx);
+            });
         }
     }
 

@@ -125,7 +125,10 @@ impl Workspace {
             self.renumber_pool(from_group_old);
         }
 
-        self.mark_dirty_and_save(cx);
+        // Empty closure: see group_ops.rs:83 for the rationale (multi-stage
+        // mutation already complete, intermediate borrows cannot cross the
+        // closure boundary).
+        self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }
 
@@ -165,7 +168,7 @@ impl Workspace {
 
         self.renumber_pool(from_group_old);
 
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }
 
@@ -211,7 +214,7 @@ impl Workspace {
         }
         self.write_top_row_order(&new);
 
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }
 

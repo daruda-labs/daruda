@@ -51,12 +51,6 @@ pub(in crate::workspace) struct FileTreeContext {
     /// `Workspace` entity drops.
     pub(in crate::workspace) files_watcher_poll: Option<Task<()>>,
 
-    /// Mirror of `daruda_config::LeftDockConfig::files_show_hidden`.
-    /// Drives the dotfile filter inside the Files view's `walk_into`.
-    /// Toggled at runtime by `FilesToggleHidden`; `apply_config`
-    /// overwrites it on live reload.
-    pub(in crate::workspace) files_show_hidden: bool,
-
     /// Focus handle attached to the left-dock Files panel root. Click on
     /// any row routes focus here, which activates the `FilesPanel`
     /// key context — only then do `FilesSelectNext` etc. fire (so
@@ -67,14 +61,6 @@ pub(in crate::workspace) struct FileTreeContext {
     /// `activate_worktree`. Distinct from the focused file viewer's
     /// path — the cursor is a "highlighted but not opened" row.
     pub(in crate::workspace) files_selection: Option<EntryId>,
-
-    /// Mirror of `daruda_config::LeftDockConfig::files_use_gitignore`.
-    /// When true, `walk_into` consults `files_gitignore_index` per row
-    /// and greys out ignored entries.
-    pub(in crate::workspace) files_use_gitignore: bool,
-
-    /// Mirror of `daruda_config::LeftDockConfig::file_icon_color_mode`.
-    pub(in crate::workspace) files_icon_color_mode: daruda_config::IconColorMode,
 
     /// Compiled gitignore matcher per worktree. Built lazily in
     /// `ensure_file_tree`; rebuilt when `.gitignore` changes (watcher

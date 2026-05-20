@@ -19,7 +19,7 @@ use gpui::KeyDownEvent;
 
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
-use super::layout::{BottomDockSnapshot, DockSnapshot, LeftDockSnapshot, RightDockSnapshot};
+use super::layout::DockSnapshot;
 use super::main_area::file_view_pane::{CharPos, CharSelection};
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
@@ -30,6 +30,8 @@ use super::{
 };
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
+
+mod snapshots;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;
 
@@ -302,282 +304,16 @@ impl Render for Workspace {
             self.ensure_file_tree(active_ref, cx);
         }
 
-        let left_snap = LeftDockSnapshot {
-            left_dock_view: self.left_dock_view,
-            active_project_name: self
-                .active_project()
-                .map(|p| gpui::SharedString::from(p.name.clone())),
-            worktrees: self.active_worktrees().to_vec(),
-            projects: {
-                let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
-                    .projects
-                    .iter()
-                    .map(|p| crate::workspace::layout::snap::ProjectSnapshot {
-                        id: p.id,
-                        name: gpui::SharedString::from(p.name.clone()),
-                        group_id: p.group_id,
-                        color: p
-                            .color
-                            .as_ref()
-                            .map(|c| gpui::SharedString::from(c.clone())),
-                        tab_order: p.tab_order,
-                        worktrees: p.worktrees.clone(),
-                        last_active_worktree_id: p.last_active_worktree_id,
-                        is_collapsed: p.is_collapsed,
-                    })
-                    .collect();
-                projects.sort_by_key(|p| p.tab_order);
-                projects
-            },
-            groups: {
-                let mut groups: Vec<crate::workspace::layout::snap::GroupSnapshot> = self
-                    .groups
-                    .iter()
-                    .map(|g| crate::workspace::layout::snap::GroupSnapshot {
-                        id: g.id,
-                        name: gpui::SharedString::from(g.name.clone()),
-                        color: g
-                            .color
-                            .as_ref()
-                            .map(|c| gpui::SharedString::from(c.clone())),
-                        tab_order: g.tab_order,
-                        is_collapsed: g.is_collapsed,
-                    })
-                    .collect();
-                groups.sort_by_key(|g| g.tab_order);
-                groups
-            },
-            active: self.active,
-            git_status_cache: self.git_status_cache.clone(),
-            git_stage_in_flight: self.git_stage_in_flight,
-            git_op_in_flight: self.git_op_in_flight,
-            git_collapsed_dirs: self
-                .git_collapsed_dirs
-                .get(&self.active)
-                .cloned()
-                .unwrap_or_default(),
-            git_changes_cursor: self.git_changes_cursor.get(&self.active).cloned(),
-            git_changes_panel_focus: self.git_changes_panel_focus.clone(),
-            focused_file_selection: self
-                .focused_file_view()
-                .map(|fv| (fv.worktree_id, fv.path.clone(), fv.staged)),
-            git_changes_scroll_handle: self.git_changes_scroll_handle.clone(),
-            git_commit_input: self.git_commit_input.clone(),
-            files_panel_focus: self.file_tree.files_panel_focus.clone(),
-            files_scroll_handle: self.file_tree.files_scroll_handle.clone(),
-            files_icon_color_mode: self.file_tree.files_icon_color_mode.clone(),
-            cached_visible: self.cached_or_rebuild_visible(active_ref),
-            root_kind: self
-                .file_tree
-                .file_trees
-                .get(&active_ref)
-                .and_then(|t| t.entry(t.root_id))
-                .map(|e| e.kind),
-            // Sessions are only surfaced once the PtyTracker has
-            // confirmed a live PID for them. A session_id can sit in
-            // `claude_status` (hook write or jsonl tail) without
-            // belonging to any process daruda owns — e.g. a stale
-            // status file from a crashed run, or `claude` running
-            // outside daruda in another terminal. Hiding those keeps
-            // the indicator a faithful "this Workspace owns a live
-            // claude here" signal rather than a "we have a status
-            // record for this cwd somewhere on disk".
-            //
-            // Trade-off: there's a ~3 s window after `claude` starts
-            // before PtyTracker's next poll lands the binding, so the
-            // indicator appears slightly later than the first hook
-            // event. Acceptable for the correctness it buys.
-            claude_status_per_worktree: {
-                let live: std::collections::HashSet<&str> = self
-                    .claude
-                    .pty_claude_bindings
-                    .values()
-                    .map(|b| b.session_id.as_str())
-                    .collect();
-                let mut map = std::collections::HashMap::new();
-                // Iterate every project's worktrees, not just the
-                // active project's — the left dock renders every
-                // project and each project numbers worktrees from 0,
-                // so keying by bare `WorktreeId` would alias status
-                // across projects.
-                for project in &self.projects {
-                    for wt in &project.worktrees {
-                        let live_sessions = self
-                            .claude
-                            .claude_status
-                            .per_session_states_for_cwd(&wt.path)
-                            .into_iter()
-                            .filter(|(sid, _)| live.contains(sid.as_str()));
-                        if let Some(state) =
-                            live_sessions.map(|(_, s)| s).max_by_key(|s| s.priority())
-                        {
-                            let key = daruda_store::project::WorktreeRef {
-                                project: project.id,
-                                worktree: wt.id,
-                            };
-                            map.insert(key, state);
-                        }
-                    }
-                }
-                map
-            },
-            claude_per_session_per_worktree: {
-                let live: std::collections::HashSet<&str> = self
-                    .claude
-                    .pty_claude_bindings
-                    .values()
-                    .map(|b| b.session_id.as_str())
-                    .collect();
-                let mut map = std::collections::HashMap::new();
-                for project in &self.projects {
-                    for wt in &project.worktrees {
-                        let sessions: Vec<_> = self
-                            .claude
-                            .claude_status
-                            .per_session_states_for_cwd(&wt.path)
-                            .into_iter()
-                            .filter(|(sid, _)| live.contains(sid.as_str()))
-                            .collect();
-                        // Only worktrees with ≥ 2 PID-confirmed
-                        // sessions get a sub-row; single-session
-                        // worktrees are fully described by the leading
-                        // indicator.
-                        if sessions.len() >= 2 {
-                            let key = daruda_store::project::WorktreeRef {
-                                project: project.id,
-                                worktree: wt.id,
-                            };
-                            map.insert(key, sessions);
-                        }
-                    }
-                }
-                map
-            },
-            claude_active_session_id: self
-                .claude
-                .pty_claude_bindings
-                .get(&self.main_area.focused_pane_id)
-                .map(|b| b.session_id.clone()),
-            claude_install_banner_visible: self.claude.claude_status_enabled
-                && !self.claude.claude_hooks_installed,
-            workspace: self.left_dock.read(cx).workspace.clone(),
-        };
+        // — Build dock snapshots ————————————————————————————————————————
+        let left_snap = self.prepare_left_dock_snapshot(cx);
+        let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
+        let right_snap = self.prepare_right_dock_snapshot(cx);
+
+        // — Publish snapshots to docks ————————————————————————————————
         self.left_dock
             .update(cx, |d, _| d.snap = DockSnapshot::Left(Box::new(left_snap)));
-
-        let bottom_snap = {
-            let active_tab_id = self.panels.active_tab_id.clone();
-            let tab_summaries: Vec<(daruda_store::panels::TabId, String, usize)> = {
-                let mut v: Vec<_> = self
-                    .panels
-                    .tabs
-                    .iter()
-                    .map(|t| (t.order, t.id.clone(), t.name.clone(), t.widgets.len()))
-                    .collect();
-                v.sort_by_key(|(order, _, _, _)| *order);
-                v.into_iter()
-                    .map(|(_, id, name, count)| (id, name, count))
-                    .collect()
-            };
-            let active_tab_widgets = self
-                .panels
-                .active_tab_id
-                .as_ref()
-                .and_then(|id| self.panels.tabs.iter().find(|t| &t.id == id))
-                .map(|t| t.widgets.clone())
-                .unwrap_or_default();
-            // `shell_program` is None when neither the user nor project
-            // config sets `[shell] program` — drag-drop quoting falls back
-            // to Posix, which is right for daruda's macOS target where the
-            // PTY inherits `$SHELL` (zsh / bash / sh).
-            let shell = self
-                .shell_program
-                .as_deref()
-                .map(crate::shell_quote::Shell::detect_from_program)
-                .unwrap_or_default();
-            let bottom_dock_size = self.bottom_dock.read(cx).size;
-            BottomDockSnapshot {
-                terminal_input_visible: self.terminal_input_visible,
-                active_tab_id,
-                tab_summaries,
-                active_tab_widgets,
-                grid_columns: self.panels_grid_columns,
-                bottom_dock_size,
-                terminal_input: self.terminal_input.clone(),
-                shell,
-                workspace: self.bottom_dock.read(cx).workspace.clone(),
-            }
-        };
         self.bottom_dock
             .update(cx, |d, _| d.snap = DockSnapshot::Bottom(bottom_snap));
-
-        let claude_status_per_path = cx
-            .global::<crate::agent::tasks_global::GlobalTasks>()
-            .tasks
-            .iter()
-            .filter_map(|t| t.state.worktree_path().cloned())
-            .filter_map(|p| {
-                self.claude
-                    .claude_status
-                    .aggregate_for_cwd(&p)
-                    .map(|s| (p, s))
-            })
-            .collect();
-        // Per-session status keyed by the `session_id` so the Tasks
-        // tab's row renderer can paint a `⟳ / ● / ⚠` glyph next to
-        // each row's session-id badge (R-23) without dipping into
-        // the workspace.
-        let claude_status_per_session: std::collections::HashMap<
-            String,
-            daruda_claude::SessionStatus,
-        > = self
-            .claude
-            .claude_status
-            .iter()
-            .map(|(sid, file)| (sid.to_string(), file.status))
-            .collect();
-        // Mirror the per-session failure counters too — only entries
-        // that have actually accumulated failures travel into the
-        // snap so an idle session with 0 failures stays absent from
-        // the map (cheaper hash, no false-positive lookups).
-        let tool_use_failure_counts: std::collections::HashMap<String, u32> = self
-            .claude
-            .tool_use_failure_counts
-            .iter()
-            .filter(|&(_, &n)| n > 0)
-            .map(|(sid, &n)| (sid.clone(), n))
-            .collect();
-        let right_snap = RightDockSnapshot {
-            right_dock_view: self.right_dock_view,
-            workspace: self.right_dock.read(cx).workspace.clone(),
-            usage: self.claude.usage.clone(),
-            usage_pricing: self.claude.usage_pricing.clone(),
-            plan_limits: self.claude.plan_limits.clone(),
-            service_status: self.claude.service_status.clone(),
-            usage_window: self.claude.usage_window,
-            usage_select: self.claude.usage_select.clone(),
-            skills: cx
-                .global::<crate::agent::skills::SkillsState>()
-                .snapshot_for(self.active_worktree_root().as_deref()),
-            skill_search_input: self.skill_search_input.clone(),
-            skill_search_query: self.skill_search_input.read(cx).value().to_string(),
-            skill_plugin_expanded: self.skill_plugin_expanded.clone(),
-            tasks: cx
-                .global::<crate::agent::tasks_global::GlobalTasks>()
-                .0
-                .clone(),
-            task_search_input: self.task_search_input.clone(),
-            task_search_query: self.task_search_input.read(cx).value().to_string(),
-            task_filter: self.task_filter,
-            claude_status_per_path,
-            claude_status_per_session,
-            tool_use_failure_counts,
-            now: chrono::Utc::now(),
-            right_panel_scroll_handle: self.right_panel_scroll_handle.clone(),
-            mcp: cx
-                .global::<crate::agent::mcp::McpState>()
-                .snapshot_for(self.active_worktree_root().as_deref()),
-        };
         self.right_dock.update(cx, |d, _| {
             d.snap = DockSnapshot::Right(Box::new(right_snap))
         });
@@ -754,8 +490,9 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_TAB,
                                         false,
                                         move |this, win, cx| {
-                                            this.request_close_tab(i, win, cx);
-                                            this.mark_dirty_and_save(cx);
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                ws.request_close_tab(i, win, cx);
+                                            });
                                         },
                                     ),
                                     ws_menu_item(
@@ -763,13 +500,14 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_OTHER_TABS,
                                         tab_count <= 1,
                                         move |this, win, cx| {
-                                            let indices: Vec<usize> =
-                                                (0..this.main_area.tabs.len())
-                                                    .rev()
-                                                    .filter(|&j| j != i)
-                                                    .collect();
-                                            this.request_close_tabs_bulk(indices, win, cx);
-                                            this.mark_dirty_and_save(cx);
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                let indices: Vec<usize> =
+                                                    (0..ws.main_area.tabs.len())
+                                                        .rev()
+                                                        .filter(|&j| j != i)
+                                                        .collect();
+                                                ws.request_close_tabs_bulk(indices, win, cx);
+                                            });
                                         },
                                     ),
                                     ws_menu_item(
@@ -777,10 +515,11 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_TABS_TO_RIGHT,
                                         is_last,
                                         move |this, win, cx| {
-                                            let indices: Vec<usize> =
-                                                (i + 1..this.main_area.tabs.len()).rev().collect();
-                                            this.request_close_tabs_bulk(indices, win, cx);
-                                            this.mark_dirty_and_save(cx);
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                let indices: Vec<usize> =
+                                                    (i + 1..ws.main_area.tabs.len()).rev().collect();
+                                                ws.request_close_tabs_bulk(indices, win, cx);
+                                            });
                                         },
                                     ),
                                     CItem::separator(),
@@ -790,8 +529,9 @@ impl Render for Workspace {
                                         i == 0,
                                         move |this, _win, cx| {
                                             if i > 0 {
-                                                this.move_tab(i, i - 1, cx);
-                                                this.mark_dirty_and_save(cx);
+                                                this.mutate_durable(cx, |ws, cx| {
+                                                    ws.move_tab(i, i - 1, cx);
+                                                });
                                             }
                                         },
                                     ),
@@ -801,8 +541,9 @@ impl Render for Workspace {
                                         is_last,
                                         move |this, _win, cx| {
                                             if i + 1 < this.main_area.tabs.len() {
-                                                this.move_tab(i, i + 1, cx);
-                                                this.mark_dirty_and_save(cx);
+                                                this.mutate_durable(cx, |ws, cx| {
+                                                    ws.move_tab(i, i + 1, cx);
+                                                });
                                             }
                                         },
                                     ),
@@ -817,15 +558,16 @@ impl Render for Workspace {
                                             s::CTX_SPLIT_RIGHT,
                                             false,
                                             move |this, win, cx| {
-                                                if this.main_area.active_tab_index != i {
-                                                    this.activate_tab(i, win, cx);
-                                                }
-                                                this.split_focused_pane(
-                                                    SplitDirection::Horizontal,
-                                                    win,
-                                                    cx,
-                                                );
-                                                this.mark_dirty_and_save(cx);
+                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                    if ws.main_area.active_tab_index != i {
+                                                        ws.activate_tab(i, win, cx);
+                                                    }
+                                                    ws.split_focused_pane(
+                                                        SplitDirection::Horizontal,
+                                                        win,
+                                                        cx,
+                                                    );
+                                                });
                                             },
                                         ),
                                         ws_menu_item(
@@ -833,15 +575,16 @@ impl Render for Workspace {
                                             s::CTX_SPLIT_DOWN,
                                             false,
                                             move |this, win, cx| {
-                                                if this.main_area.active_tab_index != i {
-                                                    this.activate_tab(i, win, cx);
-                                                }
-                                                this.split_focused_pane(
-                                                    SplitDirection::Vertical,
-                                                    win,
-                                                    cx,
-                                                );
-                                                this.mark_dirty_and_save(cx);
+                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                    if ws.main_area.active_tab_index != i {
+                                                        ws.activate_tab(i, win, cx);
+                                                    }
+                                                    ws.split_focused_pane(
+                                                        SplitDirection::Vertical,
+                                                        win,
+                                                        cx,
+                                                    );
+                                                });
                                             },
                                         ),
                                         CItem::separator(),
@@ -850,8 +593,9 @@ impl Render for Workspace {
                                             s::CTX_NEW_TAB,
                                             false,
                                             |this, win, cx| {
-                                                this.add_tab(win, cx);
-                                                this.mark_dirty_and_save(cx);
+                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                    ws.add_tab(win, cx);
+                                                });
                                             },
                                         ),
                                     ]);
@@ -879,8 +623,9 @@ impl Render for Workspace {
                                         s::CTX_CLOSE_FILE_VIEWER,
                                         false,
                                         move |this, win, cx| {
-                                            this.request_close_tab(i, win, cx);
-                                            this.mark_dirty_and_save(cx);
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                ws.request_close_tab(i, win, cx);
+                                            });
                                         },
                                     ));
                                 }
@@ -1078,18 +823,10 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &FileViewerSearchNext, _window, cx| {
-                if let Some(fv) = this.focused_file_view_mut() {
-                    fv.search_next_match();
-                }
-                this.scroll_file_viewer_to_focused_match();
-                cx.notify();
+                this.file_view_search_next(cx);
             }))
             .on_action(cx.listener(|this, _: &FileViewerSearchPrev, _window, cx| {
-                if let Some(fv) = this.focused_file_view_mut() {
-                    fv.search_prev_match();
-                }
-                this.scroll_file_viewer_to_focused_match();
-                cx.notify();
+                this.file_view_search_prev(cx);
             }))
             // Keyboard shortcuts when the focused pane is a file viewer.
             // The per-pane Input handles its own typing; this `on_key_down`

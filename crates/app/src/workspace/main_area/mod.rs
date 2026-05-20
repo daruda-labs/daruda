@@ -169,8 +169,9 @@ fn pane_header(
                         s::CTX_SPLIT_RIGHT,
                         false,
                         |this, win, cx| {
-                            this.split_focused_pane(SplitDirection::Horizontal, win, cx);
-                            this.mark_dirty_and_save(cx);
+                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                ws.split_focused_pane(SplitDirection::Horizontal, win, cx);
+                            });
                         },
                     ),
                     crate::workspace::render::ws_menu_item(
@@ -178,8 +179,9 @@ fn pane_header(
                         s::CTX_SPLIT_DOWN,
                         false,
                         |this, win, cx| {
-                            this.split_focused_pane(SplitDirection::Vertical, win, cx);
-                            this.mark_dirty_and_save(cx);
+                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                ws.split_focused_pane(SplitDirection::Vertical, win, cx);
+                            });
                         },
                     ),
                     CItem::separator(),

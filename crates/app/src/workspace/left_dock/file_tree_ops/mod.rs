@@ -685,7 +685,7 @@ impl Workspace {
         } else {
             None
         };
-        let gitignore = if self.file_tree.files_use_gitignore {
+        let gitignore = if self.mirrors.files_use_gitignore {
             self.file_tree.files_gitignore_index.get(&wt_ref)
         } else {
             None
@@ -699,7 +699,7 @@ impl Workspace {
             &status_index,
             keyboard_focus,
             gitignore,
-            self.file_tree.files_show_hidden,
+            self.mirrors.files_show_hidden,
             &mut out,
         );
         out
@@ -708,7 +708,7 @@ impl Workspace {
     /// Flip `files_show_hidden`, invalidate every cached visible list,
     /// and request a render. Wired to `FilesToggleHidden`.
     pub(in crate::workspace) fn toggle_files_show_hidden(&mut self, cx: &mut Context<Self>) {
-        self.file_tree.files_show_hidden = !self.file_tree.files_show_hidden;
+        self.mirrors.files_show_hidden = !self.mirrors.files_show_hidden;
         let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
         for wt_ref in refs {
             self.invalidate_visible_files_cache(wt_ref);

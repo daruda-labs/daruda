@@ -17,6 +17,8 @@ mod actions;
 mod claude_session_ops;
 pub(in crate::workspace) mod command;
 mod config_ops;
+mod config_sync;
+mod durable;
 pub(crate) mod delete_project_modal;
 pub(in crate::workspace) mod dialog_helpers;
 mod dnd_ops;
@@ -43,6 +45,7 @@ mod toast_layer;
 mod window_close_ops;
 mod worktree_ops;
 
+pub(in crate::workspace) use config_sync::ConfigMirrors;
 pub(in crate::workspace) use modal_view::ModalView;
 pub(in crate::workspace) use persistence::WorktreeRuntime;
 
@@ -294,6 +297,10 @@ pub struct Workspace {
     /// into one struct so the 12 sub-fields don't clutter
     /// `Workspace`'s top level. See [`left_dock::file_tree_context::FileTreeContext`].
     pub(in crate::workspace) file_tree: left_dock::file_tree_context::FileTreeContext,
+    /// Single source of truth for live-reloaded config mirror state.
+    /// `apply_config` is the only update site (other than per-field
+    /// toggle methods like `toggle_files_show_hidden`).
+    pub(in crate::workspace) mirrors: ConfigMirrors,
     /// Per-worktree "git status currently running" guard. Watcher
     /// events can arrive faster than `git status` can complete on a
     /// large repo; this keeps at most one in-flight task per worktree.
@@ -302,9 +309,6 @@ pub struct Workspace {
     /// already running. Drained by the in-flight task on completion,
     /// re-firing once to capture intervening changes.
     pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::WorktreeRef>,
-    /// Mirror of `daruda_config::PanelsConfig::grid_columns`. Drives the
-    /// bottom-dock macro tile grid column count.
-    pub(in crate::workspace) panels_grid_columns: u8,
     /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
     pub(in crate::workspace) git_changes_scroll_handle: gpui::ScrollHandle,
     /// Scroll handle for the right-dock panel body — shared with the
@@ -343,12 +347,6 @@ pub struct Workspace {
     /// string passed to `window.set_window_title`. Persisted to
     /// `ProjectState.window_user_label`.
     pub(in crate::workspace) window_user_label: Option<gpui::SharedString>,
-    /// When true, the stdout poll task auto-closes a pane (and its
-    /// containing tab if it was the only pane) as soon as the shell
-    /// process terminates. Mirrors iTerm2's "When the Session Ends"
-    /// preference. Read live by the poll task, so a config reload
-    /// takes effect for already-running panes.
-    pub(in crate::workspace) close_pane_on_exit: bool,
     /// Effective shell program for new panes — `Some` only when a
     /// project layer (or the user `[shell]` section) sets `program`.
     /// `None` falls back to `$SHELL` / `/bin/zsh` via `PtyConfig::default`.
@@ -768,17 +766,14 @@ impl Workspace {
                 file_watchers: HashMap::new(),
                 files_reload_queues: HashMap::new(),
                 files_watcher_poll: None,
-                files_show_hidden: config.left_dock.files_show_hidden,
                 files_panel_focus: cx.focus_handle(),
                 files_selection: None,
-                files_use_gitignore: config.left_dock.files_use_gitignore,
-                files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
                 files_gitignore_index: HashMap::new(),
                 files_scroll_handle: gpui::UniformListScrollHandle::new(),
             },
+            mirrors: ConfigMirrors::from_config(config),
             git_status_in_flight: HashSet::new(),
             git_status_pending_repeat: HashSet::new(),
-            panels_grid_columns: config.panels.grid_columns,
             git_changes_scroll_handle: gpui::ScrollHandle::new(),
             right_panel_scroll_handle: gpui::ScrollHandle::new(),
             git_commit_input,
@@ -788,7 +783,6 @@ impl Workspace {
             toast_layer,
             cached_window_bounds: None,
             window_user_label: None,
-            close_pane_on_exit: config.shell.close_pane_on_exit,
             shell_program: config.shell.program.clone(),
             syntax_theme: config.file_viewer.syntax_theme.clone(),
             file_viewer_preview_tab: config.file_viewer.preview_tab,
@@ -954,8 +948,9 @@ impl Workspace {
         if self.left_dock_view == view {
             return;
         }
-        self.left_dock_view = view;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, _| {
+            ws.left_dock_view = view;
+        });
         if view == daruda_store::project::LeftDockView::GitChanges {
             let target = self.active;
             self.refresh_git_status(target, cx);
@@ -1108,8 +1103,9 @@ impl Workspace {
         if self.right_dock_view == view {
             return;
         }
-        self.right_dock_view = view;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, _| {
+            ws.right_dock_view = view;
+        });
         cx.notify();
     }
 

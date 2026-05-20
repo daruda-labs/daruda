@@ -60,7 +60,10 @@ impl Workspace {
             }
             self.activate_worktree(t, window, cx);
         }
-        self.mark_dirty_and_save(cx);
+        // Empty closure: see group_ops.rs:83 for rationale. `activate_worktree`
+        // consumes `&mut Window`, so the persist trigger has to land after
+        // those borrows release.
+        self.mutate_durable(cx, |_, _| {});
         target
     }
 
@@ -76,7 +79,7 @@ impl Workspace {
             return;
         }
         self.window_open_policy = policy;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Toggle the collapsed flag on a project. The project's worktree
@@ -92,7 +95,7 @@ impl Workspace {
             return;
         };
         project.is_collapsed = !project.is_collapsed;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Current workspace-level "Open Project" policy. Read by the
@@ -149,7 +152,7 @@ impl Workspace {
             return false;
         }
         project.name = name;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         true
     }
 
@@ -242,7 +245,7 @@ impl Workspace {
         self.main_area.focused_pane_id = 0;
         self.active = WorktreeRef::default();
         self.activate_worktree(next_target, window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         true
     }
 
@@ -355,7 +358,7 @@ impl Workspace {
                             ws.main_area
                                 .inactive_worktree_runtimes
                                 .retain(|key, _| key.project != project_id);
-                            ws.mark_dirty_and_save(cx);
+                            ws.mutate_durable(cx, |_, _| {});
                             return ws.projects.is_empty();
                         }
                         let keep = ws.close_active_project(window, cx);

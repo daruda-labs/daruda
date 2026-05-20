@@ -17,8 +17,9 @@ impl Workspace {
         label: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.window_user_label = label.map(gpui::SharedString::from);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, _| {
+            ws.window_user_label = label.map(gpui::SharedString::from);
+        });
         cx.notify();
     }
 
@@ -152,9 +153,10 @@ impl Workspace {
             self.main_area.active_tab_index = index;
             let focused = self.main_area.tabs[index].last_focused_pane;
             self.main_area.focused_pane_id = focused;
-            self.bump_activity(focused);
-            self.focus_pane(focused, window, cx);
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable_in(window, cx, |ws, window, cx| {
+                ws.bump_activity(focused);
+                ws.focus_pane(focused, window, cx);
+            });
             cx.notify();
         }
     }

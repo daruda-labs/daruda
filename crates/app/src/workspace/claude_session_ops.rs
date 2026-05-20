@@ -210,12 +210,13 @@ impl Workspace {
         if self.claude.usage_window == value {
             return;
         }
-        self.claude.usage_window = value;
-        let slug = gpui::SharedString::from(value.slug());
-        self.claude.usage_select.update(cx, |s, cx_inner| {
-            s.set_selected_value(&slug, window, cx_inner)
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.claude.usage_window = value;
+            let slug = gpui::SharedString::from(value.slug());
+            ws.claude.usage_select.update(cx, |s, cx_inner| {
+                s.set_selected_value(&slug, window, cx_inner)
+            });
         });
-        self.mark_dirty_and_save(cx);
         cx.notify();
     }
 

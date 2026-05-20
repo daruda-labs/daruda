@@ -80,7 +80,12 @@ impl Workspace {
             tab_order,
             is_collapsed: false,
         });
-        self.mark_dirty_and_save(cx);
+        // Empty closure pattern (used across group/project/worktree/dnd ops):
+        // the state mutation completed above. The wrapper structurally
+        // guarantees the persist call — factoring the preceding lines into
+        // the closure would force re-running mutable borrows that have
+        // already expired here.
+        self.mutate_durable(cx, |_, _| {});
         id
     }
 
@@ -116,7 +121,7 @@ impl Workspace {
             return true;
         }
         group.name = name;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         true
     }
 
@@ -135,7 +140,7 @@ impl Workspace {
             return;
         }
         group.color = color;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Toggle the group's collapsed flag in the left dock.
@@ -144,7 +149,7 @@ impl Workspace {
             return;
         };
         group.is_collapsed = !group.is_collapsed;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Remove a group. Member projects are demoted to ungrouped
@@ -162,7 +167,7 @@ impl Workspace {
             }
         }
         self.groups.retain(|g| g.id != group_id);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Move a project into (or out of) a group. Passing
@@ -188,6 +193,6 @@ impl Workspace {
             return;
         }
         project.group_id = target;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 }

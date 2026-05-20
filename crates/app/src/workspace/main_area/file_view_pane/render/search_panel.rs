@@ -118,11 +118,7 @@ pub(super) fn render_search_panel(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _: &MouseDownEvent, _w, cx| {
-                        if let Some(fv) = this.focused_file_view_mut() {
-                            fv.search_prev_match();
-                        }
-                        this.scroll_file_viewer_to_focused_match();
-                        cx.notify();
+                        this.file_view_search_prev(cx);
                         cx.stop_propagation();
                     }),
                 )
@@ -139,11 +135,7 @@ pub(super) fn render_search_panel(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _: &MouseDownEvent, _w, cx| {
-                        if let Some(fv) = this.focused_file_view_mut() {
-                            fv.search_next_match();
-                        }
-                        this.scroll_file_viewer_to_focused_match();
-                        cx.notify();
+                        this.file_view_search_next(cx);
                         cx.stop_propagation();
                     }),
                 )

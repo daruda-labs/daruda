@@ -54,9 +54,10 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.left_dock.update(cx, |d, _| d.toggle());
-        self.main_area.pending_resize = true;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, cx| {
+            ws.left_dock.update(cx, |d, _| d.toggle());
+            ws.main_area.pending_resize = true;
+        });
         cx.notify();
     }
 
@@ -66,9 +67,10 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.bottom_dock.update(cx, |d, _| d.toggle());
-        self.main_area.pending_resize = true;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, cx| {
+            ws.bottom_dock.update(cx, |d, _| d.toggle());
+            ws.main_area.pending_resize = true;
+        });
         cx.notify();
     }
 
@@ -78,9 +80,10 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.right_dock.update(cx, |d, _| d.toggle());
-        self.main_area.pending_resize = true;
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |ws, cx| {
+            ws.right_dock.update(cx, |d, _| d.toggle());
+            ws.main_area.pending_resize = true;
+        });
         cx.notify();
     }
 
@@ -142,8 +145,9 @@ impl Workspace {
 
     pub(in crate::workspace) fn end_divider_drag(&mut self, cx: &mut Context<Self>) {
         if self.main_area.drag_state.is_some() {
-            self.main_area.drag_state = None;
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |ws, _| {
+                ws.main_area.drag_state = None;
+            });
             cx.notify();
         }
     }
@@ -199,8 +203,9 @@ impl Workspace {
 
     pub(in crate::workspace) fn end_dock_drag(&mut self, cx: &mut Context<Self>) {
         if self.dock_drag.is_some() {
-            self.dock_drag = None;
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |ws, _| {
+                ws.dock_drag = None;
+            });
             cx.notify();
         }
     }
@@ -216,9 +221,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.bottom_dock.update(cx, |d, _| d.resize(new_size));
-        self.resize_all_tabs(window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.bottom_dock.update(cx, |d, _| d.resize(new_size));
+            ws.resize_all_tabs(window, cx);
+        });
         cx.notify();
     }
 

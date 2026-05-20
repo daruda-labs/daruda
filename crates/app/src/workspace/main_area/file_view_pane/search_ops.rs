@@ -37,6 +37,22 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
         cx.notify();
     }
+
+    pub(in crate::workspace) fn file_view_search_prev(&mut self, cx: &mut Context<Self>) {
+        if let Some(fv) = self.focused_file_view_mut() {
+            fv.search_prev_match();
+        }
+        self.scroll_file_viewer_to_focused_match();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn file_view_search_next(&mut self, cx: &mut Context<Self>) {
+        if let Some(fv) = self.focused_file_view_mut() {
+            fv.search_next_match();
+        }
+        self.scroll_file_viewer_to_focused_match();
+        cx.notify();
+    }
 }
 
 #[cfg(test)]

@@ -380,7 +380,7 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
 fn test_close_pane_on_exit_defaults_true(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
-        assert!(ws.close_pane_on_exit);
+        assert!(ws.mirrors.close_pane_on_exit);
     });
 }
 
@@ -398,7 +398,7 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
     let pane_id = ws.read_with(cx, |ws, _| ws.main_area.panes[0].id);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
-        let should_close = ws.read(cx).close_pane_on_exit;
+        let should_close = ws.read(cx).mirrors.close_pane_on_exit;
         if should_close {
             ws.update(cx, |ws, cx| ws.close_pane_by_id(pane_id, window, cx));
         }
@@ -421,14 +421,14 @@ fn test_apply_config_updates_close_pane_on_exit(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
     })
     .unwrap();
-    ws.read_with(cx, |ws, _| assert!(!ws.close_pane_on_exit));
+    ws.read_with(cx, |ws, _| assert!(!ws.mirrors.close_pane_on_exit));
 
     cfg.shell.close_pane_on_exit = true;
     cx.update_window(window_handle.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
     })
     .unwrap();
-    ws.read_with(cx, |ws, _| assert!(ws.close_pane_on_exit));
+    ws.read_with(cx, |ws, _| assert!(ws.mirrors.close_pane_on_exit));
 }
 
 #[gpui::test]
@@ -510,7 +510,7 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
             "project-layer shell.program must override user default at construction",
         );
         assert!(
-            !ws.close_pane_on_exit,
+            !ws.mirrors.close_pane_on_exit,
             "project-layer shell section replaces wholesale, including close_pane_on_exit",
         );
     });

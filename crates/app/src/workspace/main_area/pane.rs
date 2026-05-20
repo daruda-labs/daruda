@@ -938,7 +938,7 @@ impl Workspace {
                     // share a closure — avoids any ambiguity with
                     // GPUI's reentrant-update guard.
                     let should_close = cx
-                        .update(|_, app_cx| workspace.read(app_cx).close_pane_on_exit)
+                        .update(|_, app_cx| workspace.read(app_cx).mirrors.close_pane_on_exit)
                         .unwrap_or(false);
 
                     if should_close {

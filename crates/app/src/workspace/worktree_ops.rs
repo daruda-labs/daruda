@@ -203,7 +203,10 @@ impl Workspace {
         // root; restart the watcher so it tracks the new active path.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
-        self.mark_dirty_and_save(cx);
+        // Empty closure: see group_ops.rs:83 for rationale. The preceding
+        // refresh_* calls finish the mutation chain; the wrapper only needs
+        // to schedule persist here.
+        self.mutate_durable(cx, |_, _| {});
         // Force a render even when no fallback fired — the worktree
         // list shrank by one and the dock would otherwise hold a row
         // for the now-removed worktree until an unrelated render.
@@ -442,7 +445,7 @@ impl Workspace {
         // came in from a restored-but-never-active runtime); fire
         // their loads now that the worktree is active.
         self.load_pending_file_panes(cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         // 5. If the incoming worktree's tree was modified while
         //    inactive, replay a single Bulk reload to catch up.
         self.replay_files_dirty(target, cx);
@@ -497,7 +500,7 @@ impl Workspace {
         for (i, w) in project.worktrees.iter_mut().enumerate() {
             w.tab_order = i as u32;
         }
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }
 
@@ -515,7 +518,7 @@ impl Workspace {
         };
         if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
             wt.set_description(description);
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |_, _| {});
             cx.notify();
         }
     }
@@ -534,7 +537,7 @@ impl Workspace {
         };
         if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
             wt.set_name(name);
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |_, _| {});
             cx.notify();
         }
     }

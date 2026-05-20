@@ -52,7 +52,6 @@ impl Workspace {
         self.terminal_config.background_alpha = config.window.opacity;
         self.terminal_config.osc1337_max_bytes = config.clipboard.streaming_max_bytes;
         self.font_family = config.font.family.clone();
-        self.close_pane_on_exit = config.shell.close_pane_on_exit;
         self.shell_program = config.shell.program.clone();
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
@@ -79,28 +78,20 @@ impl Workspace {
             });
         }
         // Trigger #7 — left-dock config affecting filter state changed.
-        let mut filter_changed = false;
-        if self.file_tree.files_show_hidden != config.left_dock.files_show_hidden {
-            self.file_tree.files_show_hidden = config.left_dock.files_show_hidden;
-            filter_changed = true;
-        }
-        if self.file_tree.files_use_gitignore != config.left_dock.files_use_gitignore {
-            self.file_tree.files_use_gitignore = config.left_dock.files_use_gitignore;
-            filter_changed = true;
-        }
-        if self.file_tree.files_icon_color_mode != config.left_dock.file_icon_color_mode {
-            self.file_tree.files_icon_color_mode = config.left_dock.file_icon_color_mode.clone();
-            cx.notify();
-        }
-        if self.panels_grid_columns != config.panels.grid_columns {
-            self.panels_grid_columns = config.panels.grid_columns;
-            cx.notify();
-        }
+        let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);
+        let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
+            || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
+        let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;
+        let panels_changed = self.mirrors.panels_grid_columns != new_mirrors.panels_grid_columns;
+        self.mirrors = new_mirrors;
         if filter_changed {
             let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
             for wt_ref in refs {
                 self.invalidate_visible_files_cache(wt_ref);
             }
+        }
+        if icon_changed || panels_changed {
+            cx.notify();
         }
         // Picks up `claude_status.enable` flips.
         let new_enabled = config.claude_status.enable;
