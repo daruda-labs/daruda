@@ -4,15 +4,16 @@
 //! - [`render`] — `right_panel::render` dispatch entry, draws the
 //!   project + personal scope sections.
 //! - [`add_modal`] / [`edit_modal`] / [`delete_confirm`] — modal
-//!   openers as free functions. `render.rs` calls them as
-//!   `super::open_*_mcp_*` rather than going through `Workspace`
-//!   methods.
+//!   openers as free functions. The openers are wrapped by
+//!   `Workspace::open_*_mcp_*` methods in `ops`; `render.rs`
+//!   dispatches through those wrappers.
 //! - This `mod.rs` re-exports the openers so callers stay one-liners.
 
 pub(in crate::workspace) mod add_modal;
 pub(in crate::workspace) mod delete_confirm;
 pub(in crate::workspace) mod edit_modal;
 mod modal_shared;
+mod ops;
 pub(in crate::workspace) mod render;
 
 pub(in crate::workspace) use add_modal::open_add_mcp_server_modal;

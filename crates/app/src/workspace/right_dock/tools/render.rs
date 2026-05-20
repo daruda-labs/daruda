@@ -94,9 +94,7 @@ fn new_server_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) ->
         .child(strings::MCP_NEW_BUTTON)
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws: &mut Workspace, cx| {
-                    super::open_add_mcp_server_modal(ws, None, window, cx)
-                });
+                ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
             }
         })
 }
@@ -288,9 +286,7 @@ fn row_actions(
             move |window, cx| {
                 if let Some(ws) = workspace_edit.upgrade() {
                     let n = name_for_edit.clone();
-                    ws.update(cx, |ws: &mut Workspace, cx| {
-                        super::open_edit_mcp_server_modal(ws, scope, n, window, cx)
-                    });
+                    ws.update(cx, |ws, cx| ws.open_edit_mcp_server(scope, n, window, cx));
                 }
             },
         ))
@@ -301,9 +297,7 @@ fn row_actions(
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
                     let n = name_for_delete.clone();
-                    ws.update(cx, |ws: &mut Workspace, cx| {
-                        super::open_delete_mcp_server_confirm(ws, scope, n, window, cx)
-                    });
+                    ws.update(cx, |ws, cx| ws.open_delete_mcp_server_confirm(scope, n, window, cx));
                 }
             },
         ))
