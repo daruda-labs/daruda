@@ -11,20 +11,22 @@ use super::constants::APP_NAME;
 // Top-level menu names
 // ============================================================================
 
-pub const MENU_APP: &str = APP_NAME;
-pub const MENU_FILE: &str = "File";
-pub const MENU_VIEW: &str = "View";
-pub const MENU_EDIT: &str = "Edit";
-pub const MENU_WORKTREE: &str = "Worktree";
-pub const MENU_WINDOW: &str = "Window";
-pub const MENU_HELP: &str = "Help";
+pub fn menu_app() -> &'static str { APP_NAME }
+pub fn menu_file() -> String { rust_i18n::t!("menu.file").into_owned() }
+pub fn menu_view() -> String { rust_i18n::t!("menu.view").into_owned() }
+pub fn menu_edit() -> String { rust_i18n::t!("menu.edit").into_owned() }
+pub fn menu_worktree() -> String { rust_i18n::t!("menu.worktree").into_owned() }
+pub fn menu_window() -> String { rust_i18n::t!("menu.window").into_owned() }
+pub fn menu_help() -> String { rust_i18n::t!("menu.help").into_owned() }
 
 // ============================================================================
 // App menu
 // ============================================================================
 
 pub fn menu_quit_app() -> String { rust_i18n::t!("menu.quit_app").into_owned() }
-pub const MENU_SERVICES: &str = "Services";
+pub fn menu_services() -> String { rust_i18n::t!("menu.services").into_owned() }
+pub fn menu_settings() -> String { rust_i18n::t!("menu.settings").into_owned() }
+pub fn menu_open_project_config() -> String { rust_i18n::t!("menu.open_project_config").into_owned() }
 
 // ============================================================================
 // File menu
@@ -32,88 +34,88 @@ pub const MENU_SERVICES: &str = "Services";
 
 pub fn menu_new_window() -> String { rust_i18n::t!("menu.new_window").into_owned() }
 pub fn menu_open() -> String { rust_i18n::t!("menu.open").into_owned() }
-pub const MENU_OPEN_IN_NEW_WINDOW: &str = "Open in New Window…";
-pub const MENU_OPEN_RECENT: &str = "Open Recent";
-pub const MENU_OPEN_RECENT_IN_NEW_WINDOW: &str = "Open Recent in New Window";
+pub fn menu_open_in_new_window() -> String { rust_i18n::t!("menu.open_in_new_window").into_owned() }
+pub fn menu_open_recent() -> String { rust_i18n::t!("menu.open_recent").into_owned() }
+pub fn menu_open_recent_in_new_window() -> String { rust_i18n::t!("menu.open_recent_in_new_window").into_owned() }
 pub fn menu_close_project() -> String { rust_i18n::t!("menu.close_project").into_owned() }
-pub const MENU_NO_RECENT: &str = "No recent projects";
-pub fn menu_new_tab() -> String { rust_i18n::t!("menu.new_tab").into_owned() }
-pub const MENU_CLOSE_PANE: &str = "Close Pane";
-pub fn menu_close_tab() -> String { rust_i18n::t!("menu.close_tab").into_owned() }
+pub fn menu_no_recent() -> String { rust_i18n::t!("menu.no_recent").into_owned() }
+pub fn menu_new_tab() -> String { rust_i18n::t!("common.new_tab").into_owned() }
+pub fn menu_close_pane() -> String { rust_i18n::t!("common.close_pane").into_owned() }
+pub fn menu_close_tab() -> String { rust_i18n::t!("common.close_tab").into_owned() }
 
 // ============================================================================
 // View menu
 // ============================================================================
 
-pub fn menu_split_right() -> String { rust_i18n::t!("menu.split_right").into_owned() }
-pub fn menu_split_down() -> String { rust_i18n::t!("menu.split_down").into_owned() }
-pub const MENU_NEXT_PANE: &str = "Next Pane";
-pub const MENU_PREV_PANE: &str = "Previous Pane";
-pub const MENU_FOCUS_PANE_LEFT: &str = "Focus Pane Left";
-pub const MENU_FOCUS_PANE_RIGHT: &str = "Focus Pane Right";
-pub const MENU_FOCUS_PANE_UP: &str = "Focus Pane Up";
-pub const MENU_FOCUS_PANE_DOWN: &str = "Focus Pane Down";
-pub const MENU_MOVE_TAB_LEFT: &str = "Move Tab Left";
-pub const MENU_MOVE_TAB_RIGHT: &str = "Move Tab Right";
+pub fn menu_split_right() -> String { rust_i18n::t!("common.split_right").into_owned() }
+pub fn menu_split_down() -> String { rust_i18n::t!("common.split_down").into_owned() }
+pub fn menu_next_pane() -> String { rust_i18n::t!("menu.next_pane").into_owned() }
+pub fn menu_prev_pane() -> String { rust_i18n::t!("menu.prev_pane").into_owned() }
+pub fn menu_focus_pane_left() -> String { rust_i18n::t!("menu.focus_pane_left").into_owned() }
+pub fn menu_focus_pane_right() -> String { rust_i18n::t!("menu.focus_pane_right").into_owned() }
+pub fn menu_focus_pane_up() -> String { rust_i18n::t!("menu.focus_pane_up").into_owned() }
+pub fn menu_focus_pane_down() -> String { rust_i18n::t!("menu.focus_pane_down").into_owned() }
+pub fn menu_move_tab_left() -> String { rust_i18n::t!("common.move_tab_left").into_owned() }
+pub fn menu_move_tab_right() -> String { rust_i18n::t!("common.move_tab_right").into_owned() }
 
 // ============================================================================
 // Edit menu
 // ============================================================================
 
-pub const MENU_COPY: &str = "Copy";
-pub const MENU_PASTE: &str = "Paste";
-pub const MENU_SELECT_ALL: &str = "Select All";
-pub const MENU_FIND: &str = "Find\u{2026}";
-pub const MENU_FIND_NEXT: &str = "Find Next";
-pub const MENU_FIND_PREV: &str = "Find Previous";
-pub const MENU_CLEAR_BUFFER: &str = "Clear Buffer";
-pub const MENU_CLEAR_SCROLLBACK: &str = "Clear Scrollback";
+pub fn menu_copy() -> String { rust_i18n::t!("menu.copy").into_owned() }
+pub fn menu_paste() -> String { rust_i18n::t!("menu.paste").into_owned() }
+pub fn menu_select_all() -> String { rust_i18n::t!("menu.select_all").into_owned() }
+pub fn menu_find() -> String { rust_i18n::t!("menu.find").into_owned() }
+pub fn menu_find_next() -> String { rust_i18n::t!("menu.find_next").into_owned() }
+pub fn menu_find_prev() -> String { rust_i18n::t!("menu.find_prev").into_owned() }
+pub fn menu_clear_buffer() -> String { rust_i18n::t!("menu.clear_buffer").into_owned() }
+pub fn menu_clear_scrollback() -> String { rust_i18n::t!("menu.clear_scrollback").into_owned() }
 
 // ============================================================================
 // View menu (additions)
 // ============================================================================
 
 pub fn menu_toggle_full_screen() -> String { rust_i18n::t!("menu.toggle_full_screen").into_owned() }
-pub const MENU_TOGGLE_LEFT_DOCK: &str = "Toggle Left Dock";
-pub const MENU_TOGGLE_BOTTOM_DOCK: &str = "Toggle Bottom Dock";
-pub const MENU_TOGGLE_RIGHT_DOCK: &str = "Toggle Right Dock";
-pub const MENU_JUMP_PROMPT_PREV: &str = "Jump to Previous Prompt";
-pub const MENU_JUMP_PROMPT_NEXT: &str = "Jump to Next Prompt";
+pub fn menu_toggle_left_dock() -> String { rust_i18n::t!("menu.toggle_left_dock").into_owned() }
+pub fn menu_toggle_bottom_dock() -> String { rust_i18n::t!("menu.toggle_bottom_dock").into_owned() }
+pub fn menu_toggle_right_dock() -> String { rust_i18n::t!("menu.toggle_right_dock").into_owned() }
+pub fn menu_jump_prompt_prev() -> String { rust_i18n::t!("menu.jump_prompt_prev").into_owned() }
+pub fn menu_jump_prompt_next() -> String { rust_i18n::t!("menu.jump_prompt_next").into_owned() }
 
 // ============================================================================
 // Worktree menu
 // ============================================================================
 
-pub const MENU_ACTIVATE_WORKTREE_1: &str = "Activate Worktree 1";
-pub const MENU_ACTIVATE_WORKTREE_2: &str = "Activate Worktree 2";
-pub const MENU_ACTIVATE_WORKTREE_3: &str = "Activate Worktree 3";
-pub const MENU_ACTIVATE_WORKTREE_4: &str = "Activate Worktree 4";
-pub const MENU_ACTIVATE_WORKTREE_5: &str = "Activate Worktree 5";
-pub const MENU_ACTIVATE_WORKTREE_6: &str = "Activate Worktree 6";
-pub const MENU_ACTIVATE_WORKTREE_7: &str = "Activate Worktree 7";
-pub const MENU_ACTIVATE_WORKTREE_8: &str = "Activate Worktree 8";
-pub const MENU_ACTIVATE_WORKTREE_9: &str = "Activate Worktree 9";
+pub fn menu_activate_worktree_1() -> String { rust_i18n::t!("menu.activate_worktree_1").into_owned() }
+pub fn menu_activate_worktree_2() -> String { rust_i18n::t!("menu.activate_worktree_2").into_owned() }
+pub fn menu_activate_worktree_3() -> String { rust_i18n::t!("menu.activate_worktree_3").into_owned() }
+pub fn menu_activate_worktree_4() -> String { rust_i18n::t!("menu.activate_worktree_4").into_owned() }
+pub fn menu_activate_worktree_5() -> String { rust_i18n::t!("menu.activate_worktree_5").into_owned() }
+pub fn menu_activate_worktree_6() -> String { rust_i18n::t!("menu.activate_worktree_6").into_owned() }
+pub fn menu_activate_worktree_7() -> String { rust_i18n::t!("menu.activate_worktree_7").into_owned() }
+pub fn menu_activate_worktree_8() -> String { rust_i18n::t!("menu.activate_worktree_8").into_owned() }
+pub fn menu_activate_worktree_9() -> String { rust_i18n::t!("menu.activate_worktree_9").into_owned() }
 
 // ============================================================================
 // Window menu
 // ============================================================================
 
-pub const MENU_MINIMIZE: &str = "Minimize";
-pub const MENU_ZOOM: &str = "Zoom";
-pub const MENU_EDIT_WINDOW_TITLE: &str = "Edit Window Title\u{2026}";
+pub fn menu_minimize() -> String { rust_i18n::t!("menu.minimize").into_owned() }
+pub fn menu_zoom() -> String { rust_i18n::t!("menu.zoom").into_owned() }
+pub fn menu_edit_window_title() -> String { rust_i18n::t!("menu.edit_window_title").into_owned() }
 
-pub const EDIT_WINDOW_TITLE_MODAL_TITLE: &str = "Edit Window Title";
-pub const EDIT_WINDOW_TITLE_PLACEHOLDER: &str = "Window title (e.g. daruda — review window)";
+pub fn edit_window_title_modal_title() -> String { rust_i18n::t!("modal.edit_window_title_title").into_owned() }
+pub fn edit_window_title_placeholder() -> String { rust_i18n::t!("modal.edit_window_title_placeholder").into_owned() }
 
 // ============================================================================
 // Help menu
 // ============================================================================
 
-pub const MENU_DARUDA_HELP: &str = "Daruda Help";
-pub const MENU_KEYBOARD_SHORTCUTS: &str = "Keyboard Shortcuts";
-pub const MENU_EDIT_KEYMAP: &str = "Edit Keymap\u{2026}";
-pub const MENU_REPORT_ISSUE: &str = "Report Issue\u{2026}";
-pub const MENU_GITHUB_REPO: &str = "GitHub Repository";
+pub fn menu_daruda_help() -> String { rust_i18n::t!("menu.daruda_help").into_owned() }
+pub fn menu_keyboard_shortcuts() -> String { rust_i18n::t!("menu.keyboard_shortcuts").into_owned() }
+pub fn menu_edit_keymap() -> String { rust_i18n::t!("menu.edit_keymap").into_owned() }
+pub fn menu_report_issue() -> String { rust_i18n::t!("menu.report_issue").into_owned() }
+pub fn menu_github_repo() -> String { rust_i18n::t!("menu.github_repo").into_owned() }
 
 // ============================================================================
 // External URLs (Help menu targets)
@@ -124,7 +126,7 @@ pub const URL_REPORT_ISSUE: &str = "https://github.com/daruda-ai/daruda/issues/n
 pub const URL_HELP: &str = "https://github.com/daruda-ai/daruda#readme";
 
 // ============================================================================
-// Dock panel labels
+// Dock panel labels — kept as &'static str because panel_name() -> &'static str
 // ============================================================================
 
 pub const DOCK_PANEL_AGENT_TASKS: &str = "Agent Tasks";
@@ -138,64 +140,64 @@ pub const DOCK_PANEL_WORKTREES: &str = "Projects";
 // Right panel tab labels
 // ============================================================================
 
-pub const RIGHT_PANEL_TAB_USAGE: &str = "Usage";
-pub const RIGHT_PANEL_TAB_SKILLS: &str = "Skills";
-pub const RIGHT_PANEL_TAB_TOOLS: &str = "Tools";
-pub const RIGHT_PANEL_TAB_TASKS: &str = "Tasks";
+pub fn right_panel_tab_usage() -> String { rust_i18n::t!("dock.right_tab_usage").into_owned() }
+pub fn right_panel_tab_skills() -> String { rust_i18n::t!("dock.right_tab_skills").into_owned() }
+pub fn right_panel_tab_tools() -> String { rust_i18n::t!("dock.right_tab_tools").into_owned() }
+pub fn right_panel_tab_tasks() -> String { rust_i18n::t!("dock.right_tab_tasks").into_owned() }
 
 // ============================================================================
 // Dock (left dock) tab labels
 // ============================================================================
 
-pub const SIDEBAR_TAB_WORKTREES: &str = "Projects";
-pub const SIDEBAR_TAB_GIT: &str = "Git";
-pub const SIDEBAR_TAB_FILES: &str = "Files";
+pub fn sidebar_tab_worktrees() -> String { rust_i18n::t!("dock.sidebar_tab_worktrees").into_owned() }
+pub fn sidebar_tab_git() -> String { rust_i18n::t!("dock.sidebar_tab_git").into_owned() }
+pub fn sidebar_tab_files() -> String { rust_i18n::t!("dock.sidebar_tab_files").into_owned() }
 
 // ============================================================================
 // Right panel — Tasks tab labels (R-11 ~ R-18)
 // ============================================================================
 
 /// Filter dropdown labels.
-pub const TASK_FILTER_ALL: &str = "All";
-pub const TASK_FILTER_BACKLOG: &str = "Backlog";
-pub const TASK_FILTER_RUNNING: &str = "Running";
-pub const TASK_FILTER_DONE: &str = "Done";
+pub fn task_filter_all() -> String { rust_i18n::t!("task.filter_all").into_owned() }
+pub fn task_filter_backlog() -> String { rust_i18n::t!("task.filter_backlog").into_owned() }
+pub fn task_filter_running() -> String { rust_i18n::t!("task.filter_running").into_owned() }
+pub fn task_filter_done() -> String { rust_i18n::t!("task.filter_done").into_owned() }
 
 /// `[+ New]` button label.
-pub const TASK_NEW_BUTTON: &str = "+ New";
+pub fn task_new_button() -> String { rust_i18n::t!("task.new_button").into_owned() }
 
 /// Tasks tab search bar — substring filter over title / prompt /
 /// notes / branch_name. Placement and behaviour mirror the Skills tab
 /// search (`SKILLS_SEARCH_*`). Cleared via the in-field `✕` overlay.
-pub const TASK_SEARCH_PLACEHOLDER: &str = "Search tasks…";
-pub const TASK_SEARCH_EMPTY_PREFIX: &str = "No tasks match ";
+pub fn task_search_placeholder() -> String { rust_i18n::t!("task.search_placeholder").into_owned() }
+pub fn task_search_empty_prefix() -> String { rust_i18n::t!("task.search_empty_prefix").into_owned() }
 pub const TASK_SEARCH_CLEAR_ICON: &str = "✕";
 
 /// Action labels rendered inside the status-pill dropdown. The pill
 /// itself shows the task's current state; the dropdown lists the
 /// transitions and meta actions valid for that state (R-26).
-pub const TASK_ACTION_START: &str = "Start";
-pub const TASK_ACTION_OPEN: &str = "Open worktree";
-pub const TASK_ACTION_STOP: &str = "Stop";
-pub const TASK_ACTION_DELETE: &str = "Delete";
-pub const TASK_ACTION_REOPEN: &str = "Reopen";
-pub const TASK_ACTION_RETRY: &str = "Retry";
-pub const TASK_ACTION_EDIT: &str = "Edit";
+pub fn task_action_start() -> String { rust_i18n::t!("task.action_start").into_owned() }
+pub fn task_action_open() -> String { rust_i18n::t!("task.action_open").into_owned() }
+pub fn task_action_stop() -> String { rust_i18n::t!("task.action_stop").into_owned() }
+pub fn task_action_delete() -> String { rust_i18n::t!("common.btn_delete").into_owned() }
+pub fn task_action_reopen() -> String { rust_i18n::t!("task.action_reopen").into_owned() }
+pub fn task_action_retry() -> String { rust_i18n::t!("task.action_retry").into_owned() }
+pub fn task_action_edit() -> String { rust_i18n::t!("common.btn_edit").into_owned() }
 /// `View error` (R-26 Error state). Opens an OK-only alert dialog
 /// showing the full `TaskState::Error.message` so users can see the
 /// truncated row text in full.
-pub const TASK_ACTION_VIEW_ERROR: &str = "View error";
+pub fn task_action_view_error() -> String { rust_i18n::t!("task.action_view_error").into_owned() }
 /// Title shown on the alert dialog opened by `View error`.
-pub const TASK_ERROR_DIALOG_TITLE: &str = "Task error";
+pub fn task_error_dialog_title() -> String { rust_i18n::t!("task.error_dialog_title").into_owned() }
 /// OK-button label on the View error alert dialog.
-pub const TASK_ERROR_DIALOG_CLOSE: &str = "Close";
+pub fn task_error_dialog_close() -> String { rust_i18n::t!("common.btn_close").into_owned() }
 
 /// `[📄 Open file]` button shown next to the Prompt section header in
 /// the TaskEdit pane (R-20 follow-up). Click opens
 /// `<wt>/.daruda/task-<branch>.md` in a fresh file viewer tab when
 /// the task has a worktree (Backlog / draft tasks disable the button
 /// since no on-disk file exists yet).
-pub const TASK_EDIT_OPEN_FILE_BUTTON: &str = "📄 Open file";
+pub fn task_edit_open_file_button() -> String { rust_i18n::t!("task.edit_open_file_button").into_owned() }
 
 /// Subtext rendered directly under the "Notes" label in the TaskEdit
 /// pane. Notes are stored on the `Task` and surface in search, but
@@ -203,17 +205,17 @@ pub const TASK_EDIT_OPEN_FILE_BUTTON: &str = "📄 Open file";
 /// that contract visible so users don't expect the agent to read
 /// their journal. Kept agent-agnostic since `AgentType` is reserved
 /// for future codex / gemini / copilot expansion.
-pub const TASK_EDIT_NOTES_HINT: &str = "Not included in the agent prompt.";
+pub fn task_edit_notes_hint() -> String { rust_i18n::t!("task.edit_notes_hint").into_owned() }
 
 /// Field label for the base-worktree selector on the TaskEdit pane.
-pub const TASK_EDIT_BASE_LABEL: &str = "Base";
+pub fn task_edit_base_label() -> String { rust_i18n::t!("task.edit_base_label").into_owned() }
 
 /// Trailing suffix on the option that maps to "no explicit base
 /// worktree — fall through to the project's active worktree at
 /// start_task time". Used as both the placeholder and the
 /// first-option label so empty drafts read as "Active worktree"
 /// rather than blank.
-pub const TASK_EDIT_BASE_ACTIVE_LABEL: &str = "Active worktree";
+pub fn task_edit_base_active_label() -> String { rust_i18n::t!("task.edit_base_active_label").into_owned() }
 
 /// Glyph appended to the status pill label as the dropdown chevron.
 /// Leading space provides the visual gap between the label and the
@@ -223,13 +225,13 @@ pub const TASK_PILL_CHEVRON: &str = " ▾";
 /// TaskEdit pane close prompt — copy mirrors Zed `pane.rs:1981-1998`
 /// (R-25 / I-8). Draft branch uses a stronger "Discard new task?"
 /// heading since the work has never been persisted.
-pub const TASK_EDIT_SAVE_PROMPT_PREFIX: &str = "Save changes to “";
-pub const TASK_EDIT_SAVE_PROMPT_SUFFIX: &str = "” before closing?";
-pub const TASK_EDIT_DISCARD_DRAFT_PROMPT: &str = "Discard new task?";
-pub const TASK_EDIT_SAVE: &str = "Save";
-pub const TASK_EDIT_SAVE_DRAFT: &str = "Save Draft";
-pub const TASK_EDIT_DISCARD: &str = "Discard";
-pub const TASK_EDIT_CANCEL: &str = "Cancel";
+pub fn task_edit_save_prompt_prefix() -> String { rust_i18n::t!("task.edit_save_prompt_prefix").into_owned() }
+pub fn task_edit_save_prompt_suffix() -> String { rust_i18n::t!("task.edit_save_prompt_suffix").into_owned() }
+pub fn task_edit_discard_draft_prompt() -> String { rust_i18n::t!("task.edit_discard_draft_prompt").into_owned() }
+pub fn task_edit_save() -> String { rust_i18n::t!("common.btn_save").into_owned() }
+pub fn task_edit_save_draft() -> String { rust_i18n::t!("task.edit_save_draft").into_owned() }
+pub fn task_edit_discard() -> String { rust_i18n::t!("task.edit_discard").into_owned() }
+pub fn task_edit_cancel() -> String { rust_i18n::t!("common.btn_cancel").into_owned() }
 
 /// Tab-title dirty indicator (R-25). Painted before the title with a
 /// trailing space so titles align across dirty / clean tabs.
@@ -239,38 +241,38 @@ pub const TAB_TITLE_DIRTY_DOT: &str = "● ";
 /// external editor rewrites `<wt>/.daruda/task-<branch>.md` and the
 /// pane already has unsaved edits.
 pub const PROMPT_WATCHER_HEADING_PREFIX: &str = "“";
-pub const PROMPT_WATCHER_HEADING_SUFFIX: &str = "” changed on disk";
-pub const PROMPT_WATCHER_DETAIL: &str = "Reload the file or keep your in-pane edits?";
-pub const PROMPT_WATCHER_USE_DISK: &str = "Use disk version";
-pub const PROMPT_WATCHER_KEEP_MINE: &str = "Keep my version";
-pub const PROMPT_WATCHER_DIFF: &str = "Diff";
+pub fn prompt_watcher_heading_suffix() -> String { rust_i18n::t!("task.watcher_heading_suffix").into_owned() }
+pub fn prompt_watcher_detail() -> String { rust_i18n::t!("task.watcher_detail").into_owned() }
+pub fn prompt_watcher_use_disk() -> String { rust_i18n::t!("task.watcher_use_disk").into_owned() }
+pub fn prompt_watcher_keep_mine() -> String { rust_i18n::t!("task.watcher_keep_mine").into_owned() }
+pub fn prompt_watcher_diff() -> String { rust_i18n::t!("task.watcher_diff").into_owned() }
 
 /// Tab / window batch close prompt (R-25). Single 3-button modal
 /// summarising every dirty TaskEdit pane in the closing scope.
-pub const TAB_CLOSE_BATCH_HEADING: &str = "Save changes to the following tasks before closing?";
-pub const TAB_CLOSE_BATCH_SAVE_ALL: &str = "Save all";
-pub const TAB_CLOSE_BATCH_DISCARD_ALL: &str = "Discard all";
+pub fn tab_close_batch_heading() -> String { rust_i18n::t!("task.batch_close_heading").into_owned() }
+pub fn tab_close_batch_save_all() -> String { rust_i18n::t!("task.batch_save_all").into_owned() }
+pub fn tab_close_batch_discard_all() -> String { rust_i18n::t!("task.batch_discard_all").into_owned() }
 
 /// Title for the toast surfaced when one or more panes in a Save-all
 /// batch fail to commit because their branch input is invalid. The
 /// detail message lists the affected task titles (M-2 review note).
-pub const TASK_BATCH_SAVE_FAILED_TITLE: &str = "Some tasks couldn't be saved";
+pub fn task_batch_save_failed_title() -> String { rust_i18n::t!("task.batch_save_failed_title").into_owned() }
 
 /// Done end-reason flavour appended inline as `Done (<flavour>)`.
-pub const TASK_DONE_FLAVOUR_STOP: &str = "Stop";
-pub const TASK_DONE_FLAVOUR_PROMPT_INPUT_EXIT: &str = "Prompt Exit";
-pub const TASK_DONE_FLAVOUR_LOGOUT: &str = "Logout";
-pub const TASK_DONE_FLAVOUR_OTHER: &str = "Other";
+pub fn task_done_flavour_stop() -> String { rust_i18n::t!("task.done_flavour_stop").into_owned() }
+pub fn task_done_flavour_prompt_input_exit() -> String { rust_i18n::t!("task.done_flavour_prompt_input_exit").into_owned() }
+pub fn task_done_flavour_logout() -> String { rust_i18n::t!("task.done_flavour_logout").into_owned() }
+pub fn task_done_flavour_other() -> String { rust_i18n::t!("task.done_flavour_other").into_owned() }
 
 /// Subtask UI strings (R-21). The section title is suffixed with the
 /// `(done/total done)` counter at render time; the auto/manual labels
 /// surface the `source_session_id` namespace split (I-14).
-pub const TASK_SUBTASK_SECTION_TITLE: &str = "Subtasks";
-pub const TASK_SUBTASK_PROGRESS_SUFFIX: &str = " done";
-pub const TASK_SUBTASK_ADD_PLACEHOLDER: &str = "Add subtask…";
-pub const TASK_SUBTASK_DRAFT_HINT: &str = "Save the task to add subtasks.";
-pub const TASK_SUBTASK_AUTO_LABEL: &str = "auto";
-pub const TASK_SUBTASK_MANUAL_LABEL: &str = "manual";
+pub fn task_subtask_section_title() -> String { rust_i18n::t!("task.subtask_section_title").into_owned() }
+pub fn task_subtask_progress_suffix() -> String { rust_i18n::t!("task.subtask_progress_suffix").into_owned() }
+pub fn task_subtask_add_placeholder() -> String { rust_i18n::t!("task.subtask_add_placeholder").into_owned() }
+pub fn task_subtask_draft_hint() -> String { rust_i18n::t!("task.subtask_draft_hint").into_owned() }
+pub fn task_subtask_auto_label() -> String { rust_i18n::t!("task.subtask_auto_label").into_owned() }
+pub fn task_subtask_manual_label() -> String { rust_i18n::t!("task.subtask_manual_label").into_owned() }
 
 // ============================================================================
 // Right panel — Usage tab labels
@@ -278,22 +280,22 @@ pub const TASK_SUBTASK_MANUAL_LABEL: &str = "manual";
 
 /// Heading shown above the per-session list — the row that aggregates
 /// every active session's tokens + estimated cost.
-pub const USAGE_TOTAL_LABEL: &str = "Total";
+pub fn usage_total_label() -> String { rust_i18n::t!("usage.total_label").into_owned() }
 
 /// Inline label for inbound (user → Claude) tokens.
-pub const USAGE_IN_LABEL: &str = "in";
+pub fn usage_in_label() -> String { rust_i18n::t!("usage.in_label").into_owned() }
 
 /// Inline label for outbound (Claude → user) tokens.
-pub const USAGE_OUT_LABEL: &str = "out";
+pub fn usage_out_label() -> String { rust_i18n::t!("usage.out_label").into_owned() }
 
 /// Inline label for prompt-cache tokens (read + creation combined).
-pub const USAGE_CACHE_LABEL: &str = "cache";
+pub fn usage_cache_label() -> String { rust_i18n::t!("usage.cache_label").into_owned() }
 
 /// Body shown when no Claude Code session has produced any usage
 /// data yet. Intentionally instructional rather than a bare "no
 /// data" — first-launch users may not realise daruda needs an
 /// active Claude session to populate this view.
-pub const USAGE_EMPTY_STATE: &str = "Waiting for Claude Code activity in any worktree.";
+pub fn usage_empty_state() -> String { rust_i18n::t!("usage.empty_state").into_owned() }
 
 /// Fallback worktree label when a session's `worktree_path` has no
 /// resolvable file-name component (e.g. root path).
@@ -304,19 +306,19 @@ pub const USAGE_UNKNOWN_WORKTREE: &str = "?";
 /// user-facing strings; lookups go through [`usage_window_label`]
 /// so a single source of truth for the picker's option list lives
 /// here in the surface module.
-pub const USAGE_WINDOW_LIFETIME: &str = "Lifetime";
-pub const USAGE_WINDOW_LAST_5H: &str = "Last 5h";
-pub const USAGE_WINDOW_LAST_24H: &str = "Last 24h";
-pub const USAGE_WINDOW_LAST_7D: &str = "Last 7d";
+pub fn usage_window_lifetime() -> String { rust_i18n::t!("usage.window_lifetime").into_owned() }
+pub fn usage_window_last_5h() -> String { rust_i18n::t!("usage.window_last_5h").into_owned() }
+pub fn usage_window_last_24h() -> String { rust_i18n::t!("usage.window_last_24h").into_owned() }
+pub fn usage_window_last_7d() -> String { rust_i18n::t!("usage.window_last_7d").into_owned() }
 
 /// Resolve a `UsageWindow` variant to its dropdown / summary label.
-pub fn usage_window_label(window: daruda_store::project::UsageWindow) -> &'static str {
+pub fn usage_window_label(window: daruda_store::project::UsageWindow) -> String {
     use daruda_store::project::UsageWindow;
     match window {
-        UsageWindow::All => USAGE_WINDOW_LIFETIME,
-        UsageWindow::Last5h => USAGE_WINDOW_LAST_5H,
-        UsageWindow::Last24h => USAGE_WINDOW_LAST_24H,
-        UsageWindow::Last7d => USAGE_WINDOW_LAST_7D,
+        UsageWindow::All => usage_window_lifetime(),
+        UsageWindow::Last5h => usage_window_last_5h(),
+        UsageWindow::Last24h => usage_window_last_24h(),
+        UsageWindow::Last7d => usage_window_last_7d(),
     }
 }
 
@@ -325,13 +327,13 @@ pub fn usage_window_label(window: daruda_store::project::UsageWindow) -> &'stati
 // ----------------------------------------------------------------
 
 /// Label for the 5-hour rolling window gauge.
-pub const USAGE_LIMIT_5H_LABEL: &str = "5h";
+pub fn usage_limit_5h_label() -> String { rust_i18n::t!("usage.limit_5h_label").into_owned() }
 /// Label for the 7-day rolling window gauge.
-pub const USAGE_LIMIT_7D_LABEL: &str = "7d";
+pub fn usage_limit_7d_label() -> String { rust_i18n::t!("usage.limit_7d_label").into_owned() }
 /// Placeholder label for either gauge when the OAuth token is
 /// unavailable, the API call failed, or the window is missing from
 /// the response.
-pub const USAGE_LIMIT_UNAVAILABLE: &str = "Unavailable";
+pub fn usage_limit_unavailable() -> String { rust_i18n::t!("usage.limit_unavailable").into_owned() }
 
 /// Format a "resets in …" countdown for the gauge subtitle. Lives
 /// here (not on `Duration`) so the precise rounding behaviour is
@@ -375,20 +377,20 @@ pub fn format_reset_countdown(remaining: std::time::Duration) -> String {
 /// upstream description on the green path because Statuspage tends
 /// to leave stale "All systems normal" descriptions; daruda mirrors
 /// that behavior.
-pub const STATUS_LABEL_OPERATIONAL: &str = "Operational";
+pub fn status_label_operational() -> String { rust_i18n::t!("status.operational").into_owned() }
 /// Default label for `minor` indicator when the response carries no
 /// description (rare but possible).
-pub const STATUS_LABEL_MINOR_DEFAULT: &str = "Minor disruption";
+pub fn status_label_minor_default() -> String { rust_i18n::t!("status.minor_default").into_owned() }
 /// Default label for `major` indicator when the response carries no
 /// description.
-pub const STATUS_LABEL_MAJOR_DEFAULT: &str = "Partial outage";
+pub fn status_label_major_default() -> String { rust_i18n::t!("status.major_default").into_owned() }
 /// Default label for `critical` indicator when the response carries
 /// no description.
-pub const STATUS_LABEL_CRITICAL_DEFAULT: &str = "Major outage";
+pub fn status_label_critical_default() -> String { rust_i18n::t!("status.critical_default").into_owned() }
 /// Label shown when the indicator is `Unknown` (parse miss or
 /// before-first-fetch). Distinct from operational so the renderer
 /// can dim the pill instead of pretending green.
-pub const STATUS_LABEL_UNKNOWN: &str = "Status unavailable";
+pub fn status_label_unknown() -> String { rust_i18n::t!("status.unknown").into_owned() }
 
 /// Resolve the user-visible label for a service-status snapshot.
 ///
@@ -400,25 +402,25 @@ pub const STATUS_LABEL_UNKNOWN: &str = "Status unavailable";
 pub fn service_status_label(status: &daruda_claude::ServiceStatus) -> String {
     use daruda_claude::StatusIndicator;
     match status.indicator {
-        StatusIndicator::None => STATUS_LABEL_OPERATIONAL.to_string(),
-        StatusIndicator::Unknown => STATUS_LABEL_UNKNOWN.to_string(),
+        StatusIndicator::None => status_label_operational().to_string(),
+        StatusIndicator::Unknown => status_label_unknown().to_string(),
         StatusIndicator::Minor => {
             if status.description.is_empty() {
-                STATUS_LABEL_MINOR_DEFAULT.to_string()
+                status_label_minor_default().to_string()
             } else {
                 status.description.clone()
             }
         }
         StatusIndicator::Major => {
             if status.description.is_empty() {
-                STATUS_LABEL_MAJOR_DEFAULT.to_string()
+                status_label_major_default().to_string()
             } else {
                 status.description.clone()
             }
         }
         StatusIndicator::Critical => {
             if status.description.is_empty() {
-                STATUS_LABEL_CRITICAL_DEFAULT.to_string()
+                status_label_critical_default().to_string()
             } else {
                 status.description.clone()
             }
@@ -448,21 +450,21 @@ pub fn welcome_changelog_open_policy() -> String { rust_i18n::t!("welcome.change
 // File viewer (pane-area viewer opened from Git Changes dock)
 // ============================================================================
 
-pub const FILE_VIEWER_LOADING: &str = "Loading…";
-pub const FILE_VIEWER_BINARY: &str = "Binary file";
-pub const FILE_VIEWER_DELETED: &str = "File deleted";
-pub const FILE_VIEWER_EMPTY_DIFF: &str = "No changes";
-pub const FILE_VIEWER_STAGED_BADGE: &str = " (staged)";
+pub fn file_viewer_loading() -> String { rust_i18n::t!("common.loading").into_owned() }
+pub fn file_viewer_binary() -> String { rust_i18n::t!("file_viewer.binary").into_owned() }
+pub fn file_viewer_deleted() -> String { rust_i18n::t!("file_viewer.deleted").into_owned() }
+pub fn file_viewer_empty_diff() -> String { rust_i18n::t!("file_viewer.empty_diff").into_owned() }
+pub fn file_viewer_staged_badge() -> String { rust_i18n::t!("file_viewer.staged_badge").into_owned() }
 pub const FILE_VIEWER_PATH_SEP: &str = std::path::MAIN_SEPARATOR_STR;
-pub const FILE_VIEWER_TAB_RAW: &str = "Raw";
-pub const FILE_VIEWER_TAB_PREVIEW: &str = "Preview";
-pub const FILE_VIEWER_TAB_CHANGES: &str = "Changes";
-pub const FILE_VIEWER_SHOW_ALL: &str = "Show all";
-pub const FILE_VIEWER_HIDE_UNCHANGED: &str = "Hide unchanged";
+pub fn file_viewer_tab_raw() -> String { rust_i18n::t!("file_viewer.tab_raw").into_owned() }
+pub fn file_viewer_tab_preview() -> String { rust_i18n::t!("file_viewer.tab_preview").into_owned() }
+pub fn file_viewer_tab_changes() -> String { rust_i18n::t!("file_viewer.tab_changes").into_owned() }
+pub fn file_viewer_show_all() -> String { rust_i18n::t!("file_viewer.show_all").into_owned() }
+pub fn file_viewer_hide_unchanged() -> String { rust_i18n::t!("file_viewer.hide_unchanged").into_owned() }
 pub const FILE_VIEWER_CLOSE: &str = "×";
-pub const FILE_VIEWER_NO_NEWLINE: &str = "\\ No newline at end of file";
-pub const FILE_VIEWER_COPY_ABS_PATH: &str = "Copy Absolute Path";
-pub const FILE_VIEWER_COPY_REL_PATH: &str = "Copy Path from Worktree Root";
+pub fn file_viewer_no_newline() -> String { rust_i18n::t!("file_viewer.no_newline").into_owned() }
+pub fn file_viewer_copy_abs_path() -> String { rust_i18n::t!("file_viewer.copy_abs_path").into_owned() }
+pub fn file_viewer_copy_rel_path() -> String { rust_i18n::t!("file_viewer.copy_rel_path").into_owned() }
 
 pub fn file_viewer_more_lines(count: usize) -> String {
     format!("… ({count} more lines)")
@@ -481,8 +483,8 @@ pub fn file_viewer_byte_truncated(shown: usize, max_bytes: usize, total_count: u
     }
 }
 
-pub const FILE_VIEWER_SEARCH_PLACEHOLDER: &str = "Search…";
-pub const FILE_VIEWER_SEARCH_NO_MATCH: &str = "No matches";
+pub fn file_viewer_search_placeholder() -> String { rust_i18n::t!("file_viewer.search_placeholder").into_owned() }
+pub fn file_viewer_search_no_match() -> String { rust_i18n::t!("file_viewer.search_no_match").into_owned() }
 pub const FILE_VIEWER_SEARCH_PREV: &str = "◀";
 pub const FILE_VIEWER_SEARCH_NEXT: &str = "▶";
 pub const FILE_VIEWER_SEARCH_CLOSE_BTN: &str = "✕";
@@ -495,119 +497,117 @@ pub const FILE_VIEWER_SEARCH_CLEAR: &str = "✕";
 /// Checkmark glyph rendered inside a checked checkbox.
 pub const UI_CHECKMARK: &str = "✓";
 /// Generic loading placeholder used in list widgets while items are fetched.
-pub const UI_LOADING: &str = "Loading…";
+pub fn ui_loading() -> String { rust_i18n::t!("common.loading").into_owned() }
 /// Keystroke-input hint shown while waiting for keystrokes to be recorded.
-pub const KEYSTROKE_HINT_RECORDING: &str = "Press keys…";
+pub fn keystroke_hint_recording() -> String { rust_i18n::t!("ui.keystroke_hint_recording").into_owned() }
 /// Keystroke-input hint shown when the widget is idle (nothing recorded yet).
-pub const KEYSTROKE_HINT_IDLE: &str = "Click to record";
+pub fn keystroke_hint_idle() -> String { rust_i18n::t!("ui.keystroke_hint_idle").into_owned() }
 
 // ----------------------------------------------------------------
 // Files view (W-7)
 // ----------------------------------------------------------------
 
-pub const FILES_HEADER_LABEL: &str = "Files";
-pub const FILES_REFRESH_TOOLTIP: &str = "Refresh";
+pub fn files_header_label() -> String { rust_i18n::t!("ui.files_header").into_owned() }
+pub fn files_refresh_tooltip() -> String { rust_i18n::t!("common.refresh").into_owned() }
 pub const FILES_REFRESH_GLYPH: &str = "⟳";
-pub const FILES_LOADING: &str = "Loading…";
-pub const FILES_EMPTY_DIR: &str = "(empty)";
-pub const FILES_LOAD_ERROR_PREFIX: &str = "Cannot read:";
+pub fn files_loading() -> String { rust_i18n::t!("common.loading").into_owned() }
+pub fn files_empty_dir() -> String { rust_i18n::t!("ui.files_empty_dir").into_owned() }
+pub fn files_load_error_prefix() -> String { rust_i18n::t!("ui.files_load_error_prefix").into_owned() }
 pub const FILES_CHEVRON_PENDING: &str = "…";
 
 // ----------------------------------------------------------------
 // Worktree context menu (W-8)
 // ----------------------------------------------------------------
 
-pub const CTX_REVEAL_IN_FINDER: &str = "Reveal in Finder";
-pub const CTX_COPY_PATH: &str = "Copy Path";
-pub const CTX_EDIT_DESCRIPTION: &str = "Edit Description\u{2026}";
-pub const CTX_RENAME: &str = "Rename\u{2026}";
-pub const EDIT_DESCRIPTION_MODAL_TITLE: &str = "Edit Description";
-pub const EDIT_DESCRIPTION_PLACEHOLDER: &str = "Description (e.g. PR #123 review)";
-pub const RENAME_MODAL_TITLE: &str = "Rename Worktree";
-pub const RENAME_PLACEHOLDER: &str = "Display name";
+pub fn ctx_reveal_in_finder() -> String { rust_i18n::t!("ctx.reveal_in_finder").into_owned() }
+pub fn ctx_copy_path() -> String { rust_i18n::t!("ctx.copy_path").into_owned() }
+pub fn ctx_edit_description() -> String { rust_i18n::t!("ctx.edit_description").into_owned() }
+pub fn ctx_rename() -> String { rust_i18n::t!("common.btn_rename").into_owned() }
+pub fn edit_description_modal_title() -> String { rust_i18n::t!("modal.edit_description_title").into_owned() }
+pub fn edit_description_placeholder() -> String { rust_i18n::t!("modal.edit_description_placeholder").into_owned() }
+pub fn rename_modal_title() -> String { rust_i18n::t!("modal.rename_worktree_title").into_owned() }
+pub fn rename_placeholder() -> String { rust_i18n::t!("modal.rename_placeholder").into_owned() }
 
 // Merge into context menu + modal
-pub const CTX_MERGE_INTO: &str = "Merge into\u{2026}";
-pub const CTX_MERGE_DISABLED_DIRTY: &str = "Commit your changes first";
-pub const CTX_MERGE_DISABLED_DETACHED: &str = "No branch (Detached HEAD)";
-pub const MERGE_MODAL_BRANCH_LABEL: &str = "Target branch:";
-pub const MERGE_MODAL_NO_TARGETS: &str = "Add another worktree to merge into";
-pub const MERGE_MODAL_MERGING: &str = "Merging\u{2026}";
-pub const MERGE_MODAL_ALREADY_UP_TO_DATE: &str = "Already up to date";
-pub const MERGE_MODAL_TARGET_DIRTY: &str =
-    "Target branch has uncommitted changes \u{2014} commit or stash them first";
-pub const MERGE_MODAL_CONFLICTS_NOTE: &str =
-    "Conflicts detected \u{2014} resolve them in the target worktree, then commit.";
-pub const MERGE_MODAL_ABORT_MERGE: &str = "Abort Merge";
-pub const MERGE_MODAL_REMOVE_AFTER: &str = "Remove worktree and branch after merge";
+pub fn ctx_merge_into() -> String { rust_i18n::t!("ctx.merge_into").into_owned() }
+pub fn ctx_merge_disabled_dirty() -> String { rust_i18n::t!("ctx.merge_disabled_dirty").into_owned() }
+pub fn ctx_merge_disabled_detached() -> String { rust_i18n::t!("ctx.merge_disabled_detached").into_owned() }
+pub fn merge_modal_branch_label() -> String { rust_i18n::t!("modal.merge_branch_label").into_owned() }
+pub fn merge_modal_no_targets() -> String { rust_i18n::t!("modal.merge_no_targets").into_owned() }
+pub fn merge_modal_merging() -> String { rust_i18n::t!("modal.merge_merging").into_owned() }
+pub fn merge_modal_already_up_to_date() -> String { rust_i18n::t!("modal.merge_already_up_to_date").into_owned() }
+pub fn merge_modal_target_dirty() -> String { rust_i18n::t!("modal.merge_target_dirty").into_owned() }
+pub fn merge_modal_conflicts_note() -> String { rust_i18n::t!("modal.merge_conflicts_note").into_owned() }
+pub fn merge_modal_abort_merge() -> String { rust_i18n::t!("modal.merge_abort").into_owned() }
+pub fn merge_modal_remove_after() -> String { rust_i18n::t!("modal.merge_remove_after").into_owned() }
 
 // ----------------------------------------------------------------
 // Bottom dock panels — tab modals + context menu (B-3 / B-4)
 // ----------------------------------------------------------------
 
-pub const CREATE_PANEL_TAB_MODAL_TITLE: &str = "New Panel Tab";
-pub const CREATE_PANEL_TAB_PLACEHOLDER: &str = "Tab name (e.g. AI, Build, Git)";
-pub const RENAME_PANEL_TAB_MODAL_TITLE: &str = "Rename Tab";
-pub const RENAME_PANEL_TAB_PLACEHOLDER: &str = "New tab name";
-pub const CTX_PANEL_TAB_RENAME: &str = "Rename\u{2026}";
-pub const CTX_PANEL_TAB_DELETE: &str = "Delete\u{2026}";
-pub const DELETE_PANEL_TAB_MODAL_TITLE: &str = "Delete Tab";
-pub const DELETE_PANEL_TAB_CONFIRM_LABEL: &str = "Delete";
-pub const CTX_MACRO_EDIT: &str = "Edit\u{2026}";
-pub const CTX_MACRO_DELETE: &str = "Delete\u{2026}";
-pub const DELETE_MACRO_MODAL_TITLE: &str = "Delete Macro";
-pub const DELETE_MACRO_CONFIRM_LABEL: &str = "Delete";
+pub fn create_panel_tab_modal_title() -> String { rust_i18n::t!("modal.create_panel_tab_title").into_owned() }
+pub fn create_panel_tab_placeholder() -> String { rust_i18n::t!("modal.create_panel_tab_placeholder").into_owned() }
+pub fn rename_panel_tab_modal_title() -> String { rust_i18n::t!("modal.rename_panel_tab_title").into_owned() }
+pub fn rename_panel_tab_placeholder() -> String { rust_i18n::t!("modal.rename_panel_tab_placeholder").into_owned() }
+pub fn ctx_panel_tab_rename() -> String { rust_i18n::t!("common.btn_rename").into_owned() }
+pub fn ctx_panel_tab_delete() -> String { rust_i18n::t!("ctx.panel_tab_delete").into_owned() }
+pub fn delete_panel_tab_modal_title() -> String { rust_i18n::t!("modal.delete_panel_tab_title").into_owned() }
+pub fn delete_panel_tab_confirm_label() -> String { rust_i18n::t!("common.btn_delete").into_owned() }
+pub fn ctx_macro_edit() -> String { rust_i18n::t!("ctx.macro_edit").into_owned() }
+pub fn ctx_macro_delete() -> String { rust_i18n::t!("ctx.macro_delete").into_owned() }
+pub fn delete_macro_modal_title() -> String { rust_i18n::t!("modal.delete_macro_title").into_owned() }
+pub fn delete_macro_confirm_label() -> String { rust_i18n::t!("common.btn_delete").into_owned() }
 
 // Bottom dock — row-preset selector (suffix in the tab strip).
-pub const ROW_PRESET_1_LABEL: &str = "1 row";
-pub const ROW_PRESET_2_LABEL: &str = "2 rows";
-pub const ROW_PRESET_3_LABEL: &str = "3 rows";
+pub fn row_preset_1_label() -> String { rust_i18n::t!("bottom_dock.row_preset_1").into_owned() }
+pub fn row_preset_2_label() -> String { rust_i18n::t!("bottom_dock.row_preset_2").into_owned() }
+pub fn row_preset_3_label() -> String { rust_i18n::t!("bottom_dock.row_preset_3").into_owned() }
 pub const ROW_PRESET_CHECK_PREFIX: &str = "\u{2713} ";
 pub const ROW_PRESET_UNCHECK_PREFIX: &str = "  ";
-pub const ROW_PRESET_TOOLTIP: &str = "Bottom dock height";
+pub fn row_preset_tooltip() -> String { rust_i18n::t!("bottom_dock.row_preset_tooltip").into_owned() }
 
 // ----------------------------------------------------------------
 // Bottom dock — terminal input panel (B-series)
 // ----------------------------------------------------------------
 
-pub const BOTTOM_INPUT_TAB_LABEL: &str = "Input";
-pub const BOTTOM_INPUT_PLACEHOLDER: &str = "Type to send to terminal\u{2026}";
-pub const BOTTOM_INPUT_SEND_BUTTON: &str = "Submit";
+pub fn bottom_input_tab_label() -> String { rust_i18n::t!("bottom_dock.input_tab_label").into_owned() }
+pub fn bottom_input_placeholder() -> String { rust_i18n::t!("bottom_dock.input_placeholder").into_owned() }
+pub fn bottom_input_send_button() -> String { rust_i18n::t!("common.btn_submit").into_owned() }
 
 // ----------------------------------------------------------------
 // Projects view — section header + empty state
 // ----------------------------------------------------------------
 
-pub const PROJECTS_SECTION_HEADER: &str = "PROJECTS";
-pub const PROJECTS_EMPTY_STATE: &str = "No project open";
+pub fn projects_section_header() -> String { rust_i18n::t!("projects.section_header").into_owned() }
+pub fn projects_empty_state() -> String { rust_i18n::t!("projects.empty_state").into_owned() }
 
 /// Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
 /// flat context menu instead of dispatching straight to the folder
 /// picker so the user can pick between adding a Project (existing
 /// behaviour) or creating a Group (previously only reachable via the
 /// `Cmd+Shift+N` shortcut / Command Palette).
-pub const SECTION_ADD_MENU_PROJECT: &str = "Add Project\u{2026}";
-pub const SECTION_ADD_MENU_GROUP: &str = "New Group\u{2026}";
+pub fn section_add_menu_project() -> String { rust_i18n::t!("projects.add_menu_project").into_owned() }
+pub fn section_add_menu_group() -> String { rust_i18n::t!("projects.add_menu_group").into_owned() }
 
 // Group context menu (§5.1) — rename / recolor / collapse / delete.
-pub const GROUP_MENU_RENAME: &str = "Rename Group\u{2026}";
-pub const GROUP_MENU_COLOR_RED: &str = "Color: Red";
-pub const GROUP_MENU_COLOR_ORANGE: &str = "Color: Orange";
-pub const GROUP_MENU_COLOR_YELLOW: &str = "Color: Yellow";
-pub const GROUP_MENU_COLOR_LIME: &str = "Color: Lime";
-pub const GROUP_MENU_COLOR_GREEN: &str = "Color: Green";
-pub const GROUP_MENU_COLOR_TEAL: &str = "Color: Teal";
-pub const GROUP_MENU_COLOR_CYAN: &str = "Color: Cyan";
-pub const GROUP_MENU_COLOR_BLUE: &str = "Color: Blue";
-pub const GROUP_MENU_COLOR_INDIGO: &str = "Color: Indigo";
-pub const GROUP_MENU_COLOR_PURPLE: &str = "Color: Purple";
-pub const GROUP_MENU_COLOR_PINK: &str = "Color: Pink";
-pub const GROUP_MENU_COLOR_CLEAR: &str = "Clear color";
-pub const GROUP_MENU_COLLAPSE: &str = "Collapse";
-pub const GROUP_MENU_EXPAND: &str = "Expand";
-pub const GROUP_MENU_DELETE: &str = "Delete Group";
-pub const GROUP_RENAME_DIALOG_TITLE: &str = "Rename Group";
-pub const GROUP_RENAME_DIALOG_PLACEHOLDER: &str = "Group name";
+pub fn group_menu_rename() -> String { rust_i18n::t!("group.menu_rename").into_owned() }
+pub fn group_menu_color_red() -> String { rust_i18n::t!("group.menu_color_red").into_owned() }
+pub fn group_menu_color_orange() -> String { rust_i18n::t!("group.menu_color_orange").into_owned() }
+pub fn group_menu_color_yellow() -> String { rust_i18n::t!("group.menu_color_yellow").into_owned() }
+pub fn group_menu_color_lime() -> String { rust_i18n::t!("group.menu_color_lime").into_owned() }
+pub fn group_menu_color_green() -> String { rust_i18n::t!("group.menu_color_green").into_owned() }
+pub fn group_menu_color_teal() -> String { rust_i18n::t!("group.menu_color_teal").into_owned() }
+pub fn group_menu_color_cyan() -> String { rust_i18n::t!("group.menu_color_cyan").into_owned() }
+pub fn group_menu_color_blue() -> String { rust_i18n::t!("group.menu_color_blue").into_owned() }
+pub fn group_menu_color_indigo() -> String { rust_i18n::t!("group.menu_color_indigo").into_owned() }
+pub fn group_menu_color_purple() -> String { rust_i18n::t!("group.menu_color_purple").into_owned() }
+pub fn group_menu_color_pink() -> String { rust_i18n::t!("group.menu_color_pink").into_owned() }
+pub fn group_menu_color_clear() -> String { rust_i18n::t!("group.menu_color_clear").into_owned() }
+pub fn group_menu_collapse() -> String { rust_i18n::t!("group.menu_collapse").into_owned() }
+pub fn group_menu_expand() -> String { rust_i18n::t!("group.menu_expand").into_owned() }
+pub fn group_menu_delete() -> String { rust_i18n::t!("group.menu_delete").into_owned() }
+pub fn group_rename_dialog_title() -> String { rust_i18n::t!("modal.group_rename_title").into_owned() }
+pub fn group_rename_dialog_placeholder() -> String { rust_i18n::t!("modal.group_rename_placeholder").into_owned() }
 
 /// Color presets exposed by the Group context menu. Hex strings are
 /// stored on `SerializedGroup::color` so the dock's group header
@@ -627,28 +627,22 @@ pub const GROUP_PRESET_PINK: &str = "#f472b6";
 
 // Project context menu (§5.1) — rename / move to group / delete /
 // open in new window.
-pub const PROJECT_MENU_RENAME: &str = "Rename Project\u{2026}";
-pub const PROJECT_MENU_MOVE_TO_GROUP: &str = "Move to Group\u{2026}";
-pub const PROJECT_MENU_DELETE: &str = "Delete Project\u{2026}";
-pub const PROJECT_MENU_OPEN_IN_NEW_WINDOW: &str = "Open in New Window";
+pub fn project_menu_rename() -> String { rust_i18n::t!("project.menu_rename").into_owned() }
+pub fn project_menu_move_to_group() -> String { rust_i18n::t!("project.menu_move_to_group").into_owned() }
+pub fn project_menu_delete() -> String { rust_i18n::t!("project.menu_delete").into_owned() }
+pub fn project_menu_open_in_new_window() -> String { rust_i18n::t!("project.menu_open_in_new_window").into_owned() }
 
 // ----------------------------------------------------------------
 // Claude integration banner (dock prompt to install hooks)
 // ----------------------------------------------------------------
 
 pub const CLAUDE_BANNER_ICON: &str = "ⓘ";
-pub const CLAUDE_BANNER_TITLE: &str = "Claude Code integration disabled";
-pub const CLAUDE_BANNER_HINT: &str = "Click to enable accurate session status";
+pub fn claude_banner_title() -> String { rust_i18n::t!("claude.banner_title").into_owned() }
+pub fn claude_banner_hint() -> String { rust_i18n::t!("claude.banner_hint").into_owned() }
 
-pub const CLAUDE_CONSENT_TITLE: &str = "Enable Claude Code integration?";
-pub const CLAUDE_CONSENT_BODY: &str = concat!(
-    "daruda will register hook entries in ~/.claude/settings.json so Claude Code ",
-    "can report session status (Working / Needs attention / Idle) for each ",
-    "worktree.\n\nOther tools' hooks are preserved. ",
-    "You can disable this anytime via the command palette ",
-    "(\"Claude: Uninstall Hook Integration\")."
-);
-pub const CLAUDE_CONSENT_CONFIRM: &str = "Enable";
+pub fn claude_consent_title() -> String { rust_i18n::t!("claude.consent_title").into_owned() }
+pub fn claude_consent_body() -> String { rust_i18n::t!("claude.consent_body").into_owned() }
+pub fn claude_consent_confirm() -> String { rust_i18n::t!("claude.consent_confirm").into_owned() }
 
 /// Per-badge tooltip — appended after the session_id prefix to mark
 /// the truncation. Localized separately from the active suffix so a
@@ -657,119 +651,113 @@ pub const CLAUDE_BADGE_TOOLTIP_ELLIPSIS: &str = "…";
 /// Suffix appended to the active session's badge tooltip to identify
 /// the one that's bound to the focused tab. Empty for inactive
 /// siblings.
-pub const CLAUDE_BADGE_TOOLTIP_ACTIVE_SUFFIX: &str = " (active in this tab)";
+pub fn claude_badge_tooltip_active_suffix() -> String { rust_i18n::t!("claude.badge_active_suffix").into_owned() }
 /// Sub-row label preceding the session badges (e.g. `"3 sessions:"`).
 /// Rendered as `format!("{count}{SUFFIX}")`.
-pub const CLAUDE_SESSIONS_LABEL_SUFFIX: &str = " sessions:";
+pub fn claude_sessions_label_suffix() -> String { rust_i18n::t!("claude.sessions_label_suffix").into_owned() }
 
 // ----------------------------------------------------------------
 // Git Changes view (W-6)
 // ----------------------------------------------------------------
 
 /// Placeholder text for the git commit message input.
-pub const GIT_COMMIT_PLACEHOLDER: &str = "Commit message\u{2026} (Cmd+Enter to commit)";
+pub fn git_commit_placeholder() -> String { rust_i18n::t!("git.commit_placeholder").into_owned() }
 /// Button label for the commit action in the git commit footer.
-pub const GIT_COMMIT_BTN: &str = "Commit";
+pub fn git_commit_btn() -> String { rust_i18n::t!("git.commit_btn").into_owned() }
 /// Button label for the push action in the git commit footer.
-pub const GIT_PUSH_BTN: &str = "Push";
+pub fn git_push_btn() -> String { rust_i18n::t!("git.push_btn").into_owned() }
 
 /// Placeholder shown while the first `git status` for a worktree is
 /// still in flight (cache miss).
-pub const GIT_LOADING_CHANGES: &str = "Loading changes\u{2026}";
+pub fn git_loading_changes() -> String { rust_i18n::t!("git.loading_changes").into_owned() }
 /// Manual-refresh button label inside the loading placeholder.
-pub const GIT_REFRESH_BTN: &str = "Refresh";
+pub fn git_refresh_btn() -> String { rust_i18n::t!("common.refresh").into_owned() }
 
 /// Title for the discard-file confirmation dialog.
-pub const GIT_CONFIRM_DISCARD_TITLE: &str = "Discard changes?";
+pub fn git_confirm_discard_title() -> String { rust_i18n::t!("git.confirm_discard_title").into_owned() }
 /// OK button label for the discard-file confirmation dialog.
-pub const GIT_CONFIRM_DISCARD_OK: &str = "Discard";
+pub fn git_confirm_discard_ok() -> String { rust_i18n::t!("git.confirm_discard_ok").into_owned() }
 
 /// Single-conflict banner shown at the top of the Git Changes view when
 /// `git status` reports one merge conflict. Multi-conflict variants are
 /// formatted inline with the count.
-pub const GIT_CONFLICT_BANNER_SINGLE: &str = "1 conflict — resolve before committing.";
+pub fn git_conflict_banner_single() -> String { rust_i18n::t!("git.conflict_banner_single").into_owned() }
 
 /// Button label in the non-git worktree placeholder. Click runs
 /// `git init` in the worktree path.
-pub const GIT_INIT_BTN: &str = "Initialize Git Repo";
+pub fn git_init_btn() -> String { rust_i18n::t!("git.init_btn").into_owned() }
 
 /// Title for the push confirmation dialog.
-pub const GIT_CONFIRM_PUSH_TITLE: &str = "Push to remote?";
+pub fn git_confirm_push_title() -> String { rust_i18n::t!("git.confirm_push_title").into_owned() }
 /// Body text for the push confirmation dialog.
-pub const GIT_CONFIRM_PUSH_BODY: &str = "Push the current branch to its remote.";
+pub fn git_confirm_push_body() -> String { rust_i18n::t!("git.confirm_push_body").into_owned() }
 /// OK button label for the push confirmation dialog.
-pub const GIT_CONFIRM_PUSH_OK: &str = "Push";
+pub fn git_confirm_push_ok() -> String { rust_i18n::t!("git.confirm_push_ok").into_owned() }
 
 /// Title for the commit confirmation dialog.
-pub const GIT_CONFIRM_COMMIT_TITLE: &str = "Commit changes?";
+pub fn git_confirm_commit_title() -> String { rust_i18n::t!("git.confirm_commit_title").into_owned() }
 /// OK button label for the commit confirmation dialog.
-pub const GIT_CONFIRM_COMMIT_OK: &str = "Commit";
+pub fn git_confirm_commit_ok() -> String { rust_i18n::t!("git.confirm_commit_ok").into_owned() }
 
 /// Title for the amend confirmation dialog.
-pub const GIT_CONFIRM_AMEND_TITLE: &str = "Amend last commit?";
+pub fn git_confirm_amend_title() -> String { rust_i18n::t!("git.confirm_amend_title").into_owned() }
 /// Body text for the amend confirmation dialog.
-pub const GIT_CONFIRM_AMEND_BODY: &str =
-    "This rewrites the last commit. If it has already been pushed, you will need a force-push.";
+pub fn git_confirm_amend_body() -> String { rust_i18n::t!("git.confirm_amend_body").into_owned() }
 /// OK button label for the amend confirmation dialog.
-pub const GIT_CONFIRM_AMEND_OK: &str = "Amend";
+pub fn git_confirm_amend_ok() -> String { rust_i18n::t!("git.confirm_amend_ok").into_owned() }
 
 /// Branch label fallback when HEAD is detached.
-pub const GIT_DETACHED_LABEL: &str = "detached";
+pub fn git_detached_label() -> String { rust_i18n::t!("git.detached_label").into_owned() }
 /// Section header for staged files in the Git Changes panel.
-pub const GIT_SECTION_STAGED: &str = "Staged";
+pub fn git_section_staged() -> String { rust_i18n::t!("git.section_staged").into_owned() }
 /// Section header for unstaged / untracked files in the Git Changes panel.
-pub const GIT_SECTION_CHANGES: &str = "Changes";
+pub fn git_section_changes() -> String { rust_i18n::t!("git.section_changes").into_owned() }
 /// Button label to stage all unstaged files at once.
-pub const GIT_STAGE_ALL: &str = "Stage All";
+pub fn git_stage_all() -> String { rust_i18n::t!("git.stage_all").into_owned() }
 /// Button label shown when all files are staged — clicks unstages everything.
-pub const GIT_UNSTAGE_ALL: &str = "Unstage All";
+pub fn git_unstage_all() -> String { rust_i18n::t!("git.unstage_all").into_owned() }
 /// Button label for the fetch action in the git remote bar.
-pub const GIT_FETCH_BTN: &str = "Fetch";
+pub fn git_fetch_btn() -> String { rust_i18n::t!("git.fetch_btn").into_owned() }
 /// Button label for the pull action in the git remote bar.
-pub const GIT_PULL_BTN: &str = "Pull";
+pub fn git_pull_btn() -> String { rust_i18n::t!("git.pull_btn").into_owned() }
 /// Context menu — stage a single file.
-pub const CTX_GIT_STAGE: &str = "Stage";
+pub fn ctx_git_stage() -> String { rust_i18n::t!("ctx.git_stage").into_owned() }
 /// Context menu — unstage a single file.
-pub const CTX_GIT_UNSTAGE: &str = "Unstage";
+pub fn ctx_git_unstage() -> String { rust_i18n::t!("ctx.git_unstage").into_owned() }
 /// Context menu — discard working-tree changes for a file.
-pub const CTX_GIT_DISCARD: &str = "Discard Changes";
+pub fn ctx_git_discard() -> String { rust_i18n::t!("ctx.git_discard").into_owned() }
 /// Context menu — open the diff viewer for a file.
-pub const CTX_GIT_OPEN_DIFF: &str = "Open Diff";
+pub fn ctx_git_open_diff() -> String { rust_i18n::t!("ctx.git_open_diff").into_owned() }
 /// Commit dropdown — amend the last commit with the current staged changes.
-pub const CTX_GIT_COMMIT_AMEND: &str = "Amend Last Commit";
+pub fn ctx_git_commit_amend() -> String { rust_i18n::t!("ctx.git_commit_amend").into_owned() }
 
 // ----------------------------------------------------------------
 // Agent chat — role labels
 // ----------------------------------------------------------------
 
 /// Chat label for messages authored by the user.
-pub const AGENT_CHAT_LABEL_USER: &str = "You";
+pub fn agent_chat_label_user() -> String { rust_i18n::t!("agent.chat_label_user").into_owned() }
 /// Chat label for messages authored by the agent.
-pub const AGENT_CHAT_LABEL_AGENT: &str = "Agent";
+pub fn agent_chat_label_agent() -> String { rust_i18n::t!("agent.chat_label_agent").into_owned() }
 /// Chat label for system / tool messages injected into the chat stream.
-pub const AGENT_CHAT_LABEL_SYSTEM: &str = "System";
+pub fn agent_chat_label_system() -> String { rust_i18n::t!("agent.chat_label_system").into_owned() }
 
 // ----------------------------------------------------------------
 // Settings panel
 // ----------------------------------------------------------------
 
-pub const MENU_SETTINGS: &str = "Settings\u{2026}";
-pub const MENU_OPEN_PROJECT_CONFIG: &str = "Open Project Config\u{2026}";
-
 /// Status-bar / error-banner copy for the project-config flow.
-pub const PROJECT_CONFIG_NO_PROJECT: &str =
-    "Open a project first — project config has nowhere to live.";
-pub const PROJECT_CONFIG_NO_DIR: &str = "Cannot resolve project config directory.";
+pub fn project_config_no_project() -> String { rust_i18n::t!("settings.project_config_no_project").into_owned() }
+pub fn project_config_no_dir() -> String { rust_i18n::t!("settings.project_config_no_dir").into_owned() }
 
 /// Hover text on the small status-bar dot that indicates a
 /// project-layer config file exists for the active project.
-pub const STATUS_BAR_PROJECT_CONFIG_TOOLTIP: &str =
-    "Project config active — this workspace's [shell] section is overridden.";
+pub fn status_bar_project_config_tooltip() -> String { rust_i18n::t!("settings.status_bar_project_config_tooltip").into_owned() }
 
 /// Inline chip label shown in the status bar when the active git
 /// worktree is on a detached HEAD. Lowercase so it reads as a state
 /// tag, not a sentence.
-pub const STATUS_BAR_DETACHED_CHIP: &str = "detached";
+pub fn status_bar_detached_chip() -> String { rust_i18n::t!("settings.status_bar_detached_chip").into_owned() }
 
 /// Initial contents of a freshly-created
 /// `~/.config/daruda/projects/<repo>-<hash>/config.toml`. The user
@@ -788,148 +776,148 @@ pub const PROJECT_CONFIG_TEMPLATE: &str = "\
 # program = \"/usr/local/bin/zsh\"
 # close_pane_on_exit = true
 ";
-pub const SETTINGS_TITLE: &str = "Settings";
-pub const SETTINGS_SECTION_FONT: &str = "FONT";
-pub const SETTINGS_SECTION_CURSOR: &str = "CURSOR";
-pub const SETTINGS_SECTION_SHELL: &str = "SHELL";
-pub const SETTINGS_SECTION_WINDOW: &str = "WINDOW";
-pub const SETTINGS_LABEL_FONT_FAMILY: &str = "Family";
-pub const SETTINGS_LABEL_FONT_SIZE: &str = "Size";
-pub const SETTINGS_LABEL_VERTICAL_SPACING: &str = "Line Height";
-pub const SETTINGS_LABEL_HORIZONTAL_SPACING: &str = "Cell Width";
-pub const SETTINGS_LABEL_CURSOR_STYLE: &str = "Style";
-pub const SETTINGS_LABEL_CURSOR_BLINKING: &str = "Blinking";
-pub const SETTINGS_LABEL_CLOSE_ON_EXIT: &str = "Close pane on exit";
-pub const SETTINGS_LABEL_WINDOW_OPACITY: &str = "Opacity";
-pub const SETTINGS_LABEL_WINDOW_BLUR: &str = "Background Blur";
-pub const SETTINGS_CANCEL: &str = "Cancel";
-pub const SETTINGS_SAVE: &str = "Save";
-pub const SETTINGS_ERR_FONT_SIZE: &str = "Font size must be a number between 6 and 72.";
-pub const SETTINGS_ERR_SPACING: &str = "Spacing must be a number between 0.5 and 2.0.";
-pub const SETTINGS_ERR_OPACITY: &str = "Opacity must be a number between 0.1 and 1.0.";
-pub const SETTINGS_CURSOR_BLOCK: &str = "Block";
-pub const SETTINGS_CURSOR_UNDERLINE: &str = "Underline";
-pub const SETTINGS_CURSOR_BAR: &str = "Bar";
-pub const SETTINGS_SECTION_THEME: &str = "THEME";
-pub const SETTINGS_LABEL_THEME: &str = "Preset";
-pub const SETTINGS_LABEL_TERMINAL_THEME: &str = "Terminal Preset";
-pub const SETTINGS_LABEL_UI_THEME: &str = "UI Theme";
-pub const SETTINGS_UI_THEME_PHASE3_TOOLTIP: &str = "More themes coming in Phase 3.";
-pub const SETTINGS_SECTION_TERMINAL: &str = "TERMINAL";
-pub const SETTINGS_LABEL_SCROLLBACK: &str = "Scrollback Lines";
-pub const SETTINGS_ERR_SCROLLBACK: &str = "Scrollback must be a number between 1 000 and 500 000.";
-pub const SETTINGS_SECTION_SIDEBAR: &str = "SIDEBAR";
-pub const SETTINGS_LABEL_SHOW_HIDDEN: &str = "Show Hidden Files";
-pub const SETTINGS_LABEL_USE_GITIGNORE: &str = "Respect .gitignore";
-pub const SETTINGS_SECTION_FILE_VIEWER: &str = "FILE VIEWER";
-pub const SETTINGS_LABEL_SYNTAX_THEME: &str = "Syntax Theme";
+pub fn settings_title() -> String { rust_i18n::t!("settings.title").into_owned() }
+pub fn settings_section_font() -> String { rust_i18n::t!("settings.section_font").into_owned() }
+pub fn settings_section_cursor() -> String { rust_i18n::t!("settings.section_cursor").into_owned() }
+pub fn settings_section_shell() -> String { rust_i18n::t!("settings.section_shell").into_owned() }
+pub fn settings_section_window() -> String { rust_i18n::t!("settings.section_window").into_owned() }
+pub fn settings_label_font_family() -> String { rust_i18n::t!("settings.label_font_family").into_owned() }
+pub fn settings_label_font_size() -> String { rust_i18n::t!("settings.label_font_size").into_owned() }
+pub fn settings_label_vertical_spacing() -> String { rust_i18n::t!("settings.label_vertical_spacing").into_owned() }
+pub fn settings_label_horizontal_spacing() -> String { rust_i18n::t!("settings.label_horizontal_spacing").into_owned() }
+pub fn settings_label_cursor_style() -> String { rust_i18n::t!("settings.label_cursor_style").into_owned() }
+pub fn settings_label_cursor_blinking() -> String { rust_i18n::t!("settings.label_cursor_blinking").into_owned() }
+pub fn settings_label_close_on_exit() -> String { rust_i18n::t!("settings.label_close_on_exit").into_owned() }
+pub fn settings_label_window_opacity() -> String { rust_i18n::t!("settings.label_window_opacity").into_owned() }
+pub fn settings_label_window_blur() -> String { rust_i18n::t!("settings.label_window_blur").into_owned() }
+pub fn settings_cancel() -> String { rust_i18n::t!("common.btn_cancel").into_owned() }
+pub fn settings_save() -> String { rust_i18n::t!("common.btn_save").into_owned() }
+pub fn settings_err_font_size() -> String { rust_i18n::t!("settings.err_font_size").into_owned() }
+pub fn settings_err_spacing() -> String { rust_i18n::t!("settings.err_spacing").into_owned() }
+pub fn settings_err_opacity() -> String { rust_i18n::t!("settings.err_opacity").into_owned() }
+pub fn settings_cursor_block() -> String { rust_i18n::t!("settings.cursor_block").into_owned() }
+pub fn settings_cursor_underline() -> String { rust_i18n::t!("settings.cursor_underline").into_owned() }
+pub fn settings_cursor_bar() -> String { rust_i18n::t!("settings.cursor_bar").into_owned() }
+pub fn settings_section_theme() -> String { rust_i18n::t!("settings.section_theme").into_owned() }
+pub fn settings_label_theme() -> String { rust_i18n::t!("settings.label_theme").into_owned() }
+pub fn settings_label_language() -> String { rust_i18n::t!("settings.label_language").into_owned() }
+pub fn settings_language_auto() -> String { rust_i18n::t!("settings.language_auto").into_owned() }
+pub fn settings_language_en() -> String { rust_i18n::t!("settings.language_en").into_owned() }
+pub fn settings_language_ko() -> String { rust_i18n::t!("settings.language_ko").into_owned() }
+pub fn settings_label_terminal_theme() -> String { rust_i18n::t!("settings.label_terminal_theme").into_owned() }
+pub fn settings_label_ui_theme() -> String { rust_i18n::t!("settings.label_ui_theme").into_owned() }
+pub fn settings_ui_theme_phase3_tooltip() -> String { rust_i18n::t!("settings.ui_theme_phase3_tooltip").into_owned() }
+pub fn settings_section_terminal() -> String { rust_i18n::t!("settings.section_terminal").into_owned() }
+pub fn settings_label_scrollback() -> String { rust_i18n::t!("settings.label_scrollback").into_owned() }
+pub fn settings_err_scrollback() -> String { rust_i18n::t!("settings.err_scrollback").into_owned() }
+pub fn settings_section_sidebar() -> String { rust_i18n::t!("settings.section_sidebar").into_owned() }
+pub fn settings_label_show_hidden() -> String { rust_i18n::t!("settings.label_show_hidden").into_owned() }
+pub fn settings_label_use_gitignore() -> String { rust_i18n::t!("settings.label_use_gitignore").into_owned() }
+pub fn settings_section_file_viewer() -> String { rust_i18n::t!("settings.section_file_viewer").into_owned() }
+pub fn settings_label_syntax_theme() -> String { rust_i18n::t!("settings.label_syntax_theme").into_owned() }
 
 // ----------------------------------------------------------------
 // Dock nav labels — title-case for the new left-rail section list.
 // (The uppercase `SETTINGS_SECTION_*` consts above are still used as
 //  body-area headers inside each rendered section.)
 // ----------------------------------------------------------------
-pub const SETTINGS_NAV_GENERAL: &str = "General";
-pub const SETTINGS_NAV_FONT: &str = "Font";
-pub const SETTINGS_NAV_CURSOR: &str = "Cursor";
-pub const SETTINGS_NAV_SHELL: &str = "Shell";
-pub const SETTINGS_NAV_WINDOW: &str = "Window";
-pub const SETTINGS_NAV_TERMINAL: &str = "Terminal";
-pub const SETTINGS_NAV_SIDEBAR: &str = "Dock";
-pub const SETTINGS_NAV_FILE_VIEWER: &str = "File Viewer";
-pub const SETTINGS_NAV_CLIPBOARD: &str = "Clipboard";
-pub const SETTINGS_NAV_PANELS: &str = "Panels";
-pub const SETTINGS_NAV_CLAUDE_STATUS: &str = "Claude Status";
-pub const SETTINGS_NAV_NOTIFICATIONS: &str = "Notifications";
-pub const SETTINGS_NAV_KEYMAP: &str = "Keymap";
-pub const SETTINGS_NAV_PLUGIN: &str = "Plugin";
+pub fn settings_nav_general() -> String { rust_i18n::t!("settings.nav_general").into_owned() }
+pub fn settings_nav_font() -> String { rust_i18n::t!("settings.nav_font").into_owned() }
+pub fn settings_nav_cursor() -> String { rust_i18n::t!("settings.nav_cursor").into_owned() }
+pub fn settings_nav_shell() -> String { rust_i18n::t!("settings.nav_shell").into_owned() }
+pub fn settings_nav_window() -> String { rust_i18n::t!("settings.nav_window").into_owned() }
+pub fn settings_nav_terminal() -> String { rust_i18n::t!("settings.nav_terminal").into_owned() }
+pub fn settings_nav_sidebar() -> String { rust_i18n::t!("settings.nav_sidebar").into_owned() }
+pub fn settings_nav_file_viewer() -> String { rust_i18n::t!("settings.nav_file_viewer").into_owned() }
+pub fn settings_nav_clipboard() -> String { rust_i18n::t!("settings.nav_clipboard").into_owned() }
+pub fn settings_nav_panels() -> String { rust_i18n::t!("settings.nav_panels").into_owned() }
+pub fn settings_nav_claude_status() -> String { rust_i18n::t!("settings.nav_claude_status").into_owned() }
+pub fn settings_nav_notifications() -> String { rust_i18n::t!("settings.nav_notifications").into_owned() }
+pub fn settings_nav_keymap() -> String { rust_i18n::t!("settings.nav_keymap").into_owned() }
+pub fn settings_nav_plugin() -> String { rust_i18n::t!("settings.nav_plugin").into_owned() }
 
 // New body-section headers (Phase 1 additions)
-pub const SETTINGS_SECTION_GENERAL: &str = "GENERAL";
-pub const SETTINGS_SECTION_CLIPBOARD: &str = "CLIPBOARD";
-pub const SETTINGS_SECTION_PANELS: &str = "PANELS";
-pub const SETTINGS_SECTION_CLAUDE_STATUS: &str = "CLAUDE STATUS";
-pub const SETTINGS_SECTION_NOTIFICATIONS: &str = "NOTIFICATIONS";
-pub const SETTINGS_SECTION_KEYMAP: &str = "KEYMAP";
-pub const SETTINGS_SECTION_PLUGIN: &str = "PLUGINS";
+pub fn settings_section_general() -> String { rust_i18n::t!("settings.section_general").into_owned() }
+pub fn settings_section_clipboard() -> String { rust_i18n::t!("settings.section_clipboard").into_owned() }
+pub fn settings_section_panels() -> String { rust_i18n::t!("settings.section_panels").into_owned() }
+pub fn settings_section_claude_status() -> String { rust_i18n::t!("settings.section_claude_status").into_owned() }
+pub fn settings_section_notifications() -> String { rust_i18n::t!("settings.section_notifications").into_owned() }
+pub fn settings_section_keymap() -> String { rust_i18n::t!("settings.section_keymap").into_owned() }
+pub fn settings_section_plugin() -> String { rust_i18n::t!("settings.section_plugin").into_owned() }
 
 // New labels / actions for Phase 1 sections
-pub const SETTINGS_LABEL_CLIPBOARD_STREAMING: &str = "Streaming Cap (bytes)";
-pub const SETTINGS_LABEL_GRID_COLUMNS: &str = "Macro Grid Columns";
-pub const SETTINGS_LABEL_CLAUDE_STATUS_ENABLE: &str = "Enable Claude Code integration";
-pub const SETTINGS_ERR_CLIPBOARD: &str =
-    "Streaming cap must be a number between 4 096 and 67 108 864 (4 KiB – 64 MiB).";
-pub const SETTINGS_ERR_GRID_COLUMNS: &str =
-    "Macro grid columns must be a whole number between 1 and 16.";
-pub const SETTINGS_OPEN_CONFIG_FILE: &str = "Open Config File";
-pub const SETTINGS_PLACEHOLDER_KEYMAP: &str = "Keymap GUI editor coming soon. For now, edit the [keybindings] section of your config file directly.";
-pub const SETTINGS_PLACEHOLDER_NOTIFICATIONS: &str = "Notifications UI coming soon. For now, edit the [notifications] section of your config file directly.";
+pub fn settings_label_clipboard_streaming() -> String { rust_i18n::t!("settings.label_clipboard_streaming").into_owned() }
+pub fn settings_label_grid_columns() -> String { rust_i18n::t!("settings.label_grid_columns").into_owned() }
+pub fn settings_label_claude_status_enable() -> String { rust_i18n::t!("settings.label_claude_status_enable").into_owned() }
+pub fn settings_err_clipboard() -> String { rust_i18n::t!("settings.err_clipboard").into_owned() }
+pub fn settings_err_grid_columns() -> String { rust_i18n::t!("settings.err_grid_columns").into_owned() }
+pub fn settings_open_config_file() -> String { rust_i18n::t!("settings.open_config_file").into_owned() }
+pub fn settings_placeholder_keymap() -> String { rust_i18n::t!("settings.placeholder_keymap").into_owned() }
+pub fn settings_placeholder_notifications() -> String { rust_i18n::t!("settings.placeholder_notifications").into_owned() }
 
 // Plugin section — install / uninstall UI labels
-pub const SETTINGS_PLUGIN_INSTALLED_HEADER: &str = "Installed";
-pub const SETTINGS_PLUGIN_AVAILABLE_HEADER: &str = "Available from marketplace";
-pub const SETTINGS_PLUGIN_NONE_INSTALLED: &str =
-    "No plugins installed. Browse the list below to add one.";
-pub const SETTINGS_PLUGIN_NONE_AVAILABLE: &str =
-    "No marketplace plugins registered. Run `claude plugin marketplace add <url>` from a terminal.";
-pub const SETTINGS_PLUGIN_INSTALL: &str = "Install";
-pub const SETTINGS_PLUGIN_UNINSTALL: &str = "Uninstall";
-pub const SETTINGS_PLUGIN_INSTALLING: &str = "Installing…";
-pub const SETTINGS_PLUGIN_UNINSTALLING: &str = "Uninstalling…";
+pub fn settings_plugin_installed_header() -> String { rust_i18n::t!("settings.plugin_installed_header").into_owned() }
+pub fn settings_plugin_available_header() -> String { rust_i18n::t!("settings.plugin_available_header").into_owned() }
+pub fn settings_plugin_none_installed() -> String { rust_i18n::t!("settings.plugin_none_installed").into_owned() }
+pub fn settings_plugin_none_available() -> String { rust_i18n::t!("settings.plugin_none_available").into_owned() }
+pub fn settings_plugin_install() -> String { rust_i18n::t!("settings.plugin_install").into_owned() }
+pub fn settings_plugin_uninstall() -> String { rust_i18n::t!("settings.plugin_uninstall").into_owned() }
+pub fn settings_plugin_installing() -> String { rust_i18n::t!("settings.plugin_installing").into_owned() }
+pub fn settings_plugin_uninstalling() -> String { rust_i18n::t!("settings.plugin_uninstalling").into_owned() }
 
 // Plugin detail pane (Settings → Plugin master-detail layout)
-pub const SETTINGS_PLUGIN_DETAIL_EMPTY: &str = "Select a plugin to see details.";
-pub const SETTINGS_PLUGIN_DETAIL_MARKETPLACE: &str = "Marketplace";
-pub const SETTINGS_PLUGIN_DETAIL_VERSION: &str = "Version";
-pub const SETTINGS_PLUGIN_DETAIL_PATH: &str = "Path";
-pub const SETTINGS_PLUGIN_DETAIL_SCOPE: &str = "Scope";
-pub const SETTINGS_PLUGIN_DETAIL_AVAILABILITY: &str = "Availability";
-pub const SETTINGS_PLUGIN_DETAIL_STATUS_INSTALLED: &str = "Installed";
-pub const SETTINGS_PLUGIN_DETAIL_STATUS_AVAILABLE: &str = "Available (not installed)";
-pub const SETTINGS_PLUGIN_DETAIL_SKILLS_HEADER: &str = "Skills";
-pub const SETTINGS_PLUGIN_DETAIL_NO_SKILLS: &str = "This plugin doesn't expose any skills.";
-pub const SETTINGS_PLUGIN_DETAIL_UNKNOWN: &str = "—";
-pub const SETTINGS_PLUGIN_SKILL_VIEW: &str = "View";
-pub const SETTINGS_PLUGIN_SKILL_DESCRIPTION: &str = "Description";
-pub const SETTINGS_PLUGIN_SKILL_INVOCATION: &str = "Invocation";
-pub const SETTINGS_PLUGIN_SKILL_ARGUMENT_HINT: &str = "Argument hint";
-pub const SETTINGS_PLUGIN_SKILL_ALLOWED_TOOLS: &str = "Allowed tools";
-pub const SETTINGS_PLUGIN_SKILL_PATHS: &str = "Paths";
-pub const SETTINGS_PLUGIN_SKILL_WHEN_TO_USE: &str = "When to use";
-pub const SETTINGS_PLUGIN_SKILL_INVOCATION_BOTH: &str = "user + model";
-pub const SETTINGS_PLUGIN_SKILL_INVOCATION_USER_ONLY: &str = "user only";
-pub const SETTINGS_PLUGIN_SKILL_INVOCATION_MODEL_ONLY: &str = "model only";
-pub const SETTINGS_PLUGIN_SKILL_INVOCATION_DISABLED: &str = "disabled";
-pub const SETTINGS_PLUGIN_SKILL_BODY: &str = "Body (SKILL.md)";
-pub const SETTINGS_PLUGIN_SKILL_BACK: &str = "← Back";
-pub const SETTINGS_PLUGIN_SKILL_BODY_LOADING: &str = "Loading SKILL.md…";
-pub const SETTINGS_PLUGIN_SKILL_BODY_ERROR: &str = "Failed to load SKILL.md:";
+pub fn settings_plugin_detail_empty() -> String { rust_i18n::t!("settings.plugin_detail_empty").into_owned() }
+pub fn settings_plugin_detail_marketplace() -> String { rust_i18n::t!("settings.plugin_detail_marketplace").into_owned() }
+pub fn settings_plugin_detail_version() -> String { rust_i18n::t!("settings.plugin_detail_version").into_owned() }
+pub fn settings_plugin_detail_path() -> String { rust_i18n::t!("settings.plugin_detail_path").into_owned() }
+pub fn settings_plugin_detail_scope() -> String { rust_i18n::t!("settings.plugin_detail_scope").into_owned() }
+pub fn settings_plugin_detail_availability() -> String { rust_i18n::t!("settings.plugin_detail_availability").into_owned() }
+pub fn settings_plugin_detail_status_installed() -> String { rust_i18n::t!("settings.plugin_detail_status_installed").into_owned() }
+pub fn settings_plugin_detail_status_available() -> String { rust_i18n::t!("settings.plugin_detail_status_available").into_owned() }
+pub fn settings_plugin_detail_skills_header() -> String { rust_i18n::t!("settings.plugin_detail_skills_header").into_owned() }
+pub fn settings_plugin_detail_no_skills() -> String { rust_i18n::t!("settings.plugin_detail_no_skills").into_owned() }
+pub fn settings_plugin_detail_unknown() -> String { rust_i18n::t!("settings.plugin_detail_unknown").into_owned() }
+pub fn settings_plugin_skill_view() -> String { rust_i18n::t!("settings.plugin_skill_view").into_owned() }
+pub fn settings_plugin_skill_description() -> String { rust_i18n::t!("settings.plugin_skill_description").into_owned() }
+pub fn settings_plugin_skill_invocation() -> String { rust_i18n::t!("settings.plugin_skill_invocation").into_owned() }
+pub fn settings_plugin_skill_argument_hint() -> String { rust_i18n::t!("settings.plugin_skill_argument_hint").into_owned() }
+pub fn settings_plugin_skill_allowed_tools() -> String { rust_i18n::t!("settings.plugin_skill_allowed_tools").into_owned() }
+pub fn settings_plugin_skill_paths() -> String { rust_i18n::t!("settings.plugin_skill_paths").into_owned() }
+pub fn settings_plugin_skill_when_to_use() -> String { rust_i18n::t!("settings.plugin_skill_when_to_use").into_owned() }
+pub fn settings_plugin_skill_invocation_both() -> String { rust_i18n::t!("settings.plugin_skill_invocation_both").into_owned() }
+pub fn settings_plugin_skill_invocation_user_only() -> String { rust_i18n::t!("settings.plugin_skill_invocation_user_only").into_owned() }
+pub fn settings_plugin_skill_invocation_model_only() -> String { rust_i18n::t!("settings.plugin_skill_invocation_model_only").into_owned() }
+pub fn settings_plugin_skill_invocation_disabled() -> String { rust_i18n::t!("settings.plugin_skill_invocation_disabled").into_owned() }
+pub fn settings_plugin_skill_body() -> String { rust_i18n::t!("settings.plugin_skill_body").into_owned() }
+pub fn settings_plugin_skill_back() -> String { rust_i18n::t!("settings.plugin_skill_back").into_owned() }
+pub fn settings_plugin_skill_body_loading() -> String { rust_i18n::t!("settings.plugin_skill_body_loading").into_owned() }
+pub fn settings_plugin_skill_body_error() -> String { rust_i18n::t!("settings.plugin_skill_body_error").into_owned() }
 
 // ============================================================================
 // Context menu labels (right-click on tab bar / pane header)
 // ============================================================================
 
-pub const CTX_CLOSE_TAB: &str = "Close Tab";
-pub const CTX_CLOSE_OTHER_TABS: &str = "Close Other Tabs";
-pub const CTX_CLOSE_TABS_TO_RIGHT: &str = "Close Tabs to the Right";
-pub const CTX_MOVE_TAB_LEFT: &str = "Move Tab Left";
-pub const CTX_MOVE_TAB_RIGHT: &str = "Move Tab Right";
-pub const CTX_NEW_TAB: &str = "New Tab";
-pub const CTX_SPLIT_RIGHT: &str = "Split Right";
-pub const CTX_SPLIT_DOWN: &str = "Split Down";
-pub const CTX_COPY_FILE_PATH: &str = "Copy File Path";
-pub const CTX_COPY_RELATIVE_PATH: &str = "Copy Relative Path";
-pub const CTX_CLOSE_FILE_VIEWER: &str = "Close File Viewer";
-pub const CTX_CLOSE_PANE: &str = "Close Pane";
-pub const CTX_ZOOM_PANE: &str = "Zoom Pane";
-pub const CTX_UNZOOM_PANE: &str = "Unzoom Pane";
+pub fn ctx_close_tab() -> String { rust_i18n::t!("common.close_tab").into_owned() }
+pub fn ctx_close_other_tabs() -> String { rust_i18n::t!("ctx.close_other_tabs").into_owned() }
+pub fn ctx_close_tabs_to_right() -> String { rust_i18n::t!("ctx.close_tabs_to_right").into_owned() }
+pub fn ctx_move_tab_left() -> String { rust_i18n::t!("common.move_tab_left").into_owned() }
+pub fn ctx_move_tab_right() -> String { rust_i18n::t!("common.move_tab_right").into_owned() }
+pub fn ctx_new_tab() -> String { rust_i18n::t!("common.new_tab").into_owned() }
+pub fn ctx_split_right() -> String { rust_i18n::t!("common.split_right").into_owned() }
+pub fn ctx_split_down() -> String { rust_i18n::t!("common.split_down").into_owned() }
+pub fn ctx_copy_file_path() -> String { rust_i18n::t!("ctx.copy_file_path").into_owned() }
+pub fn ctx_copy_relative_path() -> String { rust_i18n::t!("ctx.copy_relative_path").into_owned() }
+pub fn ctx_close_file_viewer() -> String { rust_i18n::t!("ctx.close_file_viewer").into_owned() }
+pub fn ctx_close_pane() -> String { rust_i18n::t!("common.close_pane").into_owned() }
+pub fn ctx_zoom_pane() -> String { rust_i18n::t!("ctx.zoom_pane").into_owned() }
+pub fn ctx_unzoom_pane() -> String { rust_i18n::t!("ctx.unzoom_pane").into_owned() }
 
 // ============================================================================
 // Notifications
 // ============================================================================
 
 /// Title for "long-running command finished" desktop notifications.
-pub const NOTIFICATION_LONG_RUNNING_TITLE: &str = "Command finished";
+pub fn notification_long_running_title() -> String { rust_i18n::t!("notification.long_running_title").into_owned() }
 
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
@@ -956,164 +944,153 @@ pub fn format_duration_compact(d: std::time::Duration) -> String {
 // ============================================================================
 
 /// Section heading for the project-scope group.
-pub const SKILLS_PROJECT: &str = "Project";
+pub fn skills_project() -> String { rust_i18n::t!("common.section_project").into_owned() }
 /// Section heading for the personal-scope group.
-pub const SKILLS_PERSONAL: &str = "Personal";
+pub fn skills_personal() -> String { rust_i18n::t!("common.section_personal").into_owned() }
 /// Section heading for the plugin-scope group. Plugin skills come
 /// from marketplace installs (`~/.claude/plugins/cache/...`) and are
 /// **read-only** in daruda — Edit / Delete / Rename are disabled.
-pub const SKILLS_PLUGIN: &str = "Plugin";
+pub fn skills_plugin() -> String { rust_i18n::t!("skills.section_plugin").into_owned() }
 /// Header button — opens the Create modal.
-pub const SKILLS_NEW_BUTTON: &str = "+ New skill";
+pub fn skills_new_button() -> String { rust_i18n::t!("skills.new_button").into_owned() }
 /// Header button on the right-panel Skills tab — opens Settings →
 /// Plugin so the user can install / uninstall plugins. Install /
 /// Uninstall is no longer surfaced inline on the panel rows.
-pub const SKILLS_MANAGE_PLUGINS_BUTTON: &str = "Manage…";
+pub fn skills_manage_plugins_button() -> String { rust_i18n::t!("skills.manage_plugins_button").into_owned() }
 
 // ----------------------------------------------------------------
 // Skill invocation modal — clicking a row opens this, Submit writes
 // `/<skill> <input>\n` into the focused terminal pane.
 // ----------------------------------------------------------------
-pub const SKILLS_INVOKE_CANCEL: &str = "Cancel";
-pub const SKILLS_INVOKE_SUBMIT: &str = "Submit";
-pub const SKILLS_INVOKE_SUBMITTING: &str = "Sending…";
-pub const SKILLS_INVOKE_PLACEHOLDER_DEFAULT: &str = "Enter input…";
-pub const SKILLS_INVOKE_NO_TERMINAL: &str = "No active terminal — focus a terminal pane first.";
+pub fn skills_invoke_cancel() -> String { rust_i18n::t!("common.btn_cancel").into_owned() }
+pub fn skills_invoke_submit() -> String { rust_i18n::t!("common.btn_submit").into_owned() }
+pub fn skills_invoke_submitting() -> String { rust_i18n::t!("skills.invoke_submitting").into_owned() }
+pub fn skills_invoke_placeholder_default() -> String { rust_i18n::t!("skills.invoke_placeholder_default").into_owned() }
+pub fn skills_invoke_no_terminal() -> String { rust_i18n::t!("skills.invoke_no_terminal").into_owned() }
 
 // ----------------------------------------------------------------
 // Skills search bar (C-4) — substring filter atop the Skills tab.
 // ----------------------------------------------------------------
-pub const SKILLS_SEARCH_PLACEHOLDER: &str = "Search skills…";
-pub const SKILLS_SEARCH_EMPTY_PREFIX: &str = "No skills match ";
+pub fn skills_search_placeholder() -> String { rust_i18n::t!("skills.search_placeholder").into_owned() }
+pub fn skills_search_empty_prefix() -> String { rust_i18n::t!("skills.search_empty_prefix").into_owned() }
 /// Glyph for the in-field clear button. Rendered on the trailing edge of
 /// the search input only while the query is non-empty.
 pub const SKILLS_SEARCH_CLEAR_ICON: &str = "✕";
 
 /// Body shown when both scopes are empty.
-pub const SKILLS_EMPTY_PROJECT: &str =
-    "No project skills — create one to teach Claude a project-specific workflow.";
-pub const SKILLS_EMPTY_PERSONAL: &str = "No personal skills yet.";
-pub const SKILLS_EMPTY_PLUGIN: &str =
-    "No plugin skills installed. Install a plugin via Claude Code's `/plugin` command.";
-/// Hover hint shown on plugin rows so the user knows why Edit/× are missing.
-pub const SKILLS_PLUGIN_READ_ONLY: &str = "managed by plugin";
+pub fn skills_empty_project() -> String { rust_i18n::t!("skills.empty_project").into_owned() }
+pub fn skills_empty_personal() -> String { rust_i18n::t!("skills.empty_personal").into_owned() }
+pub fn skills_empty_plugin() -> String { rust_i18n::t!("skills.empty_plugin").into_owned() }
 /// Chip text on plugin rows discovered through a registered
 /// marketplace but not yet `/plugin install`-ed. Surfacing them lets
 /// the user browse the catalog.
-pub const SKILLS_PLUGIN_AVAILABLE: &str = "available";
+pub fn skills_plugin_available() -> String { rust_i18n::t!("skills.plugin_available").into_owned() }
 /// Tooltip / chip text when a project skill shadows a personal one.
-pub const SKILLS_OVERRIDES_PERSONAL: &str = "overrides personal";
+pub fn skills_overrides_personal() -> String { rust_i18n::t!("skills.overrides_personal").into_owned() }
 
 /// Title strings for the CRUD modals.
-pub const SKILLS_NEW_TITLE: &str = "New skill";
-pub const SKILLS_EDIT_TITLE: &str = "Edit skill";
-pub const SKILLS_DELETE_TITLE: &str = "Delete skill?";
+pub fn skills_new_title() -> String { rust_i18n::t!("skills.new_title").into_owned() }
+pub fn skills_edit_title() -> String { rust_i18n::t!("skills.edit_title").into_owned() }
+pub fn skills_delete_title() -> String { rust_i18n::t!("skills.delete_title").into_owned() }
 
 /// Field labels in the CRUD modals.
-pub const SKILLS_FIELD_NAME: &str = "Name";
-pub const SKILLS_FIELD_SCOPE: &str = "Scope";
-pub const SKILLS_FIELD_DESCRIPTION: &str = "Description";
-pub const SKILLS_FIELD_WHEN_TO_USE: &str = "When to use";
-pub const SKILLS_FIELD_ALLOWED_TOOLS: &str = "Allowed tools";
-pub const SKILLS_FIELD_ARG_HINT: &str = "Argument hint";
-pub const SKILLS_FIELD_PATHS: &str = "Paths";
-pub const SKILLS_FIELD_MODEL: &str = "Model";
-pub const SKILLS_FIELD_BODY: &str = "Body (markdown)";
-pub const SKILLS_TOGGLE_USER_INVOCABLE: &str = "User invocable";
-pub const SKILLS_TOGGLE_DISABLE_MODEL: &str = "Disable model invocation";
-pub const SKILLS_BUTTON_RENAME: &str = "Rename…";
-pub const SKILLS_BUTTON_OPEN_FINDER: &str = "Open in Finder";
-pub const SKILLS_BUTTON_DELETE: &str = "Delete";
+pub fn skills_field_name() -> String { rust_i18n::t!("common.field_name").into_owned() }
+pub fn skills_field_scope() -> String { rust_i18n::t!("common.field_scope").into_owned() }
+pub fn skills_field_description() -> String { rust_i18n::t!("skills.field_description").into_owned() }
+pub fn skills_field_when_to_use() -> String { rust_i18n::t!("skills.field_when_to_use").into_owned() }
+pub fn skills_field_allowed_tools() -> String { rust_i18n::t!("skills.field_allowed_tools").into_owned() }
+pub fn skills_field_arg_hint() -> String { rust_i18n::t!("skills.field_arg_hint").into_owned() }
+pub fn skills_field_paths() -> String { rust_i18n::t!("skills.field_paths").into_owned() }
+pub fn skills_field_model() -> String { rust_i18n::t!("skills.field_model").into_owned() }
+pub fn skills_field_body() -> String { rust_i18n::t!("skills.field_body").into_owned() }
+pub fn skills_toggle_user_invocable() -> String { rust_i18n::t!("skills.toggle_user_invocable").into_owned() }
+pub fn skills_toggle_disable_model() -> String { rust_i18n::t!("skills.toggle_disable_model").into_owned() }
+pub fn skills_button_rename() -> String { rust_i18n::t!("common.btn_rename").into_owned() }
+pub fn skills_button_open_finder() -> String { rust_i18n::t!("skills.button_open_finder").into_owned() }
+pub fn skills_button_delete() -> String { rust_i18n::t!("common.btn_delete").into_owned() }
 /// Hover-only `[View]` action shown on plugin rows in place of Edit —
 /// opens SKILL.md in the daruda file viewer.
-pub const SKILLS_BUTTON_VIEW: &str = "View";
+pub fn skills_button_view() -> String { rust_i18n::t!("common.btn_view").into_owned() }
 /// `[Edit]` label on the skill row's hover-only action overlay.
-pub const SKILLS_BUTTON_EDIT: &str = "Edit";
+pub fn skills_button_edit() -> String { rust_i18n::t!("common.btn_edit").into_owned() }
 /// Single-glyph `×` delete affordance on the skill row overlay.
 /// Lives as a constant so the glyph stays consistent across rows and
 /// is easy to swap if a future revision uses an icon.
 pub const SKILLS_BUTTON_DELETE_ICON: &str = "×";
-pub const SKILLS_DELETE_BODY_PREFIX: &str =
-    "This removes the skill directory and every auxiliary file inside it. This cannot be undone.";
+pub fn skills_delete_body_prefix() -> String { rust_i18n::t!("skills.delete_body_prefix").into_owned() }
 
 /// Validation messages for the modal banner.
-pub const SKILLS_NAME_EMPTY: &str = "Name is required.";
-pub const SKILLS_NAME_INVALID: &str =
-    "Name must be lowercase letters, digits, hyphens, or underscores.";
-pub const SKILLS_NAME_LEADING: &str = "Name cannot start with a hyphen or underscore.";
-pub const SKILLS_NAME_TOO_LONG: &str = "Name must be 64 characters or fewer.";
-pub const SKILLS_NAME_DUPLICATE: &str = "A skill with this name already exists in this scope.";
-pub const SKILLS_DESCRIPTION_TOO_LONG_HINT: &str =
-    "Description over 1536 characters — Claude Code may truncate it.";
-pub const SKILLS_NO_PROJECT_HINT: &str =
-    "Project skills require an active worktree. Open a project to enable this scope.";
+pub fn skills_name_empty() -> String { rust_i18n::t!("common.name_required").into_owned() }
+pub fn skills_name_invalid() -> String { rust_i18n::t!("skills.name_invalid").into_owned() }
+pub fn skills_name_leading() -> String { rust_i18n::t!("skills.name_leading").into_owned() }
+pub fn skills_name_too_long() -> String { rust_i18n::t!("skills.name_too_long").into_owned() }
+pub fn skills_name_duplicate() -> String { rust_i18n::t!("skills.name_duplicate").into_owned() }
+pub fn skills_description_too_long_hint() -> String { rust_i18n::t!("skills.description_too_long_hint").into_owned() }
+pub fn skills_no_project_hint() -> String { rust_i18n::t!("skills.no_project_hint").into_owned() }
 
 // ============================================================================
 // Right panel — Tools tab (MCP servers)
 // ============================================================================
 
 /// Section heading for project-scope MCP servers (`<wt>/.mcp.json`).
-pub const MCP_PROJECT: &str = "Project";
+pub fn mcp_project() -> String { rust_i18n::t!("common.section_project").into_owned() }
 /// Section heading for personal-scope MCP servers (`~/.claude/settings.json`).
-pub const MCP_PERSONAL: &str = "Personal";
+pub fn mcp_personal() -> String { rust_i18n::t!("common.section_personal").into_owned() }
 /// Header button — opens AddMcpServerModal.
-pub const MCP_NEW_BUTTON: &str = "+ Add server";
+pub fn mcp_new_button() -> String { rust_i18n::t!("mcp.new_button").into_owned() }
 /// Body when project scope has no servers and there is an active worktree.
-pub const MCP_EMPTY_PROJECT: &str =
-    "No project MCP servers — `+ Add server` to create `.mcp.json`.";
+pub fn mcp_empty_project() -> String { rust_i18n::t!("mcp.empty_project").into_owned() }
 /// Body when project scope has no active worktree (welcome-style window).
-pub const MCP_NO_PROJECT_HINT: &str =
-    "Project MCP servers require an active worktree. Open a project to enable this scope.";
+pub fn mcp_no_project_hint() -> String { rust_i18n::t!("mcp.no_project_hint").into_owned() }
 /// Body when personal scope is empty.
-pub const MCP_EMPTY_PERSONAL: &str = "No personal MCP servers configured.";
+pub fn mcp_empty_personal() -> String { rust_i18n::t!("mcp.empty_personal").into_owned() }
 /// Row status label — server is configured and not disabled.
-pub const MCP_STATUS_ENABLED: &str = "enabled";
+pub fn mcp_status_enabled() -> String { rust_i18n::t!("mcp.status_enabled").into_owned() }
 /// Row status label — server has `"disabled": true` in config.
-pub const MCP_STATUS_DISABLED: &str = "disabled";
+pub fn mcp_status_disabled() -> String { rust_i18n::t!("mcp.status_disabled").into_owned() }
 /// Row status label — required fields for the chosen transport are missing.
-pub const MCP_STATUS_MALFORMED: &str = "malformed";
+pub fn mcp_status_malformed() -> String { rust_i18n::t!("mcp.status_malformed").into_owned() }
 
 /// CRUD modal titles.
-pub const MCP_NEW_TITLE: &str = "Add MCP server";
-pub const MCP_EDIT_TITLE: &str = "Edit MCP server";
-pub const MCP_DELETE_TITLE: &str = "Delete MCP server?";
+pub fn mcp_new_title() -> String { rust_i18n::t!("mcp.new_title").into_owned() }
+pub fn mcp_edit_title() -> String { rust_i18n::t!("mcp.edit_title").into_owned() }
+pub fn mcp_delete_title() -> String { rust_i18n::t!("mcp.delete_title").into_owned() }
 
 /// Field labels in the CRUD modals.
-pub const MCP_FIELD_NAME: &str = "Name";
-pub const MCP_FIELD_SCOPE: &str = "Scope";
-pub const MCP_FIELD_TRANSPORT: &str = "Transport";
-pub const MCP_FIELD_COMMAND: &str = "Command";
-pub const MCP_FIELD_ARGS: &str = "Args (space-separated)";
-pub const MCP_FIELD_URL: &str = "URL";
-pub const MCP_FIELD_ENV: &str = "Env (KEY=VALUE per line)";
-pub const MCP_FIELD_HEADERS: &str = "Headers (KEY=VALUE per line)";
+pub fn mcp_field_name() -> String { rust_i18n::t!("common.field_name").into_owned() }
+pub fn mcp_field_scope() -> String { rust_i18n::t!("common.field_scope").into_owned() }
+pub fn mcp_field_transport() -> String { rust_i18n::t!("mcp.field_transport").into_owned() }
+pub fn mcp_field_command() -> String { rust_i18n::t!("mcp.field_command").into_owned() }
+pub fn mcp_field_args() -> String { rust_i18n::t!("mcp.field_args").into_owned() }
+pub fn mcp_field_url() -> String { rust_i18n::t!("mcp.field_url").into_owned() }
+pub fn mcp_field_env() -> String { rust_i18n::t!("mcp.field_env").into_owned() }
+pub fn mcp_field_headers() -> String { rust_i18n::t!("mcp.field_headers").into_owned() }
 
 /// Buttons shared across CRUD modals + row hover actions.
-pub const MCP_BUTTON_ADD: &str = "Add";
-pub const MCP_BUTTON_EDIT: &str = "Edit";
-pub const MCP_BUTTON_DELETE: &str = "Delete";
-pub const MCP_BUTTON_SAVE: &str = "Save";
-pub const MCP_BUTTON_CANCEL: &str = "Cancel";
+pub fn mcp_button_add() -> String { rust_i18n::t!("common.btn_add").into_owned() }
+pub fn mcp_button_edit() -> String { rust_i18n::t!("common.btn_edit").into_owned() }
+pub fn mcp_button_delete() -> String { rust_i18n::t!("common.btn_delete").into_owned() }
+pub fn mcp_button_save() -> String { rust_i18n::t!("common.btn_save").into_owned() }
+pub fn mcp_button_cancel() -> String { rust_i18n::t!("common.btn_cancel").into_owned() }
 /// Displayed on the primary action button while the save is in flight.
-pub const MCP_SAVING_LABEL: &str = "Saving…";
+pub fn mcp_saving_label() -> String { rust_i18n::t!("mcp.saving_label").into_owned() }
 /// Toggle label inside the AddModal / EditModal that maps to the
 /// JSON `"disabled": true` key.
-pub const MCP_FIELD_DISABLED: &str = "Disabled";
+pub fn mcp_field_disabled() -> String { rust_i18n::t!("mcp.field_disabled").into_owned() }
 
 /// Confirm-modal body for the Delete flow.
-pub const MCP_DELETE_BODY_PREFIX: &str =
-    "This removes the server entry from disk. This cannot be undone.";
+pub fn mcp_delete_body_prefix() -> String { rust_i18n::t!("mcp.delete_body_prefix").into_owned() }
 
 /// Validation messages for the AddModal / EditModal banner.
-pub const MCP_NAME_EMPTY: &str = "Name is required.";
-pub const MCP_NAME_INVALID: &str = "Name must be alphanumeric, underscore, or hyphen.";
-pub const MCP_NAME_LEADING: &str = "Name cannot start with a hyphen or underscore.";
-pub const MCP_NAME_TOO_LONG: &str = "Name must be 63 characters or fewer.";
-pub const MCP_NAME_DUPLICATE: &str = "A server with this name already exists in this scope.";
-pub const MCP_COMMAND_REQUIRED: &str = "Command is required for stdio transport.";
-pub const MCP_URL_REQUIRED: &str = "URL is required for sse / http transport.";
-pub const MCP_URL_INVALID: &str = "URL must start with http:// or https://.";
-pub const MCP_ENV_INVALID: &str = "Each env line must be KEY=VALUE.";
+pub fn mcp_name_empty() -> String { rust_i18n::t!("common.name_required").into_owned() }
+pub fn mcp_name_invalid() -> String { rust_i18n::t!("mcp.name_invalid").into_owned() }
+pub fn mcp_name_leading() -> String { rust_i18n::t!("mcp.name_leading").into_owned() }
+pub fn mcp_name_too_long() -> String { rust_i18n::t!("mcp.name_too_long").into_owned() }
+pub fn mcp_name_duplicate() -> String { rust_i18n::t!("mcp.name_duplicate").into_owned() }
+pub fn mcp_command_required() -> String { rust_i18n::t!("mcp.command_required").into_owned() }
+pub fn mcp_url_required() -> String { rust_i18n::t!("mcp.url_required").into_owned() }
+pub fn mcp_url_invalid() -> String { rust_i18n::t!("mcp.url_invalid").into_owned() }
+pub fn mcp_env_invalid() -> String { rust_i18n::t!("mcp.env_invalid").into_owned() }
 
 /// Transport option labels for the dropdown.
 pub const MCP_TRANSPORT_STDIO: &str = "stdio";
@@ -1121,8 +1098,8 @@ pub const MCP_TRANSPORT_SSE: &str = "sse";
 pub const MCP_TRANSPORT_HTTP: &str = "http";
 
 /// Scope option labels for the dropdown.
-pub const MCP_SCOPE_PROJECT: &str = "Project (.mcp.json)";
-pub const MCP_SCOPE_PERSONAL: &str = "Personal (~/.claude/settings.json)";
+pub fn mcp_scope_project() -> String { rust_i18n::t!("mcp.scope_project").into_owned() }
+pub fn mcp_scope_personal() -> String { rust_i18n::t!("mcp.scope_personal").into_owned() }
 
 // ============================================================================
 // Error toast (Layer 1 of the error-reporting pipeline)
@@ -1134,14 +1111,14 @@ pub const TOAST_ICON_WARNING: &str = "⚠";
 pub const TOAST_ICON_ERROR: &str = "✕";
 
 /// Action button labels.
-pub const TOAST_BUTTON_COPY: &str = "Copy";
-pub const TOAST_BUTTON_DETAILS: &str = "Details";
+pub fn toast_button_copy() -> String { rust_i18n::t!("common.btn_copy").into_owned() }
+pub fn toast_button_details() -> String { rust_i18n::t!("toast.button_details").into_owned() }
 /// Glyph for the dismiss ✕ button. Same character as the title-bar
 /// pane close, separate constant so a future redesign can split them.
 pub const TOAST_BUTTON_DISMISS: &str = "×";
 /// Transient one-second affordance shown after `[Copy]` is clicked so
 /// the user has visual confirmation the clipboard write happened.
-pub const TOAST_BUTTON_COPIED: &str = "Copied";
+pub fn toast_button_copied() -> String { rust_i18n::t!("common.btn_copied").into_owned() }
 /// `×N` repeat counter prefix.
 pub const TOAST_REPEAT_PREFIX: &str = "×";
 
@@ -1151,16 +1128,16 @@ pub const TOAST_REPEAT_PREFIX: &str = "×";
 
 /// Title prefix, e.g. `Error: PTY writer thread died`. The trailing
 /// title is drawn from the underlying [`ErrorReport`] verbatim.
-pub const ERROR_MODAL_TITLE_PREFIX: &str = "Error: ";
+pub fn error_modal_title_prefix() -> String { rust_i18n::t!("error_modal.title_prefix").into_owned() }
 
 /// Footer button labels. `Copy report` writes the full plain-text
 /// rendering (including system-info trailer) to the clipboard;
 /// `Open log file` shells out to the system handler for the day's
 /// NDJSON log; `Close` dismisses.
-pub const ERROR_MODAL_BUTTON_COPY: &str = "Copy report";
-pub const ERROR_MODAL_BUTTON_COPIED: &str = "Copied";
-pub const ERROR_MODAL_BUTTON_OPEN_LOG: &str = "Open log file";
-pub const ERROR_MODAL_BUTTON_CLOSE: &str = "Close";
+pub fn error_modal_button_copy() -> String { rust_i18n::t!("common.btn_copy").into_owned() }
+pub fn error_modal_button_copied() -> String { rust_i18n::t!("common.btn_copied").into_owned() }
+pub fn error_modal_button_open_log() -> String { rust_i18n::t!("error_modal.button_open_log").into_owned() }
+pub fn error_modal_button_close() -> String { rust_i18n::t!("common.btn_close").into_owned() }
 
 #[cfg(test)]
 mod tests {
