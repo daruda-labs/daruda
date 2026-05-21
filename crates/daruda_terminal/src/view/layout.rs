@@ -16,12 +16,15 @@ pub struct TerminalLayout {
 impl TerminalLayout {
     /// Number of fully visible columns in the given pixel width.
     pub fn cols(&self, avail_w: f32) -> u16 {
-        (avail_w / self.cell_width).floor().max(1.0) as u16
+        // avail_w / cell_width can be N − 1 ULP when both values come from
+        // float arithmetic (e.g. 8.0 * 100 / 8.0 → 99.999…). next_up()
+        // advances one ULP before floor(), matching Zed's verified fix.
+        (avail_w / self.cell_width).next_up().floor().max(1.0) as u16
     }
 
     /// Number of fully visible rows in the given pixel height.
     pub fn rows(&self, avail_h: f32) -> u16 {
-        (avail_h / self.line_height).floor().max(1.0) as u16
+        (avail_h / self.line_height).next_up().floor().max(1.0) as u16
     }
 }
 

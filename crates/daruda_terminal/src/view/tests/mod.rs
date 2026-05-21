@@ -996,3 +996,52 @@ fn dirty_rows_after_cursor_to_row1_write() {
 }
 
 mod mouse_protocol;
+
+#[test]
+fn terminal_layout_cols_next_up_precision() {
+    use super::layout::TerminalLayout;
+    let layout = TerminalLayout {
+        cell_width: 8.0,
+        line_height: 16.0,
+    };
+    // 8.0 * 100 = 800; float arithmetic can produce 799.999...; must still yield 100
+    let nearly_800: f32 = 8.0_f32.mul_add(100.0, -f32::EPSILON * 8.0);
+    assert_eq!(layout.cols(nearly_800), 100);
+}
+
+#[test]
+fn terminal_layout_rows_next_up_precision() {
+    use super::layout::TerminalLayout;
+    let layout = TerminalLayout {
+        cell_width: 8.0,
+        line_height: 16.0,
+    };
+    let nearly_480: f32 = 16.0_f32.mul_add(30.0, -f32::EPSILON * 16.0);
+    assert_eq!(layout.rows(nearly_480), 30);
+}
+
+#[test]
+fn terminal_layout_cols_floor_exact_boundary() {
+    use super::layout::TerminalLayout;
+    let layout = TerminalLayout {
+        cell_width: 8.0,
+        line_height: 16.0,
+    };
+    // Exact pixel boundary: 799 px → 99 cols
+    assert_eq!(layout.cols(799.0), 99);
+    // One full cell: 800 px → 100 cols
+    assert_eq!(layout.cols(800.0), 100);
+}
+
+#[test]
+fn terminal_layout_minimum_one_col_and_row() {
+    use super::layout::TerminalLayout;
+    let layout = TerminalLayout {
+        cell_width: 8.0,
+        line_height: 16.0,
+    };
+    assert_eq!(layout.cols(0.0), 1);
+    assert_eq!(layout.rows(0.0), 1);
+    assert_eq!(layout.cols(1.0), 1);
+    assert_eq!(layout.rows(1.0), 1);
+}

@@ -398,7 +398,14 @@ export fn ghostty_vt_terminal_cursor_position(
     if (col_out == null or row_out == null) return false;
     const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
 
-    col_out.?.* = @intCast(handle.terminal.screen.cursor.x + 1);
+    var x = handle.terminal.screen.cursor.x;
+    // Snap off a wide-char spacer_tail to its head cell (xterm / iTerm2
+    // behaviour: the reported cursor column is always the leftmost cell of
+    // the wide character, never the phantom right half).
+    if (x > 0 and handle.terminal.screen.cursor.page_cell.wide == .spacer_tail) {
+        x -= 1;
+    }
+    col_out.?.* = @intCast(x + 1);
     row_out.?.* = @intCast(handle.terminal.screen.cursor.y + 1);
     return true;
 }

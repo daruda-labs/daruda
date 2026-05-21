@@ -10,7 +10,8 @@ use super::super::style::{
     cursor_color_for_background, hsla_from_rgb, text_run_for_key,
 };
 use super::super::text_metrics::{
-    byte_index_for_column_in_line, cell_left_x_for_col, grid_right_x, shaped_pixel_range_for_cols,
+    byte_index_for_column_in_line, cell_left_x_for_col, cursor_width_for_col, cursor_x_for_col,
+    grid_right_x, shaped_pixel_range_for_cols,
 };
 use super::{PreeditPostShift, TerminalPrepaintState, TerminalTextElement};
 use crate::ux::theme;
@@ -528,8 +529,28 @@ impl TerminalTextElement {
             let view = self.view.read(cx);
             let focused = view.focus_handle.is_focused(window);
             let has_marked = view.state.marked_text.is_some();
-            if focused && !view.state.search_overlay && view.session.cursor_visible() && !has_marked
+            let cursor_visible = view.session.cursor_visible();
+            let search_overlay = view.state.search_overlay;
+
+            // DEBUG: log why cursor block is or isn't rendered.
+            // Remove after root-cause analysis.
+            #[cfg(debug_assertions)]
             {
+                use std::io::Write as _;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/daruda_cursor.log")
+                {
+                    let _ = writeln!(
+                        f,
+                        "CURSOR_CHECK focused={focused} cursor_visible={cursor_visible} search={search_overlay} has_marked={has_marked} => will_render={}",
+                        focused && !search_overlay && cursor_visible && !has_marked
+                    );
+                }
+            }
+
+            if focused && !search_overlay && cursor_visible && !has_marked {
                 Some((view.session.cursor_position(), view.session.cursor_style()))
             } else {
                 None
@@ -542,21 +563,19 @@ impl TerminalTextElement {
             let y = bounds.top() + line_height * (row.saturating_sub(1)) as f32;
             let row_index = row.saturating_sub(1) as usize;
             let line = shaped_lines.get(row_index)?;
-            let byte_index = byte_index_for_column_in_line(line.text.as_str(), col);
-            let x = bounds.left() + line.x_for_index(byte_index.min(line.text.len()));
-
-            let cell_width = cell_width_f;
+            let x = cursor_x_for_col(line, col, bounds.left());
+            let cursor_w = cursor_width_for_col(line, col, cell_width_f);
 
             let cursor_bounds = match style_code {
                 3 | 4 => {
                     let underline_height = 2.0_f32;
                     Bounds::new(
                         point(x, y + line_height - px(underline_height)),
-                        size(px(cell_width), px(underline_height)),
+                        size(px(cursor_w), px(underline_height)),
                     )
                 }
                 5 | 6 => Bounds::new(point(x, y), size(px(theme::CURSOR_BAR_W), line_height)),
-                _ => Bounds::new(point(x, y), size(px(cell_width), line_height)),
+                _ => Bounds::new(point(x, y), size(px(cursor_w), line_height)),
             };
 
             Some(fill(cursor_bounds, cursor_color))
