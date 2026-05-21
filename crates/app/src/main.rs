@@ -3,6 +3,8 @@
 //! Dev loop accelerator for Claude Code.
 //! Built on GPUI (Metal rendering) + ghostty_vt (Zig SIMD terminal emulation).
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 pub mod agent;
 mod assets;
 mod bind_keys;

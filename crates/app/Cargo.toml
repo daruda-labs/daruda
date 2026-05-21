@@ -32,6 +32,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAppl
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }
 portable-pty = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
+rust-i18n = { workspace = true }
+sys-locale = "0.3"
 schemars = { workspace = true }
 sysinfo = "0.32"
 tempfile = "3"

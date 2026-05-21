@@ -1,0 +1,20 @@
+# Welcome screen
+welcome:
+  title: "daruda"
+  open_folder: "Open Folder..."
+  recent: "Recent Projects"
+  new_empty: "New Empty Window"
+  no_recent: "No recent projects"
+  changelog_open_policy: "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window"
+
+# Menus
+menu:
+  new_window: "New Window"
+  open: "Open…"
+  new_tab: "New Tab"
+  close_tab: "Close Tab"
+  close_project: "Close Project"
+  quit_app: "Quit Daruda"
+  split_right: "Split Right"
+  split_down: "Split Down"
+  toggle_full_screen: "Toggle Full Screen"

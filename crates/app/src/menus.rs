@@ -80,14 +80,14 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
                 MenuItem::separator(),
                 MenuItem::os_submenu(s::MENU_SERVICES, SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action(s::MENU_QUIT_APP, Quit),
+                MenuItem::action(s::menu_quit_app(), Quit),
             ],
         },
         Menu {
             name: s::MENU_FILE.into(),
             items: vec![
-                MenuItem::action(s::MENU_NEW_WINDOW, NewEmptyWindow),
-                MenuItem::action(s::MENU_OPEN, OpenFolder),
+                MenuItem::action(s::menu_new_window(), NewEmptyWindow),
+                MenuItem::action(s::menu_open(), OpenFolder),
                 MenuItem::action(s::MENU_OPEN_IN_NEW_WINDOW, OpenFolderInNewWindow),
                 MenuItem::submenu(Menu {
                     name: s::MENU_OPEN_RECENT.into(),
@@ -98,11 +98,11 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
                     items: build_recent_submenu(recent, OpenMode::NewWindow),
                 }),
                 MenuItem::separator(),
-                MenuItem::action(s::MENU_CLOSE_PROJECT, CloseProject),
+                MenuItem::action(s::menu_close_project(), CloseProject),
                 MenuItem::separator(),
-                MenuItem::action(s::MENU_NEW_TAB, NewTab),
+                MenuItem::action(s::menu_new_tab(), NewTab),
                 MenuItem::action(s::MENU_CLOSE_PANE, ClosePane),
-                MenuItem::action(s::MENU_CLOSE_TAB, CloseTab),
+                MenuItem::action(s::menu_close_tab(), CloseTab),
             ],
         },
         Menu {
@@ -123,8 +123,8 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         Menu {
             name: s::MENU_VIEW.into(),
             items: vec![
-                MenuItem::action(s::MENU_SPLIT_RIGHT, SplitRight),
-                MenuItem::action(s::MENU_SPLIT_DOWN, SplitDown),
+                MenuItem::action(s::menu_split_right(), SplitRight),
+                MenuItem::action(s::menu_split_down(), SplitDown),
                 MenuItem::separator(),
                 MenuItem::action(s::MENU_NEXT_PANE, FocusNextPane),
                 MenuItem::action(s::MENU_PREV_PANE, FocusPrevPane),
@@ -137,7 +137,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
                 MenuItem::action(s::MENU_MOVE_TAB_LEFT, MoveTabLeft),
                 MenuItem::action(s::MENU_MOVE_TAB_RIGHT, MoveTabRight),
                 MenuItem::separator(),
-                MenuItem::action(s::MENU_TOGGLE_FULL_SCREEN, ToggleFullScreen),
+                MenuItem::action(s::menu_toggle_full_screen(), ToggleFullScreen),
                 MenuItem::separator(),
                 MenuItem::action(s::MENU_TOGGLE_LEFT_DOCK, ToggleLeftDock),
                 MenuItem::action(s::MENU_TOGGLE_BOTTOM_DOCK, ToggleBottomDock),

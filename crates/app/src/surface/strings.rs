@@ -23,30 +23,30 @@ pub const MENU_HELP: &str = "Help";
 // App menu
 // ============================================================================
 
-pub const MENU_QUIT_APP: &str = "Quit Daruda";
+pub fn menu_quit_app() -> String { rust_i18n::t!("menu.quit_app").into_owned() }
 pub const MENU_SERVICES: &str = "Services";
 
 // ============================================================================
 // File menu
 // ============================================================================
 
-pub const MENU_NEW_WINDOW: &str = "New Window";
-pub const MENU_OPEN: &str = "Open…";
+pub fn menu_new_window() -> String { rust_i18n::t!("menu.new_window").into_owned() }
+pub fn menu_open() -> String { rust_i18n::t!("menu.open").into_owned() }
 pub const MENU_OPEN_IN_NEW_WINDOW: &str = "Open in New Window…";
 pub const MENU_OPEN_RECENT: &str = "Open Recent";
 pub const MENU_OPEN_RECENT_IN_NEW_WINDOW: &str = "Open Recent in New Window";
-pub const MENU_CLOSE_PROJECT: &str = "Close Project";
+pub fn menu_close_project() -> String { rust_i18n::t!("menu.close_project").into_owned() }
 pub const MENU_NO_RECENT: &str = "No recent projects";
-pub const MENU_NEW_TAB: &str = "New Tab";
+pub fn menu_new_tab() -> String { rust_i18n::t!("menu.new_tab").into_owned() }
 pub const MENU_CLOSE_PANE: &str = "Close Pane";
-pub const MENU_CLOSE_TAB: &str = "Close Tab";
+pub fn menu_close_tab() -> String { rust_i18n::t!("menu.close_tab").into_owned() }
 
 // ============================================================================
 // View menu
 // ============================================================================
 
-pub const MENU_SPLIT_RIGHT: &str = "Split Right";
-pub const MENU_SPLIT_DOWN: &str = "Split Down";
+pub fn menu_split_right() -> String { rust_i18n::t!("menu.split_right").into_owned() }
+pub fn menu_split_down() -> String { rust_i18n::t!("menu.split_down").into_owned() }
 pub const MENU_NEXT_PANE: &str = "Next Pane";
 pub const MENU_PREV_PANE: &str = "Previous Pane";
 pub const MENU_FOCUS_PANE_LEFT: &str = "Focus Pane Left";
@@ -73,7 +73,7 @@ pub const MENU_CLEAR_SCROLLBACK: &str = "Clear Scrollback";
 // View menu (additions)
 // ============================================================================
 
-pub const MENU_TOGGLE_FULL_SCREEN: &str = "Toggle Full Screen";
+pub fn menu_toggle_full_screen() -> String { rust_i18n::t!("menu.toggle_full_screen").into_owned() }
 pub const MENU_TOGGLE_LEFT_DOCK: &str = "Toggle Left Dock";
 pub const MENU_TOGGLE_BOTTOM_DOCK: &str = "Toggle Bottom Dock";
 pub const MENU_TOGGLE_RIGHT_DOCK: &str = "Toggle Right Dock";
@@ -430,26 +430,19 @@ pub fn service_status_label(status: &daruda_claude::ServiceStatus) -> String {
 // Welcome screen
 // ============================================================================
 
-pub const WELCOME_TITLE: &str = "daruda";
+pub fn welcome_title() -> String { rust_i18n::t!("welcome.title").into_owned() }
 pub const WELCOME_VERSION: &str = "v0.1.0";
-pub const WELCOME_OPEN_FOLDER: &str = "Open Folder...";
-pub const WELCOME_RECENT: &str = "Recent Projects";
-pub const WELCOME_NEW_EMPTY: &str = "New Empty Window";
-pub const WELCOME_NO_RECENT: &str = "No recent projects";
+pub fn welcome_open_folder() -> String { rust_i18n::t!("welcome.open_folder").into_owned() }
+pub fn welcome_recent() -> String { rust_i18n::t!("welcome.recent").into_owned() }
+pub fn welcome_new_empty() -> String { rust_i18n::t!("welcome.new_empty").into_owned() }
+pub fn welcome_no_recent() -> String { rust_i18n::t!("welcome.no_recent").into_owned() }
 
-/// Hint shown beneath the recent-projects placeholder when the list is
-/// empty under the new UUID-keyed schema. Legacy hash-keyed files are
-/// deliberately not auto-migrated; this string explains the situation
-/// without alarming the user.
-pub const WELCOME_EMPTY_RECENT_HINT: &str = "이전 버전 데이터는 보존되어 있습니다 (자동 마이그레이션 없음).\n\
-     신규 워크스페이스를 만들거나 폴더를 여세요.";
 
 /// Short changelog line shown at the bottom of the welcome panel.
 /// Announces the post-multi-project shortcut semantics — `Cmd+O` now
 /// adds the project to the current window (policy-aware) instead of
 /// spawning a new one. Plain text; no Markdown rendering.
-pub const WELCOME_CHANGELOG_OPEN_POLICY: &str =
-    "Cmd+O adds the project to this window · Cmd+Shift+O opens in a new window";
+pub fn welcome_changelog_open_policy() -> String { rust_i18n::t!("welcome.changelog_open_policy").into_owned() }
 
 // ============================================================================
 // File viewer (pane-area viewer opened from Git Changes dock)

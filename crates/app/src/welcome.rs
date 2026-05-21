@@ -76,7 +76,7 @@ impl Render for WelcomeScreen {
                 div()
                     .text_size(px(theme::WELCOME_TITLE_FONT_SIZE))
                     .text_color(welcome_text)
-                    .child(s::WELCOME_TITLE),
+                    .child(s::welcome_title()),
             )
             .child(
                 div()
@@ -107,7 +107,7 @@ impl Render for WelcomeScreen {
                     cx.emit(WelcomeEvent::OpenFolder);
                 }),
             )
-            .child(s::WELCOME_OPEN_FOLDER);
+            .child(s::welcome_open_folder());
 
         let recent_section = if has_recent {
             let entries = self
@@ -155,7 +155,7 @@ impl Render for WelcomeScreen {
                     div()
                         .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
                         .text_color(muted_text)
-                        .child(s::WELCOME_RECENT),
+                        .child(s::welcome_recent()),
                 )
                 .children(entries)
         } else {
@@ -168,14 +168,9 @@ impl Render for WelcomeScreen {
                     div()
                         .text_size(px(theme::WELCOME_HEADING_FONT_SIZE))
                         .text_color(faint_text)
-                        .child(s::WELCOME_NO_RECENT),
+                        .child(s::welcome_no_recent()),
                 )
-                .child(
-                    div()
-                        .text_size(px(theme::WELCOME_VERSION_FONT_SIZE))
-                        .text_color(faint_text)
-                        .child(s::WELCOME_EMPTY_RECENT_HINT),
-                )
+
         };
 
         let new_empty_btn = div()
@@ -197,12 +192,12 @@ impl Render for WelcomeScreen {
                     cx.emit(WelcomeEvent::NewEmpty);
                 }),
             )
-            .child(s::WELCOME_NEW_EMPTY);
+            .child(s::welcome_new_empty());
 
         let changelog = div()
             .text_size(px(theme::WELCOME_VERSION_FONT_SIZE))
             .text_color(faint_text)
-            .child(s::WELCOME_CHANGELOG_OPEN_POLICY);
+            .child(s::welcome_changelog_open_policy());
 
         // Main layout — centered panel.
         div()

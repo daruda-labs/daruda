@@ -16,6 +16,7 @@ use crate::window_registry::WindowRegistry;
 use gpui::App;
 
 pub(crate) fn init_all(cx: &mut App) {
+    init_locale();
     gpui_component::init(cx);
     ui::theme::DarudaTheme::init(cx);
     ui::theme::apply_daruda_palette(cx);
@@ -44,6 +45,12 @@ pub(crate) fn init_all(cx: &mut App) {
 /// subscription. Keeping the app-wide swap here (not inside
 /// `apply_config`) means one config change repaints every window
 /// at the same instant.
+fn init_locale() {
+    let sys = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
+    let lang = sys.split('-').next().unwrap_or("en");
+    gpui_component::set_locale(lang);
+}
+
 fn register_settings_observer(cx: &mut App) {
     cx.observe_global::<crate::settings_store::SettingsStore>(|cx| {
         let user = crate::settings_store::SettingsStore::global(cx).user_arc();
