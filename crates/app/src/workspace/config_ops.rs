@@ -136,7 +136,7 @@ impl Workspace {
 
         crate::windows::try_update_workspace_window(
             handle,
-            &mut **cx,
+            cx,
             "refresh_locale_strings",
             |window, cx| {
                 // Git Changes commit input — placeholder + button + dropdown.
