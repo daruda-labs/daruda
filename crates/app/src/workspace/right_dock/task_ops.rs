@@ -378,9 +378,9 @@ impl Workspace {
             }
         };
         crate::workspace::dialog_helpers::open_alert_dialog(
-            crate::surface::strings::TASK_ERROR_DIALOG_TITLE,
+            crate::surface::strings::task_error_dialog_title(),
             message,
-            crate::surface::strings::TASK_ERROR_DIALOG_CLOSE,
+            crate::surface::strings::task_error_dialog_close(),
             window,
             cx,
         );

@@ -150,10 +150,10 @@ impl AddMcpServerModal {
         let raw_name = raw_name.trim().to_string();
         match validate_name(&raw_name) {
             Ok(()) => {}
-            Err(NameError::Empty) => return Err(strings::MCP_NAME_EMPTY.into()),
-            Err(NameError::TooLong { .. }) => return Err(strings::MCP_NAME_TOO_LONG.into()),
-            Err(NameError::InvalidChar { .. }) => return Err(strings::MCP_NAME_INVALID.into()),
-            Err(NameError::InvalidLeading { .. }) => return Err(strings::MCP_NAME_LEADING.into()),
+            Err(NameError::Empty) => return Err(strings::mcp_name_empty().into()),
+            Err(NameError::TooLong { .. }) => return Err(strings::mcp_name_too_long().into()),
+            Err(NameError::InvalidChar { .. }) => return Err(strings::mcp_name_invalid().into()),
+            Err(NameError::InvalidLeading { .. }) => return Err(strings::mcp_name_leading().into()),
             Err(NameError::DuplicateInScope { .. }) => unreachable!("validate_name is syntactic"),
         }
         if self
@@ -162,7 +162,7 @@ impl AddMcpServerModal {
             .iter()
             .any(|(scope, name)| *scope == self.scope && name == &raw_name)
         {
-            return Err(strings::MCP_NAME_DUPLICATE.into());
+            return Err(strings::mcp_name_duplicate().into());
         }
 
         let command_text = self.command_input.read(cx).value().to_string();
@@ -369,26 +369,26 @@ impl Render for AddMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::MCP_FIELD_NAME, cx))
+            .child(field_label(strings::mcp_field_name(), cx))
             .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::MCP_FIELD_SCOPE, cx))
+            .child(field_label(strings::mcp_field_scope(), cx))
             .child(scope_chip)
-            .child(field_label(strings::MCP_FIELD_TRANSPORT, cx))
+            .child(field_label(strings::mcp_field_transport(), cx))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::MCP_FIELD_COMMAND, cx))
+                    .child(field_label(strings::mcp_field_command(), cx))
                     .child(input(&self.command_input, cx, 1))
-                    .child(field_label(strings::MCP_FIELD_ARGS, cx))
+                    .child(field_label(strings::mcp_field_args(), cx))
                     .child(input(&self.args_input, cx, 2));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::MCP_FIELD_URL, cx))
+                    .child(field_label(strings::mcp_field_url(), cx))
                     .child(input(&self.url_input, cx, 1))
-                    .child(field_label(strings::MCP_FIELD_HEADERS, cx))
+                    .child(field_label(strings::mcp_field_headers(), cx))
                     .child(input(&self.headers_input, cx, 2));
             }
         }
@@ -398,10 +398,10 @@ impl Render for AddMcpServerModal {
         // regardless of the active transport (Stdio uses 1,2; remote
         // uses 1,2 for url+headers — env uses 3 across both branches).
         body = body
-            .child(field_label(strings::MCP_FIELD_ENV, cx))
+            .child(field_label(strings::mcp_field_env(), cx))
             .child(input(&self.env_input, cx, 3))
             .child(
-                checkbox("mcp-disabled", strings::MCP_FIELD_DISABLED, 4)
+                checkbox("mcp-disabled", strings::mcp_field_disabled(), 4)
                     .checked(self.disabled)
                     .on_click(cx.listener(|this, checked: &bool, _w, cx| {
                         this.disabled = *checked;
@@ -410,9 +410,9 @@ impl Render for AddMcpServerModal {
             );
 
         let save_label = if submitting {
-            "Saving…"
+            strings::mcp_saving_label()
         } else {
-            strings::MCP_BUTTON_ADD
+            strings::mcp_button_add()
         };
         let footer = div()
             .flex()
@@ -421,7 +421,7 @@ impl Render for AddMcpServerModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("add-mcp-cancel", strings::MCP_BUTTON_CANCEL)
+                button("add-mcp-cancel", strings::mcp_button_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
@@ -462,7 +462,7 @@ pub fn open_add_mcp_server_modal(
         existing_names: snapshot.all_names(),
     };
     crate::workspace::dialog_helpers::open_form_modal(
-        strings::MCP_NEW_TITLE,
+        strings::mcp_new_title(),
         Some(px(crate::ui::theme::FORM_MODAL_WIDE)),
         move |window, cx| AddMcpServerModal::new(workspace, initial, window, cx),
         window,

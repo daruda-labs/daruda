@@ -364,9 +364,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::GIT_CONFIRM_DISCARD_TITLE,
+            app_strings::git_confirm_discard_title(),
             body,
-            app_strings::GIT_CONFIRM_DISCARD_OK,
+            app_strings::git_confirm_discard_ok(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {

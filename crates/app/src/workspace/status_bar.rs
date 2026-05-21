@@ -82,7 +82,7 @@ impl RenderOnce for StatusBar {
                         .text_size(px(theme::STATUS_BAR_DETACHED_FONT_SIZE))
                         .text_color(detached_text)
                         .child(SharedString::from(
-                            crate::surface::strings::STATUS_BAR_DETACHED_CHIP,
+                            crate::surface::strings::status_bar_detached_chip(),
                         )),
                 )
             })
@@ -115,7 +115,7 @@ impl RenderOnce for StatusBar {
                         .rounded_full()
                         .bg(project_dot)
                         .tooltip(crate::ui::tooltip::text(
-                            crate::surface::strings::STATUS_BAR_PROJECT_CONFIG_TOOLTIP,
+                            crate::surface::strings::status_bar_project_config_tooltip(),
                         )),
                 )
             })

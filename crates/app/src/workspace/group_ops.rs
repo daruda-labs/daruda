@@ -29,25 +29,28 @@ use super::Workspace;
 /// the auto-color path that fills in unspecified colours on group
 /// creation. `(label, hex)` pairs — label drives the menu copy, hex is
 /// what lands in `SerializedGroup::color` and the left-dock chip.
-pub(in crate::workspace) const GROUP_COLOR_PRESETS: &[(&str, &str)] = &[
-    (s::GROUP_MENU_COLOR_RED, s::GROUP_PRESET_RED),
-    (s::GROUP_MENU_COLOR_ORANGE, s::GROUP_PRESET_ORANGE),
-    (s::GROUP_MENU_COLOR_YELLOW, s::GROUP_PRESET_YELLOW),
-    (s::GROUP_MENU_COLOR_LIME, s::GROUP_PRESET_LIME),
-    (s::GROUP_MENU_COLOR_GREEN, s::GROUP_PRESET_GREEN),
-    (s::GROUP_MENU_COLOR_TEAL, s::GROUP_PRESET_TEAL),
-    (s::GROUP_MENU_COLOR_CYAN, s::GROUP_PRESET_CYAN),
-    (s::GROUP_MENU_COLOR_BLUE, s::GROUP_PRESET_BLUE),
-    (s::GROUP_MENU_COLOR_INDIGO, s::GROUP_PRESET_INDIGO),
-    (s::GROUP_MENU_COLOR_PURPLE, s::GROUP_PRESET_PURPLE),
-    (s::GROUP_MENU_COLOR_PINK, s::GROUP_PRESET_PINK),
-];
+pub(in crate::workspace) fn group_color_presets() -> Vec<(String, &'static str)> {
+    vec![
+        (s::group_menu_color_red(), s::GROUP_PRESET_RED),
+        (s::group_menu_color_orange(), s::GROUP_PRESET_ORANGE),
+        (s::group_menu_color_yellow(), s::GROUP_PRESET_YELLOW),
+        (s::group_menu_color_lime(), s::GROUP_PRESET_LIME),
+        (s::group_menu_color_green(), s::GROUP_PRESET_GREEN),
+        (s::group_menu_color_teal(), s::GROUP_PRESET_TEAL),
+        (s::group_menu_color_cyan(), s::GROUP_PRESET_CYAN),
+        (s::group_menu_color_blue(), s::GROUP_PRESET_BLUE),
+        (s::group_menu_color_indigo(), s::GROUP_PRESET_INDIGO),
+        (s::group_menu_color_purple(), s::GROUP_PRESET_PURPLE),
+        (s::group_menu_color_pink(), s::GROUP_PRESET_PINK),
+    ]
+}
 
 /// Pick an auto-assigned preset hex for a freshly created group. Cycles
-/// through `GROUP_COLOR_PRESETS` by group id so consecutive groups land
+/// through the preset palette by group id so consecutive groups land
 /// on distinct colours, and the choice is deterministic (test-friendly).
 fn auto_color_for_group(group_id: GroupId) -> &'static str {
-    GROUP_COLOR_PRESETS[(group_id as usize) % GROUP_COLOR_PRESETS.len()].1
+    let presets = group_color_presets();
+    presets[(group_id as usize) % presets.len()].1
 }
 
 impl Workspace {

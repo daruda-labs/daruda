@@ -170,7 +170,7 @@ impl MergeModal {
         };
 
         if target_is_dirty {
-            self.state = MergeState::Error(surface_strings::MERGE_MODAL_TARGET_DIRTY.to_string());
+            self.state = MergeState::Error(surface_strings::merge_modal_target_dirty().to_string());
             cx.notify();
             return;
         }
@@ -242,7 +242,7 @@ impl MergeModal {
                                     // not about to also remove the worktree.
                                     if !remove_after_merge {
                                         let report = ErrorReport::new(
-                                            surface_strings::MERGE_MODAL_ALREADY_UP_TO_DATE,
+                                            surface_strings::merge_modal_already_up_to_date(),
                                         )
                                         .severity(ErrorSeverity::Info)
                                         .at(file!(), line!())
@@ -324,7 +324,7 @@ impl MergeModal {
                                         ws.finalize_remove_worktree(source_ref, window, cx);
                                         if was_up_to_date {
                                             let report = ErrorReport::new(
-                                                surface_strings::MERGE_MODAL_ALREADY_UP_TO_DATE,
+                                                surface_strings::merge_modal_already_up_to_date(),
                                             )
                                             .severity(ErrorSeverity::Info)
                                             .at(file!(), line!())
@@ -538,7 +538,7 @@ impl Render for MergeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(surface_strings::MERGE_MODAL_MERGING)
+                    .child(surface_strings::merge_modal_merging())
                     .into_any_element(),
             ),
             MergeState::Conflicts(files) => {
@@ -550,7 +550,7 @@ impl Render for MergeModal {
                         div()
                             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                             .text_color(strong_text)
-                            .child(surface_strings::MERGE_MODAL_CONFLICTS_NOTE),
+                            .child(surface_strings::merge_modal_conflicts_note()),
                     );
                 if !files.is_empty() {
                     let mut file_list = div().flex().flex_col().pl(px(theme::MODAL_BUTTON_PAD_X));
@@ -585,7 +585,7 @@ impl Render for MergeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(surface_strings::MERGE_MODAL_BRANCH_LABEL),
+                    .child(surface_strings::merge_modal_branch_label()),
             )
             .child(branch_list);
 
@@ -593,7 +593,7 @@ impl Render for MergeModal {
             body = body.child(
                 checkbox(
                     "merge-remove-after",
-                    surface_strings::MERGE_MODAL_REMOVE_AFTER,
+                    surface_strings::merge_modal_remove_after(),
                     0,
                 )
                 .checked(self.remove_after_merge)
@@ -619,7 +619,7 @@ impl Render for MergeModal {
         if is_conflicts {
             footer = footer
                 .child(
-                    button_danger("merge-abort", surface_strings::MERGE_MODAL_ABORT_MERGE)
+                    button_danger("merge-abort", surface_strings::merge_modal_abort_merge())
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.abort_merge(window, cx);
                         })),

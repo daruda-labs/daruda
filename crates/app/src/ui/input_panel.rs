@@ -197,6 +197,36 @@ impl InputPanel {
         }
     }
 
+    /// Update the display label of an action button (e.g. after a locale change).
+    pub fn set_action_label(
+        &mut self,
+        id: &str,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(a) = self.actions.iter_mut().find(|a| a.id.as_ref() == id) {
+            a.label = label.into();
+            cx.notify();
+        }
+    }
+
+    /// Update the label of the first dropdown item under an action button.
+    pub fn set_action_dropdown_label(
+        &mut self,
+        action_id: &str,
+        item_index: usize,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(a) = self.actions.iter_mut().find(|a| a.id.as_ref() == action_id) {
+            let items = std::rc::Rc::make_mut(&mut a.dropdown_items);
+            if let Some(item) = items.get_mut(item_index) {
+                item.label = label.into();
+                cx.notify();
+            }
+        }
+    }
+
     /// Returns an owned snapshot of the panel's text. The buffer lives
     /// in a sibling `Entity<InputState>`, so callers can't hold a
     /// `&str` through the entity guard and must take a clone.

@@ -247,7 +247,7 @@ pub(in crate::workspace) fn open_error_report_dialog(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let title: SharedString = format!("{}{}", s::ERROR_MODAL_TITLE_PREFIX, report.title).into();
+    let title: SharedString = format!("{}{}", s::error_modal_title_prefix(), report.title).into();
     open_form_modal(
         title,
         Some(px(theme::ERROR_MODAL_WIDTH)),

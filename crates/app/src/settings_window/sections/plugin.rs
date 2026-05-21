@@ -67,25 +67,25 @@ fn group_plugins_for_settings(skills: &[Skill]) -> Vec<PluginGroupForSettings> {
     out
 }
 
-fn plugin_subheading(label: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn plugin_subheading(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(theme::current(cx).modal_text_primary)
-        .child(label)
+        .child(label.into())
 }
 
-fn plugin_empty_hint(label: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn plugin_empty_hint(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(theme::current(cx).modal_secondary_text)
-        .child(label)
+        .child(label.into())
 }
 
 /// Two-column row used inside the detail pane: a fixed-width label on
 /// the left, free-form value on the right. Keeps every line aligned
 /// when rendered in a `flex_col` so multiple `detail_row`s read as a
 /// table.
-fn detail_row(label: &'static str, value: SharedString, cx: &gpui::App) -> impl IntoElement {
+fn detail_row(label: impl Into<gpui::SharedString>, value: SharedString, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     let label_color = t.modal_secondary_text;
     let value_color = t.modal_text_primary;
@@ -99,7 +99,7 @@ fn detail_row(label: &'static str, value: SharedString, cx: &gpui::App) -> impl 
                 .flex_none()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(label_color)
-                .child(label),
+                .child(label.into()),
         )
         .child(
             div()
@@ -130,12 +130,12 @@ fn display_name_for_invocation(skill: &Skill) -> String {
 
 /// User-facing label for the 4-state `SkillInvocation`. Read off the
 /// `user_invocable` / `disable_model_invocation` frontmatter pair.
-fn invocation_status_label(inv: SkillInvocation) -> &'static str {
+fn invocation_status_label(inv: SkillInvocation) -> String {
     match inv {
-        SkillInvocation::Both => s::SETTINGS_PLUGIN_SKILL_INVOCATION_BOTH,
-        SkillInvocation::UserOnly => s::SETTINGS_PLUGIN_SKILL_INVOCATION_USER_ONLY,
-        SkillInvocation::ModelOnly => s::SETTINGS_PLUGIN_SKILL_INVOCATION_MODEL_ONLY,
-        SkillInvocation::Disabled => s::SETTINGS_PLUGIN_SKILL_INVOCATION_DISABLED,
+        SkillInvocation::Both => s::settings_plugin_skill_invocation_both(),
+        SkillInvocation::UserOnly => s::settings_plugin_skill_invocation_user_only(),
+        SkillInvocation::ModelOnly => s::settings_plugin_skill_invocation_model_only(),
+        SkillInvocation::Disabled => s::settings_plugin_skill_invocation_disabled(),
     }
 }
 
@@ -176,7 +176,7 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_PLUGIN, cx));
+            .child(Self::section_label(s::settings_section_plugin(), cx));
         if let Some(err) = self.plugin_last_error.clone() {
             header_col = header_col.child(
                 div()
@@ -224,18 +224,18 @@ impl SettingsWindow {
 
         let mut col = div().flex().flex_col().gap(px(theme::MODAL_PANEL_GAP));
 
-        col = col.child(plugin_subheading(s::SETTINGS_PLUGIN_INSTALLED_HEADER, cx));
+        col = col.child(plugin_subheading(s::settings_plugin_installed_header(), cx));
         if installed.is_empty() {
-            col = col.child(plugin_empty_hint(s::SETTINGS_PLUGIN_NONE_INSTALLED, cx));
+            col = col.child(plugin_empty_hint(s::settings_plugin_none_installed(), cx));
         } else {
             for g in &installed {
                 col = col.child(self.plugin_master_row(g, cx));
             }
         }
 
-        col = col.child(plugin_subheading(s::SETTINGS_PLUGIN_AVAILABLE_HEADER, cx));
+        col = col.child(plugin_subheading(s::settings_plugin_available_header(), cx));
         if available.is_empty() {
-            col = col.child(plugin_empty_hint(s::SETTINGS_PLUGIN_NONE_AVAILABLE, cx));
+            col = col.child(plugin_empty_hint(s::settings_plugin_none_available(), cx));
         } else {
             for g in &available {
                 col = col.child(self.plugin_master_row(g, cx));
@@ -318,11 +318,11 @@ impl SettingsWindow {
             return self.plugin_skill_view_pane(view, cx);
         }
         let Some(selected_id) = self.plugin_selected.clone() else {
-            return plugin_empty_hint(s::SETTINGS_PLUGIN_DETAIL_EMPTY, cx).into_any_element();
+            return plugin_empty_hint(s::settings_plugin_detail_empty(), cx).into_any_element();
         };
         let Some(group) = groups.iter().find(|g| g.plugin_id == selected_id) else {
             // Selection went stale (plugin uninstalled while open).
-            return plugin_empty_hint(s::SETTINGS_PLUGIN_DETAIL_EMPTY, cx).into_any_element();
+            return plugin_empty_hint(s::settings_plugin_detail_empty(), cx).into_any_element();
         };
 
         let install = installs.get(&group.plugin_id);
@@ -346,49 +346,49 @@ impl SettingsWindow {
         );
 
         let availability_text = match group.availability {
-            Some(PluginAvailability::Installed) => s::SETTINGS_PLUGIN_DETAIL_STATUS_INSTALLED,
-            Some(PluginAvailability::Available) => s::SETTINGS_PLUGIN_DETAIL_STATUS_AVAILABLE,
-            None => s::SETTINGS_PLUGIN_DETAIL_UNKNOWN,
+            Some(PluginAvailability::Installed) => s::settings_plugin_detail_status_installed(),
+            Some(PluginAvailability::Available) => s::settings_plugin_detail_status_available(),
+            None => s::settings_plugin_detail_unknown(),
         };
 
         let version_text = install
             .map(|i| i.version.clone())
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| s::SETTINGS_PLUGIN_DETAIL_UNKNOWN.to_string());
+            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
         let path_text = install
             .map(|i| redact_home(&i.install_path))
-            .unwrap_or_else(|| s::SETTINGS_PLUGIN_DETAIL_UNKNOWN.to_string());
+            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
         let scope_text = install
             .map(|i| i.scope.clone())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| s::SETTINGS_PLUGIN_DETAIL_UNKNOWN.to_string());
+            .unwrap_or_else(|| s::settings_plugin_detail_unknown().to_string());
 
         let meta = div()
             .flex()
             .flex_col()
             .gap(px(theme::SKILL_ROW_GAP))
             .child(detail_row(
-                s::SETTINGS_PLUGIN_DETAIL_MARKETPLACE,
+                s::settings_plugin_detail_marketplace(),
                 SharedString::from(marketplace_id),
                 cx,
             ))
             .child(detail_row(
-                s::SETTINGS_PLUGIN_DETAIL_AVAILABILITY,
+                s::settings_plugin_detail_availability(),
                 SharedString::from(availability_text),
                 cx,
             ))
             .child(detail_row(
-                s::SETTINGS_PLUGIN_DETAIL_VERSION,
+                s::settings_plugin_detail_version(),
                 SharedString::from(version_text),
                 cx,
             ))
             .child(detail_row(
-                s::SETTINGS_PLUGIN_DETAIL_SCOPE,
+                s::settings_plugin_detail_scope(),
                 SharedString::from(scope_text),
                 cx,
             ))
             .child(detail_row(
-                s::SETTINGS_PLUGIN_DETAIL_PATH,
+                s::settings_plugin_detail_path(),
                 SharedString::from(path_text),
                 cx,
             ));
@@ -401,12 +401,12 @@ impl SettingsWindow {
                 .flex_col()
                 .gap(px(theme::SKILL_ROW_GAP))
                 .child(plugin_subheading(
-                    s::SETTINGS_PLUGIN_DETAIL_SKILLS_HEADER,
+                    s::settings_plugin_detail_skills_header(),
                     cx,
                 ));
         if skills_for_plugin.is_empty() {
             skills_col =
-                skills_col.child(plugin_empty_hint(s::SETTINGS_PLUGIN_DETAIL_NO_SKILLS, cx));
+                skills_col.child(plugin_empty_hint(s::settings_plugin_detail_no_skills(), cx));
         } else {
             for sk in &skills_for_plugin {
                 skills_col = skills_col.child(self.plugin_skill_row(sk, cx));
@@ -437,14 +437,14 @@ impl SettingsWindow {
         let is_in_flight = in_flight.contains(&group.plugin_id);
         let (button_label, action) = match (group.availability, is_in_flight) {
             (Some(PluginAvailability::Installed), false) => {
-                (s::SETTINGS_PLUGIN_UNINSTALL, Some(PluginAction::Uninstall))
+                (s::settings_plugin_uninstall(), Some(PluginAction::Uninstall))
             }
-            (Some(PluginAvailability::Installed), true) => (s::SETTINGS_PLUGIN_UNINSTALLING, None),
+            (Some(PluginAvailability::Installed), true) => (s::settings_plugin_uninstalling(), None),
             (Some(PluginAvailability::Available), false) => {
-                (s::SETTINGS_PLUGIN_INSTALL, Some(PluginAction::Install))
+                (s::settings_plugin_install(), Some(PluginAction::Install))
             }
-            (Some(PluginAvailability::Available), true) => (s::SETTINGS_PLUGIN_INSTALLING, None),
-            (None, _) => ("", None),
+            (Some(PluginAvailability::Available), true) => (s::settings_plugin_installing(), None),
+            (None, _) => (String::new(), None),
         };
 
         let button_id = SharedString::from(format!("settings-plugin-action-{}", group.plugin_id));
@@ -542,23 +542,23 @@ impl SettingsWindow {
             .child(header_line);
 
         if let Some(desc) = description {
-            col = col.child(detail_row(s::SETTINGS_PLUGIN_SKILL_DESCRIPTION, desc, cx));
+            col = col.child(detail_row(s::settings_plugin_skill_description(), desc, cx));
         }
         if let Some(hint) = arg_hint {
-            col = col.child(detail_row(s::SETTINGS_PLUGIN_SKILL_ARGUMENT_HINT, hint, cx));
+            col = col.child(detail_row(s::settings_plugin_skill_argument_hint(), hint, cx));
         }
         if let Some(tools) = allowed_tools {
             col = col.child(detail_row(
-                s::SETTINGS_PLUGIN_SKILL_ALLOWED_TOOLS,
+                s::settings_plugin_skill_allowed_tools(),
                 tools,
                 cx,
             ));
         }
         if let Some(p) = paths {
-            col = col.child(detail_row(s::SETTINGS_PLUGIN_SKILL_PATHS, p, cx));
+            col = col.child(detail_row(s::settings_plugin_skill_paths(), p, cx));
         }
         if let Some(w) = when_to_use {
-            col = col.child(detail_row(s::SETTINGS_PLUGIN_SKILL_WHEN_TO_USE, w, cx));
+            col = col.child(detail_row(s::settings_plugin_skill_when_to_use(), w, cx));
         }
         col
     }
@@ -581,7 +581,7 @@ impl SettingsWindow {
         // master-row selection. Pass `display_name` + `skill_md_path`
         // to the spawn loader so they survive the async disk read.
         let _ = plugin_id;
-        button(id, s::SETTINGS_PLUGIN_SKILL_VIEW).on_click(cx.listener(
+        button(id, s::settings_plugin_skill_view()).on_click(cx.listener(
             move |this, _: &ClickEvent, _, cx| {
                 this.open_plugin_skill_view(display_name.clone(), skill_md_path.clone(), cx);
             },
@@ -608,7 +608,7 @@ impl SettingsWindow {
             .items_center()
             .gap(px(theme::SKILL_HEADER_GAP))
             .child(
-                button("settings-plugin-skill-back", s::SETTINGS_PLUGIN_SKILL_BACK).on_click(
+                button("settings-plugin-skill-back", s::settings_plugin_skill_back()).on_click(
                     cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.plugin_view_skill = None;
                         cx.notify();
@@ -623,7 +623,7 @@ impl SettingsWindow {
             );
 
         let path_row = detail_row(
-            s::SETTINGS_PLUGIN_DETAIL_PATH,
+            s::settings_plugin_detail_path(),
             SharedString::from(redact_home(&view.skill_md_path)),
             cx,
         );
@@ -632,7 +632,7 @@ impl SettingsWindow {
             PluginSkillBodyState::Loading => div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(secondary_color)
-                .child(s::SETTINGS_PLUGIN_SKILL_BODY_LOADING)
+                .child(s::settings_plugin_skill_body_loading())
                 .into_any_element(),
             PluginSkillBodyState::Error(msg) => div()
                 .flex()
@@ -642,7 +642,7 @@ impl SettingsWindow {
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(error_color)
-                        .child(s::SETTINGS_PLUGIN_SKILL_BODY_ERROR),
+                        .child(s::settings_plugin_skill_body_error()),
                 )
                 .child(
                     div()
@@ -659,7 +659,7 @@ impl SettingsWindow {
                     div()
                         .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
                         .text_color(section_header_color)
-                        .child(s::SETTINGS_PLUGIN_SKILL_BODY),
+                        .child(s::settings_plugin_skill_body()),
                 )
                 .child(
                     div()

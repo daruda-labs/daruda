@@ -51,7 +51,7 @@ pub(super) fn claude_badges_row(
     cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let count = sessions.len();
-    let label = format!("{count}{}", surface_strings::CLAUDE_SESSIONS_LABEL_SUFFIX);
+    let label = format!("{count}{}", surface_strings::claude_sessions_label_suffix());
     let faint_text = theme::current(cx).faint_text;
     div()
         .flex()
@@ -81,7 +81,7 @@ pub(super) fn claude_badges_row(
                         format!(
                             "{prefix}{}{}",
                             surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS,
-                            surface_strings::CLAUDE_BADGE_TOOLTIP_ACTIVE_SUFFIX
+                            surface_strings::claude_badge_tooltip_active_suffix()
                         )
                     } else {
                         format!("{prefix}{}", surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS)

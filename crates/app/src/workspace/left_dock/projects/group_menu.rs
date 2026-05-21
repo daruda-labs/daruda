@@ -17,7 +17,7 @@ use crate::surface::strings as s;
 use crate::ui::ContextMenuItem;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_single_field_dialog;
-use crate::workspace::group_ops::GROUP_COLOR_PRESETS;
+use crate::workspace::group_ops::group_color_presets;
 
 /// Build the flat menu for a group header.
 pub(in crate::workspace) fn build_group_menu_items(
@@ -32,7 +32,7 @@ pub(in crate::workspace) fn build_group_menu_items(
     let ws_rename = ws.clone();
     let initial = current_name.to_string();
     items.push(ContextMenuItem::new(
-        s::GROUP_MENU_RENAME,
+        s::group_menu_rename(),
         move |_, window, app_cx| {
             let Some(workspace) = ws_rename.upgrade() else {
                 return;
@@ -42,8 +42,8 @@ pub(in crate::workspace) fn build_group_menu_items(
             workspace.update(app_cx, |_, cx| {
                 open_single_field_dialog(
                     weak,
-                    s::GROUP_RENAME_DIALOG_TITLE,
-                    s::GROUP_RENAME_DIALOG_PLACEHOLDER,
+                    s::group_rename_dialog_title(),
+                    s::group_rename_dialog_placeholder(),
                     Some(&initial),
                     move |ws, value, _window, cx| {
                         let Some(name) = value else {
@@ -61,21 +61,21 @@ pub(in crate::workspace) fn build_group_menu_items(
     items.push(ContextMenuItem::separator());
 
     // -- Color presets --
-    for (label, hex) in GROUP_COLOR_PRESETS {
+    for (label, hex) in group_color_presets() {
         let ws_color = ws.clone();
-        items.push(ContextMenuItem::new(*label, move |_, _window, app_cx| {
+        items.push(ContextMenuItem::new(label, move |_, _window, app_cx| {
             let Some(workspace) = ws_color.upgrade() else {
                 return;
             };
             workspace.update(app_cx, |ws, cx| {
-                ws.recolor_group(group_id, Some((*hex).to_string()), cx);
+                ws.recolor_group(group_id, Some(hex.to_string()), cx);
             });
         }));
     }
 
     let ws_clear = ws.clone();
     items.push(ContextMenuItem::new(
-        s::GROUP_MENU_COLOR_CLEAR,
+        s::group_menu_color_clear(),
         move |_, _window, app_cx| {
             let Some(workspace) = ws_clear.upgrade() else {
                 return;
@@ -90,9 +90,9 @@ pub(in crate::workspace) fn build_group_menu_items(
 
     // -- Collapse / Expand --
     let collapse_label = if is_collapsed {
-        s::GROUP_MENU_EXPAND
+        s::group_menu_expand()
     } else {
-        s::GROUP_MENU_COLLAPSE
+        s::group_menu_collapse()
     };
     let ws_collapse = ws.clone();
     items.push(ContextMenuItem::new(
@@ -114,7 +114,7 @@ pub(in crate::workspace) fn build_group_menu_items(
     // ungrouped (no data loss) — only the visual grouping disappears.
     let ws_delete = ws.clone();
     items.push(ContextMenuItem::new(
-        s::GROUP_MENU_DELETE,
+        s::group_menu_delete(),
         move |_, _window, app_cx| {
             let Some(workspace) = ws_delete.upgrade() else {
                 return;
@@ -130,7 +130,7 @@ pub(in crate::workspace) fn build_group_menu_items(
 
 #[cfg(test)]
 mod tests {
-    use crate::workspace::group_ops::GROUP_COLOR_PRESETS;
+    use crate::workspace::group_ops::group_color_presets;
 
     /// Sanity check the shared preset table — the count is referenced
     /// indirectly by the `[+] color presets` UI so an accidental drop
@@ -138,11 +138,11 @@ mod tests {
     #[test]
     fn color_presets_table_is_well_formed() {
         assert!(
-            GROUP_COLOR_PRESETS.len() >= 6,
+            group_color_presets().len() >= 6,
             "expected at least six preset colors, got {}",
-            GROUP_COLOR_PRESETS.len()
+            group_color_presets().len()
         );
-        for (label, hex) in GROUP_COLOR_PRESETS {
+        for (label, hex) in group_color_presets() {
             assert!(!label.is_empty(), "preset label must not be empty");
             assert!(
                 hex.starts_with('#') && hex.len() == 7,

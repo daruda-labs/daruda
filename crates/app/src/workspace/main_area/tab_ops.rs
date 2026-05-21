@@ -419,14 +419,18 @@ impl Workspace {
             .collect::<Vec<_>>()
             .join("\n");
 
+        let prompt_heading = crate::surface::strings::tab_close_batch_heading();
+        let prompt_save = crate::surface::strings::tab_close_batch_save_all();
+        let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
+        let prompt_cancel = crate::surface::strings::task_edit_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
-            crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
+            &prompt_heading,
             Some(&detail),
             &[
-                crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                crate::surface::strings::TASK_EDIT_CANCEL,
+                prompt_save.as_str(),
+                prompt_discard.as_str(),
+                prompt_cancel.as_str(),
             ],
             cx,
         );
@@ -501,14 +505,18 @@ impl Workspace {
             .collect::<Vec<_>>()
             .join("\n");
 
+        let prompt_heading = crate::surface::strings::tab_close_batch_heading();
+        let prompt_save = crate::surface::strings::tab_close_batch_save_all();
+        let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
+        let prompt_cancel = crate::surface::strings::task_edit_cancel();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
-            crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
+            &prompt_heading,
             Some(&detail),
             &[
-                crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                crate::surface::strings::TASK_EDIT_CANCEL,
+                prompt_save.as_str(),
+                prompt_discard.as_str(),
+                prompt_cancel.as_str(),
             ],
             cx,
         );
@@ -555,25 +563,27 @@ impl Workspace {
         let can_save = pane.can_save(cx);
 
         let heading: String = if is_draft {
-            crate::surface::strings::TASK_EDIT_DISCARD_DRAFT_PROMPT.to_string()
+            crate::surface::strings::task_edit_discard_draft_prompt().to_string()
         } else {
             format!(
                 "{}{}{}",
-                crate::surface::strings::TASK_EDIT_SAVE_PROMPT_PREFIX,
+                crate::surface::strings::task_edit_save_prompt_prefix(),
                 title,
-                crate::surface::strings::TASK_EDIT_SAVE_PROMPT_SUFFIX,
+                crate::surface::strings::task_edit_save_prompt_suffix(),
             )
         };
 
         let save_label = if is_draft {
-            crate::surface::strings::TASK_EDIT_SAVE_DRAFT
+            crate::surface::strings::task_edit_save_draft()
         } else {
-            crate::surface::strings::TASK_EDIT_SAVE
+            crate::surface::strings::task_edit_save()
         };
+        let btn_discard = crate::surface::strings::task_edit_discard();
+        let btn_cancel = crate::surface::strings::task_edit_cancel();
         let buttons = [
-            save_label,
-            crate::surface::strings::TASK_EDIT_DISCARD,
-            crate::surface::strings::TASK_EDIT_CANCEL,
+            save_label.as_str(),
+            btn_discard.as_str(),
+            btn_cancel.as_str(),
         ];
 
         let receiver = window.prompt(gpui::PromptLevel::Warning, &heading, None, &buttons, cx);

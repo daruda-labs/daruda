@@ -53,7 +53,7 @@ pub(super) fn render_file_viewer_body(
             .justify_center()
             .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
             .text_color(ctx_text)
-            .child(strings::FILE_VIEWER_LOADING)
+            .child(strings::file_viewer_loading())
             .into_any_element(),
 
         PaneFileContent::Error(msg) => frame
@@ -73,7 +73,7 @@ pub(super) fn render_file_viewer_body(
             .justify_center()
             .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
             .text_color(ctx_text)
-            .child(strings::FILE_VIEWER_BINARY)
+            .child(strings::file_viewer_binary())
             .into_any_element(),
 
         PaneFileContent::Deleted => frame
@@ -83,7 +83,7 @@ pub(super) fn render_file_viewer_body(
             .justify_center()
             .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
             .text_color(del_text)
-            .child(strings::FILE_VIEWER_DELETED)
+            .child(strings::file_viewer_deleted())
             .into_any_element(),
 
         PaneFileContent::LoadedRaw {
@@ -275,7 +275,7 @@ fn render_diff_body(
             .size_full()
             .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
             .text_color(ctx_text)
-            .child(strings::FILE_VIEWER_EMPTY_DIFF);
+            .child(strings::file_viewer_empty_diff());
     }
 
     let line_h = px(theme::FILE_VIEWER_LINE_H);

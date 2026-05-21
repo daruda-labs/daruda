@@ -254,7 +254,7 @@ pub(in crate::workspace) fn build_raw_rows(lines: &[String]) -> Vec<VisualRow> {
 /// When `hide_ctx` is true, `DiffLine::Context` rows are omitted and hunks
 /// that contain only context lines are skipped entirely (no orphan headers).
 pub(in crate::workspace) fn build_diff_rows(hunks: &[DiffHunk], hide_ctx: bool) -> Vec<VisualRow> {
-    use crate::surface::strings::FILE_VIEWER_NO_NEWLINE;
+    use crate::surface::strings::file_viewer_no_newline;
     let mut rows = Vec::new();
     for hunk in hunks {
         // When hiding context, skip hunks that have no non-context lines.
@@ -331,7 +331,7 @@ pub(in crate::workspace) fn build_diff_rows(hunks: &[DiffHunk], hide_ctx: bool) 
                         kind: VisualRowKind::NoNewline,
                         line_no_left: String::new(),
                         line_no_right: String::new(),
-                        content: FILE_VIEWER_NO_NEWLINE.to_owned(),
+                        content: file_viewer_no_newline().to_owned(),
                         header_context: String::new(),
                         spans: Vec::new(),
                         word_changes: Vec::new(),

@@ -15,11 +15,11 @@ use super::super::layout::Dock;
 use super::super::layout::LeftDockSnapshot;
 
 /// All view entries shown in the strip, in visible order.
-fn entries() -> [(LeftDockView, &'static str); 3] {
-    [
-        (LeftDockView::Worktrees, strings::SIDEBAR_TAB_WORKTREES),
-        (LeftDockView::GitChanges, strings::SIDEBAR_TAB_GIT),
-        (LeftDockView::Files, strings::SIDEBAR_TAB_FILES),
+fn entries() -> Vec<(LeftDockView, gpui::SharedString)> {
+    vec![
+        (LeftDockView::Worktrees, strings::sidebar_tab_worktrees().into()),
+        (LeftDockView::GitChanges, strings::sidebar_tab_git().into()),
+        (LeftDockView::Files, strings::sidebar_tab_files().into()),
     ]
 }
 
@@ -46,7 +46,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, _cx: &mut Context<Do
         .w_full()
         .gap(px(0.))
         .selected_index(active_ix)
-        .children(all.iter().map(|(_, label)| tab(*label)))
+        .children(all.into_iter().map(|(_, label)| tab(label)))
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);
             if let Some(ws) = workspace.upgrade() {

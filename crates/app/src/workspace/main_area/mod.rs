@@ -159,14 +159,14 @@ fn pane_header(
             cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
                 let ws = cx.entity().downgrade();
                 let zoom_label = if is_zoomed {
-                    s::CTX_UNZOOM_PANE
+                    s::ctx_unzoom_pane()
                 } else {
-                    s::CTX_ZOOM_PANE
+                    s::ctx_zoom_pane()
                 };
                 let items: Vec<CItem> = vec![
                     crate::workspace::render::ws_menu_item(
                         ws.clone(),
-                        s::CTX_SPLIT_RIGHT,
+                        s::ctx_split_right(),
                         false,
                         |this, win, cx| {
                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -176,7 +176,7 @@ fn pane_header(
                     ),
                     crate::workspace::render::ws_menu_item(
                         ws.clone(),
-                        s::CTX_SPLIT_DOWN,
+                        s::ctx_split_down(),
                         false,
                         |this, win, cx| {
                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -196,7 +196,7 @@ fn pane_header(
                     CItem::separator(),
                     crate::workspace::render::ws_menu_item(
                         ws.clone(),
-                        s::CTX_CLOSE_PANE,
+                        s::ctx_close_pane(),
                         false,
                         move |this, win, cx| {
                             this.request_close_pane(pane_id, win, cx);

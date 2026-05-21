@@ -119,7 +119,7 @@ fn empty_state_inline(cx: &gpui::App) -> AnyElement {
         .py(px(theme::RIGHT_PANEL_PAD_Y))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::USAGE_EMPTY_STATE)
+        .child(strings::usage_empty_state())
         .into_any_element()
 }
 
@@ -220,9 +220,9 @@ fn metrics_group(
         .flex_none()
         .items_baseline()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(token_count(strings::USAGE_IN_LABEL, input_tokens, cx))
-        .child(token_count(strings::USAGE_OUT_LABEL, output_tokens, cx))
-        .child(token_count(strings::USAGE_CACHE_LABEL, cache_tokens, cx))
+        .child(token_count(strings::usage_in_label(), input_tokens, cx))
+        .child(token_count(strings::usage_out_label(), output_tokens, cx))
+        .child(token_count(strings::usage_cache_label(), cache_tokens, cx))
         .child(cost_label(cost, cx))
 }
 
@@ -248,17 +248,17 @@ fn worktree_label(s: &SessionUsage) -> SharedString {
 /// Compact summary "label" pill that doesn't carry data — used to
 /// open the summary row with the literal "Total" so that row reads
 /// the same as session rows from the eye's perspective.
-fn label_pill(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn label_pill(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .flex_none()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).faint_text)
-        .child(text)
+        .child(text.into())
 }
 
 /// "label: 142k" pair. Label is rendered dim, count in body color so
 /// the eye scans the numbers first.
-fn token_count(label: &'static str, n: u64, cx: &gpui::App) -> impl IntoElement {
+fn token_count(label: impl Into<gpui::SharedString>, n: u64, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     let label_color = t.faint_text;
     let value_color = t.muted_text;
@@ -272,7 +272,7 @@ fn token_count(label: &'static str, n: u64, cx: &gpui::App) -> impl IntoElement 
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                 .text_color(label_color)
-                .child(label),
+                .child(label.into()),
         )
         .child(
             div()
@@ -320,12 +320,12 @@ fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
         .flex_col()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
         .child(gauge_row(
-            strings::USAGE_LIMIT_5H_LABEL,
+            strings::usage_limit_5h_label(),
             limits.five_hour.as_ref(),
             cx,
         ))
         .child(gauge_row(
-            strings::USAGE_LIMIT_7D_LABEL,
+            strings::usage_limit_7d_label(),
             limits.seven_day.as_ref(),
             cx,
         ))
@@ -333,7 +333,8 @@ fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
 
 /// One gauge: `[ "5h"  ━━━━━░░░░░  68%   Resets in 2h 14m ]`.
 /// `None` window → placeholder (dim track + "Unavailable").
-fn gauge_row(label: &'static str, window: Option<&LimitWindow>, cx: &gpui::App) -> AnyElement {
+fn gauge_row(label: impl Into<gpui::SharedString>, window: Option<&LimitWindow>, cx: &gpui::App) -> AnyElement {
+    let label: gpui::SharedString = label.into();
     let Some(win) = window else {
         return placeholder_gauge(label, cx);
     };
@@ -370,7 +371,7 @@ fn gauge_row(label: &'static str, window: Option<&LimitWindow>, cx: &gpui::App) 
 /// `/api/oauth/usage` request failed, or Anthropic omitted this
 /// window from the response. Renders the same shape as a real
 /// gauge so the layout doesn't shift when data arrives.
-fn placeholder_gauge(label: &'static str, cx: &gpui::App) -> AnyElement {
+fn placeholder_gauge(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> AnyElement {
     let track_bg = theme::current(cx).gauge_track_bg;
     div()
         .flex()
@@ -394,17 +395,17 @@ fn placeholder_unavailable_text(cx: &gpui::App) -> impl IntoElement {
         .flex_none()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).right_panel_dim_text)
-        .child(strings::USAGE_LIMIT_UNAVAILABLE)
+        .child(strings::usage_limit_unavailable())
 }
 
 /// "5h" / "7d" leading label. Fixed width so the bars align across
 /// the two rows.
-fn gauge_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn gauge_label(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .flex_none()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).faint_text)
-        .child(text)
+        .child(text.into())
 }
 
 /// Filled bar — outer track with a percentage-width fill. `pct` is

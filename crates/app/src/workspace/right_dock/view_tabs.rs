@@ -15,12 +15,12 @@ use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 
 /// All view entries shown in the strip, in visible order.
-fn entries() -> [(RightDockView, &'static str); 4] {
-    [
-        (RightDockView::Usage, strings::RIGHT_PANEL_TAB_USAGE),
-        (RightDockView::Skills, strings::RIGHT_PANEL_TAB_SKILLS),
-        (RightDockView::Tools, strings::RIGHT_PANEL_TAB_TOOLS),
-        (RightDockView::Tasks, strings::RIGHT_PANEL_TAB_TASKS),
+fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
+    vec![
+        (RightDockView::Usage, strings::right_panel_tab_usage().into()),
+        (RightDockView::Skills, strings::right_panel_tab_skills().into()),
+        (RightDockView::Tools, strings::right_panel_tab_tools().into()),
+        (RightDockView::Tasks, strings::right_panel_tab_tasks().into()),
     ]
 }
 
@@ -51,7 +51,7 @@ pub(in crate::workspace) fn render(
         .w_full()
         .gap(px(0.))
         .selected_index(active_ix)
-        .children(all.iter().map(|(_, label)| tab(*label)))
+        .children(all.into_iter().map(|(_, label)| tab(label)))
         .on_click(move |ix, _window, cx| {
             let view = view_by_index(*ix);
             if let Some(ws) = workspace.upgrade() {

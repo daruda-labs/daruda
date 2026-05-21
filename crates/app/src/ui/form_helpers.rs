@@ -22,14 +22,14 @@
 //! ```
 
 use crate::ui::theme;
-use gpui::{IntoElement, div, prelude::*, px};
+use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 /// Form row with a fixed-width label on the left and a flex-grow
 /// input on the right. Label width is `theme::SETTINGS_LABEL_W`.
 /// Uses `gpui_component::Label` for the label cell so the text colour
 /// flows from `cx.theme().foreground` (which `apply_daruda_palette`
 /// retones on every light-mode switch). No `cx` argument needed.
-pub fn field_row(label: &'static str, input: impl IntoElement) -> impl IntoElement {
+pub fn field_row(label: impl Into<SharedString>, input: impl IntoElement) -> impl IntoElement {
     div()
         .flex()
         .flex_row()

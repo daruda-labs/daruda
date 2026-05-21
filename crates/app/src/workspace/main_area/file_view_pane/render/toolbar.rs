@@ -37,9 +37,9 @@ pub(super) fn render_file_viewer_toolbar(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
     let staged_badge = if fv.staged {
-        strings::FILE_VIEWER_STAGED_BADGE
+        strings::file_viewer_staged_badge()
     } else {
-        ""
+        String::new()
     };
     let label = match parent_name {
         Some(dir) => format!(
@@ -116,7 +116,7 @@ pub(super) fn render_file_viewer_toolbar(
                             .and_then(|root| abs_pathbuf.strip_prefix(root).ok())
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_else(|| path_for_menu.to_string_lossy().to_string());
-                        let make_copy_item = |label: &'static str, text: String| {
+                        let make_copy_item = |label: gpui::SharedString, text: String| {
                             let ws = ws.clone();
                             ContextMenuItem::new(label, move |_, _, app| {
                                 if let Some(w) = ws.upgrade() {
@@ -128,8 +128,8 @@ pub(super) fn render_file_viewer_toolbar(
                             })
                         };
                         let items = vec![
-                            make_copy_item(strings::FILE_VIEWER_COPY_ABS_PATH, abs_path),
-                            make_copy_item(strings::FILE_VIEWER_COPY_REL_PATH, rel_path),
+                            make_copy_item(strings::file_viewer_copy_abs_path().into(), abs_path),
+                            make_copy_item(strings::file_viewer_copy_rel_path().into(), rel_path),
                         ];
                         this.open_context_menu(ev.position, items, cx);
                     }),
@@ -177,7 +177,7 @@ pub(super) fn render_file_viewer_toolbar(
                     )
                 })
                 .child(mode_tab(
-                    strings::FILE_VIEWER_TAB_RAW,
+                    strings::file_viewer_tab_raw(),
                     is_raw,
                     tab_text,
                     tab_active_bg,
@@ -188,7 +188,7 @@ pub(super) fn render_file_viewer_toolbar(
                 ))
                 .when(is_markdown, |d| {
                     d.child(mode_tab(
-                        strings::FILE_VIEWER_TAB_PREVIEW,
+                        strings::file_viewer_tab_preview(),
                         is_preview,
                         tab_text,
                         tab_active_bg,
@@ -199,7 +199,7 @@ pub(super) fn render_file_viewer_toolbar(
                     ))
                 })
                 .child(mode_tab(
-                    strings::FILE_VIEWER_TAB_CHANGES,
+                    strings::file_viewer_tab_changes(),
                     is_changes,
                     tab_text,
                     tab_active_bg,
@@ -211,9 +211,9 @@ pub(super) fn render_file_viewer_toolbar(
                 .when(is_changes, |d| {
                     d.child(mode_tab(
                         if hide_unchanged {
-                            strings::FILE_VIEWER_SHOW_ALL
+                            strings::file_viewer_show_all()
                         } else {
-                            strings::FILE_VIEWER_HIDE_UNCHANGED
+                            strings::file_viewer_hide_unchanged()
                         },
                         true,
                         tab_text,
@@ -246,15 +246,16 @@ pub(super) fn render_file_viewer_toolbar(
 
 /// A small pill button for mode tabs in the file viewer toolbar.
 fn mode_tab(
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     active: bool,
     tab_text: gpui::Hsla,
     tab_active_bg: gpui::Hsla,
     tab_active_text: gpui::Hsla,
     on_click: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: gpui::SharedString = label.into();
     div()
-        .id(label)
+        .id(label.clone())
         .flex_none()
         .px(px(theme::FILE_VIEWER_TAB_PAD_X))
         .py(px(theme::FILE_VIEWER_TAB_PAD_Y))

@@ -10,6 +10,7 @@ pub mod colors;
 pub mod cursor;
 pub mod file_viewer;
 pub mod font;
+pub mod general;
 pub mod keybindings;
 pub mod left_dock;
 pub mod logs;
@@ -36,6 +37,7 @@ pub use colors::{AnsiPalette, ColorConfig, HexColor};
 pub use cursor::{CursorConfig, CursorStyle};
 pub use file_viewer::FileViewerConfig;
 pub use font::FontConfig;
+pub use general::{GeneralConfig, SUPPORTED_LOCALES};
 pub use keybindings::KeybindingConfig;
 pub use left_dock::{IconColorMode, LeftDockConfig};
 pub use logs::LogsConfig;
@@ -85,6 +87,7 @@ impl Default for ThemeConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
+    pub general: GeneralConfig,
     pub font: FontConfig,
     pub cursor: CursorConfig,
     pub window: WindowConfig,
@@ -209,6 +212,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             f(t);
         }
     }
+
+    patch_section(&mut doc, "general", |t| {
+        t["language"] = toml_edit::value(config.general.language.clone());
+    });
 
     patch_section(&mut doc, "theme", |t| {
         // Phase 2 split the legacy `preset` key into `terminal_preset`

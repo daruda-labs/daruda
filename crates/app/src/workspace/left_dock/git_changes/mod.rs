@@ -44,7 +44,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             daruda_store::project::WorktreeKind::Git { branch, .. } => branch.clone(),
             daruda_store::project::WorktreeKind::Default => None,
         })
-        .unwrap_or_else(|| app_strings::GIT_DETACHED_LABEL.to_string());
+        .unwrap_or_else(|| app_strings::git_detached_label().to_string());
 
     let status = snap.git_status_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
@@ -334,7 +334,7 @@ fn view_header(
     }
     let header_actions = header_actions.child(refresh_icon);
 
-    let fetch_btn = button("git-fetch", app_strings::GIT_FETCH_BTN)
+    let fetch_btn = button("git-fetch", app_strings::git_fetch_btn())
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -343,7 +343,7 @@ fn view_header(
             }
         }));
 
-    let push_btn = button("git-push", app_strings::GIT_PUSH_BTN)
+    let push_btn = button("git-push", app_strings::git_push_btn())
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -423,9 +423,9 @@ fn summary_bar(
     // single-button look.)
     let all_staged = unstaged_count == 0 && staged_count > 0;
     let btn_label = if all_staged {
-        app_strings::GIT_UNSTAGE_ALL
+        app_strings::git_unstage_all()
     } else {
-        app_strings::GIT_STAGE_ALL
+        app_strings::git_stage_all()
     };
 
     div()
@@ -483,7 +483,7 @@ fn count_conflicts(unstaged: &[GitFileEntry]) -> usize {
 
 fn conflict_banner(count: usize) -> impl IntoElement {
     let msg = if count == 1 {
-        app_strings::GIT_CONFLICT_BANNER_SINGLE.to_string()
+        app_strings::git_conflict_banner_single().to_string()
     } else {
         format!("{count} conflicts — resolve before committing.")
     };
@@ -884,7 +884,7 @@ fn unified_file_row(
 
                 if is_staged {
                     items.push(ContextMenuItem::new(
-                        app_strings::CTX_GIT_UNSTAGE,
+                        app_strings::ctx_git_unstage(),
                         move |_, _, cx| {
                             ws_stage.update(cx, |ws, cx| {
                                 ws.close_context_menu(cx);
@@ -894,7 +894,7 @@ fn unified_file_row(
                     ));
                 } else {
                     items.push(ContextMenuItem::new(
-                        app_strings::CTX_GIT_STAGE,
+                        app_strings::ctx_git_stage(),
                         move |_, _, cx| {
                             ws_stage.update(cx, |ws, cx| {
                                 ws.close_context_menu(cx);
@@ -906,7 +906,7 @@ fn unified_file_row(
 
                 items.push(ContextMenuItem::separator());
                 items.push(ContextMenuItem::new(
-                    app_strings::CTX_GIT_OPEN_DIFF,
+                    app_strings::ctx_git_open_diff(),
                     move |_, window, cx| {
                         ws_diff.update(cx, |ws, cx| {
                             ws.close_context_menu(cx);
@@ -924,7 +924,7 @@ fn unified_file_row(
 
                 items.push(ContextMenuItem::separator());
                 items.push(
-                    ContextMenuItem::new(app_strings::CTX_GIT_DISCARD, move |_, window, cx| {
+                    ContextMenuItem::new(app_strings::ctx_git_discard(), move |_, window, cx| {
                         ws_discard.update(cx, |ws, cx| {
                             ws.on_discard_file(
                                 worktree_id,
@@ -1087,7 +1087,7 @@ fn loading_placeholder(
     let text_color = theme::current(cx).faint_text;
     let workspace = snap.workspace.clone();
     let active_ref = snap.active;
-    let refresh_btn = button("git-refresh-fallback", app_strings::GIT_REFRESH_BTN).on_click(
+    let refresh_btn = button("git-refresh-fallback", app_strings::git_refresh_btn()).on_click(
         cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
@@ -1102,7 +1102,7 @@ fn loading_placeholder(
         .p(px(theme::WORKTREE_PLACEHOLDER_PAD))
         .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
         .text_color(text_color)
-        .child(app_strings::GIT_LOADING_CHANGES)
+        .child(app_strings::git_loading_changes())
         .child(refresh_btn)
 }
 
@@ -1125,7 +1125,7 @@ fn non_git_placeholder(
     let workspace = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
 
-    let init_btn = button("git-init", app_strings::GIT_INIT_BTN).on_click(cx.listener(
+    let init_btn = button("git-init", app_strings::git_init_btn()).on_click(cx.listener(
         move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.init_git_repo(worktree_id, cx));

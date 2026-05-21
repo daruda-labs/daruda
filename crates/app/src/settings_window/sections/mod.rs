@@ -88,12 +88,16 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_GENERAL, cx))
+            .child(Self::section_label(s::settings_section_general(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_TERMINAL_THEME,
+                s::settings_label_language(),
+                crate::ui::select::select(&self.language_select, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_label_terminal_theme(),
                 crate::ui::select::select(&self.terminal_preset_select, cx, ()),
             ))
-            .child(field_row(s::SETTINGS_LABEL_UI_THEME, ui_preset_widget))
+            .child(field_row(s::settings_label_ui_theme(), ui_preset_widget))
             .into_any_element()
     }
 
@@ -102,21 +106,21 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_FONT, cx))
+            .child(Self::section_label(s::settings_section_font(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_FONT_FAMILY,
+                s::settings_label_font_family(),
                 crate::ui::select::select(&self.font_family_select, cx, ()),
             ))
             .child(field_row(
-                s::SETTINGS_LABEL_FONT_SIZE,
+                s::settings_label_font_size(),
                 crate::ui::input(&self.font_size_input, cx, ()),
             ))
             .child(field_row(
-                s::SETTINGS_LABEL_VERTICAL_SPACING,
+                s::settings_label_vertical_spacing(),
                 crate::ui::input(&self.vertical_spacing_input, cx, ()),
             ))
             .child(field_row(
-                s::SETTINGS_LABEL_HORIZONTAL_SPACING,
+                s::settings_label_horizontal_spacing(),
                 crate::ui::input(&self.horizontal_spacing_input, cx, ()),
             ))
             .into_any_element()
@@ -128,15 +132,15 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_CURSOR, cx))
+            .child(Self::section_label(s::settings_section_cursor(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_CURSOR_STYLE,
+                s::settings_label_cursor_style(),
                 crate::ui::select::select(&self.cursor_style_select, cx, ()),
             ))
             .child(checkbox_row(
                 checkbox(
                     "settings-cursor-blinking",
-                    s::SETTINGS_LABEL_CURSOR_BLINKING,
+                    s::settings_label_cursor_blinking(),
                     (),
                 )
                 .checked(cursor_blinking)
@@ -154,11 +158,11 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_SHELL, cx))
+            .child(Self::section_label(s::settings_section_shell(), cx))
             .child(checkbox_row(
                 checkbox(
                     "settings-close-on-exit",
-                    s::SETTINGS_LABEL_CLOSE_ON_EXIT,
+                    s::settings_label_close_on_exit(),
                     (),
                 )
                 .checked(close_on_exit)
@@ -176,13 +180,13 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_WINDOW, cx))
+            .child(Self::section_label(s::settings_section_window(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_WINDOW_OPACITY,
+                s::settings_label_window_opacity(),
                 crate::ui::input(&self.opacity_input, cx, ()),
             ))
             .child(checkbox_row(
-                checkbox("settings-window-blur", s::SETTINGS_LABEL_WINDOW_BLUR, ())
+                checkbox("settings-window-blur", s::settings_label_window_blur(), ())
                     .checked(window_blur)
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                         this.window_blur = *checked;
@@ -197,9 +201,9 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_TERMINAL, cx))
+            .child(Self::section_label(s::settings_section_terminal(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_SCROLLBACK,
+                s::settings_label_scrollback(),
                 crate::ui::input(&self.scrollback_input, cx, ()),
             ))
             .into_any_element()
@@ -212,9 +216,9 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_SIDEBAR, cx))
+            .child(Self::section_label(s::settings_section_sidebar(), cx))
             .child(checkbox_row(
-                checkbox("settings-show-hidden", s::SETTINGS_LABEL_SHOW_HIDDEN, ())
+                checkbox("settings-show-hidden", s::settings_label_show_hidden(), ())
                     .checked(files_show_hidden)
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                         this.files_show_hidden = *checked;
@@ -224,7 +228,7 @@ impl SettingsWindow {
             .child(checkbox_row(
                 checkbox(
                     "settings-use-gitignore",
-                    s::SETTINGS_LABEL_USE_GITIGNORE,
+                    s::settings_label_use_gitignore(),
                     (),
                 )
                 .checked(files_use_gitignore)
@@ -241,9 +245,9 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_FILE_VIEWER, cx))
+            .child(Self::section_label(s::settings_section_file_viewer(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_SYNTAX_THEME,
+                s::settings_label_syntax_theme(),
                 crate::ui::select::select(&self.syntax_theme_select, cx, ()),
             ))
             .into_any_element()
@@ -254,9 +258,9 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_CLIPBOARD, cx))
+            .child(Self::section_label(s::settings_section_clipboard(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_CLIPBOARD_STREAMING,
+                s::settings_label_clipboard_streaming(),
                 crate::ui::input(&self.clipboard_streaming_input, cx, ()),
             ))
             .into_any_element()
@@ -267,9 +271,9 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_PANELS, cx))
+            .child(Self::section_label(s::settings_section_panels(), cx))
             .child(field_row(
-                s::SETTINGS_LABEL_GRID_COLUMNS,
+                s::settings_label_grid_columns(),
                 crate::ui::input(&self.panels_grid_columns_input, cx, ()),
             ))
             .into_any_element()
@@ -281,11 +285,11 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::SETTINGS_SECTION_CLAUDE_STATUS, cx))
+            .child(Self::section_label(s::settings_section_claude_status(), cx))
             .child(checkbox_row(
                 checkbox(
                     "settings-claude-status-enable",
-                    s::SETTINGS_LABEL_CLAUDE_STATUS_ENABLE,
+                    s::settings_label_claude_status_enable(),
                     (),
                 )
                 .checked(claude_status_enable)
@@ -299,16 +303,16 @@ impl SettingsWindow {
 
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         Self::render_placeholder(
-            s::SETTINGS_SECTION_NOTIFICATIONS,
-            s::SETTINGS_PLACEHOLDER_NOTIFICATIONS,
+            s::settings_section_notifications(),
+            s::settings_placeholder_notifications(),
             cx,
         )
     }
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         Self::render_placeholder(
-            s::SETTINGS_SECTION_KEYMAP,
-            s::SETTINGS_PLACEHOLDER_KEYMAP,
+            s::settings_section_keymap(),
+            s::settings_placeholder_keymap(),
             cx,
         )
     }
@@ -317,8 +321,8 @@ impl SettingsWindow {
     /// section header + an explanation pointing the user at the
     /// config file, plus a button to open it directly.
     fn render_placeholder(
-        header: &'static str,
-        body: &'static str,
+        header: impl Into<gpui::SharedString>,
+        body: impl Into<gpui::SharedString>,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let body_color = theme::current(cx).modal_text_primary;
@@ -331,10 +335,10 @@ impl SettingsWindow {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(body_color)
-                    .child(body),
+                    .child(body.into()),
             )
             .child(div().flex().flex_row().child(
-                button("settings-open-config", s::SETTINGS_OPEN_CONFIG_FILE).on_click(cx.listener(
+                button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
                     |_this, _: &ClickEvent, _window, cx| {
                         let path = daruda_config::config_path();
                         if let Some(parent) = path.parent()

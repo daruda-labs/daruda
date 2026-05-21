@@ -28,15 +28,15 @@ pub fn open_delete_mcp_server_confirm(
     let workspace = cx.weak_entity();
     let body = format!(
         "{}\n\nServer: {}\nFile: {}",
-        strings::MCP_DELETE_BODY_PREFIX,
+        strings::mcp_delete_body_prefix(),
         name,
         path.display(),
     );
 
     open_confirm_dialog(
-        strings::MCP_DELETE_TITLE,
+        strings::mcp_delete_title(),
         body,
-        strings::MCP_BUTTON_DELETE,
+        strings::mcp_button_delete(),
         ButtonVariant::Danger,
         move |_, _window, app_cx| {
             if let Some(ws) = workspace.upgrade() {

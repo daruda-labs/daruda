@@ -167,7 +167,7 @@ pub(in crate::workspace) fn render(
 /// Built-in "Input" tab. No drag / right-click — click-to-activate is
 /// driven from the TabBar's `on_click(ix=0)` branch.
 fn builtin_input_tab() -> Tab {
-    tab(surface_strings::BOTTOM_INPUT_TAB_LABEL)
+    tab(surface_strings::bottom_input_tab_label())
 }
 
 /// Row-preset chip rendered next to `[+]` in the TabBar suffix. Shows
@@ -222,9 +222,9 @@ fn row_preset_item(
         surface_strings::ROW_PRESET_UNCHECK_PREFIX
     };
     let body = match rows {
-        1 => surface_strings::ROW_PRESET_1_LABEL,
-        2 => surface_strings::ROW_PRESET_2_LABEL,
-        _ => surface_strings::ROW_PRESET_3_LABEL,
+        1 => surface_strings::row_preset_1_label(),
+        2 => surface_strings::row_preset_2_label(),
+        _ => surface_strings::row_preset_3_label(),
     };
     let label = format!("{prefix}{body}");
     ContextMenuItem::new(label, move |_ev, window, app_cx| {
@@ -252,8 +252,8 @@ fn add_tab_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl Int
                     let _ = ws;
                     crate::workspace::dialog_helpers::open_single_field_dialog(
                         callback_ws.clone(),
-                        surface_strings::CREATE_PANEL_TAB_MODAL_TITLE,
-                        surface_strings::CREATE_PANEL_TAB_PLACEHOLDER,
+                        surface_strings::create_panel_tab_modal_title(),
+                        surface_strings::create_panel_tab_placeholder(),
                         None,
                         |ws, value, _window, cx| {
                             if let Some(name) = value {
@@ -342,7 +342,7 @@ fn rename_item(
     workspace: WeakEntity<Workspace>,
 ) -> ContextMenuItem {
     ContextMenuItem::new(
-        surface_strings::CTX_PANEL_TAB_RENAME,
+        surface_strings::ctx_panel_tab_rename(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             let Some(ws) = workspace.upgrade() else {
                 return;
@@ -354,8 +354,8 @@ fn rename_item(
                 ws.close_context_menu(cx);
                 crate::workspace::dialog_helpers::open_single_field_dialog(
                     callback_ws.clone(),
-                    surface_strings::RENAME_PANEL_TAB_MODAL_TITLE,
-                    surface_strings::RENAME_PANEL_TAB_PLACEHOLDER,
+                    surface_strings::rename_panel_tab_modal_title(),
+                    surface_strings::rename_panel_tab_placeholder(),
                     Some(&initial),
                     {
                         let tab_id = tab_id.clone();
@@ -380,7 +380,7 @@ fn delete_item(
     workspace: WeakEntity<Workspace>,
 ) -> ContextMenuItem {
     ContextMenuItem::new(
-        surface_strings::CTX_PANEL_TAB_DELETE,
+        surface_strings::ctx_panel_tab_delete(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             let Some(ws) = workspace.upgrade() else {
                 return;
@@ -392,9 +392,9 @@ fn delete_item(
                 ws.close_context_menu(cx);
             });
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::DELETE_PANEL_TAB_MODAL_TITLE,
+                surface_strings::delete_panel_tab_modal_title(),
                 body,
-                surface_strings::DELETE_PANEL_TAB_CONFIRM_LABEL,
+                surface_strings::delete_panel_tab_confirm_label(),
                 ButtonVariant::Danger,
                 move |_, _window, app_cx| {
                     if let Some(ws) = callback_ws.upgrade() {

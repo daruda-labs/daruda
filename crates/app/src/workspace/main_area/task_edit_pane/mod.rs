@@ -64,10 +64,10 @@ pub(in crate::workspace) fn render(
     let branch_block = labeled_field("Branch", branch_field(te, cx), label_color);
 
     let base_block = labeled_field(
-        strings::TASK_EDIT_BASE_LABEL,
+        strings::task_edit_base_label(),
         div()
             .w_full()
-            .child(select(&te.base_select, cx, 3).placeholder(strings::TASK_EDIT_BASE_ACTIVE_LABEL))
+            .child(select(&te.base_select, cx, 3).placeholder(strings::task_edit_base_active_label()))
             .into_any_element(),
         label_color,
     );
@@ -278,10 +278,10 @@ fn subtasks_section(
 
     let header = SharedString::from(format!(
         "{} ({}/{}{})",
-        strings::TASK_SUBTASK_SECTION_TITLE,
+        strings::task_subtask_section_title(),
         done,
         total,
-        strings::TASK_SUBTASK_PROGRESS_SUFFIX,
+        strings::task_subtask_progress_suffix(),
     ));
 
     let editing_id = te.editing_subtask.clone();
@@ -314,12 +314,12 @@ fn draft_subtasks_hint(_te: &TaskEditContent, cx: &gpui::App) -> gpui::AnyElemen
         .flex()
         .flex_col()
         .gap(px(theme::MODAL_PANEL_GAP))
-        .child(field_label(strings::TASK_SUBTASK_SECTION_TITLE, cx))
+        .child(field_label(strings::task_subtask_section_title(), cx))
         .child(
             div()
                 .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                 .text_color(muted)
-                .child(strings::TASK_SUBTASK_DRAFT_HINT),
+                .child(strings::task_subtask_draft_hint()),
         )
         .into_any_element()
 }
@@ -380,9 +380,9 @@ fn subtask_row(
     };
 
     let auto_manual_label = if sub.source_session_id.is_some() {
-        strings::TASK_SUBTASK_AUTO_LABEL
+        strings::task_subtask_auto_label()
     } else {
-        strings::TASK_SUBTASK_MANUAL_LABEL
+        strings::task_subtask_manual_label()
     };
 
     let sub_id_for_remove = sub.id.clone();
@@ -434,7 +434,7 @@ fn field_label_shared(text: SharedString, cx: &gpui::App) -> impl IntoElement {
 }
 
 fn labeled_field(
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     body: gpui::AnyElement,
     label_color: gpui::Hsla,
 ) -> impl IntoElement {
@@ -446,15 +446,15 @@ fn labeled_field(
         .child(body)
 }
 
-fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn field_label(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     field_label_with_color(text, theme::current(cx).muted_text)
 }
 
-fn field_label_with_color(text: &'static str, color: gpui::Hsla) -> impl IntoElement {
+fn field_label_with_color(text: impl Into<gpui::SharedString>, color: gpui::Hsla) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(color)
-        .child(text)
+        .child(text.into())
 }
 
 /// Smaller, dimmer caption rendered inline with a `field_label` —
@@ -462,11 +462,11 @@ fn field_label_with_color(text: &'static str, color: gpui::Hsla) -> impl IntoEle
 /// (e.g. "Not included in the agent prompt." beside the Notes
 /// section). One size step below `field_label` so it reads as a
 /// subtitle rather than a peer.
-fn field_hint(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+fn field_hint(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).muted_text)
-        .child(text)
+        .child(text.into())
 }
 
 /// Header row above the Notes markdown editor: "Notes" label on the
@@ -480,7 +480,7 @@ fn notes_header(cx: &gpui::App) -> impl IntoElement {
         .items_baseline()
         .gap(px(theme::MODAL_PANEL_GAP))
         .child(field_label("Notes", cx))
-        .child(field_hint(strings::TASK_EDIT_NOTES_HINT, cx))
+        .child(field_hint(strings::task_edit_notes_hint(), cx))
 }
 
 /// Header row above the Prompt markdown editor: "Prompt" label on the
@@ -507,7 +507,7 @@ fn prompt_header(
     });
     let open_btn = button(
         ("task-edit-open-file", pane_id as usize),
-        strings::TASK_EDIT_OPEN_FILE_BUTTON,
+        strings::task_edit_open_file_button(),
     )
     .disabled(!has_prompt_file)
     .on_click(cx.listener(move |this, _, window, cx| {

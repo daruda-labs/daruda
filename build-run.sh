@@ -6,4 +6,4 @@ if [[ "${1:-}" == "clean" ]]; then
 else
     rm -rf target/debug/deps target/debug/incremental
 fi
-cargo run -p daruda --release
+cargo run -p daruda 

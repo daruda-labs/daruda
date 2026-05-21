@@ -62,7 +62,7 @@ pub(in crate::workspace) fn render_body(
     // the shortcuts to fire — the same constraint every other modal
     // input has.
     let submit =
-        crate::ui::button_primary("send", crate::surface::strings::BOTTOM_INPUT_SEND_BUTTON)
+        crate::ui::button_primary("send", crate::surface::strings::bottom_input_send_button())
             .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                 if let Some(ws) = workspace.upgrade() {
                     ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));

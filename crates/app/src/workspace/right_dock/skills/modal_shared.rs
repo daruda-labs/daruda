@@ -4,14 +4,14 @@
 //! Dialog's built-in Confirm / Cancel actions.
 
 use crate::ui::theme;
-use gpui::{IntoElement, div, prelude::*, px};
+use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 /// Small label rendered above a form field. Matches the typography of
 /// `field_row` from `ui::form_helpers` but lives here because the
 /// Skills modal stacks label-on-top instead of inline.
-pub(super) fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+pub(super) fn field_label(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).skill_meta_text)
-        .child(text)
+        .child(text.into())
 }

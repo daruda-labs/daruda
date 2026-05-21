@@ -131,7 +131,7 @@ impl Workspace {
 
         let search_input = cx.new(|cx_state| {
             crate::ui::InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::FILE_VIEWER_SEARCH_PLACEHOLDER)
+                .placeholder(crate::surface::strings::file_viewer_search_placeholder())
         });
         // The subscription is owned by `FileContent` and dropped with
         // the pane. Capture `pane_id` so the closure can locate the

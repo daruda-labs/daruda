@@ -84,7 +84,7 @@ fn wrap_items_with_close(
 /// action executes in a new event cycle after the current render is done.
 pub(in crate::workspace) fn ws_menu_item(
     ws: gpui::WeakEntity<Workspace>,
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     disabled: bool,
     f: impl Fn(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>) + 'static,
 ) -> crate::ui::ContextMenuItem {
@@ -103,7 +103,7 @@ pub(in crate::workspace) fn ws_menu_item(
 /// writes `text` to the system clipboard.
 pub(in crate::workspace) fn ws_clipboard_item(
     ws: gpui::WeakEntity<Workspace>,
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     text: String,
 ) -> crate::ui::ContextMenuItem {
     crate::ui::ContextMenuItem::new(label, move |_, _, app| {
@@ -487,7 +487,7 @@ impl Render for Workspace {
                                 let mut items: Vec<CItem> = vec![
                                     ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_CLOSE_TAB,
+                                        s::ctx_close_tab(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -497,7 +497,7 @@ impl Render for Workspace {
                                     ),
                                     ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_CLOSE_OTHER_TABS,
+                                        s::ctx_close_other_tabs(),
                                         tab_count <= 1,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -512,7 +512,7 @@ impl Render for Workspace {
                                     ),
                                     ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_CLOSE_TABS_TO_RIGHT,
+                                        s::ctx_close_tabs_to_right(),
                                         is_last,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -527,7 +527,7 @@ impl Render for Workspace {
                                     CItem::separator(),
                                     ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_MOVE_TAB_LEFT,
+                                        s::ctx_move_tab_left(),
                                         i == 0,
                                         move |this, _win, cx| {
                                             if i > 0 {
@@ -539,7 +539,7 @@ impl Render for Workspace {
                                     ),
                                     ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_MOVE_TAB_RIGHT,
+                                        s::ctx_move_tab_right(),
                                         is_last,
                                         move |this, _win, cx| {
                                             if i + 1 < this.main_area.tabs.len() {
@@ -557,7 +557,7 @@ impl Render for Workspace {
                                         CItem::separator(),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::CTX_SPLIT_RIGHT,
+                                            s::ctx_split_right(),
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -574,7 +574,7 @@ impl Render for Workspace {
                                         ),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::CTX_SPLIT_DOWN,
+                                            s::ctx_split_down(),
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -592,7 +592,7 @@ impl Render for Workspace {
                                         CItem::separator(),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::CTX_NEW_TAB,
+                                            s::ctx_new_tab(),
                                             false,
                                             |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -609,20 +609,20 @@ impl Render for Workspace {
                                     if let Some(abs) = abs_str {
                                         items.push(ws_clipboard_item(
                                             ws.clone(),
-                                            s::CTX_COPY_FILE_PATH,
+                                            s::ctx_copy_file_path(),
                                             abs,
                                         ));
                                     }
                                     if let Some(rel) = rel_path {
                                         items.push(ws_clipboard_item(
                                             ws.clone(),
-                                            s::CTX_COPY_RELATIVE_PATH,
+                                            s::ctx_copy_relative_path(),
                                             rel,
                                         ));
                                     }
                                     items.push(ws_menu_item(
                                         ws.clone(),
-                                        s::CTX_CLOSE_FILE_VIEWER,
+                                        s::ctx_close_file_viewer(),
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {

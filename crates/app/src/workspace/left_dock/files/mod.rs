@@ -185,7 +185,7 @@ fn view_header(
             }
         }));
 
-    SectionHeader::new(strings::FILES_HEADER_LABEL)
+    SectionHeader::new(strings::files_header_label())
         .padding(theme::GIT_HEADER_PAD_X, theme::GIT_HEADER_PAD_Y)
         .truncate_label(true)
         .actions(refresh)
@@ -371,7 +371,7 @@ fn loading_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::FILES_LOADING)
+        .child(strings::files_loading())
         .into_any_element()
 }
 
@@ -383,6 +383,6 @@ fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::FILES_EMPTY_DIR)
+        .child(strings::files_empty_dir())
         .into_any_element()
 }

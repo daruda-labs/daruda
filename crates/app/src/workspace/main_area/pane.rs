@@ -610,7 +610,8 @@ fn handle_view_event(
                 return;
             }
             let body = s::format_duration_compact(*elapsed);
-            platform::notifications::show(s::NOTIFICATION_LONG_RUNNING_TITLE, &body);
+            let title = s::notification_long_running_title();
+            platform::notifications::show(&title, &body);
         }
     }
 }

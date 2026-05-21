@@ -48,9 +48,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::GIT_CONFIRM_COMMIT_TITLE,
+            app_strings::git_confirm_commit_title(),
             body,
-            app_strings::GIT_CONFIRM_COMMIT_OK,
+            app_strings::git_confirm_commit_ok(),
             ButtonVariant::Primary,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -156,9 +156,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::GIT_CONFIRM_AMEND_TITLE,
-            app_strings::GIT_CONFIRM_AMEND_BODY,
-            app_strings::GIT_CONFIRM_AMEND_OK,
+            app_strings::git_confirm_amend_title(),
+            app_strings::git_confirm_amend_body(),
+            app_strings::git_confirm_amend_ok(),
             ButtonVariant::Danger,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
@@ -256,9 +256,9 @@ impl Workspace {
 
         let weak = cx.weak_entity();
         open_confirm_dialog(
-            app_strings::GIT_CONFIRM_PUSH_TITLE,
-            app_strings::GIT_CONFIRM_PUSH_BODY,
-            app_strings::GIT_CONFIRM_PUSH_OK,
+            app_strings::git_confirm_push_title(),
+            app_strings::git_confirm_push_body(),
+            app_strings::git_confirm_push_ok(),
             ButtonVariant::Primary,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {

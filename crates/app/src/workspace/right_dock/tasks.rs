@@ -122,10 +122,10 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
     let new_ws = snap.workspace.clone();
 
     let filter_label = match snap.task_filter {
-        TaskFilter::All => strings::TASK_FILTER_ALL,
-        TaskFilter::Backlog => strings::TASK_FILTER_BACKLOG,
-        TaskFilter::Running => strings::TASK_FILTER_RUNNING,
-        TaskFilter::Done => strings::TASK_FILTER_DONE,
+        TaskFilter::All => strings::task_filter_all(),
+        TaskFilter::Backlog => strings::task_filter_backlog(),
+        TaskFilter::Running => strings::task_filter_running(),
+        TaskFilter::Done => strings::task_filter_done(),
     };
 
     let filter_chip =
@@ -135,7 +135,7 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
             }
         });
 
-    let new_btn = button_primary("task-new", strings::TASK_NEW_BUTTON).on_click(
+    let new_btn = button_primary("task-new", strings::task_new_button()).on_click(
         move |_evt: &ClickEvent, window, app| {
             if let Some(w) = new_ws.upgrade() {
                 w.update(app, |this: &mut Workspace, cx| {
@@ -214,7 +214,7 @@ fn search_empty_hint(query: String, cx: &gpui::App) -> impl IntoElement {
         .text_color(theme::current(cx).skill_empty_text)
         .child(SharedString::from(format!(
             "{}{}.",
-            strings::TASK_SEARCH_EMPTY_PREFIX,
+            strings::task_search_empty_prefix(),
             display_query
         )))
 }
@@ -436,16 +436,16 @@ fn state_label(state: &TaskState) -> SharedString {
     }
 }
 
-fn done_flavour_label(reason: SessionEndReason) -> &'static str {
+fn done_flavour_label(reason: SessionEndReason) -> String {
     match reason {
-        SessionEndReason::Stop => strings::TASK_DONE_FLAVOUR_STOP,
-        SessionEndReason::PromptInputExit => strings::TASK_DONE_FLAVOUR_PROMPT_INPUT_EXIT,
-        SessionEndReason::Logout => strings::TASK_DONE_FLAVOUR_LOGOUT,
-        SessionEndReason::Other => strings::TASK_DONE_FLAVOUR_OTHER,
+        SessionEndReason::Stop => strings::task_done_flavour_stop(),
+        SessionEndReason::PromptInputExit => strings::task_done_flavour_prompt_input_exit(),
+        SessionEndReason::Logout => strings::task_done_flavour_logout(),
+        SessionEndReason::Other => strings::task_done_flavour_other(),
         // `Error` lives on the `Error` state, not the `Done` state —
         // any path that reaches here means the row was migrated from
         // an older daruda. Fall back to the generic "Other" flavour.
-        SessionEndReason::Error => strings::TASK_DONE_FLAVOUR_OTHER,
+        SessionEndReason::Error => strings::task_done_flavour_other(),
     }
 }
 

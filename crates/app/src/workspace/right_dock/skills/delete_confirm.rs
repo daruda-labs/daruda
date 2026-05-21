@@ -32,14 +32,14 @@ pub fn open_delete_skill_confirm(
     let workspace = cx.weak_entity();
     let body = format!(
         "{}\n\n{}",
-        strings::SKILLS_DELETE_BODY_PREFIX,
+        strings::skills_delete_body_prefix(),
         dir.display(),
     );
 
     open_confirm_dialog(
-        strings::SKILLS_DELETE_TITLE,
+        strings::skills_delete_title(),
         body,
-        strings::SKILLS_BUTTON_DELETE,
+        strings::skills_button_delete(),
         ButtonVariant::Danger,
         move |_, _window, app_cx| {
             if let Some(ws) = workspace.upgrade() {

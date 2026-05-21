@@ -13,7 +13,7 @@ mod config_watcher;
 pub mod files;
 mod globals;
 mod hooks;
-mod menus;
+pub(crate) mod menus;
 mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;

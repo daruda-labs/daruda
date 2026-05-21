@@ -72,7 +72,7 @@ impl SkillInvocationModal {
             .argument_hint
             .clone()
             .map(SharedString::from)
-            .unwrap_or_else(|| SharedString::from(strings::SKILLS_INVOKE_PLACEHOLDER_DEFAULT));
+            .unwrap_or_else(|| SharedString::from(strings::skills_invoke_placeholder_default()));
         // Multi-line `gpui_component::Input` with Cmd+Enter as
         // `PressEnter { secondary: true }` — plain Enter inserts a
         // newline so users can compose multi-line prompts. Escape is
@@ -130,7 +130,7 @@ impl SkillInvocationModal {
             ws.update(cx, |ws, cx| {
                 let report = ErrorReport::new("Skill invocation failed")
                     .severity(ErrorSeverity::Warning)
-                    .message(strings::SKILLS_INVOKE_NO_TERMINAL)
+                    .message(strings::skills_invoke_no_terminal())
                     .at(file!(), line!())
                     .with_context("skill", &display_name)
                     .dedup("skills.invoke.no_terminal")
@@ -213,7 +213,7 @@ impl Render for SkillInvocationModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("skill-invoke-cancel", strings::SKILLS_INVOKE_CANCEL).on_click(cx.listener(
+                button("skill-invoke-cancel", strings::skills_invoke_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, w, cx| {
                         this.dismiss(w, cx);
                     },
@@ -223,9 +223,9 @@ impl Render for SkillInvocationModal {
                 button_primary(
                     "skill-invoke-submit",
                     if self.submitting {
-                        strings::SKILLS_INVOKE_SUBMITTING
+                        strings::skills_invoke_submitting()
                     } else {
-                        strings::SKILLS_INVOKE_SUBMIT
+                        strings::skills_invoke_submit()
                     },
                 )
                 .disabled(self.submitting)

@@ -67,6 +67,8 @@ pub struct SettingsWindow {
     /// natural starting field (e.g. font size for the Font page).
     section_focus: HashMap<BuiltinSection, FocusHandle>,
     // ---- form fields ----
+    // General page.
+    language_select: Entity<SelectState>,
     // Theme (rendered inside the General page).
     // `terminal_preset_select` controls the cell palette (16-color
     // ANSI + fg/bg); `ui_preset_select` controls the chrome palette
@@ -173,6 +175,25 @@ impl SettingsWindow {
             .user()
             .clone();
 
+        // Language select — options driven by the canonical locale list so
+        // adding a new locale only requires updating SUPPORTED_LOCALES.
+        let lang = SharedString::from(config.general.language.clone());
+        let language_select = cx.new(|cx| {
+            let opts: Vec<select::SelectOption> = daruda_config::SUPPORTED_LOCALES
+                .iter()
+                .map(|&slug| {
+                    let label = match slug {
+                        "auto" => s::settings_language_auto(),
+                        "en" => s::settings_language_en(),
+                        "ko" => s::settings_language_ko(),
+                        other => other.to_owned(),
+                    };
+                    select::SelectOption::new(slug, label)
+                })
+                .collect();
+            select::state_with_options(opts, Some(&lang), window, cx)
+        });
+
         // Terminal preset select — cell palette (fg/bg + ANSI 16).
         let terminal_preset = SharedString::from(config.theme.terminal_preset.clone());
         let terminal_preset_select = cx.new(|cx| {
@@ -250,9 +271,9 @@ impl SettingsWindow {
         let cursor_style_select = cx.new(|cx| {
             select::state_with_options(
                 vec![
-                    SelectOption::new("block", s::SETTINGS_CURSOR_BLOCK),
-                    SelectOption::new("underline", s::SETTINGS_CURSOR_UNDERLINE),
-                    SelectOption::new("bar", s::SETTINGS_CURSOR_BAR),
+                    SelectOption::new("block", s::settings_cursor_block()),
+                    SelectOption::new("underline", s::settings_cursor_underline()),
+                    SelectOption::new("bar", s::settings_cursor_bar()),
                 ],
                 Some(&cursor_style_str),
                 window,
@@ -320,6 +341,7 @@ impl SettingsWindow {
             base_config: config.clone(),
             active_section: active,
             section_focus,
+            language_select,
             terminal_preset_select,
             ui_preset_select,
             font_family_select,
@@ -419,6 +441,13 @@ impl SettingsWindow {
         // exposed in the UI (e.g. [colors], [keybindings]) are preserved.
         let mut config = self.base_config.clone();
 
+        config.general.language = self
+            .language_select
+            .read(cx)
+            .selected_value()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "auto".to_owned());
+
         config.theme.terminal_preset = self
             .terminal_preset_select
             .read(cx)
@@ -445,7 +474,7 @@ impl SettingsWindow {
             .parse::<f32>()
             .ok()
             .filter(|&v| (6.0..=72.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_FONT_SIZE))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_font_size()))?;
 
         let vs_str = self
             .vertical_spacing_input
@@ -457,7 +486,7 @@ impl SettingsWindow {
             .parse::<f32>()
             .ok()
             .filter(|&v| (0.5..=2.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_SPACING))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_spacing()))?;
 
         let hs_str = self
             .horizontal_spacing_input
@@ -469,7 +498,7 @@ impl SettingsWindow {
             .parse::<f32>()
             .ok()
             .filter(|&v| (0.5..=2.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_SPACING))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_spacing()))?;
 
         config.cursor.style = match self
             .cursor_style_select
@@ -490,7 +519,7 @@ impl SettingsWindow {
             .parse::<f32>()
             .ok()
             .filter(|&v| (0.1..=1.0).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_OPACITY))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_opacity()))?;
         config.window.blur = self.window_blur;
 
         let sb_str = self.scrollback_input.read(cx).value().trim().to_string();
@@ -498,7 +527,7 @@ impl SettingsWindow {
             .parse::<usize>()
             .ok()
             .filter(|&v| (1_000..=500_000).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_SCROLLBACK))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_scrollback()))?;
 
         config.left_dock.files_show_hidden = self.files_show_hidden;
         config.left_dock.files_use_gitignore = self.files_use_gitignore;
@@ -520,7 +549,7 @@ impl SettingsWindow {
             .parse::<usize>()
             .ok()
             .filter(|&v| (4_096..=67_108_864).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_CLIPBOARD))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_clipboard()))?;
 
         let pg_str = self
             .panels_grid_columns_input
@@ -532,7 +561,7 @@ impl SettingsWindow {
             .parse::<u8>()
             .ok()
             .filter(|&v| (1..=16).contains(&v))
-            .ok_or_else(|| SharedString::from(s::SETTINGS_ERR_GRID_COLUMNS))?;
+            .ok_or_else(|| SharedString::from(s::settings_err_grid_columns()))?;
 
         config.claude_status.enable = self.claude_status_enable;
 
@@ -607,12 +636,12 @@ impl SettingsWindow {
         handles[next].focus(window, cx);
     }
 
-    pub(super) fn section_label(label: &'static str, cx: &gpui::App) -> impl IntoElement {
+    pub(super) fn section_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
         div()
             .text_size(px(theme::WORKTREE_SECTION_HEADER_FONT_SIZE))
             .text_color(theme::current(cx).muted_text)
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
-            .child(label)
+            .child(label.into())
     }
 }
 

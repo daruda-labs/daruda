@@ -1,5 +1,6 @@
 use gpui::Context;
 
+use crate::surface::strings as s;
 use crate::workspace::Workspace;
 
 impl Workspace {
@@ -99,7 +100,75 @@ impl Workspace {
             self.claude.claude_status_enabled = new_enabled;
             self.refresh_jsonl_watcher(cx);
         }
+        // Refresh locale-dependent widget strings. `apply_locale_str` in
+        // `globals::register_settings_observer` runs before this method, so
+        // `rust_i18n::locale()` already reflects the new language by the time
+        // we get here.
+        self.refresh_locale_strings(cx);
+
         cx.notify();
+    }
+
+    /// Re-apply translated strings to all widgets whose labels are captured
+    /// at construction time (InputState placeholders, SelectState option
+    /// labels, InputPanel button labels). Called from `apply_config` so
+    /// every language switch refreshes them in one place.
+    ///
+    /// Uses `try_update_workspace_window` to obtain a live `&mut Window`
+    /// because `apply_config` is called from `observe_global` which has no
+    /// window in scope, yet `InputState::set_placeholder` and
+    /// `SelectState::set_selected_value` require one.
+    fn refresh_locale_strings(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::select;
+        use daruda_store::project::UsageWindow;
+
+        let git_commit_input = self.git_commit_input.clone();
+        let skill_search_input = self.skill_search_input.clone();
+        let task_search_input = self.task_search_input.clone();
+        let usage_select = self.claude.usage_select.clone();
+        let handle = self.window_handle;
+
+        let new_opts: Vec<select::SelectOption> = UsageWindow::ALL
+            .iter()
+            .map(|w| select::SelectOption::new(w.slug(), s::usage_window_label(*w)))
+            .collect();
+        let selected = self.claude.usage_select.read(cx).selected_value().cloned();
+
+        crate::windows::try_update_workspace_window(
+            handle,
+            &mut **cx,
+            "refresh_locale_strings",
+            |window, cx| {
+                // Git Changes commit input — placeholder + button + dropdown.
+                git_commit_input.update(cx, |panel, cx| {
+                    panel.area.update(cx, |input, cx| {
+                        input.set_placeholder(s::git_commit_placeholder(), window, cx);
+                    });
+                    panel.set_action_label("commit", s::git_commit_btn(), cx);
+                    panel.set_action_dropdown_label("commit", 0, s::ctx_git_commit_amend(), cx);
+                });
+
+                // Skills search input — placeholder.
+                skill_search_input.update(cx, |input, cx| {
+                    input.set_placeholder(s::skills_search_placeholder(), window, cx);
+                });
+
+                // Task search input — placeholder.
+                task_search_input.update(cx, |input, cx| {
+                    input.set_placeholder(s::task_search_placeholder(), window, cx);
+                });
+
+                // Usage window select — option labels (value slugs stay unchanged).
+                usage_select.update(cx, |state, cx| {
+                    state.set_items(new_opts, window, cx);
+                });
+                if let Some(val) = selected {
+                    usage_select.update(cx, |state, cx| {
+                        state.set_selected_value(&val, window, cx);
+                    });
+                }
+            },
+        );
     }
 }
 

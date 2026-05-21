@@ -437,3 +437,33 @@ fn resolve_section_replace_drops_user_subkeys() {
     assert!(effective.shell.program.is_none());
     assert!(effective.shell.close_pane_on_exit);
 }
+
+// ---- general.language round-trip ----
+
+#[test]
+fn patch_config_file_round_trips_language() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let mut cfg = Config::default();
+    cfg.general.language = "ko".to_owned();
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.general.language, "ko");
+}
+
+#[test]
+fn config_default_language_is_auto() {
+    assert_eq!(Config::default().general.language, "auto");
+}
+
+#[test]
+fn config_load_missing_general_defaults_to_auto() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    // Write a config that has no [general] section.
+    std::fs::write(&path, "[font]\nsize = 14.0\n").unwrap();
+    let cfg = Config::load_from(&path);
+    assert_eq!(cfg.general.language, "auto");
+}

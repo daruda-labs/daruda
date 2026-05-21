@@ -211,5 +211,5 @@ fn empty_state(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(surface_strings::PROJECTS_EMPTY_STATE)
+        .child(surface_strings::projects_empty_state())
 }

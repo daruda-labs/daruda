@@ -29,7 +29,7 @@ pub(super) fn render_search_panel(
     let (counter, counter_color) = if !has_query {
         (String::new(), count_color)
     } else if total == 0 {
-        (strings::FILE_VIEWER_SEARCH_NO_MATCH.to_owned(), empty_color)
+        (strings::file_viewer_search_no_match().to_owned(), empty_color)
     } else {
         (format!("{focused_n}/{total}"), count_color)
     };

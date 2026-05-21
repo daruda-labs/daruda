@@ -24,20 +24,20 @@ pub(super) fn transport_options() -> Vec<(McpTransport, &'static str)> {
     ]
 }
 
-pub(super) fn scope_options() -> Vec<(McpScope, &'static str)> {
+pub(super) fn scope_options() -> Vec<(McpScope, String)> {
     vec![
-        (McpScope::Project, strings::MCP_SCOPE_PROJECT),
-        (McpScope::Personal, strings::MCP_SCOPE_PERSONAL),
+        (McpScope::Project, strings::mcp_scope_project()),
+        (McpScope::Personal, strings::mcp_scope_personal()),
     ]
 }
 
 /// Small label rendered above a form field in the modal stack-style
 /// layout (label-on-top instead of inline).
-pub(super) fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
+pub(super) fn field_label(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(theme::current(cx).mcp_section_header_text)
-        .child(text)
+        .child(text.into())
 }
 
 /// Pill button used for both the Scope and Transport chip strips. The
@@ -45,7 +45,7 @@ pub(super) fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElemen
 /// so a future style tweak edits one site.
 pub(super) fn chip_button<F>(
     id: SharedString,
-    label: &'static str,
+    label: impl Into<SharedString>,
     active: bool,
     cx: &gpui::App,
     on_click: F,
@@ -68,7 +68,7 @@ where
         .bg(bg)
         .text_size(px(theme::MCP_BADGE_FONT_SIZE))
         .text_color(text_color)
-        .child(label)
+        .child(label.into())
         .on_mouse_down(MouseButton::Left, move |_, w, cx| {
             on_click(&gpui::ClickEvent::default(), w, cx);
         })
@@ -77,9 +77,9 @@ where
 /// Map a typed [`FieldError`] back to its localised banner string.
 pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {
     match e {
-        FieldError::CommandRequired => strings::MCP_COMMAND_REQUIRED.into(),
-        FieldError::UrlRequired => strings::MCP_URL_REQUIRED.into(),
-        FieldError::UrlInvalidScheme => strings::MCP_URL_INVALID.into(),
-        FieldError::EnvInvalidLine { .. } => strings::MCP_ENV_INVALID.into(),
+        FieldError::CommandRequired => strings::mcp_command_required().into(),
+        FieldError::UrlRequired => strings::mcp_url_required().into(),
+        FieldError::UrlInvalidScheme => strings::mcp_url_invalid().into(),
+        FieldError::EnvInvalidLine { .. } => strings::mcp_env_invalid().into(),
     }
 }

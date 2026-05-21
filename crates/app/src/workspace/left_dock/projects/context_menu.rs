@@ -32,7 +32,7 @@ pub(in crate::workspace) fn build_context_menu_items(
     let workspace_for_reveal = workspace.clone();
     let path_for_reveal = path_str.clone();
     let reveal_item = ContextMenuItem::new(
-        surface_strings::CTX_REVEAL_IN_FINDER,
+        surface_strings::ctx_reveal_in_finder(),
         move |_ev: &MouseDownEvent, _window, app_cx: &mut App| {
             let path = path_for_reveal.clone();
             let workspace = workspace_for_reveal.clone();
@@ -55,7 +55,7 @@ pub(in crate::workspace) fn build_context_menu_items(
     let workspace_for_copy = workspace.clone();
     let path_for_copy = path_str.clone();
     let copy_item = ContextMenuItem::new(
-        surface_strings::CTX_COPY_PATH,
+        surface_strings::ctx_copy_path(),
         move |_ev: &MouseDownEvent, _window, app_cx: &mut App| {
             app_cx.write_to_clipboard(gpui::ClipboardItem::new_string(path_for_copy.clone()));
             if let Some(ws) = workspace_for_copy.upgrade() {
@@ -66,7 +66,7 @@ pub(in crate::workspace) fn build_context_menu_items(
 
     let workspace_for_description = workspace.clone();
     let edit_description_item = ContextMenuItem::new(
-        surface_strings::CTX_EDIT_DESCRIPTION,
+        surface_strings::ctx_edit_description(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             if let Some(ws) = workspace_for_description.upgrade() {
                 let current = current_description.clone();
@@ -75,8 +75,8 @@ pub(in crate::workspace) fn build_context_menu_items(
                     ws.close_context_menu(cx);
                     crate::workspace::dialog_helpers::open_single_field_dialog(
                         callback_ws.clone(),
-                        surface_strings::EDIT_DESCRIPTION_MODAL_TITLE,
-                        surface_strings::EDIT_DESCRIPTION_PLACEHOLDER,
+                        surface_strings::edit_description_modal_title(),
+                        surface_strings::edit_description_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
                             workspace.set_worktree_description(wt_id, value, cx);
@@ -91,7 +91,7 @@ pub(in crate::workspace) fn build_context_menu_items(
 
     let workspace_for_rename = workspace.clone();
     let rename_item = ContextMenuItem::new(
-        surface_strings::CTX_RENAME,
+        surface_strings::ctx_rename(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             if let Some(ws) = workspace_for_rename.upgrade() {
                 let current = current_name.clone();
@@ -100,8 +100,8 @@ pub(in crate::workspace) fn build_context_menu_items(
                     ws.close_context_menu(cx);
                     crate::workspace::dialog_helpers::open_single_field_dialog(
                         callback_ws.clone(),
-                        surface_strings::RENAME_MODAL_TITLE,
-                        surface_strings::RENAME_PLACEHOLDER,
+                        surface_strings::rename_modal_title(),
+                        surface_strings::rename_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
                             workspace.set_worktree_name(wt_id, value, cx);
@@ -119,19 +119,19 @@ pub(in crate::workspace) fn build_context_menu_items(
     // "Merge into…" — only for git-backed worktrees.
     if is_git {
         let merge_item = if is_detached {
-            ContextMenuItem::new(surface_strings::CTX_MERGE_INTO, |_, _, _| {})
+            ContextMenuItem::new(surface_strings::ctx_merge_into(), |_, _, _| {})
                 .disabled(true)
-                .with_tooltip(surface_strings::CTX_MERGE_DISABLED_DETACHED)
+                .with_tooltip(surface_strings::ctx_merge_disabled_detached())
         } else if is_dirty {
-            ContextMenuItem::new(surface_strings::CTX_MERGE_INTO, |_, _, _| {})
+            ContextMenuItem::new(surface_strings::ctx_merge_into(), |_, _, _| {})
                 .disabled(true)
-                .with_tooltip(surface_strings::CTX_MERGE_DISABLED_DIRTY)
+                .with_tooltip(surface_strings::ctx_merge_disabled_dirty())
         } else {
             // source_branch is guaranteed Some when is_git && !is_detached.
             let branch = source_branch.unwrap_or_default();
             let workspace_for_merge = workspace.clone();
             ContextMenuItem::new(
-                surface_strings::CTX_MERGE_INTO,
+                surface_strings::ctx_merge_into(),
                 move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
                     let Some(ws) = workspace_for_merge.upgrade() else {
                         return;
@@ -165,7 +165,7 @@ pub(in crate::workspace) fn build_context_menu_items(
                             .collect();
 
                         if target_options.is_empty() {
-                            let report = ErrorReport::new(surface_strings::MERGE_MODAL_NO_TARGETS)
+                            let report = ErrorReport::new(surface_strings::merge_modal_no_targets())
                                 .severity(ErrorSeverity::Info)
                                 .at(file!(), line!())
                                 .dedup("worktree.merge.no_targets")

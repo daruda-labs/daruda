@@ -15,7 +15,7 @@ use crate::workspace::dialog_helpers::open_single_field_dialog;
 
 fn report_validation(
     ws: &mut Workspace,
-    msg: &'static str,
+    msg: impl Into<String>,
     dedup: &'static str,
     cx: &mut Context<Workspace>,
 ) {
@@ -44,7 +44,7 @@ pub fn open_rename_skill_modal(
 
     open_single_field_dialog(
         workspace,
-        strings::SKILLS_BUTTON_RENAME,
+        strings::skills_button_rename(),
         "new-name",
         Some(&current_name),
         move |ws, value, _window, cx| {
@@ -53,19 +53,19 @@ pub fn open_rename_skill_modal(
                 return;
             };
             if new_name.is_empty() {
-                report_validation(ws, strings::SKILLS_NAME_EMPTY, "skills.rename.empty", cx);
+                report_validation(ws, strings::skills_name_empty(), "skills.rename.empty", cx);
                 return;
             }
             match validate_name(&new_name) {
                 Ok(()) => {}
                 Err(NameError::Empty) => {
-                    report_validation(ws, strings::SKILLS_NAME_EMPTY, "skills.rename.empty", cx);
+                    report_validation(ws, strings::skills_name_empty(), "skills.rename.empty", cx);
                     return;
                 }
                 Err(NameError::TooLong { .. }) => {
                     report_validation(
                         ws,
-                        strings::SKILLS_NAME_TOO_LONG,
+                        strings::skills_name_too_long(),
                         "skills.rename.too_long",
                         cx,
                     );
@@ -74,7 +74,7 @@ pub fn open_rename_skill_modal(
                 Err(NameError::InvalidChar { .. }) => {
                     report_validation(
                         ws,
-                        strings::SKILLS_NAME_INVALID,
+                        strings::skills_name_invalid(),
                         "skills.rename.invalid",
                         cx,
                     );
@@ -83,7 +83,7 @@ pub fn open_rename_skill_modal(
                 Err(NameError::InvalidLeading { .. }) => {
                     report_validation(
                         ws,
-                        strings::SKILLS_NAME_LEADING,
+                        strings::skills_name_leading(),
                         "skills.rename.leading",
                         cx,
                     );
@@ -98,7 +98,7 @@ pub fn open_rename_skill_modal(
             {
                 report_validation(
                     ws,
-                    strings::SKILLS_NAME_DUPLICATE,
+                    strings::skills_name_duplicate(),
                     "skills.rename.duplicate",
                     cx,
                 );

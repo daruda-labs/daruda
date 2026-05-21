@@ -51,11 +51,11 @@ pub(in crate::workspace) fn claude_install_banner(
                 .flex_1()
                 .flex()
                 .flex_col()
-                .child(surface_strings::CLAUDE_BANNER_TITLE)
+                .child(surface_strings::claude_banner_title())
                 .child(
                     div()
                         .text_color(hint_text)
-                        .child(surface_strings::CLAUDE_BANNER_HINT),
+                        .child(surface_strings::claude_banner_hint()),
                 ),
         )
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -64,9 +64,9 @@ pub(in crate::workspace) fn claude_install_banner(
             };
             let weak = workspace.clone();
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::CLAUDE_CONSENT_TITLE,
-                surface_strings::CLAUDE_CONSENT_BODY,
-                surface_strings::CLAUDE_CONSENT_CONFIRM,
+                surface_strings::claude_consent_title(),
+                surface_strings::claude_consent_body(),
+                surface_strings::claude_consent_confirm(),
                 ButtonVariant::Primary,
                 move |_, window, app_cx| {
                     if let Some(ws) = weak.upgrade() {

@@ -31,7 +31,7 @@ impl Render for SettingsWindow {
             .pl(px(theme::TRAFFIC_LIGHT_WIDTH))
             .text_size(px(theme::TAB_FONT_SIZE))
             .text_color(header_text)
-            .child(s::SETTINGS_TITLE);
+            .child(s::settings_title());
 
         let body = self.render_section_body(cx);
         let sidebar = self.render_sidebar_nav(cx);
@@ -58,14 +58,14 @@ impl Render for SettingsWindow {
             .py(px(theme::MODAL_FOOTER_GAP))
             .bg(panel_bg)
             .child(
-                button("settings-cancel", s::SETTINGS_CANCEL).on_click(cx.listener(
+                button("settings-cancel", s::settings_cancel()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, _cx| {
                         this.dismiss(window);
                     },
                 )),
             )
             .child(
-                button_primary("settings-save", s::SETTINGS_SAVE).on_click(cx.listener(
+                button_primary("settings-save", s::settings_save()).on_click(cx.listener(
                     |this, _: &ClickEvent, window, cx| {
                         this.submit(window, cx);
                     },
@@ -178,7 +178,7 @@ impl SettingsWindow {
         &self,
         cx: &mut Context<Self>,
         section: BuiltinSection,
-        label: &'static str,
+        label: impl Into<gpui::SharedString>,
         is_active: bool,
     ) -> impl IntoElement {
         let t = theme::current(cx);
@@ -198,7 +198,7 @@ impl SettingsWindow {
             .text_size(px(theme::MODAL_BODY_FONT_SIZE))
             .text_color(row_text)
             .cursor_pointer()
-            .child(label)
+            .child(label.into())
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.focus_section(section, window, cx);
             }));
@@ -211,22 +211,22 @@ impl SettingsWindow {
     }
 }
 
-fn section_nav_label(section: BuiltinSection) -> &'static str {
+fn section_nav_label(section: BuiltinSection) -> String {
     match section {
-        BuiltinSection::General => s::SETTINGS_NAV_GENERAL,
-        BuiltinSection::Font => s::SETTINGS_NAV_FONT,
-        BuiltinSection::Cursor => s::SETTINGS_NAV_CURSOR,
-        BuiltinSection::Shell => s::SETTINGS_NAV_SHELL,
-        BuiltinSection::Window => s::SETTINGS_NAV_WINDOW,
-        BuiltinSection::Terminal => s::SETTINGS_NAV_TERMINAL,
-        BuiltinSection::LeftDock => s::SETTINGS_NAV_SIDEBAR,
-        BuiltinSection::FileViewer => s::SETTINGS_NAV_FILE_VIEWER,
-        BuiltinSection::Clipboard => s::SETTINGS_NAV_CLIPBOARD,
-        BuiltinSection::Panels => s::SETTINGS_NAV_PANELS,
-        BuiltinSection::ClaudeStatus => s::SETTINGS_NAV_CLAUDE_STATUS,
-        BuiltinSection::Notifications => s::SETTINGS_NAV_NOTIFICATIONS,
-        BuiltinSection::Keymap => s::SETTINGS_NAV_KEYMAP,
-        BuiltinSection::Plugin => s::SETTINGS_NAV_PLUGIN,
+        BuiltinSection::General => s::settings_nav_general(),
+        BuiltinSection::Font => s::settings_nav_font(),
+        BuiltinSection::Cursor => s::settings_nav_cursor(),
+        BuiltinSection::Shell => s::settings_nav_shell(),
+        BuiltinSection::Window => s::settings_nav_window(),
+        BuiltinSection::Terminal => s::settings_nav_terminal(),
+        BuiltinSection::LeftDock => s::settings_nav_sidebar(),
+        BuiltinSection::FileViewer => s::settings_nav_file_viewer(),
+        BuiltinSection::Clipboard => s::settings_nav_clipboard(),
+        BuiltinSection::Panels => s::settings_nav_panels(),
+        BuiltinSection::ClaudeStatus => s::settings_nav_claude_status(),
+        BuiltinSection::Notifications => s::settings_nav_notifications(),
+        BuiltinSection::Keymap => s::settings_nav_keymap(),
+        BuiltinSection::Plugin => s::settings_nav_plugin(),
     }
 }
 

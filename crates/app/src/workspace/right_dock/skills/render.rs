@@ -81,7 +81,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     // hint), since that hint is misleading mid-search — the cause is
     // the active query, not an empty disk state.
     let project_section = scope_section(
-        strings::SKILLS_PROJECT,
+        strings::skills_project(),
         SkillScope::Project,
         &project,
         skills,
@@ -92,7 +92,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         &t,
     );
     let personal_section = scope_section(
-        strings::SKILLS_PERSONAL,
+        strings::skills_personal(),
         SkillScope::Personal,
         &personal,
         skills,
@@ -103,7 +103,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         &t,
     );
     let plugin_section = scope_section(
-        strings::SKILLS_PLUGIN,
+        strings::skills_plugin(),
         SkillScope::Plugin,
         &plugin,
         skills,
@@ -201,7 +201,7 @@ fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
         .text_color(t.skill_empty_text)
         .child(SharedString::from(format!(
             "{}{}.",
-            strings::SKILLS_SEARCH_EMPTY_PREFIX,
+            strings::skills_search_empty_prefix(),
             display_query
         )))
 }
@@ -217,7 +217,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                 .text_color(t.skill_section_header_text)
-                .child(strings::RIGHT_PANEL_TAB_SKILLS),
+                .child(strings::right_panel_tab_skills()),
         )
         .child(
             div()
@@ -250,7 +250,7 @@ fn manage_plugins_button(t: &DarudaTheme) -> impl IntoElement {
         .text_color(chip_text)
         .cursor_pointer()
         .hover(move |s| s.bg(hover_bg))
-        .child(strings::SKILLS_MANAGE_PLUGINS_BUTTON)
+        .child(strings::skills_manage_plugins_button())
         .on_mouse_down(MouseButton::Left, |_, window, cx| {
             window.dispatch_action(
                 Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
@@ -274,7 +274,7 @@ fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> 
         .text_color(chip_text)
         .cursor_pointer()
         .hover(move |s| s.bg(hover_bg))
-        .child(strings::SKILLS_NEW_BUTTON)
+        .child(strings::skills_new_button())
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
@@ -284,7 +284,7 @@ fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> 
 
 #[allow(clippy::too_many_arguments)]
 fn scope_section(
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     scope: SkillScope,
     skills: &[Skill],
     state: &SkillsSnapshot,
@@ -320,7 +320,7 @@ fn scope_section(
             .gap(px(theme::SKILL_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
             .text_color(t.skill_section_header_text)
-            .child(SharedString::from(label.to_string()))
+            .child(label.into())
             .child(neutral_chip(count_text, t)),
     );
 
@@ -331,7 +331,7 @@ fn scope_section(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                     .text_color(t.skill_empty_text)
-                    .child(strings::SKILLS_NO_PROJECT_HINT),
+                    .child(strings::skills_no_project_hint()),
             )
             .into_any_element(),
         );
@@ -344,9 +344,9 @@ fn scope_section(
         // same action again as an inline chip muddies the empty
         // state.
         let msg = match scope {
-            SkillScope::Project => strings::SKILLS_EMPTY_PROJECT,
-            SkillScope::Personal => strings::SKILLS_EMPTY_PERSONAL,
-            SkillScope::Plugin => strings::SKILLS_EMPTY_PLUGIN,
+            SkillScope::Project => strings::skills_empty_project(),
+            SkillScope::Personal => strings::skills_empty_personal(),
+            SkillScope::Plugin => strings::skills_empty_plugin(),
         };
         return Some(
             col.child(
@@ -615,7 +615,7 @@ fn skill_row(
             .child(
                 button(
                     SharedString::from(format!("skill-edit-{}-{}", scope.slug(), s.name)),
-                    strings::SKILLS_BUTTON_EDIT,
+                    strings::skills_button_edit(),
                 )
                 .outline()
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
@@ -662,7 +662,7 @@ fn skill_row(
             .child(
                 button(
                     SharedString::from(format!("skill-view-{}-{}", scope.slug(), s.name)),
-                    strings::SKILLS_BUTTON_VIEW,
+                    strings::skills_button_view(),
                 )
                 .outline()
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
@@ -708,7 +708,7 @@ fn skill_row(
         .hover(move |s| s.bg(row_hover_bg))
         .child(name_button)
         .when(overrides_personal, |c| {
-            c.child(neutral_chip(strings::SKILLS_OVERRIDES_PERSONAL, t))
+            c.child(neutral_chip(strings::skills_overrides_personal(), t))
         })
         .when_some(description_span, |c, span| c.child(span))
         .child(actions)

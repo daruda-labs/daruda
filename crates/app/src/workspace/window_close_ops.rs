@@ -44,14 +44,18 @@ impl Workspace {
                 .collect::<Vec<_>>()
                 .join("\n");
 
+            let prompt_heading = crate::surface::strings::tab_close_batch_heading();
+            let prompt_save = crate::surface::strings::tab_close_batch_save_all();
+            let prompt_discard = crate::surface::strings::tab_close_batch_discard_all();
+            let prompt_cancel = crate::surface::strings::task_edit_cancel();
             let receiver = window.prompt(
                 gpui::PromptLevel::Warning,
-                crate::surface::strings::TAB_CLOSE_BATCH_HEADING,
+                &prompt_heading,
                 Some(&detail),
                 &[
-                    crate::surface::strings::TAB_CLOSE_BATCH_SAVE_ALL,
-                    crate::surface::strings::TAB_CLOSE_BATCH_DISCARD_ALL,
-                    crate::surface::strings::TASK_EDIT_CANCEL,
+                    prompt_save.as_str(),
+                    prompt_discard.as_str(),
+                    prompt_cancel.as_str(),
                 ],
                 app,
             );
@@ -101,7 +105,7 @@ impl Workspace {
             .map(|t| t.as_ref())
             .collect::<Vec<_>>()
             .join(", ");
-        let report = ErrorReport::new(crate::surface::strings::TASK_BATCH_SAVE_FAILED_TITLE)
+        let report = ErrorReport::new(crate::surface::strings::task_batch_save_failed_title())
             .severity(ErrorSeverity::Warning)
             .message(format!(
                 "{} pane(s) had invalid input and were not saved: {}",

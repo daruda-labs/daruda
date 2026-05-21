@@ -204,7 +204,7 @@ impl Workspace {
         // the old daruda TextInput per ADR S1).
         let new_subtask_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .placeholder(crate::surface::strings::TASK_SUBTASK_ADD_PLACEHOLDER)
+                .placeholder(crate::surface::strings::task_subtask_add_placeholder())
         });
         let editing_subtask_input = cx.new(|cx_state| InputState::new(window, cx_state));
         let new_subtask_sub = cx.subscribe_in(
@@ -890,16 +890,20 @@ impl Workspace {
             "{}{}{}",
             crate::surface::strings::PROMPT_WATCHER_HEADING_PREFIX,
             title,
-            crate::surface::strings::PROMPT_WATCHER_HEADING_SUFFIX,
+            crate::surface::strings::prompt_watcher_heading_suffix(),
         );
+        let prompt_detail = crate::surface::strings::prompt_watcher_detail();
+        let prompt_use_disk = crate::surface::strings::prompt_watcher_use_disk();
+        let prompt_keep_mine = crate::surface::strings::prompt_watcher_keep_mine();
+        let prompt_diff = crate::surface::strings::prompt_watcher_diff();
         let receiver = window.prompt(
             gpui::PromptLevel::Warning,
             &heading,
-            Some(crate::surface::strings::PROMPT_WATCHER_DETAIL),
+            Some(prompt_detail.as_str()),
             &[
-                crate::surface::strings::PROMPT_WATCHER_USE_DISK,
-                crate::surface::strings::PROMPT_WATCHER_KEEP_MINE,
-                crate::surface::strings::PROMPT_WATCHER_DIFF,
+                prompt_use_disk.as_str(),
+                prompt_keep_mine.as_str(),
+                prompt_diff.as_str(),
             ],
             cx,
         );
@@ -1050,7 +1054,7 @@ fn base_worktree_options(ws: &Workspace) -> Vec<SelectOption> {
     let mut options = Vec::with_capacity(worktrees.len() + 1);
     options.push(SelectOption::new(
         "",
-        crate::surface::strings::TASK_EDIT_BASE_ACTIVE_LABEL,
+        crate::surface::strings::task_edit_base_active_label(),
     ));
     for w in worktrees {
         let Some(path_str) = w.path.to_str() else {

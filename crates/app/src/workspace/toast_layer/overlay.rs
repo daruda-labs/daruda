@@ -178,7 +178,7 @@ fn toast_pill(
 
 fn copy_button(toast_id: ToastId, plain_text: SharedString) -> impl IntoElement {
     let element_id = format!("error-toast-{toast_id}-copy");
-    button(SharedString::from(element_id), s::TOAST_BUTTON_COPY).on_click(
+    button(SharedString::from(element_id), s::toast_button_copy()).on_click(
         move |_: &ClickEvent, _window, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(plain_text.to_string()));
         },
@@ -192,7 +192,7 @@ fn details_button(toast_id: ToastId, report: ErrorReport) -> impl IntoElement {
     // the user rapidly re-opens / closes the dialog without touching
     // a different toast. ErrorReport's clone is cheap (small heap
     // strings + a BTreeMap of context entries).
-    button(SharedString::from(element_id), s::TOAST_BUTTON_DETAILS).on_click(
+    button(SharedString::from(element_id), s::toast_button_details()).on_click(
         move |_: &ClickEvent, window, cx| {
             dialog_helpers::open_error_report_dialog(report.clone(), window, cx);
         },

@@ -493,6 +493,11 @@ pub struct Workspace {
     /// effective config (user layer + this workspace's project
     /// overlay) and calls `apply_config` on every change.
     _settings_global_subscription: gpui::Subscription,
+    /// Handle to this workspace's GPUI window. Stored so that methods
+    /// called from `observe_global` (which has no `&mut Window`) can
+    /// re-enter the window via `cx.update_window` when they need to
+    /// update widgets whose setters require `&mut Window`.
+    pub(in crate::workspace) window_handle: gpui::AnyWindowHandle,
 }
 
 impl Workspace {
@@ -601,13 +606,13 @@ impl Workspace {
         let ws_amend = ws_weak.clone();
         let git_commit_input = cx.new(|cx| {
             crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsFloating, window, cx)
-                .with_placeholder(crate::surface::strings::GIT_COMMIT_PLACEHOLDER, window, cx)
+                .with_placeholder(crate::surface::strings::git_commit_placeholder(), window, cx)
                 .with_borderless(cx)
                 .with_focus_ring(false, cx)
                 .with_action(
                     crate::ui::PanelAction::new(
                         "commit",
-                        crate::surface::strings::GIT_COMMIT_BTN,
+                        crate::surface::strings::git_commit_btn(),
                         crate::ui::PanelActionVariant::Primary,
                         move |_, window, cx| {
                             let _ = ws_commit.upgrade().map(|w| {
@@ -618,7 +623,7 @@ impl Workspace {
                         },
                     )
                     .with_dropdown_item(
-                        crate::surface::strings::CTX_GIT_COMMIT_AMEND,
+                        crate::surface::strings::ctx_git_commit_amend(),
                         move |window, app_cx| {
                             if let Some(ws) = ws_amend.upgrade() {
                                 ws.update(app_cx, |ws, cx| ws.on_commit_amend(window, cx));
@@ -641,7 +646,7 @@ impl Workspace {
         let terminal_input = cx.new(|cx_state| {
             let mut state = crate::ui::InputState::new(window, cx_state).multi_line(true);
             state.set_placeholder(
-                crate::surface::strings::BOTTOM_INPUT_PLACEHOLDER,
+                crate::surface::strings::bottom_input_placeholder(),
                 window,
                 cx_state,
             );
@@ -878,11 +883,11 @@ impl Workspace {
             terminal_input_visible: false,
             skill_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::SKILLS_SEARCH_PLACEHOLDER)
+                    .placeholder(crate::surface::strings::skills_search_placeholder())
             }),
             task_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)
-                    .placeholder(crate::surface::strings::TASK_SEARCH_PLACEHOLDER)
+                    .placeholder(crate::surface::strings::task_search_placeholder())
             }),
             skill_plugin_expanded: std::collections::HashSet::new(),
             data_dir,
@@ -913,6 +918,7 @@ impl Workspace {
                     let effective = store.effective_for(worktree);
                     ws.apply_config(&effective, cx);
                 }),
+            window_handle: window.window_handle(),
         };
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O

@@ -41,7 +41,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .gap(px(theme::MCP_SECTION_GAP))
         .child(header_row(workspace.clone(), &t))
         .child(scope_section(
-            strings::MCP_PROJECT,
+            strings::mcp_project(),
             McpScope::Project,
             mcp,
             workspace.clone(),
@@ -50,7 +50,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         ))
         .child(Divider::horizontal())
         .child(scope_section(
-            strings::MCP_PERSONAL,
+            strings::mcp_personal(),
             McpScope::Personal,
             mcp,
             workspace,
@@ -71,7 +71,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
                 .text_color(t.mcp_section_header_text)
-                .child(strings::RIGHT_PANEL_TAB_TOOLS),
+                .child(strings::right_panel_tab_tools()),
         )
         .child(new_server_button(workspace, t))
 }
@@ -91,7 +91,7 @@ fn new_server_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) ->
         .text_color(badge_text)
         .cursor_pointer()
         .hover(move |s| s.bg(hover_bg))
-        .child(strings::MCP_NEW_BUTTON)
+        .child(strings::mcp_new_button())
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
@@ -100,7 +100,7 @@ fn new_server_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) ->
 }
 
 fn scope_section(
-    label: &'static str,
+    label: impl Into<gpui::SharedString>,
     scope: McpScope,
     state: &McpSnapshot,
     workspace: gpui::WeakEntity<Workspace>,
@@ -116,7 +116,7 @@ fn scope_section(
             .gap(px(theme::MCP_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
             .text_color(t.mcp_section_header_text)
-            .child(SharedString::from(label.to_string())),
+            .child(label.into()),
     );
 
     if !enabled {
@@ -125,15 +125,15 @@ fn scope_section(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                     .text_color(t.mcp_empty_text)
-                    .child(strings::MCP_NO_PROJECT_HINT),
+                    .child(strings::mcp_no_project_hint()),
             )
             .into_any_element();
     }
 
     if servers.is_empty() {
         let msg = match scope {
-            McpScope::Project => strings::MCP_EMPTY_PROJECT,
-            McpScope::Personal => strings::MCP_EMPTY_PERSONAL,
+            McpScope::Project => strings::mcp_empty_project(),
+            McpScope::Personal => strings::mcp_empty_personal(),
         };
         col = col.child(
             div()
@@ -176,11 +176,11 @@ fn server_row(
     };
 
     let (status_label, status_color) = if s.disabled {
-        (strings::MCP_STATUS_DISABLED, t.mcp_disabled_badge_text)
+        (strings::mcp_status_disabled(), t.mcp_disabled_badge_text)
     } else if s.is_malformed() {
-        (strings::MCP_STATUS_MALFORMED, t.mcp_malformed_badge_text)
+        (strings::mcp_status_malformed(), t.mcp_malformed_badge_text)
     } else {
-        (strings::MCP_STATUS_ENABLED, t.mcp_row_body_text)
+        (strings::mcp_status_enabled(), t.mcp_row_body_text)
     };
 
     let server_name = SharedString::from(s.name.clone());
@@ -281,7 +281,7 @@ fn row_actions(
         .gap(px(theme::MCP_HEADER_GAP))
         .child(text_action_button(
             "edit",
-            strings::MCP_BUTTON_EDIT,
+            strings::mcp_button_edit(),
             t,
             move |window, cx| {
                 if let Some(ws) = workspace_edit.upgrade() {
@@ -292,7 +292,7 @@ fn row_actions(
         ))
         .child(text_action_button(
             "del",
-            strings::MCP_BUTTON_DELETE,
+            strings::mcp_button_delete(),
             t,
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
@@ -323,8 +323,8 @@ fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
 /// the row line-height tight. Different shape on purpose, hence not
 /// shared with `skills::render::text_action_button`.
 fn text_action_button<F>(
-    id: &'static str,
-    label: &'static str,
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<gpui::SharedString>,
     t: &DarudaTheme,
     on_click: F,
 ) -> impl IntoElement
@@ -340,7 +340,7 @@ where
         .text_color(idle_color)
         .cursor_pointer()
         .hover(move |s| s.text_color(hover_color))
-        .child(label)
+        .child(label.into())
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             on_click(window, cx);
         })

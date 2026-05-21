@@ -108,7 +108,7 @@ fn edit_item(
     workspace: gpui::WeakEntity<Workspace>,
 ) -> ContextMenuItem {
     ContextMenuItem::new(
-        surface_strings::CTX_MACRO_EDIT,
+        surface_strings::ctx_macro_edit(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             let Some(ws) = workspace.upgrade() else {
                 return;
@@ -145,7 +145,7 @@ fn delete_item(
     workspace: gpui::WeakEntity<Workspace>,
 ) -> ContextMenuItem {
     ContextMenuItem::new(
-        surface_strings::CTX_MACRO_DELETE,
+        surface_strings::ctx_macro_delete(),
         move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
             let Some(ws) = workspace.upgrade() else {
                 return;
@@ -158,9 +158,9 @@ fn delete_item(
                 ws.close_context_menu(cx);
             });
             crate::workspace::dialog_helpers::open_confirm_dialog(
-                surface_strings::DELETE_MACRO_MODAL_TITLE,
+                surface_strings::delete_macro_modal_title(),
                 body,
-                surface_strings::DELETE_MACRO_CONFIRM_LABEL,
+                surface_strings::delete_macro_confirm_label(),
                 ButtonVariant::Danger,
                 move |_ev, _window, app_cx| {
                     if let Some(ws) = workspace_for_modal.upgrade() {

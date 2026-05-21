@@ -36,7 +36,7 @@ pub(in crate::workspace) fn build_project_menu_items(
     // -- Rename --
     let ws_rename = ws.clone();
     items.push(ContextMenuItem::new(
-        s::PROJECT_MENU_RENAME,
+        s::project_menu_rename(),
         move |_, window, app_cx| {
             let Some(workspace) = ws_rename.upgrade() else {
                 return;
@@ -51,7 +51,7 @@ pub(in crate::workspace) fn build_project_menu_items(
     // -- Move to Group --
     let ws_move = ws.clone();
     items.push(ContextMenuItem::new(
-        s::PROJECT_MENU_MOVE_TO_GROUP,
+        s::project_menu_move_to_group(),
         move |_, window, app_cx| {
             let Some(workspace) = ws_move.upgrade() else {
                 return;
@@ -89,7 +89,7 @@ pub(in crate::workspace) fn build_project_menu_items(
     // update sees a clean slate.
     let ws_delete = ws.clone();
     items.push(ContextMenuItem::new(
-        s::PROJECT_MENU_DELETE,
+        s::project_menu_delete(),
         move |_, window, app_cx| {
             let Some(workspace) = ws_delete.upgrade() else {
                 return;
@@ -145,7 +145,7 @@ pub(in crate::workspace) fn build_project_menu_items(
     // -- Open in New Window --
     let ws_open = ws.clone();
     items.push(ContextMenuItem::new(
-        s::PROJECT_MENU_OPEN_IN_NEW_WINDOW,
+        s::project_menu_open_in_new_window(),
         move |_, _window, app_cx| {
             let Some(workspace) = ws_open.upgrade() else {
                 return;

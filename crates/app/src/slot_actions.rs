@@ -407,39 +407,39 @@ macro_rules! worktree_slot_table {
     (@menu_items) => {
         ::std::vec![
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_1,
+                $crate::surface::strings::menu_activate_worktree_1(),
                 $crate::workspace::ActivateWorktree1,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_2,
+                $crate::surface::strings::menu_activate_worktree_2(),
                 $crate::workspace::ActivateWorktree2,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_3,
+                $crate::surface::strings::menu_activate_worktree_3(),
                 $crate::workspace::ActivateWorktree3,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_4,
+                $crate::surface::strings::menu_activate_worktree_4(),
                 $crate::workspace::ActivateWorktree4,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_5,
+                $crate::surface::strings::menu_activate_worktree_5(),
                 $crate::workspace::ActivateWorktree5,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_6,
+                $crate::surface::strings::menu_activate_worktree_6(),
                 $crate::workspace::ActivateWorktree6,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_7,
+                $crate::surface::strings::menu_activate_worktree_7(),
                 $crate::workspace::ActivateWorktree7,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_8,
+                $crate::surface::strings::menu_activate_worktree_8(),
                 $crate::workspace::ActivateWorktree8,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::MENU_ACTIVATE_WORKTREE_9,
+                $crate::surface::strings::menu_activate_worktree_9(),
                 $crate::workspace::ActivateWorktree9,
             ),
         ]

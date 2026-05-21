@@ -507,7 +507,7 @@ pub(in crate::workspace) fn section_header(
             let ws_for_group = workspace.clone();
             let items = vec![
                 ContextMenuItem::new(
-                    surface_strings::SECTION_ADD_MENU_PROJECT,
+                    surface_strings::section_add_menu_project(),
                     move |_, _window, app_cx| {
                         // No workspace handle needed — the global open-folder
                         // flow reads its config from `SettingsStore` and the
@@ -519,7 +519,7 @@ pub(in crate::workspace) fn section_header(
                     },
                 ),
                 ContextMenuItem::new(
-                    surface_strings::SECTION_ADD_MENU_GROUP,
+                    surface_strings::section_add_menu_group(),
                     move |_, window, app_cx| {
                         if let Some(ws) = ws_for_group.upgrade() {
                             ws.update(app_cx, |ws, cx| {
@@ -534,7 +534,7 @@ pub(in crate::workspace) fn section_header(
             }
         }));
 
-    SectionHeader::new(surface_strings::PROJECTS_SECTION_HEADER)
+    SectionHeader::new(surface_strings::projects_section_header())
         .padding(theme::WORKTREE_ROW_PAD_X, theme::WORKTREE_SECTION_PAD_Y)
         .actions(add_button)
 }

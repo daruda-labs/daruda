@@ -499,8 +499,8 @@ impl Workspace {
         let workspace_handle = cx.entity().downgrade();
         super::dialog_helpers::open_single_field_dialog(
             workspace_handle,
-            s::EDIT_WINDOW_TITLE_MODAL_TITLE,
-            s::EDIT_WINDOW_TITLE_PLACEHOLDER,
+            s::edit_window_title_modal_title(),
+            s::edit_window_title_placeholder(),
             initial.as_deref(),
             |ws, value, _window, cx| {
                 ws.set_window_label(value, cx);
@@ -524,7 +524,7 @@ impl Workspace {
         use crate::surface::strings as s;
 
         let Some(project_root) = self.active_project().map(|p| p.root.clone()) else {
-            let report = ErrorReport::new(s::PROJECT_CONFIG_NO_PROJECT)
+            let report = ErrorReport::new(s::project_config_no_project())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("config.no_project")
@@ -533,7 +533,7 @@ impl Workspace {
             return;
         };
         let Some(path) = daruda_config::project_config_path(&project_root) else {
-            let report = ErrorReport::new(s::PROJECT_CONFIG_NO_DIR)
+            let report = ErrorReport::new(s::project_config_no_dir())
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
                 .dedup("config.no_dir")
