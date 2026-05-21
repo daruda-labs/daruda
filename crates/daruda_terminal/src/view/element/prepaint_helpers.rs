@@ -265,8 +265,18 @@ impl TerminalTextElement {
     }
 }
 
-/// Multi-cell spans use the cell grid; single-cell uses the shaper so
-/// caret reverse-video rides the actual glyph.
+/// Resolve a background span to pixel x coordinates via the shaper when
+/// available, falling back to grid arithmetic on the first frame before
+/// `line_layouts` is populated.
+///
+/// Using grid arithmetic for multi-cell spans containing wide/CJK glyphs
+/// drifts from the actual glyph position: GPUI drops `force_width` when
+/// any glyph on the line is wide, so `cell_width * col` no longer tracks
+/// the shaper's advance.  The shaper path is therefore used for all spans,
+/// not just single-cell ones.  `shaped_pixel_range_for_cols` returns `None`
+/// only when the shaped text is empty or the byte range collapses (e.g. the
+/// right half of a wide char referenced as a lone col), at which point the
+/// grid fallback is still correct.
 fn bg_pixel_range(
     shaped: Option<&gpui::ShapedLine>,
     line_text: Option<&str>,
@@ -275,8 +285,7 @@ fn bg_pixel_range(
     cell_width: f32,
 ) -> (Pixels, Pixels) {
     let grid_x = |col_boundary: u16| px(cell_width * col_boundary.saturating_sub(1) as f32);
-    if start_col == end_col
-        && let (Some(shaped), Some(line_text)) = (shaped, line_text)
+    if let (Some(shaped), Some(line_text)) = (shaped, line_text)
         && let Some(range) = shaped_pixel_range_for_cols(shaped, line_text, start_col, end_col)
     {
         return range;
