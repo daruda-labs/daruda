@@ -532,24 +532,6 @@ impl TerminalTextElement {
             let cursor_visible = view.session.cursor_visible();
             let search_overlay = view.state.search_overlay;
 
-            // DEBUG: log why cursor block is or isn't rendered.
-            // Remove after root-cause analysis.
-            #[cfg(debug_assertions)]
-            {
-                use std::io::Write as _;
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/daruda_cursor.log")
-                {
-                    let _ = writeln!(
-                        f,
-                        "CURSOR_CHECK focused={focused} cursor_visible={cursor_visible} search={search_overlay} has_marked={has_marked} => will_render={}",
-                        focused && !search_overlay && cursor_visible && !has_marked
-                    );
-                }
-            }
-
             if focused && !search_overlay && cursor_visible && !has_marked {
                 Some((view.session.cursor_position(), view.session.cursor_style()))
             } else {

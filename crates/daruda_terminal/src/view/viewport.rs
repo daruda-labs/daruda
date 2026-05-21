@@ -104,26 +104,6 @@ pub(crate) fn line_range_in_viewport(
 
 impl TerminalView {
     pub(super) fn feed_output_bytes_to_session(&mut self, bytes: &[u8]) {
-        #[cfg(debug_assertions)]
-        {
-            use std::io::Write as _;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/daruda_pty.log")
-            {
-                let s: String = String::from_utf8_lossy(bytes)
-                    .chars()
-                    .map(|c| match c as u32 {
-                        0x1b => "\\e".to_string(),
-                        0..=0x1f | 0x7f => format!("\\x{:02x}", c as u32),
-                        _ => c.to_string(),
-                    })
-                    .collect();
-                let _ = writeln!(f, "PTY>> {s}");
-            }
-        }
-
         if let Some(input) = self.input.as_ref() {
             let _ = self
                 .session
@@ -132,21 +112,6 @@ impl TerminalView {
             let _ = self.session.feed(bytes);
         }
         self.apply_screen_change();
-
-        #[cfg(debug_assertions)]
-        {
-            use std::io::Write as _;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/daruda_pty.log")
-            {
-                if let Some((col, row)) = self.session.cursor_position() {
-                    let row_text = self.session.dump_viewport_row(row.saturating_sub(1)).ok();
-                    let _ = writeln!(f, "CURSOR=> col={col} row={row} text={row_text:?}");
-                }
-            }
-        }
     }
 
     /// Responds to an alt-screen state transition signalled by the session
