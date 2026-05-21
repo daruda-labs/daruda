@@ -62,7 +62,7 @@ pub enum PluginOpError {
     /// The CLI ran but exited non-zero.
     Exit { code: Option<i32>, stderr: String },
     /// CLI output wasn't valid UTF-8 — extremely unlikely in practice
-    /// but kept for parity with `worktree::git`'s error shape.
+    /// but kept for parity with `lane::git`'s error shape.
     Utf8,
 }
 

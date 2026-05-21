@@ -17,7 +17,7 @@
 //! `~/.config/daruda/projects/` directly.
 //!
 //! See `Projects/daruda/Tasks/Project-Local-Config-Layer-Plan.md` for
-//! the full design rationale (worktree-isolation use case, why
+//! the full design rationale (lane-isolation use case, why
 //! out-of-tree storage, layered priority).
 
 use std::path::{Path, PathBuf};

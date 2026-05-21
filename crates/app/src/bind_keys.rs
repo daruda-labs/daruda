@@ -173,11 +173,11 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         KeyBinding::new(k::SHORTCUT_OPEN_COMMAND_HISTORY, OpenCommandHistory, None),
     ]);
 
-    // Cmd+1..9 tab quick-switch and Cmd+Ctrl+1..9 worktree quick-switch
+    // Cmd+1..9 tab quick-switch and Cmd+Ctrl+1..9 lane quick-switch
     // come from a shared slot table so adding a tenth slot is one line
     // in `slot_actions.rs` instead of nine across four files.
     cx.bind_keys(crate::tab_slot_table!(@bindings));
-    cx.bind_keys(crate::worktree_slot_table!(@bindings));
+    cx.bind_keys(crate::lane_slot_table!(@bindings));
 }
 
 pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<daruda_config::Config>) {
@@ -231,7 +231,7 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
 
     // Global CloseProject handler — surfaces the DeleteProjectModal
     // so the user picks between "Remove from Daruda only" (safe) and
-    // "Remove worktrees and delete on disk" (destructive). The
+    // "Remove lanes and delete on disk" (destructive). The
     // workspace mutation runs on the modal's submit callback.
     //
     // Fallback for "no active workspace" (e.g. only Welcome is open)

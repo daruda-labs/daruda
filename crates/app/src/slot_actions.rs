@@ -1,5 +1,5 @@
 //! Slot-table macros — single source of truth for the `Cmd+1..9`
-//! tab quick-switch and `Cmd+Ctrl+1..9` worktree quick-switch
+//! tab quick-switch and `Cmd+Ctrl+1..9` lane quick-switch
 //! action wiring. The 1..=9 enumeration would otherwise need to be
 //! kept in lockstep across four files (`actions!` declaration, key
 //! bindings, config-override `bind!` arms, render-time
@@ -213,52 +213,52 @@ macro_rules! tab_slot_table {
 }
 
 #[macro_export]
-macro_rules! worktree_slot_table {
+macro_rules! lane_slot_table {
     (@bindings) => {
         [
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_1,
-                $crate::workspace::ActivateWorktree1,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_1,
+                $crate::workspace::ActivateLane1,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_2,
-                $crate::workspace::ActivateWorktree2,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_2,
+                $crate::workspace::ActivateLane2,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_3,
-                $crate::workspace::ActivateWorktree3,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_3,
+                $crate::workspace::ActivateLane3,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_4,
-                $crate::workspace::ActivateWorktree4,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_4,
+                $crate::workspace::ActivateLane4,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_5,
-                $crate::workspace::ActivateWorktree5,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_5,
+                $crate::workspace::ActivateLane5,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_6,
-                $crate::workspace::ActivateWorktree6,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_6,
+                $crate::workspace::ActivateLane6,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_7,
-                $crate::workspace::ActivateWorktree7,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_7,
+                $crate::workspace::ActivateLane7,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_8,
-                $crate::workspace::ActivateWorktree8,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_8,
+                $crate::workspace::ActivateLane8,
                 None,
             ),
             ::gpui::KeyBinding::new(
-                $crate::surface::keybindings::SHORTCUT_ACTIVATE_WORKTREE_9,
-                $crate::workspace::ActivateWorktree9,
+                $crate::surface::keybindings::SHORTCUT_ACTIVATE_LANE_9,
+                $crate::workspace::ActivateLane9,
                 None,
             ),
         ]
@@ -266,74 +266,74 @@ macro_rules! worktree_slot_table {
 
     (@try_bind_override $key:expr, $name:expr, $cx:expr) => {{
         match $name {
-            "activate_worktree_1" => {
+            "activate_lane_1" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree1,
+                    $crate::workspace::ActivateLane1,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_2" => {
+            "activate_lane_2" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree2,
+                    $crate::workspace::ActivateLane2,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_3" => {
+            "activate_lane_3" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree3,
+                    $crate::workspace::ActivateLane3,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_4" => {
+            "activate_lane_4" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree4,
+                    $crate::workspace::ActivateLane4,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_5" => {
+            "activate_lane_5" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree5,
+                    $crate::workspace::ActivateLane5,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_6" => {
+            "activate_lane_6" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree6,
+                    $crate::workspace::ActivateLane6,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_7" => {
+            "activate_lane_7" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree7,
+                    $crate::workspace::ActivateLane7,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_8" => {
+            "activate_lane_8" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree8,
+                    $crate::workspace::ActivateLane8,
                     None,
                 )]);
                 true
             }
-            "activate_worktree_9" => {
+            "activate_lane_9" => {
                 $cx.bind_keys([::gpui::KeyBinding::new(
                     $key,
-                    $crate::workspace::ActivateWorktree9,
+                    $crate::workspace::ActivateLane9,
                     None,
                 )]);
                 true
@@ -344,47 +344,47 @@ macro_rules! worktree_slot_table {
 
     (@register_listeners $cx:expr, $div:expr) => {
         $div.on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree1, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane1, window, cx| {
                 this.activate_worktree_by_index(0, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree2, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane2, window, cx| {
                 this.activate_worktree_by_index(1, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree3, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane3, window, cx| {
                 this.activate_worktree_by_index(2, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree4, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane4, window, cx| {
                 this.activate_worktree_by_index(3, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree5, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane5, window, cx| {
                 this.activate_worktree_by_index(4, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree6, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane6, window, cx| {
                 this.activate_worktree_by_index(5, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree7, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane7, window, cx| {
                 this.activate_worktree_by_index(6, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree8, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane8, window, cx| {
                 this.activate_worktree_by_index(7, window, cx);
             },
         ))
         .on_action($cx.listener(
-            |this: &mut Self, _: &$crate::workspace::ActivateWorktree9, window, cx| {
+            |this: &mut Self, _: &$crate::workspace::ActivateLane9, window, cx| {
                 this.activate_worktree_by_index(8, window, cx);
             },
         ))
@@ -392,15 +392,15 @@ macro_rules! worktree_slot_table {
 
     (@names) => {
         [
-            "activate_worktree_1",
-            "activate_worktree_2",
-            "activate_worktree_3",
-            "activate_worktree_4",
-            "activate_worktree_5",
-            "activate_worktree_6",
-            "activate_worktree_7",
-            "activate_worktree_8",
-            "activate_worktree_9",
+            "activate_lane_1",
+            "activate_lane_2",
+            "activate_lane_3",
+            "activate_lane_4",
+            "activate_lane_5",
+            "activate_lane_6",
+            "activate_lane_7",
+            "activate_lane_8",
+            "activate_lane_9",
         ]
     };
 
@@ -408,39 +408,39 @@ macro_rules! worktree_slot_table {
         ::std::vec![
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_1(),
-                $crate::workspace::ActivateWorktree1,
+                $crate::workspace::ActivateLane1,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_2(),
-                $crate::workspace::ActivateWorktree2,
+                $crate::workspace::ActivateLane2,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_3(),
-                $crate::workspace::ActivateWorktree3,
+                $crate::workspace::ActivateLane3,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_4(),
-                $crate::workspace::ActivateWorktree4,
+                $crate::workspace::ActivateLane4,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_5(),
-                $crate::workspace::ActivateWorktree5,
+                $crate::workspace::ActivateLane5,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_6(),
-                $crate::workspace::ActivateWorktree6,
+                $crate::workspace::ActivateLane6,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_7(),
-                $crate::workspace::ActivateWorktree7,
+                $crate::workspace::ActivateLane7,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_8(),
-                $crate::workspace::ActivateWorktree8,
+                $crate::workspace::ActivateLane8,
             ),
             ::gpui::MenuItem::action(
                 $crate::surface::strings::menu_activate_worktree_9(),
-                $crate::workspace::ActivateWorktree9,
+                $crate::workspace::ActivateLane9,
             ),
         ]
     };

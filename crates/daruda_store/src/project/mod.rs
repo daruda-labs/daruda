@@ -5,18 +5,21 @@
 //!
 //! Schema-entry-point types ([`WorkspaceState`], [`ProjectState`]) and
 //! per-file persistence live in [`types`] and [`persistence`]. Low-level
-//! building blocks ([`SerializedWorktree`], [`SerializedGroup`],
-//! [`SerializedProject`], [`WorktreeRef`], dock / window state, etc.)
+//! building blocks ([`SerializedLane`], [`SerializedGroup`],
+//! [`SerializedProject`], [`LaneRef`], dock / window state, etc.)
 //! stay at this level so views and other consumers can import them
 //! without pulling in the persistence layer.
 
+pub mod lane;
 pub mod persistence;
 pub mod types;
-pub mod worktree;
 
 #[cfg(test)]
 mod tests;
 
+pub use lane::{
+    LaneId, LaneKind, LaneStatus, LeftDockView, RightDockView, SerializedLane, UsageWindow,
+};
 pub use persistence::{
     RECENT_MAX, delete_project_state_in, delete_workspace_state_in, for_each_project_state_in,
     for_each_workspace_state_in, is_uuid_filename_stem, load_project_state_in, load_recent_in,
@@ -26,10 +29,6 @@ pub use persistence::{
 pub use types::{
     PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid, RecentEntry,
     WORKSPACE_SCHEMA_VERSION, WorkspaceState, WorkspaceUuid,
-};
-pub use worktree::{
-    LeftDockView, RightDockView, SerializedWorktree, UsageWindow, WorktreeId, WorktreeKind,
-    WorktreeStatus,
 };
 
 use serde::{Deserialize, Serialize};
@@ -78,14 +77,15 @@ pub fn derive_name_from_path(root: &Path) -> String {
 // ============================================================================
 
 /// Active-tab pointer in the multi-project model. A workspace always
-/// points at exactly one (project, worktree) pair; an invalid pair is
+/// points at exactly one (project, lane) pair; an invalid pair is
 /// repaired by the runtime restore path
 /// (`Workspace::restore_from_disk::resolve_active`) at load time so
 /// downstream code never has to handle dangling refs.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorktreeRef {
+pub struct LaneRef {
     pub project: ProjectId,
-    pub worktree: WorktreeId,
+    #[serde(rename = "worktree", alias = "lane")]
+    pub lane: LaneId,
 }
 
 /// User policy for the "Open Project…" affordance. Persists across
@@ -119,9 +119,9 @@ pub struct SerializedGroup {
 }
 
 /// Serializable per-project payload bundled inside a workspace
-/// snapshot. Each project owns its own worktrees and tracks which
-/// worktree was last active so clicking the project header in the
-/// left dock can snap to that worktree.
+/// snapshot. Each project owns its own lanes and tracks which
+/// lane was last active so clicking the project header in the
+/// left dock can snap to that lane.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SerializedProject {
     pub id: ProjectId,
@@ -135,15 +135,19 @@ pub struct SerializedProject {
     /// the same `tab_order` pool).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_id: Option<GroupId>,
-    #[serde(default)]
-    pub worktrees: Vec<SerializedWorktree>,
-    /// Last worktree the user activated inside this project. Used as a
+    #[serde(default, rename = "worktrees", alias = "lanes")]
+    pub lanes: Vec<SerializedLane>,
+    /// Last lane the user activated inside this project. Used as a
     /// snap hint when the project becomes active without a specific
-    /// worktree pick.
-    #[serde(default)]
-    pub last_active_worktree_id: WorktreeId,
+    /// lane pick.
+    #[serde(
+        default,
+        rename = "last_active_worktree_id",
+        alias = "last_active_lane_id"
+    )]
+    pub last_active_lane_id: LaneId,
     /// True when the project header is rendered in the left dock with
-    /// its worktree list hidden. Click on the chevron toggles.
+    /// its lane list hidden. Click on the chevron toggles.
     /// `#[serde(default)]` so older state files load as expanded.
     #[serde(default)]
     pub is_collapsed: bool,
@@ -186,10 +190,11 @@ pub enum SerializedLayout {
 /// Persisted state for a `PaneContent::File` leaf — enough to
 /// reconstruct the file viewer on the next launch. `file_status`
 /// (the git badge) is intentionally omitted: it depends on live git
-/// state and re-derives when the worktree's git status refreshes.
+/// state and re-derives when the lane's git status refreshes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedFileContent {
-    pub worktree_id: WorktreeId,
+    #[serde(rename = "worktree_id", alias = "lane_id")]
+    pub lane_id: LaneId,
     pub path: PathBuf,
     #[serde(default)]
     pub staged: bool,

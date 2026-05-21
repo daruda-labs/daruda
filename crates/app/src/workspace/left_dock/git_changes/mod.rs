@@ -8,12 +8,14 @@
 use std::path::PathBuf;
 
 use crate::ui::theme;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::LaneId;
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, MouseButton, MouseDownEvent, div,
     prelude::*, px,
 };
 
+use crate::lane::git::GitFileEntry;
+use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
 use crate::ui::{
@@ -24,16 +26,14 @@ use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::path_drag::PathDrag;
-use crate::worktree::git::GitFileEntry;
-use crate::worktree::paths::WorktreePaths;
 
 // ----------------------------------------------------------------
 // Entry point
 // ----------------------------------------------------------------
 
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    let active_id = snap.active.worktree;
-    let active_wt = snap.worktrees.iter().find(|w| w.id == active_id);
+    let active_id = snap.active.lane;
+    let active_wt = snap.lanes.iter().find(|w| w.id == active_id);
 
     if !active_wt.map(|w| w.is_git()).unwrap_or(false) {
         return non_git_placeholder(active_id, snap, cx).into_any_element();
@@ -41,15 +41,15 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     let branch = active_wt
         .and_then(|wt| match &wt.kind {
-            daruda_store::project::WorktreeKind::Git { branch, .. } => branch.clone(),
-            daruda_store::project::WorktreeKind::Default => None,
+            daruda_store::project::LaneKind::Git { branch, .. } => branch.clone(),
+            daruda_store::project::LaneKind::Default => None,
         })
         .unwrap_or_else(|| app_strings::git_detached_label().to_string());
 
     let status = snap.git_status_cache.get(&snap.active);
     let stage_in_flight = snap.git_stage_in_flight;
 
-    let selected: Option<(WorktreeId, PathBuf, bool)> = snap.focused_file_selection.clone();
+    let selected: Option<(LaneId, PathBuf, bool)> = snap.focused_file_selection.clone();
 
     // `key_context("GitChanges")` + `track_focus(...)` route arrow / Space /
     // Enter to GitChangesSelectNext / Prev / ToggleStage / Activate only
@@ -75,7 +75,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
             body = body.child(clean_placeholder(cx));
         }
         Some(s) => {
-            // git status --porcelain paths are repo-root-relative. WorktreePaths
+            // git status --porcelain paths are repo-root-relative. LanePaths
             // resolves them to absolute and back to wt-relative for display/git ops.
             // Safe to unwrap: is_git() was checked at the top of this function.
             let wt_paths = active_wt.unwrap().paths();
@@ -213,7 +213,7 @@ fn build_unified_list(staged: &[GitFileEntry], unstaged: &[GitFileEntry]) -> Vec
     map.into_values().collect()
 }
 
-/// Group a unified list by worktree-relative parent directory.
+/// Group a unified list by lane-relative parent directory.
 ///
 /// Output order: directory groups first (alphabetical by dir path),
 /// then a single root-level group (no parent dir) at the end. Files
@@ -223,7 +223,7 @@ fn build_unified_list(staged: &[GitFileEntry], unstaged: &[GitFileEntry]) -> Vec
 /// them with directory groups by raw string order.
 fn group_by_dir(
     entries: Vec<UnifiedEntry>,
-    wt_paths: &WorktreePaths<'_>,
+    wt_paths: &LanePaths<'_>,
 ) -> Vec<(Option<String>, Vec<UnifiedEntry>)> {
     use std::collections::BTreeMap;
 
@@ -262,9 +262,9 @@ fn group_by_dir(
 /// `move_git_changes_cursor` calls this so future render-side reordering
 /// (sticky conflicts, custom sort) automatically applies to nav.
 pub(in crate::workspace) fn ordered_visible_paths(
-    status: &crate::worktree::git::GitStatusData,
+    status: &crate::lane::git::GitStatusData,
     collapsed: &std::collections::HashSet<String>,
-    wt_paths: &WorktreePaths<'_>,
+    wt_paths: &LanePaths<'_>,
 ) -> Vec<PathBuf> {
     let unified = build_unified_list(&status.staged, &status.unstaged);
     let groups = group_by_dir(unified, wt_paths);
@@ -289,7 +289,7 @@ pub(in crate::workspace) fn ordered_visible_paths(
 // ----------------------------------------------------------------
 
 fn view_header(
-    _worktree_id: WorktreeId,
+    _worktree_id: LaneId,
     branch: &str,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -397,7 +397,7 @@ fn summary_bar(
     staged_count: usize,
     unstaged_count: usize,
     in_flight: bool,
-    worktree_id: WorktreeId,
+    lane_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -434,7 +434,7 @@ fn summary_bar(
         .items_center()
         .justify_between()
         .px(px(theme::GIT_HEADER_PAD_X))
-        .py(px(theme::WORKTREE_SECTION_PAD_Y))
+        .py(px(theme::LANE_SECTION_PAD_Y))
         .text_size(px(theme::GIT_SECTION_FONT_SIZE))
         .text_color(summary_text_color)
         .child(label)
@@ -456,9 +456,9 @@ fn summary_bar(
                                     return;
                                 };
                                 if all_staged {
-                                    ws.update(cx, |ws, cx| ws.unstage_all(worktree_id, cx));
+                                    ws.update(cx, |ws, cx| ws.unstage_all(lane_id, cx));
                                 } else {
-                                    ws.update(cx, |ws, cx| ws.stage_all(worktree_id, cx));
+                                    ws.update(cx, |ws, cx| ws.stage_all(lane_id, cx));
                                 }
                             }),
                         )
@@ -538,8 +538,8 @@ fn dir_header(
     is_collapsed: bool,
     state: DirStageState,
     entries: &[UnifiedEntry],
-    worktree_id: WorktreeId,
-    wt_paths: &WorktreePaths<'_>,
+    lane_id: LaneId,
+    wt_paths: &LanePaths<'_>,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
@@ -613,9 +613,9 @@ fn dir_header(
                     };
                     let paths = stage_paths.clone();
                     ws.update(cx, |ws, cx| match state {
-                        DirStageState::AllStaged => ws.unstage_paths(worktree_id, paths, cx),
+                        DirStageState::AllStaged => ws.unstage_paths(lane_id, paths, cx),
                         DirStageState::NoneStaged | DirStageState::Mixed => {
-                            ws.stage_paths(worktree_id, paths, cx)
+                            ws.stage_paths(lane_id, paths, cx)
                         }
                     });
                 }),
@@ -654,9 +654,7 @@ fn dir_header(
                     cx.listener(move |_dock, _: &MouseDownEvent, _window, cx| {
                         if let Some(ws) = workspace_toggle.upgrade() {
                             let dir = dir_for_toggle.clone();
-                            ws.update(cx, |ws, cx| {
-                                ws.toggle_git_dir_collapse(worktree_id, dir, cx)
-                            });
+                            ws.update(cx, |ws, cx| ws.toggle_git_dir_collapse(lane_id, dir, cx));
                         }
                     }),
                 )
@@ -695,9 +693,9 @@ fn discard_disabled(is_staged: bool, has_unstaged: bool) -> bool {
 fn unified_file_row(
     idx: usize,
     entry: &UnifiedEntry,
-    worktree_id: WorktreeId,
-    wt_paths: &WorktreePaths<'_>,
-    selected: Option<&(WorktreeId, PathBuf, bool)>,
+    lane_id: LaneId,
+    wt_paths: &LanePaths<'_>,
+    selected: Option<&(LaneId, PathBuf, bool)>,
     is_cursor: bool,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -713,7 +711,7 @@ fn unified_file_row(
     let is_untracked = entry.unstaged.as_ref().is_some_and(|u| u.x == '?');
 
     let is_selected = selected
-        .map(|(wt, p, _s)| *wt == worktree_id && *p == abs_path_for_open)
+        .map(|(wt, p, _s)| *wt == lane_id && *p == abs_path_for_open)
         .unwrap_or(false);
 
     // Renamed entries (`R` / `C` status) carry the original path —
@@ -815,9 +813,9 @@ fn unified_file_row(
                     };
                     ws.update(cx, |ws, cx| {
                         if is_staged {
-                            ws.unstage_file(worktree_id, path_for_checkbox.clone(), cx);
+                            ws.unstage_file(lane_id, path_for_checkbox.clone(), cx);
                         } else {
-                            ws.stage_file(worktree_id, path_for_checkbox.clone(), cx);
+                            ws.stage_file(lane_id, path_for_checkbox.clone(), cx);
                         }
                     });
                 }),
@@ -849,11 +847,11 @@ fn unified_file_row(
                 let cursor_path = path_for_cursor.clone();
                 ws.update(cx, |ws, cx| {
                     if click_count >= 2 {
-                        ws.open_file_externally(worktree_id, abs_path, cx);
+                        ws.open_file_externally(lane_id, abs_path, cx);
                     } else {
-                        ws.set_git_changes_cursor(worktree_id, cursor_path, cx);
+                        ws.set_git_changes_cursor(lane_id, cursor_path, cx);
                         ws.open_git_file_diff(
-                            worktree_id,
+                            lane_id,
                             abs_path,
                             is_staged,
                             Some(status_char_for_diff),
@@ -888,7 +886,7 @@ fn unified_file_row(
                         move |_, _, cx| {
                             ws_stage.update(cx, |ws, cx| {
                                 ws.close_context_menu(cx);
-                                ws.unstage_file(worktree_id, path_stage.clone(), cx)
+                                ws.unstage_file(lane_id, path_stage.clone(), cx)
                             });
                         },
                     ));
@@ -898,7 +896,7 @@ fn unified_file_row(
                         move |_, _, cx| {
                             ws_stage.update(cx, |ws, cx| {
                                 ws.close_context_menu(cx);
-                                ws.stage_file(worktree_id, path_stage.clone(), cx)
+                                ws.stage_file(lane_id, path_stage.clone(), cx)
                             });
                         },
                     ));
@@ -911,7 +909,7 @@ fn unified_file_row(
                         ws_diff.update(cx, |ws, cx| {
                             ws.close_context_menu(cx);
                             ws.open_git_file_diff(
-                                worktree_id,
+                                lane_id,
                                 path_diff.clone(),
                                 is_staged,
                                 Some(status_char_for_diff),
@@ -927,7 +925,7 @@ fn unified_file_row(
                     ContextMenuItem::new(app_strings::ctx_git_discard(), move |_, window, cx| {
                         ws_discard.update(cx, |ws, cx| {
                             ws.on_discard_file(
-                                worktree_id,
+                                lane_id,
                                 path_discard.clone(),
                                 is_untracked,
                                 window,
@@ -975,7 +973,7 @@ fn unified_file_row(
                         .flex_shrink()
                         .overflow_hidden()
                         .whitespace_nowrap()
-                        .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+                        .text_size(px(theme::LANE_SUB_FONT_SIZE))
                         .text_color(filename_color)
                         .child(file_name),
                 )
@@ -1080,7 +1078,7 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
 // ----------------------------------------------------------------
 
 fn loading_placeholder(
-    _worktree_id: WorktreeId,
+    _worktree_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -1099,8 +1097,8 @@ fn loading_placeholder(
         .flex_col()
         .items_center()
         .gap(px(theme::GIT_COMMIT_PAD))
-        .p(px(theme::WORKTREE_PLACEHOLDER_PAD))
-        .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+        .p(px(theme::LANE_PLACEHOLDER_PAD))
+        .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(text_color)
         .child(app_strings::git_loading_changes())
         .child(refresh_btn)
@@ -1118,7 +1116,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
 }
 
 fn non_git_placeholder(
-    worktree_id: WorktreeId,
+    lane_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -1128,7 +1126,7 @@ fn non_git_placeholder(
     let init_btn = button("git-init", app_strings::git_init_btn()).on_click(cx.listener(
         move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.init_git_repo(worktree_id, cx));
+                ws.update(cx, |ws, cx| ws.init_git_repo(lane_id, cx));
             }
         },
     ));
@@ -1152,7 +1150,7 @@ fn non_git_placeholder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worktree::git::{GitFileEntry, GitStatusData};
+    use crate::lane::git::{GitFileEntry, GitStatusData};
     use std::collections::HashSet;
     use std::path::Path;
 
@@ -1165,14 +1163,14 @@ mod tests {
         }
     }
 
-    /// `WorktreePaths` borrows from the caller's `Path` storage. The
+    /// `LanePaths` borrows from the caller's `Path` storage. The
     /// helper uses `from_git_status(p)` (repo-root-relative → absolute)
     /// and `strip_prefix_or_self(wt_path).parent()` to derive the
     /// dir-group key. For tests we set `wt_path == repo_root` so the
     /// repo-root-relative input round-trips back to the same string the
     /// render pipeline groups by.
-    fn paths_for(root: &Path) -> WorktreePaths<'_> {
-        WorktreePaths {
+    fn paths_for(root: &Path) -> LanePaths<'_> {
+        LanePaths {
             wt_path: root,
             repo_root: Some(root),
         }

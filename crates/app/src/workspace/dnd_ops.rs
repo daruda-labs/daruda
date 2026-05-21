@@ -1,6 +1,6 @@
 //! Project / group reordering driven by the left-dock DnD pipeline.
 //!
-//! Worktrees stay inside their parent project (see
+//! Lanes stay inside their parent project (see
 //! [`super::Workspace::reorder_worktree`]); this module handles the
 //! other two payload kinds from the multi-project plan:
 //!

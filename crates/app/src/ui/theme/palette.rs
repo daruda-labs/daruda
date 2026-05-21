@@ -2,7 +2,7 @@
 //!
 //! Lives in the `app` crate (not `daruda_terminal::ux::theme`) because
 //! it describes colours / metrics for daruda-bespoke chrome widgets:
-//! tab bar, dock view tabs, worktrees list, status bar, dock
+//! tab bar, dock view tabs, lanes list, status bar, dock
 //! panels. The terminal-side palette (cell fg/bg, cursor, search
 //! overlay, scrollback search, terminal scrollbar) stays in
 //! `daruda_terminal::ux::theme` because the `view/` rendering code
@@ -169,95 +169,95 @@ pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = 11.0;
 /// Dock view tab strip — active underline thickness (px).
 pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
 
-// Worktrees list (left dock Worktrees view)
-/// Worktrees list — horizontal padding (px).
-pub const WORKTREE_ROW_PAD_X: f32 = 10.0;
-/// Worktrees list — unread marker tint (warning).
-pub const WORKTREE_UNREAD: Hsla = hsla(30.0, 0.80, 0.60, 1.0);
-/// Worktrees list — inactive row hover background.
-pub const WORKTREE_ROW_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
-/// Worktrees list — primary label font size (px).
-pub const WORKTREE_LABEL_FONT_SIZE: f32 = 12.0;
-/// Worktrees list — secondary (path / status) font size (px).
-pub const WORKTREE_SUB_FONT_SIZE: f32 = 10.0;
-/// Worktrees list — section header font size (px).
-pub const WORKTREE_SECTION_HEADER_FONT_SIZE: f32 = 10.5;
-/// Worktrees list — section header top/bottom padding (px).
-pub const WORKTREE_SECTION_PAD_Y: f32 = 6.0;
-/// Worktrees list — placeholder (non-git info box) padding (px).
-pub const WORKTREE_PLACEHOLDER_PAD: f32 = 12.0;
+// Lanes list (left dock Lanes view)
+/// Lanes list — horizontal padding (px).
+pub const LANE_ROW_PAD_X: f32 = 10.0;
+/// Lanes list — unread marker tint (warning).
+pub const LANE_UNREAD: Hsla = hsla(30.0, 0.80, 0.60, 1.0);
+/// Lanes list — inactive row hover background.
+pub const LANE_ROW_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
+/// Lanes list — primary label font size (px).
+pub const LANE_LABEL_FONT_SIZE: f32 = 12.0;
+/// Lanes list — secondary (path / status) font size (px).
+pub const LANE_SUB_FONT_SIZE: f32 = 10.0;
+/// Lanes list — section header font size (px).
+pub const LANE_SECTION_HEADER_FONT_SIZE: f32 = 10.5;
+/// Lanes list — section header top/bottom padding (px).
+pub const LANE_SECTION_PAD_Y: f32 = 6.0;
+/// Lanes list — placeholder (non-git info box) padding (px).
+pub const LANE_PLACEHOLDER_PAD: f32 = 12.0;
 /// Context menu max width (px) — wider items get truncated by overflow_hidden.
 pub const CTX_MENU_MAX_WIDTH: f32 = 200.0;
 /// Drag ghost row vertical padding (px) — space above/below label in the
-/// floating preview that follows the cursor during a worktree drag.
-pub const WORKTREE_DRAG_GHOST_PAD_Y: f32 = 4.0;
-/// Highlight color applied to a drop target row while a worktree is being
+/// floating preview that follows the cursor during a lane drag.
+pub const LANE_DRAG_GHOST_PAD_Y: f32 = 4.0;
+/// Highlight color applied to a drop target row while a lane is being
 /// dragged over it.
-pub const WORKTREE_DROP_TARGET_BG: Hsla = hsla(210.0, 0.50, 0.30, 0.35);
+pub const LANE_DROP_TARGET_BG: Hsla = hsla(210.0, 0.50, 0.30, 0.35);
 /// Rejection tint applied when the in-flight payload cannot land on
-/// the hovered row (cross-project worktree drag, group dropped on a
+/// the hovered row (cross-project lane drag, group dropped on a
 /// grouped project, etc.). Desaturated red at low alpha so it reads
 /// as "not here" rather than as a hard error.
-pub const WORKTREE_DROP_TARGET_REJECTED_BG: Hsla = hsla(0.0, 0.55, 0.32, 0.20);
+pub const LANE_DROP_TARGET_REJECTED_BG: Hsla = hsla(0.0, 0.55, 0.32, 0.20);
 /// Unread indicator dot diameter (px).
-pub const WORKTREE_UNREAD_DOT_SIZE: f32 = 6.0;
+pub const LANE_UNREAD_DOT_SIZE: f32 = 6.0;
 /// Unread indicator dot corner radius (px).
-pub const WORKTREE_UNREAD_DOT_RADIUS: f32 = 3.0;
+pub const LANE_UNREAD_DOT_RADIUS: f32 = 3.0;
 /// Gap between label elements within the primary label row (px).
-pub const WORKTREE_LABEL_GAP: f32 = 6.0;
+pub const LANE_LABEL_GAP: f32 = 6.0;
 /// Gap between elements in the sub-label row (px).
-pub const WORKTREE_SUBLABEL_GAP: f32 = 6.0;
+pub const LANE_SUBLABEL_GAP: f32 = 6.0;
 /// Gap between the body and the × remove button within a row (px).
-pub const WORKTREE_ROW_GAP: f32 = 8.0;
+pub const LANE_ROW_GAP: f32 = 8.0;
 /// Top margin of the "git init" affordance inside the non-git placeholder (px).
-pub const WORKTREE_PLACEHOLDER_GIT_INIT_MT: f32 = 4.0;
+pub const LANE_PLACEHOLDER_GIT_INIT_MT: f32 = 4.0;
 /// Gap between lines inside the non-git info placeholder (px).
-pub const WORKTREE_PLACEHOLDER_LINE_GAP: f32 = 6.0;
+pub const LANE_PLACEHOLDER_LINE_GAP: f32 = 6.0;
 /// Diameter of the optional color dot rendered in a group header (px).
-pub const WORKTREE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
+pub const LANE_GROUP_COLOR_DOT_SIZE: f32 = 8.0;
 /// Corner radius of the group color dot (px). Half the size to render a circle.
-pub const WORKTREE_GROUP_COLOR_DOT_RADIUS: f32 = 4.0;
+pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = 4.0;
 
 // ----------------------------------------------------------------------------
-// Premium Card surface tokens (Worktrees redesign)
+// Premium Card surface tokens (Lanes redesign)
 // ----------------------------------------------------------------------------
 
-/// Worktrees card — outer corner radius (px).
-pub const WORKTREE_CARD_RADIUS: f32 = 10.0;
-/// Worktrees card — vertical gap between adjacent cards (px).
-pub const WORKTREE_CARD_GAP: f32 = 6.0;
-/// Worktrees card — inner horizontal padding (px).
-pub const WORKTREE_CARD_PAD_X: f32 = 10.0;
-/// Worktrees card — inner vertical padding (px).
-pub const WORKTREE_CARD_PAD_Y: f32 = 6.0;
-/// Worktrees row — corner radius applied to hover/active background fills
+/// Lanes card — outer corner radius (px).
+pub const LANE_CARD_RADIUS: f32 = 10.0;
+/// Lanes card — vertical gap between adjacent cards (px).
+pub const LANE_CARD_GAP: f32 = 6.0;
+/// Lanes card — inner horizontal padding (px).
+pub const LANE_CARD_PAD_X: f32 = 10.0;
+/// Lanes card — inner vertical padding (px).
+pub const LANE_CARD_PAD_Y: f32 = 6.0;
+/// Lanes row — corner radius applied to hover/active background fills
 /// so the highlight reads as a rounded chip instead of a hard rectangle.
-pub const WORKTREE_ROW_RADIUS: f32 = 6.0;
-/// Worktrees card — horizontal outer margin so cards don't hug the dock
+pub const LANE_ROW_RADIUS: f32 = 6.0;
+/// Lanes card — horizontal outer margin so cards don't hug the dock
 /// edges; gives the surface visible left/right breathing room.
-pub const WORKTREE_CARD_MARGIN_X: f32 = 8.0;
-/// Worktrees list — vertical gap between adjacent worktree rows inside
+pub const LANE_CARD_MARGIN_X: f32 = 8.0;
+/// Lanes list — vertical gap between adjacent lane rows inside
 /// a project block so consecutive rows don't read as a single block.
-pub const WORKTREE_LIST_GAP_Y: f32 = 3.0;
-/// Worktrees card — border width (px).
-pub const WORKTREE_CARD_BORDER_W: f32 = 1.0;
-/// Worktrees card — base background. Sits a step above `DOCK_BG` (#0a)
+pub const LANE_LIST_GAP_Y: f32 = 3.0;
+/// Lanes card — border width (px).
+pub const LANE_CARD_BORDER_W: f32 = 1.0;
+/// Lanes card — base background. Sits a step above `DOCK_BG` (#0a)
 /// so the card edge is visible without leaning on the border alone.
-pub const WORKTREE_CARD_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
-/// Worktrees card — border at 8% alpha. Higher than the original 4%
+pub const LANE_CARD_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
+/// Lanes card — border at 8% alpha. Higher than the original 4%
 /// so the card outline reads on the dark dock surface.
-pub const WORKTREE_CARD_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
-/// Worktrees card — hover background (one tonal step above the base).
-pub const WORKTREE_CARD_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
-/// Worktrees card — active background when this card holds the focused
+pub const LANE_CARD_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
+/// Lanes card — hover background (one tonal step above the base).
+pub const LANE_CARD_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
+/// Lanes card — active background when this card holds the focused
 /// project (group card with an active member, or the ungrouped shell's
 /// project row). One tonal step above hover so "selected" reads
 /// distinct from "hovered" without competing with row-level highlights.
-pub const WORKTREE_CARD_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-/// Worktrees active row — subtle bg only (no left bar / no glow).
-pub const WORKTREE_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
+pub const LANE_CARD_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
+/// Lanes active row — subtle bg only (no left bar / no glow).
+pub const LANE_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
 /// Group label font size (px) — uppercase eyebrow.
-pub const WORKTREE_GROUP_LABEL_FONT_SIZE: f32 = 11.0;
+pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = 11.0;
 
 // ============================================================================
 // Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)
@@ -488,7 +488,7 @@ pub const GIT_FILE_ROW_PAD_X: f32 = 10.0;
 pub const GIT_FILE_ROW_GAP: f32 = 6.0;
 /// Status char column width (px).
 pub const GIT_STATUS_CHAR_W: f32 = 14.0;
-/// Git status badge font size shown in the Worktrees list (px).
+/// Git status badge font size shown in the Lanes list (px).
 pub const GIT_BADGE_FONT_SIZE: f32 = 10.0;
 /// Git badge — GH-Desktop-style pill background fill (white at low alpha
 /// so it lifts above the row but stays neutral, no color signal).
@@ -701,7 +701,7 @@ pub const FILES_ROW_GAP: f32 = 4.0;
 /// Font size for the file tree row name (px).
 pub const FILES_ROW_FONT_SIZE: f32 = 12.0;
 /// Width of the dock scrollbar thumb (px). Shared by every left-dock
-/// left-dock view (Files, Git Changes, Worktrees) so the scrollbars feel
+/// left-dock view (Files, Git Changes, Lanes) so the scrollbars feel
 /// consistent.
 pub const DOCK_SCROLLBAR_W: f32 = 6.0;
 /// Right margin between the thumb and the panel edge (px).
@@ -1331,12 +1331,12 @@ pub const POPOVER_SNAP_MARGIN: f32 = 8.0;
 /// just below and to the right of the cursor regardless of where the user
 /// clicked within the source row.
 pub const DRAG_PILL_CURSOR_OFFSET: f32 = 4.0;
-/// Leading indicator footprint on the worktree row. All four states
+/// Leading indicator footprint on the lane row. All four states
 /// share the same 3×3 dot-grid shape; only color/animation differ.
 pub const STATUS_INDICATOR_SIZE: f32 = 16.0;
 /// Sub-row per-session badge footprint (Phase D).
 pub const STATUS_INDICATOR_BADGE_SIZE: f32 = 12.0;
-/// Width of the cell that holds the indicator inside the worktree row,
+/// Width of the cell that holds the indicator inside the lane row,
 /// inserted between the active-row accent bar and the body.
 pub const STATUS_INDICATOR_CELL_WIDTH: f32 = 22.0;
 /// One full Working-state animation cycle (head sweeps every dot once).
@@ -1413,7 +1413,7 @@ pub const RIGHT_PANEL_LABEL_FONT_SIZE: f32 = 10.0;
 /// dollar-cost cell stands out against the muted token-count text
 /// without yelling like a warning would.
 pub const RIGHT_PANEL_COST_COLOR: Hsla = hsla(40.0, 0.65, 0.65, 1.0);
-/// Maximum displayed width of the worktree-label cell in a session
+/// Maximum displayed width of the lane-label cell in a session
 /// row before it truncates with `…` (px). The cell's hard cap keeps
 /// a long branch name from pushing the token + cost cells off-screen
 /// when the right dock is narrow; below this width the metrics group

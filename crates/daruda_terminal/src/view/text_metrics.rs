@@ -247,6 +247,42 @@ pub(crate) fn grid_right_x(origin_left: Pixels, cell_width: f32, cols: u16) -> P
     origin_left + gpui::px(cell_width * cols as f32)
 }
 
+/// Left-edge pixel x of the cursor block for a given 1-indexed VT column.
+///
+/// Uses the shaper's `x_for_index` rather than `(col-1) × cell_width`
+/// because GPUI drops `force_width` on any line containing wide/CJK glyphs,
+/// making the linear formula drift by up to 1 cell per wide character.
+/// Keeping this helper here (next to `byte_index_for_column_in_line`)
+/// ensures both the lookup and the pixel conversion stay together and are
+/// not accidentally "simplified" to the linear form in calling code.
+pub(crate) fn cursor_x_for_col(line: &gpui::ShapedLine, col: u16, origin_left: Pixels) -> Pixels {
+    let byte_index = byte_index_for_column_in_line(line.text.as_str(), col);
+    origin_left + line.x_for_index(byte_index.min(line.text.len()))
+}
+
+/// Width of the cursor block in pixels for the glyph at 1-indexed `col`.
+///
+/// Measures the actual shaped advance of the character under the cursor so
+/// the block covers exactly one character cell even on lines where
+/// `force_width` is disabled (CJK / wide chars). Falls back to `cell_width`
+/// when the cursor is past the last character (end-of-line position).
+pub(crate) fn cursor_width_for_col(line: &gpui::ShapedLine, col: u16, cell_width: f32) -> f32 {
+    let byte_index = byte_index_for_column_in_line(line.text.as_str(), col);
+    let text = line.text.as_str();
+    if byte_index < text.len() {
+        let char_end = text
+            .get(byte_index..)
+            .and_then(|s| s.chars().next())
+            .map(|c| byte_index + c.len_utf8())
+            .unwrap_or(byte_index + 1)
+            .min(text.len());
+        let w = f32::from(line.x_for_index(char_end)) - f32::from(line.x_for_index(byte_index));
+        if w > 0.5 { w } else { cell_width }
+    } else {
+        cell_width
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

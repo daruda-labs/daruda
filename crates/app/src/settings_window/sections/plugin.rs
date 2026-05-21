@@ -85,7 +85,11 @@ fn plugin_empty_hint(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> im
 /// the left, free-form value on the right. Keeps every line aligned
 /// when rendered in a `flex_col` so multiple `detail_row`s read as a
 /// table.
-fn detail_row(label: impl Into<gpui::SharedString>, value: SharedString, cx: &gpui::App) -> impl IntoElement {
+fn detail_row(
+    label: impl Into<gpui::SharedString>,
+    value: SharedString,
+    cx: &gpui::App,
+) -> impl IntoElement {
     let t = theme::current(cx);
     let label_color = t.modal_secondary_text;
     let value_color = t.modal_text_primary;
@@ -436,10 +440,13 @@ impl SettingsWindow {
 
         let is_in_flight = in_flight.contains(&group.plugin_id);
         let (button_label, action) = match (group.availability, is_in_flight) {
-            (Some(PluginAvailability::Installed), false) => {
-                (s::settings_plugin_uninstall(), Some(PluginAction::Uninstall))
+            (Some(PluginAvailability::Installed), false) => (
+                s::settings_plugin_uninstall(),
+                Some(PluginAction::Uninstall),
+            ),
+            (Some(PluginAvailability::Installed), true) => {
+                (s::settings_plugin_uninstalling(), None)
             }
-            (Some(PluginAvailability::Installed), true) => (s::settings_plugin_uninstalling(), None),
             (Some(PluginAvailability::Available), false) => {
                 (s::settings_plugin_install(), Some(PluginAction::Install))
             }
@@ -545,7 +552,11 @@ impl SettingsWindow {
             col = col.child(detail_row(s::settings_plugin_skill_description(), desc, cx));
         }
         if let Some(hint) = arg_hint {
-            col = col.child(detail_row(s::settings_plugin_skill_argument_hint(), hint, cx));
+            col = col.child(detail_row(
+                s::settings_plugin_skill_argument_hint(),
+                hint,
+                cx,
+            ));
         }
         if let Some(tools) = allowed_tools {
             col = col.child(detail_row(
@@ -608,12 +619,14 @@ impl SettingsWindow {
             .items_center()
             .gap(px(theme::SKILL_HEADER_GAP))
             .child(
-                button("settings-plugin-skill-back", s::settings_plugin_skill_back()).on_click(
-                    cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.plugin_view_skill = None;
-                        cx.notify();
-                    }),
-                ),
+                button(
+                    "settings-plugin-skill-back",
+                    s::settings_plugin_skill_back(),
+                )
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.plugin_view_skill = None;
+                    cx.notify();
+                })),
             )
             .child(
                 div()

@@ -67,7 +67,9 @@ pub(in crate::workspace) fn render(
         strings::task_edit_base_label(),
         div()
             .w_full()
-            .child(select(&te.base_select, cx, 3).placeholder(strings::task_edit_base_active_label()))
+            .child(
+                select(&te.base_select, cx, 3).placeholder(strings::task_edit_base_active_label()),
+            )
             .into_any_element(),
         label_color,
     );
@@ -450,7 +452,10 @@ fn field_label(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl Into
     field_label_with_color(text, theme::current(cx).muted_text)
 }
 
-fn field_label_with_color(text: impl Into<gpui::SharedString>, color: gpui::Hsla) -> impl IntoElement {
+fn field_label_with_color(
+    text: impl Into<gpui::SharedString>,
+    color: gpui::Hsla,
+) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(color)
@@ -487,7 +492,7 @@ fn notes_header(cx: &gpui::App) -> impl IntoElement {
 /// left, `[📄 Open file]` button on the right (R-20 follow-up). The
 /// button is disabled for drafts and Backlog tasks since neither has
 /// the on-disk `<wt>/.daruda/task-<branch>.md` file yet — running
-/// `[Start]` materialises both the worktree and the file in one step.
+/// `[Start]` materialises both the lane and the file in one step.
 fn prompt_header(
     pane_id: PaneId,
     te: &TaskEditContent,

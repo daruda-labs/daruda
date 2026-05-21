@@ -33,7 +33,7 @@ pub use daruda_theme::DarudaTheme;
 /// existing `theme::TAB_BAR_BG` const path.
 ///
 /// Phase 3-C migrates the workspace-chrome call sites (tab strip,
-/// pane header, dock, status bar, worktrees list) to this helper;
+/// pane header, dock, status bar, lanes list) to this helper;
 /// the long tail of modal / agent / right-panel sites keeps reading
 /// the underlying `palette::FOO` const until a follow-up pass moves
 /// them too. Both paths return the same colour today — Phase 3-D
@@ -185,7 +185,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     t.primary_hover = d.modal_primary_hover_bg;
     t.primary_active = d.modal_primary_bg;
     t.primary_foreground = d.modal_text_primary;
-    t.accent = d.worktree_row_hover_bg;
+    t.accent = d.lane_row_hover_bg;
     t.accent_foreground = d.modal_text_primary;
     t.ring = d.input_focus_border;
 
@@ -211,10 +211,10 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     // List rows / accordion (hover + selection)
     // ---------------------------------------------------------------
-    t.list_hover = d.worktree_row_hover_bg;
+    t.list_hover = d.lane_row_hover_bg;
     t.list_active = d.tab_active_bg;
     t.list_active_border = d.modal_primary_bg;
-    t.accordion_hover = d.worktree_row_hover_bg;
+    t.accordion_hover = d.lane_row_hover_bg;
 
     // ---------------------------------------------------------------
     // Danger / Warning / Success — semantic states. Light mode keeps
@@ -241,7 +241,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.caret = d.modal_primary_bg;
     t.selection = hsla(210.0 / 360.0, 0.70, 0.55, 0.40);
-    t.drop_target = d.worktree_drop_target_bg;
+    t.drop_target = d.lane_drop_target_bg;
 
     // ---------------------------------------------------------------
     // Tab — daruda renders its own tab strip; these cover gpui_component

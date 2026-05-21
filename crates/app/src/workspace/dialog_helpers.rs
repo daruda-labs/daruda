@@ -14,7 +14,7 @@
 //!   [`gpui_component::WindowExt::close_dialog`].
 //! - [`open_confirm_dialog`] — title + body text + OK/Cancel footer.
 //!   Caller supplies the OK handler. Used for short-lived destructive
-//!   confirmations (Delete macro / skill / tool / worktree). Dialog
+//!   confirmations (Delete macro / skill / tool / lane). Dialog
 //!   owns OK / Cancel button rendering and dismissal.
 //! - [`open_error_report_dialog`] — Layer 2 of the error-reporting
 //!   pipeline. Mounts an [`ErrorReportModal`] for a captured

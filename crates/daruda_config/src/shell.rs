@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct ShellConfig {
     /// Shell executable path. `None` falls back to the `$SHELL`
     /// environment variable, then `/bin/zsh`. Project-overridable so
-    /// a worktree can pin e.g. `/usr/local/bin/zsh` (Homebrew) or a
+    /// a lane can pin e.g. `/usr/local/bin/zsh` (Homebrew) or a
     /// nix-shell wrapper script independently of the user default.
     pub program: Option<String>,
 

@@ -1,26 +1,26 @@
-//! Tests for the left-dock DnD ops (worktree, project, group
+//! Tests for the left-dock DnD ops (lane, project, group
 //! reordering). Each test sets up a workspace with the minimum shape
-//! the op under test needs — extra projects, groups, or worktrees are
+//! the op under test needs — extra projects, groups, or lanes are
 //! injected directly instead of going through filesystem-bound paths.
 
 use super::*;
 use crate::workspace::dnd_ops::TopRow;
-use daruda_store::project::{GroupId, ProjectId, WorktreeId, WorktreeKind, WorktreeRef};
+use daruda_store::project::{GroupId, LaneId, LaneKind, LaneRef, ProjectId};
 
-/// Push a synthetic worktree into the project so reorder tests have
+/// Push a synthetic lane into the project so reorder tests have
 /// more than the bootstrapped row to work with. `tab_order` matches the
 /// caller-supplied value because the dock sorts by it and we want
 /// deterministic before-state.
-fn push_worktree(project: &mut crate::project::Project, id: WorktreeId, tab_order: u32) {
-    project.worktrees.push(crate::worktree::Worktree {
+fn push_worktree(project: &mut crate::project::Project, id: LaneId, tab_order: u32) {
+    project.lanes.push(crate::lane::Lane {
         id,
-        kind: WorktreeKind::Default,
+        kind: LaneKind::Default,
         path: std::path::PathBuf::from(format!("/tmp/dnd_wt_{id}")),
         name: None,
         tab_order,
         is_unread: false,
         last_activity: 0,
-        status: daruda_store::project::WorktreeStatus::Idle,
+        status: daruda_store::project::LaneStatus::Idle,
         base_ref: None,
         description: None,
     });
@@ -66,18 +66,18 @@ fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
     let (project_id, ref_a, ref_b) = ws.update(cx, |ws, _| {
         let p = &mut ws.projects[0];
         let pid = p.id;
-        // Bootstrapped worktree already sits at id 0 / tab_order 0.
+        // Bootstrapped lane already sits at id 0 / tab_order 0.
         push_worktree(p, 100, 1);
         push_worktree(p, 200, 2);
         (
             pid,
-            WorktreeRef {
+            LaneRef {
                 project: pid,
-                worktree: 200,
+                lane: 200,
             },
-            WorktreeRef {
+            LaneRef {
                 project: pid,
-                worktree: 100,
+                lane: 100,
             },
         )
     });
@@ -85,8 +85,7 @@ fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         let p = ws.projects.iter().find(|p| p.id == project_id).unwrap();
         // Expect: [0, 200, 100] in tab_order 0..2.
-        let order: Vec<(WorktreeId, u32)> =
-            p.worktrees.iter().map(|w| (w.id, w.tab_order)).collect();
+        let order: Vec<(LaneId, u32)> = p.lanes.iter().map(|w| (w.id, w.tab_order)).collect();
         assert_eq!(order, vec![(0, 0), (200, 1), (100, 2)]);
     });
 }
@@ -99,11 +98,11 @@ fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
         push_project_in_memory(ws, "/tmp/daruda_dnd_wt_cross_b");
     });
     // Snapshot tab_order before the cross-project move attempt.
-    let before: Vec<(ProjectId, WorktreeId, u32)> = ws.read_with(cx, |ws, _| {
+    let before: Vec<(ProjectId, LaneId, u32)> = ws.read_with(cx, |ws, _| {
         ws.projects
             .iter()
             .flat_map(|p| {
-                p.worktrees
+                p.lanes
                     .iter()
                     .map(move |w| (p.id, w.id, w.tab_order))
                     .collect::<Vec<_>>()
@@ -112,22 +111,22 @@ fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
     });
     let (from_project, to_project) =
         ws.read_with(cx, |ws, _| (ws.projects[0].id, ws.projects[1].id));
-    let from = WorktreeRef {
+    let from = LaneRef {
         project: from_project,
-        worktree: 0,
+        lane: 0,
     };
-    let to = WorktreeRef {
+    let to = LaneRef {
         project: to_project,
-        worktree: 0,
+        lane: 0,
     };
     ws.update(cx, |ws, cx| ws.reorder_worktree(from, to, cx));
     // Order is unchanged — cross-project move is rejected silently.
     ws.read_with(cx, |ws, _| {
-        let after: Vec<(ProjectId, WorktreeId, u32)> = ws
+        let after: Vec<(ProjectId, LaneId, u32)> = ws
             .projects
             .iter()
             .flat_map(|p| {
-                p.worktrees
+                p.lanes
                     .iter()
                     .map(move |w| (p.id, w.id, w.tab_order))
                     .collect::<Vec<_>>()

@@ -19,7 +19,7 @@ impl Workspace {
             active_project_name: self
                 .active_project()
                 .map(|p| gpui::SharedString::from(p.name.clone())),
-            worktrees: self.active_worktrees().to_vec(),
+            lanes: self.active_lanes().to_vec(),
             projects: {
                 let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
                     .projects
@@ -33,8 +33,8 @@ impl Workspace {
                             .as_ref()
                             .map(|c| gpui::SharedString::from(c.clone())),
                         tab_order: p.tab_order,
-                        worktrees: p.worktrees.clone(),
-                        last_active_worktree_id: p.last_active_worktree_id,
+                        lanes: p.lanes.clone(),
+                        last_active_lane_id: p.last_active_lane_id,
                         is_collapsed: p.is_collapsed,
                     })
                     .collect();
@@ -72,7 +72,7 @@ impl Workspace {
             git_changes_panel_focus: self.git_changes_panel_focus.clone(),
             focused_file_selection: self
                 .focused_file_view()
-                .map(|fv| (fv.worktree_id, fv.path.clone(), fv.staged)),
+                .map(|fv| (fv.lane_id, fv.path.clone(), fv.staged)),
             git_changes_scroll_handle: self.git_changes_scroll_handle.clone(),
             git_commit_input: self.git_commit_input.clone(),
             files_panel_focus: self.file_tree.files_panel_focus.clone(),
@@ -107,13 +107,13 @@ impl Workspace {
                     .map(|b| b.session_id.as_str())
                     .collect();
                 let mut map = std::collections::HashMap::new();
-                // Iterate every project's worktrees, not just the
+                // Iterate every project's lanes, not just the
                 // active project's — the left dock renders every
-                // project and each project numbers worktrees from 0,
-                // so keying by bare `WorktreeId` would alias status
+                // project and each project numbers lanes from 0,
+                // so keying by bare `LaneId` would alias status
                 // across projects.
                 for project in &self.projects {
-                    for wt in &project.worktrees {
+                    for wt in &project.lanes {
                         let live_sessions = self
                             .claude
                             .claude_status
@@ -123,9 +123,9 @@ impl Workspace {
                         if let Some(state) =
                             live_sessions.map(|(_, s)| s).max_by_key(|s| s.priority())
                         {
-                            let key = daruda_store::project::WorktreeRef {
+                            let key = daruda_store::project::LaneRef {
                                 project: project.id,
-                                worktree: wt.id,
+                                lane: wt.id,
                             };
                             map.insert(key, state);
                         }
@@ -142,7 +142,7 @@ impl Workspace {
                     .collect();
                 let mut map = std::collections::HashMap::new();
                 for project in &self.projects {
-                    for wt in &project.worktrees {
+                    for wt in &project.lanes {
                         let sessions: Vec<_> = self
                             .claude
                             .claude_status
@@ -150,14 +150,14 @@ impl Workspace {
                             .into_iter()
                             .filter(|(sid, _)| live.contains(sid.as_str()))
                             .collect();
-                        // Only worktrees with ≥ 2 PID-confirmed
+                        // Only lanes with ≥ 2 PID-confirmed
                         // sessions get a sub-row; single-session
-                        // worktrees are fully described by the leading
+                        // lanes are fully described by the leading
                         // indicator.
                         if sessions.len() >= 2 {
-                            let key = daruda_store::project::WorktreeRef {
+                            let key = daruda_store::project::LaneRef {
                                 project: project.id,
-                                worktree: wt.id,
+                                lane: wt.id,
                             };
                             map.insert(key, sessions);
                         }

@@ -1,4 +1,4 @@
-//! Tasks tab body — renders the worktree-isolated Claude Code agent
+//! Tasks tab body — renders the lane-isolated Claude Code agent
 //! task list pulled from `Workspace::tasks` (R-11 ~ R-18 + R-26 / R-27).
 //!
 //! Layout (top to bottom):
@@ -15,7 +15,7 @@
 //!
 //! Filter chip cycles `All → Backlog → Running → Done → All` on
 //! click; `[+ New]` opens `CreateTaskModal` (R-13). Every state
-//! transition + meta action (Edit / Delete / Open worktree) lives
+//! transition + meta action (Edit / Delete / Open lane) lives
 //! inside the per-row status-pill dropdown — see `status_pill.rs`
 //! for the state → menu matrix (plan I-9 / R-26).
 //!

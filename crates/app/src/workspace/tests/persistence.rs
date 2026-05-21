@@ -39,13 +39,9 @@ fn test_save_state_with_project(cx: &mut TestAppContext) {
             state.primary_project().unwrap().root,
             std::path::PathBuf::from("/tmp/test_project")
         );
-        // Tabs now live inside the active worktree.
-        assert_eq!(state.primary_project().unwrap().worktrees.len(), 1);
-        assert!(
-            !state.primary_project().unwrap().worktrees[0]
-                .tabs
-                .is_empty()
-        );
+        // Tabs now live inside the active lane.
+        assert_eq!(state.primary_project().unwrap().lanes.len(), 1);
+        assert!(!state.primary_project().unwrap().lanes[0].tabs.is_empty());
         assert_eq!(state.font_size, config.font.size);
     });
 }
@@ -64,7 +60,7 @@ fn test_restore_state_applies_dock_sizes(cx: &mut TestAppContext) {
         );
         let state = daruda_store::project::legacy::ProjectState {
             root: std::path::PathBuf::from("/tmp/test_restore"),
-            worktrees: Vec::new(),
+            lanes: Vec::new(),
             active_worktree_id: 0,
             active_dock_view: daruda_store::project::LeftDockView::default(),
             active_right_panel_view: daruda_store::project::RightDockView::default(),
@@ -151,10 +147,10 @@ fn test_save_state_serializes_leaf_layout(cx: &mut TestAppContext) {
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, app_cx| {
         let state = ws.save_state(app_cx).unwrap();
-        // Tabs moved onto the active worktree in W-2.
+        // Tabs moved onto the active lane in W-2.
         let primary = state.primary_project().unwrap();
-        assert_eq!(primary.worktrees.len(), 1);
-        let wt_tabs = &primary.worktrees[0].tabs;
+        assert_eq!(primary.lanes.len(), 1);
+        let wt_tabs = &primary.lanes[0].tabs;
         assert_eq!(wt_tabs.len(), 1);
         match &wt_tabs[0].layout {
             daruda_store::project::SerializedLayout::Leaf { .. } => {}
@@ -195,9 +191,9 @@ fn test_restore_state_rebuilds_horizontal_split(cx: &mut TestAppContext) {
     };
     let state = ProjectState {
         root: std::path::PathBuf::from("/tmp/test_restore_split"),
-        worktrees: vec![daruda_store::project::SerializedWorktree {
+        lanes: vec![daruda_store::project::SerializedLane {
             id: 0,
-            kind: daruda_store::project::WorktreeKind::Default,
+            kind: daruda_store::project::LaneKind::Default,
             path: std::path::PathBuf::from("/tmp/test_restore_split"),
             name: None,
             tab_order: 0,
@@ -285,9 +281,9 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
     ];
     let state = ProjectState {
         root: std::path::PathBuf::from("/tmp/test_restore_tabs"),
-        worktrees: vec![daruda_store::project::SerializedWorktree {
+        lanes: vec![daruda_store::project::SerializedLane {
             id: 0,
-            kind: daruda_store::project::WorktreeKind::Default,
+            kind: daruda_store::project::LaneKind::Default,
             path: std::path::PathBuf::from("/tmp/test_restore_tabs"),
             name: None,
             tab_order: 0,
@@ -345,7 +341,7 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
     let project = daruda_store::project::Project::from_path("/tmp/test_restore_clamp");
     let state = ProjectState {
         root: std::path::PathBuf::from("/tmp/test_restore_clamp"),
-        worktrees: Vec::new(),
+        lanes: Vec::new(),
         active_worktree_id: 0,
         active_dock_view: daruda_store::project::LeftDockView::default(),
         active_right_panel_view: daruda_store::project::RightDockView::default(),
@@ -406,13 +402,10 @@ fn test_save_restore_round_trip_preserves_layout(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
 
-    // Capture the serialized shape. Tabs now live on the active worktree.
+    // Capture the serialized shape. Tabs now live on the active lane.
     let original = ws.read_with(cx, |ws, app_cx| ws.save_state(app_cx).unwrap());
-    assert_eq!(original.primary_project().unwrap().worktrees.len(), 1);
-    assert_eq!(
-        original.primary_project().unwrap().worktrees[0].tabs.len(),
-        2
-    );
+    assert_eq!(original.primary_project().unwrap().lanes.len(), 1);
+    assert_eq!(original.primary_project().unwrap().lanes[0].tabs.len(), 2);
 
     // Rebuild into a fresh workspace and verify topology matches.
     let window_handle2 = cx.add_window(|window, cx| {

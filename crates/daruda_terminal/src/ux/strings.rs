@@ -121,14 +121,14 @@ pub const MACRO_RECORD_BUTTON_IDLE: &str = "● Record";
 pub const MACRO_RECORD_BUTTON_RECORDING: &str = "Press shortcut\u{2026}";
 
 // ============================================================================
-// Worktrees view
+// Lanes view
 // ============================================================================
 
-/// Hint shown in the Worktrees view when the project is not a Git repo.
-pub const WORKTREE_NON_GIT_HINT: &str = "Open a Git repository to use multiple worktrees.";
+/// Hint shown in the Lanes view when the project is not a Git repo.
+pub const LANE_NON_GIT_HINT: &str = "Open a Git repository to use multiple lanes.";
 
 /// Label for the Git initialization affordance button.
-pub const WORKTREE_GIT_INIT_LABEL: &str = "[ Initialize Git Repo ]";
+pub const LANE_GIT_INIT_LABEL: &str = "[ Initialize Git Repo ]";
 
 // ============================================================================
 // Right-panel Tasks tab
@@ -163,7 +163,7 @@ pub const RIGHT_PANEL_SUBTASK_PROGRESS_GLYPH: &str = "☑";
 
 /// Glyph trailing the session-id badge while the matching Claude
 /// session is generating tokens or running a tool — matches the
-/// "spinning" indicator vocabulary used in the worktree dock.
+/// "spinning" indicator vocabulary used in the lane dock.
 pub const RIGHT_PANEL_TASK_SESSION_STATUS_WORKING: &str = "⟳";
 
 /// Glyph trailing the session-id badge while the session is idle

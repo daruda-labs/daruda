@@ -2,7 +2,7 @@
 //! Workspace methods that mutate or read `self.claude` live here.
 //!
 //! Groups the 18 fields that together drive the right-panel Usage tab,
-//! the per-worktree session-status indicator, the JSONL fallback
+//! the per-lane session-status indicator, the JSONL fallback
 //! watcher, the PTY tracker, and the plan-limits / service-status
 //! polls. Workspace owns this struct directly (not as an `Entity`) so
 //! the existing access patterns (`self.claude.usage`, etc.) compile
@@ -75,7 +75,7 @@ pub(in crate::workspace) struct ClaudeContext {
 
     /// Claude Code session-status mirror — driven by the hook channel
     /// (and Phase B jsonl fallback). Read by the left dock to render the
-    /// per-worktree Working/NeedsAttention/Idle/Connecting indicator.
+    /// per-lane Working/NeedsAttention/Idle/Connecting indicator.
     pub(in crate::workspace) claude_status: daruda_claude::ClaudeStatusStore,
 
     /// Whether the Claude status feature is enabled in `[claude_status]`
@@ -107,13 +107,13 @@ pub(in crate::workspace) struct ClaudeContext {
 
     /// JSONL fallback watcher's shutdown half — engaged only when
     /// the user has not installed the hook integration. The watcher
-    /// thread reads `~/.claude/projects/<encoded(cwd)>/` per worktree
+    /// thread reads `~/.claude/projects/<encoded(cwd)>/` per lane
     /// and feeds `JsonlEvent`s through the same store as hooks (with
     /// `Source::Jsonl`). `None` when hooks are installed (or the
     /// claude_status feature is disabled). Dropping this sender
     /// shuts the watcher thread down via its shutdown channel;
     /// `refresh_jsonl_watcher` reassigns this when install state or
-    /// the worktree set changes.
+    /// the lane set changes.
     pub(in crate::workspace) _jsonl_watcher_shutdown: Option<mpsc::Sender<()>>,
     pub(in crate::workspace) _jsonl_event_pump: Option<Task<()>>,
 

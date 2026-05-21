@@ -636,9 +636,12 @@ impl SettingsWindow {
         handles[next].focus(window, cx);
     }
 
-    pub(super) fn section_label(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
+    pub(super) fn section_label(
+        label: impl Into<gpui::SharedString>,
+        cx: &gpui::App,
+    ) -> impl IntoElement {
         div()
-            .text_size(px(theme::WORKTREE_SECTION_HEADER_FONT_SIZE))
+            .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
             .text_color(theme::current(cx).muted_text)
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(label.into())

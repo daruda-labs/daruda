@@ -2,7 +2,7 @@
 //!
 //! Pulls the GPUI mouse-event plumbing out of `mod.rs` so the
 //! workspace entity stays focused on tabs / panes / docks /
-//! worktrees. Drag state (`DividerDrag`, `DockDrag`) lives here
+//! lanes. Drag state (`DividerDrag`, `DockDrag`) lives here
 //! because it is exclusively read by these methods plus `render.rs`.
 
 use gpui::{Context, Pixels, Point, Window};
@@ -25,7 +25,7 @@ pub(in crate::workspace) struct DividerDrag {
 }
 
 /// Active right-click context menu. The `items` vec is produced at the
-/// call site (worktree row, files row, …) so the anchor carries a
+/// call site (lane row, files row, …) so the anchor carries a
 /// ready-to-render item list. Cleared by `close_context_menu` or when a
 /// backdrop click is received.
 pub(in crate::workspace) struct ContextMenuAnchor {

@@ -20,7 +20,7 @@ pub(in crate::workspace) use diff_parser::{DiffHunk, DiffLine, parse_diff_hunks}
 use std::ops::Range;
 use std::path::PathBuf;
 
-use daruda_store::project::WorktreeId;
+use daruda_store::project::LaneId;
 
 // ----------------------------------------------------------------
 // Character-level selection types (GPUI-free)
@@ -163,7 +163,7 @@ pub(in crate::workspace) struct FileViewerSearch {
 }
 
 pub(in crate::workspace) struct PaneFileView {
-    pub worktree_id: WorktreeId,
+    pub lane_id: LaneId,
     pub path: PathBuf,
     pub staged: bool,
     /// Git status character for the file (M / A / D / R / ? …).
@@ -835,7 +835,7 @@ diff --git a/bar.rs b/bar.rs
         let rows_no_ctx = build_diff_rows(&hunks, true);
         let (added, removed) = count_diff_stats(&hunks);
         let fv = PaneFileView {
-            worktree_id: 0,
+            lane_id: 0,
             path: "test.rs".into(),
             staged: false,
             file_status: None,
@@ -871,7 +871,7 @@ diff --git a/bar.rs b/bar.rs
         let lines: Vec<String> = contents.iter().map(|s| s.to_string()).collect();
         let rows = build_raw_rows(&lines);
         PaneFileView {
-            worktree_id: 0,
+            lane_id: 0,
             path: "test.txt".into(),
             staged: false,
             file_status: None,

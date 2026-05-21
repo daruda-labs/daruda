@@ -258,12 +258,12 @@ impl Render for Workspace {
                     base_label
                 };
                 let (file_path, worktree_root) = match pane.and_then(|p| match &p.content {
-                    PaneContent::File(f) => Some((f.view.path.clone(), f.view.worktree_id)),
+                    PaneContent::File(f) => Some((f.view.path.clone(), f.view.lane_id)),
                     PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
                 }) {
                     Some((path, wt_id)) => {
                         let root = self
-                            .active_worktrees()
+                            .active_lanes()
                             .iter()
                             .find(|wt| wt.id == wt_id)
                             .map(|wt| wt.path.clone());
@@ -282,7 +282,7 @@ impl Render for Workspace {
             .collect();
 
         // Window title — user override (Window > Edit Window Title…) wins;
-        // otherwise show `<project> · <branch>` for the active worktree
+        // otherwise show `<project> · <branch>` for the active lane
         // (active project only, no aggregate count). Welcome state
         // (no projects) leaves the title untouched.
         if let Some(label) = self.window_user_label.as_ref() {
@@ -983,10 +983,10 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_focus_pane_down))
             .on_action(cx.listener(Self::on_move_tab_left))
             .on_action(cx.listener(Self::on_move_tab_right));
-        // Cmd+1..9 tab quick-switch + Cmd+Ctrl+1..9 worktree quick-switch —
+        // Cmd+1..9 tab quick-switch + Cmd+Ctrl+1..9 lane quick-switch —
         // each slot is one macro line in `slot_actions.rs`.
         let workspace_root = crate::tab_slot_table!(@register_listeners cx, workspace_root);
-        let workspace_root = crate::worktree_slot_table!(@register_listeners cx, workspace_root);
+        let workspace_root = crate::lane_slot_table!(@register_listeners cx, workspace_root);
         workspace_root
             .on_action(cx.listener(Self::on_toggle_left_dock))
             .on_action(cx.listener(Self::on_toggle_bottom_dock))

@@ -338,8 +338,8 @@ impl SettingsWindow {
                     .child(body.into()),
             )
             .child(div().flex().flex_row().child(
-                button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
-                    |_this, _: &ClickEvent, _window, cx| {
+                button("settings-open-config", s::settings_open_config_file()).on_click(
+                    cx.listener(|_this, _: &ClickEvent, _window, cx| {
                         let path = daruda_config::config_path();
                         if let Some(parent) = path.parent()
                             && let Err(e) = std::fs::create_dir_all(parent)
@@ -355,8 +355,8 @@ impl SettingsWindow {
                             );
                         }
                         cx.open_url(&path_to_file_url(&path));
-                    },
-                )),
+                    }),
+                ),
             ))
             .into_any_element()
     }

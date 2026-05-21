@@ -1,6 +1,6 @@
 //! JSONL fallback watcher — engaged when hooks aren't installed.
 //!
-//! For each tracked worktree, we watch
+//! For each tracked lane, we watch
 //! `~/.claude/projects/<encoded(cwd)>/` for modifications and emit a
 //! [`JsonlEvent`] containing the inferred [`SessionStatus`]. The
 //! Workspace pumps these into the same `ClaudeStatusStore` as hook
@@ -13,7 +13,7 @@
 //!
 //! Lifecycle is shutdown-receiver based: the spawn function returns
 //! `(shutdown_tx, event_rx)`; dropping `shutdown_tx` (typically when
-//! a Workspace re-spawns the watcher after a worktree change, or on
+//! a Workspace re-spawns the watcher after a lane change, or on
 //! Workspace teardown) wakes the watcher thread out of its blocking
 //! `recv` and lets the `notify::Watcher` drop, unregistering FSEvents
 //! cleanly. There is no `loop { park() }` — that pattern would leak
@@ -107,7 +107,7 @@ pub fn encode_path_for_claude(path: &str) -> String {
         .collect()
 }
 
-/// Resolve `~/.claude/projects/<encoded(cwd)>/` for a worktree path.
+/// Resolve `~/.claude/projects/<encoded(cwd)>/` for a lane path.
 pub fn project_dir_for(home: &Path, worktree_path: &Path) -> PathBuf {
     let cwd_str = worktree_path.to_string_lossy();
     let encoded = encode_path_for_claude(&cwd_str);
@@ -125,15 +125,15 @@ pub struct JsonlWatcherHandle {
     pub events: mpsc::Receiver<JsonlEvent>,
 }
 
-/// Spawn the jsonl watcher across `worktree_dirs`. Each entry pairs a
-/// worktree's path (used as `cwd` in emitted events) with the
+/// Spawn the jsonl watcher across `lane_dirs`. Each entry pairs a
+/// lane's path (used as `cwd` in emitted events) with the
 /// `~/.claude/projects/<encoded>/` directory to watch.
 ///
 /// The watcher reloads `~/.claude/settings.json` permissions on
 /// startup; live permission changes are not reflected until restart
 /// (acceptable for the fallback path; the hook channel is real-time
 /// for active permission events anyway).
-pub fn spawn(worktree_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
+pub fn spawn(lane_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
     use notify::{EventKind, RecursiveMode, Watcher};
 
     let (tx, rx) = mpsc::channel();
@@ -146,10 +146,10 @@ pub fn spawn(worktree_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
         // thread *after* the closure has captured) can share state.
         let permissions = Arc::new(PermissionChecker::from_settings_file());
         let usage_tracker: Arc<Mutex<UsageTracker>> = Arc::new(Mutex::new(HashMap::new()));
-        // Map watched dir → owning worktree cwd. `notify::Event`
+        // Map watched dir → owning lane cwd. `notify::Event`
         // gives us absolute file paths; the closure looks up the
         // parent dir here to attach the right cwd to the emitted event.
-        let lookup: Vec<(PathBuf, PathBuf)> = worktree_dirs.clone();
+        let lookup: Vec<(PathBuf, PathBuf)> = lane_dirs.clone();
 
         let tx_inner = tx.clone();
         let permissions_inner = permissions.clone();
@@ -187,7 +187,7 @@ pub fn spawn(worktree_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
         // Subscribe before the cold-restore walk so any modify events
         // that happen during cold-restore are still picked up — the
         // tracker dedupes shared uuids between the two paths.
-        for (_cwd, dir) in &worktree_dirs {
+        for (_cwd, dir) in &lane_dirs {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 LogWriter::log(
                     ErrorReport::new("jsonl watcher mkdir failed")
@@ -216,7 +216,7 @@ pub fn spawn(worktree_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
         // jsonl file so the Usage tab populates immediately on
         // launch + after every refresh_jsonl_watcher restart, instead
         // of staying empty until the next FSEvent fires.
-        cold_restore(&worktree_dirs, &permissions, &usage_tracker, &tx);
+        cold_restore(&lane_dirs, &permissions, &usage_tracker, &tx);
 
         // Block until the caller drops `shutdown_tx`. `recv()` on a
         // disconnected channel returns immediately, so this sleeps
@@ -334,12 +334,12 @@ fn process_jsonl_file(
 /// files (read failures, malformed JSONL) are swallowed so one bad
 /// session doesn't block the rest of the cold restore.
 fn cold_restore(
-    worktree_dirs: &[(PathBuf, PathBuf)],
+    lane_dirs: &[(PathBuf, PathBuf)],
     permissions: &PermissionChecker,
     usage_tracker: &Mutex<UsageTracker>,
     tx: &mpsc::Sender<JsonlEvent>,
 ) {
-    for (cwd, dir) in worktree_dirs {
+    for (cwd, dir) in lane_dirs {
         let read_dir = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
             Err(_) => continue,

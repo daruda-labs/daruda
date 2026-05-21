@@ -183,48 +183,48 @@
       "$ref": "#/$defs/Rgba",
       "default": "#2e2e2eff"
     },
-    "worktree_unread": {
-      "description": "Maps to `palette::WORKTREE_UNREAD`.",
+    "lane_unread": {
+      "description": "Maps to `palette::LANE_UNREAD`.",
       "$ref": "#/$defs/Rgba",
       "default": "#eb9947ff"
     },
-    "worktree_row_hover_bg": {
-      "description": "Maps to `palette::WORKTREE_ROW_HOVER_BG`.",
+    "lane_row_hover_bg": {
+      "description": "Maps to `palette::LANE_ROW_HOVER_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#2e2e2eff"
     },
-    "worktree_drop_target_bg": {
-      "description": "Maps to `palette::WORKTREE_DROP_TARGET_BG`.",
+    "lane_drop_target_bg": {
+      "description": "Maps to `palette::LANE_DROP_TARGET_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#264d7359"
     },
-    "worktree_drop_target_rejected_bg": {
-      "description": "Maps to `palette::WORKTREE_DROP_TARGET_REJECTED_BG`.",
+    "lane_drop_target_rejected_bg": {
+      "description": "Maps to `palette::LANE_DROP_TARGET_REJECTED_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#7e252533"
     },
-    "worktree_card_bg": {
-      "description": "Maps to `palette::WORKTREE_CARD_BG`.",
+    "lane_card_bg": {
+      "description": "Maps to `palette::LANE_CARD_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#212121ff"
     },
-    "worktree_card_border": {
-      "description": "Maps to `palette::WORKTREE_CARD_BORDER`.",
+    "lane_card_border": {
+      "description": "Maps to `palette::LANE_CARD_BORDER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff14"
     },
-    "worktree_card_hover_bg": {
-      "description": "Maps to `palette::WORKTREE_CARD_HOVER_BG`.",
+    "lane_card_hover_bg": {
+      "description": "Maps to `palette::LANE_CARD_HOVER_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#292929ff"
     },
-    "worktree_card_active_bg": {
-      "description": "Maps to `palette::WORKTREE_CARD_ACTIVE_BG`.",
+    "lane_card_active_bg": {
+      "description": "Maps to `palette::LANE_CARD_ACTIVE_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#333333ff"
     },
-    "worktree_row_active_bg": {
-      "description": "Maps to `palette::WORKTREE_ROW_ACTIVE_BG`.",
+    "lane_row_active_bg": {
+      "description": "Maps to `palette::LANE_ROW_ACTIVE_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff14"
     },

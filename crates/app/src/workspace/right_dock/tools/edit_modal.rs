@@ -426,10 +426,10 @@ pub fn open_edit_mcp_server_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let worktree = ws.active_worktree_root();
+    let lane = ws.active_worktree_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(worktree.as_deref());
+        .snapshot_for(lane.as_deref());
     let Some(initial) = EditMcpInitial::from_state(&snapshot, scope, &name) else {
         return;
     };

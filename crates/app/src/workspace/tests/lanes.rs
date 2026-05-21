@@ -1,12 +1,12 @@
 use super::*;
 
-// ---- Worktrees (W-2) ----
+// ---- Lanes (W-2) ----
 
 #[gpui::test]
 fn test_workspace_without_project_has_no_worktrees(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
-        assert!(ws.active_worktrees().is_empty());
+        assert!(ws.active_lanes().is_empty());
     });
 }
 
@@ -25,15 +25,15 @@ fn test_workspace_with_project_bootstraps_one_default_worktree(cx: &mut TestAppC
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_worktrees().len(), 1);
-        assert_eq!(ws.active_worktrees()[0].id, 0);
-        assert_eq!(ws.active.worktree, 0);
+        assert_eq!(ws.active_lanes().len(), 1);
+        assert_eq!(ws.active_lanes()[0].id, 0);
+        assert_eq!(ws.active.lane, 0);
         assert_eq!(
-            ws.active_worktrees()[0].kind,
-            daruda_store::project::WorktreeKind::Default
+            ws.active_lanes()[0].kind,
+            daruda_store::project::LaneKind::Default
         );
         assert_eq!(
-            ws.active_worktrees()[0].path,
+            ws.active_lanes()[0].path,
             std::path::PathBuf::from("/tmp/test_bootstrap_wt")
         );
     });
@@ -57,15 +57,15 @@ fn test_activate_worktree_requires_existing_id(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             // Nonexistent id → no-op.
             let proj = ws.active_ref().project;
-            let mk = |id| daruda_store::project::WorktreeRef {
+            let mk = |id| daruda_store::project::LaneRef {
                 project: proj,
-                worktree: id,
+                lane: id,
             };
             ws.activate_worktree(mk(99), window, cx);
-            assert_eq!(ws.active.worktree, 0);
+            assert_eq!(ws.active.lane, 0);
             // Self id → no-op (already active).
             ws.activate_worktree(mk(0), window, cx);
-            assert_eq!(ws.active.worktree, 0);
+            assert_eq!(ws.active.lane, 0);
         });
     })
     .unwrap();
@@ -76,10 +76,10 @@ fn test_worktree_removable_excludes_main_and_default(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |_ws, _| {
         let default_wt =
-            crate::worktree::Worktree::default_for_project(0, std::path::PathBuf::from("/tmp"));
-        assert!(!Workspace::worktree_removable(&default_wt));
+            crate::lane::Lane::default_for_project(0, std::path::PathBuf::from("/tmp"));
+        assert!(!Workspace::lane_removable(&default_wt));
 
-        let main_git = crate::worktree::Worktree::git(
+        let main_git = crate::lane::Lane::git(
             0,
             std::path::PathBuf::from("/tmp/repo"),
             Some("main".into()),
@@ -87,9 +87,9 @@ fn test_worktree_removable_excludes_main_and_default(cx: &mut TestAppContext) {
             std::path::PathBuf::from("/tmp/repo"),
             0,
         );
-        assert!(!Workspace::worktree_removable(&main_git));
+        assert!(!Workspace::lane_removable(&main_git));
 
-        let linked = crate::worktree::Worktree::git(
+        let linked = crate::lane::Lane::git(
             1,
             std::path::PathBuf::from("/tmp/repo-feat"),
             Some("feat".into()),
@@ -97,13 +97,13 @@ fn test_worktree_removable_excludes_main_and_default(cx: &mut TestAppContext) {
             std::path::PathBuf::from("/tmp/repo-feat"),
             1,
         );
-        assert!(Workspace::worktree_removable(&linked));
+        assert!(Workspace::lane_removable(&linked));
     });
 }
 
 #[gpui::test]
 fn test_git_repo_root_returns_none_for_non_git_workspace(cx: &mut TestAppContext) {
-    // Non-git Default worktree → git_repo_root() is the gate the
+    // Non-git Default lane → git_repo_root() is the gate the
     // `[+]` button uses to short-circuit before opening the modal.
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_modal_non_git");
@@ -138,11 +138,11 @@ fn test_validate_remove_worktree_rejects_unknown_id(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         let proj = ws.active_ref().project;
-        let target = daruda_store::project::WorktreeRef {
+        let target = daruda_store::project::LaneRef {
             project: proj,
-            worktree: 999,
+            lane: 999,
         };
-        let err = ws.validate_remove_worktree(target).unwrap_err();
+        let err = ws.validate_remove_lane(target).unwrap_err();
         assert!(err.contains("not found"));
     });
 }
@@ -162,21 +162,21 @@ fn test_validate_remove_worktree_rejects_default_kind(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        // Bootstrapped default worktree at id 0 — not removable.
+        // Bootstrapped default lane at id 0 — not removable.
         let proj = ws.active_ref().project;
-        let target = daruda_store::project::WorktreeRef {
+        let target = daruda_store::project::LaneRef {
             project: proj,
-            worktree: 0,
+            lane: 0,
         };
-        let err = ws.validate_remove_worktree(target).unwrap_err();
+        let err = ws.validate_remove_lane(target).unwrap_err();
         assert!(err.contains("cannot be removed"));
     });
 }
 
 #[gpui::test]
 fn test_validate_remove_worktree_rejects_default(cx: &mut TestAppContext) {
-    // Default-kind worktree → not removable. The `×` click handler in
-    // dock/worktrees/list.rs uses validate_remove_worktree() to
+    // Default-kind lane → not removable. The `×` click handler in
+    // dock/lanes/list.rs uses validate_remove_lane() to
     // decide whether to even open the modal.
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_remove_main_noop");
@@ -192,11 +192,11 @@ fn test_validate_remove_worktree_rejects_default(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         let proj = ws.active_ref().project;
-        let target = daruda_store::project::WorktreeRef {
+        let target = daruda_store::project::LaneRef {
             project: proj,
-            worktree: 0,
+            lane: 0,
         };
-        let err = ws.validate_remove_worktree(target).unwrap_err();
+        let err = ws.validate_remove_lane(target).unwrap_err();
         assert!(err.contains("cannot be removed"));
     });
 }
@@ -216,20 +216,19 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
 
-    // Seed a second worktree with empty runtime so we can swap into it.
+    // Seed a second lane with empty runtime so we can swap into it.
     ws.update(cx, |ws, _cx| {
         if let Some(p) = ws.active_project_mut() {
-            p.worktrees
-                .push(crate::worktree::Worktree::default_for_project(
-                    1,
-                    std::path::PathBuf::from("/tmp/test_wt_swap_b"),
-                ));
+            p.lanes.push(crate::lane::Lane::default_for_project(
+                1,
+                std::path::PathBuf::from("/tmp/test_wt_swap_b"),
+            ));
         }
     });
 
-    // Swap to worktree 1 → the previous runtime lands in the
+    // Swap to lane 1 → the previous runtime lands in the
     // inactive map, and activate_worktree lazy-spawns a new pane
-    // rooted at the target worktree's path (so the viewport isn't
+    // rooted at the target lane's path (so the viewport isn't
     // empty).
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -237,14 +236,14 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
             assert_eq!(ws.main_area.panes.len(), 1);
             let proj = ws.active_ref().project;
             ws.activate_worktree(
-                daruda_store::project::WorktreeRef {
+                daruda_store::project::LaneRef {
                     project: proj,
-                    worktree: 1,
+                    lane: 1,
                 },
                 window,
                 cx,
             );
-            assert_eq!(ws.active.worktree, 1);
+            assert_eq!(ws.active.lane, 1);
             // Lazy seed: exactly one tab/pane materialized.
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
@@ -253,9 +252,9 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
             let stashed = ws
                 .main_area
                 .inactive_worktree_runtimes
-                .get(&daruda_store::project::WorktreeRef {
+                .get(&daruda_store::project::LaneRef {
                     project: proj,
-                    worktree: 0,
+                    lane: 0,
                 })
                 .unwrap();
             assert_eq!(stashed.tabs.len(), 1);
@@ -265,31 +264,31 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     .unwrap();
 
     // Swap back → the original runtime rehydrates (same PTY tasks,
-    // same pane ids). Worktree 1's freshly-spawned runtime parks in
+    // same pane ids). Lane 1's freshly-spawned runtime parks in
     // the inactive map.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let proj = ws.active_ref().project;
             ws.activate_worktree(
-                daruda_store::project::WorktreeRef {
+                daruda_store::project::LaneRef {
                     project: proj,
-                    worktree: 0,
+                    lane: 0,
                 },
                 window,
                 cx,
             );
-            assert_eq!(ws.active.worktree, 0);
+            assert_eq!(ws.active.lane, 0);
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
             let stashed = ws
                 .main_area
                 .inactive_worktree_runtimes
-                .get(&daruda_store::project::WorktreeRef {
+                .get(&daruda_store::project::LaneRef {
                     project: proj,
-                    worktree: 1,
+                    lane: 1,
                 })
                 .unwrap();
-            // Worktree 1 carries its lazy-spawned pane now.
+            // Lane 1 carries its lazy-spawned pane now.
             assert_eq!(stashed.tabs.len(), 1);
             assert_eq!(stashed.panes.len(), 1);
         });
@@ -314,16 +313,15 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
     });
     let ws = wh.root(cx).unwrap();
 
-    // Add a second worktree, push into it, swap back — now inactive
-    // worktree 1 has meta only (no tabs). Verify save captures both
+    // Add a second lane, push into it, swap back — now inactive
+    // lane 1 has meta only (no tabs). Verify save captures both
     // without duplication.
     ws.update(cx, |ws, _cx| {
         if let Some(p) = ws.active_project_mut() {
-            p.worktrees
-                .push(crate::worktree::Worktree::default_for_project(
-                    1,
-                    std::path::PathBuf::from("/tmp/test_wt_save_inactive_b"),
-                ));
+            p.lanes.push(crate::lane::Lane::default_for_project(
+                1,
+                std::path::PathBuf::from("/tmp/test_wt_save_inactive_b"),
+            ));
         }
     });
 
@@ -331,12 +329,12 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
     let primary = state.primary_project().unwrap();
-    assert_eq!(primary.worktrees.len(), 2);
-    // Active worktree 0 has its tab.
-    let wt0 = primary.worktrees.iter().find(|w| w.id == 0).unwrap();
+    assert_eq!(primary.lanes.len(), 2);
+    // Active lane 0 has its tab.
+    let wt0 = primary.lanes.iter().find(|w| w.id == 0).unwrap();
     assert!(!wt0.tabs.is_empty());
-    // Inactive worktree 1 has no runtime → serialized tabs empty.
-    let wt1 = primary.worktrees.iter().find(|w| w.id == 1).unwrap();
+    // Inactive lane 1 has no runtime → serialized tabs empty.
+    let wt1 = primary.lanes.iter().find(|w| w.id == 1).unwrap();
     assert!(wt1.tabs.is_empty());
 }
 
@@ -345,8 +343,8 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
 #[cfg(any())]
 #[gpui::test]
 fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
-    // Create the worktree directories so the path-exists check in
-    // restore_state doesn't skip the inactive worktree layout rebuild.
+    // Create the lane directories so the path-exists check in
+    // restore_state doesn't skip the inactive lane layout rebuild.
     std::fs::create_dir_all("/tmp/test_wt_restore_all/main").unwrap();
     std::fs::create_dir_all("/tmp/test_wt_restore_all/side").unwrap();
     let config = daruda_config::Config::default();
@@ -370,10 +368,10 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
         };
         let state = daruda_store::project::legacy::ProjectState {
             root: std::path::PathBuf::from("/tmp/test_wt_restore_all"),
-            worktrees: vec![
-                daruda_store::project::SerializedWorktree {
+            lanes: vec![
+                daruda_store::project::SerializedLane {
                     id: 0,
-                    kind: daruda_store::project::WorktreeKind::Default,
+                    kind: daruda_store::project::LaneKind::Default,
                     path: std::path::PathBuf::from("/tmp/test_wt_restore_all/main"),
                     name: None,
                     tab_order: 0,
@@ -384,9 +382,9 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
                     base_ref: None,
                     description: None,
                 },
-                daruda_store::project::SerializedWorktree {
+                daruda_store::project::SerializedLane {
                     id: 5,
-                    kind: daruda_store::project::WorktreeKind::Default,
+                    kind: daruda_store::project::LaneKind::Default,
                     path: std::path::PathBuf::from("/tmp/test_wt_restore_all/side"),
                     name: Some("Side".into()),
                     tab_order: 1,
@@ -421,19 +419,19 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        // Active worktree is 5 with 2 tabs → Workspace.tabs mirrors it.
-        assert_eq!(ws.active.worktree, 5);
+        // Active lane is 5 with 2 tabs → Workspace.tabs mirrors it.
+        assert_eq!(ws.active.lane, 5);
         assert_eq!(ws.main_area.tabs.len(), 2);
         assert_eq!(ws.main_area.active_tab_index, 1);
-        // Inactive worktree 0 rebuilt into the inactive map with 1 tab.
+        // Inactive lane 0 rebuilt into the inactive map with 1 tab.
         assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
         let proj = ws.active_ref().project;
         let stashed = ws
             .main_area
             .inactive_worktree_runtimes
-            .get(&daruda_store::project::WorktreeRef {
+            .get(&daruda_store::project::LaneRef {
                 project: proj,
-                worktree: 0,
+                lane: 0,
             })
             .unwrap();
         assert_eq!(stashed.tabs.len(), 1);
@@ -460,15 +458,15 @@ fn test_save_state_captures_bootstrapped_worktree(cx: &mut TestAppContext) {
         .read_with(cx, |ws, app_cx| ws.save_state(app_cx))
         .unwrap();
     let primary = state.primary_project().unwrap();
-    assert_eq!(primary.worktrees.len(), 1);
-    assert_eq!(primary.worktrees[0].id, 0);
+    assert_eq!(primary.lanes.len(), 1);
+    assert_eq!(primary.lanes[0].id, 0);
     assert_eq!(
-        primary.worktrees[0].path,
+        primary.lanes[0].path,
         std::path::PathBuf::from("/tmp/test_save_wt")
     );
-    assert_eq!(state.active.worktree, 0);
-    // Tabs live inside the active worktree from W-2 onward.
-    assert!(!primary.worktrees[0].tabs.is_empty());
+    assert_eq!(state.active.lane, 0);
+    // Tabs live inside the active lane from W-2 onward.
+    assert!(!primary.lanes[0].tabs.is_empty());
 }
 
 #[gpui::test]
@@ -490,9 +488,9 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             window,
             cx,
         );
-        let worktree = daruda_store::project::SerializedWorktree {
+        let lane = daruda_store::project::SerializedLane {
             id: 0,
-            kind: daruda_store::project::WorktreeKind::Default,
+            kind: daruda_store::project::LaneKind::Default,
             path: std::path::PathBuf::from("/tmp/test_restore_wt_tabs"),
             name: None,
             tab_order: 0,
@@ -517,9 +515,9 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             uuid: project_uuid,
             root: std::path::PathBuf::from("/tmp/test_restore_wt_tabs"),
             name: None,
-            worktrees: vec![worktree],
-            last_active_worktree_id: 0,
-            next_worktree_id: 1,
+            lanes: vec![lane],
+            last_active_lane_id: 0,
+            next_lane_id: 1,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -530,7 +528,7 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
             project_overrides,
             groups: Vec::new(),
             active_project: Some(project_uuid),
-            active_worktree: Some(0),
+            active_lane: Some(0),
             docks: DockStates::default(),
             window: WindowState::default(),
             font_size: 13.0,
@@ -550,8 +548,8 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.main_area.tabs.len(), 1);
-        assert_eq!(ws.active_worktrees().len(), 1);
-        assert_eq!(ws.active.worktree, 0);
+        assert_eq!(ws.active_lanes().len(), 1);
+        assert_eq!(ws.active.lane, 0);
     });
 }
 
@@ -574,7 +572,7 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             window,
             cx,
         );
-        let worktree = daruda_store::project::SerializedWorktree::default_for_path(
+        let lane = daruda_store::project::SerializedLane::default_for_path(
             3,
             std::path::PathBuf::from("/tmp/test_restore_clamp_id"),
         );
@@ -584,9 +582,9 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             uuid: project_uuid,
             root: std::path::PathBuf::from("/tmp/test_restore_clamp_id"),
             name: None,
-            worktrees: vec![worktree],
-            last_active_worktree_id: 3,
-            next_worktree_id: 4,
+            lanes: vec![lane],
+            last_active_lane_id: 3,
+            next_lane_id: 4,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -597,7 +595,7 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
             project_overrides,
             groups: Vec::new(),
             active_project: Some(project_uuid),
-            active_worktree: Some(999), // stale — only id 3 exists
+            active_lane: Some(999), // stale — only id 3 exists
             docks: DockStates::default(),
             window: WindowState::default(),
             font_size: 13.0,
@@ -616,7 +614,7 @@ fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
     });
     let ws = wh.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active.worktree, 3);
+        assert_eq!(ws.active.lane, 3);
     });
 }
 
@@ -626,7 +624,7 @@ fn test_dock_view_defaults_to_worktrees(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         assert_eq!(
             ws.left_dock_view,
-            daruda_store::project::LeftDockView::Worktrees
+            daruda_store::project::LeftDockView::Lanes
         );
     });
 }
@@ -705,9 +703,9 @@ fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
             uuid: project_uuid,
             root: std::path::PathBuf::from("/tmp/test_restore_dock_view"),
             name: None,
-            worktrees: Vec::new(),
-            last_active_worktree_id: 0,
-            next_worktree_id: 0,
+            lanes: Vec::new(),
+            last_active_lane_id: 0,
+            next_lane_id: 0,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -718,7 +716,7 @@ fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
             project_overrides,
             groups: Vec::new(),
             active_project: Some(project_uuid),
-            active_worktree: None,
+            active_lane: None,
             docks: DockStates::default(),
             window: WindowState::default(),
             font_size: 13.0,
@@ -795,9 +793,9 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
             uuid: project_uuid,
             root: std::path::PathBuf::from("/tmp/test_restore_right_dock_view"),
             name: None,
-            worktrees: Vec::new(),
-            last_active_worktree_id: 0,
-            next_worktree_id: 0,
+            lanes: Vec::new(),
+            last_active_lane_id: 0,
+            next_lane_id: 0,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -808,7 +806,7 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
             project_overrides,
             groups: Vec::new(),
             active_project: Some(project_uuid),
-            active_worktree: None,
+            active_lane: None,
             docks: DockStates::default(),
             window: WindowState::default(),
             font_size: 13.0,
@@ -884,9 +882,9 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 uuid: project_uuid,
                 root: std::path::PathBuf::from("/tmp/test_restore_usage_window"),
                 name: None,
-                worktrees: Vec::new(),
-                last_active_worktree_id: 0,
-                next_worktree_id: 0,
+                lanes: Vec::new(),
+                last_active_lane_id: 0,
+                next_lane_id: 0,
             };
             let mut project_overrides = BTreeMap::new();
             project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -897,7 +895,7 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 project_overrides,
                 groups: Vec::new(),
                 active_project: Some(project_uuid),
-                active_worktree: None,
+                active_lane: None,
                 docks: DockStates::default(),
                 window: WindowState::default(),
                 font_size: 13.0,

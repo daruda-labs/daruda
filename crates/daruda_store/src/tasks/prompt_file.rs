@@ -1,5 +1,5 @@
 //! Prompt-file delivery — write the rendered task prompt under the
-//! worktree's `.daruda/` directory and build the matching shell command
+//! lane's `.daruda/` directory and build the matching shell command
 //! that pipes it into `claude` via `cat`. This avoids every shell
 //! quoting hazard (newlines, single / double quotes, `$`, backticks,
 //! length limits) by handing Claude a file path instead of an inline
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use super::task::Task;
 
-/// Subdirectory inside the worktree where prompt files live.
+/// Subdirectory inside the lane where prompt files live.
 pub const PROMPT_DIR_NAME: &str = ".daruda";
 
 /// Filename prefix for task prompt files. Final form is
@@ -62,7 +62,7 @@ pub fn render_task_prompt(task: &Task) -> String {
     )
 }
 
-/// Materialize the prompt file. Creates `<worktree>/.daruda/` if it
+/// Materialize the prompt file. Creates `<lane>/.daruda/` if it
 /// doesn't exist. Overwrites any existing file at the same path so
 /// Reopen / Retry always reflects the latest prompt.
 pub fn write_prompt_file(

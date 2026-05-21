@@ -1,12 +1,12 @@
 //! Project-level mutation ops on [`Workspace`] — add / close / move.
 //!
-//! Worktree-scoped operations live in `worktree_ops.rs`; this module
+//! Lane-scoped operations live in `lane_ops.rs`; this module
 //! owns the project boundary itself (registering a new project root
 //! with the workspace, removing one without tearing down the window).
 
 use std::path::{Path, PathBuf};
 
-use daruda_store::project::{ProjectId, ProjectUuid, WindowOpenPolicy, WorktreeRef};
+use daruda_store::project::{LaneRef, ProjectId, ProjectUuid, WindowOpenPolicy};
 use gpui::{AppContext as _, Context, Window};
 
 use super::Workspace;
@@ -35,13 +35,13 @@ pub(in crate::workspace) fn find_existing_project_uuid_for_root(
 
 impl Workspace {
     /// Add a freshly-opened project to this workspace and activate its
-    /// first worktree.
+    /// first lane.
     ///
     /// Mints a new [`ProjectId`] from the monotonic `next_project_id`
     /// counter, walks the filesystem at `root` to discover git
-    /// worktrees (or falls back to one default), and pushes the result
+    /// lanes (or falls back to one default), and pushes the result
     /// onto `self.projects`. Then routes through `activate_worktree`
-    /// to swap the live `MainAreaContext` over to the new worktree —
+    /// to swap the live `MainAreaContext` over to the new lane —
     /// the previous active runtime is preserved in the inactive map.
     ///
     /// **Pre-condition (caller):** the same-workspace duplicate-root
@@ -58,13 +58,13 @@ impl Workspace {
         root: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<WorktreeRef> {
+    ) -> Option<LaneRef> {
         let new_id: ProjectId = self.next_project_id;
         self.next_project_id = self.next_project_id.checked_add(1)?;
         let tab_order = self.projects.len() as u32;
         // Policy B: when this root already has a `ProjectState` on disk
         // (from another workspace), reuse its UUID so the new runtime
-        // project points at the canonical shared file. Worktree-list
+        // project points at the canonical shared file. Lane-list
         // mutations from either workspace flow through the same
         // `<data_dir>/projects/<uuid>.json`.
         //
@@ -77,21 +77,21 @@ impl Workspace {
         project.tab_order = tab_order;
         let target = project.first_worktree_ref();
         self.projects.push(project);
-        // Activate the new worktree. When `self.projects` was empty
+        // Activate the new lane. When `self.projects` was empty
         // before this call there is no prior runtime to freeze, but
         // `activate_worktree` is still the right path: it lazy-seeds
-        // a pane at the new worktree's path so the user lands on a
+        // a pane at the new lane's path so the user lands on a
         // live shell immediately.
         if let Some(t) = target {
             // First project case: `self.active` is the default
-            // (project=0, worktree=0). `activate_worktree` skips when
+            // (project=0, lane=0). `activate_worktree` skips when
             // `self.active == target`, but with monotonic ids the new
             // project's id is always > 0 the first time so this fires.
             // Manually set `self.active` to a sentinel that differs
             // from `target` so the swap path runs even when the
             // workspace previously had no live runtime to freeze.
             if self.projects.len() == 1 {
-                self.active = WorktreeRef::default();
+                self.active = LaneRef::default();
             }
             self.activate_worktree(t, window, cx);
         }
@@ -117,7 +117,7 @@ impl Workspace {
         self.mutate_durable(cx, |_, _| {});
     }
 
-    /// Toggle the collapsed flag on a project. The project's worktree
+    /// Toggle the collapsed flag on a project. The project's lane
     /// list is hidden under its header when collapsed; clicking the
     /// project chevron in the left dock drives this. Persists through
     /// `mark_dirty_and_save`.
@@ -205,7 +205,7 @@ impl Workspace {
     /// open. Returns `false` when removing the active project emptied
     /// the workspace; the caller should close the window.
     ///
-    /// Inactive worktrees from the removed project also drop out of
+    /// Inactive lanes from the removed project also drop out of
     /// `inactive_worktree_runtimes` so memory does not leak.
     pub(crate) fn close_active_project(
         &mut self,
@@ -221,7 +221,7 @@ impl Workspace {
         self.main_area
             .inactive_worktree_runtimes
             .retain(|key, _| key.project != project_id);
-        // Drop per-worktree caches for the closing project so they do
+        // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.
         self.git_status_cache
             .retain(|key, _| key.project != project_id);
@@ -233,7 +233,7 @@ impl Workspace {
             .retain(|key, _| key.project != project_id);
         self.git_changes_cursor
             .retain(|key, _| key.project != project_id);
-        // Five FileTreeContext caches keyed by WorktreeRef — drop every
+        // Five FileTreeContext caches keyed by LaneRef — drop every
         // entry belonging to the removed project. The notify watchers
         // stop when their entries drop; the gitignore matchers and
         // visible-row caches are pure data, free to discard.
@@ -263,19 +263,19 @@ impl Workspace {
             self.main_area.active_tab_index = 0;
             self.main_area.tab_history.clear();
             self.main_area.focused_pane_id = 0;
-            self.active = WorktreeRef::default();
+            self.active = LaneRef::default();
             return false;
         }
 
         // Pick a fallback project (first remaining with a usable
-        // worktree). Iterating finds a valid snap_target even when
-        // the natural first project's worktree list is somehow empty.
+        // lane). Iterating finds a valid snap_target even when
+        // the natural first project's lane list is somehow empty.
         let Some(next_target) = self.projects.iter().find_map(|p| p.snap_target()) else {
-            // No surviving project has any worktree — leave main_area
+            // No surviving project has any lane — leave main_area
             // cleared and let the caller decide. Extremely unlikely in
             // practice (every Project bootstraps with at least one
-            // worktree); reaching this branch implies bug or manual
-            // worktree-list corruption.
+            // lane); reaching this branch implies bug or manual
+            // lane-list corruption.
             self.main_area.tabs.clear();
             self.main_area.panes.clear();
             self.main_area.active_tab_index = 0;
@@ -287,11 +287,11 @@ impl Workspace {
         // Reset live runtime; the removed project's panes are gone for
         // good and their TabEntry ids hold no PaneIds we can reuse.
         // `self.active` is intentionally left pointing at the deleted
-        // project's worktree ref — its project_id is guaranteed
+        // project's lane ref — its project_id is guaranteed
         // distinct from `next_target.project` (we just removed it from
         // `self.projects`), so `activate_worktree`'s same-target guard
-        // doesn't fire. Resetting to `WorktreeRef::default()` here would
-        // collide with the natural (project=0, worktree=0) target of
+        // doesn't fire. Resetting to `LaneRef::default()` here would
+        // collide with the natural (project=0, lane=0) target of
         // the surviving first project and false-trigger the guard,
         // leaving main_area empty (regression covered by
         // `close_active_project_keeps_window_when_other_remain`).
@@ -302,7 +302,7 @@ impl Workspace {
         self.main_area.focused_pane_id = 0;
         self.activate_worktree(next_target, window, cx);
         // `activate_worktree`'s freeze step wrote a dangling empty
-        // runtime under the deleted project's worktree ref. Drop it so
+        // runtime under the deleted project's lane ref. Drop it so
         // `inactive_worktree_runtimes` stays clean.
         self.main_area
             .inactive_worktree_runtimes
@@ -312,7 +312,7 @@ impl Workspace {
     }
 
     /// Disk-cleanup variant of [`Self::close_active_project`]. Runs
-    /// `git worktree remove` for every linked worktree of the active
+    /// `git worktree remove` for every linked lane of the active
     /// project on the background executor, then strips the project
     /// directory via `fs::remove_dir_all` for any default-kind / left
     /// over directories. UI bookkeeping (`close_active_project` +
@@ -320,7 +320,7 @@ impl Workspace {
     /// disk work finishes.
     ///
     /// Errors are toast-reported; the project still gets unregistered
-    /// even when one or more worktrees fail to remove on disk — the
+    /// even when one or more lanes fail to remove on disk — the
     /// dock entry going stale is the worse failure mode.
     pub(crate) fn delete_active_project_on_disk(
         &mut self,
@@ -333,14 +333,14 @@ impl Workspace {
         let project_id = project.id;
         let project_path = project.root.clone();
         // Snapshot the (repo_root, worktree_root) pairs for the git
-        // worktrees we'll remove. Default-kind worktrees are skipped —
+        // lanes we'll remove. Default-kind lanes are skipped —
         // they're not git-managed, so `fs::remove_dir_all` on
         // `project_path` is sufficient.
         let removals: Vec<(PathBuf, PathBuf)> = project
-            .worktrees
+            .lanes
             .iter()
             .filter_map(|wt| {
-                if let daruda_store::project::WorktreeKind::Git {
+                if let daruda_store::project::LaneKind::Git {
                     repo_root,
                     worktree_root,
                     ..
@@ -362,7 +362,7 @@ impl Workspace {
                 let wt_clone = wt_root.clone();
                 let result = executor
                     .spawn(async move {
-                        crate::worktree::git::remove_worktree(&repo_clone, &wt_clone, false)
+                        crate::lane::git::remove_lane(&repo_clone, &wt_clone, false)
                     })
                     .await;
                 if let Err(e) = result {
@@ -370,7 +370,7 @@ impl Workspace {
                 }
             }
             // Default-kind project directory or any leftover (e.g. the
-            // primary worktree under a subdirectory anchor) gets a
+            // primary lane under a subdirectory anchor) gets a
             // best-effort recursive delete. Already-gone is fine.
             let path_for_rm = project_path.clone();
             let rm_err: std::io::Result<()> = executor
@@ -396,7 +396,7 @@ impl Workspace {
                     let close_window = ws.update(cx_w, |ws, cx| {
                         for (path, message) in &errors {
                             let report = daruda_store::observability::error_report::ErrorReport::new(
-                                "Worktree disk cleanup failed",
+                                "Lane disk cleanup failed",
                             )
                             .severity(
                                 daruda_store::observability::error_report::ErrorSeverity::Warning,

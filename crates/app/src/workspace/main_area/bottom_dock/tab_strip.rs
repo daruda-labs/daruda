@@ -82,7 +82,7 @@ impl Render for DraggedPanelTabGhost {
         let bg = t.panel_tab_drop_target_bg;
         div()
             .px(px(theme::DOCK_VIEW_TAB_PAD_X))
-            .py(px(theme::WORKTREE_DRAG_GHOST_PAD_Y))
+            .py(px(theme::LANE_DRAG_GHOST_PAD_Y))
             .text_size(px(theme::DOCK_VIEW_TAB_FONT_SIZE))
             .text_color(text_color)
             .bg(bg)
@@ -284,7 +284,7 @@ fn macro_tab(
         let ws = workspace.clone();
         cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
             // Stop ancestors from interpreting the right-click before
-            // the menu can render (mirrors the worktrees row pattern).
+            // the menu can render (mirrors the lanes row pattern).
             cx.stop_propagation();
             let position: Point<Pixels> = ev.position;
             if let Some(w) = ws.upgrade() {

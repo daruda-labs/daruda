@@ -157,7 +157,7 @@ fn summary_row(
 
 /// One row per Claude session.
 ///
-/// Layout mirrors [`summary_row`]: identity group ([badge][worktree])
+/// Layout mirrors [`summary_row`]: identity group ([badge][lane])
 /// on the left, metrics group on the right; `flex_wrap` on the
 /// parent puts metrics on a second line when the row is narrower
 /// than ~identity_group_width + metrics_group_width.
@@ -185,9 +185,9 @@ fn session_row(s: &SessionUsage, pricing: &UsagePricing, cx: &gpui::App) -> AnyE
         .into_any_element()
 }
 
-/// Left group of a session row: short id badge + worktree label.
+/// Left group of a session row: short id badge + lane label.
 /// `flex_none` so the entire group wraps as a unit; the inner
-/// worktree cell caps at [`theme::RIGHT_PANEL_WT_MAX_W`] and
+/// lane cell caps at [`theme::RIGHT_PANEL_WT_MAX_W`] and
 /// truncates on overflow.
 fn identity_group(
     id_prefix: SharedString,
@@ -235,7 +235,7 @@ fn short_session_id(session_id: &str) -> SharedString {
     SharedString::from(session_id[..len].to_string())
 }
 
-/// Display name for a session's worktree — basename of `worktree_path`,
+/// Display name for a session's lane — basename of `worktree_path`,
 /// or the configured fallback when the path has no name component.
 fn worktree_label(s: &SessionUsage) -> SharedString {
     s.worktree_path
@@ -293,7 +293,7 @@ fn cost_label(cost: f64, cx: &gpui::App) -> impl IntoElement {
         .child(SharedString::from(format!("~${cost:.2}")))
 }
 
-/// Renderable worktree label inside [`identity_group`]. Capped at
+/// Renderable lane label inside [`identity_group`]. Capped at
 /// [`theme::RIGHT_PANEL_WT_MAX_W`] so a long branch name never
 /// pushes the metrics group off-screen — instead the metrics group
 /// wraps onto a second line via the row's `flex_wrap`.
@@ -333,7 +333,11 @@ fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
 
 /// One gauge: `[ "5h"  ━━━━━░░░░░  68%   Resets in 2h 14m ]`.
 /// `None` window → placeholder (dim track + "Unavailable").
-fn gauge_row(label: impl Into<gpui::SharedString>, window: Option<&LimitWindow>, cx: &gpui::App) -> AnyElement {
+fn gauge_row(
+    label: impl Into<gpui::SharedString>,
+    window: Option<&LimitWindow>,
+    cx: &gpui::App,
+) -> AnyElement {
     let label: gpui::SharedString = label.into();
     let Some(win) = window else {
         return placeholder_gauge(label, cx);

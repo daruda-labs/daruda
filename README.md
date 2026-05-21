@@ -20,13 +20,9 @@ Built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and
 
 ---
 
-## Core concept: worktree isolation
+## Core concept: lane isolation
 
-```
-1 worktree = 1 directory = 1 git HEAD = 1 tab group = 1 Claude session
-```
-
-Each AI agent runs in its own worktree. daruda tracks which agent lives in which worktree, shows its status in real time, and lets you jump between agents with `Cmd+Ctrl+1–9`. No branch switching, no shared `target/` thrashing.
+Each AI agent runs in its own **lane** — a git worktree (own directory, own HEAD, own branch) or a plain non-git directory. daruda tracks which agent lives in which lane, shows its status in real time, and lets you jump between agents with `Cmd+Ctrl+1–9`. No branch switching, no shared `target/` thrashing. The left dock still labels these "Worktrees" since that's the familiar git term.
 
 ---
 

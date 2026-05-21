@@ -28,8 +28,8 @@ fn default_clones_compile_time_palette() {
         palette::STATUS_BAR_DETACHED_TEXT
     );
     assert_eq!(
-        t.worktree_drop_target_rejected_bg,
-        palette::WORKTREE_DROP_TARGET_REJECTED_BG,
+        t.lane_drop_target_rejected_bg,
+        palette::LANE_DROP_TARGET_REJECTED_BG,
     );
     assert_eq!(t.dock_bg, palette::DOCK_BG);
     assert_eq!(t.dock_border, palette::DOCK_BORDER);
@@ -55,9 +55,9 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.dock_view_tab_active, palette::DOCK_VIEW_TAB_ACTIVE);
     assert_eq!(t.dock_view_tab_accent, palette::DOCK_VIEW_TAB_ACCENT);
     assert_eq!(t.dock_view_tab_hover_bg, palette::DOCK_VIEW_TAB_HOVER_BG);
-    assert_eq!(t.worktree_unread, palette::WORKTREE_UNREAD);
-    assert_eq!(t.worktree_row_hover_bg, palette::WORKTREE_ROW_HOVER_BG);
-    assert_eq!(t.worktree_drop_target_bg, palette::WORKTREE_DROP_TARGET_BG);
+    assert_eq!(t.lane_unread, palette::LANE_UNREAD);
+    assert_eq!(t.lane_row_hover_bg, palette::LANE_ROW_HOVER_BG);
+    assert_eq!(t.lane_drop_target_bg, palette::LANE_DROP_TARGET_BG);
     assert_eq!(t.modal_panel_bg, palette::MODAL_PANEL_BG);
     assert_eq!(t.modal_panel_border, palette::MODAL_PANEL_BORDER);
     assert_eq!(t.modal_input_bg, palette::MODAL_INPUT_BG);
@@ -554,7 +554,7 @@ fn bundled_daruda_dark_json_matches_default() {
     assert_eq!(parsed.status_bar_bg, defaults.status_bar_bg);
     assert_eq!(parsed.modal_panel_bg, defaults.modal_panel_bg);
     assert_eq!(parsed.banner_error_text, defaults.banner_error_text);
-    assert_eq!(parsed.worktree_unread, defaults.worktree_unread);
+    assert_eq!(parsed.lane_unread, defaults.lane_unread);
 }
 
 #[test]
@@ -583,7 +583,7 @@ fn json_schema_lists_every_theme_slot() {
         "tab_bar_bg",
         "status_bar_bg",
         "modal_panel_bg",
-        "worktree_unread",
+        "lane_unread",
         "right_panel_task_session_needs_attention_text",
     ] {
         assert!(

@@ -34,7 +34,7 @@ pub use scan::{SkillsRoots, body_preview, scan_scope, skills_personal_dir, skill
 
 /// On-disk scope for a skill.
 ///
-/// - `Project` — `<worktree>/.claude/skills/<name>/SKILL.md`
+/// - `Project` — `<lane>/.claude/skills/<name>/SKILL.md`
 /// - `Personal` — `~/.claude/skills/<name>/SKILL.md`
 /// - `Plugin` — `<plugin-install-path>/skills/<name>/SKILL.md`,
 ///   typically under `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`.
@@ -154,21 +154,21 @@ impl Skill {
 /// App-wide skills state. Lives as a GPUI Global registered at
 /// bootstrap (`global::init`). User-scope vectors (`personal`,
 /// `plugin`) are shared across every Workspace; project-scope skills
-/// are partitioned by worktree root path so multiple Workspace windows
-/// observing different worktrees never collide on a single
-/// `project_root` field. Renderers read a per-worktree
+/// are partitioned by lane root path so multiple Workspace windows
+/// observing different lanes never collide on a single
+/// `project_root` field. Renderers read a per-lane
 /// [`SkillsSnapshot`] via [`SkillsState::snapshot_for`].
 ///
 /// Mirrors Zed's `SettingsStore::local_settings` pattern (a single
-/// Global with a `BTreeMap` keyed by worktree-relative location).
+/// Global with a `BTreeMap` keyed by lane-relative location).
 #[derive(Clone, Debug, Default)]
 pub struct SkillsState {
     pub personal: Vec<Skill>,
     pub plugin: Vec<Skill>,
-    /// Per-worktree project-scope skills, keyed by the worktree's
+    /// Per-lane project-scope skills, keyed by the lane's
     /// absolute root path (what `Workspace::active_worktree_root`
-    /// returns). An entry exists for every worktree that has been
-    /// scanned at least once; opening a different worktree adds a new
+    /// returns). An entry exists for every lane that has been
+    /// scanned at least once; opening a different lane adds a new
     /// key without disturbing the others.
     pub project: BTreeMap<PathBuf, Vec<Skill>>,
     /// Last successful scan timestamp across any scope. `None` until
@@ -177,18 +177,13 @@ pub struct SkillsState {
 }
 
 impl SkillsState {
-    /// Reload one scope from disk. `worktree` is required for
+    /// Reload one scope from disk. `lane` is required for
     /// `SkillScope::Project` and ignored otherwise. Project entries
-    /// are inserted into the `project` map at the worktree's path.
-    pub fn reload_scope(
-        &mut self,
-        scope: SkillScope,
-        worktree: Option<&Path>,
-        personal_root: &Path,
-    ) {
+    /// are inserted into the `project` map at the lane's path.
+    pub fn reload_scope(&mut self, scope: SkillScope, lane: Option<&Path>, personal_root: &Path) {
         match scope {
             SkillScope::Project => {
-                if let Some(root) = worktree {
+                if let Some(root) = lane {
                     let v = scan_scope(&skills_project_dir(root), SkillScope::Project);
                     self.project.insert(root.to_path_buf(), v);
                 }
@@ -203,14 +198,14 @@ impl SkillsState {
         self.last_scanned = Some(SystemTime::now());
     }
 
-    /// Drop a worktree's project entry. Call when a worktree is
+    /// Drop a lane's project entry. Call when a lane is
     /// closed so the `BTreeMap` doesn't grow unbounded across the
     /// session.
-    pub fn forget_worktree(&mut self, root: &Path) {
+    pub fn forget_lane(&mut self, root: &Path) {
         self.project.remove(root);
     }
 
-    /// Build an owned per-worktree view for the renderer / modals.
+    /// Build an owned per-lane view for the renderer / modals.
     /// Carrying it by value keeps the panel render closure off the
     /// Global (no re-entrancy hazard).
     pub fn snapshot_for(&self, root: Option<&Path>) -> SkillsSnapshot {
@@ -230,9 +225,9 @@ impl SkillsState {
     /// Duplicate-name check used by Create / Rename modals. Plugin
     /// scope is read-only and namespaced (`<plugin>:<skill>`); a bare
     /// duplicate query against it is meaningless, so `false`.
-    pub fn name_exists(&self, scope: SkillScope, name: &str, worktree: Option<&Path>) -> bool {
+    pub fn name_exists(&self, scope: SkillScope, name: &str, lane: Option<&Path>) -> bool {
         let list: &[Skill] = match scope {
-            SkillScope::Project => match worktree.and_then(|r| self.project.get(r)) {
+            SkillScope::Project => match lane.and_then(|r| self.project.get(r)) {
                 Some(v) => v.as_slice(),
                 None => return false,
             },
@@ -244,16 +239,16 @@ impl SkillsState {
     }
 }
 
-/// Owned per-worktree projection of [`SkillsState`] consumed by the
+/// Owned per-lane projection of [`SkillsState`] consumed by the
 /// renderer and CRUD modals. Carries the project Vec for *one*
-/// worktree along with the user-global personal + plugin vectors.
+/// lane along with the user-global personal + plugin vectors.
 #[derive(Clone, Debug, Default)]
 pub struct SkillsSnapshot {
     pub project: Vec<Skill>,
     pub personal: Vec<Skill>,
     pub plugin: Vec<Skill>,
-    /// Worktree root whose project skills are carried in `project`.
-    /// `None` when the workspace has no active worktree.
+    /// Lane root whose project skills are carried in `project`.
+    /// `None` when the workspace has no active lane.
     pub project_root: Option<PathBuf>,
     pub last_scanned: Option<SystemTime>,
 }

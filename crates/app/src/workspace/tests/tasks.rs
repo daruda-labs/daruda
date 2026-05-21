@@ -256,7 +256,7 @@ fn apply_task_session_ended_with_error_uses_session_error_message(cx: &mut TestA
 // ---------------------------------------------------------------------------
 
 /// Insert a Backlog task and return its id. Subtask tests don't need a
-/// session or worktree.
+/// session or lane.
 fn seed_backlog_task(
     workspace: &gpui::Entity<crate::workspace::Workspace>,
     cx: &mut TestAppContext,

@@ -1,5 +1,5 @@
 //! `SettingsStore` — single GPUI `Global` carrying the user [`Config`]
-//! plus per-worktree [`ProjectConfig`] overlays.
+//! plus per-lane [`ProjectConfig`] overlays.
 //!
 //! Mirrors the zed `crates/settings/src/settings_store.rs` pattern:
 //! a Global owning both layers, with consumers subscribing via
@@ -13,9 +13,9 @@
 //!   on the second `set_global`.
 //! - Mutate via `cx.update_global::<SettingsStore, _>(|store, _| ...)`
 //!   so observers fire automatically on the closure return.
-//! - Per-worktree slices live in a `BTreeMap<PathBuf, ...>` and
-//!   every `Workspace::finalize_remove_worktree` must call
-//!   [`SettingsStore::forget_worktree`] so the map can't grow
+//! - Per-lane slices live in a `BTreeMap<PathBuf, ...>` and
+//!   every `Workspace::finalize_remove_lane` must call
+//!   [`SettingsStore::forget_lane`] so the map can't grow
 //!   unbounded across a long session.
 
 use crate::config_watcher;
@@ -25,11 +25,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Settings layers — user-global plus per-worktree overlay.
+/// Settings layers — user-global plus per-lane overlay.
 ///
 /// `user` is the parsed `~/.config/daruda/config.toml`. `project`
-/// keys are absolute worktree paths and the values are the parsed
-/// `.daruda/config.toml` overlay sitting inside each worktree.
+/// keys are absolute lane paths and the values are the parsed
+/// `.daruda/config.toml` overlay sitting inside each lane.
 pub struct SettingsStore {
     user: Arc<Config>,
     project: BTreeMap<PathBuf, Arc<ProjectConfig>>,
@@ -83,34 +83,34 @@ impl SettingsStore {
         self.user = Arc::new(Config::load());
     }
 
-    /// Resolve the effective `Config` for an optional worktree path
+    /// Resolve the effective `Config` for an optional lane path
     /// by composing the user layer with the matching project
     /// overlay (if any).  Falls back to the user layer when
-    /// `worktree` is `None` or no overlay has been loaded for that
+    /// `lane` is `None` or no overlay has been loaded for that
     /// path. Returns a fresh owned `Config` rather than a borrow so
     /// callers can hand it to `Workspace::apply_config`.
-    pub fn effective_for(&self, worktree: Option<&Path>) -> Config {
+    pub fn effective_for(&self, lane: Option<&Path>) -> Config {
         let base = (*self.user).clone();
-        match worktree.and_then(|w| self.project.get(w)) {
+        match lane.and_then(|w| self.project.get(w)) {
             Some(overlay) => base.resolve(overlay),
             None => base,
         }
     }
 
-    /// Load (or refresh) the project overlay for `worktree`. Reads
+    /// Load (or refresh) the project overlay for `lane`. Reads
     /// from disk using the daruda-config conventions
     /// (`project_config_path`).  Idempotent — safe to call from
     /// `Workspace::new_with_project` and again from any reload path.
-    pub fn load_project_layer(&mut self, worktree: &Path) {
-        let cfg = ProjectConfig::load_for(worktree);
-        self.project.insert(worktree.to_path_buf(), Arc::new(cfg));
+    pub fn load_project_layer(&mut self, lane: &Path) {
+        let cfg = ProjectConfig::load_for(lane);
+        self.project.insert(lane.to_path_buf(), Arc::new(cfg));
     }
 
-    /// Drop the project overlay for `worktree`. Required by
-    /// `Workspace::finalize_remove_worktree` so the map can't grow
+    /// Drop the project overlay for `lane`. Required by
+    /// `Workspace::finalize_remove_lane` so the map can't grow
     /// unbounded across a long session (CLAUDE.md "Cleanup rule").
-    pub fn forget_worktree(&mut self, worktree: &Path) {
-        self.project.remove(worktree);
+    pub fn forget_lane(&mut self, lane: &Path) {
+        self.project.remove(lane);
     }
 
     /// Surgical user-config edit + persist + cache update. Pass the
@@ -183,12 +183,12 @@ pub fn user_config_path() -> PathBuf {
     daruda_config::config_path()
 }
 
-/// Convenience: probe the per-worktree config path. Mirrors
+/// Convenience: probe the per-lane config path. Mirrors
 /// [`project::project_config_path`]; returns `None` when the
-/// worktree resides outside the user's home or otherwise has no
+/// lane resides outside the user's home or otherwise has no
 /// resolvable XDG-aligned project dir.
-pub fn worktree_config_path(worktree: &Path) -> Option<PathBuf> {
-    project::project_config_path(worktree)
+pub fn lane_config_path(lane: &Path) -> Option<PathBuf> {
+    project::project_config_path(lane)
 }
 
 #[cfg(test)]
@@ -239,18 +239,18 @@ mod tests {
         });
     }
 
-    /// `forget_worktree` drops the per-worktree slice.
+    /// `forget_lane` drops the per-lane slice.
     #[gpui::test]
     fn forget_worktree_removes_entry(cx: &mut TestAppContext) {
         cx.update(|cx| {
             SettingsStore::init(cx);
-            let path = PathBuf::from("/tmp/daruda-test-worktree");
+            let path = PathBuf::from("/tmp/daruda-test-lane");
             cx.update_global::<SettingsStore, _>(|store, _| {
                 store
                     .project
                     .insert(path.clone(), Arc::new(ProjectConfig::default()));
                 assert!(store.project.contains_key(&path));
-                store.forget_worktree(&path);
+                store.forget_lane(&path);
                 assert!(!store.project.contains_key(&path));
             });
         });

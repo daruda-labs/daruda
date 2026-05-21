@@ -213,11 +213,11 @@ impl Render for SkillInvocationModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("skill-invoke-cancel", strings::skills_invoke_cancel()).on_click(cx.listener(
-                    |this, _: &ClickEvent, w, cx| {
+                button("skill-invoke-cancel", strings::skills_invoke_cancel()).on_click(
+                    cx.listener(|this, _: &ClickEvent, w, cx| {
                         this.dismiss(w, cx);
-                    },
-                )),
+                    }),
+                ),
             )
             .child(
                 button_primary(

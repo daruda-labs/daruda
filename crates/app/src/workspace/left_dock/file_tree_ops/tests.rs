@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::files::tree::LoadedEntry;
-use crate::worktree::git::{GitFileEntry, GitStatusData};
+use crate::lane::git::{GitFileEntry, GitStatusData};
 
 fn loaded(name: &str, kind: EntryKind) -> LoadedEntry {
     LoadedEntry {

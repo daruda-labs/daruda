@@ -18,10 +18,10 @@ pub fn open_delete_mcp_server_confirm(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let worktree = ws.active_worktree_root();
+    let lane = ws.active_worktree_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(worktree.as_deref());
+        .snapshot_for(lane.as_deref());
     let Some(path) = snapshot.path_for(scope).map(std::path::Path::to_path_buf) else {
         return;
     };

@@ -1,5 +1,5 @@
-//! Context menu items for a Group header (left-dock worktrees view,
-//! §5.1). Mirrors the worktree row's `build_context_menu_items` shape
+//! Context menu items for a Group header (left-dock lanes view,
+//! §5.1). Mirrors the lane row's `build_context_menu_items` shape
 //! — pure builder, takes a `WeakEntity<Workspace>` plus the captured
 //! group id + flags, returns a flat `Vec<ContextMenuItem>` ready for
 //! `Workspace::open_context_menu`.

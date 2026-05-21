@@ -9,7 +9,7 @@
 //! ties, so when both channels are live the user sees the authoritative path.
 //!
 //! Mirrors the shape of [`super::pty_pump`] — drain every queued
-//! event per 100 ms tick so a burst from a multi-session worktree
+//! event per 100 ms tick so a burst from a multi-session lane
 //! doesn't lag visible state.
 
 use std::path::PathBuf;
@@ -133,7 +133,7 @@ fn jsonl_pseudo_event_label() -> String {
 
 impl Workspace {
     /// (Re)evaluate whether the JSONL watcher should be running for
-    /// this Workspace, and (re)spawn it with the current worktree set.
+    /// this Workspace, and (re)spawn it with the current lane set.
     ///
     /// Engaged when **both** are true:
     /// - `claude_status_enabled` (config opt-in)
@@ -147,7 +147,7 @@ impl Workspace {
     /// channel and lets the FSEvents subscription unregister).
     ///
     /// Call from any site that changes one of those inputs:
-    /// initial construction, worktree create / remove, and
+    /// initial construction, lane create / remove, and
     /// `apply_config` when `claude_status.enable` flips.
     pub fn refresh_jsonl_watcher(&mut self, cx: &mut Context<Self>) {
         // Drop any existing shutdown sender + pump first so the old
@@ -173,7 +173,7 @@ impl Workspace {
             return;
         };
         let pairs: Vec<(PathBuf, PathBuf)> = self
-            .active_worktrees()
+            .active_lanes()
             .iter()
             .map(|wt| {
                 (

@@ -1,4 +1,4 @@
-//! Create-worktree modal — text input is delegated to the
+//! Create-lane modal — text input is delegated to the
 //! `gpui_component::Input` family (via `crate::ui::input`), so this
 //! file owns only the modal-level coordination: builder, two buttons,
 //! validation, the workspace finalize handoff, and an Enter-to-submit
@@ -23,7 +23,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use crate::workspace::worktree_ops::{CreateWorktreePlan, sanitize_branch_name};
+use crate::workspace::lane_ops::{CreateWorktreePlan, sanitize_branch_name};
 
 pub struct CreateWorktreeModal {
     /// Panel focus handle — `.track_focus` target for the modal root
@@ -39,7 +39,7 @@ pub struct CreateWorktreeModal {
     /// pre-listing them.
     base_input: Entity<InputState>,
     /// Free-form description (optional). Surfaced in the left dock
-    /// row so an idle worktree from last week is still self-describing.
+    /// row so an idle lane from last week is still self-describing.
     description_input: Entity<InputState>,
     /// Subscriptions to all three inputs — kept alive so PressEnter
     /// + Change events keep flowing into us.
@@ -50,7 +50,7 @@ pub struct CreateWorktreeModal {
     /// closed window doesn't keep the modal around.
     workspace: WeakEntity<Workspace>,
     /// Captured at open time so the modal doesn't have to re-traverse
-    /// the worktree list to validate.
+    /// the lane list to validate.
     repo_root: PathBuf,
 }
 
@@ -179,7 +179,7 @@ impl CreateWorktreeModal {
                 let result: Result<(), String> = async_cx
                     .background_executor()
                     .spawn(async move {
-                        crate::worktree::git::add_worktree(
+                        crate::lane::git::add_lane(
                             &git_repo,
                             &git_path,
                             Some(&git_branch),
@@ -200,7 +200,7 @@ impl CreateWorktreeModal {
                         Ok(()) => match workspace.upgrade() {
                             Some(ws) => ws
                                 .update(app_cx, |ws, cx| {
-                                    ws.finalize_create_worktree(plan.clone(), window, cx)
+                                    ws.finalize_create_lane(plan.clone(), window, cx)
                                 })
                                 // The left dock opener doesn't need the
                                 // newly-spawned pane id — only
@@ -257,9 +257,7 @@ impl Render for CreateWorktreeModal {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(muted_text)
-                    .child(
-                        "Branch name for the new worktree. A sibling directory will be created.",
-                    ),
+                    .child("Branch name for the new lane. A sibling directory will be created."),
             )
             .child(input(&self.branch_input, cx, 0))
             .child(
@@ -313,7 +311,7 @@ impl Render for CreateWorktreeModal {
         if let Some(banner) = self
             .error
             .as_ref()
-            .map(|msg| crate::ui::alert::error("create-worktree-error", msg.clone()))
+            .map(|msg| crate::ui::alert::error("create-lane-error", msg.clone()))
         {
             panel = panel.child(banner);
         }

@@ -6,7 +6,7 @@
 //!
 //! Submodule wiring: `git/mod.rs` declares `mod status;` +
 //! `pub use status::*;` so external callers write
-//! `crate::worktree::git::git_status(...)`. The `run_git` /
+//! `crate::lane::git::git_status(...)`. The `run_git` /
 //! `GitError` symbols used here are `pub(super)` in `mod.rs`.
 
 use std::ffi::OsStr;
@@ -151,7 +151,7 @@ pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
     data
 }
 
-/// `git status --porcelain=v1 --branch` for the worktree rooted at `path`,
+/// `git status --porcelain=v1 --branch` for the lane rooted at `path`,
 /// plus a follow-up `git diff HEAD --numstat` to populate per-file
 /// diffstat. The `--branch` flag prepends a `## branch...upstream [ahead
 /// N, behind M]` header line that the parser turns into branch /
@@ -160,7 +160,7 @@ pub(crate) fn parse_git_status_output(output: &str) -> GitStatusData {
 ///
 /// The diffstat call is non-fatal — a fresh `git init` repo has no HEAD,
 /// so the call errors and `diffstat` stays empty (dock simply omits
-/// the `+N −M` column for that worktree until the first commit lands).
+/// the `+N −M` column for that lane until the first commit lands).
 pub fn git_status(path: &Path) -> Result<GitStatusData, GitError> {
     let raw = run_git(path, ["status", "--porcelain=v1", "--branch"])?;
     let mut data = parse_git_status_output(&raw);
@@ -202,8 +202,8 @@ pub(crate) fn parse_numstat(text: &str) -> Vec<(u32, u32, PathBuf)> {
 }
 
 /// `git diff [--cached] -- <path>` as a UTF-8 string.
-/// Runs from `wt_path` (the worktree directory) so that paths relative to the
-/// worktree are resolved correctly for both main and linked worktrees.
+/// Runs from `wt_path` (the lane directory) so that paths relative to the
+/// lane are resolved correctly for both main and linked lanes.
 pub fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, GitError> {
     let mut args: Vec<String> = vec!["diff".into()];
     if staged {
@@ -256,8 +256,8 @@ pub fn git_add_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError
 
 /// `git add --all` — stage all changes including untracked files and deletions.
 ///
-/// Must run from the worktree path (`wt_path`) so linked worktrees only stage
-/// their own changes, not those of sibling worktrees sharing the same repo.
+/// Must run from the lane path (`wt_path`) so linked lanes only stage
+/// their own changes, not those of sibling lanes sharing the same repo.
 pub fn git_add_all(wt_path: &Path) -> Result<(), GitError> {
     run_git(wt_path, ["add", "--all"]).map(|_| ())
 }

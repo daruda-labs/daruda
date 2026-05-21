@@ -2,29 +2,25 @@
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::Context;
 
 use crate::workspace::Workspace;
 
 impl Workspace {
     /// Run `git init` in a non-git worktree, then re-probe so the
-    /// worktree's `kind` flips from `Default` to `Git` and the Git
+    /// lane's `kind` flips from `Default` to `Git` and the Git
     /// Changes view starts surfacing changes immediately. No-op for
-    /// worktrees that are already git-backed.
-    pub(in crate::workspace) fn init_git_repo(
-        &mut self,
-        worktree_id: WorktreeId,
-        cx: &mut Context<Self>,
-    ) {
+    /// lanes that are already git-backed.
+    pub(in crate::workspace) fn init_git_repo(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
         if self.git_op_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         if wt.is_git() {
@@ -36,15 +32,15 @@ impl Workspace {
         let path_for_report = path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || -> Result<Option<_>, crate::worktree::git::GitError> {
-                crate::worktree::git::git_init(&path)?;
-                Ok(crate::worktree::git::probe_repo(&path))
+            move || -> Result<Option<_>, crate::lane::git::GitError> {
+                crate::lane::git::git_init(&path)?;
+                Ok(crate::lane::git::probe_repo(&path))
             },
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 match result {
                     Ok(Some(probe)) => {
-                        // Pick the matching worktree entry's branch from
+                        // Pick the matching lane entry's branch from
                         // `git worktree list` so the header label flips
                         // from "detached" to the actual branch name (git
                         // init defaults to `main`, but a user-configured
@@ -52,22 +48,22 @@ impl Workspace {
                         // actually decided rather than guessing).
                         if let Some(wt) = ws
                             .active_project_mut()
-                            .and_then(|p| p.worktrees.iter_mut().find(|w| w.id == worktree_id))
+                            .and_then(|p| p.lanes.iter_mut().find(|w| w.id == lane_id))
                         {
                             let probed_entry = probe
-                                .worktrees
+                                .lanes
                                 .iter()
                                 .find(|p| p.path == wt.path)
-                                .or_else(|| probe.worktrees.first());
+                                .or_else(|| probe.lanes.first());
                             let probed_branch = probed_entry.and_then(|p| p.branch.clone());
                             // Freshly init'd repo: the toplevel from the
-                            // probe entry IS this worktree's root. Fall
+                            // probe entry IS this lane's root. Fall
                             // back to `wt.path` if for some reason the
                             // entry list is empty.
                             let worktree_root = probed_entry
                                 .map(|p| p.path.clone())
                                 .unwrap_or_else(|| wt.path.clone());
-                            wt.kind = daruda_store::project::WorktreeKind::Git {
+                            wt.kind = daruda_store::project::LaneKind::Git {
                                 repo_root: probe.repo_root,
                                 branch: probed_branch,
                                 worktree_root,
@@ -78,7 +74,7 @@ impl Workspace {
                     Ok(None) => {
                         // `git init` succeeded — the repo is on disk and
                         // usable; only the follow-up probe that flips
-                        // `WorktreeKind::Default → Git` failed. The user
+                        // `LaneKind::Default → Git` failed. The user
                         // can re-open the project and the next probe
                         // will pick it up. Warning, not Error.
                         let report = ErrorReport::new("git init succeeded but probe failed")

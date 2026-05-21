@@ -62,14 +62,14 @@ fn snapshot_with_project_emits_new_schema(cx: &mut TestAppContext) {
         // active one because `new_with_project` makes it so.
         let active_uuid = workspace.active_project.expect("active project");
         assert_eq!(active_uuid, projects[0].uuid);
-        assert_eq!(workspace.active_worktree, Some(ws.active.worktree));
+        assert_eq!(workspace.active_lane, Some(ws.active.lane));
 
         // ProjectState carries intrinsic fields from the runtime Project.
         assert_eq!(projects[0].root, ws.projects[0].root);
         assert_eq!(projects[0].name, Some(ws.projects[0].name.clone()));
-        // First-touch worktrees: ids start at 0, so next_worktree_id is
+        // First-touch lanes: ids start at 0, so next_lane_id is
         // one past the max live id.
-        let max_live = ws.projects[0].worktrees.iter().map(|w| w.id).max().unwrap();
-        assert_eq!(projects[0].next_worktree_id, max_live + 1);
+        let max_live = ws.projects[0].lanes.iter().map(|w| w.id).max().unwrap();
+        assert_eq!(projects[0].next_lane_id, max_live + 1);
     });
 }

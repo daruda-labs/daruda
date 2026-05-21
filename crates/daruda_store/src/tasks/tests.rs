@@ -496,7 +496,7 @@ fn derive_branch_name_handles_korean_title() {
 }
 
 // ---------------------------------------------------------------------------
-// sanitize parity (a subset of worktree_ops::sanitize_branch_name cases)
+// sanitize parity (a subset of lane_ops::sanitize_branch_name cases)
 // ---------------------------------------------------------------------------
 
 #[test]

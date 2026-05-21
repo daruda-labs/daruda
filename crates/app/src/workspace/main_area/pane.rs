@@ -123,11 +123,11 @@ pub(in crate::workspace) struct TaskEditContent {
     /// don't trample the override (R-19 / I-12).
     pub(in crate::workspace) branch_override: bool,
     pub(in crate::workspace) branch_validation: BranchValidation,
-    /// Dropdown that maps user worktree picks back to
+    /// Dropdown that maps user lane picks back to
     /// `Task::base_worktree_path`. The empty-string sentinel value
     /// means "no explicit base — start_task will branch from the
-    /// project's active worktree at run time"; every other value is
-    /// the absolute path of a registered worktree, matching the
+    /// project's active lane at run time"; every other value is
+    /// the absolute path of a registered lane, matching the
     /// `Task::base_worktree_path: Option<PathBuf>` schema. Sits in
     /// the focus chain between the prompt editor and the notes
     /// editor (R-19 / C-1 review note).
@@ -145,8 +145,8 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `current_snapshot()` after every successful save.
     pub(in crate::workspace) saved_snapshot: TaskEditSnapshot,
     pub(in crate::workspace) _subscriptions: Vec<Subscription>,
-    /// FS watcher on `<worktree>/.daruda/task-<branch>.md`. `None`
-    /// when the task is still in `Backlog` (no worktree yet) or the
+    /// FS watcher on `<lane>/.daruda/task-<branch>.md`. `None`
+    /// when the task is still in `Backlog` (no lane yet) or the
     /// file didn't exist at pane-open time. Dropped with the pane —
     /// `PromptFileWatcherHandle` shuts down the underlying threads.
     pub(in crate::workspace) _prompt_watcher:
@@ -325,7 +325,7 @@ impl Pane {
     /// File: the file's parent directory). The Files-view "show parent
     /// of focused file" affordance reuses this. TaskEdit panes don't
     /// have a meaningful cwd until the task transitions to `Running`
-    /// and a worktree is materialised — return `None` so dock
+    /// and a lane is materialised — return `None` so dock
     /// affordances skip TaskEdit panes.
     pub(in crate::workspace) fn cwd(&self) -> Option<&Path> {
         match &self.content {
@@ -533,7 +533,9 @@ impl TerminalContent {
         });
 
         let Some(layout) = layout else { return false };
-        let cols = layout.cols(avail_w);
+        // ghostty_vt render paths are undefined for a 1-column terminal
+        // (mirrors Zed's `cell_width * 2` minimum guard).
+        let cols = layout.cols(avail_w).max(2);
         let rows = layout.rows((avail_h - pane_header_h).max(1.0));
 
         if let Some(master) = &self.master {
@@ -638,7 +640,7 @@ pub(in crate::workspace) struct TabEntry {
 }
 
 /// All the cwd sources `resolve_default_cwd` chooses between.
-/// Named-fields struct so callers can't transpose `active_worktree`
+/// Named-fields struct so callers can't transpose `active_lane`
 /// and `project_root` (both `Option<PathBuf>`); the compiler now
 /// catches a mistake that previously silently picked the wrong tier.
 #[derive(Debug, Default)]
@@ -646,14 +648,14 @@ pub(in crate::workspace) struct CwdCandidates {
     /// The pane the user currently has focus on. Only consulted when
     /// the workspace has `inherit_cwd` on.
     pub focused_pane: Option<PathBuf>,
-    /// The active worktree's filesystem path. The "always preserve
-    /// 1 worktree = 1 cwd" tier — wins whenever the focused-pane
+    /// The active lane's filesystem path. The "always preserve
+    /// 1 lane = 1 cwd" tier — wins whenever the focused-pane
     /// path is unavailable or `inherit_cwd` is off.
-    pub active_worktree: Option<PathBuf>,
+    pub active_lane: Option<PathBuf>,
     /// Umbrella project root. Last-resort fallback for legacy /
-    /// non-worktree workspaces; in the steady state it is shadowed
-    /// by `active_worktree` because every Workspace bootstraps at
-    /// least one worktree.
+    /// non-lane workspaces; in the steady state it is shadowed
+    /// by `active_lane` because every Workspace bootstraps at
+    /// least one lane.
     pub project_root: Option<PathBuf>,
 }
 
@@ -666,21 +668,21 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 /// Pure resolver for the cwd a new pane should spawn at. Keeps the
-/// "1 worktree = 1 cwd" invariant: when no live focused-pane cwd is
-/// available, the active worktree's path wins over the project root.
+/// "1 lane = 1 cwd" invariant: when no live focused-pane cwd is
+/// available, the active lane's path wins over the project root.
 ///
 /// Priority:
 /// 1) `candidates.focused_pane` (when `inherit_cwd` is true) — copy
 ///    from the pane the user is currently looking at,
-/// 2) `candidates.active_worktree` — keeps `Cmd+T` from a worktree
-///    pinned inside that worktree even before the new shell sends
+/// 2) `candidates.active_lane` — keeps `Cmd+T` from a lane
+///    pinned inside that lane even before the new shell sends
 ///    OSC 7,
 /// 3) `candidates.project_root` — last-resort fallback for
-///    non-worktree workspaces.
+///    non-lane workspaces.
 ///
 /// The previous resolver fell through to `project_root` ahead of
-/// the active worktree path, which silently spawned new shells at
-/// the main repo root from inside a `daruda-feat-x` worktree —
+/// the active lane path, which silently spawned new shells at
+/// the main repo root from inside a `daruda-feat-x` lane —
 /// breaking isolation for fresh starts, restored sessions before
 /// OSC 7 landed, and any `Cmd+T` issued before the focused pane had
 /// a reported cwd.
@@ -691,7 +693,7 @@ pub(in crate::workspace) fn resolve_default_cwd(
     if inherit_cwd && let Some(cwd) = candidates.focused_pane {
         return Some(cwd);
     }
-    candidates.active_worktree.or(candidates.project_root)
+    candidates.active_lane.or(candidates.project_root)
 }
 
 impl Workspace {
@@ -706,7 +708,7 @@ impl Workspace {
                 .iter()
                 .find(|p| p.id == self.main_area.focused_pane_id)
                 .and_then(|p| p.cwd().map(Path::to_path_buf)),
-            active_worktree: self.active_worktree().map(|w| w.path.clone()),
+            active_lane: self.active_lane().map(|w| w.path.clone()),
             project_root: self.active_project().map(|p| p.root.clone()),
         };
         resolve_default_cwd(self.inherit_cwd, candidates).or_else(home_dir)

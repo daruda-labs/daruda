@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::project::{
-    DockStates, GroupId, LeftDockView, RightDockView, SerializedGroup, SerializedTab,
-    SerializedWorktree, UsageWindow, WindowOpenPolicy, WindowState, WorktreeId,
+    DockStates, GroupId, LaneId, LeftDockView, RightDockView, SerializedGroup, SerializedLane,
+    SerializedTab, UsageWindow, WindowOpenPolicy, WindowState,
 };
 
 pub const WORKSPACE_SCHEMA_VERSION: u32 = 3;
@@ -84,8 +84,8 @@ impl Default for WorkspaceUuid {
 /// One project, identified by UUID. Stored at
 /// `projects/<uuid>.json`. Owns the parts that are *intrinsic* to a
 /// project regardless of which workspaces reference it: root path,
-/// human-visible name, the worktree list, and the last-active
-/// worktree pointer. Per-workspace decoration (group/color/order)
+/// human-visible name, the lane list, and the last-active
+/// lane pointer. Per-workspace decoration (group/color/order)
 /// lives in `WorkspaceState::project_overrides`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectState {
@@ -94,12 +94,16 @@ pub struct ProjectState {
     pub root: PathBuf,
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
-    pub worktrees: Vec<SerializedWorktree>,
-    #[serde(default)]
-    pub last_active_worktree_id: WorktreeId,
-    #[serde(default)]
-    pub next_worktree_id: WorktreeId,
+    #[serde(default, rename = "worktrees", alias = "lanes")]
+    pub lanes: Vec<SerializedLane>,
+    #[serde(
+        default,
+        rename = "last_active_worktree_id",
+        alias = "last_active_lane_id"
+    )]
+    pub last_active_lane_id: LaneId,
+    #[serde(default, rename = "next_worktree_id", alias = "next_lane_id")]
+    pub next_lane_id: LaneId,
 }
 
 /// Per-workspace decoration on a project reference. Color/tab_order/
@@ -132,7 +136,8 @@ pub struct WorkspaceState {
     pub groups: Vec<SerializedGroup>,
 
     pub active_project: Option<ProjectUuid>,
-    pub active_worktree: Option<WorktreeId>,
+    #[serde(rename = "active_worktree", alias = "active_lane")]
+    pub active_lane: Option<LaneId>,
 
     pub docks: DockStates,
     pub window: WindowState,
@@ -154,12 +159,12 @@ pub struct WorkspaceState {
     /// projects' tabs.
     ///
     /// Write-only forward-compat envelope today. The canonical read
-    /// source for tabs is `ProjectState::worktrees[i].tabs` — this
+    /// source for tabs is `ProjectState::lanes[i].tabs` — this
     /// field is populated by `Workspace::snapshot_for_disk` but not
     /// yet consumed by restore. Once a future task introduces
     /// workspace-level tab reordering that needs to override the
-    /// per-worktree default, this field will become canonical and
-    /// `SerializedWorktree::tabs` will become its initialization seed.
+    /// per-lane default, this field will become canonical and
+    /// `SerializedLane::tabs` will become its initialization seed.
     pub project_tabs: BTreeMap<ProjectUuid, Vec<PaneLayout>>,
 }
 

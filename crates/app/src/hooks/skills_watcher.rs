@@ -1,5 +1,5 @@
 //! Skills filesystem watcher — recursive notify subscriptions on
-//! `<worktree>/.claude/skills/` (project) and `~/.claude/skills/`
+//! `<lane>/.claude/skills/` (project) and `~/.claude/skills/`
 //! (personal).
 //!
 //! Two threads, mirroring `panels_watcher`:
@@ -26,10 +26,10 @@
 //! empty event vectors.
 //!
 //! Pre-existing-directory quirk: when the user has never created
-//! `~/.claude/skills/` (or `<worktree>/.claude/skills/`), the target
+//! `~/.claude/skills/` (or `<lane>/.claude/skills/`), the target
 //! directory does not exist at spawn time, so `notify::watch` would
 //! fail. We fall back to watching the closest existing ancestor
-//! (typically `~/.claude` / `<worktree>/.claude`) and rely on the
+//! (typically `~/.claude` / `<lane>/.claude`) and rely on the
 //! callback's `starts_with` filter to throw away events outside the
 //! skills subtree. That way creating the first skill via an external
 //! editor still fires a `Reloaded` event without daruda needing to
@@ -59,7 +59,7 @@ pub struct SkillsWatcherHandle {
     pub(super) _shutdown_tx: mpsc::Sender<()>,
 }
 
-/// Spawn the watcher. `project_dir` is `None` when no worktree is
+/// Spawn the watcher. `project_dir` is `None` when no lane is
 /// active (welcome window) — the watcher then only subscribes to the
 /// personal scope.
 ///

@@ -1,6 +1,6 @@
 //! ViewSwitcher for the left dock (LeftDock).
 //!
-//! Three tabs (Worktrees / Git / Files) map to
+//! Three tabs (Lanes / Git / Files) map to
 //! `daruda_store::project::LeftDockView`. Clicking a tab calls
 //! `Workspace::set_left_dock_view` via the snapshot's `workspace`
 //! weak-entity handle.
@@ -17,7 +17,7 @@ use super::super::layout::LeftDockSnapshot;
 /// All view entries shown in the strip, in visible order.
 fn entries() -> Vec<(LeftDockView, gpui::SharedString)> {
     vec![
-        (LeftDockView::Worktrees, strings::sidebar_tab_worktrees().into()),
+        (LeftDockView::Lanes, strings::sidebar_tab_worktrees().into()),
         (LeftDockView::GitChanges, strings::sidebar_tab_git().into()),
         (LeftDockView::Files, strings::sidebar_tab_files().into()),
     ]
@@ -30,7 +30,7 @@ fn view_by_index(ix: usize) -> LeftDockView {
     entries()
         .get(ix)
         .map(|(v, _)| *v)
-        .unwrap_or(LeftDockView::Worktrees)
+        .unwrap_or(LeftDockView::Lanes)
 }
 
 /// Render the ViewSwitcher tab strip for the left dock.

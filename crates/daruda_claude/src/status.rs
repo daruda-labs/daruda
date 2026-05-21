@@ -22,7 +22,7 @@ pub enum SessionStatus {
 
 impl SessionStatus {
     /// Aggregate priority for collapsing N session statuses into a single
-    /// indicator (e.g. one worktree row showing the "worst" of multiple
+    /// indicator (e.g. one lane row showing the "worst" of multiple
     /// concurrent Claude sessions).
     ///
     /// Higher number = higher priority = wins the aggregate slot.

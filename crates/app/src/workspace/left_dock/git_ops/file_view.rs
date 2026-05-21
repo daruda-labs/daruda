@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
@@ -13,7 +13,7 @@ impl Workspace {
     /// in a new tab (or activate the existing tab if the file is already open).
     pub(in crate::workspace) fn open_git_file_diff(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         staged: bool,
         file_status: Option<char>,
@@ -21,7 +21,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_pane_file_view(
-            worktree_id,
+            lane_id,
             path,
             staged,
             file_status,
@@ -50,7 +50,7 @@ impl Workspace {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn open_pane_file_view(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         staged: bool,
         file_status: Option<char>,
@@ -59,7 +59,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Always dedupe: clicking the same file activates its existing tab.
-        if let Some((tab_idx, _pane_id)) = self.find_existing_file_tab(worktree_id, &path, staged) {
+        if let Some((tab_idx, _pane_id)) = self.find_existing_file_tab(lane_id, &path, staged) {
             self.activate_tab(tab_idx, window, cx);
             return;
         }
@@ -92,7 +92,7 @@ impl Workspace {
                 .iter()
                 .find(|p| p.id == pane_id)
                 .and_then(|p| p.file_view())
-                .map(|fv| fv.worktree_id);
+                .map(|fv| fv.lane_id);
             if let Some(pane) = self.main_area.panes.iter_mut().find(|p| p.id == pane_id)
                 && let Some(fc) = pane.file_content_mut()
             {
@@ -100,7 +100,7 @@ impl Workspace {
                     .file_name()
                     .map(|n| gpui::SharedString::from(n.to_string_lossy().into_owned()))
                     .unwrap_or_else(|| gpui::SharedString::from("(file)"));
-                fc.view.worktree_id = worktree_id;
+                fc.view.lane_id = lane_id;
                 fc.view.path = path.clone();
                 fc.view.staged = staged;
                 fc.view.file_status = file_status;
@@ -124,23 +124,23 @@ impl Workspace {
             self.focus_pane(pane_id, window, cx);
             let project = self.active.project;
             if let Some(prev_id) = prev_worktree {
-                self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+                self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
                     project,
-                    worktree: prev_id,
+                    lane: prev_id,
                 });
             }
-            self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+            self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
                 project,
-                worktree: worktree_id,
+                lane: lane_id,
             });
             cx.notify();
-            self.load_pane_file_content(worktree_id, path, staged, effective_mode, file_status, cx);
+            self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
             return;
         }
 
         // No reusable tab (or multi-tab mode): open a new tab.
         let pane = self.create_file_pane(
-            worktree_id,
+            lane_id,
             path.clone(),
             staged,
             file_status,
@@ -168,13 +168,13 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
 
         // Trigger #4 — selection moved (dock row gets selected BG).
-        self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+        self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         });
         cx.notify();
 
-        self.load_pane_file_content(worktree_id, path, staged, effective_mode, file_status, cx);
+        self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
     }
 
     /// Open `path` as a file viewer in a new pane *split to the right
@@ -192,7 +192,7 @@ impl Workspace {
     /// `pane_id` would otherwise crash on the layout walk.
     pub(in crate::workspace) fn open_file_split_right(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         anchor: crate::workspace::main_area::pane_tree::PaneId,
         window: &mut Window,
@@ -212,7 +212,7 @@ impl Workspace {
         };
 
         let pane = self.create_file_pane(
-            worktree_id,
+            lane_id,
             path.clone(),
             /* staged = */ false,
             /* file_status = */ None,
@@ -251,13 +251,13 @@ impl Workspace {
         self.bump_activity(new_pane_id);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
-        self.invalidate_visible_files_cache(daruda_store::project::WorktreeRef {
+        self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         });
         cx.notify();
 
-        self.load_pane_file_content(worktree_id, path, false, effective_mode, None, cx);
+        self.load_pane_file_content(lane_id, path, false, effective_mode, None, cx);
     }
 
     /// Switch the focused file pane between Raw / Preview / Changes mode.
@@ -271,7 +271,7 @@ impl Workspace {
         // Apply the mutation in an inner scope so the focused-pane borrow
         // releases before we call `load_pane_file_content` (which reborrows
         // self for the spawn).
-        let load_args: Option<(WorktreeId, PathBuf, bool, Option<char>)> = {
+        let load_args: Option<(LaneId, PathBuf, bool, Option<char>)> = {
             let Some(fc) = self.focused_file_content_mut() else {
                 return;
             };
@@ -296,13 +296,13 @@ impl Workspace {
                 None
             } else {
                 fv.content = PaneFileContent::Loading;
-                Some((fv.worktree_id, fv.path.clone(), fv.staged, fv.file_status))
+                Some((fv.lane_id, fv.path.clone(), fv.staged, fv.file_status))
             }
         };
         cx.notify();
 
-        if let Some((worktree_id, path, staged, file_status)) = load_args {
-            self.load_pane_file_content(worktree_id, path, staged, mode, file_status, cx);
+        if let Some((lane_id, path, staged, file_status)) = load_args {
+            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
         }
     }
 
@@ -375,12 +375,12 @@ impl Workspace {
 
     /// Trigger content loads for every File pane in the live `panes`
     /// vec whose content is still `Loading`. Called at the end of
-    /// `restore_state` (for the active worktree's panes only — others
+    /// `restore_state` (for the active lane's panes only — others
     /// live in `inactive_worktree_runtimes` and load when their
-    /// worktree is next activated) and at the end of `activate_worktree`.
+    /// lane is next activated) and at the end of `activate_worktree`.
     /// Already-loaded panes are skipped, so re-activations are cheap.
     pub(in crate::workspace) fn load_pending_file_panes(&mut self, cx: &mut Context<Self>) {
-        let pending: Vec<(WorktreeId, PathBuf, bool, FileViewMode, Option<char>)> = self
+        let pending: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = self
             .main_area
             .panes
             .iter()
@@ -388,7 +388,7 @@ impl Workspace {
             .filter(|fv| matches!(fv.content, PaneFileContent::Loading))
             .map(|fv| {
                 (
-                    fv.worktree_id,
+                    fv.lane_id,
                     fv.path.clone(),
                     fv.staged,
                     fv.view_mode,
@@ -396,30 +396,30 @@ impl Workspace {
                 )
             })
             .collect();
-        for (worktree_id, path, staged, mode, file_status) in pending {
-            self.load_pane_file_content(worktree_id, path, staged, mode, file_status, cx);
+        for (lane_id, path, staged, mode, file_status) in pending {
+            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
         }
     }
 
     /// Spawn a background task to load file content for the given mode
     /// and update the matching file pane's `content` on completion. The
-    /// pane is identified by `(worktree_id, path, staged, mode)` — if
+    /// pane is identified by `(lane_id, path, staged, mode)` — if
     /// no pane still matches when the load returns (because the user
     /// switched mode or closed the tab), the result is dropped.
     fn load_pane_file_content(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         staged: bool,
         mode: FileViewMode,
         file_status: Option<char>,
         cx: &mut Context<Self>,
     ) {
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let wt_path = wt.path.clone();
@@ -446,7 +446,7 @@ impl Workspace {
                 // closed the tab while the load was in flight.
                 let pane_match = ws.main_area.panes.iter_mut().find(|p| {
                     p.file_view().is_some_and(|fv| {
-                        fv.worktree_id == worktree_id
+                        fv.lane_id == lane_id
                             && fv.path == path
                             && fv.staged == staged
                             && fv.view_mode == mode
@@ -463,27 +463,27 @@ impl Workspace {
         .detach();
     }
 
-    /// Open `path` from worktree `worktree_id` using the system default
+    /// Open `path` from lane `lane_id` using the system default
     /// application. Runs the `open` command on a background thread so the
     /// UI thread is never blocked. Kept for a future context-menu "Open in
     /// default app" action on the Git Changes file list.
     ///
-    /// `path` may be either worktree-relative (Files left-dock convention) or
+    /// `path` may be either lane-relative (Files left-dock convention) or
     /// absolute (Git Changes left-dock uses repo-root-relative paths and joins
     /// against repo_root before calling). `Path::join` returns the absolute
     /// argument unchanged, so the same code handles both cases.
     #[allow(dead_code)]
     pub(in crate::workspace) fn open_file_externally(
         &mut self,
-        worktree_id: daruda_store::project::WorktreeId,
+        lane_id: daruda_store::project::LaneId,
         path: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let full_path = wt.path.join(&path);

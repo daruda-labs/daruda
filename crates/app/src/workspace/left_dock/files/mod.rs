@@ -1,4 +1,4 @@
-//! Files view — file tree rooted at the active worktree path.
+//! Files view — file tree rooted at the active lane path.
 //!
 //! W-7e: virtual scroll via `uniform_list`. The visible-row list is
 //! built once per cache invalidation (see
@@ -9,7 +9,7 @@
 
 use crate::ui::theme;
 use daruda_config::IconColorMode;
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{
     AnyElement, ClickEvent, Context, Hsla, IntoElement, div, img, prelude::*, px, svg, uniform_list,
 };
@@ -26,7 +26,7 @@ use crate::workspace::path_drag::PathDrag;
 use gpui::UniformListScrollHandle;
 
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    let active_id = snap.active.worktree;
+    let active_id = snap.active.lane;
     let active_ref = snap.active;
     let visible = snap.cached_visible.clone();
     let count = visible.len();
@@ -57,12 +57,12 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         let color_mode = snap.files_icon_color_mode.clone();
         let scroll_handle = snap.files_scroll_handle.clone();
         // The row renderer runs inside Context<Dock> but needs Workspace
-        // state (worktree root path, per-range VisibleEntry slice). Pull
+        // state (lane root path, per-range VisibleEntry slice). Pull
         // everything needed from the snapshot at closure-capture time.
         let visible_for_renderer = visible.clone();
         let workspace_for_renderer = workspace.clone();
         let worktree_root = snap
-            .worktrees
+            .lanes
             .iter()
             .find(|w| w.id == active_id)
             .map(|w| w.path.clone())
@@ -73,7 +73,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                   _window: &mut gpui::Window,
                   cx: &mut Context<Dock>| {
                 // Give each row a `WeakEntity<Workspace>` for its event handlers.
-                // The snap's worktree root is already captured above.
+                // The snap's lane root is already captured above.
                 let _ = workspace_for_renderer.clone(); // keep alive in closure
                 range
                     .filter_map(|i| visible_for_renderer.get(i).cloned())
@@ -171,7 +171,7 @@ fn build_files_scrollbar(
 // ----------------------------------------------------------------
 
 fn view_header(
-    _worktree_id: WorktreeId,
+    _worktree_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -197,13 +197,13 @@ fn view_header(
 
 fn render_row(
     v: &VisibleEntry,
-    wt_ref: WorktreeRef,
+    wt_ref: LaneRef,
     worktree_root: &std::path::Path,
     color_mode: &IconColorMode,
     workspace: gpui::WeakEntity<crate::workspace::Workspace>,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
-    let worktree_id = wt_ref.worktree;
+    let lane_id = wt_ref.lane;
     let entry_id = v.entry_id;
     let kind = v.kind;
     let path = v.path.clone();
@@ -256,7 +256,7 @@ fn render_row(
 
                     if click_count >= 2 {
                         if !kind.is_dir() {
-                            ws.open_file_externally(worktree_id, path.clone(), cx);
+                            ws.open_file_externally(lane_id, path.clone(), cx);
                         }
                         return;
                     }

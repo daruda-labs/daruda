@@ -1,4 +1,4 @@
-//! Group / ungrouped-shell card chrome for the Worktrees view.
+//! Group / ungrouped-shell card chrome for the Lanes view.
 //!
 //! Card is purely visual — radius + border + bg + padding. All inner
 //! interaction (drag/drop, context menu, chevron toggle) stays on the
@@ -24,22 +24,22 @@ pub(in crate::workspace::left_dock::projects) fn group_card(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let hover_bg = t.worktree_card_hover_bg;
+    let hover_bg = t.lane_card_hover_bg;
     let bg = if is_active {
-        t.worktree_card_active_bg
+        t.lane_card_active_bg
     } else {
-        t.worktree_card_bg
+        t.lane_card_bg
     };
     div()
         .flex()
         .flex_col()
-        .mx(px(theme::WORKTREE_CARD_MARGIN_X))
-        .px(px(theme::WORKTREE_CARD_PAD_X))
-        .py(px(theme::WORKTREE_CARD_PAD_Y))
-        .rounded(px(theme::WORKTREE_CARD_RADIUS))
+        .mx(px(theme::LANE_CARD_MARGIN_X))
+        .px(px(theme::LANE_CARD_PAD_X))
+        .py(px(theme::LANE_CARD_PAD_Y))
+        .rounded(px(theme::LANE_CARD_RADIUS))
         .bg(bg)
-        .border(px(theme::WORKTREE_CARD_BORDER_W))
-        .border_color(t.worktree_card_border)
+        .border(px(theme::LANE_CARD_BORDER_W))
+        .border_color(t.lane_card_border)
         .when(!is_active, move |d| d.hover(move |d| d.bg(hover_bg)))
         .child(header)
         .child(body)
@@ -55,9 +55,9 @@ pub(in crate::workspace::left_dock::projects) fn ungrouped_shell(
     div()
         .flex()
         .flex_col()
-        .mx(px(theme::WORKTREE_CARD_MARGIN_X))
-        .px(px(theme::WORKTREE_CARD_PAD_X))
-        .py(px(theme::WORKTREE_CARD_PAD_Y))
-        .rounded(px(theme::WORKTREE_CARD_RADIUS))
+        .mx(px(theme::LANE_CARD_MARGIN_X))
+        .px(px(theme::LANE_CARD_PAD_X))
+        .py(px(theme::LANE_CARD_PAD_Y))
+        .rounded(px(theme::LANE_CARD_RADIUS))
         .child(body)
 }

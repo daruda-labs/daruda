@@ -18,7 +18,7 @@ const ULID_SUFFIX_CHARS: usize = 4;
 const ULID_FALLBACK_CHARS: usize = 8;
 
 /// Derive a stable branch name. The result is reused on Reopen / Retry —
-/// never regenerated — so the worktree path stays predictable.
+/// never regenerated — so the lane path stays predictable.
 ///
 /// - Sanitizes via `sanitize_branch_name`.
 /// - Truncates the sanitized prefix to `MAX_TITLE_CHARS` *characters*

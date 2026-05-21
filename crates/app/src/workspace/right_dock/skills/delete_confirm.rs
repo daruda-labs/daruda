@@ -1,7 +1,7 @@
 //! Delete confirmation modal — routes through
 //! [`crate::workspace::dialog_helpers::open_confirm_dialog`] so every
 //! confirm-style dialog in the app shares one opener (consistency
-//! with worktree / panels delete confirmations).
+//! with lane / panels delete confirmations).
 
 use std::path::PathBuf;
 

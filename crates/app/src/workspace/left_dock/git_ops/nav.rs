@@ -2,14 +2,14 @@
 
 use std::path::PathBuf;
 
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
 
 impl Workspace {
     /// Build the keyboard-navigable file order for the Git Changes view
-    /// in the active worktree. Defers to the left dock's
+    /// in the active lane. Defers to the left dock's
     /// `ordered_visible_paths` helper so any future change to the render
     /// order (sticky conflicts, custom sort) automatically applies to
     /// `↑↓` nav.
@@ -17,7 +17,7 @@ impl Workspace {
         let Some(s) = self.git_status_cache.get(&self.active) else {
             return Vec::new();
         };
-        let Some(wt) = self.active_worktree() else {
+        let Some(wt) = self.active_lane() else {
             return Vec::new();
         };
         let collapsed = self
@@ -33,13 +33,13 @@ impl Workspace {
     /// row rather than wherever the cursor was last left.
     pub(in crate::workspace) fn set_git_changes_cursor(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
         self.git_changes_cursor.insert(target, path);
         cx.notify();
@@ -81,7 +81,7 @@ impl Workspace {
     /// vanished from `git status`.
     pub(in crate::workspace) fn toggle_git_changes_cursor_stage(&mut self, cx: &mut Context<Self>) {
         let active_ref = self.active;
-        let active_id = self.active.worktree;
+        let active_id = self.active.lane;
         let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
             return;
         };
@@ -103,7 +103,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let active_ref = self.active;
-        let active_id = self.active.worktree;
+        let active_id = self.active.lane;
         let Some(cursor) = self.git_changes_cursor.get(&active_ref).cloned() else {
             return;
         };
@@ -120,8 +120,8 @@ impl Workspace {
 
         // The diff viewer wants the absolute path (it routes through
         // `open_pane_file_view` which loads from the filesystem); resolve
-        // the repo-root-relative cursor via WorktreePaths.
-        let Some(wt) = self.active_worktree() else {
+        // the repo-root-relative cursor via LanePaths.
+        let Some(wt) = self.active_lane() else {
             return;
         };
         let abs = wt.paths().from_git_status(&cursor);
@@ -129,19 +129,19 @@ impl Workspace {
     }
 
     /// Toggle the collapse state of a directory group in the Git Changes
-    /// view. State is per-worktree and in-memory only — Git Changes is
+    /// view. State is per-lane and in-memory only — Git Changes is
     /// task-driven (open it, deal with the diff, close it), so persisting
     /// collapse state across app restarts would mostly preserve stale
     /// "I last collapsed this dir three weeks ago" noise.
     pub(in crate::workspace) fn toggle_git_dir_collapse(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         dir: String,
         cx: &mut Context<Self>,
     ) {
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
         let set = self.git_collapsed_dirs.entry(target).or_default();
         if !set.remove(&dir) {

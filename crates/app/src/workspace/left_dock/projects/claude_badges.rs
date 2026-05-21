@@ -1,11 +1,11 @@
-//! Per-worktree Claude session indicators rendered inside the
+//! Per-lane Claude session indicators rendered inside the
 //! dock row.
 //!
 //! Two pieces:
 //! - `claude_status_cell` — the leading dot column (always present
 //!   so rows align whether or not a session is bound).
 //! - `claude_badges_row` — the multi-session sub-row shown only when
-//!   a worktree has ≥ 2 concurrent Claude sessions. The badge
+//!   a lane has ≥ 2 concurrent Claude sessions. The badge
 //!   matching the focused tab gets an outline ring (Phase E) so the
 //!   user can tell which sibling their terminal is talking to.
 
@@ -18,7 +18,7 @@ use crate::ui::{AgentStatusBadge, IndicatorSize};
 
 /// Fixed-width cell that holds the leading Claude-status indicator.
 /// Empty (just the spacer width) when no Claude session is associated
-/// with the worktree.
+/// with the lane.
 pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -> AnyElement {
     let cell = div()
         .flex_none()
@@ -35,7 +35,7 @@ pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -
     }
 }
 
-/// Phase D — sub-row badge strip. Shown when a worktree has ≥ 2
+/// Phase D — sub-row badge strip. Shown when a lane has ≥ 2
 /// concurrent Claude sessions; each badge is a small per-session
 /// indicator (`IndicatorSize::Badge`) so the user can tell which of
 /// several agents needs attention.
@@ -122,7 +122,7 @@ mod tests {
         crate::test_support::init_gpui_component(cx);
         cx.update(|cx| {
             // Both populated and empty cells must reserve the same
-            // horizontal space so worktree rows in the list don't visually
+            // horizontal space so lane rows in the list don't visually
             // shift when a session attaches.
             let with = claude_status_cell(Some(SessionStatus::Working), cx);
             let without = claude_status_cell(None, cx);

@@ -8,7 +8,7 @@
 //! backdrop whose click-handler sets open = None. Submenus are
 //! intentionally not supported yet.
 //!
-//! Current consumer: none (W-8 worktree row right-click will be the
+//! Current consumer: none (W-8 lane row right-click will be the
 //! first). Kept here so the W-8 feature commit doesn't also have
 //! to invent the widget.
 
@@ -159,7 +159,7 @@ impl RenderOnce for ContextMenu {
         let panel_bg = t.modal_panel_bg;
         let item_text = t.modal_text_primary;
         let item_disabled_text = t.disabled_item_text;
-        let item_hover_bg = t.worktree_row_hover_bg;
+        let item_hover_bg = t.lane_row_hover_bg;
 
         let mut menu = div()
             .id(id)

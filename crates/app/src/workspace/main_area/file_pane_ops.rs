@@ -84,11 +84,11 @@ impl Workspace {
     }
 
     /// Find an existing single-pane tab showing the given file
-    /// (worktree + path + staged). Returns `(tab_index, pane_id)`.
+    /// (lane + path + staged). Returns `(tab_index, pane_id)`.
     /// Used by `open_file_in_new_tab` to dedupe.
     pub(in crate::workspace) fn find_existing_file_tab(
         &self,
-        worktree_id: daruda_store::project::WorktreeId,
+        lane_id: daruda_store::project::LaneId,
         path: &std::path::Path,
         staged: bool,
     ) -> Option<(usize, PaneId)> {
@@ -96,7 +96,7 @@ impl Workspace {
             if let PaneLayout::Pane(pane_id) = tab.layout
                 && let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id)
                 && let Some(fv) = pane.file_view()
-                && fv.worktree_id == worktree_id
+                && fv.lane_id == lane_id
                 && fv.path == path
                 && fv.staged == staged
             {
@@ -114,7 +114,7 @@ impl Workspace {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn create_file_pane(
         &mut self,
-        worktree_id: daruda_store::project::WorktreeId,
+        lane_id: daruda_store::project::LaneId,
         path: std::path::PathBuf,
         staged: bool,
         file_status: Option<char>,
@@ -168,7 +168,7 @@ impl Workspace {
             id: pane_id,
             content: PaneContent::File(FileContent {
                 view: PaneFileView {
-                    worktree_id,
+                    lane_id,
                     path,
                     staged,
                     file_status,

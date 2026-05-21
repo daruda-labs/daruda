@@ -1,4 +1,4 @@
-//! Worktree-aware path conversion helpers.
+//! Lane-aware path conversion helpers.
 //!
 //! A single `PathBuf` can carry three different meanings depending on its
 //! origin:
@@ -13,42 +13,42 @@
 //! root directly) all three happen to collapse, so bugs only surface when the
 //! user opens a sub-directory of the repo (`wt.path != repo_root`).
 //!
-//! `WorktreePaths` captures both anchors and exposes named conversion methods
+//! `LanePaths` captures both anchors and exposes named conversion methods
 //! so every call site documents *which* space it is converting from or to.
 //! Direct `.join()` on raw `PathBuf` values is banned once the newtype layer
 //! is in place (see CLAUDE.md Pitfall #10).
 
 use std::path::{Path, PathBuf};
 
-/// Path-conversion helper for a single worktree.
+/// Path-conversion helper for a single lane.
 ///
 /// Holds references to the two anchors needed to translate among the three
 /// path spaces.  Callers construct one at the start of an operation and use
 /// the named methods — no arithmetic on raw `PathBuf` values is needed.
-pub struct WorktreePaths<'a> {
-    /// Absolute path of the worktree directory (`wt.path`).
+pub struct LanePaths<'a> {
+    /// Absolute path of the lane directory (`wt.path`).
     pub wt_path: &'a Path,
     /// Absolute path of the git repo root.  `None` for non-git worktrees
-    /// (the `WorktreeKind::Default` case); those callers only use
+    /// (the `LaneKind::Default` case); those callers only use
     /// `from_files_tree` / `to_wt_relative`.
     pub repo_root: Option<&'a Path>,
 }
 
-impl<'a> WorktreePaths<'a> {
+impl<'a> LanePaths<'a> {
     /// `git status --porcelain` path (repo-root-relative) → absolute.
     ///
     /// Uses `repo_root` as the base; falls back to `wt_path` for non-git
-    /// worktrees so callers do not need to special-case them.
+    /// lanes so callers do not need to special-case them.
     pub fn from_git_status(&self, p: &Path) -> PathBuf {
         self.repo_root.unwrap_or(self.wt_path).join(p)
     }
 
-    /// `FileTree` path (worktree-root-relative) → absolute.
+    /// `FileTree` path (lane-root-relative) → absolute.
     pub fn from_files_tree(&self, p: &Path) -> PathBuf {
         self.wt_path.join(p)
     }
 
-    /// Absolute path → worktree-relative (for UI display and `git restore`).
+    /// Absolute path → lane-relative (for UI display and `git restore`).
     ///
     /// Returns `None` when `abs` does not start with `wt_path` (should not
     /// happen in normal operation; callers can log and fall back).
@@ -74,7 +74,7 @@ mod tests {
     fn from_git_status_uses_repo_root() {
         let wt = Path::new("/term/daruda");
         let repo = Path::new("/term");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: Some(repo),
         };
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn from_git_status_falls_back_to_wt_when_no_repo() {
         let wt = Path::new("/projects/myapp");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: None,
         };
@@ -101,7 +101,7 @@ mod tests {
     fn from_files_tree_always_uses_wt_path() {
         let wt = Path::new("/term/daruda");
         let repo = Path::new("/term");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: Some(repo),
         };
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn to_wt_relative_strips_prefix() {
         let wt = Path::new("/term/daruda");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: None,
         };
@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn to_wt_relative_returns_none_outside_wt() {
         let wt = Path::new("/term/daruda");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: None,
         };
@@ -138,7 +138,7 @@ mod tests {
     fn to_repo_relative_strips_repo_prefix() {
         let wt = Path::new("/term/daruda");
         let repo = Path::new("/term");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: Some(repo),
         };
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn to_repo_relative_none_for_non_git() {
         let wt = Path::new("/projects/myapp");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: wt,
             repo_root: None,
         };
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn round_trip_same_path_when_wt_equals_repo() {
         let root = Path::new("/term");
-        let wp = WorktreePaths {
+        let wp = LanePaths {
             wt_path: root,
             repo_root: Some(root),
         };

@@ -452,10 +452,10 @@ pub fn open_add_mcp_server_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let worktree = ws.active_worktree_root();
+    let lane = ws.active_worktree_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(worktree.as_deref());
+        .snapshot_for(lane.as_deref());
     let initial = AddMcpInitial {
         default_scope: prefill_scope.unwrap_or(McpScope::Personal),
         project_root: snapshot.project_root.clone(),

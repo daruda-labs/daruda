@@ -13,6 +13,7 @@ mod config_watcher;
 pub mod files;
 mod globals;
 mod hooks;
+pub mod lane;
 pub(crate) mod menus;
 mod panels_watcher;
 pub(crate) mod path_ext;
@@ -33,7 +34,6 @@ pub(crate) mod window_registry;
 mod window_startup;
 mod windows;
 mod workspace;
-pub mod worktree;
 
 use gpui::{App, MenuItem, actions};
 use windows::OpenMode;

@@ -1,5 +1,5 @@
-//! Worktrees view — list of worktrees plus a section header. Rendered
-//! into the left dock when `left_dock_view == Worktrees`.
+//! Lanes view — list of lanes plus a section header. Rendered
+//! into the left dock when `left_dock_view == Lanes`.
 //!
 //! Top-level rows interleave groups and ungrouped projects by their
 //! shared `tab_order` pool. A group's member projects render only
@@ -17,7 +17,7 @@ use super::rows::{
     worktree_row,
 };
 
-/// Top-level entry rendered in the worktrees tree. Groups carry their
+/// Top-level entry rendered in the lanes tree. Groups carry their
 /// member projects so the renderer can expand or hide them together.
 enum TopRow<'a> {
     Group(&'a GroupSnapshot, Vec<&'a ProjectSnapshot>),
@@ -33,7 +33,7 @@ impl<'a> TopRow<'a> {
     }
 }
 
-/// Render the Worktrees view body.
+/// Render the Lanes view body.
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     if snap.projects.is_empty() {
         return empty_state(cx).into_any_element();
@@ -42,10 +42,10 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     let any_git = snap
         .projects
         .iter()
-        .flat_map(|p| &p.worktrees)
+        .flat_map(|p| &p.lanes)
         .any(|w| w.is_git());
     let active_project = snap.active.project;
-    let active_worktree = snap.active.worktree;
+    let active_lane = snap.active.lane;
 
     // Build the interleaved top-level row list. Member projects keep
     // their own `tab_order` so the order inside an expanded group is
@@ -73,7 +73,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .flex()
         .flex_col()
         .w_full()
-        .gap(px(theme::WORKTREE_CARD_GAP))
+        .gap(px(theme::LANE_CARD_GAP))
         .overflow_hidden();
     if snap.claude_install_banner_visible {
         body = body.child(claude_install_banner(snap, cx));
@@ -97,7 +97,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                             inner = inner.child(grouped_project_block(
                                 project,
                                 active_project,
-                                active_worktree,
+                                active_lane,
                                 snap,
                                 cx,
                             ));
@@ -113,9 +113,8 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                 ));
             }
             TopRow::UngroupedProject(project) => {
-                let inner =
-                    ungrouped_project_block(project, active_project, active_worktree, snap, cx)
-                        .into_any_element();
+                let inner = ungrouped_project_block(project, active_project, active_lane, snap, cx)
+                    .into_any_element();
                 body = body.child(super::card::ungrouped_shell(inner, cx));
             }
         }
@@ -129,28 +128,28 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     body.into_any_element()
 }
 
-/// Project header + worktree rows rendered flush against the dock edge.
+/// Project header + lane rows rendered flush against the dock edge.
 fn ungrouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
-    active_worktree: daruda_store::project::WorktreeId,
+    active_lane: daruda_store::project::LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
-    // Same vertical gap as between adjacent worktree rows — keeps the
-    // project header from sitting flush against its first worktree, so
-    // header / list reads as the same rhythm the worktree list uses
+    // Same vertical gap as between adjacent lane rows — keeps the
+    // project header from sitting flush against its first lane, so
+    // header / list reads as the same rhythm the lane list uses
     // internally.
     let mut block = div()
         .flex()
         .flex_col()
         .w_full()
-        .gap(px(theme::WORKTREE_LIST_GAP_Y));
+        .gap(px(theme::LANE_LIST_GAP_Y));
     let is_active_project = project.id == active_project;
     let project_is_git = project
-        .worktrees
+        .lanes
         .iter()
-        .any(|w| matches!(&w.kind, daruda_store::project::WorktreeKind::Git { .. }));
+        .any(|w| matches!(&w.kind, daruda_store::project::LaneKind::Git { .. }));
     block = block.child(project_header_row(
         super::rows::ProjectHeaderArgs {
             project_id: project.id,
@@ -159,7 +158,7 @@ fn ungrouped_project_block(
             is_active: is_active_project,
             is_git: project_is_git,
             is_collapsed: project.is_collapsed,
-            last_active_worktree_id: project.last_active_worktree_id,
+            last_active_lane_id: project.last_active_lane_id,
         },
         snap,
         cx,
@@ -169,9 +168,9 @@ fn ungrouped_project_block(
             .flex()
             .flex_col()
             .w_full()
-            .gap(px(theme::WORKTREE_LIST_GAP_Y));
-        for wt in &project.worktrees {
-            let is_active = project.id == active_project && wt.id == active_worktree;
+            .gap(px(theme::LANE_LIST_GAP_Y));
+        for wt in &project.lanes {
+            let is_active = project.id == active_project && wt.id == active_lane;
             let git_badge = git_badge_for(snap, project.id, wt.id);
             list = list.child(worktree_row(wt, project.id, is_active, git_badge, snap, cx));
         }
@@ -186,7 +185,7 @@ fn ungrouped_project_block(
 fn grouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
-    active_worktree: daruda_store::project::WorktreeId,
+    active_lane: daruda_store::project::LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
@@ -197,7 +196,7 @@ fn grouped_project_block(
         .child(ungrouped_project_block(
             project,
             active_project,
-            active_worktree,
+            active_lane,
             snap,
             cx,
         ))

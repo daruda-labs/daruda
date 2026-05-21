@@ -11,12 +11,12 @@ pub(super) const STATUS_BAR_HEIGHT: f32 = theme::STATUS_BAR_HEIGHT;
 /// avoid entity reads during element construction (GPUI re-entrant
 /// panic prevention).
 pub(super) struct StatusBarData {
-    /// `<project>/<branch>` for git-backed active worktrees, just
+    /// `<project>/<branch>` for git-backed active lanes, just
     /// `<project>` for non-git or detached HEAD, `None` in Welcome
     /// state (no project loaded). The detached marker is rendered
     /// separately via [`Self::is_detached`].
     pub project_branch: Option<SharedString>,
-    /// True when the active worktree is git-backed but on a detached
+    /// True when the active lane is git-backed but on a detached
     /// HEAD. Drives the inline "detached" chip rendered next to
     /// `project_branch`; harmless when `project_branch` is `None`
     /// (the chip suppresses itself).

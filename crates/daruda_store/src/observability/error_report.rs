@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn project_id_is_attached_via_builder_and_round_trips() {
-        let r = ErrorReport::new("Worktree probe failed")
+        let r = ErrorReport::new("Lane probe failed")
             .severity(ErrorSeverity::Warning)
             .message("permission denied")
             .project_id(7)

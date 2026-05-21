@@ -1,5 +1,5 @@
-//! Runtime representation of a worktree — the Workspace-visible
-//! counterpart to `daruda_store::project::SerializedWorktree`.
+//! Runtime representation of a lane — the Workspace-visible
+//! counterpart to `daruda_store::project::SerializedLane`.
 //!
 //! Persistable fields mirror the serialized form; runtime-only fields
 //! (e.g. `status`) are recomputed and never written to disk. Tabs and
@@ -13,12 +13,12 @@ pub mod paths;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use daruda_store::project::{SerializedWorktree, WorktreeId, WorktreeKind, WorktreeStatus};
+use daruda_store::project::{LaneId, LaneKind, LaneStatus, SerializedLane};
 
 #[derive(Clone, Debug)]
-pub struct Worktree {
-    pub id: WorktreeId,
-    pub kind: WorktreeKind,
+pub struct Lane {
+    pub id: LaneId,
+    pub kind: LaneKind,
     pub path: PathBuf,
     pub name: Option<String>,
     pub tab_order: u32,
@@ -27,45 +27,45 @@ pub struct Worktree {
     pub last_activity: u64,
     /// Runtime-only. Rebuilt from live PTY/agent signals on each
     /// render; never serialized.
-    pub status: WorktreeStatus,
-    /// Ref the worktree was branched from (e.g. `main`,
+    pub status: LaneStatus,
+    /// Ref the lane was branched from (e.g. `main`,
     /// `origin/main`). `None` = current HEAD at creation. Persisted.
     pub base_ref: Option<String>,
     /// Free-form description shown as the dock row sublabel.
     pub description: Option<String>,
 }
 
-impl Worktree {
-    /// Fresh default worktree for a non-git project path. Status
+impl Lane {
+    /// Fresh default lane for a non-git project path. Status
     /// starts `Idle`; `last_activity` = now.
-    pub fn default_for_project(id: WorktreeId, path: PathBuf) -> Self {
+    pub fn default_for_project(id: LaneId, path: PathBuf) -> Self {
         Self {
             id,
-            kind: WorktreeKind::Default,
+            kind: LaneKind::Default,
             path,
             name: None,
             tab_order: 0,
             is_unread: false,
             last_activity: now_secs(),
-            status: WorktreeStatus::Idle,
+            status: LaneStatus::Idle,
             base_ref: None,
             description: None,
         }
     }
 
-    /// Fresh worktree entry backed by git.
+    /// Fresh lane entry backed by git.
     ///
-    /// - `path`: initial value for `Worktree.path` — the terminal-cwd
+    /// - `path`: initial value for `Lane.path` — the terminal-cwd
     ///   anchor (caller may anchor it to a subdir afterwards).
-    /// - `repo_root`: shared common-dir top, same across every worktree
+    /// - `repo_root`: shared common-dir top, same across every lane
     ///   of the repo. Used by `git worktree add/remove/branch`.
-    /// - `worktree_root`: this worktree's filesystem toplevel. Used by
-    ///   every per-worktree git CLI (`status`, `add`, `restore`).
+    /// - `worktree_root`: this lane's filesystem toplevel. Used by
+    ///   every per-lane git CLI (`status`, `add`, `restore`).
     ///   Typically equal to `path` at construction time; immutable
     ///   afterwards.
     /// - `branch`: `None` for detached HEAD.
     pub fn git(
-        id: WorktreeId,
+        id: LaneId,
         path: PathBuf,
         branch: Option<String>,
         repo_root: PathBuf,
@@ -74,7 +74,7 @@ impl Worktree {
     ) -> Self {
         Self {
             id,
-            kind: WorktreeKind::Git {
+            kind: LaneKind::Git {
                 branch,
                 repo_root,
                 worktree_root,
@@ -84,54 +84,50 @@ impl Worktree {
             tab_order,
             is_unread: false,
             last_activity: now_secs(),
-            status: WorktreeStatus::Idle,
+            status: LaneStatus::Idle,
             base_ref: None,
             description: None,
         }
     }
 
     /// Inspect the filesystem at `project_root` and build the initial
-    /// worktree list. If git is installed and the path is a repo,
-    /// every linked worktree becomes an entry (bare checkouts are
+    /// lane list. If git is installed and the path is a repo,
+    /// every linked lane becomes an entry (bare checkouts are
     /// filtered out); the one at `project_root` sorts first so it
     /// becomes the active one. Non-git paths yield a single
-    /// `Default` worktree so the left dock always has at least one row.
-    pub fn bootstrap_from_project(project_root: &std::path::Path) -> Vec<Worktree> {
+    /// `Default` lane so the left dock always has at least one row.
+    pub fn bootstrap_from_project(project_root: &std::path::Path) -> Vec<Lane> {
         match git::probe_repo(project_root) {
-            Some(probe) => Self::from_repo_probe(project_root, probe).unwrap_or_else(|| {
-                vec![Worktree::default_for_project(0, project_root.to_path_buf())]
-            }),
-            None => vec![Worktree::default_for_project(0, project_root.to_path_buf())],
+            Some(probe) => Self::from_repo_probe(project_root, probe)
+                .unwrap_or_else(|| vec![Lane::default_for_project(0, project_root.to_path_buf())]),
+            None => vec![Lane::default_for_project(0, project_root.to_path_buf())],
         }
     }
 
-    /// Convert a successful repo probe into ordered runtime worktrees.
+    /// Convert a successful repo probe into ordered runtime lanes.
     /// Returns `None` when the probe yielded no usable (non-bare)
-    /// worktrees, so the caller can fall back to a `Default`.
-    fn from_repo_probe(
-        project_root: &std::path::Path,
-        probe: git::RepoProbe,
-    ) -> Option<Vec<Worktree>> {
+    /// lanes, so the caller can fall back to a `Default`.
+    fn from_repo_probe(project_root: &std::path::Path, probe: git::RepoProbe) -> Option<Vec<Lane>> {
         // Try to canonicalize the project_root so comparisons against
         // git's resolved paths succeed on macOS (/tmp → /private/tmp).
         let canonical_target =
             std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
 
-        let mut worktrees: Vec<Worktree> = probe
-            .worktrees
+        let mut lanes: Vec<Lane> = probe
+            .lanes
             .into_iter()
             .filter(|e| !e.bare)
             .enumerate()
             .map(|(i, entry)| {
-                // `entry.path` is this worktree's actual git toplevel
+                // `entry.path` is this lane's actual git toplevel
                 // straight from `git worktree list --porcelain`. Capture
                 // it now — the anchoring loop below may overwrite the
-                // initial `Worktree.path` with a sub-directory, but
+                // initial `Lane.path` with a sub-directory, but
                 // `worktree_root` must stay at the real toplevel for
-                // every per-worktree git CLI to address the right index.
+                // every per-lane git CLI to address the right index.
                 let worktree_root = entry.path.clone();
-                Worktree::git(
-                    i as WorktreeId,
+                Lane::git(
+                    i as LaneId,
                     entry.path,
                     entry.branch,
                     probe.repo_root.clone(),
@@ -141,36 +137,36 @@ impl Worktree {
             })
             .collect();
 
-        if worktrees.is_empty() {
+        if lanes.is_empty() {
             return None;
         }
 
         // When the user opens a subdirectory of a git repo (e.g. opens
-        // `term/daruda` inside the `term` git root), the main worktree's
+        // `term/daruda` inside the `term` git root), the main lane's
         // path comes back from `git worktree list` as the repo root.
         // Anchor it to the project root so new panes start inside the
         // user's intended directory rather than the repo root.
-        for w in worktrees.iter_mut() {
+        for w in lanes.iter_mut() {
             if canonical_target.starts_with(&w.path) && canonical_target != w.path {
                 w.path = canonical_target.clone();
                 break;
             }
         }
 
-        // Put the worktree matching `project_root` first so the
+        // Put the lane matching `project_root` first so the
         // caller's `active_worktree_id = 0` lands on it.
-        if let Some(idx) = worktrees.iter().position(|w| w.path == canonical_target)
+        if let Some(idx) = lanes.iter().position(|w| w.path == canonical_target)
             && idx != 0
         {
-            let chosen = worktrees.remove(idx);
-            worktrees.insert(0, chosen);
+            let chosen = lanes.remove(idx);
+            lanes.insert(0, chosen);
         }
         // Reassign ids/tab_order after reordering so id = position.
-        for (i, w) in worktrees.iter_mut().enumerate() {
-            w.id = i as WorktreeId;
+        for (i, w) in lanes.iter_mut().enumerate() {
+            w.id = i as LaneId;
             w.tab_order = i as u32;
         }
-        Some(worktrees)
+        Some(lanes)
     }
 
     /// Hydrate runtime state from the on-disk form. Tabs stored on
@@ -183,7 +179,7 @@ impl Worktree {
     /// `Self::backfill_worktree_root` re-derives it via a one-stat
     /// filesystem walk so existing projects keep working without a
     /// schema migration step.
-    pub fn from_serialized(s: &SerializedWorktree) -> Self {
+    pub fn from_serialized(s: &SerializedLane) -> Self {
         let mut kind = s.kind.clone();
         Self::backfill_worktree_root(&mut kind, &s.path);
         Self {
@@ -194,7 +190,7 @@ impl Worktree {
             tab_order: s.tab_order,
             is_unread: s.is_unread,
             last_activity: s.last_activity,
-            status: WorktreeStatus::default(),
+            status: LaneStatus::default(),
             base_ref: s.base_ref.clone(),
             description: s.description.clone(),
         }
@@ -205,9 +201,9 @@ impl Worktree {
     /// from `wt_path` to find the first ancestor containing a `.git`
     /// entry and use that as the toplevel. Silent no-op when the field
     /// is already populated or when no `.git` exists above `wt_path`
-    /// (e.g. the worktree was deleted on disk).
-    fn backfill_worktree_root(kind: &mut WorktreeKind, wt_path: &std::path::Path) {
-        let WorktreeKind::Git { worktree_root, .. } = kind else {
+    /// (e.g. the lane was deleted on disk).
+    fn backfill_worktree_root(kind: &mut LaneKind, wt_path: &std::path::Path) {
+        let LaneKind::Git { worktree_root, .. } = kind else {
             return;
         };
         if !worktree_root.as_os_str().is_empty() {
@@ -221,8 +217,8 @@ impl Worktree {
     /// Produce a serialized snapshot sans tabs (tabs are written by
     /// the workspace save path, which has access to the live tab
     /// list).
-    pub fn to_serialized(&self) -> SerializedWorktree {
-        SerializedWorktree {
+    pub fn to_serialized(&self) -> SerializedLane {
+        SerializedLane {
             id: self.id,
             kind: self.kind.clone(),
             path: self.path.clone(),
@@ -238,17 +234,17 @@ impl Worktree {
     }
 
     /// User-facing display name — same resolution rules as
-    /// `SerializedWorktree::display_name`.
+    /// `SerializedLane::display_name`.
     pub fn display_name(&self) -> String {
         if let Some(name) = self.name.as_deref() {
             return name.to_string();
         }
         match &self.kind {
-            WorktreeKind::Git {
+            LaneKind::Git {
                 branch: Some(b), ..
             } => b.clone(),
-            WorktreeKind::Git { branch: None, .. } => "(detached)".to_string(),
-            WorktreeKind::Default => self
+            LaneKind::Git { branch: None, .. } => "(detached)".to_string(),
+            LaneKind::Default => self
                 .path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -264,54 +260,54 @@ impl Worktree {
     }
 
     /// Overwrite the free-form description shown in the left dock
-    /// sublabel. `None` removes it and reverts to the worktree path.
+    /// sublabel. `None` removes it and reverts to the lane path.
     pub fn set_description(&mut self, description: Option<String>) {
         self.description = description;
     }
 
-    /// `true` when this worktree is git-backed.
+    /// `true` when this lane is git-backed.
     pub fn is_git(&self) -> bool {
         self.kind.is_git()
     }
 
-    /// This worktree's git toplevel — the directory holding its `.git`
-    /// entry (a regular `.git/` for the main worktree, a `.git` pointer
-    /// file for linked worktrees). Stored on the kind at probe time
+    /// This lane's git toplevel — the directory holding its `.git`
+    /// entry (a regular `.git/` for the main lane, a `.git` pointer
+    /// file for linked lanes). Stored on the kind at probe time
     /// and persisted, so this is a constant-time field access — no
     /// filesystem walk on every stage / unstage.
     ///
     /// `git status --porcelain` returns paths relative to this
-    /// toplevel, so every per-worktree git CLI (`status`, `add`,
+    /// toplevel, so every per-lane git CLI (`status`, `add`,
     /// `restore --staged`) must cwd here to keep porcelain paths and
-    /// the per-worktree index aligned.
+    /// the per-lane index aligned.
     ///
-    /// Returns `None` for `Default` (non-git) worktrees and for legacy
-    /// persisted Git worktrees whose backfill walk failed (the worktree
+    /// Returns `None` for `Default` (non-git) lanes and for legacy
+    /// persisted Git lanes whose backfill walk failed (the lane
     /// was deleted on disk between save and reload). Callers treat both
-    /// as "no git ops possible on this worktree".
+    /// as "no git ops possible on this lane".
     pub fn git_worktree_root(&self) -> Option<&std::path::Path> {
         match &self.kind {
-            WorktreeKind::Git { worktree_root, .. } => {
+            LaneKind::Git { worktree_root, .. } => {
                 if worktree_root.as_os_str().is_empty() {
                     None
                 } else {
                     Some(worktree_root.as_path())
                 }
             }
-            WorktreeKind::Default => None,
+            LaneKind::Default => None,
         }
     }
 
-    /// Path-conversion helper for this worktree.
+    /// Path-conversion helper for this lane.
     ///
-    /// Captures `wt.path` and this worktree's git toplevel so callers
+    /// Captures `wt.path` and this lane's git toplevel so callers
     /// can convert among the three path spaces (git-status-relative,
     /// wt-relative, absolute) without raw `.join()` arithmetic. The
     /// toplevel — not the shared `repo_root` — is what porcelain paths
-    /// resolve against, so linked-worktree path conversion lands on
+    /// resolve against, so linked-lane path conversion lands on
     /// the right working tree.
-    pub fn paths(&self) -> paths::WorktreePaths<'_> {
-        paths::WorktreePaths {
+    pub fn paths(&self) -> paths::LanePaths<'_> {
+        paths::LanePaths {
             wt_path: &self.path,
             repo_root: self.git_worktree_root(),
         }
@@ -326,9 +322,9 @@ fn now_secs() -> u64 {
 }
 
 /// Walk up from `start` to find the first ancestor that contains a
-/// `.git` entry — a regular directory for the main worktree or a
-/// pointer file for linked worktrees. Used only by the legacy-state
-/// migration in [`Worktree::backfill_worktree_root`]; production paths
+/// `.git` entry — a regular directory for the main lane or a
+/// pointer file for linked lanes. Used only by the legacy-state
+/// migration in [`Lane::backfill_worktree_root`]; production paths
 /// read the persisted `worktree_root` field directly.
 fn find_git_toplevel(start: &std::path::Path) -> Option<PathBuf> {
     let mut current: &std::path::Path = start;
@@ -346,23 +342,23 @@ mod tests {
 
     #[test]
     fn default_for_project_is_default_kind() {
-        let w = Worktree::default_for_project(0, PathBuf::from("/tmp/scratch"));
-        assert_eq!(w.kind, WorktreeKind::Default);
+        let w = Lane::default_for_project(0, PathBuf::from("/tmp/scratch"));
+        assert_eq!(w.kind, LaneKind::Default);
         assert!(!w.is_git());
-        assert_eq!(w.status, WorktreeStatus::Idle);
+        assert_eq!(w.status, LaneStatus::Idle);
         assert!(w.last_activity > 0);
     }
 
     #[test]
     fn display_name_uses_path_basename_for_default() {
-        let w = Worktree::default_for_project(0, PathBuf::from("/Users/alice/scratch"));
+        let w = Lane::default_for_project(0, PathBuf::from("/Users/alice/scratch"));
         assert_eq!(w.display_name(), "scratch");
     }
 
     #[test]
     fn display_name_uses_branch_for_git() {
-        let mut w = Worktree::default_for_project(0, PathBuf::from("/repo"));
-        w.kind = WorktreeKind::Git {
+        let mut w = Lane::default_for_project(0, PathBuf::from("/repo"));
+        w.kind = LaneKind::Git {
             branch: Some("feat/sidebar".into()),
             repo_root: PathBuf::from("/repo"),
             worktree_root: PathBuf::from("/repo"),
@@ -372,7 +368,7 @@ mod tests {
 
     #[test]
     fn display_name_prefers_user_name() {
-        let mut w = Worktree::default_for_project(0, PathBuf::from("/tmp"));
+        let mut w = Lane::default_for_project(0, PathBuf::from("/tmp"));
         w.name = Some("My Work".into());
         assert_eq!(w.display_name(), "My Work");
     }
@@ -382,10 +378,10 @@ mod tests {
         let dir = std::env::temp_dir().join("daruda_boot_non_git");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let wts = Worktree::bootstrap_from_project(&dir);
+        let wts = Lane::bootstrap_from_project(&dir);
         assert_eq!(wts.len(), 1);
         assert_eq!(wts[0].id, 0);
-        assert_eq!(wts[0].kind, WorktreeKind::Default);
+        assert_eq!(wts[0].kind, LaneKind::Default);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -416,7 +412,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let wts = Worktree::bootstrap_from_project(&dir);
+        let wts = Lane::bootstrap_from_project(&dir);
         assert_eq!(wts.len(), 1);
         assert!(wts[0].is_git());
         let _ = std::fs::remove_dir_all(&dir);
@@ -447,11 +443,11 @@ mod tests {
             .output();
 
         let extra = dir.join("wt-side");
-        git::add_worktree(&dir, &extra, Some("side"), None).unwrap();
+        git::add_lane(&dir, &extra, Some("side"), None).unwrap();
 
-        let wts = Worktree::bootstrap_from_project(&dir);
+        let wts = Lane::bootstrap_from_project(&dir);
         assert_eq!(wts.len(), 2);
-        // The project_root's worktree must sort to id 0.
+        // The project_root's lane must sort to id 0.
         assert_eq!(wts[0].path, dir);
         assert_eq!(wts[0].id, 0);
         assert_eq!(wts[1].id, 1);
@@ -460,9 +456,9 @@ mod tests {
 
     #[test]
     fn round_trip_through_serialized_drops_tabs_only() {
-        let w = Worktree {
+        let w = Lane {
             id: 7,
-            kind: WorktreeKind::Git {
+            kind: LaneKind::Git {
                 branch: Some("main".into()),
                 repo_root: PathBuf::from("/repo"),
                 worktree_root: PathBuf::from("/repo/wt-feat"),
@@ -472,12 +468,12 @@ mod tests {
             tab_order: 2,
             is_unread: true,
             last_activity: 12345,
-            status: WorktreeStatus::Running,
+            status: LaneStatus::Running,
             base_ref: Some("origin/main".into()),
             description: Some("PR #123".into()),
         };
         let s = w.to_serialized();
-        let back = Worktree::from_serialized(&s);
+        let back = Lane::from_serialized(&s);
         assert_eq!(back.id, 7);
         assert_eq!(back.kind, w.kind);
         assert_eq!(back.path, w.path);
@@ -486,7 +482,7 @@ mod tests {
         assert!(back.is_unread);
         assert_eq!(back.last_activity, 12345);
         // Status is runtime-only and always resets to Idle.
-        assert_eq!(back.status, WorktreeStatus::Idle);
+        assert_eq!(back.status, LaneStatus::Idle);
         // Serialized form carries no tabs yet (W-3 wires them).
         assert!(s.tabs.is_empty());
         assert_eq!(s.active_tab_index, 0);

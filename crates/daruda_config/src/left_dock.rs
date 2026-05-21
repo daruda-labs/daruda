@@ -29,7 +29,7 @@ pub struct LeftDockConfig {
     /// rules push them to the end of their group regardless. Toggled
     /// at runtime via `FilesToggleHidden` (`Cmd+Shift+.`).
     pub files_show_hidden: bool,
-    /// Use the worktree's `.gitignore` + `.git/info/exclude` to grey
+    /// Use the lane's `.gitignore` + `.git/info/exclude` to grey
     /// out ignored entries in the Files view. Disable when working
     /// outside a git repository or when ignore rules are noisy.
     pub files_use_gitignore: bool,

@@ -49,8 +49,8 @@ pub(in crate::workspace) fn spawn(
 impl Workspace {
     /// Apply one debounced [`McpEvent`] from the watcher.
     ///
-    /// The event carries only the scope; the worktree path is taken
-    /// from *this* workspace's active worktree at fire time so the
+    /// The event carries only the scope; the lane path is taken
+    /// from *this* workspace's active lane at fire time so the
     /// pump never reloads against a stale project root. The result
     /// lands in the `McpState` Global, where every other open
     /// Workspace picks it up through `observe_global`.
@@ -60,10 +60,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let McpEvent::Reloaded(scope) = event;
-        let worktree = self.active_worktree_root();
-        let result = cx.update_global::<McpState, _>(|state, _| {
-            state.reload_scope(scope, worktree.as_deref())
-        });
+        let lane = self.active_worktree_root();
+        let result =
+            cx.update_global::<McpState, _>(|state, _| state.reload_scope(scope, lane.as_deref()));
         if let Err(e) = result {
             let report = ErrorReport::new(format!("MCP reload failed ({})", scope.slug()))
                 .severity(ErrorSeverity::Warning)
@@ -78,24 +77,24 @@ impl Workspace {
         cx.notify();
     }
 
-    /// (Re)spawn the MCP watcher with the current active worktree's
-    /// `.mcp.json` path. Call from initial construction, worktree
-    /// create / remove, and worktree activation.
+    /// (Re)spawn the MCP watcher with the current active lane's
+    /// `.mcp.json` path. Call from initial construction, lane
+    /// create / remove, and lane activation.
     ///
     /// Dismisses any open MCP modal first — `AddMcpInitial` /
     /// `EditMcpInitial` snapshots are taken at open time and become
-    /// stale when the active worktree changes (the project scope path
+    /// stale when the active lane changes (the project scope path
     /// underneath them moves to a different file). Delete-confirm uses
     /// the shared `ConfirmModal` and isn't type-checkable here, so
-    /// users who confirmed a delete during a worktree swap may see the
+    /// users who confirmed a delete during a lane swap may see the
     /// post-confirm error banner — acceptable, since we'd otherwise
     /// have to dismiss every confirm modal in the workspace.
     pub fn refresh_mcp_watcher(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
         // Close any open dialog — `AddMcpInitial` / `EditMcpInitial`
         // snapshots are taken at open time and become stale when the
-        // active worktree changes. We can't downcast a Dialog to a
+        // active lane changes. We can't downcast a Dialog to a
         // specific modal type, so close indiscriminately. In practice
-        // worktree activation is a major user action and stale dialogs
+        // lane activation is a major user action and stale dialogs
         // (incl. delete-confirm) are reasonable to dismiss.
         //
         // Guard the root-walk for the case where this method runs

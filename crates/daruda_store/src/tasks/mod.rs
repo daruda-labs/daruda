@@ -6,11 +6,11 @@
 //! └── tasks.json
 //! ```
 //!
-//! Each `Task` is a 1:1 mapping with a worktree:
-//! - Backlog       → no worktree yet
-//! - Running       → worktree spawned, claude session(s) running
-//! - Done / Error  → terminal, worktree preserved (user deletes via dock)
-//! - Cancelled     → user-initiated stop, worktree preserved
+//! Each `Task` is a 1:1 mapping with a lane:
+//! - Backlog       → no lane yet
+//! - Running       → lane spawned, claude session(s) running
+//! - Done / Error  → terminal, lane preserved (user deletes via dock)
+//! - Cancelled     → user-initiated stop, lane preserved
 //!
 //! Phase 1 hardcodes `agent_type = Claude`; the field is reserved for
 //! future codex / gemini / copilot / cursor-agent expansion (G5

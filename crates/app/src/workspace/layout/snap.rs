@@ -26,9 +26,9 @@ use crate::workspace::Workspace;
 // Left dock
 // ----------------------------------------------------------------
 
-/// Plain-data snapshot of one project for the left-dock worktrees
+/// Plain-data snapshot of one project for the left-dock lanes
 /// tree. Mirrors the runtime [`crate::project::Project`] fields the
-/// render needs, plus the worktrees list copied by value so dock
+/// render needs, plus the lanes list copied by value so dock
 /// render can iterate without re-entering the workspace entity.
 #[derive(Clone)]
 pub(in crate::workspace) struct ProjectSnapshot {
@@ -43,19 +43,19 @@ pub(in crate::workspace) struct ProjectSnapshot {
     #[allow(dead_code)]
     pub color: Option<gpui::SharedString>,
     pub tab_order: u32,
-    pub worktrees: Vec<crate::worktree::Worktree>,
-    /// Last-active worktree id, mirrored from the runtime project so
+    pub lanes: Vec<crate::lane::Lane>,
+    /// Last-active lane id, mirrored from the runtime project so
     /// the dock can snap the active focus back to it when the user
     /// clicks the project header (§5.5).
-    pub last_active_worktree_id: daruda_store::project::WorktreeId,
-    /// Whether the project's worktree list is hidden under its header.
+    pub last_active_lane_id: daruda_store::project::LaneId,
+    /// Whether the project's lane list is hidden under its header.
     /// Toggled by the project header chevron click.
     pub is_collapsed: bool,
 }
 
 /// Plain-data snapshot of one group for the left-dock tree.
 ///
-/// Drives the accordion header rendered in the Worktrees view: caret
+/// Drives the accordion header rendered in the Lanes view: caret
 /// flips on `is_collapsed`, optional color dot keyed off `color`, and
 /// member projects fold/unfold based on the same flag.
 #[derive(Clone)]
@@ -75,12 +75,12 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// headers driven off `projects` once the multi-project tree
     /// landed; kept around so any pending consumer (status bar,
     /// header rebuilds) can still read it. Unused inside the
-    /// worktrees view itself.
+    /// lanes view itself.
     #[allow(dead_code)]
     pub active_project_name: Option<gpui::SharedString>,
-    pub worktrees: Vec<crate::worktree::Worktree>,
+    pub lanes: Vec<crate::lane::Lane>,
     /// Every project in the workspace, in `tab_order` order. Drives
-    /// the multi-project tree render — each entry's `worktrees` slice
+    /// the multi-project tree render — each entry's `lanes` slice
     /// is shown under its project header. Empty when the workspace is
     /// in the Welcome state.
     pub projects: Vec<ProjectSnapshot>,
@@ -88,20 +88,18 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// headers interleave with ungrouped projects in the top-level
     /// tree via the shared `tab_order` pool.
     pub groups: Vec<GroupSnapshot>,
-    pub active: daruda_store::project::WorktreeRef,
-    pub git_status_cache: std::collections::HashMap<
-        daruda_store::project::WorktreeRef,
-        crate::worktree::git::GitStatusData,
-    >,
+    pub active: daruda_store::project::LaneRef,
+    pub git_status_cache:
+        std::collections::HashMap<daruda_store::project::LaneRef, crate::lane::git::GitStatusData>,
     pub git_stage_in_flight: bool,
     /// Mirrors `Workspace::git_op_in_flight` — true while a Fetch / Push /
     /// Commit / Amend is running. Drives `loading + disabled` on the Fetch
     /// and Push buttons in the Git Changes header.
     pub git_op_in_flight: bool,
-    /// Active worktree's collapsed dir set (Git Changes view). Keyed by
-    /// worktree-relative dir string.
+    /// Active lane's collapsed dir set (Git Changes view). Keyed by
+    /// lane-relative dir string.
     pub git_collapsed_dirs: std::collections::HashSet<String>,
-    /// Active worktree's keyboard cursor in the Git Changes view —
+    /// Active lane's keyboard cursor in the Git Changes view —
     /// repo-root-relative path of the focused row (or None if no row is
     /// focused). Drives the visual cursor highlight.
     pub git_changes_cursor: Option<std::path::PathBuf>,
@@ -109,11 +107,10 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// the Git Changes body so its keyboard shortcuts fire only when
     /// the panel holds focus.
     pub git_changes_panel_focus: FocusHandle,
-    /// `(worktree, path, staged)` of the focused file viewer's pane,
+    /// `(lane, path, staged)` of the focused file viewer's pane,
     /// or `None` when no file pane is focused. Dock rows render a
     /// "selected" background when this triple matches.
-    pub focused_file_selection:
-        Option<(daruda_store::project::WorktreeId, std::path::PathBuf, bool)>,
+    pub focused_file_selection: Option<(daruda_store::project::LaneId, std::path::PathBuf, bool)>,
     pub git_changes_scroll_handle: gpui::ScrollHandle,
     pub git_commit_input: gpui::Entity<crate::ui::InputPanel>,
     pub files_panel_focus: FocusHandle,
@@ -121,19 +118,19 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub files_icon_color_mode: daruda_config::IconColorMode,
     pub cached_visible: Arc<Vec<VisibleEntry>>,
     pub root_kind: Option<EntryKind>,
-    /// Aggregate Claude status per worktree. Keyed by `WorktreeRef`
-    /// so worktree ids in distinct projects (each project numbers its
-    /// worktrees from 0) don't collide. Empty when the
+    /// Aggregate Claude status per lane. Keyed by `LaneRef`
+    /// so lane ids in distinct projects (each project numbers its
+    /// lanes from 0) don't collide. Empty when the
     /// `claude_status.enable` config flag is off, no Claude session is
-    /// running, or the worktree has no matching cwd.
+    /// running, or the lane has no matching cwd.
     pub claude_status_per_worktree:
-        std::collections::HashMap<daruda_store::project::WorktreeRef, daruda_claude::SessionStatus>,
-    /// Per-session statuses for worktrees that have ≥ 2 active Claude
-    /// sessions. Phase D sub-row badges read this. Worktrees with 0 or
+        std::collections::HashMap<daruda_store::project::LaneRef, daruda_claude::SessionStatus>,
+    /// Per-session statuses for lanes that have ≥ 2 active Claude
+    /// sessions. Phase D sub-row badges read this. Lanes with 0 or
     /// 1 sessions are absent (the leading indicator covers them).
-    /// Keyed by `WorktreeRef` for the same cross-project reason.
+    /// Keyed by `LaneRef` for the same cross-project reason.
     pub claude_per_session_per_worktree: std::collections::HashMap<
-        daruda_store::project::WorktreeRef,
+        daruda_store::project::LaneRef,
         Vec<(String, daruda_claude::SessionStatus)>,
     >,
     /// `session_id` of the claude process living inside the focused
@@ -143,7 +140,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// resolved it yet.
     pub claude_active_session_id: Option<String>,
     /// Show the "Claude integration disabled" banner above the
-    /// worktrees list. True when status is enabled in config but
+    /// lanes list. True when status is enabled in config but
     /// hooks aren't yet installed in `~/.claude/settings.json`.
     pub claude_install_banner_visible: bool,
     pub workspace: WeakEntity<Workspace>,
@@ -214,7 +211,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Cloned cheaply each frame; the workspace is the source of
     /// truth for selection state.
     pub usage_select: gpui::Entity<crate::ui::select::SelectState>,
-    /// Per-worktree projection of the app-wide `SkillsState` Global
+    /// Per-lane projection of the app-wide `SkillsState` Global
     /// for the Skills tab renderer. Carried by-value so the panel
     /// renderer never re-enters the workspace entity (G2 / pitfall §4)
     /// and never reads the Global from inside `Render::render`.
@@ -241,8 +238,8 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub task_search_query: String,
     /// Active Tasks-tab filter (Backlog / Running / Done / All).
     pub task_filter: daruda_store::tasks::TaskFilter,
-    /// Aggregate Claude session status per worktree, keyed by the
-    /// worktree's filesystem path so the Tasks tab can paint a
+    /// Aggregate Claude session status per lane, keyed by the
+    /// lane's filesystem path so the Tasks tab can paint a
     /// session badge next to each `Running` row without consulting
     /// the workspace entity. Empty when the `claude_status.enable`
     /// config flag is off.

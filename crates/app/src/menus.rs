@@ -149,7 +149,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_worktree().into(),
-            items: crate::worktree_slot_table!(@menu_items),
+            items: crate::lane_slot_table!(@menu_items),
         },
         Menu {
             name: s::menu_window().into(),

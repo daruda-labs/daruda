@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct ClaudeStatusConfig {
-    /// Render the indicator on each worktree row. When false, the
+    /// Render the indicator on each lane row. When false, the
     /// hook handler still records status (so toggling back on shows
     /// fresh data immediately) but the left dock skips the indicator
     /// cell entirely.

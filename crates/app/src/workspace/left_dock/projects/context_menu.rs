@@ -1,4 +1,4 @@
-//! Right-click context menu items for a worktree row.
+//! Right-click context menu items for a lane row.
 //!
 //! Captures all path / id / branch metadata by value so the resulting
 //! `ContextMenuItem` closures are `'static` and free of borrows on the
@@ -7,16 +7,16 @@
 use gpui::{App, MouseDownEvent, SharedString, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::project::WorktreeId;
+use daruda_store::project::LaneId;
 
 use crate::surface::strings as surface_strings;
 use crate::ui::ContextMenuItem;
 
-/// Build the context menu item list for a worktree row right-click.
+/// Build the context menu item list for a lane row right-click.
 /// Captures path / id by value so the closures are `'static`.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn build_context_menu_items(
-    wt_id: WorktreeId,
+    wt_id: LaneId,
     path_str: String,
     current_description: Option<String>,
     current_name: Option<String>,
@@ -116,7 +116,7 @@ pub(in crate::workspace) fn build_context_menu_items(
 
     let mut items = vec![reveal_item, copy_item, edit_description_item, rename_item];
 
-    // "Merge into…" — only for git-backed worktrees.
+    // "Merge into…" — only for git-backed lanes.
     if is_git {
         let merge_item = if is_detached {
             ContextMenuItem::new(surface_strings::ctx_merge_into(), |_, _, _| {})
@@ -148,13 +148,12 @@ pub(in crate::workspace) fn build_context_menu_items(
 
                         // Build target list: other git worktrees with a branch.
                         let target_options: Vec<super::merge_modal::TargetOption> = ws
-                            .active_worktrees()
+                            .active_lanes()
                             .iter()
                             .filter(|w| w.id != wt_id)
                             .filter_map(|w| match &w.kind {
-                                daruda_store::project::WorktreeKind::Git {
-                                    branch: Some(b),
-                                    ..
+                                daruda_store::project::LaneKind::Git {
+                                    branch: Some(b), ..
                                 } => Some(super::merge_modal::TargetOption {
                                     wt_id: w.id,
                                     branch: b.clone(),
@@ -165,11 +164,12 @@ pub(in crate::workspace) fn build_context_menu_items(
                             .collect();
 
                         if target_options.is_empty() {
-                            let report = ErrorReport::new(surface_strings::merge_modal_no_targets())
-                                .severity(ErrorSeverity::Info)
-                                .at(file!(), line!())
-                                .dedup("worktree.merge.no_targets")
-                                .build();
+                            let report =
+                                ErrorReport::new(surface_strings::merge_modal_no_targets())
+                                    .severity(ErrorSeverity::Info)
+                                    .at(file!(), line!())
+                                    .dedup("lane.merge.no_targets")
+                                    .build();
                             ws.report_error(report, cx);
                             return;
                         }

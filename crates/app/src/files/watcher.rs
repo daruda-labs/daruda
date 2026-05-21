@@ -1,6 +1,6 @@
 //! File-system watcher for the left-dock Files view.
 //!
-//! Per-worktree `notify::RecommendedWatcher` with recursive watch (macOS
+//! Per-lane `notify::RecommendedWatcher` with recursive watch (macOS
 //! FSEvents). Raw events are debounced on a dedicated thread (30 ms
 //! window); the thread blocks on `recv()` so it parks at zero CPU when
 //! the filesystem is idle. Bursts above `BULK_THRESHOLD` collapse to a

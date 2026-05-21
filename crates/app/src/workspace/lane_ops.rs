@@ -1,4 +1,4 @@
-//! Worktree lifecycle operations on `Workspace`: create / remove
+//! Lane lifecycle operations on `Workspace`: create / remove
 //! validation + execution, modal openers, slot-id allocation, and the
 //! tab-swap activation path.
 //!
@@ -8,11 +8,11 @@
 //! on `Workspace` (not in this file) because it has to outlive any
 //! single render cycle.
 
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
+use super::LaneRuntime;
 use super::Workspace;
-use super::WorktreeRuntime;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -26,11 +26,11 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     pub new_path: std::path::PathBuf,
     pub repo_root: std::path::PathBuf,
     /// Ref the new branch should be based on (e.g. `main`,
-    /// `origin/main`). `None` = whatever git's `worktree add` defaults
+    /// `origin/main`). `None` = whatever git's `lane add` defaults
     /// to (current HEAD when paired with `-b`).
     pub base_ref: Option<String>,
     /// Free-form description captured at creation time.
-    /// Surfaced as the worktree row sublabel in the left dock.
+    /// Surfaced as the lane row sublabel in the left dock.
     pub description: Option<String>,
 }
 
@@ -42,8 +42,8 @@ pub(in crate::workspace) struct RemoveWorktreePlan {
 }
 
 impl Workspace {
-    /// Switch to the nth worktree of the active project by left-dock
-    /// position (0-indexed). Worktrees are sorted by `tab_order` so the
+    /// Switch to the nth lane of the active project by left-dock
+    /// position (0-indexed). Lanes are sorted by `tab_order` so the
     /// position matches what the user sees in the left dock. No-ops
     /// when `index` is out of range or no project is loaded.
     pub(in crate::workspace) fn activate_worktree_by_index(
@@ -55,17 +55,17 @@ impl Workspace {
         let Some(active_project_id) = self.active_project().map(|p| p.id) else {
             return;
         };
-        let mut ids: Vec<(u32, WorktreeId)> = self
-            .active_worktrees()
+        let mut ids: Vec<(u32, LaneId)> = self
+            .active_lanes()
             .iter()
             .map(|w| (w.tab_order, w.id))
             .collect();
         ids.sort_unstable_by_key(|&(order, _)| order);
         if let Some(&(_, id)) = ids.get(index) {
             self.activate_worktree(
-                WorktreeRef {
+                LaneRef {
                     project: active_project_id,
-                    worktree: id,
+                    lane: id,
                 },
                 window,
                 cx,
@@ -73,31 +73,31 @@ impl Workspace {
         }
     }
 
-    /// True when the target worktree can be removed via `git worktree
-    /// remove`. Main worktrees (checkout at `repo_root`) and the
+    /// True when the target lane can be removed via `git worktree
+    /// remove`. Main lanes (checkout at `repo_root`) and the
     /// default non-git stand-in are non-removable.
-    pub(in crate::workspace) fn worktree_removable(wt: &crate::worktree::Worktree) -> bool {
+    pub(in crate::workspace) fn lane_removable(wt: &crate::lane::Lane) -> bool {
         match &wt.kind {
-            daruda_store::project::WorktreeKind::Git { repo_root, .. } => wt.path != *repo_root,
-            daruda_store::project::WorktreeKind::Default => false,
+            daruda_store::project::LaneKind::Git { repo_root, .. } => wt.path != *repo_root,
+            daruda_store::project::LaneKind::Default => false,
         }
     }
 
     /// Validate that `target` is removable and resolve its (repo_root,
     /// path) for the shell-out. Pure — does not mutate state, so it's
     /// safe to call from tests or action handlers without side effects.
-    pub(in crate::workspace) fn validate_remove_worktree(
+    pub(in crate::workspace) fn validate_remove_lane(
         &self,
-        target: WorktreeRef,
+        target: LaneRef,
     ) -> Result<RemoveWorktreePlan, String> {
         let wt = self
-            .worktree_for(target)
-            .ok_or_else(|| "Worktree not found.".to_string())?;
-        if !Self::worktree_removable(wt) {
-            return Err("This worktree cannot be removed.".to_string());
+            .lane_for(target)
+            .ok_or_else(|| "Lane not found.".to_string())?;
+        if !Self::lane_removable(wt) {
+            return Err("This lane cannot be removed.".to_string());
         }
         let repo_root = match &wt.kind {
-            daruda_store::project::WorktreeKind::Git { repo_root, .. } => repo_root.clone(),
+            daruda_store::project::LaneKind::Git { repo_root, .. } => repo_root.clone(),
             _ => return Err("Not a git worktree.".to_string()),
         };
         Ok(RemoveWorktreePlan {
@@ -107,43 +107,43 @@ impl Workspace {
     }
 
     /// Post-git cleanup on the UI thread: switch away if active, then
-    /// drop the entry and its runtime. Invariant: the active worktree
-    /// is always survivable because `validate_remove_worktree` refuses
+    /// drop the entry and its runtime. Invariant: the active lane
+    /// is always survivable because `validate_remove_lane` refuses
     /// main/default kinds, so there's always at least one other entry
     /// in the project.
-    pub(in crate::workspace) fn finalize_remove_worktree(
+    pub(in crate::workspace) fn finalize_remove_lane(
         &mut self,
-        target: WorktreeRef,
+        target: LaneRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Capture the worktree path before removal so the per-worktree
+        // Capture the lane path before removal so the per-lane
         // entries in the `SkillsState` / `McpState` Globals can be
         // pruned — otherwise the BTreeMap grows unbounded across the
-        // session as worktrees come and go.
-        let removed_path = self.worktree_for(target).map(|w| w.path.clone());
+        // session as lanes come and go.
+        let removed_path = self.lane_for(target).map(|w| w.path.clone());
 
-        // Pick the fallback `WorktreeRef` to activate when the removal
-        // strips the currently active worktree. Prefer a sibling
-        // worktree in the same project (Project membership stays put),
+        // Pick the fallback `LaneRef` to activate when the removal
+        // strips the currently active lane. Prefer a sibling
+        // lane in the same project (Project membership stays put),
         // then fall back to *another* project's snap target so the
         // status bar / window title / pane runtime never wedge on a
         // dangling ref. Returning `None` here only happens in the
         // degenerate case where the workspace is about to be empty —
         // the section-header `[+]` is hidden for non-git workspaces so
-        // in practice main worktrees keep at least one per project.
-        let fallback_target: Option<WorktreeRef> = if self.active == target {
+        // in practice main lanes keep at least one per project.
+        let fallback_target: Option<LaneRef> = if self.active == target {
             let same_project = self
                 .projects
                 .iter()
                 .find(|p| p.id == target.project)
                 .and_then(|p| {
-                    p.worktrees
+                    p.lanes
                         .iter()
-                        .find(|w| w.id != target.worktree)
-                        .map(|w| WorktreeRef {
+                        .find(|w| w.id != target.lane)
+                        .map(|w| LaneRef {
                             project: target.project,
-                            worktree: w.id,
+                            lane: w.id,
                         })
                 });
             let cross_project = || {
@@ -160,7 +160,7 @@ impl Workspace {
             self.activate_worktree(fallback, window, cx);
         }
         self.main_area.inactive_worktree_runtimes.remove(&target);
-        // W-7 per-worktree state must be cleared too — otherwise the
+        // W-7 per-lane state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
         // drops the embedded `RecommendedWatcher`, which stops the
@@ -176,30 +176,30 @@ impl Workspace {
         self.git_collapsed_dirs.remove(&target);
         self.git_changes_cursor.remove(&target);
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
-            project.worktrees.retain(|w| w.id != target.worktree);
+            project.lanes.retain(|w| w.id != target.lane);
         }
         if let Some(path) = removed_path {
             use gpui::BorrowAppContext as _;
             cx.update_global::<crate::agent::skills::SkillsState, _>(|s, _| {
-                s.forget_worktree(&path);
+                s.forget_lane(&path);
             });
             cx.update_global::<crate::agent::mcp::McpState, _>(|s, _| {
-                s.forget_worktree(&path);
+                s.forget_lane(&path);
             });
-            // Drop the per-worktree slice from `SettingsStore` so its
+            // Drop the per-lane slice from `SettingsStore` so its
             // BTreeMap doesn't grow unbounded across the session
             // (CLAUDE.md §"GPUI shared-state convention — Cleanup
             // rule").
             cx.update_global::<crate::settings_store::SettingsStore, _>(|s, _| {
-                s.forget_worktree(&path);
+                s.forget_lane(&path);
             });
         }
         // The watcher's pair list is fixed at spawn time, so removing
-        // a worktree leaves a dead `~/.claude/projects/<encoded>/`
+        // a lane leaves a dead `~/.claude/projects/<encoded>/`
         // entry under FSEvents subscription — re-spawn so the lookup
-        // table matches the live worktree set.
+        // table matches the live lane set.
         self.refresh_jsonl_watcher(cx);
-        // Project skill scope is anchored to the active worktree's
+        // Project skill scope is anchored to the active lane's
         // root; restart the watcher so it tracks the new active path.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
@@ -207,32 +207,32 @@ impl Workspace {
         // refresh_* calls finish the mutation chain; the wrapper only needs
         // to schedule persist here.
         self.mutate_durable(cx, |_, _| {});
-        // Force a render even when no fallback fired — the worktree
+        // Force a render even when no fallback fired — the lane
         // list shrank by one and the dock would otherwise hold a row
-        // for the now-removed worktree until an unrelated render.
+        // for the now-removed lane until an unrelated render.
         // Same defensive notify shape `add_project` uses.
         cx.notify();
     }
 
     /// Resolve the active git repo_root from the active project's
-    /// worktree list. Returns `None` when the workspace isn't backed by
+    /// lane list. Returns `None` when the workspace isn't backed by
     /// a git repo. Used by callers (e.g. the `[+]` button) that need to
     /// construct a `CreateWorktreeModal` without traversing the
-    /// worktree list.
+    /// lane list.
     pub(in crate::workspace) fn git_repo_root(&self) -> Option<std::path::PathBuf> {
-        self.active_worktrees().iter().find_map(|w| match &w.kind {
-            daruda_store::project::WorktreeKind::Git { repo_root, .. } => Some(repo_root.clone()),
+        self.active_lanes().iter().find_map(|w| match &w.kind {
+            daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
             _ => None,
         })
     }
 
     /// Post-git UI-thread work: spawn a pane at the new checkout,
-    /// wrap it in a Tab / WorktreeRuntime, register the Worktree
+    /// wrap it in a Tab / LaneRuntime, register the Lane
     /// entry, and activate the newcomer. Errors here leave the freshly
     /// created git worktree orphaned on disk (the user can clean up
     /// via `git worktree prune`) and bubble the message back so the
     /// modal shows it.
-    pub(in crate::workspace) fn finalize_create_worktree(
+    pub(in crate::workspace) fn finalize_create_lane(
         &mut self,
         plan: CreateWorktreePlan,
         window: &mut Window,
@@ -261,17 +261,17 @@ impl Workspace {
         };
 
         let new_id = self.allocate_worktree_id();
-        let new_ref = WorktreeRef {
+        let new_ref = LaneRef {
             project: active_project_id,
-            worktree: new_id,
+            lane: new_id,
         };
-        let order = self.active_worktrees().len() as u32;
-        // A freshly-added linked worktree's toplevel is exactly
-        // `new_path` — `git worktree add` writes the per-worktree
+        let order = self.active_lanes().len() as u32;
+        // A freshly-added linked lane's toplevel is exactly
+        // `new_path` — `git worktree add` writes the per-lane
         // `.git` pointer file there. No anchoring happens at this
         // point either, so `path` and `worktree_root` start equal.
         let worktree_root = new_path.clone();
-        let mut wt = crate::worktree::Worktree::git(
+        let mut wt = crate::lane::Lane::git(
             new_id,
             new_path,
             Some(branch),
@@ -282,10 +282,10 @@ impl Workspace {
         wt.base_ref = base_ref;
         wt.description = description;
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == active_project_id) {
-            project.worktrees.push(wt);
+            project.lanes.push(wt);
         }
 
-        let runtime = WorktreeRuntime {
+        let runtime = LaneRuntime {
             tabs: vec![tab],
             panes: vec![pane],
             active_tab_index: 0,
@@ -298,7 +298,7 @@ impl Workspace {
         self.activate_worktree(new_ref, window, cx);
         // New cwd → new `~/.claude/projects/<encoded>/` to watch.
         self.refresh_jsonl_watcher(cx);
-        // New worktree root → new project-skills directory to watch.
+        // New lane root → new project-skills directory to watch.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
         // Returning the spawned pane's id lets task-driven callers
@@ -308,19 +308,19 @@ impl Workspace {
         Ok(pane_id)
     }
 
-    /// Monotonic worktree id allocator scoped to the active project.
-    /// Walks both the worktree list and the stashed inactive runtimes
+    /// Monotonic lane id allocator scoped to the active project.
+    /// Walks both the lane list and the stashed inactive runtimes
     /// so a phantom key from a crash mid-remove never collides with a
     /// fresh id.
-    fn allocate_worktree_id(&self) -> WorktreeId {
+    fn allocate_worktree_id(&self) -> LaneId {
         let project_id = self.active.project;
-        let max_list = self.active_worktrees().iter().map(|w| w.id).max();
+        let max_list = self.active_lanes().iter().map(|w| w.id).max();
         let max_map = self
             .main_area
             .inactive_worktree_runtimes
             .keys()
             .filter(|r| r.project == project_id)
-            .map(|r| r.worktree)
+            .map(|r| r.lane)
             .max();
         match (max_list, max_map) {
             (Some(a), Some(b)) => a.max(b) + 1,
@@ -330,43 +330,43 @@ impl Workspace {
         }
     }
 
-    /// Switch the visible worktree. The Workspace's `tabs` / `panes`
-    /// / focus fields represent the **active** worktree's runtime;
+    /// Switch the visible lane. The Workspace's `tabs` / `panes`
+    /// / focus fields represent the **active** lane's runtime;
     /// activating a different one swaps those fields with the target
-    /// worktree's stored runtime. If the target has never been
+    /// lane's stored runtime. If the target has never been
     /// populated (e.g. `bootstrap_from_project` loaded its metadata
     /// from `git worktree list` but no tabs were serialized), a fresh
-    /// pane is spawned at the worktree's path so the user never lands
+    /// pane is spawned at the lane's path so the user never lands
     /// on an empty viewport. PTY entities survive the swap because
     /// `_stdout_task` moves with the Pane rather than being cloned.
     pub(in crate::workspace) fn activate_worktree(
         &mut self,
-        target: WorktreeRef,
+        target: LaneRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.active == target {
-            // Same-worktree click is a no-op — the worktree is already
+            // Same-lane click is a no-op — the lane is already
             // active and its tabs (including any file viewer panes)
             // stay in place.
             return;
         }
-        if self.worktree_for(target).is_none() {
+        if self.lane_for(target).is_none() {
             return;
         }
-        // Trigger #5 — active worktree change. Both the previous and the
+        // Trigger #5 — active lane change. Both the previous and the
         // incoming visible lists become stale (selection moves with the
         // active id).
         let previous = self.active;
         self.invalidate_visible_files_cache(previous);
         self.invalidate_visible_files_cache(target);
-        // Clear keyboard cursor — it lived in the previous worktree's
+        // Clear keyboard cursor — it lived in the previous lane's
         // visible list.
         self.file_tree.files_selection = None;
 
         // 1. Freeze the currently active runtime into the inactive map.
         let current = self.active;
-        let frozen = WorktreeRuntime {
+        let frozen = LaneRuntime {
             tabs: std::mem::take(&mut self.main_area.tabs),
             panes: std::mem::take(&mut self.main_area.panes),
             active_tab_index: std::mem::take(&mut self.main_area.active_tab_index),
@@ -377,7 +377,7 @@ impl Workspace {
             .inactive_worktree_runtimes
             .insert(current, frozen);
 
-        // 2. Pull the target worktree's runtime into the live fields.
+        // 2. Pull the target lane's runtime into the live fields.
         let next = self
             .main_area
             .inactive_worktree_runtimes
@@ -389,25 +389,25 @@ impl Workspace {
         self.main_area.tab_history = next.tab_history;
         self.main_area.focused_pane_id = next.focused_pane_id;
         self.active = target;
-        // Update the project's last-active-worktree hint so clicking
+        // Update the project's last-active-lane hint so clicking
         // the project header in the left dock snaps to the same
-        // worktree the user just left.
+        // lane the user just left.
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
-            project.last_active_worktree_id = target.worktree;
+            project.last_active_lane_id = target.lane;
         }
-        // File viewer panes travel with their worktree's tab list via
-        // the `WorktreeRuntime` swap above, so each worktree retains
+        // File viewer panes travel with their lane's tab list via
+        // the `LaneRuntime` swap above, so each lane retains
         // its own open files across activations.
 
-        // 3. Lazy seed: a worktree loaded from `git worktree list` on
+        // 3. Lazy seed: a lane loaded from `git worktree list` on
         //    startup has metadata but no runtime tabs. First-time
-        //    activation spawns one pane rooted at the worktree path so
+        //    activation spawns one pane rooted at the lane path so
         //    the user lands in the right shell immediately. On PTY
         //    failure the error surfaces in the status bar and the
         //    viewport stays empty — still better than a silent black
         //    pane.
         if self.main_area.tabs.is_empty() {
-            let cwd = self.worktree_for(target).map(|w| w.path.clone());
+            let cwd = self.lane_for(target).map(|w| w.path.clone());
             match self.create_pane_with_cwd(cwd, window, cx) {
                 Ok(pane) => {
                     let pane_id = pane.id;
@@ -424,13 +424,13 @@ impl Workspace {
                     self.bump_activity(pane_id);
                 }
                 Err(e) => {
-                    self.report_pane_error("activate worktree", e, cx);
+                    self.report_pane_error("activate lane", e, cx);
                 }
             }
         }
 
         // 4. Refocus the active pane and request a resize — the
-        //    worktree may have been last seen at a different viewport.
+        //    lane may have been last seen at a different viewport.
         if self
             .main_area
             .panes
@@ -443,33 +443,33 @@ impl Workspace {
         // Any File panes that arrived in the live `panes` vec via the
         // runtime swap above may still have `Loading` content (if they
         // came in from a restored-but-never-active runtime); fire
-        // their loads now that the worktree is active.
+        // their loads now that the lane is active.
         self.load_pending_file_panes(cx);
         self.mutate_durable(cx, |_, _| {});
-        // 5. If the incoming worktree's tree was modified while
+        // 5. If the incoming lane's tree was modified while
         //    inactive, replay a single Bulk reload to catch up.
         self.replay_files_dirty(target, cx);
-        // Project skill scope follows the active worktree's path —
+        // Project skill scope follows the active lane's path —
         // re-spawn so the panel switches to the new repo's skills.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
-        // Commit button reflects the active worktree's staged count —
+        // Commit button reflects the active lane's staged count —
         // recompute now that `active` has flipped.
         self.sync_commit_buttons(cx);
         cx.notify();
     }
 
-    /// Move `from` immediately before `to` in the worktrees list of
+    /// Move `from` immediately before `to` in the lanes list of
     /// the project they share, renumbering `tab_order` for all
-    /// worktrees afterwards. Worktree DnD is intentionally scoped to a
+    /// lanes afterwards. Lane DnD is intentionally scoped to a
     /// single project — cross-project drops are rejected as a no-op so
-    /// a worktree never migrates between projects through the dock.
+    /// a lane never migrates between projects through the dock.
     /// Also no-ops when `from == to`, when the project is missing, or
     /// when either id is not present in that project.
     pub(in crate::workspace) fn reorder_worktree(
         &mut self,
-        from: WorktreeRef,
-        to: WorktreeRef,
+        from: LaneRef,
+        to: LaneRef,
         cx: &mut Context<Self>,
     ) {
         if from == to {
@@ -481,8 +481,8 @@ impl Workspace {
         let Some(project) = self.projects.iter_mut().find(|p| p.id == from.project) else {
             return;
         };
-        let from_idx = project.worktrees.iter().position(|w| w.id == from.worktree);
-        let to_idx = project.worktrees.iter().position(|w| w.id == to.worktree);
+        let from_idx = project.lanes.iter().position(|w| w.id == from.lane);
+        let to_idx = project.lanes.iter().position(|w| w.id == to.lane);
         let (Some(from_idx), Some(to_idx)) = (from_idx, to_idx) else {
             return;
         };
@@ -495,9 +495,9 @@ impl Workspace {
         // matches the standard list-DnD expectation that "drop X
         // onto Y's slot" makes X take Y's row regardless of drag
         // direction.
-        let item = project.worktrees.remove(from_idx);
-        project.worktrees.insert(to_idx, item);
-        for (i, w) in project.worktrees.iter_mut().enumerate() {
+        let item = project.lanes.remove(from_idx);
+        project.lanes.insert(to_idx, item);
+        for (i, w) in project.lanes.iter_mut().enumerate() {
             w.tab_order = i as u32;
         }
         self.mutate_durable(cx, |_, _| {});
@@ -505,18 +505,18 @@ impl Workspace {
     }
 
     /// Update the free-form description for the active project's
-    /// worktree `id`. `None` clears it, reverting the left dock
-    /// sublabel to the worktree path.
+    /// lane `id`. `None` clears it, reverting the left dock
+    /// sublabel to the lane path.
     pub(in crate::workspace) fn set_worktree_description(
         &mut self,
-        id: WorktreeId,
+        id: LaneId,
         description: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let Some(project) = self.active_project_mut() else {
             return;
         };
-        if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
+        if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
             wt.set_description(description);
             self.mutate_durable(cx, |_, _| {});
             cx.notify();
@@ -524,18 +524,18 @@ impl Workspace {
     }
 
     /// Update the user-visible display name for the active project's
-    /// worktree `id`. `None` clears it and reverts to the branch /
+    /// lane `id`. `None` clears it and reverts to the branch /
     /// path fallback.
     pub(in crate::workspace) fn set_worktree_name(
         &mut self,
-        id: WorktreeId,
+        id: LaneId,
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let Some(project) = self.active_project_mut() else {
             return;
         };
-        if let Some(wt) = project.worktrees.iter_mut().find(|w| w.id == id) {
+        if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
             wt.set_name(name);
             self.mutate_durable(cx, |_, _| {});
             cx.notify();

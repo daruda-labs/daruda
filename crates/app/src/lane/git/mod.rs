@@ -1,4 +1,4 @@
-//! Blocking wrappers around the `git` CLI for worktree operations.
+//! Blocking wrappers around the `git` CLI for lane operations.
 //!
 //! Synchronous on purpose — the UI layer invokes these from
 //! `cx.background_spawn` so the main thread stays free. Keeping this
@@ -12,7 +12,7 @@
 //!
 //! The status / diff / staging / commit / push family lives in
 //! [`status`]; this module retains the run-git plumbing, the repo
-//! probe, worktree lifecycle, and the merge sub-module.
+//! probe, lane lifecycle, and the merge sub-module.
 
 mod status;
 
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Worktree entry parsed from `git worktree list --porcelain`.
+/// Lane entry parsed from `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitWorktreeInfo {
     pub path: PathBuf,
@@ -47,7 +47,7 @@ pub enum GitError {
     /// `git` was killed because it ran past the configured deadline. The
     /// usual cause is a network operation (`push`, `fetch`, `pull`) on a
     /// stalled connection. Surfaces in the status bar so the user knows
-    /// the worktree isn't actually frozen.
+    /// the lane isn't actually frozen.
     Timeout(Duration),
 }
 
@@ -179,7 +179,7 @@ pub fn git_init(path: &Path) -> Result<(), GitError> {
 
 /// Cheap availability probe — runs `git --version`. Use this to
 /// decide whether to show the "Initialize Git Repo" button vs. hide
-/// the worktree UI entirely.
+/// the lane UI entirely.
 pub fn has_git() -> bool {
     Command::new("git")
         .arg("--version")
@@ -188,7 +188,7 @@ pub fn has_git() -> bool {
         .unwrap_or(false)
 }
 
-/// True when `path` is inside a git repository (any worktree counts).
+/// True when `path` is inside a git repository (any lane counts).
 pub fn is_git_repo(path: &Path) -> bool {
     run_git(path, ["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")
@@ -230,9 +230,9 @@ pub fn init(path: &Path) -> Result<(), GitError> {
 ///   (e.g. `"main"`, `"origin/main"`, a SHA). `None` falls through
 ///   to git's default (current HEAD when creating a new branch).
 ///
-/// `repo_root` must be the main repository (any existing worktree
+/// `repo_root` must be the main repository (any existing lane
 /// path works; git resolves the shared gitdir).
-pub fn add_worktree(
+pub fn add_lane(
     repo_root: &Path,
     new_path: &Path,
     new_branch: Option<&str>,
@@ -249,15 +249,15 @@ pub fn add_worktree(
         // not become the new branch's upstream — without `^{commit}`
         // git auto-tracks the remote ref, which then triggers
         // unintended `push` collisions when daruda later finalizes
-        // the worktree. Mirrors superset-desktop git.ts:457-519.
+        // the lane. Mirrors superset-desktop git.ts:457-519.
         args.push(format!("{b}^{{commit}}"));
     }
     run_git(repo_root, args)?;
 
     // `push.autoSetupRemote=true` makes the *first* `git push` from
-    // the new worktree auto-create the remote branch and set its
+    // the new lane auto-create the remote branch and set its
     // upstream — the user never has to type `-u origin <branch>`.
-    // Failure here is non-fatal: the worktree is already on disk.
+    // Failure here is non-fatal: the lane is already on disk.
     let _ = run_git(
         new_path,
         ["config", "--local", "push.autoSetupRemote", "true"],
@@ -266,14 +266,14 @@ pub fn add_worktree(
     Ok(())
 }
 
-/// `git worktree remove [--force] <path>`. The main worktree of a
+/// `git worktree remove [--force] <path>`. The main lane of a
 /// repo cannot be removed — git rejects that with a clear message
 /// and we pass the error through.
 ///
 /// Exit 128 with "is not a working tree" means the directory is already
 /// gone (manual deletion or a prior interrupted removal). Treat that as
 /// success so the UI can clean up the stale dock entry.
-pub fn remove_worktree(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
+pub fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
     if force {
         args.push("--force".into());
@@ -290,16 +290,16 @@ pub fn remove_worktree(repo_root: &Path, path: &Path, force: bool) -> Result<(),
 }
 
 /// `git branch -D <branch>` — force-delete a branch. Used by the
-/// "remove worktree + branch" flow: after `worktree remove` succeeds,
+/// "remove lane + branch" flow: after `lane remove` succeeds,
 /// the branch is no longer checked out anywhere, so deletion is safe
 /// (git still rejects deleting the currently-checked-out branch of
-/// the main worktree, surfacing as `GitError::Exit`).
+/// the main lane, surfacing as `GitError::Exit`).
 pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<(), GitError> {
     run_git(repo_root, ["branch", "-D", branch]).map(|_| ())
 }
 
 /// `git worktree list --porcelain`. Returns one entry per linked
-/// worktree (including the main one). The porcelain format is
+/// lane (including the main one). The porcelain format is
 /// stable: blank-line-separated records, each `key value` lines.
 /// Unknown keys are ignored so future git versions don't break us.
 pub fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError> {
@@ -313,7 +313,7 @@ pub fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError
 /// a single Option instead of threading three fallible probes.
 pub struct RepoProbe {
     pub repo_root: PathBuf,
-    pub worktrees: Vec<GitWorktreeInfo>,
+    pub lanes: Vec<GitWorktreeInfo>,
 }
 
 pub fn probe_repo(project_root: &Path) -> Option<RepoProbe> {
@@ -321,11 +321,8 @@ pub fn probe_repo(project_root: &Path) -> Option<RepoProbe> {
         return None;
     }
     let repo_root = repo_root(project_root)?;
-    let worktrees = list_worktrees(&repo_root).ok()?;
-    Some(RepoProbe {
-        repo_root,
-        worktrees,
-    })
+    let lanes = list_worktrees(&repo_root).ok()?;
+    Some(RepoProbe { repo_root, lanes })
 }
 
 fn parse_worktree_list(text: &str) -> Result<Vec<GitWorktreeInfo>, GitError> {
@@ -391,7 +388,7 @@ pub enum MergeOutcome {
     AlreadyUpToDate,
     /// Merge completed (fast-forward or new merge commit).
     Success,
-    /// One or more files have conflicts.  The target worktree is left in
+    /// One or more files have conflicts.  The target lane is left in
     /// mid-merge state so the user can resolve conflicts manually and commit.
     /// The caller may call `git_merge_abort` to cancel instead.
     Conflicts(Vec<String>),
@@ -399,7 +396,7 @@ pub enum MergeOutcome {
 
 /// `git merge --no-ff --no-edit <source_branch>` run from `target_path`.
 ///
-/// Executed in the *target* worktree directory so the merge lands on
+/// Executed in the *target* lane directory so the merge lands on
 /// the branch that is already checked out there — no `checkout` needed.
 /// `--no-ff` always creates a merge commit, preserving branch history even
 /// when a fast-forward would be possible.
@@ -469,7 +466,7 @@ pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome
 }
 
 /// `git merge --abort` — cancel an in-progress conflicted merge and
-/// restore the target worktree to its pre-merge state.
+/// restore the target lane to its pre-merge state.
 pub fn git_merge_abort(target_path: &Path) -> Result<(), GitError> {
     run_git(target_path, ["merge", "--abort"]).map(|_| ())
 }

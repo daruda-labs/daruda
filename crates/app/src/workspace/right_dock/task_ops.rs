@@ -144,7 +144,7 @@ impl Workspace {
     /// editable surface — that is driven by the workflow.
     ///
     /// `base_worktree_path = None` maps to "use the project's active
-    /// worktree at start_task time" (C-1 review note). Re-editing a
+    /// lane at start_task time" (C-1 review note). Re-editing a
     /// `Running` / `Done` task's base has no immediate effect — the
     /// field is consulted only when a Backlog task transitions to
     /// `Running` via `start_task`.
@@ -306,7 +306,7 @@ impl Workspace {
         }
     }
 
-    /// Permanent delete. The associated worktree (if any) is *not*
+    /// Permanent delete. The associated lane (if any) is *not*
     /// removed — the user takes care of that from the left dock so two
     /// destructive actions never share one click. (D-1)
     pub(in crate::workspace) fn delete_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
@@ -401,7 +401,7 @@ impl Workspace {
                 return;
             };
             format!(
-                "Delete task \"{}\"? The associated worktree (if any) is preserved.",
+                "Delete task \"{}\"? The associated lane (if any) is preserved.",
                 task.title
             )
         };

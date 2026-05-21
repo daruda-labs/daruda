@@ -119,7 +119,7 @@ impl ModalView for CommandHistoryModal {}
 
 impl Render for CommandHistoryModal {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // Modal frame sized to the worktree create/remove panel for
+        // Modal frame sized to the lane create/remove panel for
         // chrome consistency. Dialog provides the outer chrome (bg /
         // border / radius / padding); we cap the height so a long
         // history scrolls inside.

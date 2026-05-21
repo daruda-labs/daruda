@@ -62,10 +62,10 @@ impl Workspace {
         if index >= self.main_area.tabs.len() {
             return;
         }
-        // Last tab in the active worktree → close this window. Other
+        // Last tab in the active lane → close this window. Other
         // windows (and the app itself under `QuitMode::Default`) stay
         // alive; the user reopens projects via File > New Window /
-        // Open… / Open Recent. If the project had other worktrees
+        // Open… / Open Recent. If the project had other lanes
         // parked in `inactive_worktree_runtimes`, their PTYs drop
         // with the workspace entity when the window is removed —
         // that's fine for now, a future phase could offer a confirm.

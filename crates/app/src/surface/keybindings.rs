@@ -111,17 +111,17 @@ pub const SHORTCUT_RENAME_PROJECT: &str = "cmd-shift-r";
 pub const SHORTCUT_MOVE_PROJECT_TO_GROUP: &str = "cmd-shift-m";
 
 // ============================================================================
-// Worktrees
+// Lanes
 // ============================================================================
-pub const SHORTCUT_ACTIVATE_WORKTREE_1: &str = "cmd-ctrl-1";
-pub const SHORTCUT_ACTIVATE_WORKTREE_2: &str = "cmd-ctrl-2";
-pub const SHORTCUT_ACTIVATE_WORKTREE_3: &str = "cmd-ctrl-3";
-pub const SHORTCUT_ACTIVATE_WORKTREE_4: &str = "cmd-ctrl-4";
-pub const SHORTCUT_ACTIVATE_WORKTREE_5: &str = "cmd-ctrl-5";
-pub const SHORTCUT_ACTIVATE_WORKTREE_6: &str = "cmd-ctrl-6";
-pub const SHORTCUT_ACTIVATE_WORKTREE_7: &str = "cmd-ctrl-7";
-pub const SHORTCUT_ACTIVATE_WORKTREE_8: &str = "cmd-ctrl-8";
-pub const SHORTCUT_ACTIVATE_WORKTREE_9: &str = "cmd-ctrl-9";
+pub const SHORTCUT_ACTIVATE_LANE_1: &str = "cmd-ctrl-1";
+pub const SHORTCUT_ACTIVATE_LANE_2: &str = "cmd-ctrl-2";
+pub const SHORTCUT_ACTIVATE_LANE_3: &str = "cmd-ctrl-3";
+pub const SHORTCUT_ACTIVATE_LANE_4: &str = "cmd-ctrl-4";
+pub const SHORTCUT_ACTIVATE_LANE_5: &str = "cmd-ctrl-5";
+pub const SHORTCUT_ACTIVATE_LANE_6: &str = "cmd-ctrl-6";
+pub const SHORTCUT_ACTIVATE_LANE_7: &str = "cmd-ctrl-7";
+pub const SHORTCUT_ACTIVATE_LANE_8: &str = "cmd-ctrl-8";
+pub const SHORTCUT_ACTIVATE_LANE_9: &str = "cmd-ctrl-9";
 
 // ============================================================================
 // Files view

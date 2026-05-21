@@ -77,9 +77,9 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         uuid: project_uuid,
         root: project_root.clone(),
         name: Some("test_restore".to_string()),
-        worktrees: Vec::new(),
-        last_active_worktree_id: 0,
-        next_worktree_id: 0,
+        lanes: Vec::new(),
+        last_active_lane_id: 0,
+        next_lane_id: 0,
     };
 
     let mut project_overrides = BTreeMap::new();
@@ -100,7 +100,7 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         project_overrides,
         groups: Vec::new(),
         active_project: Some(project_uuid),
-        active_worktree: None,
+        active_lane: None,
         docks: DockStates {
             left_open: true,
             left_size: 321.0,

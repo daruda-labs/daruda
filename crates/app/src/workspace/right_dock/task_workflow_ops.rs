@@ -1,7 +1,7 @@
 //! Right-panel Tasks tab — R-14 lifecycle layer.
 //!
 //! Hosts the long-running task workflows: `start_task` (open the
-//! worktree → write the prompt file → dispatch `claude` into the
+//! lane → write the prompt file → dispatch `claude` into the
 //! new pane's PTY), `cancel_task`, `focus_task_worktree`,
 //! `reopen_task`, `retry_task`, plus the supporting Claude-Code
 //! session bookkeeping (`apply_task_session_changed`,
@@ -23,7 +23,7 @@ use gpui::{BorrowAppContext, Context, Window};
 use serde::Deserialize;
 
 use crate::workspace::Workspace;
-use crate::workspace::worktree_ops::CreateWorktreePlan;
+use crate::workspace::lane_ops::CreateWorktreePlan;
 
 /// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape (R-22).
 /// Claude Code includes more fields (`activeForm`, sometimes free-form
@@ -53,7 +53,7 @@ impl Workspace {
     /// Per-repo lock acquisition. Two concurrent `start_task` calls
     /// against the same repo race on `git worktree add`; we make the
     /// second one fail fast with a user-visible error rather than
-    /// risk a half-created worktree.
+    /// risk a half-created lane.
     fn acquire_repo_lock(&mut self, repo_root: &Path) -> bool {
         self.pending_worktree_creates
             .insert(repo_root.to_path_buf())
@@ -63,16 +63,16 @@ impl Workspace {
         self.pending_worktree_creates.remove(repo_root);
     }
 
-    /// Resolve the branch name we should base the new worktree on.
-    /// Looks the path up in the workspace's worktree list and returns
-    /// `worktree.branch.clone()` when it's a git worktree. `None`
+    /// Resolve the branch name we should base the new lane on.
+    /// Looks the path up in the workspace's lane list and returns
+    /// `lane.branch.clone()` when it's a git worktree. `None`
     /// falls through to git's "branch from current HEAD" default.
     fn branch_for_worktree_path(&self, path: &Path) -> Option<String> {
-        self.active_worktrees()
+        self.active_lanes()
             .iter()
             .find(|w| w.path == path)
             .and_then(|w| match &w.kind {
-                daruda_store::project::WorktreeKind::Git { branch, .. } => branch.clone(),
+                daruda_store::project::LaneKind::Git { branch, .. } => branch.clone(),
                 _ => None,
             })
     }
@@ -82,7 +82,7 @@ impl Workspace {
     /// pane isn't a terminal. Targeting by id — not by `focused_pane_id`
     /// — guarantees the bytes land in the pane the caller intends,
     /// which matters for task dispatch where focus may shift between
-    /// `finalize_create_worktree` and the actual write.
+    /// `finalize_create_lane` and the actual write.
     pub(in crate::workspace) fn send_to_pane(
         &self,
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
@@ -96,7 +96,7 @@ impl Workspace {
             .unwrap_or(false)
     }
 
-    /// Start a Backlog task: open the worktree (`git worktree add`),
+    /// Start a Backlog task: open the lane (`git worktree add`),
     /// then write the prompt file and dispatch the `claude` command
     /// into the new pane's PTY. Mirrors superset-desktop's
     /// `agent-command.ts` + `terminal-adapter.ts` flow but in a
@@ -125,10 +125,10 @@ impl Workspace {
             return;
         };
         if !self.acquire_repo_lock(&repo_root) {
-            let report = ErrorReport::new("Another worktree is already being created")
+            let report = ErrorReport::new("Another lane is already being created")
                 .severity(ErrorSeverity::Info)
                 .at(file!(), line!())
-                .dedup("worktree.create.busy")
+                .dedup("lane.create.busy")
                 .build();
             self.report_error(report, cx);
             return;
@@ -167,7 +167,7 @@ impl Workspace {
                     .spawn({
                         let plan = plan_clone.clone();
                         async move {
-                            crate::worktree::git::add_worktree(
+                            crate::lane::git::add_lane(
                                 &plan.repo_root,
                                 &plan.new_path,
                                 Some(&plan.branch),
@@ -184,7 +184,7 @@ impl Workspace {
                     };
                     workspace.update(app_cx, |ws, cx| {
                         ws.release_repo_lock(&plan.repo_root);
-                        // Lock is released *before* finalize_create_worktree
+                        // Lock is released *before* finalize_create_lane
                         // runs. If finalize fails the new git worktree is
                         // already on disk — daruda just doesn't know about
                         // it. The user can clean up via `git worktree prune`
@@ -193,21 +193,21 @@ impl Workspace {
                         // same repo isn't blocked by a half-created entry.
                         match result {
                             Err(msg) => {
-                                let report = ErrorReport::new("Worktree create failed")
+                                let report = ErrorReport::new("Lane create failed")
                                     .severity(ErrorSeverity::Error)
                                     .at(file!(), line!())
                                     .with_context("detail", msg)
-                                    .dedup("worktree.create")
+                                    .dedup("lane.create")
                                     .build();
                                 ws.report_error(report, cx);
                             }
-                            Ok(()) => match ws.finalize_create_worktree(plan.clone(), window, cx) {
+                            Ok(()) => match ws.finalize_create_lane(plan.clone(), window, cx) {
                                 Err(msg) => {
-                                    let report = ErrorReport::new("Worktree finalize failed")
+                                    let report = ErrorReport::new("Lane finalize failed")
                                         .severity(ErrorSeverity::Error)
                                         .at(file!(), line!())
                                         .with_context("detail", msg)
-                                        .dedup("worktree.create")
+                                        .dedup("lane.create")
                                         .build();
                                     ws.report_error(report, cx);
                                 }
@@ -238,14 +238,14 @@ impl Workspace {
             .detach();
     }
 
-    /// Write `<worktree>/.daruda/task-<branch>.md` and dispatch the
+    /// Write `<lane>/.daruda/task-<branch>.md` and dispatch the
     /// `claude --dangerously-skip-permissions "$(cat '...')"` command
     /// into the freshly-created pane. Marks the task `Running` on
     /// success, `Error` on prompt-file write failure.
     ///
     /// Takes `pane_id` rather than relying on `focused_pane_id` —
     /// `activate_worktree` does call `focus_pane` on the happy path,
-    /// but routing the command through the pane the worktree spawned
+    /// but routing the command through the pane the lane spawned
     /// is bug-resistant against any future change to focus handling.
     fn dispatch_claude_for_task(
         &mut self,
@@ -304,7 +304,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// User-initiated stop. Worktree is preserved (D-1).
+    /// User-initiated stop. Lane is preserved (D-1).
     pub(in crate::workspace) fn cancel_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
         let cleared_sessions = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
             if let Some(task) = g.get_mut(task_id)
@@ -329,8 +329,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Switch the active worktree to the one this task is running in.
-    /// Lazily transitions to `Error { "worktree gone" }` when the
+    /// Switch the active lane to the one this task is running in.
+    /// Lazily transitions to `Error { "lane gone" }` when the
     /// path no longer exists on disk (D-10), so a deleted-from-the-
     /// outside checkout doesn't dangle in `Running` forever.
     pub(in crate::workspace) fn focus_task_worktree(
@@ -354,7 +354,7 @@ impl Workspace {
                     let ids = std::mem::take(&mut t.session_ids);
                     t.state = daruda_store::tasks::TaskState::Error {
                         worktree_path: path_for_state,
-                        message: "worktree gone".into(),
+                        message: "lane gone".into(),
                     };
                     t.updated_at = Utc::now();
                     ids
@@ -371,22 +371,22 @@ impl Workspace {
         }
 
         let target_id = self
-            .active_worktrees()
+            .active_lanes()
             .iter()
             .find(|w| w.path == path)
             .map(|w| w.id);
         if let Some(id) = target_id {
-            let target = daruda_store::project::WorktreeRef {
+            let target = daruda_store::project::LaneRef {
                 project: self.active.project,
-                worktree: id,
+                lane: id,
             };
             self.activate_worktree(target, window, cx);
         }
     }
 
-    /// Move a terminal-state task back to `Backlog`. Worktree path is
+    /// Move a terminal-state task back to `Backlog`. Lane path is
     /// dropped from `Task::state`; user must press [Start] to spawn
-    /// a fresh worktree.
+    /// a fresh lane.
     pub(in crate::workspace) fn reopen_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
         let cleared = cx.update_global::<GlobalTasks, Vec<String>>(|g, _| {
             if let Some(task) = g.get_mut(task_id) {
@@ -434,7 +434,7 @@ impl Workspace {
     // R-15: Claude hook → task state mapping
     // ------------------------------------------------------------------
 
-    /// Attach `session_id` to every `Running` task whose worktree
+    /// Attach `session_id` to every `Running` task whose lane
     /// matches the hook's `cwd`. Idempotent — duplicate registrations
     /// are skipped so the same hook firing twice doesn't grow the
     /// `session_ids` vec without bound.

@@ -1,4 +1,4 @@
-//! Context menu items for a Project header (left-dock worktrees view,
+//! Context menu items for a Project header (left-dock lanes view,
 //! §5.1). Mirrors `group_menu::build_group_menu_items` — flat
 //! `Vec<ContextMenuItem>` ready for `Workspace::open_context_menu`.
 //!
@@ -7,14 +7,14 @@
 //! The active-project–scoped action handlers (`on_rename_active_project`,
 //! `on_move_active_project_to_group`, global `CloseProject`) are reused
 //! by first snapping the workspace focus to the right-clicked project
-//! (matches the §5.5 `project header click → last_active_worktree_id`
+//! (matches the §5.5 `project header click → last_active_lane_id`
 //! semantics — the menu just makes the snap explicit). "Open in New
 //! Window" routes straight to `Workspace::open_project_in_new_window`
 //! without snapping the focus — the user explicitly asked for a
 //! separate window, so the current workspace's active state stays
 //! untouched.
 
-use daruda_store::project::{ProjectId, WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::WeakEntity;
 
 use crate::surface::strings as s;
@@ -23,14 +23,14 @@ use crate::workspace::{MoveActiveProjectToGroup, RenameActiveProject, Workspace}
 
 pub(in crate::workspace) fn build_project_menu_items(
     project_id: ProjectId,
-    last_active_worktree_id: WorktreeId,
+    last_active_lane_id: LaneId,
     ws: WeakEntity<Workspace>,
 ) -> Vec<ContextMenuItem> {
     let mut items: Vec<ContextMenuItem> = Vec::new();
 
-    let snap_target = WorktreeRef {
+    let snap_target = LaneRef {
         project: project_id,
-        worktree: last_active_worktree_id,
+        lane: last_active_lane_id,
     };
 
     // -- Rename --

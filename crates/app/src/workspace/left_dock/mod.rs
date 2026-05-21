@@ -1,6 +1,6 @@
 //! Left-dock left-dock — view tab strip plus per-view renderers.
 //!
-//! The left dock hosts three swappable views (Worktrees / Git / Files)
+//! The left dock hosts three swappable views (Lanes / Git / Files)
 //! picked from `daruda_store::project::LeftDockView`. This module owns the
 //! header-mounted tab strip that switches between them; each view's
 //! body is rendered from `render.rs` by matching on `left_dock_view`.

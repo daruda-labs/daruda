@@ -1,17 +1,17 @@
 # daruda
 
-Run multiple AI agents in parallel — each in its own git worktree, branch, and build cache — from a single macOS terminal window. Macro buttons in the bottom dock let you send preset commands to any terminal with one click or a keyboard shortcut.
+Run multiple AI agents in parallel — each in its own `Lane` (a git worktree-backed workspace), branch, and build cache — from a single macOS terminal window. Macro buttons in the bottom dock let you send preset commands to any terminal with one click or a keyboard shortcut.
 
-**Worktree isolation is the core UX**: 1 worktree = 1 directory = 1 HEAD = 1 tab group = 1 Claude session.
+**Concept model**: `Workspace → N × Project (= git repo) → N × Lane`. A `Lane` is a worktree-like space — a checked-out branch (git worktree) or a plain directory — and is the unit a Claude session attaches to. Users see "Worktree" in the UI; "Lane" is the internal type.
 
-**Multi-project workspace**: one window holds N `Project`s (each opened repo root). Projects can be bundled into user-defined `Group`s in the left dock; ungrouped projects render at the same rank as groups. The active focus is a single `WorktreeRef { project, worktree }`, so cross-project state (`MainAreaContext` swap key, per-worktree caches) is keyed by ref rather than worktree id alone.
+**Multi-project workspace**: one window holds N `Project`s (each opened repo root). Projects can be bundled into user-defined `Group`s in the left dock; ungrouped projects render at the same rank as groups. The active focus is a single `LaneRef { project, lane }`, so cross-project state (`MainAreaContext` swap key, per-lane caches) is keyed by ref rather than lane id alone.
 
 ## Project layout
 
 ```
 daruda/
 ├── crates/
-│   ├── app/              # main app binary (workspace, agent, ui, worktree, surface)
+│   ├── app/              # main app binary (workspace, agent, ui, lane, surface)
 │   ├── daruda_config/    # config system (live reload)
 │   ├── daruda_store/     # persistence + observability (NDJSON log)
 │   ├── daruda_claude/    # Claude integration
@@ -214,6 +214,8 @@ Workspace
 | `ToastLayout` | `toast_layer: Entity<ToastLayer>` | `workspace/toast_layer/mod.rs` |
 | Project (runtime) | `crate::project::Project` | `crates/app/src/project/mod.rs` |
 | Group (runtime) | `daruda_store::project::SerializedGroup` (used directly — no separate runtime newtype) | `crates/daruda_store/src/project/` + `workspace/group_ops.rs` |
-| Active focus ref | `daruda_store::project::WorktreeRef { project, worktree }` | `daruda_store/src/project/`; per-worktree caches keyed by ref in `workspace/mod.rs` |
-| `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` | `workspace/left_dock/projects/rows.rs` |
+| Lane (runtime) | `crate::lane::Lane` (was `Worktree`) — UI label remains "Worktree" | `crates/app/src/lane/mod.rs` |
+| Lane (persisted) | `daruda_store::project::SerializedLane` + `LaneKind { Git { .. }, Default }` | `crates/daruda_store/src/project/lane.rs` |
+| Active focus ref | `daruda_store::project::LaneRef { project, lane }` — JSON keys remain `worktree` via `#[serde(rename = "worktree", alias = "lane")]` | `daruda_store/src/project/`; per-lane caches keyed by ref in `workspace/mod.rs` |
+| `ProjectsView` 2-level tree | `TopRow` enum dispatch + `group_header_row` / `project_header_row` / `worktree_row` (function name retained — UI affordance) | `workspace/left_dock/projects/rows.rs` |
 | Multi-project DnD | `DragPayload { Worktree | Project | Group }` + `dnd_ops.rs` reorder pool | `workspace/left_dock/projects/drag.rs`, `workspace/dnd_ops.rs` |

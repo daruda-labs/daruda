@@ -1,7 +1,7 @@
 //! Background file-tree operations + visible-row cache for the left dock
 //! Files view.
 //!
-//! `Workspace::ensure_file_tree` lazily creates the per-worktree
+//! `Workspace::ensure_file_tree` lazily creates the per-lane
 //! `FileTree` and kicks a root scan; `toggle_files_expand` flips the
 //! expanded set, and on `UnloadedDir → expanded` transitions kicks a
 //! `load_dir` task that comes back via `apply_dir_load_result`. All
@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::WorktreeRef;
+use daruda_store::project::LaneRef;
 use gpui::{Context, ScrollStrategy};
 
 use crate::files::gitignore::GitignoreSet;
@@ -44,10 +44,10 @@ pub(in crate::workspace) enum DirLoadSource {
 }
 
 // ----------------------------------------------------------------
-// Reload queue — per-worktree serial drain (single in-flight task)
+// Reload queue — per-lane serial drain (single in-flight task)
 // ----------------------------------------------------------------
 
-/// Queue of pending reloads for one worktree. Serialised so a burst of
+/// Queue of pending reloads for one lane. Serialised so a burst of
 /// watcher events does not spawn one fs task per affected directory.
 #[derive(Default)]
 pub(in crate::workspace) struct FilesReloadQueue {
@@ -84,10 +84,10 @@ enum ReloadTask {
 impl Workspace {
     pub(in crate::workspace) fn ensure_file_tree(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         cx: &mut Context<Self>,
     ) {
-        let Some(wt) = self.worktree_for(wt_ref) else {
+        let Some(wt) = self.lane_for(wt_ref) else {
             return;
         };
         let root = wt.path.clone();
@@ -116,7 +116,7 @@ impl Workspace {
             self.kick_dir_load(wt_ref, EntryId(0), root.clone(), cx);
         }
 
-        // Start a watcher the first time this worktree's tree is
+        // Start a watcher the first time this lane's tree is
         // touched. The watcher itself is GPUI-free; the polling task
         // belongs to Workspace and is created lazily on demand.
         if !self.file_tree.file_watchers.contains_key(&wt_ref) {
@@ -131,7 +131,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn toggle_files_expand(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         entry_id: EntryId,
         cx: &mut Context<Self>,
     ) {
@@ -168,7 +168,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn kick_dir_load(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         parent_id: EntryId,
         abs_path: PathBuf,
         cx: &mut Context<Self>,
@@ -188,7 +188,7 @@ impl Workspace {
     /// one is ready, so gitignore filtering never lapses during the build.
     pub(in crate::workspace) fn kick_gitignore_build(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         root: PathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -213,7 +213,7 @@ impl Workspace {
     /// watcher's `events_rx` once per tick.
     pub(in crate::workspace) fn spawn_files_watcher(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         root: PathBuf,
         cx: &mut Context<Self>,
     ) {
@@ -252,9 +252,9 @@ impl Workspace {
 
     /// Called once per polling tick. Drains every watcher's queue
     /// without blocking, dispatching each debounced event into the
-    /// per-worktree reload queue.
+    /// per-lane reload queue.
     pub(in crate::workspace) fn drain_files_watcher_events(&mut self, cx: &mut Context<Self>) {
-        let mut events: Vec<(WorktreeRef, DebouncedEvent)> = Vec::new();
+        let mut events: Vec<(LaneRef, DebouncedEvent)> = Vec::new();
         for (wt_ref, watcher) in &self.file_tree.file_watchers {
             while let Ok(ev) = watcher.events_rx.try_recv() {
                 events.push((*wt_ref, ev));
@@ -265,12 +265,12 @@ impl Workspace {
         }
     }
 
-    /// Enqueue one debounced event for `wt_ref`. Inactive worktrees
+    /// Enqueue one debounced event for `wt_ref`. Inactive lanes
     /// only mark `dirty = true`; active ones append to the reload
     /// queue and kick the drain task.
     pub(in crate::workspace) fn queue_files_event(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         ev: DebouncedEvent,
         cx: &mut Context<Self>,
     ) {
@@ -395,7 +395,7 @@ impl Workspace {
     /// task picks up the new entries on its next iteration).
     pub(in crate::workspace) fn kick_files_reload(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         cx: &mut Context<Self>,
     ) {
         let q = self
@@ -521,11 +521,11 @@ impl Workspace {
     }
 
     /// Replay the queued `dirty` flag for `wt_ref` (called on
-    /// activation). When the worktree was modified while inactive, a
+    /// activation). When the lane was modified while inactive, a
     /// single Bulk reload covers all changes.
     pub(in crate::workspace) fn replay_files_dirty(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         cx: &mut Context<Self>,
     ) {
         let dirty = self
@@ -554,21 +554,21 @@ impl Workspace {
         self.refresh_git_status(wt_ref, cx);
     }
 
-    /// Open `path` from the active worktree's tree in a new tab as a
+    /// Open `path` from the active lane's tree in a new tab as a
     /// `PaneContent::File` viewer (Raw mode by default; Markdown opens
-    /// in Preview). Same `(worktree, path)` re-clicked activates the
+    /// in Preview). Same `(lane, path)` re-clicked activates the
     /// existing tab instead of opening another viewer (close via
     /// Cmd+W). Delegates to `open_pane_file_view` so the loading +
     /// invalidation logic stays in one place.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         path: PathBuf,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
         self.open_pane_file_view(
-            wt_ref.worktree,
+            wt_ref.lane,
             path,
             /* staged = */ false,
             /* file_status = */ None,
@@ -580,7 +580,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn apply_dir_load_result(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         parent_id: EntryId,
         result: Result<Vec<LoadedEntry>, FileTreeError>,
         source: DirLoadSource,
@@ -610,7 +610,7 @@ impl Workspace {
                 // change event and the read. The fs watcher will send
                 // a parent-reload event next and the stale entry drops
                 // out naturally. Root NotFound is critical (the
-                // worktree itself is gone) — escalate to Error so the
+                // lane itself is gone) — escalate to Error so the
                 // user sees the toast.
                 let severity = if is_root {
                     ErrorSeverity::Error
@@ -652,7 +652,7 @@ impl Workspace {
 
     /// Drop the cached visible list for `wt_ref`. Trigger sites are
     /// enumerated in the module-level doc comment.
-    pub(in crate::workspace) fn invalidate_visible_files_cache(&mut self, wt_ref: WorktreeRef) {
+    pub(in crate::workspace) fn invalidate_visible_files_cache(&mut self, wt_ref: LaneRef) {
         self.file_tree.files_visible_cache.remove(&wt_ref);
     }
 
@@ -660,7 +660,7 @@ impl Workspace {
     /// rebuilding it from the live tree + git status if missing.
     pub(in crate::workspace) fn cached_or_rebuild_visible(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
     ) -> Arc<Vec<VisibleEntry>> {
         if let Some(cached) = self.file_tree.files_visible_cache.get(&wt_ref) {
             return cached.clone();
@@ -673,13 +673,13 @@ impl Workspace {
         arc
     }
 
-    fn build_visible_for(&self, wt_ref: WorktreeRef) -> Vec<VisibleEntry> {
+    fn build_visible_for(&self, wt_ref: LaneRef) -> Vec<VisibleEntry> {
         let Some(tree) = self.file_tree.file_trees.get(&wt_ref) else {
             return Vec::new();
         };
         let status_index = build_status_index(self.git_status_cache.get(&wt_ref));
-        // Keyboard cursor only counts on the active worktree; switching
-        // worktrees clears the cursor.
+        // Keyboard cursor only counts on the active lane; switching
+        // lanes clears the cursor.
         let keyboard_focus = if wt_ref == self.active {
             self.file_tree.files_selection
         } else {
@@ -721,7 +721,7 @@ impl Workspace {
     // ------------------------------------------------------------
 
     /// Move the keyboard cursor by `delta` rows (positive = down) in
-    /// the current visible list of the active worktree. Wraps to the
+    /// the current visible list of the active lane. Wraps to the
     /// first / last row at boundaries.
     pub(in crate::workspace) fn move_files_selection(
         &mut self,
@@ -832,7 +832,7 @@ impl Workspace {
         }
     }
 
-    /// Manual root re-scan for the active worktree. Used by both the
+    /// Manual root re-scan for the active lane. Used by both the
     /// dock's ⟳ button and the `FilesRefresh` action.
     pub(in crate::workspace) fn refresh_files_root(&mut self, cx: &mut Context<Self>) {
         let wt_ref = self.active_ref();
@@ -849,7 +849,7 @@ impl Workspace {
     /// dir falls through to the regular toggle.
     pub(in crate::workspace) fn collapse_files_subtree(
         &mut self,
-        wt_ref: WorktreeRef,
+        wt_ref: LaneRef,
         entry_id: EntryId,
         cx: &mut Context<Self>,
     ) {

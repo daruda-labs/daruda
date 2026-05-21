@@ -59,7 +59,7 @@ fn file_leaf_round_trip_preserves_viewer_state() {
         pane_id: 7,
         cwd: None,
         file: Some(SerializedFileContent {
-            worktree_id: 1,
+            lane_id: 1,
             path: PathBuf::from("src/main.rs"),
             staged: false,
             view_mode: SerializedFileViewMode::Raw,
@@ -150,63 +150,63 @@ fn split_direction_serde_round_trip() {
     assert_eq!(h2, SplitDirectionSerde::Horizontal);
 }
 
-// ---- Worktree data model ----
+// ---- Lane data model ----
 
 #[test]
 fn worktree_kind_default_round_trip() {
-    let k = WorktreeKind::Default;
+    let k = LaneKind::Default;
     let json = serde_json::to_string(&k).unwrap();
-    let back: WorktreeKind = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, WorktreeKind::Default);
+    let back: LaneKind = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, LaneKind::Default);
     assert!(!back.is_git());
 }
 
 #[test]
 fn worktree_kind_git_round_trip() {
-    let k = WorktreeKind::Git {
+    let k = LaneKind::Git {
         branch: Some("main".into()),
         repo_root: PathBuf::from("/tmp/repo"),
         worktree_root: PathBuf::from("/tmp/repo"),
     };
     let json = serde_json::to_string(&k).unwrap();
-    let back: WorktreeKind = serde_json::from_str(&json).unwrap();
+    let back: LaneKind = serde_json::from_str(&json).unwrap();
     assert_eq!(back, k);
     assert!(back.is_git());
 }
 
 #[test]
 fn worktree_kind_git_detached_head() {
-    let k = WorktreeKind::Git {
+    let k = LaneKind::Git {
         branch: None,
         repo_root: PathBuf::from("/tmp/repo"),
         worktree_root: PathBuf::from("/tmp/repo"),
     };
     let json = serde_json::to_string(&k).unwrap();
-    let back: WorktreeKind = serde_json::from_str(&json).unwrap();
+    let back: LaneKind = serde_json::from_str(&json).unwrap();
     assert_eq!(back, k);
 }
 
 #[test]
 fn serialized_worktree_default_for_path() {
-    let w = SerializedWorktree::default_for_path(0, PathBuf::from("/tmp/plain"));
+    let w = SerializedLane::default_for_path(0, PathBuf::from("/tmp/plain"));
     assert_eq!(w.id, 0);
-    assert_eq!(w.kind, WorktreeKind::Default);
+    assert_eq!(w.kind, LaneKind::Default);
     assert!(w.tabs.is_empty());
     assert!(!w.is_unread);
 }
 
 #[test]
 fn serialized_worktree_display_name_prefers_user_name() {
-    let mut w = SerializedWorktree::default_for_path(0, PathBuf::from("/tmp/scratch"));
+    let mut w = SerializedLane::default_for_path(0, PathBuf::from("/tmp/scratch"));
     w.name = Some("My Scratch".into());
     assert_eq!(w.display_name(), "My Scratch");
 }
 
 #[test]
 fn serialized_worktree_display_name_uses_branch_for_git() {
-    let w = SerializedWorktree {
+    let w = SerializedLane {
         id: 1,
-        kind: WorktreeKind::Git {
+        kind: LaneKind::Git {
             branch: Some("feat/sidebar".into()),
             repo_root: PathBuf::from("/tmp/repo"),
             worktree_root: PathBuf::from("/tmp/repo"),
@@ -226,9 +226,9 @@ fn serialized_worktree_display_name_uses_branch_for_git() {
 
 #[test]
 fn serialized_worktree_display_name_detached_head() {
-    let w = SerializedWorktree {
+    let w = SerializedLane {
         id: 1,
-        kind: WorktreeKind::Git {
+        kind: LaneKind::Git {
             branch: None,
             repo_root: PathBuf::from("/tmp/repo"),
             worktree_root: PathBuf::from("/tmp/repo"),
@@ -248,7 +248,7 @@ fn serialized_worktree_display_name_detached_head() {
 
 #[test]
 fn serialized_worktree_display_name_uses_basename_for_default() {
-    let w = SerializedWorktree::default_for_path(0, PathBuf::from("/Users/alice/scratch"));
+    let w = SerializedLane::default_for_path(0, PathBuf::from("/Users/alice/scratch"));
     assert_eq!(w.display_name(), "scratch");
 }
 
@@ -268,38 +268,38 @@ fn serialized_worktree_loads_legacy_json_with_old_field_names() {
         "tabs": [],
         "active_tab_index": 0
     }"#;
-    let w: SerializedWorktree = serde_json::from_str(json).unwrap();
+    let w: SerializedLane = serde_json::from_str(json).unwrap();
     assert!(w.base_ref.is_none());
     assert!(w.description.is_none());
 }
 
 #[test]
 fn serialized_worktree_round_trips_base_ref_and_description() {
-    let mut w = SerializedWorktree::default_for_path(0, PathBuf::from("/tmp/scratch"));
+    let mut w = SerializedLane::default_for_path(0, PathBuf::from("/tmp/scratch"));
     w.base_ref = Some("origin/main".into());
     w.description = Some("PR #123 review".into());
     let json = serde_json::to_string(&w).unwrap();
-    let back: SerializedWorktree = serde_json::from_str(&json).unwrap();
+    let back: SerializedLane = serde_json::from_str(&json).unwrap();
     assert_eq!(back.base_ref.as_deref(), Some("origin/main"));
     assert_eq!(back.description.as_deref(), Some("PR #123 review"));
 }
 
 #[test]
 fn worktree_status_defaults_to_idle() {
-    assert_eq!(WorktreeStatus::default(), WorktreeStatus::Idle);
+    assert_eq!(LaneStatus::default(), LaneStatus::Idle);
 }
 
 // ---- Dock / right-panel / usage view enums ----
 
 #[test]
 fn dock_view_default_is_worktrees() {
-    assert_eq!(LeftDockView::default(), LeftDockView::Worktrees);
+    assert_eq!(LeftDockView::default(), LeftDockView::Lanes);
 }
 
 #[test]
 fn dock_view_round_trips_as_snake_case() {
     for (v, expect) in [
-        (LeftDockView::Worktrees, "\"worktrees\""),
+        (LeftDockView::Lanes, "\"worktrees\""),
         (LeftDockView::GitChanges, "\"git_changes\""),
         (LeftDockView::Files, "\"files\""),
     ] {
@@ -308,6 +308,8 @@ fn dock_view_round_trips_as_snake_case() {
         let back: LeftDockView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, v);
     }
+    let legacy: LeftDockView = serde_json::from_str("\"lanes\"").unwrap();
+    assert_eq!(legacy, LeftDockView::Lanes);
 }
 
 #[test]
@@ -439,13 +441,13 @@ fn serialized_tab_user_label_none_is_skipped_in_json() {
     assert!(!json.contains("user_label"));
 }
 
-// ---- WorktreeRef / WindowOpenPolicy ----
+// ---- LaneRef / WindowOpenPolicy ----
 
 #[test]
 fn worktree_ref_default_is_zero_zero() {
-    let r = WorktreeRef::default();
+    let r = LaneRef::default();
     assert_eq!(r.project, 0);
-    assert_eq!(r.worktree, 0);
+    assert_eq!(r.lane, 0);
 }
 
 #[test]
@@ -475,9 +477,9 @@ mod new_schema_fixtures {
             uuid: ProjectUuid::new(),
             root: PathBuf::from("/Users/test/repo"),
             name: Some("repo".into()),
-            worktrees: vec![],
-            last_active_worktree_id: Default::default(),
-            next_worktree_id: Default::default(),
+            lanes: vec![],
+            last_active_lane_id: Default::default(),
+            next_lane_id: Default::default(),
         }
     }
 
@@ -489,7 +491,7 @@ mod new_schema_fixtures {
             project_overrides: BTreeMap::from([(project, ProjectOverride::default())]),
             groups: vec![],
             active_project: Some(project),
-            active_worktree: Some(Default::default()),
+            active_lane: Some(Default::default()),
             docks: DockStates::default(),
             window: WindowState {
                 x: 0.0,

@@ -22,10 +22,10 @@
   "sidebar_view_tab_accent":  "#3a8bc4",
   "sidebar_view_tab_hover_bg":"#e8e8e8",
 
-  "worktree_row_hover_bg":    "#ececec",
-  "worktree_accent_active":   "#3a8bc4",
-  "worktree_unread":          "#d49a3a",
-  "worktree_drop_target_bg":  "#5a8fbf59",
+  "lane_row_hover_bg":    "#ececec",
+  "lane_accent_active":   "#3a8bc4",
+  "lane_unread":          "#d49a3a",
+  "lane_drop_target_bg":  "#5a8fbf59",
 
   "claude_banner_bg":         "#f0f4fa",
   "claude_banner_border":     "#c8d8ea",

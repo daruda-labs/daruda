@@ -1,5 +1,5 @@
 //! Branch-name preflight filter — duplicates the implementation in
-//! `app/src/workspace/worktree_ops.rs::sanitize_branch_name` so this
+//! `app/src/workspace/lane_ops.rs::sanitize_branch_name` so this
 //! GPUI-free crate stays decoupled from the app crate. The two
 //! definitions must stay byte-identical; `tests::sanitize_*` exercises
 //! the same matrix the app side does.

@@ -26,7 +26,7 @@ fn teardown(path: &Path) {
 }
 
 fn commit_initial(repo: &Path) {
-    // Ensure we have an initial commit so `worktree add` can create
+    // Ensure we have an initial commit so `lane add` can create
     // checkouts — with no commits `add` refuses.
     run_git(repo, ["config", "user.email", "daruda@test"]).unwrap();
     run_git(repo, ["config", "user.name", "daruda"]).unwrap();
@@ -346,7 +346,7 @@ fn add_and_list_worktrees_round_trip() {
     commit_initial(&dir);
 
     let wt_path = dir.join("wt-feature");
-    add_worktree(&dir, &wt_path, Some("feat/xyz"), None).unwrap();
+    add_lane(&dir, &wt_path, Some("feat/xyz"), None).unwrap();
 
     let listed = list_worktrees(&dir).unwrap();
     assert_eq!(listed.len(), 2);
@@ -365,10 +365,10 @@ fn remove_worktree_deletes_entry() {
     commit_initial(&dir);
 
     let wt_path = dir.join("wt-remove");
-    add_worktree(&dir, &wt_path, Some("scratch"), None).unwrap();
+    add_lane(&dir, &wt_path, Some("scratch"), None).unwrap();
     assert_eq!(list_worktrees(&dir).unwrap().len(), 2);
 
-    remove_worktree(&dir, &wt_path, false).unwrap();
+    remove_lane(&dir, &wt_path, false).unwrap();
     let listed = list_worktrees(&dir).unwrap();
     assert_eq!(listed.len(), 1);
     assert!(listed.iter().all(|w| w.path != wt_path));
@@ -385,12 +385,12 @@ fn add_worktree_with_existing_branch_fails_cleanly() {
     commit_initial(&dir);
 
     let first = dir.join("wt-first");
-    add_worktree(&dir, &first, Some("dup-branch"), None).unwrap();
+    add_lane(&dir, &first, Some("dup-branch"), None).unwrap();
 
     // Re-using `-b dup-branch` must fail — ensures GitError::Exit
     // carries a useful message.
     let second = dir.join("wt-second");
-    let err = add_worktree(&dir, &second, Some("dup-branch"), None).unwrap_err();
+    let err = add_lane(&dir, &second, Some("dup-branch"), None).unwrap_err();
     match err {
         GitError::Exit { stderr, .. } => {
             assert!(!stderr.is_empty());
@@ -409,12 +409,12 @@ fn delete_branch_after_worktree_removal() {
     init(&dir).unwrap();
     commit_initial(&dir);
 
-    // Create a worktree (creates the branch as a side effect),
-    // then remove the worktree so the branch is no longer checked
+    // Create a lane (creates the branch as a side effect),
+    // then remove the lane so the branch is no longer checked
     // out anywhere — the modal flow does this same sequence.
     let wt = dir.join("wt-temp");
-    add_worktree(&dir, &wt, Some("temp/work"), None).unwrap();
-    remove_worktree(&dir, &wt, false).unwrap();
+    add_lane(&dir, &wt, Some("temp/work"), None).unwrap();
+    remove_lane(&dir, &wt, false).unwrap();
 
     // Branch still exists post-remove (git keeps it).
     let pre = std::process::Command::new("git")
@@ -530,7 +530,7 @@ fn git_restore_staged_unstages_file() {
 }
 
 /// New W-11 affordance: passing `base = Some(ref)` makes the new
-/// worktree branch from that ref instead of the current HEAD.
+/// lane branch from that ref instead of the current HEAD.
 /// We verify the resulting checkout is at the named branch's tip.
 #[test]
 fn git_merge_fast_forward() {
@@ -543,7 +543,7 @@ fn git_merge_fast_forward() {
 
     // Create feature branch with one commit ahead of main.
     let feat = dir.join("wt-feat");
-    add_worktree(&dir, &feat, Some("feat/add"), None).unwrap();
+    add_lane(&dir, &feat, Some("feat/add"), None).unwrap();
     run_git(&dir, ["config", "user.email", "daruda@test"]).unwrap();
     run_git(&dir, ["config", "user.name", "daruda"]).unwrap();
     std::fs::write(feat.join("feature.txt"), "new").unwrap();
@@ -552,7 +552,7 @@ fn git_merge_fast_forward() {
     run_git(&feat, ["add", "feature.txt"]).unwrap();
     run_git(&feat, ["commit", "-m", "add feature"]).unwrap();
 
-    // Merge feat/add into main (main worktree at `dir`).
+    // Merge feat/add into main (main lane at `dir`).
     let outcome = git_merge(&dir, "feat/add").unwrap();
     assert!(
         matches!(outcome, MergeOutcome::Success),
@@ -597,7 +597,7 @@ fn git_merge_abort_restores_clean_state() {
 
     // Create a branch that also modifies the same file.
     let feat = dir.join("wt-conflict");
-    add_worktree(&dir, &feat, Some("feat/conflict"), None).unwrap();
+    add_lane(&dir, &feat, Some("feat/conflict"), None).unwrap();
     run_git(&feat, ["config", "user.email", "daruda@test"]).unwrap();
     run_git(&feat, ["config", "user.name", "daruda"]).unwrap();
     std::fs::write(feat.join("conflict.txt"), "feature content").unwrap();
@@ -647,10 +647,10 @@ fn add_worktree_with_explicit_base_ref() {
         .args(["commit", "--allow-empty", "-m", "advance-main"])
         .output();
 
-    // Build the worktree with explicit base = "side". The new
+    // Build the lane with explicit base = "side". The new
     // branch must point at "side"'s commit, not the current HEAD.
     let wt_path = dir.join("wt-from-side");
-    add_worktree(&dir, &wt_path, Some("feat/from-side"), Some("side")).unwrap();
+    add_lane(&dir, &wt_path, Some("feat/from-side"), Some("side")).unwrap();
 
     let side_sha = std::process::Command::new("git")
         .current_dir(&dir)
@@ -664,7 +664,7 @@ fn add_worktree_with_explicit_base_ref() {
         .output()
         .unwrap()
         .stdout;
-    assert_eq!(side_sha, wt_sha, "worktree must inherit base ref's commit");
+    assert_eq!(side_sha, wt_sha, "lane must inherit base ref's commit");
     teardown(&dir);
 }
 

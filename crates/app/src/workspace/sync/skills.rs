@@ -50,8 +50,8 @@ pub(in crate::workspace) fn spawn(
 impl Workspace {
     /// Apply one debounced [`SkillsEvent`] from the watcher.
     ///
-    /// The event carries only the scope; the worktree path is taken
-    /// from *this* workspace's active worktree at fire time so the
+    /// The event carries only the scope; the lane path is taken
+    /// from *this* workspace's active lane at fire time so the
     /// pump never scans against a stale `project_root`. The result
     /// lands in the `SkillsState` Global, where every other open
     /// Workspace picks it up through `observe_global`.
@@ -61,24 +61,24 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let SkillsEvent::Reloaded(scope) = event;
-        let worktree = self.active_worktree_root();
+        let lane = self.active_worktree_root();
         let personal = scan::skills_personal_dir();
         cx.update_global::<SkillsState, _>(|state, _| {
-            state.reload_scope(scope, worktree.as_deref(), &personal);
+            state.reload_scope(scope, lane.as_deref(), &personal);
         });
         cx.notify();
     }
 
-    /// Project-skills root for the active worktree. `None` when the
-    /// workspace has no active worktree (welcome window).
+    /// Project-skills root for the active lane. `None` when the
+    /// workspace has no active lane (welcome window).
     pub(in crate::workspace) fn active_worktree_root(&self) -> Option<PathBuf> {
-        self.active_worktree().map(|wt| wt.path.clone())
+        self.active_lane().map(|wt| wt.path.clone())
     }
 
-    /// (Re)spawn the Skills watcher with the current worktree's project
-    /// root. Call from initial construction, worktree create / remove,
-    /// and worktree activation. Synchronously refreshes the Global so
-    /// the panel reflects the new worktree before the watcher's first
+    /// (Re)spawn the Skills watcher with the current lane's project
+    /// root. Call from initial construction, lane create / remove,
+    /// and lane activation. Synchronously refreshes the Global so
+    /// the panel reflects the new lane before the watcher's first
     /// debounced fire arrives.
     pub fn refresh_skills_watcher(&mut self, cx: &mut Context<Self>) {
         // Drop the previous watcher + pump first so the old FSEvent

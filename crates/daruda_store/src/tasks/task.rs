@@ -100,7 +100,7 @@ pub enum TaskState {
         worktree_path: PathBuf,
         message: String,
     },
-    /// User-initiated stop. Worktree is preserved so the user can
+    /// User-initiated stop. Lane is preserved so the user can
     /// inspect / resume manually.
     Cancelled {
         worktree_path: PathBuf,
@@ -131,7 +131,7 @@ fn default_auto_execute() -> bool {
 }
 
 /// One row in the Tasks tab. `branch_name` is derived once at creation
-/// time and stays stable across Reopen / Retry so the worktree path
+/// time and stays stable across Reopen / Retry so the lane path
 /// remains predictable for the user.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
@@ -140,7 +140,7 @@ pub struct Task {
     pub prompt: String,
     pub state: TaskState,
 
-    /// Claude session IDs currently attached to this task's worktree.
+    /// Claude session IDs currently attached to this task's lane.
     #[serde(default)]
     pub session_ids: Vec<String>,
 
@@ -153,7 +153,7 @@ pub struct Task {
     #[serde(default)]
     pub notes: String,
 
-    /// Worktree to branch from. `None` = the active worktree at Start
+    /// Lane to branch from. `None` = the active lane at Start
     /// time (resolved by the caller).
     #[serde(default)]
     pub base_worktree_path: Option<PathBuf>,

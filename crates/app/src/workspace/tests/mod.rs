@@ -13,6 +13,7 @@ mod palette_agent;
 // through `save_state` / `restore_state`; with the legacy module gone
 // the whole file no longer compiles. Gating the entire module is the
 // lightest-touch fix per Task 10's test policy.
+mod lanes;
 #[cfg(any())]
 mod persistence;
 mod projects;
@@ -23,7 +24,6 @@ mod snapshot_for_disk;
 mod splits;
 mod task_edit_tab_cycle;
 mod tasks;
-mod worktrees;
 
 use super::*;
 use gpui::{AppContext, TestAppContext};

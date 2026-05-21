@@ -1,6 +1,6 @@
 //! MCP filesystem watcher — recursive `notify` subscriptions on the
 //! parent directories of `~/.claude/settings.json` (personal scope)
-//! and `<worktree>/.mcp.json` (project scope).
+//! and `<lane>/.mcp.json` (project scope).
 //!
 //! Mirrors `hooks::skills_watcher`'s 2-thread layout:
 //! 1. **FSEvent thread** — owns the `notify::Watcher`, blocks on the
@@ -39,8 +39,8 @@ pub struct McpWatcherHandle {
 
 /// Spawn the watcher.
 ///
-/// `project_path` is the active worktree's `.mcp.json`. `None` when no
-/// worktree is active (welcome-style window) — only the personal scope
+/// `project_path` is the active lane's `.mcp.json`. `None` when no
+/// lane is active (welcome-style window) — only the personal scope
 /// then has a subscription.
 ///
 /// Returns `(events, handle)`: the pump task takes ownership of
@@ -188,7 +188,7 @@ fn canonicalize_or_self(path: &Path) -> PathBuf {
 /// personal anchor walks up to `~`. The watcher then receives events
 /// for every file change in `~`, but the per-event `path == match`
 /// filter accepts only the exact target path, so noise is rejected.
-/// `refresh_mcp_watcher` is called on every worktree swap — once a
+/// `refresh_mcp_watcher` is called on every lane swap — once a
 /// save has created `~/.claude/settings.json`, the next refresh
 /// re-anchors the watcher onto the now-existing parent directory.
 fn nearest_existing_ancestor_for_file(target: &Path, max_ascend: usize) -> Option<PathBuf> {

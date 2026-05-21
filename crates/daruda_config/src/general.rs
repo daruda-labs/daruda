@@ -41,8 +41,7 @@ mod tests {
     fn deserialize_explicit_language() {
         let toml = "[general]\nlanguage = \"ko\"\n";
         let cfg: toml::Value = toml::from_str(toml).unwrap();
-        let general: GeneralConfig =
-            cfg["general"].clone().try_into().unwrap();
+        let general: GeneralConfig = cfg["general"].clone().try_into().unwrap();
         assert_eq!(general.language, "ko");
     }
 

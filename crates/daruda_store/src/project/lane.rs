@@ -1,18 +1,18 @@
-//! Worktree — a git worktree (or a default stand-in for non-git
+//! Lane — a git worktree (or a default stand-in for non-git
 //! folders) plus its persisted tab/pane layout and metadata.
 //!
 //! GPUI-free: only persistable fields live here. The runtime form
 //! (with live `TerminalView` entities, PTY handles, agent tasks, etc.)
 //! is assembled in the `app` crate and wraps this struct as
-//! `worktree.serialized`.
+//! `lane.serialized`.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::SerializedTab;
 
-/// Stable identifier for a worktree within a project.
-pub type WorktreeId = u64;
+/// Stable identifier for a lane within a project.
+pub type LaneId = u64;
 
 /// Which view the left dock is currently showing. Persisted so the app
 /// restores the user's last-used view on restart.
@@ -20,7 +20,8 @@ pub type WorktreeId = u64;
 #[serde(rename_all = "snake_case")]
 pub enum LeftDockView {
     #[default]
-    Worktrees,
+    #[serde(rename = "worktrees", alias = "lanes")]
+    Lanes,
     GitChanges,
     Files,
 }
@@ -128,31 +129,31 @@ impl UsageWindow {
 /// and must be unique per project.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum WorktreeKind {
+pub enum LaneKind {
     Git {
         /// `None` = detached HEAD.
         branch: Option<String>,
         /// Absolute path to the **shared** main repository top — the
         /// directory holding the common `.git/` for the whole repo.
-        /// Same value across every worktree of the repo. Use this as
-        /// cwd for worktree-management ops (`git worktree add/remove`,
+        /// Same value across every lane of the repo. Use this as
+        /// cwd for lane-management ops (`git worktree add/remove`,
         /// `git branch -D`) where git resolves the shared gitdir from
         /// any path inside the repo. Do **not** use it as cwd for
-        /// per-worktree ops (`git add`, `git restore`) — those need
+        /// per-lane ops (`git add`, `git restore`) — those need
         /// [`worktree_root`].
         repo_root: PathBuf,
-        /// Absolute path to **this** worktree's filesystem toplevel —
-        /// the directory holding the per-worktree `.git` entry
-        /// (regular `.git/` for the main worktree, a `.git` pointer
-        /// file for linked worktrees). Per-worktree, immutable after
+        /// Absolute path to **this** lane's filesystem toplevel —
+        /// the directory holding the per-lane `.git` entry
+        /// (regular `.git/` for the main lane, a `.git` pointer
+        /// file for linked lanes). Per-lane, immutable after
         /// the initial probe. Use this as cwd for every git CLI that
-        /// targets a specific worktree's index: `git status`,
+        /// targets a specific lane's index: `git status`,
         /// `git add`, `git restore --staged`, `git diff`. Porcelain
         /// paths returned by `git status` are relative to this path,
         /// so subsequent `git add <path>` resolves correctly only
         /// when cwd matches.
         ///
-        /// Distinct from `Worktree.path` because the latter is
+        /// Distinct from `Lane.path` because the latter is
         /// anchored to a sub-directory when the user opens one
         /// (terminal-cwd convenience); `worktree_root` always stays
         /// at the actual git toplevel.
@@ -162,8 +163,8 @@ pub enum WorktreeKind {
     Default,
 }
 
-impl WorktreeKind {
-    /// `true` when this worktree is backed by git (any branch state).
+impl LaneKind {
+    /// `true` when this lane is backed by git (any branch state).
     pub fn is_git(&self) -> bool {
         matches!(self, Self::Git { .. })
     }
@@ -173,20 +174,20 @@ impl WorktreeKind {
 /// restore; the runtime recomputes `Running` / `Error` from live PTY
 /// and agent signals.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum WorktreeStatus {
+pub enum LaneStatus {
     #[default]
     Idle,
     Running,
     Error,
 }
 
-/// On-disk representation of a worktree. Each worktree owns its own
+/// On-disk representation of a lane. Each lane owns its own
 /// tab list and active-tab index; a `ProjectState` is a collection of
-/// these worktrees plus shared workspace chrome state.
+/// these lanes plus shared workspace chrome state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SerializedWorktree {
-    pub id: WorktreeId,
-    pub kind: WorktreeKind,
+pub struct SerializedLane {
+    pub id: LaneId,
+    pub kind: LaneKind,
     pub path: PathBuf,
     #[serde(default, alias = "label")]
     pub name: Option<String>,
@@ -201,27 +202,27 @@ pub struct SerializedWorktree {
     pub tabs: Vec<SerializedTab>,
     #[serde(default)]
     pub active_tab_index: usize,
-    /// Ref the worktree was branched from (e.g. `main`,
+    /// Ref the lane was branched from (e.g. `main`,
     /// `origin/main`). `None` means the user accepted the default
     /// (current HEAD at creation time). Captured so the user can
-    /// answer "what is this worktree based on?" later.
+    /// answer "what is this lane based on?" later.
     #[serde(default)]
     pub base_ref: Option<String>,
     /// Free-form description set at creation time (e.g.
     /// "PR #123 review", "feat/sidebar TextInput IME"). Surfaced as
-    /// the worktree row sublabel in the left dock so an idle worktree
+    /// the lane row sublabel in the left dock so an idle lane
     /// from last week is still self-describing.
     #[serde(default, alias = "task")]
     pub description: Option<String>,
 }
 
-impl SerializedWorktree {
-    /// Default worktree for a non-git path. Caller supplies a unique
+impl SerializedLane {
+    /// Default lane for a non-git path. Caller supplies a unique
     /// `id` (typically `0` since only one default exists per project).
-    pub fn default_for_path(id: WorktreeId, path: PathBuf) -> Self {
+    pub fn default_for_path(id: LaneId, path: PathBuf) -> Self {
         Self {
             id,
-            kind: WorktreeKind::Default,
+            kind: LaneKind::Default,
             path,
             name: None,
             tab_order: 0,
@@ -241,11 +242,11 @@ impl SerializedWorktree {
             return name.to_string();
         }
         match &self.kind {
-            WorktreeKind::Git {
+            LaneKind::Git {
                 branch: Some(b), ..
             } => b.clone(),
-            WorktreeKind::Git { branch: None, .. } => "(detached)".to_string(),
-            WorktreeKind::Default => self
+            LaneKind::Git { branch: None, .. } => "(detached)".to_string(),
+            LaneKind::Default => self
                 .path
                 .file_name()
                 .and_then(|n| n.to_str())

@@ -33,7 +33,7 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     /// Run `f` then schedule a persist. Use for any mutation that
-    /// changes persisted workspace state (projects, groups, worktrees,
+    /// changes persisted workspace state (projects, groups, lanes,
     /// tabs, panes, dock geometry, window title, claude session
     /// bindings).
     pub(in crate::workspace) fn mutate_durable<F, R>(&mut self, cx: &mut Context<Self>, f: F) -> R

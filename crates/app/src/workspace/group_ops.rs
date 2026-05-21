@@ -14,9 +14,9 @@
 //!   (`project_palette_ops::on_new_group`,
 //!   `on_move_active_project_to_group`).
 //! - `toggle_group_collapse` — left-dock group accordion header
-//!   (`worktrees/rows.rs`).
+//!   (`lanes/rows.rs`).
 //! - `rename_group` / `recolor_group` / `delete_group` — left-dock
-//!   group context menu (`worktrees/group_menu.rs`).
+//!   group context menu (`lanes/group_menu.rs`).
 
 use daruda_store::project::{GroupId, ProjectId, SerializedGroup};
 use gpui::Context;
@@ -83,7 +83,7 @@ impl Workspace {
             tab_order,
             is_collapsed: false,
         });
-        // Empty closure pattern (used across group/project/worktree/dnd ops):
+        // Empty closure pattern (used across group/project/lane/dnd ops):
         // the state mutation completed above. The wrapper structurally
         // guarantees the persist call — factoring the preceding lines into
         // the closure would force re-running mutable borrows that have

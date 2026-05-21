@@ -1,26 +1,26 @@
-//! Merge-into modal — lets the user pick a target worktree branch and
+//! Merge-into modal — lets the user pick a target lane branch and
 //! runs `git merge <source>` from the target's checkout directory.
 //!
-//! Only branches currently checked out as app worktrees are offered as
-//! targets; merging into a branch that isn't in any worktree would
-//! require a checkout, which git forbids while another worktree has it.
+//! Only branches currently checked out as app lanes are offered as
+//! targets; merging into a branch that isn't in any lane would
+//! require a checkout, which git forbids while another lane has it.
 //!
 //! Conflict handling: when git reports conflicts the merge is left
-//! in-progress in the target worktree.  The modal switches to a
+//! in-progress in the target lane.  The modal switches to a
 //! "Conflicts" state and offers two actions:
 //!   • [Abort Merge] — runs `git merge --abort` and dismisses.
-//!   • [Go to "<branch>" →] — activates the target worktree tab so the
+//!   • [Go to "<branch>" →] — activates the target lane tab so the
 //!     user can resolve conflicts in the terminal, then commit.
 //!
-//! Remove-after-merge: when the source worktree is removable (not the
-//! main checkout), a checkbox lets the user remove the worktree and
+//! Remove-after-merge: when the source lane is removable (not the
+//! main checkout), a checkbox lets the user remove the lane and
 //! delete its branch automatically after a successful merge.
 
 use std::path::PathBuf;
 
 use crate::ui::theme;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::project::WorktreeId;
+use daruda_store::project::LaneId;
 use gpui::{
     App, ClickEvent, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseDownEvent,
     Render, SharedString, WeakEntity, Window, div, prelude::*, px,
@@ -39,7 +39,7 @@ use crate::workspace::Workspace;
 // ----------------------------------------------------------------
 
 pub(in crate::workspace) struct TargetOption {
-    pub wt_id: WorktreeId,
+    pub wt_id: LaneId,
     pub branch: String,
     pub wt_path: PathBuf,
 }
@@ -47,7 +47,7 @@ pub(in crate::workspace) struct TargetOption {
 enum MergeState {
     Idle,
     Merging,
-    /// Merge ran and produced conflicts; the target worktree is in
+    /// Merge ran and produced conflicts; the target lane is in
     /// mid-merge state waiting for manual resolution.
     Conflicts(Vec<String>),
     Error(String),
@@ -58,19 +58,19 @@ enum MergeState {
 // ----------------------------------------------------------------
 
 pub(in crate::workspace) struct MergeModal {
-    /// The worktree being merged from.
-    source_wt_id: WorktreeId,
+    /// The lane being merged from.
+    source_wt_id: LaneId,
     source_branch: String,
-    /// Path of the source worktree checkout (for `git worktree remove`).
+    /// Path of the source lane checkout (for `git worktree remove`).
     source_path: PathBuf,
-    /// Repo root of the source worktree (for `git branch -D`).
+    /// Repo root of the source lane (for `git branch -D`).
     source_repo_root: PathBuf,
     target_options: Vec<TargetOption>,
     selected_idx: usize,
     workspace: WeakEntity<Workspace>,
     focus_handle: FocusHandle,
     state: MergeState,
-    /// When true, remove the source worktree and delete its branch
+    /// When true, remove the source lane and delete its branch
     /// after a successful merge.
     remove_after_merge: bool,
 }
@@ -81,7 +81,7 @@ impl MergeModal {
     /// the list would be empty.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn new(
-        source_wt_id: WorktreeId,
+        source_wt_id: LaneId,
         source_branch: String,
         source_path: PathBuf,
         source_repo_root: PathBuf,
@@ -120,7 +120,7 @@ impl MergeModal {
         }
     }
 
-    /// True when the source worktree can be removed (i.e. it is not the
+    /// True when the source lane can be removed (i.e. it is not the
     /// main checkout of the repo).
     fn source_is_removable(&self) -> bool {
         self.source_path != self.source_repo_root
@@ -149,7 +149,7 @@ impl MergeModal {
             return;
         }
 
-        // Pre-check: target worktree must be clean.
+        // Pre-check: target lane must be clean.
         // NOTE: git_status_cache may be stale if the target changed after
         // the last refresh. git itself will still reject a dirty target
         // (GitError::Exit), so no data is corrupted — this pre-check is
@@ -157,9 +157,9 @@ impl MergeModal {
         let target_is_dirty = if let Some(ws) = self.workspace.upgrade() {
             let target_id = self.target_options[self.selected_idx].wt_id;
             let ws_ref = ws.read(cx);
-            let target_ref = daruda_store::project::WorktreeRef {
+            let target_ref = daruda_store::project::LaneRef {
                 project: ws_ref.active_ref().project,
-                worktree: target_id,
+                lane: target_id,
             };
             ws_ref
                 .git_status_cache
@@ -193,13 +193,13 @@ impl MergeModal {
             .upgrade()
             .map(|w| w.read(cx).active_ref().project)
             .unwrap_or_default();
-        let target_ref = daruda_store::project::WorktreeRef {
+        let target_ref = daruda_store::project::LaneRef {
             project: active_project,
-            worktree: target_wt_id,
+            lane: target_wt_id,
         };
-        let source_ref = daruda_store::project::WorktreeRef {
+        let source_ref = daruda_store::project::LaneRef {
             project: active_project,
-            worktree: source_wt_id,
+            lane: source_wt_id,
         };
 
         // Clones for use after the first async_cx.update closure.
@@ -212,41 +212,38 @@ impl MergeModal {
                 // for the post-merge removal spawn.
                 let source_branch_for_removal = source_branch.clone();
 
-                let merge_result =
-                    async_cx
-                        .background_executor()
-                        .spawn(async move {
-                            crate::worktree::git::git_merge(&target_path, &source_branch)
-                        })
-                        .await;
+                let merge_result = async_cx
+                    .background_executor()
+                    .spawn(async move { crate::lane::git::git_merge(&target_path, &source_branch) })
+                    .await;
 
                 // Snapshot before merge_result is moved into the closure.
                 let is_success = matches!(
                     &merge_result,
-                    Ok(crate::worktree::git::MergeOutcome::Success)
-                        | Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate)
+                    Ok(crate::lane::git::MergeOutcome::Success)
+                        | Ok(crate::lane::git::MergeOutcome::AlreadyUpToDate)
                 );
                 let was_up_to_date = matches!(
                     &merge_result,
-                    Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate)
+                    Ok(crate::lane::git::MergeOutcome::AlreadyUpToDate)
                 );
 
                 // SILENT-OK: workspace may drop after merge modal closes
                 let _ = async_cx.update(|window, app_cx| {
                     match merge_result {
-                        Ok(crate::worktree::git::MergeOutcome::AlreadyUpToDate) => {
+                        Ok(crate::lane::git::MergeOutcome::AlreadyUpToDate) => {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(app_cx, |ws, cx| {
                                     ws.finalize_merge(target_ref, cx);
                                     // Show "already up to date" only if we're
-                                    // not about to also remove the worktree.
+                                    // not about to also remove the lane.
                                     if !remove_after_merge {
                                         let report = ErrorReport::new(
                                             surface_strings::merge_modal_already_up_to_date(),
                                         )
                                         .severity(ErrorSeverity::Info)
                                         .at(file!(), line!())
-                                        .dedup("worktree.merge.up_to_date")
+                                        .dedup("lane.merge.up_to_date")
                                         .build();
                                         ws.report_error(report, cx);
                                     }
@@ -257,7 +254,7 @@ impl MergeModal {
                             }
                         }
 
-                        Ok(crate::worktree::git::MergeOutcome::Success) => {
+                        Ok(crate::lane::git::MergeOutcome::Success) => {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(app_cx, |ws, cx| ws.finalize_merge(target_ref, cx));
                             }
@@ -266,8 +263,8 @@ impl MergeModal {
                             }
                         }
 
-                        Ok(crate::worktree::git::MergeOutcome::Conflicts(files)) => {
-                            // Leave the merge in-progress in the target worktree.
+                        Ok(crate::lane::git::MergeOutcome::Conflicts(files)) => {
+                            // Leave the merge in-progress in the target lane.
                             // Refresh git status so the left dock reflects the
                             // mid-merge state (dirty files + MERGE_HEAD present).
                             if let Some(ws) = workspace.upgrade() {
@@ -297,21 +294,17 @@ impl MergeModal {
                     let remove_result = async_cx
                         .background_executor()
                         .spawn(async move {
-                            // Remove worktree directory first, then delete the branch.
-                            // Branch deletion is best-effort — if it fails the worktree
+                            // Remove lane directory first, then delete the branch.
+                            // Branch deletion is best-effort — if it fails the lane
                             // is already detached, so we surface the error without rolling back.
-                            crate::worktree::git::remove_worktree(
-                                &source_repo_root,
-                                &source_path,
-                                false,
-                            )
-                            .and_then(|()| {
-                                crate::worktree::git::delete_branch(
-                                    &source_repo_root,
-                                    &source_branch_for_removal,
-                                )
-                            })
-                            .map_err(|e| e.to_string())
+                            crate::lane::git::remove_lane(&source_repo_root, &source_path, false)
+                                .and_then(|()| {
+                                    crate::lane::git::delete_branch(
+                                        &source_repo_root,
+                                        &source_branch_for_removal,
+                                    )
+                                })
+                                .map_err(|e| e.to_string())
                         })
                         .await;
 
@@ -321,14 +314,14 @@ impl MergeModal {
                             ws.update(app_cx, |ws, cx| {
                                 match &remove_result {
                                     Ok(()) => {
-                                        ws.finalize_remove_worktree(source_ref, window, cx);
+                                        ws.finalize_remove_lane(source_ref, window, cx);
                                         if was_up_to_date {
                                             let report = ErrorReport::new(
                                                 surface_strings::merge_modal_already_up_to_date(),
                                             )
                                             .severity(ErrorSeverity::Info)
                                             .at(file!(), line!())
-                                            .dedup("worktree.merge.up_to_date")
+                                            .dedup("lane.merge.up_to_date")
                                             .build();
                                             ws.report_error(report, cx);
                                         }
@@ -339,7 +332,7 @@ impl MergeModal {
                                                 .severity(ErrorSeverity::Error)
                                                 .at(file!(), line!())
                                                 .with_context("detail", e.clone())
-                                                .dedup("worktree.merge.cleanup")
+                                                .dedup("lane.merge.cleanup")
                                                 .build();
                                         ws.report_error(report, cx);
                                     }
@@ -356,7 +349,7 @@ impl MergeModal {
             .detach();
     }
 
-    /// Abort the in-progress merge in the target worktree (best-effort,
+    /// Abort the in-progress merge in the target lane (best-effort,
     /// on background executor), refresh its git status, then dismiss.
     fn abort_merge(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.target_options.get(self.selected_idx) else {
@@ -371,9 +364,9 @@ impl MergeModal {
             .upgrade()
             .map(|w| w.read(cx).active_ref().project)
             .unwrap_or_default();
-        let target_ref = daruda_store::project::WorktreeRef {
+        let target_ref = daruda_store::project::LaneRef {
             project: active_project,
-            worktree: target_wt_id,
+            lane: target_wt_id,
         };
 
         window
@@ -381,7 +374,7 @@ impl MergeModal {
                 async_cx
                     .background_executor()
                     .spawn(async move {
-                        let _ = crate::worktree::git::git_merge_abort(&target_path);
+                        let _ = crate::lane::git::git_merge_abort(&target_path);
                     })
                     .await;
                 // SILENT-OK: workspace may drop after merge modal closes
@@ -397,19 +390,14 @@ impl MergeModal {
             .detach();
     }
 
-    /// Switch focus to the target worktree so the user can resolve
+    /// Switch focus to the target lane so the user can resolve
     /// conflicts in its terminal, then dismiss this modal.
-    fn go_to_target(
-        &mut self,
-        target_wt_id: WorktreeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn go_to_target(&mut self, target_wt_id: LaneId, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ws) = self.workspace.upgrade() {
             ws.update(cx, |ws, cx| {
-                let target = daruda_store::project::WorktreeRef {
+                let target = daruda_store::project::LaneRef {
                     project: ws.active_ref().project,
-                    worktree: target_wt_id,
+                    lane: target_wt_id,
                 };
                 ws.activate_worktree(target, window, cx);
             });
@@ -482,7 +470,7 @@ impl Render for MergeModal {
         let t = theme::current(cx);
         let strong_text = t.modal_text_primary;
         let muted_text = t.muted_text;
-        let row_hover_bg = t.worktree_row_hover_bg;
+        let row_hover_bg = t.lane_row_hover_bg;
         let radio_dot_color = t.dock_view_tab_active;
 
         // ---- branch list ----
@@ -495,7 +483,7 @@ impl Render for MergeModal {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::WORKTREE_LABEL_GAP))
+                .gap(px(theme::LANE_LABEL_GAP))
                 .px(px(theme::MODAL_BUTTON_PAD_X))
                 .py(px(theme::MODAL_BUTTON_PAD_Y))
                 .rounded(px(theme::MODAL_BUTTON_RADIUS))
@@ -684,7 +672,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, b)| TargetOption {
-                wt_id: i as WorktreeId + 10,
+                wt_id: i as LaneId + 10,
                 branch: b.to_string(),
                 wt_path: std::path::PathBuf::from(format!("/tmp/wt-{b}")),
             })

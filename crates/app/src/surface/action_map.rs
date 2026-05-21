@@ -10,7 +10,7 @@ use crate::workspace::{
     GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenCommandHistory,
     OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject, ShowLeftDockFiles,
-    ShowLeftDockGit, ShowLeftDockWorktrees, SplitDown, SplitRight, SwitchRightPanelSkills,
+    ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelSkills,
     SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
     ToggleCommandPalette, ToggleLeftDock, ToggleRightDock,
 };
@@ -45,7 +45,7 @@ pub fn apply_keybinding_overrides(
         if crate::tab_slot_table!(@try_bind_override key_str, name_str, cx) {
             continue;
         }
-        if crate::worktree_slot_table!(@try_bind_override key_str, name_str, cx) {
+        if crate::lane_slot_table!(@try_bind_override key_str, name_str, cx) {
             continue;
         }
         // Per-section overrides come first so the dotted form wins over
@@ -84,7 +84,7 @@ pub fn apply_keybinding_overrides(
             "toggle_bottom_dock" => ToggleBottomDock,
             "toggle_right_dock" => ToggleRightDock,
             "toggle_command_palette" => ToggleCommandPalette,
-            "show_left_dock_worktrees" => ShowLeftDockWorktrees,
+            "show_left_dock_lanes" => ShowLeftDockLanes,
             "show_left_dock_git" => ShowLeftDockGit,
             "show_left_dock_files" => ShowLeftDockFiles,
             "switch_right_panel_usage" => SwitchRightPanelUsage,
@@ -126,7 +126,7 @@ fn is_known_action(name: &str) -> bool {
 }
 
 /// List of every recognized action name. Slot names come from the
-/// `tab_slot_table!` / `worktree_slot_table!` macros so the test stays
+/// `tab_slot_table!` / `lane_slot_table!` macros so the test stays
 /// in sync with the wiring without manual duplication.
 #[cfg(test)]
 fn known_actions() -> Vec<&'static str> {
@@ -155,7 +155,7 @@ fn known_actions() -> Vec<&'static str> {
         "toggle_bottom_dock",
         "toggle_right_dock",
         "toggle_command_palette",
-        "show_left_dock_worktrees",
+        "show_left_dock_lanes",
         "show_left_dock_git",
         "show_left_dock_files",
         "switch_right_panel_usage",
@@ -186,7 +186,7 @@ fn known_actions() -> Vec<&'static str> {
         "move_project_to_group",
     ];
     v.extend(crate::tab_slot_table!(@names));
-    v.extend(crate::worktree_slot_table!(@names));
+    v.extend(crate::lane_slot_table!(@names));
     v
 }
 

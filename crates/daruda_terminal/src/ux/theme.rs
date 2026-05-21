@@ -93,7 +93,7 @@ pub const SEARCH_LABEL_COUNTER: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 
 // ---- TextArea scrollbar ----
 
-// ---- Modal checkbox (Remove worktree, future opt-ins) ----
+// ---- Modal checkbox (Remove lane, future opt-ins) ----
 
 // ============================================================================
 // ValidationBanner — inline severity banner inside form modals
@@ -327,7 +327,7 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // ----------------------------------------------------------------
 
 // ============================================================================
-// Claude Code status indicator (dock worktree row)
+// Claude Code status indicator (dock lane row)
 // ============================================================================
 // 4 states (Working / NeedsAttention / Idle / Connecting). Mockup:
 // `Claude-Code-Status-Indicator-Mockup.html`. Palette A — classic
@@ -348,7 +348,7 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // Connecting: #9ca3af
 
 // ---- Phase D — sub-row per-session badge strip ----
-// Rendered beneath the sublabel when a worktree has ≥ 2 active Claude
+// Rendered beneath the sublabel when a lane has ≥ 2 active Claude
 // sessions. The leading indicator still shows the aggregate priority;
 // these badges drill into the individual sessions.
 

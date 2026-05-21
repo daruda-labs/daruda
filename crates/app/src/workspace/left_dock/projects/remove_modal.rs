@@ -1,14 +1,14 @@
-//! Remove-worktree confirmation dialog (Modal trait flavor).
+//! Remove-lane confirmation dialog (Modal trait flavor).
 //!
 //! Self-contained modal entity. Owns its own focus, key dispatch,
 //! and submit (background `git worktree remove`). On success the
-//! workspace finalizes by switching off the removed worktree (if
+//! workspace finalizes by switching off the removed lane (if
 //! active) and dropping its runtime + entry.
 
 use std::path::PathBuf;
 
 use crate::ui::theme;
-use daruda_store::project::WorktreeId;
+use daruda_store::project::LaneId;
 use gpui::{
     App, ClickEvent, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
     SharedString, WeakEntity, Window, div, prelude::*, px,
@@ -20,25 +20,25 @@ use crate::ui::{button, button_danger, checkbox};
 
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use crate::workspace::worktree_ops::RemoveWorktreePlan;
+use crate::workspace::lane_ops::RemoveWorktreePlan;
 
 pub struct RemoveWorktreeModal {
     focus_handle: FocusHandle,
-    target_id: WorktreeId,
+    target_id: LaneId,
     target_label: SharedString,
     target_path: SharedString,
     plan: RemoveWorktreePlan,
-    /// Branch the worktree is checked out at. `None` for default
-    /// (non-git) worktrees and detached-HEAD worktrees — in both
+    /// Branch the lane is checked out at. `None` for default
+    /// (non-git) lanes and detached-HEAD lanes — in both
     /// cases there is nothing to delete, so the checkbox is hidden.
     branch: Option<String>,
     /// User opted in to also `git branch -D <branch>` after the
-    /// worktree is removed. Off by default — branch removal is
+    /// lane is removed. Off by default — branch removal is
     /// destructive and the user must explicitly ask for it.
     delete_branch_too: bool,
     error: Option<SharedString>,
     /// When true, re-submit uses `git worktree remove --force`.
-    /// Set automatically when git rejects a dirty worktree.
+    /// Set automatically when git rejects a dirty lane.
     allow_force: bool,
     submitting: bool,
     workspace: WeakEntity<Workspace>,
@@ -47,7 +47,7 @@ pub struct RemoveWorktreeModal {
 impl RemoveWorktreeModal {
     pub fn new(
         workspace: WeakEntity<Workspace>,
-        target_id: WorktreeId,
+        target_id: LaneId,
         target_label: impl Into<SharedString>,
         target_path: impl Into<SharedString>,
         plan: RemoveWorktreePlan,
@@ -69,7 +69,7 @@ impl RemoveWorktreeModal {
         }
     }
 
-    /// Set the branch name that the worktree is checked out at.
+    /// Set the branch name that the lane is checked out at.
     /// When `Some`, shows the "Also delete branch" checkbox.
     pub fn with_branch(mut self, branch: Option<String>) -> Self {
         self.branch = branch;
@@ -93,7 +93,7 @@ impl RemoveWorktreeModal {
         self.allow_force
     }
     #[cfg(test)]
-    pub(crate) fn target_id(&self) -> WorktreeId {
+    pub(crate) fn target_id(&self) -> LaneId {
         self.target_id
     }
     #[cfg(test)]
@@ -118,12 +118,12 @@ impl RemoveWorktreeModal {
             .upgrade()
             .map(|w| w.read(cx).active_ref().project)
             .unwrap_or_default();
-        let target_ref = daruda_store::project::WorktreeRef {
+        let target_ref = daruda_store::project::LaneRef {
             project: active_project,
-            worktree: target_id,
+            lane: target_id,
         };
         // Branch deletion only fires when the user explicitly opted
-        // in *and* the worktree actually has a named branch.
+        // in *and* the lane actually has a named branch.
         let branch_to_delete = if self.delete_branch_too {
             self.branch.clone()
         } else {
@@ -134,15 +134,15 @@ impl RemoveWorktreeModal {
                 let result: Result<(), String> = async_cx
                     .background_executor()
                     .spawn(async move {
-                        crate::worktree::git::remove_worktree(&repo_root, &path, force)
+                        crate::lane::git::remove_lane(&repo_root, &path, force)
                             .map_err(|e| e.to_string())?;
                         // Branch removal is best-effort *after* the
-                        // worktree is gone — failure here surfaces as
-                        // an inline error but the worktree is already
+                        // lane is gone — failure here surfaces as
+                        // an inline error but the lane is already
                         // detached, so we don't roll back.
                         if let Some(b) = &branch_to_delete {
-                            crate::worktree::git::delete_branch(&repo_root, b).map_err(|e| {
-                                format!("Worktree removed, but `git branch -D {b}` failed: {e}")
+                            crate::lane::git::delete_branch(&repo_root, b).map_err(|e| {
+                                format!("Lane removed, but `git branch -D {b}` failed: {e}")
                             })?;
                         }
                         Ok(())
@@ -156,7 +156,7 @@ impl RemoveWorktreeModal {
                         Ok(()) => {
                             if let Some(ws) = workspace.upgrade() {
                                 ws.update(app_cx, |ws, cx| {
-                                    ws.finalize_remove_worktree(target_ref, window, cx);
+                                    ws.finalize_remove_lane(target_ref, window, cx);
                                 });
                             }
                             me.update(app_cx, |modal, cx| {
@@ -223,13 +223,13 @@ impl Render for RemoveWorktreeModal {
             )
             .child(
                 div()
-                    .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+                    .text_size(px(theme::LANE_SUB_FONT_SIZE))
                     .text_color(faint_text)
                     .child(self.target_path.clone()),
             );
 
         // Optional checkbox row: "Also delete branch '<name>'".
-        // Only shown when the worktree actually has a branch
+        // Only shown when the lane actually has a branch
         // (Default kind / detached HEAD have nothing to delete).
         if let Some(branch) = self.branch.clone() {
             let label = SharedString::from(format!("Also delete branch \"{branch}\""));
@@ -249,14 +249,14 @@ impl Render for RemoveWorktreeModal {
                 .flex()
                 .flex_col()
                 .gap(px(theme::MODAL_PANEL_GAP))
-                .child(crate::ui::alert::error("remove-worktree-error", msg.clone()));
+                .child(crate::ui::alert::error("remove-lane-error", msg.clone()));
             if self.allow_force {
                 stack = stack.child(
                     div()
-                        .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+                        .text_size(px(theme::LANE_SUB_FONT_SIZE))
                         .text_color(faint_text)
                         .child(
-                            "The worktree has uncommitted changes. Clicking Remove again will pass --force.",
+                            "The lane has uncommitted changes. Clicking Remove again will pass --force.",
                         ),
                 );
             }
@@ -373,7 +373,7 @@ mod tests {
 
     #[gpui::test]
     fn toggle_delete_branch_noop_when_branch_absent(cx: &mut TestAppContext) {
-        // Default (non-git) or detached-HEAD worktree → no branch
+        // Default (non-git) or detached-HEAD lane → no branch
         // to delete → toggle must stay off so the modal doesn't
         // pretend it can clean something up.
         let modal = build_modal_with_branch(cx, None);

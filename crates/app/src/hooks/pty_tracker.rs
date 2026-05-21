@@ -2,7 +2,7 @@
 //!
 //! Phase E uses this to:
 //! - Highlight the badge for the focused tab's session in the
-//!   per-worktree sub-row (visual disambiguation when multiple
+//!   per-lane sub-row (visual disambiguation when multiple
 //!   sessions share a cwd).
 //! - Drop a session from `ClaudeStatusStore` as soon as its
 //!   `claude` process disappears, without waiting for `SessionEnd`

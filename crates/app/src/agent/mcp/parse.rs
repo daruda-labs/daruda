@@ -4,7 +4,7 @@
 //! sibling key Claude Code uses — `permissions`, `hooks`,
 //! `enableAllProjectMcpServers`, etc., all of which we round-trip).
 //!
-//! Project: `<worktree>/.mcp.json` (usually contains only `mcpServers`,
+//! Project: `<lane>/.mcp.json` (usually contains only `mcpServers`,
 //! but the spec doesn't forbid sibling keys).
 //!
 //! Both parsers return `(Vec<McpServer>, serde_json::Value)`. The raw
@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 
 use super::{McpScope, McpServer, McpTransport};
 
-/// Filename used at every active worktree root for project-scope MCP.
+/// Filename used at every active lane root for project-scope MCP.
 pub const PROJECT_MCP_FILE: &str = ".mcp.json";
 
 /// Filename of the personal Claude Code settings file (relative to
@@ -66,7 +66,7 @@ pub fn personal_settings_path() -> PathBuf {
     base.join(".claude").join(PERSONAL_SETTINGS_FILE)
 }
 
-/// Resolve the project-scope `.mcp.json` path for a worktree root.
+/// Resolve the project-scope `.mcp.json` path for a lane root.
 pub fn project_mcp_path(worktree_root: &Path) -> PathBuf {
     worktree_root.join(PROJECT_MCP_FILE)
 }
@@ -81,7 +81,7 @@ pub fn parse_personal_settings(path: &Path) -> Result<(Vec<McpServer>, Value), P
     parse_settings_like(path, McpScope::Personal)
 }
 
-/// Read + parse `<worktree>/.mcp.json`. Same NotFound semantics as
+/// Read + parse `<lane>/.mcp.json`. Same NotFound semantics as
 /// `parse_personal_settings`.
 pub fn parse_project_mcp(path: &Path) -> Result<(Vec<McpServer>, Value), ParseError> {
     parse_settings_like(path, McpScope::Project)

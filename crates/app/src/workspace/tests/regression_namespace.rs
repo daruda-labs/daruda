@@ -11,8 +11,8 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
     let data_dir = tmp.path().to_path_buf();
 
     // Project A roots (use disposable directories under /tmp). The
-    // worktree bootstrap inspects the path with `fs::metadata`, but
-    // missing dirs degrade gracefully to a `Default` worktree — fine
+    // lane bootstrap inspects the path with `fs::metadata`, but
+    // missing dirs degrade gracefully to a `Default` lane — fine
     // for persistence shape verification.
     let root_a = std::env::temp_dir().join("daruda_regression_ns_a");
     let root_b = std::env::temp_dir().join("daruda_regression_ns_b");

@@ -66,14 +66,14 @@ fn load_raw(
         } else {
             path.to_path_buf()
         };
-        crate::worktree::git::git_show_staged(wt_path, &repo_rel).map_err(|e| e.to_string())
+        crate::lane::git::git_show_staged(wt_path, &repo_rel).map_err(|e| e.to_string())
     } else {
         // `path` is absolute when opened from the left dock; fall back via
-        // WorktreePaths::from_git_status for legacy relative paths from old session state.
+        // LanePaths::from_git_status for legacy relative paths from old session state.
         let full: std::borrow::Cow<'_, std::path::Path> = if path.is_absolute() {
             std::borrow::Cow::Borrowed(path)
         } else {
-            let wp = crate::worktree::paths::WorktreePaths { wt_path, repo_root };
+            let wp = crate::lane::paths::LanePaths { wt_path, repo_root };
             std::borrow::Cow::Owned(wp.from_git_status(path))
         };
         if !full.exists() {
@@ -147,9 +147,9 @@ fn load_diff(
     // For legacy relative paths from old session state, behaviour is unchanged.
     let repo = repo_root.expect("repo_root is Some: is_git() was checked at function entry");
     let diff_result = if is_untracked {
-        crate::worktree::git::git_diff_untracked(repo, path)
+        crate::lane::git::git_diff_untracked(repo, path)
     } else {
-        crate::worktree::git::git_diff(repo, path, staged)
+        crate::lane::git::git_diff(repo, path, staged)
     };
 
     match diff_result {

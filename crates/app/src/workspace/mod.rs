@@ -25,6 +25,7 @@ mod durable;
 pub(in crate::workspace) mod error;
 mod group_ops;
 pub(in crate::workspace) mod group_select_modal;
+mod lane_ops;
 pub(in crate::workspace) mod layout;
 mod left_dock;
 pub(in crate::workspace) mod main_area;
@@ -43,11 +44,10 @@ pub(in crate::workspace) mod sync;
 mod tests;
 mod toast_layer;
 mod window_close_ops;
-mod worktree_ops;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;
 pub(in crate::workspace) use modal_view::ModalView;
-pub(in crate::workspace) use persistence::WorktreeRuntime;
+pub(in crate::workspace) use persistence::LaneRuntime;
 
 use std::collections::{HashMap, HashSet};
 
@@ -88,16 +88,16 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 #[action(namespace = workspace, no_json)]
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
 
-/// Active worktree's branch state, derived once per render and shared
+/// Active lane's branch state, derived once per render and shared
 /// by the status bar (text label + inline detached chip) and the
 /// macOS window title (text only — chip cannot ride along).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum BranchStatus {
-    /// Git-backed worktree with an attached branch.
+    /// Git-backed lane with an attached branch.
     Branch(String),
-    /// Git-backed worktree on a detached HEAD (no branch).
+    /// Git-backed lane on a detached HEAD (no branch).
     Detached,
-    /// Non-git project (default-kind worktree) or no active project.
+    /// Non-git project (default-kind lane) or no active project.
     NotGit,
 }
 
@@ -132,16 +132,16 @@ actions!(
         ToggleBottomDock,
         ToggleRightDock,
         ToggleCommandPalette,
-        ActivateWorktree1,
-        ActivateWorktree2,
-        ActivateWorktree3,
-        ActivateWorktree4,
-        ActivateWorktree5,
-        ActivateWorktree6,
-        ActivateWorktree7,
-        ActivateWorktree8,
-        ActivateWorktree9,
-        ShowLeftDockWorktrees,
+        ActivateLane1,
+        ActivateLane2,
+        ActivateLane3,
+        ActivateLane4,
+        ActivateLane5,
+        ActivateLane6,
+        ActivateLane7,
+        ActivateLane8,
+        ActivateLane9,
+        ShowLeftDockLanes,
         ShowLeftDockGit,
         ShowLeftDockFiles,
         SwitchRightPanelUsage,
@@ -226,7 +226,7 @@ pub struct Workspace {
     #[allow(dead_code)]
     pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
     /// TabBar + PaneTree runtime state. Holds tabs, panes, focus,
-    /// drag/context-menu overlays, and inactive worktree runtimes.
+    /// drag/context-menu overlays, and inactive lane runtimes.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
     next_id: u64,
     focus_handle: FocusHandle,
@@ -249,7 +249,7 @@ pub struct Workspace {
     /// Primary font family from config. Applied to each new pane's
     /// TerminalView so user-specified fonts take effect.
     pub(in crate::workspace) font_family: String,
-    /// Left dock (worktree list, git changes, files — the
+    /// Left dock (lane list, git changes, files — the
     /// active view is picked by `left_dock_view`).
     pub(in crate::workspace) left_dock: gpui::Entity<layout::Dock>,
     /// Active view inside `left_dock`. Persisted via ProjectState.
@@ -266,15 +266,15 @@ pub struct Workspace {
     /// Runtime projects in this workspace. Zero entries = empty
     /// (Welcome screen). One entry = single-project window (current
     /// behaviour); commit c onward allows multiple. Each project owns
-    /// its own worktrees, so the per-project worktree list is reached
-    /// via `projects[i].worktrees`. `tabs`/`panes` still live on the
-    /// active worktree's `MainAreaContext` slot until W-3 migrates
+    /// its own lanes, so the per-project lane list is reached
+    /// via `projects[i].lanes`. `tabs`/`panes` still live on the
+    /// active lane's `MainAreaContext` slot until W-3 migrates
     /// them into the runtime struct.
     pub(in crate::workspace) projects: Vec<crate::project::Project>,
-    /// Active (project, worktree) pair. When `projects` is non-empty,
+    /// Active (project, lane) pair. When `projects` is non-empty,
     /// always points at a live entry — kept normalized by
     /// `activate_worktree` and `finalize_remove_*` paths.
-    pub(in crate::workspace) active: daruda_store::project::WorktreeRef,
+    pub(in crate::workspace) active: daruda_store::project::LaneRef,
     /// User-defined groups in the left dock. Each project's
     /// `group_id` links into this list. Empty during the early
     /// multi-project rollout — Group CRUD lands in a later commit.
@@ -295,13 +295,13 @@ pub struct Workspace {
     pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
     /// Command palette state (Cmd+Shift+P).
     pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
-    /// Cached git status per (project, worktree). Refreshed when the
+    /// Cached git status per (project, lane). Refreshed when the
     /// Git Changes view is activated or after a commit. Only entries
     /// that have been fetched at least once are present; missing =
     /// "not yet loaded".
     pub(in crate::workspace) git_status_cache:
-        HashMap<daruda_store::project::WorktreeRef, crate::worktree::git::GitStatusData>,
-    /// Left-dock Files view state — per-worktree lazy tree, watcher,
+        HashMap<daruda_store::project::LaneRef, crate::lane::git::GitStatusData>,
+    /// Left-dock Files view state — per-lane lazy tree, watcher,
     /// gitignore matcher, scroll handle, keyboard cursor. Grouped
     /// into one struct so the 12 sub-fields don't clutter
     /// `Workspace`'s top level. See [`left_dock::file_tree_context::FileTreeContext`].
@@ -310,14 +310,14 @@ pub struct Workspace {
     /// `apply_config` is the only update site (other than per-field
     /// toggle methods like `toggle_files_show_hidden`).
     pub(in crate::workspace) mirrors: ConfigMirrors,
-    /// Per-worktree "git status currently running" guard. Watcher
+    /// Per-lane "git status currently running" guard. Watcher
     /// events can arrive faster than `git status` can complete on a
-    /// large repo; this keeps at most one in-flight task per worktree.
-    pub(in crate::workspace) git_status_in_flight: HashSet<daruda_store::project::WorktreeRef>,
-    /// Set of worktrees that asked for a status refresh while one was
+    /// large repo; this keeps at most one in-flight task per lane.
+    pub(in crate::workspace) git_status_in_flight: HashSet<daruda_store::project::LaneRef>,
+    /// Set of lanes that asked for a status refresh while one was
     /// already running. Drained by the in-flight task on completion,
     /// re-firing once to capture intervening changes.
-    pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::WorktreeRef>,
+    pub(in crate::workspace) git_status_pending_repeat: HashSet<daruda_store::project::LaneRef>,
     /// Scroll handle for the Git Changes file list — shared with the scrollbar overlay.
     pub(in crate::workspace) git_changes_scroll_handle: gpui::ScrollHandle,
     /// Scroll handle for the right-dock panel body — shared with the
@@ -384,19 +384,19 @@ pub struct Workspace {
     /// running. Separate from `git_op_in_flight` so a stage click doesn't
     /// block the commit button and vice versa.
     pub(in crate::workspace) git_stage_in_flight: bool,
-    /// Per-worktree set of collapsed dir groups in the Git Changes view.
-    /// Keyed by the worktree-relative dir string emitted by `group_by_dir`
+    /// Per-lane set of collapsed dir groups in the Git Changes view.
+    /// Keyed by the lane-relative dir string emitted by `group_by_dir`
     /// (e.g. `"src/workspace/left_dock"`). In-memory only — collapse state
     /// resets on app restart by design.
     pub(in crate::workspace) git_collapsed_dirs:
-        std::collections::HashMap<daruda_store::project::WorktreeRef, HashSet<String>>,
-    /// Per-worktree keyboard cursor in the Git Changes view, stored as
+        std::collections::HashMap<daruda_store::project::LaneRef, HashSet<String>>,
+    /// Per-lane keyboard cursor in the Git Changes view, stored as
     /// the file's repo-root-relative path (the same shape git status
     /// porcelain emits, so it round-trips into stage/unstage/diff ops
     /// without conversion). Path-keyed (not index-keyed) so refreshes
     /// that re-sort the list keep the cursor on the same file.
     pub(in crate::workspace) git_changes_cursor:
-        std::collections::HashMap<daruda_store::project::WorktreeRef, std::path::PathBuf>,
+        std::collections::HashMap<daruda_store::project::LaneRef, std::path::PathBuf>,
     /// Focus handle for the Git Changes panel body. Bound to
     /// `key_context("GitChanges")` so the four arrow / Space / Enter
     /// keybindings only fire when the panel holds focus — otherwise
@@ -429,7 +429,7 @@ pub struct Workspace {
     pub(in crate::workspace) task_filter: daruda_store::tasks::TaskFilter,
     /// Per-repo lock that prevents two concurrent `start_task`
     /// invocations from racing on `git worktree add` against the same
-    /// repository. Cleared after `finalize_create_worktree` returns.
+    /// repository. Cleared after `finalize_create_lane` returns.
     pub(in crate::workspace) pending_worktree_creates: HashSet<std::path::PathBuf>,
     /// Re-entry guard for the platform `on_window_should_close`
     /// callback. Set to `true` while the R-25 batch prompt is
@@ -543,7 +543,7 @@ impl Workspace {
     }
 
     /// Variant of [`Self::new_with_project_for_test`] that additionally
-    /// runs the two pieces of heavy init that persistence + worktree
+    /// runs the two pieces of heavy init that persistence + lane
     /// tests assume: opening the initial tab and writing the first
     /// `persist_state` snapshot. Other heavy work (FS watchers, macro
     /// shortcut registration, `WindowRegistry`) is still skipped.
@@ -606,7 +606,11 @@ impl Workspace {
         let ws_amend = ws_weak.clone();
         let git_commit_input = cx.new(|cx| {
             crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsFloating, window, cx)
-                .with_placeholder(crate::surface::strings::git_commit_placeholder(), window, cx)
+                .with_placeholder(
+                    crate::surface::strings::git_commit_placeholder(),
+                    window,
+                    cx,
+                )
                 .with_borderless(cx)
                 .with_focus_ring(false, cx)
                 .with_action(
@@ -752,7 +756,7 @@ impl Workspace {
                     // Register the three left-dock view panels in the same order
                     // as `view_tabs::entries()` so `active_panel` and the
                     // tab strip always agree on which view is shown.
-                    d.add_panel(layout::WorktreesPanel);
+                    d.add_panel(layout::LanesPanel);
                     d.add_panel(layout::GitChangesPanel);
                     d.add_panel(layout::FilesPanel);
                     d
@@ -809,14 +813,14 @@ impl Workspace {
             },
             // Bootstrap projects for this workspace. When the caller
             // supplies a project root, wrap it in a single runtime
-            // `Project` (id `0`) with its worktrees discovered from
+            // `Project` (id `0`) with its lanes discovered from
             // disk. Otherwise the workspace starts with no projects
             // (Welcome path).
             projects: project
                 .as_ref()
                 .map(|p| vec![crate::project::Project::bootstrap(0, p.root.clone())])
                 .unwrap_or_default(),
-            active: daruda_store::project::WorktreeRef::default(),
+            active: daruda_store::project::LaneRef::default(),
             groups: Vec::new(),
             next_project_id: if project.is_some() { 1 } else { 0 },
             next_group_id: 0,
@@ -914,8 +918,8 @@ impl Workspace {
             _settings_global_subscription: cx
                 .observe_global::<crate::settings_store::SettingsStore>(|ws, cx| {
                     let store = crate::settings_store::SettingsStore::global(cx);
-                    let worktree = ws.active_project().map(|p| p.root.as_path());
-                    let effective = store.effective_for(worktree);
+                    let lane = ws.active_project().map(|p| p.root.as_path());
+                    let effective = store.effective_for(lane);
                     ws.apply_config(&effective, cx);
                 }),
             window_handle: window.window_handle(),
@@ -934,14 +938,14 @@ impl Workspace {
             return ws;
         }
         ws.add_tab(window, cx);
-        // After tabs/worktrees are seeded, decide whether the JSONL
+        // After tabs/lanes are seeded, decide whether the JSONL
         // fallback watcher should run for this Workspace and start it.
         ws.refresh_jsonl_watcher(cx);
         // Skills watcher: subscribes to project + personal skill dirs
         // and re-scans on every filesystem change.
         ws.refresh_skills_watcher(cx);
         // MCP watcher: subscribes to ~/.claude/settings.json and the
-        // active worktree's .mcp.json, re-loading the matching scope on
+        // active lane's .mcp.json, re-loading the matching scope on
         // every external edit.
         ws.refresh_mcp_watcher(window, cx);
         // Load the right-panel Tasks tab from this workspace's
@@ -1015,7 +1019,7 @@ impl Workspace {
         // snapshot until an unrelated event fires (the May-2026
         // add-project / add-group regressions both had this shape).
         // Keep notify here so every call site (group/project CRUD,
-        // worktree DnD, policy updates) gets a render for free.
+        // lane DnD, policy updates) gets a render for free.
         cx.notify();
     }
 
@@ -1087,45 +1091,43 @@ impl Workspace {
         self.projects.iter_mut().find(|p| p.id == active.project)
     }
 
-    /// Borrow the currently active worktree (active project's active
-    /// worktree). `None` when no project is loaded.
-    pub(in crate::workspace) fn active_worktree(&self) -> Option<&crate::worktree::Worktree> {
-        let id = self.active.worktree;
-        self.active_project()?.worktree(id)
+    /// Borrow the currently active lane (active project's active
+    /// lane). `None` when no project is loaded.
+    pub(in crate::workspace) fn active_lane(&self) -> Option<&crate::lane::Lane> {
+        let id = self.active.lane;
+        self.active_project()?.lane(id)
     }
 
-    /// Mutably borrow the active worktree.
+    /// Mutably borrow the active lane.
     #[allow(dead_code)]
-    pub(in crate::workspace) fn active_worktree_mut(
-        &mut self,
-    ) -> Option<&mut crate::worktree::Worktree> {
-        let id = self.active.worktree;
+    pub(in crate::workspace) fn active_lane_mut(&mut self) -> Option<&mut crate::lane::Lane> {
+        let id = self.active.lane;
         self.active_project_mut()?.worktree_mut(id)
     }
 
-    /// Resolve a `WorktreeRef` to its runtime worktree.
-    pub(in crate::workspace) fn worktree_for(
+    /// Resolve a `LaneRef` to its runtime lane.
+    pub(in crate::workspace) fn lane_for(
         &self,
-        target: daruda_store::project::WorktreeRef,
-    ) -> Option<&crate::worktree::Worktree> {
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&crate::lane::Lane> {
         self.projects
             .iter()
             .find(|p| p.id == target.project)?
-            .worktree(target.worktree)
+            .lane(target.lane)
     }
 
-    /// Borrow the active project's worktree list. Empty when the
+    /// Borrow the active project's lane list. Empty when the
     /// workspace has no projects (Welcome state).
-    pub(in crate::workspace) fn active_worktrees(&self) -> &[crate::worktree::Worktree] {
+    pub(in crate::workspace) fn active_lanes(&self) -> &[crate::lane::Lane] {
         self.active_project()
-            .map(|p| p.worktrees.as_slice())
+            .map(|p| p.lanes.as_slice())
             .unwrap_or(&[])
     }
 
-    /// `WorktreeRef` pointing at the workspace's currently active
-    /// worktree. Convenience for call sites that already know the
-    /// active id but want the `WorktreeRef` form for HashMap lookups.
-    pub(in crate::workspace) fn active_ref(&self) -> daruda_store::project::WorktreeRef {
+    /// `LaneRef` pointing at the workspace's currently active
+    /// lane. Convenience for call sites that already know the
+    /// active id but want the `LaneRef` form for HashMap lookups.
+    pub(in crate::workspace) fn active_ref(&self) -> daruda_store::project::LaneRef {
         self.active
     }
 
@@ -1135,20 +1137,20 @@ impl Workspace {
         self.active_project().map(|p| p.name.clone())
     }
 
-    /// Active worktree's branch status, split into the three cases
+    /// Active lane's branch status, split into the three cases
     /// the status bar / window title care about: attached git branch,
     /// detached HEAD, or non-git default kind. Returned as a small
     /// enum so call-site renderers can decide whether to draw an
     /// inline "detached" chip in addition to the textual label.
     pub(in crate::workspace) fn active_branch_status(&self) -> BranchStatus {
-        let Some(wt) = self.active_worktree() else {
+        let Some(wt) = self.active_lane() else {
             return BranchStatus::NotGit;
         };
         match &wt.kind {
-            daruda_store::project::WorktreeKind::Git {
+            daruda_store::project::LaneKind::Git {
                 branch: Some(b), ..
             } => BranchStatus::Branch(b.clone()),
-            daruda_store::project::WorktreeKind::Git { branch: None, .. } => BranchStatus::Detached,
+            daruda_store::project::LaneKind::Git { branch: None, .. } => BranchStatus::Detached,
             _ => BranchStatus::NotGit,
         }
     }
@@ -1281,8 +1283,8 @@ impl Workspace {
                 "focus_pane_down" => self.on_focus_pane_down(&FocusPaneDown, window, cx),
                 "move_tab_left" => self.on_move_tab_left(&MoveTabLeft, window, cx),
                 "move_tab_right" => self.on_move_tab_right(&MoveTabRight, window, cx),
-                "show_left_dock_worktrees" => {
-                    self.on_show_left_dock_worktrees(&ShowLeftDockWorktrees, window, cx);
+                "show_left_dock_lanes" => {
+                    self.on_show_left_dock_worktrees(&ShowLeftDockLanes, window, cx);
                 }
                 "show_left_dock_git" => {
                     self.on_show_left_dock_git(&ShowLeftDockGit, window, cx);

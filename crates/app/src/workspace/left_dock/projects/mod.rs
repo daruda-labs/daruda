@@ -1,6 +1,6 @@
-//! Worktrees view — list of worktrees plus modals for create/remove.
+//! Lanes view — list of lanes plus modals for create/remove.
 //!
-//! Renders into the left dock when `left_dock_view == Worktrees`. The
+//! Renders into the left dock when `left_dock_view == Lanes`. The
 //! modal state lives on `Workspace` because it needs to outlive any
 //! single render and survive view-tab switches.
 

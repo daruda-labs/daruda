@@ -10,7 +10,7 @@
 //!
 //! New handlers go here unless they carry meaningful logic of their
 //! own — at which point they belong with the rest of that domain
-//! (worktree / dock / git / files / etc.).
+//! (lane / dock / git / files / etc.).
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
@@ -25,10 +25,9 @@ use super::{
     GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InstallClaudeHooks,
     InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill, NewTab, NewTask,
     NextTab, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, PullChanges,
-    RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockWorktrees, SplitDown,
-    SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
-    SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane,
-    UninstallClaudeHooks, ZoomWindow,
+    RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
+    SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage,
+    ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane, UninstallClaudeHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -145,11 +144,11 @@ impl Workspace {
 
     pub(in crate::workspace) fn on_show_left_dock_worktrees(
         &mut self,
-        _: &ShowLeftDockWorktrees,
+        _: &ShowLeftDockLanes,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_left_dock_view(daruda_store::project::LeftDockView::Worktrees, cx);
+        self.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
     }
 
     pub(in crate::workspace) fn on_show_left_dock_git(
@@ -275,10 +274,10 @@ impl Workspace {
         // (Available rows show in Settings → Plugin only) so the
         // palette never prompts the user to invoke something Claude
         // Code can't actually run.
-        let worktree = self.active_worktree_root();
+        let lane = self.active_worktree_root();
         let snap = cx
             .global::<crate::agent::skills::SkillsState>()
-            .snapshot_for(worktree.as_deref());
+            .snapshot_for(lane.as_deref());
         let mut skills: Vec<crate::agent::skills::Skill> = snap.project.clone();
         skills.extend(snap.personal.iter().cloned());
         skills.extend(
@@ -599,7 +598,7 @@ impl Workspace {
         match result {
             Ok(()) => {
                 self.claude.claude_hooks_installed = true;
-                // Restart the watcher so it picks up any worktree
+                // Restart the watcher so it picks up any lane
                 // path changes that may have occurred during install.
                 self.refresh_jsonl_watcher(cx);
             }
@@ -629,7 +628,7 @@ impl Workspace {
         match result {
             Ok(()) => {
                 self.claude.claude_hooks_installed = false;
-                // Restart the watcher so it picks up any worktree
+                // Restart the watcher so it picks up any lane
                 // path changes that may have occurred during uninstall.
                 self.refresh_jsonl_watcher(cx);
             }

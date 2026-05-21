@@ -228,9 +228,9 @@ impl Workspace {
             },
         );
 
-        // Base-worktree selector (R-19 / C-1). The leading
+        // Base-lane selector (R-19 / C-1). The leading
         // empty-string sentinel maps to `Task::base_worktree_path ==
-        // None`; the remaining options are registered worktrees keyed
+        // None`; the remaining options are registered lanes keyed
         // by absolute path. Building the option list once here keeps
         // the dropdown stable across rerenders — re-deriving on every
         // frame would burn allocations and reset list-search state.
@@ -278,10 +278,10 @@ impl Workspace {
                 .unwrap_or_default(),
         };
 
-        // R-20: install the FS watcher when the task has a worktree
+        // R-20: install the FS watcher when the task has a lane
         // and the prompt file is already on disk. Backlog tasks have
-        // no worktree yet; drafts have neither. Subsequent
-        // `start_task` runs that materialise the worktree are out of
+        // no lane yet; drafts have neither. Subsequent
+        // `start_task` runs that materialise the lane are out of
         // scope for this PR — reopening the pane after Start picks
         // up the watcher.
         let (_prompt_watcher, _prompt_pump) =
@@ -422,11 +422,11 @@ impl Workspace {
 
     /// Dynamically install the prompt-file FS watcher on a TaskEdit
     /// pane that's still open when its task transitions Backlog →
-    /// Running (R-20). At pane-open time the worktree didn't exist
+    /// Running (R-20). At pane-open time the lane didn't exist
     /// yet so `install_prompt_watcher` returned `None`; `start_task`
     /// just wrote the file, so the watcher can finally subscribe.
     /// No-op when the pane is closed, when there's already a watcher
-    /// attached, or when the task still has no worktree.
+    /// attached, or when the task still has no lane.
     pub(in crate::workspace) fn attach_prompt_watcher_if_pane_open(
         &mut self,
         task_id: &str,
@@ -608,10 +608,10 @@ impl Workspace {
             return None;
         }
 
-        // Empty sentinel → `None`; non-empty → registered worktree
+        // Empty sentinel → `None`; non-empty → registered lane
         // path. The path is round-tripped as a string through the
         // `SelectState` value, which means we can't statically
-        // distinguish "not in the worktree list anymore" from "user
+        // distinguish "not in the lane list anymore" from "user
         // picked a stale option" — but `start_task` re-runs
         // `branch_for_worktree_path` and falls back to git's default
         // when the lookup misses, so the worst case is the same
@@ -739,7 +739,7 @@ struct TaskEditFormSnapshot {
     auto_execute: bool,
     branch_validation: BranchValidation,
     /// Selected `base_select` value — empty string sentinel for "use
-    /// active worktree", otherwise an absolute path string.
+    /// active lane", otherwise an absolute path string.
     base_value: String,
 }
 
@@ -751,7 +751,7 @@ pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
 }
 
 /// Resolve the on-disk prompt file path for `task` — only meaningful
-/// once the task has been started (i.e. has a worktree). Returns
+/// once the task has been started (i.e. has a lane). Returns
 /// `None` for Backlog / drafts.
 fn prompt_file_path_for(task: &Task) -> Option<std::path::PathBuf> {
     let wt = task.state.worktree_path()?;
@@ -964,7 +964,7 @@ impl Workspace {
 
     /// Open `<wt>/.daruda/task-<branch>.md` in a fresh file viewer
     /// tab (R-20 `[📄 Open file]` button). No-op for tasks that
-    /// haven't been started yet — Backlog tasks have no worktree
+    /// haven't been started yet — Backlog tasks have no lane
     /// path, and Started tasks whose prompt file disappeared (e.g.
     /// manual delete) silently bail rather than open a viewer onto a
     /// non-existent file. The button itself is disabled in those
@@ -996,12 +996,12 @@ impl Workspace {
             return;
         }
         let Some(wt_id) = self
-            .active_worktrees()
+            .active_lanes()
             .iter()
             .find(|w| path.starts_with(&w.path))
             .map(|w| w.id)
         else {
-            let report = ErrorReport::new("Prompt file is outside all known worktrees")
+            let report = ErrorReport::new("Prompt file is outside all known lanes")
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .with_context("path", redact_home(&path))
@@ -1010,9 +1010,9 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         };
-        let wt_ref = daruda_store::project::WorktreeRef {
+        let wt_ref = daruda_store::project::LaneRef {
             project: self.active.project,
-            worktree: wt_id,
+            lane: wt_id,
         };
         self.open_files_entry(wt_ref, path, window, cx);
     }
@@ -1023,7 +1023,7 @@ impl Workspace {
     /// the left and the disk version on the right simultaneously
     /// The two-pane layout lets the user compare in-pane edits against
     /// the on-disk version side-by-side. Falls back silently when the
-    /// path isn't inside any known worktree.
+    /// path isn't inside any known lane.
     fn open_disk_file_for_diff(
         &mut self,
         pane_id: PaneId,
@@ -1032,7 +1032,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(wt) = self
-            .active_worktrees()
+            .active_lanes()
             .iter()
             .find(|w| path.starts_with(&w.path))
             .map(|w| w.id)
@@ -1044,19 +1044,19 @@ impl Workspace {
 }
 
 /// Build the `base_select` option list from the workspace's current
-/// worktrees. The leading empty-string option is the "no explicit
-/// base — defer to the active worktree at `start_task` time"
+/// lanes. The leading empty-string option is the "no explicit
+/// base — defer to the active lane at `start_task` time"
 /// sentinel; remaining entries are keyed by absolute path so
 /// `commit_task_edit_pane` can round-trip the user's pick back into
 /// `Task::base_worktree_path: Option<PathBuf>`.
 fn base_worktree_options(ws: &Workspace) -> Vec<SelectOption> {
-    let worktrees = ws.active_worktrees();
-    let mut options = Vec::with_capacity(worktrees.len() + 1);
+    let lanes = ws.active_lanes();
+    let mut options = Vec::with_capacity(lanes.len() + 1);
     options.push(SelectOption::new(
         "",
         crate::surface::strings::task_edit_base_active_label(),
     ));
-    for w in worktrees {
+    for w in lanes {
         let Some(path_str) = w.path.to_str() else {
             continue;
         };

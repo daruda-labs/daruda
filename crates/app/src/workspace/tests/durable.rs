@@ -41,10 +41,10 @@ async fn mutate_durable_runs_inner_closure(cx: &mut TestAppContext) {
     let ws = wh.root(cx).unwrap();
     let before = ws.read_with(cx, |ws, _| ws.left_dock_view);
     let target = match before {
-        daruda_store::project::LeftDockView::Worktrees => {
+        daruda_store::project::LeftDockView::Lanes => {
             daruda_store::project::LeftDockView::GitChanges
         }
-        _ => daruda_store::project::LeftDockView::Worktrees,
+        _ => daruda_store::project::LeftDockView::Lanes,
     };
     ws.update(cx, |ws, cx| {
         ws.mutate_durable(cx, |ws, _| {

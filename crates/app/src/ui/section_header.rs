@@ -1,9 +1,9 @@
 //! Reusable section-header row.
 //!
 //! Pulled out of three near-identical chains in
-//! `workspace/left_dock/{worktrees/list, git_changes/mod, files/mod}.rs`.
+//! `workspace/left_dock/{lanes/list, git_changes/mod, files/mod}.rs`.
 //! Each rendered the same shape — `flex_row + items_center +
-//! justify_between + theme::WORKTREE_SECTION_HEADER_FONT_SIZE +
+//! justify_between + theme::LANE_SECTION_HEADER_FONT_SIZE +
 //! DOCK_HEADER_TEXT + label + optional actions` — only differing in
 //! padding (some sites embed the header inside an outer column whose
 //! padding is handled separately) and whether the label needs
@@ -17,8 +17,8 @@
 //! ```ignore
 //! use crate::ui::SectionHeader;
 //!
-//! SectionHeader::new("Worktrees")
-//!     .padding(theme::WORKTREE_ROW_PAD_X, theme::WORKTREE_SECTION_PAD_Y)
+//! SectionHeader::new("Lanes")
+//!     .padding(theme::LANE_ROW_PAD_X, theme::LANE_SECTION_PAD_Y)
 //!     .actions(add_button)
 //!
 //! SectionHeader::new(format!("Git Changes — {branch}"))
@@ -112,7 +112,7 @@ impl RenderOnce for SectionHeader {
             .flex_row()
             .items_center()
             .justify_between()
-            .text_size(px(theme::WORKTREE_SECTION_HEADER_FONT_SIZE))
+            .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
             .text_color(theme::current(cx).dock_header_text);
 
         if let Some(x) = pad_x {

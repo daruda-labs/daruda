@@ -1,7 +1,7 @@
 //! MCP server data model — GPUI-free types describing the on-disk
 //! layout of the two MCP server scopes Claude Code reads:
 //!
-//! - **Project** — `<worktree>/.mcp.json`
+//! - **Project** — `<lane>/.mcp.json`
 //! - **Personal** — `~/.claude/settings.json` `mcpServers`
 //!
 //! Both files round-trip losslessly: known keys land in typed fields,
@@ -37,7 +37,7 @@ pub use persist::{
 
 /// On-disk scope for an MCP server.
 ///
-/// - `Project` — `<worktree>/.mcp.json` (team-shared, committable; only
+/// - `Project` — `<lane>/.mcp.json` (team-shared, committable; only
 ///   loaded by Claude Code when `enableAllProjectMcpServers=true` in
 ///   personal settings).
 /// - `Personal` — `~/.claude/settings.json` `mcpServers` (always loaded).
@@ -193,8 +193,8 @@ impl McpServer {
 /// edit modal.
 pub const PREVIEW_MAX_CHARS: usize = 60;
 
-/// Per-worktree project-scope MCP state. Stored inside
-/// [`McpState::project`], one entry per worktree root path.
+/// Per-lane project-scope MCP state. Stored inside
+/// [`McpState::project`], one entry per lane root path.
 #[derive(Clone, Debug, Default)]
 pub struct ProjectMcp {
     pub servers: Vec<McpServer>,
@@ -207,13 +207,13 @@ pub struct ProjectMcp {
 /// App-wide MCP server state. Lives as a GPUI Global registered at
 /// bootstrap (`global::init`). User-scope vectors (`personal`,
 /// `personal_raw`) are shared across every Workspace; project-scope
-/// state is partitioned by worktree root path so multiple Workspace
-/// windows observing different worktrees never collide on a single
-/// `project_root` field. Renderers and modals consume a per-worktree
+/// state is partitioned by lane root path so multiple Workspace
+/// windows observing different lanes never collide on a single
+/// `project_root` field. Renderers and modals consume a per-lane
 /// [`McpSnapshot`] via [`McpState::snapshot_for`].
 ///
 /// Mirrors Zed's `SettingsStore::local_settings` pattern (a single
-/// Global with a `BTreeMap` keyed by worktree-relative location).
+/// Global with a `BTreeMap` keyed by lane-relative location).
 ///
 /// `*_raw` carries the entire parsed JSON tree so non-`mcpServers`
 /// keys (permissions, hooks, top-level project settings, etc.) survive
@@ -225,10 +225,10 @@ pub struct McpState {
     pub personal: Vec<McpServer>,
     /// Whole `~/.claude/settings.json` parsed tree.
     pub personal_raw: serde_json::Value,
-    /// Per-worktree project-scope state, keyed by the worktree's
+    /// Per-lane project-scope state, keyed by the lane's
     /// absolute root path (what `Workspace::active_worktree_root`
-    /// returns). An entry exists for every worktree that has been
-    /// scanned at least once; opening a different worktree adds a new
+    /// returns). An entry exists for every lane that has been
+    /// scanned at least once; opening a different lane adds a new
     /// key without disturbing the others.
     pub project: BTreeMap<PathBuf, ProjectMcp>,
     /// Last successful scan timestamp across any scope. `None` until
@@ -237,17 +237,17 @@ pub struct McpState {
 }
 
 impl McpState {
-    /// Reload one scope from disk. `worktree` is required for
+    /// Reload one scope from disk. `lane` is required for
     /// `McpScope::Project` and ignored otherwise. Project entries are
-    /// inserted into the `project` map at the worktree's path.
+    /// inserted into the `project` map at the lane's path.
     pub fn reload_scope(
         &mut self,
         scope: McpScope,
-        worktree: Option<&Path>,
+        lane: Option<&Path>,
     ) -> Result<(), parse::ParseError> {
         match scope {
             McpScope::Project => {
-                if let Some(w) = worktree {
+                if let Some(w) = lane {
                     let path = parse::project_mcp_path(w);
                     let (servers, raw) = parse_project_mcp(&path)?;
                     self.project
@@ -265,26 +265,26 @@ impl McpState {
         Ok(())
     }
 
-    /// Drop a worktree's project entry. Call when a worktree is
+    /// Drop a lane's project entry. Call when a lane is
     /// closed so the `BTreeMap` doesn't grow unbounded across the
     /// session.
-    pub fn forget_worktree(&mut self, root: &Path) {
+    pub fn forget_lane(&mut self, root: &Path) {
         self.project.remove(root);
     }
 
-    /// Build an owned per-worktree view for the renderer / modals.
+    /// Build an owned per-lane view for the renderer / modals.
     /// Carrying it by value keeps the panel render closure off the
     /// Global (no re-entrancy hazard).
-    pub fn snapshot_for(&self, worktree: Option<&Path>) -> McpSnapshot {
-        let (project, project_raw) = match worktree.and_then(|w| self.project.get(w)) {
+    pub fn snapshot_for(&self, lane: Option<&Path>) -> McpSnapshot {
+        let (project, project_raw) = match lane.and_then(|w| self.project.get(w)) {
             Some(p) => (p.servers.clone(), p.raw.clone()),
             None => (Vec::new(), serde_json::Value::Object(Default::default())),
         };
         McpSnapshot {
             project,
             personal: self.personal.clone(),
-            project_root: worktree.map(Path::to_path_buf),
-            project_mcp_path: worktree.map(parse::project_mcp_path),
+            project_root: lane.map(Path::to_path_buf),
+            project_mcp_path: lane.map(parse::project_mcp_path),
             personal_settings_path: parse::personal_settings_path(),
             project_raw,
             personal_raw: self.personal_raw.clone(),
@@ -293,15 +293,15 @@ impl McpState {
     }
 }
 
-/// Owned per-worktree projection of [`McpState`] consumed by the
+/// Owned per-lane projection of [`McpState`] consumed by the
 /// renderer and CRUD modals. Carries the project Vec / raw tree for
-/// *one* worktree along with the user-global personal vectors.
+/// *one* lane along with the user-global personal vectors.
 #[derive(Clone, Debug, Default)]
 pub struct McpSnapshot {
     pub project: Vec<McpServer>,
     pub personal: Vec<McpServer>,
-    /// Worktree root whose project servers are carried in `project`.
-    /// `None` when the workspace has no active worktree.
+    /// Lane root whose project servers are carried in `project`.
+    /// `None` when the workspace has no active lane.
     pub project_root: Option<PathBuf>,
     /// `<project_root>/.mcp.json`. `None` when `project_root` is `None`.
     pub project_mcp_path: Option<PathBuf>,

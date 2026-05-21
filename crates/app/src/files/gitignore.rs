@@ -1,4 +1,4 @@
-//! Per-worktree gitignore matcher for the left-dock Files view.
+//! Per-lane gitignore matcher for the left-dock Files view.
 //!
 //! Supports nested `.gitignore` files: each subdirectory that contains a
 //! `.gitignore` gets its own `Gitignore` object anchored to that directory.
@@ -25,12 +25,12 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 /// unusually nested vendor directories, etc.).
 const MAX_COLLECT_DEPTH: usize = 50;
 
-/// Compiled gitignore rules for one worktree.
+/// Compiled gitignore rules for one lane.
 ///
 /// Cheap to evaluate per row; rebuilt only when any `.gitignore` file in
 /// the tree changes.
 pub struct GitignoreSet {
-    /// Rules from the worktree root (`.gitignore` + `.git/info/exclude`).
+    /// Rules from the lane root (`.gitignore` + `.git/info/exclude`).
     root: Gitignore,
     /// Per-subdirectory matchers: `(dir, matcher)`.
     /// Each matcher is anchored to its own `dir` and is only applied when

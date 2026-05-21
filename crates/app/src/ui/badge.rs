@@ -12,7 +12,7 @@
 //!   each session row (R-3).
 //! - Right-panel Tasks tab: per-session status badge `[abc12345]`
 //!   tinted by Claude session status (R-12).
-//! - Future: short commit-hash next to a worktree row, build-id
+//! - Future: short commit-hash next to a lane row, build-id
 //!   next to a Tasks log entry, etc.
 //!
 //! ## Usage

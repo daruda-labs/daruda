@@ -91,10 +91,10 @@ pub fn open_rename_skill_modal(
                 }
                 Err(NameError::DuplicateInScope { .. }) => unreachable!(),
             }
-            let worktree = ws.active_worktree_root();
+            let lane = ws.active_worktree_root();
             if cx
                 .global::<crate::agent::skills::SkillsState>()
-                .name_exists(scope, &new_name, worktree.as_deref())
+                .name_exists(scope, &new_name, lane.as_deref())
             {
                 report_validation(
                     ws,

@@ -38,7 +38,7 @@ fn add_project_mints_next_id_and_activates_first_worktree(cx: &mut TestAppContex
         })
     });
     let target = target.expect("add_project window callback succeeded");
-    let target = target.expect("add_project returned a WorktreeRef");
+    let target = target.expect("add_project returned a LaneRef");
 
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.projects.len(), 2);
@@ -71,7 +71,7 @@ fn close_active_project_returns_false_when_last(cx: &mut TestAppContext) {
     assert!(!keep, "last project should signal close-window");
     ws.read_with(cx, |ws, _| {
         assert!(ws.projects.is_empty());
-        assert_eq!(ws.active, daruda_store::project::WorktreeRef::default());
+        assert_eq!(ws.active, daruda_store::project::LaneRef::default());
     });
 }
 
@@ -113,7 +113,7 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         assert_eq!(ws.projects[0].id, 0);
         assert_eq!(ws.active.project, 0);
         // Regression: main area must not be empty after delete. The
-        // surviving project's worktree should be re-activated with at
+        // surviving project's lane should be re-activated with at
         // least one tab/pane so the user doesn't see a blank viewport.
         assert!(
             !ws.main_area.tabs.is_empty(),
@@ -181,7 +181,7 @@ fn close_active_project_clears_file_tree_caches_for_project(cx: &mut TestAppCont
         )
     });
     let ws = wh.root(cx).unwrap();
-    // Seed a fake file_tree entry for the active worktree.
+    // Seed a fake file_tree entry for the active lane.
     let active = ws.read_with(cx, |ws, _| ws.active);
     ws.update(cx, |ws, _| {
         let tree = crate::files::tree::FileTree::new(std::path::PathBuf::from(

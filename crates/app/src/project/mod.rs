@@ -3,11 +3,11 @@
 //! per-workspace [`daruda_store::project::ProjectOverride`].
 //!
 //! A project owns a root directory, a non-empty list of runtime
-//! [`crate::worktree::Worktree`]s, a "last active worktree" hint for
+//! [`crate::lane::Lane`]s, a "last active lane" hint for
 //! the left dock, and visual metadata (color, tab order, group).
 //!
-//! GPUI-free: lives alongside [`crate::worktree`] in dependency order
-//! `workspace/ → project/ → worktree/`. Workspace assembles a
+//! GPUI-free: lives alongside [`crate::lane`] in dependency order
+//! `workspace/ → project/ → lane/`. Workspace assembles a
 //! `Vec<Project>` at construction time; persistence reads/writes via
 //! [`crate::workspace::Workspace::snapshot_for_disk`] and
 //! [`crate::workspace::Workspace::restore_from_disk`].
@@ -15,14 +15,14 @@
 use std::path::PathBuf;
 
 use daruda_store::project::{
-    GroupId, ProjectId, ProjectOverride, ProjectState, ProjectUuid, WorktreeId, WorktreeRef,
+    GroupId, LaneId, LaneRef, ProjectId, ProjectOverride, ProjectState, ProjectUuid,
     derive_name_from_path,
 };
 use gpui::BackgroundExecutor;
 
-use crate::worktree::Worktree;
+use crate::lane::Lane;
 
-/// Runtime project entry. Contains the runtime worktrees plus the
+/// Runtime project entry. Contains the runtime lanes plus the
 /// metadata needed to render the left-dock tree (color, tab order,
 /// group membership). One `Project` per opened repository root.
 #[derive(Debug)]
@@ -34,11 +34,11 @@ pub struct Project {
     pub uuid: ProjectUuid,
     pub root: PathBuf,
     pub name: String,
-    pub worktrees: Vec<Worktree>,
-    /// Worktree the user last clicked inside this project. Snap target
+    pub lanes: Vec<Lane>,
+    /// Lane the user last clicked inside this project. Snap target
     /// when the project header is clicked in the left dock without a
-    /// specific worktree pick. Always a member of `worktrees`.
-    pub last_active_worktree_id: WorktreeId,
+    /// specific lane pick. Always a member of `lanes`.
+    pub last_active_lane_id: LaneId,
     /// `None` = ungrouped (rendered at top level alongside groups in
     /// the same `tab_order` pool).
     pub group_id: Option<GroupId>,
@@ -48,7 +48,7 @@ pub struct Project {
     /// by DnD operations so the integer is dense.
     pub tab_order: u32,
     /// True when the user has collapsed the project header in the
-    /// left dock. The worktree list is hidden when collapsed; click on
+    /// left dock. The lane list is hidden when collapsed; click on
     /// the project chevron toggles. Persisted across sessions.
     pub is_collapsed: bool,
 }
@@ -56,20 +56,20 @@ pub struct Project {
 impl Project {
     /// Build a runtime project from a freshly opened directory. Walks
     /// the filesystem to discover git worktrees (or falls back to a
-    /// single `Default` worktree for non-git paths) via
-    /// [`Worktree::bootstrap_from_project`]. The default `id` is `0` —
+    /// single `Default` lane for non-git paths) via
+    /// [`Lane::bootstrap_from_project`]. The default `id` is `0` —
     /// `Workspace::add_project` overwrites it with the monotonic id.
     pub fn bootstrap(id: ProjectId, root: PathBuf) -> Self {
         let name = derive_name_from_path(&root);
-        let worktrees = Worktree::bootstrap_from_project(&root);
-        let last_active_worktree_id = worktrees.first().map(|w| w.id).unwrap_or(0);
+        let lanes = Lane::bootstrap_from_project(&root);
+        let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
         Self {
             id,
             uuid: ProjectUuid::new(),
             root,
             name,
-            worktrees,
-            last_active_worktree_id,
+            lanes,
+            last_active_lane_id,
             group_id: None,
             color: None,
             tab_order: 0,
@@ -81,19 +81,19 @@ impl Project {
     /// code paths that need to attach this runtime entry to an existing
     /// on-disk [`daruda_store::project::ProjectState`] (policy B: the
     /// same root may appear in multiple workspaces, but each shares a
-    /// single ProjectState identified by its UUID). Worktree discovery
+    /// single ProjectState identified by its UUID). Lane discovery
     /// is identical to [`Project::bootstrap`].
     pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf) -> Self {
         let name = derive_name_from_path(&root);
-        let worktrees = Worktree::bootstrap_from_project(&root);
-        let last_active_worktree_id = worktrees.first().map(|w| w.id).unwrap_or(0);
+        let lanes = Lane::bootstrap_from_project(&root);
+        let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
         Self {
             id,
             uuid,
             root,
             name,
-            worktrees,
-            last_active_worktree_id,
+            lanes,
+            last_active_lane_id,
             group_id: None,
             color: None,
             tab_order: 0,
@@ -106,14 +106,14 @@ impl Project {
     /// per-workspace [`ProjectOverride`] (cosmetic decoration). Used
     /// by [`crate::workspace::Workspace::restore_from_disk`].
     pub fn from_disk(id: ProjectId, ps: &ProjectState, ov: &ProjectOverride) -> Self {
-        let worktrees = ps.worktrees.iter().map(Worktree::from_serialized).collect();
+        let lanes = ps.lanes.iter().map(Lane::from_serialized).collect();
         Self {
             id,
             uuid: ps.uuid,
             root: ps.root.clone(),
             name: ps.name.clone().unwrap_or_default(),
-            worktrees,
-            last_active_worktree_id: ps.last_active_worktree_id,
+            lanes,
+            last_active_lane_id: ps.last_active_lane_id,
             group_id: ov.group_id,
             color: ov.color.clone(),
             // `ProjectOverride::tab_order` is persisted as `usize` for
@@ -126,41 +126,37 @@ impl Project {
         }
     }
 
-    /// Borrow a worktree by id.
-    pub fn worktree(&self, id: WorktreeId) -> Option<&Worktree> {
-        self.worktrees.iter().find(|w| w.id == id)
+    /// Borrow a lane by id.
+    pub fn lane(&self, id: LaneId) -> Option<&Lane> {
+        self.lanes.iter().find(|w| w.id == id)
     }
 
-    /// Mutably borrow a worktree by id.
-    pub fn worktree_mut(&mut self, id: WorktreeId) -> Option<&mut Worktree> {
-        self.worktrees.iter_mut().find(|w| w.id == id)
+    /// Mutably borrow a lane by id.
+    pub fn worktree_mut(&mut self, id: LaneId) -> Option<&mut Lane> {
+        self.lanes.iter_mut().find(|w| w.id == id)
     }
 
-    /// Worktree the project should focus when the user clicks the
-    /// project header. Falls back to the first worktree when the saved
+    /// Lane the project should focus when the user clicks the
+    /// project header. Falls back to the first lane when the saved
     /// hint no longer exists (deleted between sessions).
-    pub fn snap_target(&self) -> Option<WorktreeRef> {
-        let id = if self
-            .worktrees
-            .iter()
-            .any(|w| w.id == self.last_active_worktree_id)
-        {
-            self.last_active_worktree_id
+    pub fn snap_target(&self) -> Option<LaneRef> {
+        let id = if self.lanes.iter().any(|w| w.id == self.last_active_lane_id) {
+            self.last_active_lane_id
         } else {
-            self.worktrees.first()?.id
+            self.lanes.first()?.id
         };
-        Some(WorktreeRef {
+        Some(LaneRef {
             project: self.id,
-            worktree: id,
+            lane: id,
         })
     }
 
-    /// First worktree's `WorktreeRef` — used when the workspace
+    /// First lane's `LaneRef` — used when the workspace
     /// activates a project that has never been focused before.
-    pub fn first_worktree_ref(&self) -> Option<WorktreeRef> {
-        self.worktrees.first().map(|w| WorktreeRef {
+    pub fn first_worktree_ref(&self) -> Option<LaneRef> {
+        self.lanes.first().map(|w| LaneRef {
             project: self.id,
-            worktree: w.id,
+            lane: w.id,
         })
     }
 
@@ -210,8 +206,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let p = Project::bootstrap(0, dir.clone());
-        assert_eq!(p.worktrees.len(), 1);
-        assert_eq!(p.last_active_worktree_id, p.worktrees[0].id);
+        assert_eq!(p.lanes.len(), 1);
+        assert_eq!(p.last_active_lane_id, p.lanes[0].id);
         assert!(p.group_id.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -222,10 +218,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut p = Project::bootstrap(7, dir.clone());
-        p.last_active_worktree_id = 999; // not in p.worktrees
+        p.last_active_lane_id = 999; // not in p.lanes
         let snap = p.snap_target().unwrap();
         assert_eq!(snap.project, 7);
-        assert_eq!(snap.worktree, p.worktrees[0].id);
+        assert_eq!(snap.lane, p.lanes[0].id);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

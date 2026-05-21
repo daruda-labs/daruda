@@ -221,7 +221,7 @@ fn test_adjust_divider_changes_ratios() {
 
 #[test]
 fn test_sanitize_branch_name_rejects_bad_inputs() {
-    use super::super::worktree_ops::sanitize_branch_name;
+    use super::super::lane_ops::sanitize_branch_name;
     assert!(sanitize_branch_name("").is_none());
     assert!(sanitize_branch_name("   ").is_none());
     assert!(sanitize_branch_name("..").is_none());
@@ -277,9 +277,9 @@ fn test_normalize_ratios_zero_sum_falls_back_to_equal() {
 
 // ---- resolve_default_cwd ----
 //
-// New-pane cwd resolver. Verifies that the active worktree's path
+// New-pane cwd resolver. Verifies that the active lane's path
 // outranks the main project root so `Cmd+T` (and the very first
-// `add_tab` at startup) lands inside the worktree the user picked,
+// `add_tab` at startup) lands inside the lane the user picked,
 // never at the umbrella project root.
 
 mod resolve_default_cwd {
@@ -290,12 +290,12 @@ mod resolve_default_cwd {
         PathBuf::from(s)
     }
 
-    /// Standard worktree-aware setup — focused pane is inside the
-    /// active worktree. Tests override fields they care about.
+    /// Standard lane-aware setup — focused pane is inside the
+    /// active lane. Tests override fields they care about.
     fn typical_candidates() -> CwdCandidates {
         CwdCandidates {
             focused_pane: Some(p("/Users/x/proj-feat-a/src")),
-            active_worktree: Some(p("/Users/x/proj-feat-a")),
+            active_lane: Some(p("/Users/x/proj-feat-a")),
             project_root: Some(p("/Users/x/proj")),
         }
     }
@@ -309,7 +309,7 @@ mod resolve_default_cwd {
     #[test]
     fn active_worktree_path_wins_over_project_root_at_startup() {
         // Fresh `new_with_project`: no panes yet, focused-pane cwd
-        // is None. The new tab MUST spawn at the worktree path,
+        // is None. The new tab MUST spawn at the lane path,
         // not at the main repo root.
         let got = resolve_default_cwd(
             true,
@@ -324,7 +324,7 @@ mod resolve_default_cwd {
     #[test]
     fn active_worktree_path_wins_when_inherit_disabled() {
         // User opted out of cwd inheritance — every new tab should
-        // still respect worktree isolation, ignoring focused_pane
+        // still respect lane isolation, ignoring focused_pane
         // even when it would otherwise have been used.
         let got = resolve_default_cwd(false, typical_candidates());
         assert_eq!(got, Some(p("/Users/x/proj-feat-a")));
@@ -332,7 +332,7 @@ mod resolve_default_cwd {
 
     #[test]
     fn project_root_is_last_resort() {
-        // No worktree info available (legacy / non-worktree
+        // No lane info available (legacy / non-lane
         // workspace). Falls through to project root.
         let got = resolve_default_cwd(
             true,
@@ -346,7 +346,7 @@ mod resolve_default_cwd {
 
     #[test]
     fn returns_none_when_no_candidates() {
-        // Project-less Workspace, no worktrees, no focused pane.
+        // Project-less Workspace, no lanes, no focused pane.
         // The PTY then falls back to the parent process's cwd.
         let got = resolve_default_cwd(true, CwdCandidates::default());
         assert_eq!(got, None);
@@ -356,8 +356,8 @@ mod resolve_default_cwd {
     fn focused_cwd_in_worktree_kept_verbatim() {
         // A pane that has actually published OSC 7 keeps its
         // reported cwd verbatim — even if it has navigated into a
-        // subdirectory of the worktree, we don't reset to the
-        // worktree root.
+        // subdirectory of the lane, we don't reset to the
+        // lane root.
         let got = resolve_default_cwd(
             true,
             CwdCandidates {

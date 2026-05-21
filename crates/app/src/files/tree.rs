@@ -1,4 +1,4 @@
-//! Per-worktree file tree data structure.
+//! Per-lane file tree data structure.
 //!
 //! Each `Entry` is a node in a flat HashMap keyed by `EntryId`, with a
 //! parallel `path → id` index and a `parent_id → child_ids` index. The
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Per-worktree entry id. Monotonically allocated; never reused after
+/// Per-lane entry id. Monotonically allocated; never reused after
 /// removal so stale references in `expanded` or external caches can be
 /// dropped without dangling.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Debug)]
@@ -45,7 +45,7 @@ impl EntryKind {
 pub struct Entry {
     pub id: EntryId,
     pub kind: EntryKind,
-    /// Worktree-root-relative path. The root entry has an empty path.
+    /// Lane-root-relative path. The root entry has an empty path.
     pub path: PathBuf,
     /// `path.file_name()` cached. Empty for the root.
     pub name: String,
@@ -92,7 +92,7 @@ pub struct LoadedEntry {
 }
 
 pub struct FileTree {
-    /// Absolute path of the worktree root.
+    /// Absolute path of the lane root.
     pub root: PathBuf,
     pub root_id: EntryId,
     entries: HashMap<EntryId, Entry>,
@@ -102,7 +102,7 @@ pub struct FileTree {
     /// Sorted vec of expanded directory ids. binary_search for toggle.
     expanded: Vec<EntryId>,
     next_id: u32,
-    /// Set when an inactive worktree receives a watcher event. Cleared
+    /// Set when an inactive lane receives a watcher event. Cleared
     /// on activation; activation triggers a Bulk reload if true.
     pub dirty: bool,
 }

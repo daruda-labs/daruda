@@ -1,5 +1,5 @@
 //! "Claude Code integration disabled" banner shown at the top of the
-//! worktrees view. Click → install action via the workspace confirm
+//! lanes view. Click → install action via the workspace confirm
 //! dialog.
 
 use crate::ui::theme;

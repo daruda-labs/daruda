@@ -3,9 +3,9 @@
 //! `rebuild_layout`) that translate between the in-memory pane tree
 //! and the on-disk JSON form.
 //!
-//! Owns `WorktreeRuntime`, the frozen-fields struct used by the
+//! Owns `LaneRuntime`, the frozen-fields struct used by the
 //! tab-swap path; both `restore_from_disk` and `activate_worktree`
-//! live across persistence + worktree_ops, but the *type* belongs here
+//! live across persistence + lane_ops, but the *type* belongs here
 //! so the inactive map and the save format share a single definition.
 
 use std::collections::{BTreeMap, HashMap};
@@ -25,12 +25,12 @@ use super::Workspace;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
-/// Frozen runtime state of a non-active worktree. `activate_worktree`
+/// Frozen runtime state of a non-active lane. `activate_worktree`
 /// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
 /// Kept in its own struct so the swap is a single `std::mem::take` +
 /// assignment pair per direction, rather than a tangle of field moves.
 #[derive(Default)]
-pub(in crate::workspace) struct WorktreeRuntime {
+pub(in crate::workspace) struct LaneRuntime {
     pub tabs: Vec<pane::TabEntry>,
     pub panes: Vec<pane::Pane>,
     pub active_tab_index: usize,
@@ -46,12 +46,12 @@ impl Workspace {
     /// Snapshot the workspace into the UUID-keyed disk shape
     /// (`(WorkspaceState, Vec<ProjectState>)`).
     ///
-    /// Each project's intrinsic data (root / name / worktrees / last-
+    /// Each project's intrinsic data (root / name / lanes / last-
     /// active hint) lives in its own [`ProjectState`]; per-workspace
     /// decoration (color / tab order / group / collapsed flag) lives
     /// in [`WorkspaceState::project_overrides`]. The active focus is
-    /// projected from `self.active` (runtime `WorktreeRef`) into
-    /// `(active_project: ProjectUuid, active_worktree: WorktreeId)` —
+    /// projected from `self.active` (runtime `LaneRef`) into
+    /// `(active_project: ProjectUuid, active_lane: LaneId)` —
     /// runtime `ProjectId` is per-session and therefore not persisted.
     ///
     /// Returns `None` when `self.projects` is empty (Welcome state) —
@@ -72,17 +72,17 @@ impl Workspace {
         let mut project_tabs: BTreeMap<ProjectUuid, Vec<SerializedTab>> = BTreeMap::new();
 
         for project in &self.projects {
-            // Per-worktree serialized payload — captures the active
-            // worktree's live `main_area` tab tree, plus any inactive
-            // worktree's stashed runtime.
-            let worktrees: Vec<daruda_store::project::SerializedWorktree> = project
-                .worktrees
+            // Per-lane serialized payload — captures the active
+            // lane's live `main_area` tab tree, plus any inactive
+            // lane's stashed runtime.
+            let lanes: Vec<daruda_store::project::SerializedLane> = project
+                .lanes
                 .iter()
                 .map(|wt| {
                     let mut s = wt.to_serialized();
-                    let wt_ref = daruda_store::project::WorktreeRef {
+                    let wt_ref = daruda_store::project::LaneRef {
                         project: project.id,
-                        worktree: wt.id,
+                        lane: wt.id,
                     };
                     let (tabs_src, panes_src, active_idx) = if self.active == wt_ref {
                         (
@@ -109,31 +109,31 @@ impl Workspace {
                 })
                 .collect();
 
-            // `next_worktree_id`: smallest id strictly greater than every
-            // worktree currently registered for this project (both live
-            // worktrees and any stashed inactive runtimes for the same
+            // `next_lane_id`: smallest id strictly greater than every
+            // lane currently registered for this project (both live
+            // lanes and any stashed inactive runtimes for the same
             // project). Matches the "monotonic — never reused" invariant
             // enforced by `allocate_worktree_id`.
-            let max_live = project.worktrees.iter().map(|w| w.id).max();
+            let max_live = project.lanes.iter().map(|w| w.id).max();
             let max_inactive = self
                 .main_area
                 .inactive_worktree_runtimes
                 .keys()
                 .filter(|r| r.project == project.id)
-                .map(|r| r.worktree)
+                .map(|r| r.lane)
                 .max();
-            let next_worktree_id = match (max_live, max_inactive) {
+            let next_lane_id = match (max_live, max_inactive) {
                 (Some(a), Some(b)) => a.max(b) + 1,
                 (Some(a), None) => a + 1,
                 (None, Some(b)) => b + 1,
                 (None, None) => 0,
             };
 
-            // Flatten this project's per-worktree tabs into the
-            // workspace envelope's per-project bucket. Worktree order
-            // matches `project.worktrees`.
+            // Flatten this project's per-lane tabs into the
+            // workspace envelope's per-project bucket. Lane order
+            // matches `project.lanes`.
             let mut flat_tabs: Vec<SerializedTab> = Vec::new();
-            for w in &worktrees {
+            for w in &lanes {
                 flat_tabs.extend(w.tabs.iter().cloned());
             }
             project_tabs.insert(project.uuid, flat_tabs);
@@ -143,9 +143,9 @@ impl Workspace {
                 uuid: project.uuid,
                 root: project.root.clone(),
                 name: Some(project.name.clone()),
-                worktrees,
-                last_active_worktree_id: project.last_active_worktree_id,
-                next_worktree_id,
+                lanes,
+                last_active_lane_id: project.last_active_lane_id,
+                next_lane_id,
             });
 
             project_ids.push(project.uuid);
@@ -160,7 +160,7 @@ impl Workspace {
             );
         }
 
-        // Project the runtime `WorktreeRef` (per-session `ProjectId`)
+        // Project the runtime `LaneRef` (per-session `ProjectId`)
         // onto the persisted UUID. If the active project has been
         // closed, both fields fall to `None`.
         let active_project = self
@@ -168,7 +168,7 @@ impl Workspace {
             .iter()
             .find(|p| p.id == self.active.project)
             .map(|p| p.uuid);
-        let active_worktree = active_project.map(|_| self.active.worktree);
+        let active_lane = active_project.map(|_| self.active.lane);
 
         let workspace = WorkspaceState {
             schema_version: WORKSPACE_SCHEMA_VERSION,
@@ -177,7 +177,7 @@ impl Workspace {
             project_overrides,
             groups: self.groups.clone(),
             active_project,
-            active_worktree,
+            active_lane,
             docks: DockStates {
                 left_open: self.left_dock.read(cx).is_open,
                 left_size: self.left_dock.read(cx).size,
@@ -232,7 +232,7 @@ impl Workspace {
     /// owned project. No fan-out — each project's intrinsic data lives
     /// in exactly one file, and only this workspace's file references
     /// them. Other workspaces holding the same project see updates via
-    /// the shared project file (last-writer-wins on intrinsic worktree
+    /// the shared project file (last-writer-wins on intrinsic lane
     /// list).
     ///
     /// Updates `recent-workspaces.json` with this workspace's display
@@ -287,7 +287,7 @@ impl Workspace {
     /// Restore from the UUID-keyed disk shape
     /// (`(WorkspaceState, &[ProjectState])` from
     /// [`Workspace::snapshot_for_disk`]). Rebuilds every project's
-    /// worktrees, dock open/size, font settings, and the full tab /
+    /// lanes, dock open/size, font settings, and the full tab /
     /// split-tree layout from the persisted state. Each restored leaf
     /// starts at its serialized cwd so the shell opens where it was
     /// last tracked. On any pane spawn failure, falls back to a single
@@ -378,32 +378,32 @@ impl Workspace {
                     .unwrap_or_default();
                 let mut p = crate::project::Project::from_disk(runtime_id, ps, &ov);
                 let root = p.root.clone();
-                anchor_worktree_paths_to_project_root(&mut p.worktrees, &root);
+                anchor_worktree_paths_to_project_root(&mut p.lanes, &root);
                 p
             })
             .collect();
         self.next_project_id = self.projects.len() as daruda_store::project::ProjectId;
 
         // Project the persisted (active_project: ProjectUuid,
-        // active_worktree: WorktreeId) onto the runtime `WorktreeRef`
+        // active_lane: LaneId) onto the runtime `LaneRef`
         // by looking up the UUID → runtime `ProjectId` mapping.
-        let requested = match (workspace.active_project, workspace.active_worktree) {
+        let requested = match (workspace.active_project, workspace.active_lane) {
             (Some(p_uuid), Some(wt_id)) => self
                 .projects
                 .iter()
                 .find(|p| p.uuid == p_uuid)
-                .map(|p| daruda_store::project::WorktreeRef {
+                .map(|p| daruda_store::project::LaneRef {
                     project: p.id,
-                    worktree: wt_id,
+                    lane: wt_id,
                 })
                 .unwrap_or_default(),
-            _ => daruda_store::project::WorktreeRef::default(),
+            _ => daruda_store::project::LaneRef::default(),
         };
         self.active = self.resolve_active(requested);
 
-        // Drop bootstrapped pane/tab; rebuild every worktree's
+        // Drop bootstrapped pane/tab; rebuild every lane's
         // runtime from the persisted SerializedTab lists carried on
-        // each `SerializedWorktree`.
+        // each `SerializedLane`.
         self.main_area.tabs.clear();
         self.main_area.panes.clear();
         self.main_area.activity_counter.clear();
@@ -416,20 +416,20 @@ impl Workspace {
                 break;
             }
             let runtime_project_id = idx as daruda_store::project::ProjectId;
-            for swt in &ps.worktrees {
+            for swt in &ps.lanes {
                 if early_exit {
                     break;
                 }
-                let wt_ref = daruda_store::project::WorktreeRef {
+                let wt_ref = daruda_store::project::LaneRef {
                     project: runtime_project_id,
-                    worktree: swt.id,
+                    lane: swt.id,
                 };
                 if !swt.path.is_accessible_dir() {
-                    let report = ErrorReport::new("Worktree path not found")
+                    let report = ErrorReport::new("Lane path not found")
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
                         .with_context("path", redact_home(&swt.path))
-                        .dedup("worktree.restore.missing_path")
+                        .dedup("lane.restore.missing_path")
                         .build();
                     self.report_error(report, cx);
                     if wt_ref != self.active {
@@ -498,7 +498,7 @@ impl Workspace {
                         .unwrap_or_default()
                 };
 
-                let runtime = WorktreeRuntime {
+                let runtime = LaneRuntime {
                     tabs,
                     panes: wt_panes,
                     active_tab_index: wt_active_tab,
@@ -542,44 +542,44 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Pick the right (project, worktree) when restoring. Falls back
-    /// through: requested pair → project's `last_active_worktree_id` →
-    /// project's first worktree → workspace's first project's first
-    /// worktree → default `WorktreeRef`.
+    /// Pick the right (project, lane) when restoring. Falls back
+    /// through: requested pair → project's `last_active_lane_id` →
+    /// project's first lane → workspace's first project's first
+    /// lane → default `LaneRef`.
     fn resolve_active(
         &self,
-        requested: daruda_store::project::WorktreeRef,
-    ) -> daruda_store::project::WorktreeRef {
+        requested: daruda_store::project::LaneRef,
+    ) -> daruda_store::project::LaneRef {
         if let Some(project) = self.projects.iter().find(|p| p.id == requested.project) {
-            if project.worktrees.iter().any(|w| w.id == requested.worktree) {
+            if project.lanes.iter().any(|w| w.id == requested.lane) {
                 return requested;
             }
             if project
-                .worktrees
+                .lanes
                 .iter()
-                .any(|w| w.id == project.last_active_worktree_id)
+                .any(|w| w.id == project.last_active_lane_id)
             {
-                return daruda_store::project::WorktreeRef {
+                return daruda_store::project::LaneRef {
                     project: project.id,
-                    worktree: project.last_active_worktree_id,
+                    lane: project.last_active_lane_id,
                 };
             }
-            if let Some(first) = project.worktrees.first() {
-                return daruda_store::project::WorktreeRef {
+            if let Some(first) = project.lanes.first() {
+                return daruda_store::project::LaneRef {
                     project: project.id,
-                    worktree: first.id,
+                    lane: first.id,
                 };
             }
         }
         if let Some(first_project) = self.projects.first()
-            && let Some(first_worktree) = first_project.worktrees.first()
+            && let Some(first_worktree) = first_project.lanes.first()
         {
-            return daruda_store::project::WorktreeRef {
+            return daruda_store::project::LaneRef {
                 project: first_project.id,
-                worktree: first_worktree.id,
+                lane: first_worktree.id,
             };
         }
-        daruda_store::project::WorktreeRef::default()
+        daruda_store::project::LaneRef::default()
     }
 
     /// Recursively rebuild a `PaneLayout` from its serialized form.
@@ -588,8 +588,8 @@ impl Workspace {
     /// focused per tab) can be rewritten.
     /// Recursively materialize a serialized layout into live panes.
     /// `fallback_cwd` is the cwd to use when a leaf's serialized cwd
-    /// is missing — typically the owning worktree's path so restore
-    /// keeps each pane inside its worktree even for sessions that
+    /// is missing — typically the owning lane's path so restore
+    /// keeps each pane inside its lane even for sessions that
     /// were saved before OSC 7 first reported the live cwd.
     fn rebuild_layout(
         &mut self,
@@ -603,12 +603,12 @@ impl Workspace {
             daruda_store::project::SerializedLayout::Leaf { pane_id, cwd, file } => {
                 let pane = if let Some(fc) = file {
                     // File pane — `file_status` is not persisted; the
-                    // git badge re-derives when the worktree's git
+                    // git badge re-derives when the lane's git
                     // status next refreshes. Content stays at
-                    // `Loading` until the owning worktree becomes
+                    // `Loading` until the owning lane becomes
                     // active and `load_pending_file_panes` fires.
                     self.create_file_pane(
-                        fc.worktree_id,
+                        fc.lane_id,
                         fc.path.clone(),
                         fc.staged,
                         None,
@@ -718,11 +718,11 @@ pub(in crate::workspace) fn deserialize_view_mode(
 ///
 /// `saved` is the path serialized at the time of the last save (reported
 /// via OSC 7 from the shell). `worktree_root` is the physical checkout
-/// directory of the owning worktree.
+/// directory of the owning lane.
 ///
 /// **Invariant**: the returned path is always a descendant of
 /// `worktree_root` (or `worktree_root` itself). A saved path that
-/// escapes the worktree — e.g. a stale cwd from a different checkout —
+/// escapes the lane — e.g. a stale cwd from a different checkout —
 /// is discarded in favour of `worktree_root`. This prevents a pane from
 /// opening in an unrelated directory or the parent process's cwd (HOME
 /// when daruda is launched from Finder/Dock).
@@ -735,32 +735,32 @@ fn effective_cwd(
         .or_else(|| worktree_root.map(|p| p.to_path_buf()))
 }
 
-/// Re-anchor each worktree's `path` to the project subdirectory when
+/// Re-anchor each lane's `path` to the project subdirectory when
 /// the serialized path is a git root that *contains* the project root.
 ///
-/// **Before the bootstrap fix**: `Worktree::bootstrap_from_project`
-/// stored the git root (`/repo`) as the worktree path even when the
+/// **Before the bootstrap fix**: `Lane::bootstrap_from_project`
+/// stored the git root (`/repo`) as the lane path even when the
 /// user opened a subdirectory (`/repo/subdir`). After the fix, the
 /// path is anchored to `project_root`. This function updates surviving
 /// old-format entries so restored cwd anchoring (`effective_cwd`)
-/// rejects out-of-worktree paths correctly.
+/// rejects out-of-lane paths correctly.
 ///
 /// **Prefix relationship**:
 /// ```text
 /// wt.path  = /repo          (git root — the old value)
 /// canonical = /repo/subdir  (project root — the new anchor)
 ///
-/// canonical.starts_with(wt.path)  →  true   (subdir of the worktree)
+/// canonical.starts_with(wt.path)  →  true   (subdir of the lane)
 /// canonical != wt.path            →  true   (not identical — needs update)
 /// ```
-/// Only the first matching worktree is updated because each project has
+/// Only the first matching lane is updated because each project has
 /// exactly one primary checkout that maps to the project root.
 fn anchor_worktree_paths_to_project_root(
-    worktrees: &mut [crate::worktree::Worktree],
+    lanes: &mut [crate::lane::Lane],
     project_root: &std::path::Path,
 ) {
     if let Ok(canonical) = std::fs::canonicalize(project_root) {
-        for wt in worktrees.iter_mut() {
+        for wt in lanes.iter_mut() {
             if canonical.starts_with(&wt.path) && canonical != wt.path {
                 wt.path = canonical;
                 break;
@@ -782,7 +782,7 @@ fn serialize_layout(
             // cwd from `path.parent()` at runtime.
             let file = pane.and_then(|p| p.file_view()).map(|fv| {
                 daruda_store::project::SerializedFileContent {
-                    worktree_id: fv.worktree_id,
+                    lane_id: fv.lane_id,
                     path: fv.path.clone(),
                     staged: fv.staged,
                     view_mode: serialize_view_mode(fv.view_mode),

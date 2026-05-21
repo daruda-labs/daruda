@@ -17,10 +17,22 @@ use super::super::layout::RightDockSnapshot;
 /// All view entries shown in the strip, in visible order.
 fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
     vec![
-        (RightDockView::Usage, strings::right_panel_tab_usage().into()),
-        (RightDockView::Skills, strings::right_panel_tab_skills().into()),
-        (RightDockView::Tools, strings::right_panel_tab_tools().into()),
-        (RightDockView::Tasks, strings::right_panel_tab_tasks().into()),
+        (
+            RightDockView::Usage,
+            strings::right_panel_tab_usage().into(),
+        ),
+        (
+            RightDockView::Skills,
+            strings::right_panel_tab_skills().into(),
+        ),
+        (
+            RightDockView::Tools,
+            strings::right_panel_tab_tools().into(),
+        ),
+        (
+            RightDockView::Tasks,
+            strings::right_panel_tab_tasks().into(),
+        ),
     ]
 }
 

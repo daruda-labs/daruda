@@ -64,7 +64,7 @@ fn test_left_dock_registers_three_panels(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_left_dock_active_panel_matches_default_dock_view(cx: &mut TestAppContext) {
-    // Default dock view is Worktrees → index 0.
+    // Default dock view is Lanes → index 0.
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, cx| {
         let d = ws.left_dock.read(cx);
@@ -98,12 +98,12 @@ fn test_set_dock_view_updates_dock_view(cx: &mut TestAppContext) {
         );
     });
     ws.update(cx, |ws, cx| {
-        ws.set_left_dock_view(daruda_store::project::LeftDockView::Worktrees, cx);
+        ws.set_left_dock_view(daruda_store::project::LeftDockView::Lanes, cx);
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
             ws.left_dock_view,
-            daruda_store::project::LeftDockView::Worktrees
+            daruda_store::project::LeftDockView::Lanes
         );
     });
 }

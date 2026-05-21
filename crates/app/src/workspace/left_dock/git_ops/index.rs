@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::project::{WorktreeId, WorktreeRef};
+use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::path_ext::PathExt;
@@ -16,28 +16,28 @@ use crate::workspace::dialog_helpers::open_confirm_dialog;
 impl Workspace {
     /// Stage a single file from the working tree into the index.
     ///
-    /// Runs from the worktree's git toplevel so:
-    /// (a) linked worktrees stage into their own per-worktree index
+    /// Runs from the lane's git toplevel so:
+    /// (a) linked lanes stage into their own per-lane index
     ///     rather than the shared `repo_root` (which `git_repo_root_for`
-    ///     returns and which is wrong for any non-primary worktree); and
-    /// (b) an anchored main worktree (where `wt.path` points at a
+    ///     returns and which is wrong for any non-primary lane); and
+    /// (b) an anchored main lane (where `wt.path` points at a
     ///     subdirectory the user opened) still gets the porcelain-path
     ///     base correct — `git status --porcelain` paths are
     ///     toplevel-relative, so `git add` must run from there.
     pub(in crate::workspace) fn stage_file(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
         if self.git_stage_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -49,7 +49,7 @@ impl Workspace {
         let wt_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_add(&wt_top, &path),
+            move || crate::lane::git::git_add(&wt_top, &path),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -61,7 +61,7 @@ impl Workspace {
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
-                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("lane", redact_home(&wt_for_report))
                             .with_context("path", redact_home(&path_for_report))
                             .dedup("git.stage")
                             .build();
@@ -76,22 +76,22 @@ impl Workspace {
 
     /// Remove a file from the index (unstage), keeping working-tree changes.
     ///
-    /// Runs from the worktree's git toplevel — see [`Self::stage_file`] for
+    /// Runs from the lane's git toplevel — see [`Self::stage_file`] for
     /// why `wt.path` and the shared `repo_root` are both unsuitable.
     pub(in crate::workspace) fn unstage_file(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
         if self.git_stage_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -103,7 +103,7 @@ impl Workspace {
         let wt_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_restore_staged(&wt_top, &path),
+            move || crate::lane::git::git_restore_staged(&wt_top, &path),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -115,7 +115,7 @@ impl Workspace {
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
-                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("lane", redact_home(&wt_for_report))
                             .with_context("path", redact_home(&path_for_report))
                             .dedup("git.unstage")
                             .build();
@@ -132,18 +132,18 @@ impl Workspace {
     /// per-directory "stage all in this dir" checkbox.
     pub(in crate::workspace) fn stage_paths(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         if self.git_stage_in_flight || paths.is_empty() {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -155,7 +155,7 @@ impl Workspace {
         let paths_count = paths.len();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_add_paths(&wt_top, &paths),
+            move || crate::lane::git::git_add_paths(&wt_top, &paths),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -167,7 +167,7 @@ impl Workspace {
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
-                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("lane", redact_home(&wt_for_report))
                             .with_context("count", paths_count.to_string())
                             .dedup("git.stage_paths")
                             .build();
@@ -184,18 +184,18 @@ impl Workspace {
     /// [`Self::stage_paths`] for the per-dir "unstage all" toggle.
     pub(in crate::workspace) fn unstage_paths(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         paths: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         if self.git_stage_in_flight || paths.is_empty() {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -207,7 +207,7 @@ impl Workspace {
         let paths_count = paths.len();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_restore_staged_paths(&wt_top, &paths),
+            move || crate::lane::git::git_restore_staged_paths(&wt_top, &paths),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -219,7 +219,7 @@ impl Workspace {
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
                             .at(file!(), line!())
-                            .with_context("worktree", redact_home(&wt_for_report))
+                            .with_context("lane", redact_home(&wt_for_report))
                             .with_context("count", paths_count.to_string())
                             .dedup("git.unstage_paths")
                             .build();
@@ -233,19 +233,15 @@ impl Workspace {
     }
 
     /// Stage all unstaged and untracked files (`git add --all`).
-    pub(in crate::workspace) fn stage_all(
-        &mut self,
-        worktree_id: WorktreeId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn stage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
         if self.git_stage_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -256,7 +252,7 @@ impl Workspace {
         let path_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_add_all(&wt_top),
+            move || crate::lane::git::git_add_all(&wt_top),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -281,19 +277,15 @@ impl Workspace {
     }
 
     /// Unstage all files (`git restore --staged .`).
-    pub(in crate::workspace) fn unstage_all(
-        &mut self,
-        worktree_id: WorktreeId,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn unstage_all(&mut self, lane_id: LaneId, cx: &mut Context<Self>) {
         if self.git_stage_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let Some(wt_top) = wt.git_worktree_root().map(std::path::Path::to_path_buf) else {
@@ -304,7 +296,7 @@ impl Workspace {
         let path_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_restore_all_staged(&wt_top),
+            move || crate::lane::git::git_restore_all_staged(&wt_top),
             move |ws, result, cx| {
                 ws.git_stage_in_flight = false;
                 match result {
@@ -335,7 +327,7 @@ impl Workspace {
     /// confirm body spells out which one the user is about to do.
     pub(in crate::workspace) fn on_discard_file(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         is_untracked: bool,
         window: &mut Window,
@@ -347,7 +339,7 @@ impl Workspace {
         }
         if !self
             .active_project()
-            .is_some_and(|p| p.worktrees.iter().any(|w| w.id == worktree_id))
+            .is_some_and(|p| p.lanes.iter().any(|w| w.id == lane_id))
         {
             return;
         }
@@ -372,7 +364,7 @@ impl Workspace {
                 if let Some(ws) = weak.upgrade() {
                     let path = path.clone();
                     ws.update(app_cx, |ws, cx| {
-                        ws.do_discard_file(worktree_id, path, is_untracked, cx)
+                        ws.do_discard_file(lane_id, path, is_untracked, cx)
                     });
                 }
             },
@@ -387,7 +379,7 @@ impl Workspace {
     /// [`Self::on_discard_file`].
     fn do_discard_file(
         &mut self,
-        worktree_id: WorktreeId,
+        lane_id: LaneId,
         path: PathBuf,
         is_untracked: bool,
         cx: &mut Context<Self>,
@@ -395,19 +387,19 @@ impl Workspace {
         if self.git_stage_in_flight {
             return;
         }
-        let target = WorktreeRef {
+        let target = LaneRef {
             project: self.active.project,
-            worktree: worktree_id,
+            lane: lane_id,
         };
-        let Some(wt) = self.worktree_for(target) else {
+        let Some(wt) = self.lane_for(target) else {
             return;
         };
         let wt_path = wt.path.clone();
         let repo_root = self.git_repo_root_for(target);
         // `path` is a repo-root-relative pathspec (from git status output).
-        // `git restore`/`git clean` must run from the worktree directory with a
-        // worktree-relative path — use WorktreePaths for the two-step conversion.
-        let paths = crate::worktree::paths::WorktreePaths {
+        // `git restore`/`git clean` must run from the lane directory with a
+        // lane-relative path — use LanePaths for the two-step conversion.
+        let paths = crate::lane::paths::LanePaths {
             wt_path: &wt_path,
             repo_root: repo_root.as_deref(),
         };
@@ -421,9 +413,9 @@ impl Workspace {
             cx,
             move || {
                 if is_untracked {
-                    crate::worktree::git::git_clean_untracked(&wt_path, &wt_rel_path)
+                    crate::lane::git::git_clean_untracked(&wt_path, &wt_rel_path)
                 } else {
-                    crate::worktree::git::git_discard_working(&wt_path, &wt_rel_path)
+                    crate::lane::git::git_discard_working(&wt_path, &wt_rel_path)
                 }
             },
             move |ws, result, cx| {

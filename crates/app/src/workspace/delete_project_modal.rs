@@ -1,9 +1,9 @@
 //! Modal confirming a Close-Project action and offering an opt-in
-//! "also delete worktrees on disk" mode.
+//! "also delete lanes on disk" mode.
 //!
 //! Two mutually-exclusive radios:
 //!   * Remove from Daruda only (default; disk untouched).
-//!   * Remove and delete worktrees on disk (`git worktree remove`
+//!   * Remove and delete lanes on disk (`git worktree remove`
 //!     each entry + `fs::remove_dir_all`).
 //!
 //! Routed from the `cmd-shift-w` (`CloseProject`) action and any
@@ -26,10 +26,10 @@ use crate::workspace::dialog_helpers::open_form_modal;
 /// User's pick on the delete-project chooser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DeleteProjectChoice {
-    /// Drop the project from Daruda's registered state. Worktree
+    /// Drop the project from Daruda's registered state. Lane
     /// directories stay on disk.
     KeepOnDisk,
-    /// `git worktree remove` every entry and remove the worktree
+    /// `git worktree remove` every entry and remove the lane
     /// directories. Daruda also drops its registered state once the
     /// disk cleanup finishes.
     DeleteOnDisk,
@@ -101,7 +101,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-keep",
-                    "Remove from Daruda only (keep worktrees on disk)",
+                    "Remove from Daruda only (keep lanes on disk)",
                     0_isize,
                 )
                 .checked(keep_checked)
@@ -113,7 +113,7 @@ impl Render for DeleteProjectModal {
             .child(
                 radio(
                     "delete-project-disk",
-                    "Remove worktrees and delete on disk",
+                    "Remove lanes and delete on disk",
                     1_isize,
                 )
                 .checked(delete_checked)

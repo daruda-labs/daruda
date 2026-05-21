@@ -56,26 +56,26 @@ fn make_server_from_draft(scope: McpScope, draft: &McpServerDraft) -> McpServer 
 }
 
 /// Resolve the on-disk path for `scope`. `None` for `Project` when
-/// `worktree` is absent. Free helper so callers can compute the path
+/// `lane` is absent. Free helper so callers can compute the path
 /// without holding a `&McpState`.
-fn path_for(scope: McpScope, worktree: Option<&Path>) -> Option<PathBuf> {
+fn path_for(scope: McpScope, lane: Option<&Path>) -> Option<PathBuf> {
     match scope {
-        McpScope::Project => worktree.map(parse::project_mcp_path),
+        McpScope::Project => lane.map(parse::project_mcp_path),
         McpScope::Personal => Some(parse::personal_settings_path()),
     }
 }
 
 /// Mutable handle to one scope's `(servers, raw)` inside the Global.
-/// Returns `None` for `Project` when `worktree` is absent — no scoped
+/// Returns `None` for `Project` when `lane` is absent — no scoped
 /// entry to mutate. For `Personal`, always returns `Some`.
 fn scope_slot_mut<'a>(
     state: &'a mut McpState,
     scope: McpScope,
-    worktree: Option<&Path>,
+    lane: Option<&Path>,
 ) -> Option<(&'a mut Vec<McpServer>, &'a mut Value)> {
     match scope {
         McpScope::Project => {
-            let w = worktree?;
+            let w = lane?;
             let entry = state.project.entry(w.to_path_buf()).or_default();
             let ProjectMcp { servers, raw } = entry;
             Some((servers, raw))
@@ -92,12 +92,12 @@ impl Workspace {
         name: &str,
         cx: &mut Context<Self>,
     ) {
-        let worktree = self.active_worktree_root();
-        let Some(path) = path_for(scope, worktree.as_deref()) else {
+        let lane = self.active_worktree_root();
+        let Some(path) = path_for(scope, lane.as_deref()) else {
             return;
         };
         let result = cx.update_global::<McpState, _>(|state, _| {
-            let Some((servers, raw)) = scope_slot_mut(state, scope, worktree.as_deref()) else {
+            let Some((servers, raw)) = scope_slot_mut(state, scope, lane.as_deref()) else {
                 return Ok::<_, McpPersistError>(false);
             };
             let Some(current) = servers.iter().find(|s| s.name == name).map(|s| s.disabled) else {
@@ -135,10 +135,10 @@ impl Workspace {
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let worktree = self.active_worktree_root();
-        let path = path_for(scope, worktree.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let lane = self.active_worktree_root();
+        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
-            let (servers, raw) = scope_slot_mut(state, scope, worktree.as_deref())
+            let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
             write_server(raw, &path, scope, &draft)?;
             let server = make_server_from_draft(scope, &draft);
@@ -157,10 +157,10 @@ impl Workspace {
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let worktree = self.active_worktree_root();
-        let path = path_for(scope, worktree.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let lane = self.active_worktree_root();
+        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
-            let (servers, raw) = scope_slot_mut(state, scope, worktree.as_deref())
+            let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
             update_server(raw, &path, scope, &draft)?;
             let new_server = make_server_from_draft(scope, &draft);
@@ -184,10 +184,10 @@ impl Workspace {
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let worktree = self.active_worktree_root();
-        let path = path_for(scope, worktree.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let lane = self.active_worktree_root();
+        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
-            let (servers, raw) = scope_slot_mut(state, scope, worktree.as_deref())
+            let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
             delete_server(raw, &path, scope, name)?;
             servers.retain(|s| s.name != name);

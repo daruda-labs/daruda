@@ -88,7 +88,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_commit(&repo_root, &message_bg),
+            move || crate::lane::git::git_commit(&repo_root, &message_bg),
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
@@ -194,7 +194,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_commit_amend(&repo_root, &message),
+            move || crate::lane::git::git_commit_amend(&repo_root, &message),
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
@@ -284,7 +284,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_push(&repo_root),
+            move || crate::lane::git::git_push(&repo_root),
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
@@ -318,7 +318,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_fetch(&repo_root),
+            move || crate::lane::git::git_fetch(&repo_root),
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
@@ -353,7 +353,7 @@ impl Workspace {
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::worktree::git::git_pull(&repo_root),
+            move || crate::lane::git::git_pull(&repo_root),
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);

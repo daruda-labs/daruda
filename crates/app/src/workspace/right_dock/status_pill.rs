@@ -15,10 +15,10 @@
 //! | State     | Items (top → bottom)                                          |
 //! |-----------|---------------------------------------------------------------|
 //! | Backlog   | Start · Edit · Delete                                         |
-//! | Running   | Stop · Open worktree · — · Edit · Delete                      |
-//! | Done      | Reopen · Open worktree · — · Edit · Delete                    |
-//! | Error     | Retry · Reopen · Open worktree · View error · — · Edit · Delete |
-//! | Cancelled | Reopen · Open worktree · — · Edit · Delete                    |
+//! | Running   | Stop · Open lane · — · Edit · Delete                      |
+//! | Done      | Reopen · Open lane · — · Edit · Delete                    |
+//! | Error     | Retry · Reopen · Open lane · View error · — · Edit · Delete |
+//! | Cancelled | Reopen · Open lane · — · Edit · Delete                    |
 
 use crate::ui::theme;
 use daruda_store::tasks::{Task, TaskState};

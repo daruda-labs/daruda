@@ -103,7 +103,7 @@ impl Workspace {
     /// (the same one the left dock (Files / Git Changes) views use). Used
     /// for plugin-scope skills (read-only on disk) so the user can
     /// still inspect contents without an Edit button. The active
-    /// worktree id is borrowed only to satisfy the file-pane API —
+    /// lane id is borrowed only to satisfy the file-pane API —
     /// the file is read by absolute path so it can live anywhere on
     /// disk.
     pub fn open_skill_in_file_viewer(
@@ -113,9 +113,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let path = dir.join("SKILL.md");
-        let worktree_id = self.active.worktree;
+        let lane_id = self.active.lane;
         self.open_pane_file_view(
-            worktree_id,
+            lane_id,
             path,
             false,
             None,

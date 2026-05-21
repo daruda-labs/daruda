@@ -1,5 +1,5 @@
-//! Visible row primitives for the worktrees view:
-//! `section_header`, `worktree_row`, the small `WorktreeId → GitBadge`
+//! Visible row primitives for the lanes view:
+//! `section_header`, `worktree_row`, the small `LaneId → GitBadge`
 //! derivation, and the non-git placeholder hint.
 
 use crate::ui::theme;
@@ -9,22 +9,22 @@ use gpui::{
     SharedString, div, prelude::*, px,
 };
 
-use daruda_store::project::{ProjectId, WorktreeId};
+use daruda_store::project::{LaneId, ProjectId};
 
+use crate::lane::Lane;
 use crate::surface::strings as surface_strings;
 use crate::ui::{
     ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
 };
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
-use crate::worktree::Worktree;
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
 use super::context_menu::build_context_menu_items;
 use super::drag::{DragGhost, DragPayload};
 use crate::workspace::dnd_ops::TopRow;
 
-/// Compact summary of a worktree's git status for the row badge — rolled
+/// Compact summary of a lane's git status for the row badge — rolled
 /// up into a single change count plus ahead/behind divergence so the
 /// dock row can render a GitHub-Desktop-style chip
 /// (`↑N ↓N [total]`). `None` means "show nothing" (clean tree + no
@@ -42,18 +42,18 @@ pub(in crate::workspace) struct GitBadgeData {
     pub behind: u32,
 }
 
-/// Build the GH-Desktop-style change/divergence summary for worktree
+/// Build the GH-Desktop-style change/divergence summary for lane
 /// `id` from the cached git status. Returns `None` when no status is
-/// cached yet or the worktree is fully clean (no changes + no
+/// cached yet or the lane is fully clean (no changes + no
 /// divergence) so the row stays uncluttered.
 pub(in crate::workspace) fn git_badge_for(
     snap: &LeftDockSnapshot,
     project_id: ProjectId,
-    id: WorktreeId,
+    id: LaneId,
 ) -> Option<GitBadgeData> {
-    let target = daruda_store::project::WorktreeRef {
+    let target = daruda_store::project::LaneRef {
         project: project_id,
-        worktree: id,
+        lane: id,
     };
     let status = snap.git_status_cache.get(&target)?;
     // Unstaged entries are identified by the y column, not x.
@@ -87,9 +87,9 @@ pub(in crate::workspace) fn group_header_row(
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
     let label_color = t.dock_view_tab_active;
-    let row_hover_bg = t.worktree_row_hover_bg;
-    let drop_target_bg = t.worktree_drop_target_bg;
-    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
+    let row_hover_bg = t.lane_row_hover_bg;
+    let drop_target_bg = t.lane_drop_target_bg;
+    let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
     // Color dot rendered at the left of the group row (right-aligned
     // chevron carries the collapse state, so color is its own glyph
@@ -102,9 +102,9 @@ pub(in crate::workspace) fn group_header_row(
         .map(|rgba| {
             div()
                 .flex_none()
-                .w(px(theme::WORKTREE_GROUP_COLOR_DOT_SIZE))
-                .h(px(theme::WORKTREE_GROUP_COLOR_DOT_SIZE))
-                .rounded(px(theme::WORKTREE_GROUP_COLOR_DOT_RADIUS))
+                .w(px(theme::LANE_GROUP_COLOR_DOT_SIZE))
+                .h(px(theme::LANE_GROUP_COLOR_DOT_SIZE))
+                .rounded(px(theme::LANE_GROUP_COLOR_DOT_RADIUS))
                 .bg(rgba)
         });
 
@@ -132,8 +132,8 @@ pub(in crate::workspace) fn group_header_row(
         .flex_row()
         .items_center()
         .w_full()
-        .gap(px(theme::WORKTREE_LABEL_GAP))
-        .text_size(px(theme::WORKTREE_GROUP_LABEL_FONT_SIZE))
+        .gap(px(theme::LANE_LABEL_GAP))
+        .text_size(px(theme::LANE_GROUP_LABEL_FONT_SIZE))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(label_color)
         .when_some(color_dot, |d, dot| d.child(dot))
@@ -169,9 +169,9 @@ pub(in crate::workspace) fn group_header_row(
         .flex()
         .flex_col()
         .w_full()
-        .px(px(theme::WORKTREE_ROW_PAD_X))
-        .py(px(theme::WORKTREE_SECTION_PAD_Y))
-        .rounded(px(theme::WORKTREE_ROW_RADIUS))
+        .px(px(theme::LANE_ROW_PAD_X))
+        .py(px(theme::LANE_SECTION_PAD_Y))
+        .rounded(px(theme::LANE_ROW_RADIUS))
         .cursor_pointer()
         // Active highlight is expressed by the wrapping `group_card`
         // (see `card::group_card`), so the header row only carries the
@@ -208,7 +208,7 @@ pub(in crate::workspace) fn group_header_row(
         // Group header accepts:
         //   - any Project (becomes the last child of this group)
         //   - a different Group (reorder at top level)
-        // Worktree payloads are rejected — a worktree never leaves its
+        // Lane payloads are rejected — a lane never leaves its
         // project, so a group header is never a valid target for it.
         // Rejected payloads still get a tint (rejected_bg) so the user
         // sees "the row noticed me but won't accept the drop" instead
@@ -247,7 +247,7 @@ pub(in crate::workspace) fn group_header_row(
 /// Per-row state passed into [`project_header_row`].
 ///
 /// Keeps the seven row-shape inputs (project id, name, group/active/git
-/// flags, collapsed flag, and the snap-target worktree) grouped at the
+/// flags, collapsed flag, and the snap-target lane) grouped at the
 /// call site so the header signature stays readable as additional
 /// per-project flags accumulate.
 pub(in crate::workspace) struct ProjectHeaderArgs {
@@ -257,10 +257,10 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
     pub is_active: bool,
     pub is_git: bool,
     pub is_collapsed: bool,
-    pub last_active_worktree_id: WorktreeId,
+    pub last_active_lane_id: LaneId,
 }
 
-/// Single-row project header above the worktrees list for one
+/// Single-row project header above the lanes list for one
 /// project. Drag source for `DragPayload::Project` and drop target for
 /// project / group payloads. The `is_ungrouped` flag gates whether a
 /// dragged group can land here — groups only sit at the top level, so
@@ -268,8 +268,8 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
 /// silently no-op.
 ///
 /// `is_git` enables the trailing `[+]` button (per-project "create
-/// worktree" affordance — the previous `+ new worktree` row at the
-/// bottom of the worktree list was folded into this header so the
+/// lane" affordance — the previous `+ new lane` row at the
+/// bottom of the lane list was folded into this header so the
 /// project row carries every project-scoped action).
 ///
 /// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
@@ -289,7 +289,7 @@ pub(in crate::workspace) fn project_header_row(
         is_active,
         is_git,
         is_collapsed,
-        last_active_worktree_id,
+        last_active_lane_id,
     } = args;
     let t = theme::current(cx);
     let label_color = if is_active {
@@ -297,10 +297,10 @@ pub(in crate::workspace) fn project_header_row(
     } else {
         t.muted_text
     };
-    let row_hover_bg = t.worktree_row_hover_bg;
-    let row_active_bg = t.worktree_card_active_bg;
-    let drop_target_bg = t.worktree_drop_target_bg;
-    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
+    let row_hover_bg = t.lane_row_hover_bg;
+    let row_active_bg = t.lane_card_active_bg;
+    let drop_target_bg = t.lane_drop_target_bg;
+    let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
     // Active highlight lands on this header only when the project is
     // ungrouped — grouped projects rely on the wrapping `group_card`
     // active fill instead, so painting an inner row chip would double
@@ -323,12 +323,12 @@ pub(in crate::workspace) fn project_header_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::WORKTREE_LABEL_GAP))
+        .gap(px(theme::LANE_LABEL_GAP))
         .w_full()
-        .px(px(theme::WORKTREE_ROW_PAD_X))
-        .py(px(theme::WORKTREE_SECTION_PAD_Y))
-        .rounded(px(theme::WORKTREE_ROW_RADIUS))
-        .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
+        .px(px(theme::LANE_ROW_PAD_X))
+        .py(px(theme::LANE_SECTION_PAD_Y))
+        .rounded(px(theme::LANE_ROW_RADIUS))
+        .text_size(px(theme::LANE_LABEL_FONT_SIZE))
         .text_color(label_color)
         .cursor_pointer()
         .when(!show_active_bg, move |d| {
@@ -336,14 +336,14 @@ pub(in crate::workspace) fn project_header_row(
         })
         .when(show_active_bg, move |d| d.bg(row_active_bg))
         // Header click snaps the workspace focus to this project's
-        // last-active worktree (§5.5). No-op when the click lands on
+        // last-active lane (§5.5). No-op when the click lands on
         // the already-active project — the snap target would equal
         // the current focus and `activate_worktree` short-circuits.
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = ws_for_click.upgrade() {
-                let target = daruda_store::project::WorktreeRef {
+                let target = daruda_store::project::LaneRef {
                     project: project_id,
-                    worktree: last_active_worktree_id,
+                    lane: last_active_lane_id,
                 };
                 ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
             }
@@ -358,7 +358,7 @@ pub(in crate::workspace) fn project_header_row(
                 };
                 let items = super::project_menu::build_project_menu_items(
                     project_id,
-                    last_active_worktree_id,
+                    last_active_lane_id,
                     ws_for_menu.clone(),
                 );
                 ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
@@ -375,7 +375,7 @@ pub(in crate::workspace) fn project_header_row(
         //   - a Group, but only when this project is itself ungrouped
         //     (groups live at the top level and may only interleave
         //     with ungrouped projects there).
-        // Worktree payloads, group-on-grouped-project, and self-project
+        // Lane payloads, group-on-grouped-project, and self-project
         // drops fall through to the rejected tint so the user sees the
         // row noticed the drag but won't accept it.
         .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
@@ -440,7 +440,7 @@ pub(in crate::workspace) fn project_header_row(
             let ws_for_add = snap.workspace.clone();
             let row_group_for_btn = row_group.clone();
             row.child(
-                button_bare(("project-add-worktree", project_id as usize))
+                button_bare(("project-add-lane", project_id as usize))
                     .ghost()
                     .icon(IconName::Plus)
                     .invisible()
@@ -454,19 +454,19 @@ pub(in crate::workspace) fn project_header_row(
                             let workspace_for_modal = ws_for_add.clone();
                             ws.update(cx, |ws, cx| {
                                 // Activate this project first so
-                                // `finalize_create_worktree` lands the
-                                // new worktree under it (matches the
+                                // `finalize_create_lane` lands the
+                                // new lane under it (matches the
                                 // old `add_worktree_row` semantics).
-                                let target = daruda_store::project::WorktreeRef {
+                                let target = daruda_store::project::LaneRef {
                                     project: project_id,
-                                    worktree: last_active_worktree_id,
+                                    lane: last_active_lane_id,
                                 };
                                 ws.activate_worktree(target, window, cx);
                                 let Some(repo_root) = ws.git_repo_root() else {
                                     return;
                                 };
                                 crate::workspace::dialog_helpers::open_form_modal(
-                                    "Create Worktree",
+                                    "Create Lane",
                                     None,
                                     move |window, cx| {
                                         super::create_modal::CreateWorktreeModal::new(
@@ -496,8 +496,8 @@ pub(in crate::workspace) fn section_header(
     // pick between adding a project (folder picker routed through
     // `prompt_and_open_folder_with_policy`, policy-aware) and
     // creating a group (previously only reachable via Cmd+Shift+N or
-    // the Command Palette). Per-project worktree creation lives on
-    // each project's `[+ new worktree]` row.
+    // the Command Palette). Per-project lane creation lives on
+    // each project's `[+ new lane]` row.
     let workspace = snap.workspace.clone();
     let add_button = button_bare("section-add-toggle")
         .ghost()
@@ -535,12 +535,12 @@ pub(in crate::workspace) fn section_header(
         }));
 
     SectionHeader::new(surface_strings::projects_section_header())
-        .padding(theme::WORKTREE_ROW_PAD_X, theme::WORKTREE_SECTION_PAD_Y)
+        .padding(theme::LANE_ROW_PAD_X, theme::LANE_SECTION_PAD_Y)
         .actions(add_button)
 }
 
 /// GitHub-Desktop-style badge cluster rendered on the right of a
-/// worktree row's label. Layout (left to right, each group omitted when
+/// lane row's label. Layout (left to right, each group omitted when
 /// its count is zero):
 ///
 /// - `▲N` — ahead arrow + count
@@ -604,7 +604,7 @@ fn git_badge_view(
 }
 
 pub(in crate::workspace) fn worktree_row(
-    wt: &Worktree,
+    wt: &Lane,
     project_id: ProjectId,
     is_active: bool,
     git_badge: Option<GitBadgeData>,
@@ -614,17 +614,17 @@ pub(in crate::workspace) fn worktree_row(
     // Snapshot every row colour from the live theme so the closures
     // below (hover, drag_over) capture stable values.
     let t = theme::current(cx);
-    let unread_dot_color = t.worktree_unread;
+    let unread_dot_color = t.lane_unread;
     let label_active = t.dock_view_tab_active;
     let label_inactive = t.muted_text;
     let badge_pill_bg = t.git_badge_pill_bg;
     let badge_pill_text = t.git_badge_pill_text;
     let badge_arrow_text = t.git_badge_arrow_text;
     let sublabel_color = t.faint_text;
-    let row_hover_bg = t.worktree_row_hover_bg;
-    let row_active_bg = t.worktree_row_active_bg;
-    let drop_target_bg = t.worktree_drop_target_bg;
-    let drop_target_rejected_bg = t.worktree_drop_target_rejected_bg;
+    let row_hover_bg = t.lane_row_hover_bg;
+    let row_active_bg = t.lane_row_active_bg;
+    let drop_target_bg = t.lane_drop_target_bg;
+    let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
     let label = wt.display_name();
     // Sublabel priority: user-set description → path.
@@ -636,9 +636,9 @@ pub(in crate::workspace) fn worktree_row(
     // Unread marker sits to the right of the label.
     let unread_dot = div()
         .flex_none()
-        .w(px(theme::WORKTREE_UNREAD_DOT_SIZE))
-        .h(px(theme::WORKTREE_UNREAD_DOT_SIZE))
-        .rounded(px(theme::WORKTREE_UNREAD_DOT_RADIUS))
+        .w(px(theme::LANE_UNREAD_DOT_SIZE))
+        .h(px(theme::LANE_UNREAD_DOT_SIZE))
+        .rounded(px(theme::LANE_UNREAD_DOT_RADIUS))
         .bg(unread_dot_color);
 
     // Body — label row + sublabel row + optional Claude multi-session sub-row.
@@ -652,8 +652,8 @@ pub(in crate::workspace) fn worktree_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::WORKTREE_LABEL_GAP))
-                .text_size(px(theme::WORKTREE_LABEL_FONT_SIZE))
+                .gap(px(theme::LANE_LABEL_GAP))
+                .text_size(px(theme::LANE_LABEL_FONT_SIZE))
                 .text_color(if is_active {
                     label_active
                 } else {
@@ -681,8 +681,8 @@ pub(in crate::workspace) fn worktree_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(theme::WORKTREE_SUBLABEL_GAP))
-                .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+                .gap(px(theme::LANE_SUBLABEL_GAP))
+                .text_size(px(theme::LANE_SUB_FONT_SIZE))
                 .text_color(sublabel_color)
                 .overflow_hidden()
                 .whitespace_nowrap()
@@ -690,9 +690,9 @@ pub(in crate::workspace) fn worktree_row(
         )
         .when_some(
             snap.claude_per_session_per_worktree
-                .get(&daruda_store::project::WorktreeRef {
+                .get(&daruda_store::project::LaneRef {
                     project: project_id,
-                    worktree: wt.id,
+                    lane: wt.id,
                 }),
             |d, sessions| {
                 d.child(claude_badges_row(
@@ -703,22 +703,22 @@ pub(in crate::workspace) fn worktree_row(
             },
         );
 
-    let wt_id: WorktreeId = wt.id;
+    let wt_id: LaneId = wt.id;
     let wt_path: std::path::PathBuf = wt.path.clone();
     let wt_label_shared = SharedString::from(label.clone());
     let wt_description_current: Option<String> = wt.description.clone();
     let wt_name_current: Option<String> = wt.name.clone();
-    let removable = crate::workspace::Workspace::worktree_removable(wt);
+    let removable = crate::workspace::Workspace::lane_removable(wt);
 
     // Merge context menu state — captured before closures so all
     // values are 'static (no borrow of `wt` or `snap` inside closures).
-    let wt_is_git = matches!(&wt.kind, daruda_store::project::WorktreeKind::Git { .. });
+    let wt_is_git = matches!(&wt.kind, daruda_store::project::LaneKind::Git { .. });
     let wt_is_detached = matches!(
         &wt.kind,
-        daruda_store::project::WorktreeKind::Git { branch: None, .. }
+        daruda_store::project::LaneKind::Git { branch: None, .. }
     );
     let wt_source_branch: Option<String> = match &wt.kind {
-        daruda_store::project::WorktreeKind::Git {
+        daruda_store::project::LaneKind::Git {
             branch: Some(b), ..
         } => Some(b.clone()),
         _ => None,
@@ -726,23 +726,23 @@ pub(in crate::workspace) fn worktree_row(
     let wt_base_ref: Option<String> = wt.base_ref.clone();
     let wt_is_dirty = snap
         .git_status_cache
-        .get(&daruda_store::project::WorktreeRef {
+        .get(&daruda_store::project::LaneRef {
             project: project_id,
-            worktree: wt.id,
+            lane: wt.id,
         })
         .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty());
     let wt_source_repo_root: Option<std::path::PathBuf> = match &wt.kind {
-        daruda_store::project::WorktreeKind::Git { repo_root, .. } => Some(repo_root.clone()),
+        daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
         _ => None,
     };
     let workspace = snap.workspace.clone();
 
     // Drag payload — captured once so on_drag + on_drop share the same Arc.
-    let wt_ref = daruda_store::project::WorktreeRef {
+    let wt_ref = daruda_store::project::LaneRef {
         project: project_id,
-        worktree: wt_id,
+        lane: wt_id,
     };
-    let drag_payload = DragPayload::Worktree {
+    let drag_payload = DragPayload::Lane {
         target: wt_ref,
         label: wt_label_shared.clone(),
     };
@@ -750,31 +750,29 @@ pub(in crate::workspace) fn worktree_row(
     let ws_for_click = workspace.clone();
     let ws_for_drop = workspace.clone();
     let ws_for_rclick = workspace.clone();
-    // Worktree IDs reset to 0 per project (`Worktree::bootstrap_from_project`
-    // numbers each project's worktrees from 0), so `("worktree-row", wt_id)`
+    // Lane IDs reset to 0 per project (`Lane::bootstrap_from_project`
+    // numbers each project's lanes from 0), so `("lane-row", wt_id)`
     // collides across projects — GPUI sees the same ElementId for the first
-    // worktree of every project and routes the click to only one of them
+    // lane of every project and routes the click to only one of them
     // (the first project's row), which is why clicking a 2nd project's
-    // worktree never reaches `activate_worktree`. Encode both ids into the
+    // lane never reaches `activate_worktree`. Encode both ids into the
     // id string so each row is uniquely addressable.
-    let row_group = SharedString::from(format!("worktree-row-{project_id}-{wt_id}"));
+    let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
     let mut row = div()
-        .id(SharedString::from(format!(
-            "worktree-row-{project_id}-{wt_id}"
-        )))
+        .id(SharedString::from(format!("lane-row-{project_id}-{wt_id}")))
         .group(row_group.clone())
         .flex()
         .flex_row()
         .items_center()
         // Vertical padding matches the project/group header rows
-        // (`WORKTREE_SECTION_PAD_Y`) so all three row kinds share the
+        // (`LANE_SECTION_PAD_Y`) so all three row kinds share the
         // same breathing room regardless of body height — a `min_h`
         // approach collapsed to zero padding once the Claude
         // multi-session sub-row grew the row past the floor.
-        .px(px(theme::WORKTREE_ROW_PAD_X))
-        .py(px(theme::WORKTREE_SECTION_PAD_Y))
-        .gap(px(theme::WORKTREE_ROW_GAP))
-        .rounded(px(theme::WORKTREE_ROW_RADIUS))
+        .px(px(theme::LANE_ROW_PAD_X))
+        .py(px(theme::LANE_SECTION_PAD_Y))
+        .gap(px(theme::LANE_ROW_GAP))
+        .rounded(px(theme::LANE_ROW_RADIUS))
         .cursor_pointer()
         .when(!is_active, move |d| d.hover(move |d| d.bg(row_hover_bg)))
         .when(is_active, move |d| d.bg(row_active_bg))
@@ -783,9 +781,9 @@ pub(in crate::workspace) fn worktree_row(
         // on_drag without a hysteresis guard.
         .on_click(cx.listener(move |_dock, _ev: &ClickEvent, window, cx| {
             if let Some(ws) = ws_for_click.upgrade() {
-                let target = daruda_store::project::WorktreeRef {
+                let target = daruda_store::project::LaneRef {
                     project: project_id,
-                    worktree: wt_id,
+                    lane: wt_id,
                 };
                 ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
             }
@@ -798,20 +796,20 @@ pub(in crate::workspace) fn worktree_row(
             })
         })
         // Drop target — highlight only when the in-flight payload is a
-        // worktree from the same project. Cross-project worktrees, plus
+        // lane from the same project. Cross-project lanes, plus
         // any project/group payload, are rejected — drawn with the
         // rejected tint so the user sees the row noticed the drag but
         // won't accept it (the workspace op would silently discard
         // these without the tint).
         .drag_over::<DragPayload>(move |style, dragged, _window, _cx| match dragged {
-            DragPayload::Worktree { target, .. } if target.project == project_id => {
+            DragPayload::Lane { target, .. } if target.project == project_id => {
                 style.bg(drop_target_bg)
             }
             _ => style.bg(drop_target_rejected_bg),
         })
         .on_drop(
             cx.listener(move |_dock, dragged: &DragPayload, _window, cx| {
-                if let DragPayload::Worktree { target, .. } = dragged
+                if let DragPayload::Lane { target, .. } = dragged
                     && let Some(ws) = ws_for_drop.upgrade()
                 {
                     let from = *target;
@@ -849,9 +847,9 @@ pub(in crate::workspace) fn worktree_row(
         )
         .child(claude_status_cell(
             snap.claude_status_per_worktree
-                .get(&daruda_store::project::WorktreeRef {
+                .get(&daruda_store::project::LaneRef {
                     project: project_id,
-                    worktree: wt.id,
+                    lane: wt.id,
                 })
                 .copied(),
             cx,
@@ -871,38 +869,38 @@ pub(in crate::workspace) fn worktree_row(
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             // Stop the row's activate handler from firing —
             // clicking × should never also switch to the
-            // worktree we're about to remove.
+            // lane we're about to remove.
             cx.stop_propagation();
             if let Some(ws) = ws_for_close.upgrade() {
                 let ws_for_modal = ws_for_close.clone();
                 ws.update(cx, |ws, cx| {
-                    let target = daruda_store::project::WorktreeRef {
+                    let target = daruda_store::project::LaneRef {
                         project: project_id,
-                        worktree: wt_id,
+                        lane: wt_id,
                     };
-                    let Some(wt) = ws.worktree_for(target) else {
+                    let Some(wt) = ws.lane_for(target) else {
                         return;
                     };
-                    if !crate::workspace::Workspace::worktree_removable(wt) {
+                    if !crate::workspace::Workspace::lane_removable(wt) {
                         return;
                     }
                     let label = gpui::SharedString::from(wt.display_name());
                     let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
-                    let plan = match ws.validate_remove_worktree(target) {
+                    let plan = match ws.validate_remove_lane(target) {
                         Ok(p) => p,
                         Err(_) => return,
                     };
                     // Pull the branch name so the modal can offer "Also
                     // delete branch X" — None for default / detached
-                    // worktrees (modal hides the checkbox).
-                    let branch = ws.worktree_for(target).and_then(|w| match &w.kind {
-                        daruda_store::project::WorktreeKind::Git {
+                    // lanes (modal hides the checkbox).
+                    let branch = ws.lane_for(target).and_then(|w| match &w.kind {
+                        daruda_store::project::LaneKind::Git {
                             branch: Some(b), ..
                         } => Some(b.clone()),
                         _ => None,
                     });
                     crate::workspace::dialog_helpers::open_form_modal(
-                        "Remove Worktree",
+                        "Remove Lane",
                         None,
                         move |window, cx| {
                             super::remove_modal::RemoveWorktreeModal::new(
@@ -935,15 +933,15 @@ pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElem
     div()
         .flex()
         .flex_col()
-        .gap(px(theme::WORKTREE_PLACEHOLDER_LINE_GAP))
-        .p(px(theme::WORKTREE_PLACEHOLDER_PAD))
-        .text_size(px(theme::WORKTREE_SUB_FONT_SIZE))
+        .gap(px(theme::LANE_PLACEHOLDER_LINE_GAP))
+        .p(px(theme::LANE_PLACEHOLDER_PAD))
+        .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(hint_color)
-        .child(strings::WORKTREE_NON_GIT_HINT)
+        .child(strings::LANE_NON_GIT_HINT)
         .child(
             div()
-                .mt(px(theme::WORKTREE_PLACEHOLDER_GIT_INIT_MT))
+                .mt(px(theme::LANE_PLACEHOLDER_GIT_INIT_MT))
                 .text_color(init_color)
-                .child(strings::WORKTREE_GIT_INIT_LABEL),
+                .child(strings::LANE_GIT_INIT_LABEL),
         )
 }

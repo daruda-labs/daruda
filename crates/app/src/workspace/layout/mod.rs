@@ -64,8 +64,8 @@ impl<T: Panel + Send + Sync> PanelHandle for T {
 // Built-in panel types
 // ----------------------------------------------------------------
 
-/// Left-dock worktrees view panel.
-pub(super) struct WorktreesPanel;
+/// Left-dock lanes view panel.
+pub(super) struct LanesPanel;
 /// Left-dock git-changes view panel.
 pub(super) struct GitChangesPanel;
 /// Left-dock files view panel.
@@ -75,7 +75,7 @@ pub(super) struct MacrosPanel;
 /// Right-dock agent chat panel.
 pub(super) struct AgentChatPanel;
 
-impl Panel for WorktreesPanel {
+impl Panel for LanesPanel {
     fn panel_name(&self) -> &'static str {
         strings::DOCK_PANEL_WORKTREES
     }
@@ -229,7 +229,7 @@ impl Render for Dock {
             DockSnapshot::Left(snap) => {
                 let header = crate::workspace::left_dock::view_tabs::render(snap, cx);
                 let content: gpui::AnyElement = match snap.left_dock_view {
-                    daruda_store::project::LeftDockView::Worktrees => {
+                    daruda_store::project::LeftDockView::Lanes => {
                         crate::workspace::left_dock::projects::render(snap, cx)
                     }
                     daruda_store::project::LeftDockView::GitChanges => {
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn all_builtin_panels_have_non_empty_name_and_icon() {
         let panels: &[(&dyn PanelHandle, &str)] = &[
-            (&WorktreesPanel, strings::DOCK_PANEL_WORKTREES),
+            (&LanesPanel, strings::DOCK_PANEL_WORKTREES),
             (&GitChangesPanel, strings::DOCK_PANEL_GIT),
             (&FilesPanel, strings::DOCK_PANEL_FILES),
             (&MacrosPanel, strings::DOCK_PANEL_MACROS),

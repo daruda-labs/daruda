@@ -170,7 +170,6 @@ impl Render for WelcomeScreen {
                         .text_color(faint_text)
                         .child(s::welcome_no_recent()),
                 )
-
         };
 
         let new_empty_btn = div()

@@ -50,7 +50,7 @@ async fn tab_inside_zero_stop_confirm_dialog_is_safe(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         dialog_helpers::open_confirm_dialog(
-            "Delete worktree",
+            "Delete lane",
             "Are you sure?",
             "Delete",
             ui::ButtonVariant::Danger,
