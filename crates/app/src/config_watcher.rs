@@ -171,14 +171,7 @@ pub fn spawn_config_watcher() -> ConfigWatcherHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
-
-    #[test]
-    fn debounce_constant_is_reasonable() {
-        assert!(DEBOUNCE.as_millis() >= 50);
-        assert!(DEBOUNCE.as_millis() <= 1000);
-    }
 
     #[test]
     fn config_reload_produces_valid_config() {

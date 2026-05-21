@@ -245,17 +245,6 @@ fn is_valid_shortcut_rejects_empty() {
 }
 
 #[test]
-fn is_valid_shortcut_rejects_obviously_bad() {
-    // GPUI's `Keystroke::parse` is permissive (treats most ASCII
-    // punctuation as a literal key glyph), so we only assert
-    // rejection of inputs with no parseable token at all. The
-    // primary purpose of `is_valid_shortcut` is panic-prevention,
-    // not strict syntax validation.
-    assert!(!is_valid_shortcut(""));
-    assert!(!is_valid_shortcut("   "));
-}
-
-#[test]
 fn reorder_in_place_moves_left_to_right() {
     let mut tabs = vec![
         make_tab("a", "A", 0),

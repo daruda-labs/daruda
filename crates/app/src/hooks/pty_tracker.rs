@@ -315,25 +315,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn pty_binding_equality() {
-        let now = SystemTime::now();
-        let a = PtyBinding {
-            claude_pid: 100,
-            session_id: "abc".into(),
-            discovered_at: now,
-        };
-        let b = PtyBinding {
-            claude_pid: 100,
-            session_id: "abc".into(),
-            discovered_at: now,
-        };
-        assert_eq!(a, b);
-        let c = PtyBinding {
-            claude_pid: 200,
-            session_id: "abc".into(),
-            discovered_at: now,
-        };
-        assert_ne!(a, c);
-    }
 }

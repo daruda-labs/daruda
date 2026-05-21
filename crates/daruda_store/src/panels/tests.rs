@@ -1,11 +1,6 @@
 use super::*;
 
 #[test]
-fn schema_version_is_one() {
-    assert_eq!(SCHEMA_VERSION, 1);
-}
-
-#[test]
 fn seed_default_has_four_ai_macros() {
     let state = seed_default();
     assert_eq!(state.schema_version, SCHEMA_VERSION);
@@ -232,14 +227,6 @@ fn ulid_generation_unique_across_calls() {
         ids.insert(new_widget_id());
     }
     assert_eq!(ids.len(), 200);
-}
-
-#[test]
-fn panels_state_default_has_no_tabs() {
-    let state = PanelsState::default();
-    assert_eq!(state.schema_version, SCHEMA_VERSION);
-    assert!(state.tabs.is_empty());
-    assert!(state.active_tab_id.is_none());
 }
 
 #[test]

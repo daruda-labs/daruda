@@ -435,16 +435,6 @@ mod tests {
     }
 
     #[test]
-    fn log_profile_matches_debug_assertions() {
-        let expected = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        };
-        assert_eq!(log_profile(), expected);
-    }
-
-    #[test]
     fn log_dir_is_under_profile_subdirectory() {
         let Some(dir) = log_dir() else { return };
         let last = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");

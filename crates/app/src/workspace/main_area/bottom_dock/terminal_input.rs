@@ -111,11 +111,3 @@ pub(in crate::workspace) fn render_body(
         .child(cell)
         .into_any_element()
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn module_exists() {
-        // Compile-time check: the module is reachable and imports compile.
-    }
-}

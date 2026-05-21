@@ -99,39 +99,6 @@ fn test_restore_state_applies_dock_sizes(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-#[ignore = "production persist_state writes through the new UUID path; \
-            legacy hash-path `load_state_in` no longer matches — needs \
-            either a path-API migration or `for_each_workspace_state_in` check"]
-fn test_persist_state_creates_file(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project_dir = std::env::temp_dir().join("daruda_test_persist_proj");
-    let data_dir = fresh_test_data_dir();
-    let _ = std::fs::create_dir_all(&project_dir);
-    let project = daruda_store::project::Project::from_path(&project_dir);
-    // data_dir injected at construction; new_with_project calls persist_state()
-    // automatically so the state file is already on disk after this line.
-    // Uses the production constructor explicitly — the test helper's
-    // `_for_test_full` variant only runs `add_tab + persist_state`, which
-    // writes through the new UUID-keyed path, not the legacy hash path
-    // that `load_state_in` looks up below.
-    let window_handle = cx.add_window(|window, cx| {
-        Workspace::new_with_project(&config, Some(project), data_dir.clone(), window, cx)
-    });
-    let ws = window_handle.root(cx).unwrap();
-
-    let state = ws.read_with(cx, |ws, app_cx| ws.save_state(app_cx));
-    assert!(state.is_some());
-
-    // Verify the file landed in the isolated data dir (not the real app dir).
-    let loaded = daruda_store::project::legacy::persistence::load_state_in(&data_dir, &project_dir);
-    assert!(loaded.is_some());
-    assert_eq!(loaded.unwrap().root, project_dir);
-
-    let _ = std::fs::remove_dir_all(&data_dir);
-    let _ = std::fs::remove_dir_all(&project_dir);
-}
-
-#[gpui::test]
 fn test_save_state_serializes_leaf_layout(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_layout");

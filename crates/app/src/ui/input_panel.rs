@@ -418,10 +418,4 @@ mod tests {
         assert!(a.disabled);
     }
 
-    #[test]
-    fn layout_variants_exist() {
-        let _ = InputPanelLayout::ActionsBelow;
-        let _ = InputPanelLayout::ActionsRight;
-        let _ = InputPanelLayout::ActionsFloating;
-    }
 }

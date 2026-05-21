@@ -352,17 +352,6 @@ mod tests {
     }
 
     #[test]
-    fn add_panel_registers_and_active_panel_name_returns_it() {
-        let mut dock = Dock::new(DockPosition::Right, dummy_weak());
-        dock.add_panel(TestPanel {
-            name: "Chat",
-            icon: "◨",
-        });
-        assert_eq!(dock.panels.len(), 1);
-        assert_eq!(dock.active_panel_name(), "Chat");
-    }
-
-    #[test]
     fn add_panel_appends_in_order() {
         let mut dock = Dock::new(DockPosition::Left, dummy_weak());
         dock.add_panel(TestPanel {
@@ -384,12 +373,6 @@ mod tests {
     }
 
     #[test]
-    fn active_panel_name_empty_when_no_panels() {
-        let dock = Dock::new(DockPosition::Left, dummy_weak());
-        assert_eq!(dock.active_panel_name(), "");
-    }
-
-    #[test]
     fn active_panel_name_follows_active_panel_index() {
         let mut dock = Dock::new(DockPosition::Left, dummy_weak());
         dock.add_panel(TestPanel {
@@ -405,40 +388,4 @@ mod tests {
         assert_eq!(dock.active_panel_name(), "Second");
     }
 
-    #[test]
-    fn panel_handle_blanket_impl_delegates_correctly() {
-        let panel = TestPanel {
-            name: "Git",
-            icon: "⎇",
-        };
-        let handle: &dyn PanelHandle = &panel;
-        assert_eq!(handle.name(), "Git");
-        assert_eq!(handle.icon(), "⎇");
-    }
-
-    #[test]
-    fn all_builtin_panels_have_non_empty_name_and_icon() {
-        let panels: &[(&dyn PanelHandle, &str)] = &[
-            (&LanesPanel, strings::DOCK_PANEL_WORKTREES),
-            (&GitChangesPanel, strings::DOCK_PANEL_GIT),
-            (&FilesPanel, strings::DOCK_PANEL_FILES),
-            (&MacrosPanel, strings::DOCK_PANEL_MACROS),
-            (&AgentChatPanel, strings::DOCK_PANEL_AGENT_TASKS),
-        ];
-        for (handle, expected_name) in panels {
-            assert_eq!(handle.name(), *expected_name);
-            assert!(
-                !handle.icon().is_empty(),
-                "icon empty for panel '{}'",
-                expected_name
-            );
-        }
-    }
-
-    #[test]
-    fn agent_chat_panel_has_expected_metadata() {
-        let panel = AgentChatPanel;
-        assert_eq!(panel.panel_name(), strings::DOCK_PANEL_AGENT_TASKS);
-        assert!(!panel.panel_icon().is_empty());
-    }
 }

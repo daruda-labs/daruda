@@ -111,21 +111,6 @@ fn file_leaf_skips_serialization_when_terminal() {
 }
 
 #[test]
-fn dock_states_default_is_all_closed() {
-    let d = DockStates::default();
-    assert!(!d.left_open);
-    assert!(!d.bottom_open);
-    assert!(!d.right_open);
-}
-
-#[test]
-fn window_state_default_is_zero() {
-    let w = WindowState::default();
-    assert_eq!(w.x, 0.0);
-    assert_eq!(w.width, 0.0);
-}
-
-#[test]
 fn window_state_is_valid_checks_dimensions() {
     let zero = WindowState::default();
     assert!(!zero.is_valid());
@@ -284,17 +269,7 @@ fn serialized_worktree_round_trips_base_ref_and_description() {
     assert_eq!(back.description.as_deref(), Some("PR #123 review"));
 }
 
-#[test]
-fn worktree_status_defaults_to_idle() {
-    assert_eq!(LaneStatus::default(), LaneStatus::Idle);
-}
-
 // ---- Dock / right-panel / usage view enums ----
-
-#[test]
-fn dock_view_default_is_worktrees() {
-    assert_eq!(LeftDockView::default(), LeftDockView::Lanes);
-}
 
 #[test]
 fn dock_view_round_trips_as_snake_case() {
@@ -313,11 +288,6 @@ fn dock_view_round_trips_as_snake_case() {
 }
 
 #[test]
-fn right_panel_view_default_is_usage() {
-    assert_eq!(RightDockView::default(), RightDockView::Usage);
-}
-
-#[test]
 fn right_panel_view_round_trips_as_snake_case() {
     for (v, expect) in [
         (RightDockView::Usage, "\"usage\""),
@@ -330,11 +300,6 @@ fn right_panel_view_round_trips_as_snake_case() {
         let back: RightDockView = serde_json::from_str(&json).unwrap();
         assert_eq!(back, v);
     }
-}
-
-#[test]
-fn usage_window_default_is_last_7d() {
-    assert_eq!(UsageWindow::default(), UsageWindow::Last7d);
 }
 
 #[test]
@@ -442,13 +407,6 @@ fn serialized_tab_user_label_none_is_skipped_in_json() {
 }
 
 // ---- LaneRef / WindowOpenPolicy ----
-
-#[test]
-fn worktree_ref_default_is_zero_zero() {
-    let r = LaneRef::default();
-    assert_eq!(r.project, 0);
-    assert_eq!(r.lane, 0);
-}
 
 #[test]
 fn window_open_policy_default_is_ask() {

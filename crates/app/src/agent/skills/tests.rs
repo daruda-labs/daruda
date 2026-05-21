@@ -5,8 +5,7 @@ use super::frontmatter::{
 };
 use super::persist::{SkillDraft, delete_skill, rename_skill, write_skill};
 use super::{
-    NameError, Skill, SkillInvocation, SkillScope, SkillsState, body_preview, scan_scope,
-    validate_name,
+    NameError, SkillInvocation, SkillScope, SkillsState, body_preview, scan_scope, validate_name,
 };
 
 fn frontmatter_with(name: &str, description: &str) -> SkillFrontmatter {
@@ -361,8 +360,3 @@ fn render_skill_md_composes_frontmatter_and_body() {
     assert!(rendered.contains("Body goes here."));
 }
 
-#[allow(dead_code)]
-fn ensure_skill_method_signatures(s: &Skill) {
-    let _ = s.skill_md_path();
-    let _ = s.invocation();
-}

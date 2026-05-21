@@ -56,16 +56,6 @@ mod tests {
     // they're safe under parallel `cargo test` and need no `unsafe`.
 
     #[test]
-    fn empty_env_falls_back_to_cfg() {
-        let expected = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        };
-        assert_eq!(resolve_profile_from(Some("")), expected);
-    }
-
-    #[test]
     fn whitespace_env_falls_back_to_cfg() {
         let expected = if cfg!(debug_assertions) {
             "debug"

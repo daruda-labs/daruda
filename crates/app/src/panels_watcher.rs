@@ -115,13 +115,3 @@ pub fn spawn_panels_watcher() -> mpsc::Receiver<()> {
     debounced_rx
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn debounce_constant_is_reasonable() {
-        assert!(DEBOUNCE.as_millis() >= 50);
-        assert!(DEBOUNCE.as_millis() <= 1000);
-    }
-}

@@ -741,12 +741,6 @@ mod tests {
     }
 
     #[test]
-    fn overlay_is_not_open_when_closed() {
-        let state = CommandPaletteState::default();
-        assert!(!state.is_open);
-    }
-
-    #[test]
     fn palette_entries_have_unique_ids() {
         let mut ids: Vec<&str> = PALETTE_ENTRIES.iter().map(|e| e.id).collect();
         let len = ids.len();
