@@ -45,6 +45,6 @@ impl RadioTabSpec for () {
 }
 
 pub fn radio<T: RadioTabSpec>(id: impl Into<ElementId>, label: impl Into<Text>, tab: T) -> Radio {
-    let r = Radio::new(id).xsmall().label(label);
+    let r = Radio::new(id).small().label(label);
     tab.apply(r)
 }

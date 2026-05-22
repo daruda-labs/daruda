@@ -27,6 +27,7 @@ use gpui::{Hsla, IntoElement, SharedString, Styled as _, px};
 use super::super::Workspace;
 use super::super::layout::RightDockSnapshot;
 use crate::surface::strings;
+use crate::ui::Sizable as _;
 use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 
 /// Build the status-pill trigger + dropdown for a single task row.
@@ -54,6 +55,7 @@ pub(in crate::workspace) fn status_pill(
     let bg = pill_background(&state, cx);
 
     button(pill_id, label)
+        .xsmall()
         .bg(bg)
         .rounded(px(theme::RIGHT_PANEL_STATUS_PILL_RADIUS_PX))
         .dropdown_menu(move |menu, _window, _cx| {

@@ -113,17 +113,8 @@ fn load_raw(
                 };
             }
 
-            let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
-            let total_count = all_lines.len();
-            let mut rows = build_raw_rows(&all_lines);
-            if !ext.is_empty() {
-                highlight_raw_rows(&mut rows, ext, syntax_theme);
-            }
-            PaneFileContent::LoadedRaw {
-                rows,
-                total_count,
-                byte_truncated,
-            }
+            let total_count = text.lines().count();
+            PaneFileContent::LoadedRaw { text, total_count, byte_truncated }
         }
     }
 }

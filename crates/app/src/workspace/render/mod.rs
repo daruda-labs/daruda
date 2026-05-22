@@ -25,8 +25,8 @@ use super::main_area::pane::PaneContent;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::status_bar::{self, StatusBarData};
 use super::{
-    FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, TAB_BAR_HEIGHT,
-    TITLE_BAR_HEIGHT, Workspace,
+    FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, SaveFilePane,
+    TAB_BAR_HEIGHT, TITLE_BAR_HEIGHT, Workspace,
 };
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
@@ -814,6 +814,9 @@ impl Render for Workspace {
             .key_context(key_ctx)
             .track_focus(&self.focus_handle)
             // Search actions — context-gated via KeyBinding context strings in main.rs.
+            .on_action(cx.listener(|this, _: &SaveFilePane, _window, cx| {
+                this.save_focused_file_pane(cx);
+            }))
             .on_action(cx.listener(|this, _: &FileViewerSearchOpen, window, cx| {
                 if let Some(fv) = this.focused_file_view_mut() {
                     fv.search_open();

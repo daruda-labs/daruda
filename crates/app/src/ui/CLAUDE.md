@@ -22,10 +22,14 @@ the IME / focus pitfalls), see root `CLAUDE.md` §3 + §4.
 
 ## Why the wrapper layer
 
-1. **`xsmall()` auto-application** — daruda is a compact terminal UI;
+1. **`small()` auto-application** — daruda is a compact terminal UI;
    gpui_component's default `Medium` size is too large. Every `Sizable`
-   widget must be constructed at `xsmall`. Factory functions apply it
-   so call sites can't forget (CLAUDE.md §10).
+   widget must be constructed at `small`. Factory functions apply it
+   so call sites can't forget. `xsmall()` is reserved for explicit
+   overrides where a tighter fit is intentional (icon-only chrome
+   buttons, badge glyphs with pixel-level sizing). For `PopupMenu`
+   builders (`.context_menu` / `.dropdown_menu`), always go through
+   `crate::ui::menu_builder(...)` — it injects `small()` automatically.
 2. **One place to retheme** — when default colours / variants / paddings
    need to change project-wide, this is the single file to edit.
 3. **Single import path** — `use crate::ui::*;` is short and discoverable;
@@ -51,6 +55,7 @@ ui/
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
 ├── divider.rs      # Divider re-export
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
+├── menu.rs         # ContextMenuExt / DropdownMenu / PopupMenu / PopupMenuItem re-exports
 ├── select.rs       # SelectOption + state_with_options + select(&state)
 ├── tab_bar.rs      # tab_bar(id) + tab(label) factories over gpui_component (Small + underline; tab() bakes 10px x-padding)
 └── tooltip.rs      # tooltip::text(content) closure helper
@@ -270,7 +275,7 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor patches in `crates/gpui_component/`
 
-Eight small patches over upstream `longbridge/gpui-component` v0.5.1
+Nine small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
 gap / height control working. Re-apply on rev bump:
 
@@ -284,6 +289,7 @@ gap / height control working. Re-apply on rev bump:
 | TabBar inner-gap override | `src/tab/tab_bar.rs` (`TabBar` struct + `RenderOnce::render`) | add `inner_gap: Option<Pixels>` field + inherent `gap(impl Into<Pixels>) -> Self` method that shadows `Styled::gap`. The render reads `self.inner_gap.unwrap_or(variant_gap)` so the call site (`tab_bar(id).gap(px(0.))`) actually controls the spacing between adjacent tab boxes inside the inner `h_flex` — without this, `Styled::gap` only affects the outer container that holds prefix/h_flex/suffix. |
 | Small Underline tab height 30 → 28 | `src/tab/tab.rs` (`TabVariant::height(Size::Small)`) | drop the Small + Underline tab box height from 30px to 28px so the left/right dock `tab_bar()` strip matches daruda's terminal tab bar height (`palette::TAB_BAR_HEIGHT = 28`). Inner metrics (inner_height 22, inner_margins top 2 / bottom 3) unchanged — `items_center` re-centers the inner h_flex inside the 28px box. |
 | Button hover text color | `src/button/button.rs` (`RenderOnce::render`) | replace `text_color(crate::red_400())` with `text_color(hover_style.fg)` in the `.hover(...)` closure — upstream accidentally left a debug red literal instead of the theme foreground color, making all button text turn red on hover. |
+| PopupMenu small size | `src/menu/popup_menu.rs` (`PopupMenu::small` + `render_menu_item`) | change `pub(crate)` to `pub`; also wire `Size::Small` into the font — `text_xs` for small, `text_sm` otherwise (upstream only shrank item height to 20 px but left font at `text_sm`). |
 
 Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).

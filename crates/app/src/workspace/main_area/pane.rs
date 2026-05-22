@@ -105,6 +105,10 @@ pub(in crate::workspace) struct FileContent {
     pub(in crate::workspace) _search_subscription: Subscription,
     /// Tab title — file basename. Set at construction.
     pub(in crate::workspace) cached_title: SharedString,
+    /// Code-editor state for raw file editing.
+    pub(in crate::workspace) editor_state: Entity<gpui_component::input::InputState>,
+    /// Text that was last saved to disk — for dirty comparison.
+    pub(in crate::workspace) saved_text: String,
 }
 
 /// Markdown-form editor pane for a single Task — replaces the old
@@ -426,18 +430,27 @@ impl Pane {
     /// state against `saved_snapshot`.
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
         match &self.content {
-            PaneContent::Terminal(_) | PaneContent::File(_) => false,
+            PaneContent::Terminal(_) => false,
+            PaneContent::File(f) => {
+                use super::file_view_pane::PaneFileContent;
+                !f.view.staged
+                    && matches!(f.view.content, PaneFileContent::LoadedRaw { .. })
+                    && f.editor_state.read(cx).text().to_string() != f.saved_text
+            }
             PaneContent::TaskEditPane(te) => te.is_dirty(cx),
         }
     }
 
     /// True when the pane's `save` path is meaningful for the user.
-    /// Drives the disabled state of the `[Save]` button in the close
-    /// prompt + the headline copy. Terminal / File are read-only;
-    /// TaskEdit requires a valid branch + non-empty title.
     pub(in crate::workspace) fn can_save(&self, cx: &App) -> bool {
         match &self.content {
-            PaneContent::Terminal(_) | PaneContent::File(_) => false,
+            PaneContent::Terminal(_) => false,
+            PaneContent::File(f) => {
+                use super::file_view_pane::PaneFileContent;
+                !f.view.staged
+                    && matches!(f.view.content, PaneFileContent::LoadedRaw { .. })
+                    && f.view.path.is_absolute()
+            }
             PaneContent::TaskEditPane(te) => {
                 !matches!(te.branch_validation, BranchValidation::Invalid { .. })
                     && !te.title_input.read(cx).value().trim().is_empty()

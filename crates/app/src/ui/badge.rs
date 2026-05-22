@@ -127,7 +127,7 @@ impl RenderOnce for Badge {
         let text_color = text_color.unwrap_or(t.badge_text);
 
         let mut tag = Tag::custom(bg_color, text_color, border_color)
-            .xsmall()
+            .small()
             .rounded(px(theme::BADGE_RADIUS))
             .px(px(theme::BADGE_PAD_X))
             .py(px(theme::BADGE_PAD_Y))

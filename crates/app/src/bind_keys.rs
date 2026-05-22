@@ -23,8 +23,8 @@ use crate::workspace::{
     FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
     GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
-    PrevTab, RenameActiveProject, SplitDown, SplitRight, ToggleBottomDock, ToggleCommandPalette,
-    ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
+    PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
+    ToggleCommandPalette, ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -73,7 +73,8 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         // Skills shortcuts
         KeyBinding::new(k::SHORTCUT_FOCUS_SKILL_SEARCH, FocusSkillSearch, None),
         KeyBinding::new(k::SHORTCUT_INVOKE_SKILL_PALETTE, InvokeSkillPalette, None),
-        // File viewer search
+        // File viewer
+        KeyBinding::new(k::SHORTCUT_SAVE_FILE_PANE, SaveFilePane, Some("FileViewer")),
         KeyBinding::new(
             k::SHORTCUT_FILE_VIEWER_SEARCH_OPEN,
             FileViewerSearchOpen,

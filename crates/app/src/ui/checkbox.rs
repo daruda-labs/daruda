@@ -41,6 +41,6 @@ pub fn checkbox<T: CheckboxTabSpec>(
     label: impl Into<Text>,
     tab: T,
 ) -> Checkbox {
-    let cb = Checkbox::new(id).xsmall().label(label);
+    let cb = Checkbox::new(id).small().label(label);
     tab.apply(cb)
 }

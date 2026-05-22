@@ -639,8 +639,8 @@ impl PopupMenu {
         self
     }
 
-    /// Use small size, the menu item will have smaller height.
-    pub(crate) fn small(mut self) -> Self {
+    /// Use small size, the menu item will have smaller height (20 px vs 26 px default).
+    pub fn small(mut self) -> Self {
         self.size = Size::Small;
         self
     }
@@ -1034,14 +1034,15 @@ impl PopupMenu {
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
         let group_name = format!("popup-menu-item-{}", ix);
 
-        let (item_height, radius) = match self.size {
-            Size::Small => (px(20.), options.radius.half()),
-            _ => (px(26.), options.radius),
+        let (item_height, radius, use_text_xs) = match self.size {
+            Size::Small => (px(20.), options.radius.half(), true),
+            _ => (px(26.), options.radius, false),
         };
 
         let this = MenuItemElement::new(ix, &group_name)
             .relative()
-            .text_sm()
+            .when(use_text_xs, |el| el.text_xs())
+            .when(!use_text_xs, |el| el.text_sm())
             .py_0()
             .px(INNER_PADDING)
             .rounded(radius)

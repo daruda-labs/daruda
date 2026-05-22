@@ -192,14 +192,12 @@ pub(in crate::workspace) enum FileViewMode {
 
 pub(in crate::workspace) enum PaneFileContent {
     Loading,
-    /// Raw file content.
+    /// Raw file content — owned by the `InputState` editor entity.
     ///
-    /// `rows` is capped at `FILE_VIEWER_MAX_LINES`.
-    /// `total_count` is the full line count before the cap.
-    /// `byte_truncated` is true when the file exceeded `FILE_VIEWER_MAX_BYTES`
-    /// and was sliced before line-splitting.
+    /// `total_count` is the full line count of the original file.
+    /// `byte_truncated` is true when the file exceeded `FILE_VIEWER_MAX_BYTES`.
     LoadedRaw {
-        rows: Vec<VisualRow>,
+        text: String,
         total_count: usize,
         byte_truncated: bool,
     },
@@ -372,7 +370,7 @@ impl PaneFileView {
     /// Returns a slice over the currently visible rows (respects `hide_unchanged`).
     pub(in crate::workspace) fn active_rows(&self) -> &[VisualRow] {
         match &self.content {
-            PaneFileContent::LoadedRaw { rows, .. } => rows,
+            PaneFileContent::LoadedRaw { .. } => &[],
             PaneFileContent::LoadedDiff {
                 rows_all,
                 rows_no_ctx,
@@ -565,7 +563,7 @@ impl PaneFileView {
                 }
             } else {
                 let rows: &[VisualRow] = match &self.content {
-                    PaneFileContent::LoadedRaw { rows, .. } => rows,
+                    PaneFileContent::LoadedRaw { .. } => &[],
                     PaneFileContent::LoadedDiff {
                         rows_all,
                         rows_no_ctx,
@@ -868,19 +866,45 @@ diff --git a/bar.rs b/bar.rs
     }
 
     fn raw_viewer(contents: &[&str]) -> PaneFileView {
-        let lines: Vec<String> = contents.iter().map(|s| s.to_string()).collect();
-        let rows = build_raw_rows(&lines);
+        let text = contents.join("\n");
+        let total_count = contents.len();
         PaneFileView {
             lane_id: 0,
             path: "test.txt".into(),
             staged: false,
             file_status: None,
-            content: PaneFileContent::LoadedRaw {
-                rows,
-                total_count: lines.len(),
-                byte_truncated: false,
-            },
+            content: PaneFileContent::LoadedRaw { text, total_count, byte_truncated: false },
             view_mode: FileViewMode::Raw,
+            hide_unchanged: false,
+            char_selection: None,
+            char_anchor: None,
+            is_drag_selecting: false,
+            search: None,
+        }
+    }
+
+    fn diff_viewer(contents: &[&str]) -> PaneFileView {
+        let rows_all: Vec<VisualRow> = contents.iter().enumerate().map(|(i, s)| VisualRow {
+            kind: VisualRowKind::Context,
+            line_no_left: (i + 1).to_string(),
+            line_no_right: (i + 1).to_string(),
+            content: s.to_string(),
+            header_context: String::new(),
+            spans: Vec::new(),
+            word_changes: Vec::new(),
+        }).collect();
+        PaneFileView {
+            worktree_id: 0,
+            path: "test.diff".into(),
+            staged: false,
+            file_status: None,
+            content: PaneFileContent::LoadedDiff {
+                rows_all,
+                rows_no_ctx: Vec::new(),
+                added: 0,
+                removed: 0,
+            },
+            view_mode: FileViewMode::Changes,
             hide_unchanged: false,
             char_selection: None,
             char_anchor: None,
@@ -901,7 +925,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_clear_resets_query_and_matches() {
-        let mut fv = raw_viewer(&["hello world", "foo bar"]);
+        let mut fv = diff_viewer(&["hello world", "foo bar"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
         {
@@ -935,7 +959,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_matches_rows() {
-        let mut fv = raw_viewer(&["hello world", "nothing here", "hello again"]);
+        let mut fv = diff_viewer(&["hello world", "nothing here", "hello again"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
         let s = fv.search.as_ref().unwrap();
@@ -956,7 +980,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_next_and_prev_match() {
-        let mut fv = raw_viewer(&["aaa", "bbb", "aaa", "aaa"]);
+        let mut fv = diff_viewer(&["aaa", "bbb", "aaa", "aaa"]);
         fv.search_open();
         fv.search_insert_char('a');
         // matches: [0, 2, 3], focused = Some(0)
@@ -972,7 +996,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_focused_row_returns_correct_row_index() {
-        let mut fv = raw_viewer(&["aaa", "bbb", "aaa"]);
+        let mut fv = diff_viewer(&["aaa", "bbb", "aaa"]);
         fv.search_open();
         fv.search_insert_char('a');
         // matches = [0, 2], focused = Some(0) → row 0
@@ -984,7 +1008,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_case_insensitive() {
-        let mut fv = raw_viewer(&["Hello", "world", "HELLO"]);
+        let mut fv = diff_viewer(&["Hello", "world", "HELLO"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
         let s = fv.search.as_ref().unwrap();
@@ -993,7 +1017,7 @@ diff --git a/bar.rs b/bar.rs
 
     #[test]
     fn search_recomputes_on_query_change() {
-        let mut fv = raw_viewer(&["hello", "world"]);
+        let mut fv = diff_viewer(&["hello", "world"]);
         fv.search_open();
         "hello".chars().for_each(|c| fv.search_insert_char(c));
         assert_eq!(fv.search.as_ref().unwrap().matches, vec![0]);

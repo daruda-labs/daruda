@@ -510,6 +510,7 @@ fn skill_row(
     workspace: gpui::WeakEntity<Workspace>,
     t: &DarudaTheme,
 ) -> AnyElement {
+    use crate::ui::Sizable as _;
     use crate::ui::{button, button_bare};
 
     let dir = s.dir.clone();
@@ -558,6 +559,7 @@ fn skill_row(
     // outline border draws a clean edge against whatever surface the
     // row is sitting on (hovered or not).
     let name_button = button(name_btn_id, SharedString::from(display_name))
+        .xsmall()
         .outline()
         .on_click({
             let ws = workspace_for_invoke.clone();
@@ -617,6 +619,7 @@ fn skill_row(
                     SharedString::from(format!("skill-edit-{}-{}", scope.slug(), s.name)),
                     strings::skills_button_edit(),
                 )
+                .xsmall()
                 .outline()
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_edit.upgrade() {
@@ -631,6 +634,7 @@ fn skill_row(
                     scope.slug(),
                     s.name
                 )))
+                .xsmall()
                 .label(strings::SKILLS_BUTTON_DELETE_ICON)
                 .outline()
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
@@ -664,6 +668,7 @@ fn skill_row(
                     SharedString::from(format!("skill-view-{}-{}", scope.slug(), s.name)),
                     strings::skills_button_view(),
                 )
+                .xsmall()
                 .outline()
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_view.upgrade() {

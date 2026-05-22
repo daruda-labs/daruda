@@ -205,6 +205,9 @@ actions!(
         /// group). Wired from the Command Palette
         /// `move_project_to_group` entry.
         MoveActiveProjectToGroup,
+        /// Save the currently focused file-view pane to disk.
+        /// Wired to `cmd-s` in the `FileViewer` focus scope.
+        SaveFilePane,
     ]
 );
 

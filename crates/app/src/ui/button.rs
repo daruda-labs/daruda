@@ -1,4 +1,4 @@
-//! Button factories — `xsmall()` auto-applied + cycled out of Tab
+//! Button factories — `small()` auto-applied + cycled out of Tab
 //! navigation by default.
 //!
 //! daruda treats keyboard Tab as "next input field" rather than the
@@ -17,9 +17,9 @@ use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
 pub use gpui_component::button::Button;
 
-/// Default secondary button — `xsmall()` + label, excluded from Tab.
+/// Default secondary button — `small()` + label, excluded from Tab.
 pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Button {
-    Button::new(id).xsmall().label(label).tab_stop(false)
+    Button::new(id).small().label(label).tab_stop(false)
 }
 
 /// Primary variant.
@@ -35,7 +35,7 @@ pub fn button_danger(id: impl Into<ElementId>, label: impl Into<SharedString>) -
 /// Bare button (no label) — for icon-only buttons where the caller
 /// chains `.icon(...)`.
 pub fn button_bare(id: impl Into<ElementId>) -> Button {
-    Button::new(id).xsmall().tab_stop(false)
+    Button::new(id).small().tab_stop(false)
 }
 
 /// Chip-style button — outlined, compact padding, `xsmall` text,
@@ -73,7 +73,7 @@ pub fn button_close(
         .foreground(t.muted_text)
         .hover(t.close_button_hover_bg);
     Button::new(id)
-        .xsmall()
+        .small()
         .tab_stop(false)
         .custom(variant)
         .label("\u{00d7}")
@@ -99,7 +99,7 @@ pub fn button_header_action(
         .foreground(t.muted_text)
         .hover(t.dock_view_tab_active);
     Button::new(id)
-        .xsmall()
+        .small()
         .tab_stop(false)
         .custom(variant)
         .label(icon)
@@ -115,7 +115,7 @@ pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
         .border(t.muted_text)
         .hover(t.button_widget_bg_hover);
     Button::new(id)
-        .xsmall()
+        .small()
         .tab_stop(false)
         .custom(variant)
         .label("+")
@@ -153,7 +153,7 @@ pub fn button_toggle(
         ButtonCustomVariant::new(cx).foreground(fg).hover(active_bg)
     };
     Button::new(id)
-        .xsmall()
+        .small()
         .tab_stop(false)
         .custom(variant)
         .label(icon)
