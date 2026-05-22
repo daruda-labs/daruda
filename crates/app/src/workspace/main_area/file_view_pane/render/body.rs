@@ -22,6 +22,7 @@ use crate::workspace::main_area::file_view_pane::{
 /// definite, bounded height — required for overflow_y_scroll to compute scroll_max > 0.
 pub(super) fn render_file_viewer_body(
     fv: &PaneFileView,
+    editor_state: &gpui::Entity<gpui_component::input::InputState>,
     scroll_handle: &gpui::ScrollHandle,
     top_offset: gpui::Pixels,
     bottom_offset: gpui::Pixels,
@@ -86,23 +87,9 @@ pub(super) fn render_file_viewer_body(
             .child(strings::FILE_VIEWER_DELETED)
             .into_any_element(),
 
-        PaneFileContent::LoadedRaw {
-            rows,
-            total_count,
-            byte_truncated,
-        } => frame
+        PaneFileContent::LoadedRaw { .. } => frame
             .id("file-viewer-body")
-            .overflow_y_scroll()
-            .track_scroll(scroll_handle)
-            .child(render_raw_body(
-                rows,
-                *total_count,
-                *byte_truncated,
-                char_selection.as_ref(),
-                search_state,
-                scroll_handle,
-                cx,
-            ))
+            .child(crate::ui::file_viewer_editor(editor_state))
             .into_any_element(),
 
         PaneFileContent::LoadedDiff {

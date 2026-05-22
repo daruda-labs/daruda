@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use daruda_store::project::{WorktreeId, WorktreeRef};
-use gpui::{Context, Window};
+use gpui::{AppContext as _, Context, Window};
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent};
@@ -441,9 +441,7 @@ impl Workspace {
                 )
             },
             move |ws, content, cx| {
-                // Apply only if a file pane still matches the load
-                // criteria — the user may have switched modes or
-                // closed the tab while the load was in flight.
+                use crate::workspace::main_area::file_view_pane::PaneFileContent;
                 let pane_match = ws.main_area.panes.iter_mut().find(|p| {
                     p.file_view().is_some_and(|fv| {
                         fv.worktree_id == worktree_id
@@ -452,12 +450,30 @@ impl Workspace {
                             && fv.view_mode == mode
                     })
                 });
-                if let Some(pane) = pane_match
-                    && let Some(fv) = pane.file_view_mut()
-                {
-                    fv.content = content;
-                    cx.notify();
+                let Some(pane) = pane_match else { return };
+                let Some(fc) = pane.file_content_mut() else { return };
+                if let PaneFileContent::LoadedRaw { ref text, .. } = content {
+                    let text_clone = text.clone();
+                    fc.saved_text = text_clone.clone();
+                    let editor = fc.editor_state.clone();
+                    let entity_id = cx.entity_id();
+                    if let Some(wh) =
+                        crate::window_registry::WindowRegistry::handle_for_workspace(entity_id, cx)
+                    {
+                        match cx.update_window(wh, |_, window, cx_w| {
+                            editor.update(cx_w, |state, cx_s| {
+                                state.set_value(text_clone, window, cx_s);
+                            });
+                        }) {
+                            Ok(()) => {}
+                            Err(_) => {
+                                // SILENT-OK: window closed while the file load was in flight
+                            }
+                        }
+                    }
                 }
+                fc.view.content = content;
+                cx.notify();
             },
         )
         .detach();

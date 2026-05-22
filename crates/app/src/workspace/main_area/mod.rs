@@ -294,6 +294,7 @@ pub(in crate::workspace) fn render_layout(
                     })
                     .child(render_pane_file_viewer(
                         &f.view,
+                        f.editor_state.clone(),
                         &f.scroll_handle,
                         f.search_input.clone(),
                         font_family.clone(),

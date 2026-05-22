@@ -93,8 +93,9 @@ pub const SHORTCUT_TOGGLE_RIGHT_DOCK: &str = "cmd-shift-b";
 pub const SHORTCUT_COMMAND_PALETTE: &str = "cmd-shift-p";
 
 // ============================================================================
-// File viewer search
+// File viewer
 // ============================================================================
+pub const SHORTCUT_SAVE_FILE_PANE: &str = "cmd-s";
 pub const SHORTCUT_FILE_VIEWER_SEARCH_OPEN: &str = "cmd-f";
 pub const SHORTCUT_FILE_VIEWER_SEARCH_NEXT: &str = "enter";
 pub const SHORTCUT_FILE_VIEWER_SEARCH_PREV: &str = "shift-enter";

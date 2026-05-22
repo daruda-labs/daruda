@@ -43,7 +43,7 @@ pub use button::{
     button_header_action, button_primary, button_toggle,
 };
 pub use checkbox::{Checkbox, checkbox};
-pub use code_editor::{make_markdown_prose_state, make_markdown_state, markdown_editor};
+pub use code_editor::{file_viewer_editor, make_markdown_prose_state, make_markdown_state, markdown_editor};
 pub use context_menu::{ContextMenu, ContextMenuCorner, ContextMenuItem};
 pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_row};

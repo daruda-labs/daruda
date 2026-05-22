@@ -24,7 +24,7 @@ mod toolbar;
 mod virtual_list;
 
 use crate::ui::theme;
-use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use self::body::render_file_viewer_body;
 use self::scrollbar::file_viewer_scrollbar;
@@ -38,12 +38,14 @@ use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent,
 /// Taffy — required for overflow_y_scroll to compute a non-zero scroll_max.
 pub(in crate::workspace) fn render_pane_file_viewer(
     fv: &PaneFileView,
+    editor_state: gpui::Entity<gpui_component::input::InputState>,
     scroll_handle: &gpui::ScrollHandle,
     search_input: gpui::Entity<crate::ui::InputState>,
     font_family: SharedString,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let toolbar_h = px(theme::FILE_VIEWER_HEADER_H);
+    let is_raw_mode = matches!(&fv.content, PaneFileContent::LoadedRaw { .. });
 
     // Preview mode renders variable-height blocks; derive content height from GPUI's
     // measured max_offset rather than total_rows * fixed_line_h to keep the thumb accurate.
@@ -57,11 +59,19 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)
     };
     let viewer_bg = theme::current(cx).file_viewer_bg;
-    let scrollbar = file_viewer_scrollbar(scroll_handle, toolbar_h, content_h, cx);
-    let search_panel = fv
-        .search
-        .as_ref()
-        .map(|s| render_search_panel(s, toolbar_h, search_input, cx));
+    // Raw mode: editor handles scrolling/search internally; skip the overlays.
+    let scrollbar: Option<AnyElement> = if is_raw_mode {
+        None
+    } else {
+        file_viewer_scrollbar(scroll_handle, toolbar_h, content_h, cx)
+    };
+    let search_panel = if is_raw_mode {
+        None
+    } else {
+        fv.search
+            .as_ref()
+            .map(|s| render_search_panel(s, toolbar_h, search_input, cx))
+    };
 
     div()
         .relative()
@@ -79,6 +89,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         )
         .child(render_file_viewer_body(
             fv,
+            &editor_state,
             scroll_handle,
             toolbar_h,
             px(0.),

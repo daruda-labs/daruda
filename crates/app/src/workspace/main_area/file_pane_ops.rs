@@ -7,6 +7,34 @@ use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
 use crate::workspace::Workspace;
 
+fn ext_to_language(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "rs" => "rust",
+        "js" | "mjs" | "cjs" => "javascript",
+        "ts" | "mts" | "cts" => "typescript",
+        "jsx" => "jsx",
+        "tsx" => "tsx",
+        "py" => "python",
+        "go" => "go",
+        "toml" => "toml",
+        "json" | "jsonc" => "json",
+        "yaml" | "yml" => "yaml",
+        "md" | "markdown" => "markdown",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "sh" | "bash" | "zsh" => "bash",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
+        _ => "",
+    }
+}
+
 impl Workspace {
     // ---- Focused-pane file-viewer accessors ----
     //
@@ -164,6 +192,18 @@ impl Workspace {
         );
 
         let focus_handle = cx.focus_handle();
+        let language = ext_to_language(&path);
+        let editor_state = cx.new(|cx_state| {
+            let mut state = gpui_component::input::InputState::new(window, cx_state)
+                .multi_line(true)
+                .soft_wrap(false);
+            state = if language.is_empty() {
+                state.code_editor("text")
+            } else {
+                state.code_editor(language)
+            };
+            state
+        });
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
@@ -185,7 +225,40 @@ impl Workspace {
                 focus_handle,
                 _search_subscription: search_subscription,
                 cached_title,
+                editor_state,
+                saved_text: String::new(),
             }),
+        }
+    }
+
+    /// Save the focused file-view pane to disk (raw mode only).
+    pub(in crate::workspace) fn save_focused_file_pane(&mut self, cx: &mut Context<Self>) {
+        use super::file_view_pane::PaneFileContent;
+        let Some(fc) = self.focused_file_content_mut() else {
+            return;
+        };
+        if !matches!(fc.view.content, PaneFileContent::LoadedRaw { .. })
+            || fc.view.staged
+            || !fc.view.path.is_absolute()
+        {
+            return;
+        }
+        let path = fc.view.path.clone();
+        let text = fc.editor_state.read(cx).text().to_string();
+        match std::fs::write(&path, text.as_bytes()) {
+            Ok(()) => {
+                if let Some(fc) = self.focused_file_content_mut() {
+                    fc.saved_text = text;
+                }
+                cx.notify();
+            }
+            Err(e) => {
+                let report = ErrorReport::new(format!("Failed to save: {}", path.display()))
+                    .severity(ErrorSeverity::Error)
+                    .from_error(&e)
+                    .build();
+                self.report_error(report, cx);
+            }
         }
     }
 

@@ -87,3 +87,9 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
     let initial = initial.to_string();
     state.update(cx, |state, cx| state.set_value(initial, window, cx));
 }
+
+/// Render `state` as a full-size code editor for the file-viewer raw pane.
+/// `appearance(false)` hides the focus-ring border; the parent sets the bg.
+pub fn file_viewer_editor(state: &Entity<InputState>) -> Input {
+    Input::new(state).appearance(false)
+}
