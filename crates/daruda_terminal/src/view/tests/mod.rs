@@ -161,17 +161,12 @@ fn selection_at_end_of_line_includes_newline() {
 
     // Anchor at byte 3 (past "abc" text), active at row 1 byte 0 — spans
     // the virtual newline so the selection is non-empty.
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 3,
-    };
-    let active = ScreenPos {
-        screen_row: 1,
-        byte: 0,
-    };
+    let anchor = ScreenPos::viewport(0, 3);
+    let active = ScreenPos::viewport(1, 0);
     let sel = ByteSelection::linear(anchor, active);
     assert!(!sel.is_empty());
-    let (start, end) = sel.normalized();
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let (start, end) = sel.normalized(&session).unwrap();
     assert_eq!(start, anchor);
     assert_eq!(end, active);
 }
@@ -184,18 +179,13 @@ fn selection_beyond_content_uses_total_len() {
 
     // Selection spanning from row 0 byte 1 to end of row 1 — non-empty,
     // normalized order is anchor first.
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 1,
-    };
-    let active = ScreenPos {
-        screen_row: 1,
-        byte: 3,
-    };
+    let anchor = ScreenPos::viewport(0, 1);
+    let active = ScreenPos::viewport(1, 3);
     let sel = ByteSelection::linear(anchor, active);
-    let (start, end) = sel.normalized();
-    assert_eq!(start.screen_row, 0);
-    assert_eq!(end.screen_row, 1);
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let (start, end) = sel.normalized(&session).unwrap();
+    assert_eq!(start.screen_row(&session), Some(0));
+    assert_eq!(end.screen_row(&session), Some(1));
 }
 
 #[test]
@@ -228,31 +218,14 @@ fn selection_range_clamped_to_total_len() {
 
     // Full viewport selection (row 0 byte 0 → row 1 byte 3) is non-empty
     // and normalized with anchor before active.
-    let sel = ByteSelection::linear(
-        ScreenPos {
-            screen_row: 0,
-            byte: 0,
-        },
-        ScreenPos {
-            screen_row: 1,
-            byte: 3,
-        },
-    );
-    let (start, end) = sel.normalized();
-    assert!(start.screen_row <= end.screen_row);
+    let sel = ByteSelection::linear(ScreenPos::viewport(0, 0), ScreenPos::viewport(1, 3));
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let (start, end) = sel.normalized(&session).unwrap();
+    assert!(start.screen_row(&session) <= end.screen_row(&session));
     assert!(!sel.is_empty());
 
     // Selection whose active exceeds text length is still accepted.
-    let sel2 = ByteSelection::linear(
-        ScreenPos {
-            screen_row: 0,
-            byte: 0,
-        },
-        ScreenPos {
-            screen_row: 1,
-            byte: 100,
-        },
-    );
+    let sel2 = ByteSelection::linear(ScreenPos::viewport(0, 0), ScreenPos::viewport(1, 100));
     assert!(!sel2.is_empty());
 }
 
@@ -260,109 +233,71 @@ fn selection_range_clamped_to_total_len() {
 fn word_range_stays_within_line() {
     let lines: Vec<String> = vec!["hello world".into(), "foo bar".into()];
     let vp_offset = 0u32;
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
 
     // byte 6 on row 0 → selects "world" (bytes 6..11 on row 0)
-    let pos = ScreenPos {
-        screen_row: 0,
-        byte: 6,
-    };
-    let (start, end) = word_range_in_viewport(pos, &lines, vp_offset);
-    assert_eq!(
-        start,
-        ScreenPos {
-            screen_row: 0,
-            byte: 6
-        }
-    );
-    assert_eq!(
-        end,
-        ScreenPos {
-            screen_row: 0,
-            byte: 11
-        }
-    );
+    let pos = ScreenPos::viewport(0, 6);
+    let (start, end) = word_range_in_viewport(pos, &session, &lines, vp_offset);
+    assert_eq!(start, ScreenPos::viewport(0, 6));
+    assert_eq!(end, ScreenPos::viewport(0, 11));
     assert_eq!(&lines[0][6..11], "world");
 
     // byte 0 on row 1 → selects "foo" (bytes 0..3 on row 1)
-    let pos = ScreenPos {
-        screen_row: 1,
-        byte: 0,
-    };
-    let (start, end) = word_range_in_viewport(pos, &lines, vp_offset);
-    assert_eq!(start.screen_row, 1);
-    assert_eq!(end.screen_row, 1);
-    assert_eq!(&lines[1][start.byte..end.byte], "foo");
+    let pos = ScreenPos::viewport(1, 0);
+    let (start, end) = word_range_in_viewport(pos, &session, &lines, vp_offset);
+    assert_eq!(start.screen_row(&session), Some(1));
+    assert_eq!(end.screen_row(&session), Some(1));
+    let (sr, sb) = start.resolve(&session).unwrap();
+    let (_, eb) = end.resolve(&session).unwrap();
+    let _ = sr;
+    assert_eq!(&lines[1][sb..eb], "foo");
 
     // byte 11 on row 0 (past end of "hello world") — end clamps to row 0
-    let pos = ScreenPos {
-        screen_row: 0,
-        byte: 11,
-    };
-    let (_, end) = word_range_in_viewport(pos, &lines, vp_offset);
-    assert!(end.byte <= 11 + 1);
-    assert_eq!(end.screen_row, 0);
+    let pos = ScreenPos::viewport(0, 11);
+    let (_, end) = word_range_in_viewport(pos, &session, &lines, vp_offset);
+    let (er, eb) = end.resolve(&session).unwrap();
+    assert!(eb <= 11 + 1);
+    assert_eq!(er, 0);
 }
 
 #[test]
 fn line_range_last_line_does_not_select_below() {
     let lines: Vec<String> = vec!["abc".into(), "def".into()];
     let vp_offset = 0u32;
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
 
     // A position on row 1 → full row 1 range: byte 0 to len+1
-    let pos = ScreenPos {
-        screen_row: 1,
-        byte: 1,
-    };
-    let (start, end) = line_range_in_viewport(pos, &lines, vp_offset);
-    assert_eq!(
-        start,
-        ScreenPos {
-            screen_row: 1,
-            byte: 0
-        }
-    );
-    assert_eq!(end.screen_row, 1);
-    assert_eq!(end.byte, lines[1].len() + 1); // "def".len()+1 = 4
+    let pos = ScreenPos::viewport(1, 1);
+    let (start, end) = line_range_in_viewport(pos, &session, &lines, vp_offset);
+    assert_eq!(start, ScreenPos::viewport(1, 0));
+    assert_eq!(end.screen_row(&session), Some(1));
+    assert_eq!(end.byte(&session), Some(lines[1].len() + 1)); // "def".len()+1 = 4
 
     // A position on row 0 → full row 0 range
-    let pos = ScreenPos {
-        screen_row: 0,
-        byte: 1,
-    };
-    let (start, end) = line_range_in_viewport(pos, &lines, vp_offset);
-    assert_eq!(
-        start,
-        ScreenPos {
-            screen_row: 0,
-            byte: 0
-        }
-    );
-    assert_eq!(end.screen_row, 0);
-    assert_eq!(end.byte, lines[0].len() + 1); // "abc".len()+1 = 4
+    let pos = ScreenPos::viewport(0, 1);
+    let (start, end) = line_range_in_viewport(pos, &session, &lines, vp_offset);
+    assert_eq!(start, ScreenPos::viewport(0, 0));
+    assert_eq!(end.screen_row(&session), Some(0));
+    assert_eq!(end.byte(&session), Some(lines[0].len() + 1)); // "abc".len()+1 = 4
 }
 
 #[test]
 fn line_range_at_total_len_selects_last_line() {
     let lines: Vec<String> = vec!["abc".into(), "def".into()];
     let vp_offset = 0u32;
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
 
     // Clamped past-end position on row 1 still returns full row 1
-    let pos = ScreenPos {
-        screen_row: 1,
-        byte: 100,
-    };
-    let (start, end) = line_range_in_viewport(pos, &lines, vp_offset);
-    assert_eq!(start.screen_row, 1);
-    assert_eq!(end.screen_row, 1);
-    assert!(end.byte <= lines[1].len() + 1);
+    let pos = ScreenPos::viewport(1, 100);
+    let (start, end) = line_range_in_viewport(pos, &session, &lines, vp_offset);
+    assert_eq!(start.screen_row(&session), Some(1));
+    assert_eq!(end.screen_row(&session), Some(1));
+    assert!(end.byte(&session).unwrap() <= lines[1].len() + 1);
 }
 
 #[test]
 fn empty_selection_produces_no_copy_text() {
-    let pos = ScreenPos {
-        screen_row: 0,
-        byte: 5,
-    };
+    let pos = ScreenPos::viewport(0, 5);
     let sel = ByteSelection::linear(pos, pos);
     assert!(sel.is_empty());
 }
@@ -376,22 +311,16 @@ fn selection_survives_dirty_rows_outside_selection_range() {
 
     // Simulates the clear_selection_if_overlaps_screen_rows logic:
     // selection on screen rows 10..=12, dirty row 5 → no overlap → kept.
-    let sel = ByteSelection::linear(
-        ScreenPos {
-            screen_row: 10,
-            byte: 0,
-        },
-        ScreenPos {
-            screen_row: 12,
-            byte: 5,
-        },
-    );
-    let (start, end) = sel.normalized();
+    let sel = ByteSelection::linear(ScreenPos::viewport(10, 0), ScreenPos::viewport(12, 5));
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let (start, end) = sel.normalized(&session).unwrap();
     let vp_offset = 0u32;
     let dirty_rows: &[u16] = &[5]; // row 5 is outside 10..=12
+    let start_row = start.screen_row(&session).unwrap();
+    let end_row = end.screen_row(&session).unwrap();
     let overlaps = dirty_rows.iter().any(|&r| {
         let sr = vp_offset + r as u32;
-        sr >= start.screen_row && sr <= end.screen_row
+        sr >= start_row && sr <= end_row
     });
     assert!(!overlaps, "dirty row outside selection should not clear it");
 
@@ -402,22 +331,16 @@ fn selection_survives_dirty_rows_outside_selection_range() {
 #[test]
 fn selection_cleared_when_dirty_row_overlaps() {
     // Selection on rows 10..=12, dirty row 11 → overlaps → should clear.
-    let sel = ByteSelection::linear(
-        ScreenPos {
-            screen_row: 10,
-            byte: 0,
-        },
-        ScreenPos {
-            screen_row: 12,
-            byte: 5,
-        },
-    );
-    let (start, end) = sel.normalized();
+    let sel = ByteSelection::linear(ScreenPos::viewport(10, 0), ScreenPos::viewport(12, 5));
+    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let (start, end) = sel.normalized(&session).unwrap();
     let vp_offset = 0u32;
     let dirty_rows: &[u16] = &[11];
+    let start_row = start.screen_row(&session).unwrap();
+    let end_row = end.screen_row(&session).unwrap();
     let overlaps = dirty_rows.iter().any(|&r| {
         let sr = vp_offset + r as u32;
-        sr >= start.screen_row && sr <= end.screen_row
+        sr >= start_row && sr <= end_row
     });
     assert!(overlaps, "dirty row inside selection should clear it");
 }
@@ -436,26 +359,14 @@ fn selection_mode_switches_to_block_with_alt() {
 
 #[test]
 fn linear_selection_has_no_block_rect() {
-    let sel = ByteSelection::linear(
-        ScreenPos {
-            screen_row: 0,
-            byte: 3,
-        },
-        ScreenPos {
-            screen_row: 0,
-            byte: 10,
-        },
-    );
+    let sel = ByteSelection::linear(ScreenPos::viewport(0, 3), ScreenPos::viewport(0, 10));
     assert!(!sel.is_block());
     assert!(sel.block_rect().is_none());
 }
 
 #[test]
 fn block_selection_reports_is_block() {
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 0,
-    };
+    let anchor = ScreenPos::viewport(0, 0);
     let sel = ByteSelection::block(anchor, CellAnchor::new(5, 2, Side::Left));
     assert!(sel.is_block());
 }
@@ -465,10 +376,7 @@ fn block_rect_normalizes_top_left_to_bottom_right() {
     // Drag from left-half of col 3 to right-half of col 10: both
     // Side values are the ones that keep the full width, so the
     // rect should cover cols 3..=10 without Side trimming.
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 0,
-    };
+    let anchor = ScreenPos::viewport(0, 0);
     let mut sel = ByteSelection::block(anchor, CellAnchor::new(3, 2, Side::Left));
     sel.block_active = Some(CellAnchor::new(10, 5, Side::Right));
     let rect = sel.block_rect().unwrap();
@@ -483,10 +391,7 @@ fn block_rect_handles_reversed_drag_in_all_four_quadrants() {
     // Every direction uses (Side::Left outside, Side::Right
     // outside) so the trim rule doesn't fire — the test's job
     // is to verify drag-direction normalization, not Side trim.
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 0,
-    };
+    let anchor = ScreenPos::viewport(0, 0);
 
     // Drag up-and-left.
     let mut sel = ByteSelection::block(anchor, CellAnchor::new(10, 5, Side::Right));
@@ -526,7 +431,8 @@ fn block_quads_emit_one_rect_per_row() {
         left: 3,
         right: 10,
     };
-    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0);
+    // vp_top = 0, vp_rows large enough to keep all 4 rows visible.
+    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0, 0, 24);
     assert_eq!(quads.len(), 4, "rows 2..=5 inclusive → 4 quads");
 }
 
@@ -542,7 +448,7 @@ fn block_quads_start_at_left_cell_boundary() {
         left: 3,
         right: 10,
     };
-    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0);
+    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0, 0, 24);
     let q = quads[0];
     assert_eq!(q.x1, 16.0, "column 3 left edge");
     assert_eq!(q.x2, 80.0, "past column 10 right edge");
@@ -560,12 +466,45 @@ fn block_quads_adopt_element_bounds_origin() {
         left: 1,
         right: 1,
     };
-    let quads = block_selection_quads(rect, 100.0, 50.0, 8.0, 20.0);
+    let quads = block_selection_quads(rect, 100.0, 50.0, 8.0, 20.0, 0, 24);
     let q = quads[0];
     assert_eq!(q.x1, 100.0);
     assert_eq!(q.x2, 108.0);
     assert_eq!(q.y1, 50.0);
     assert_eq!(q.y2, 70.0);
+}
+
+#[test]
+fn block_quads_skip_rows_above_visible_viewport() {
+    // Rect spans absolute rows 5..=8; viewport sits at row 7
+    // (vp_top = 6 in 0-indexed terms). Rows 5 and 6 are above
+    // the viewport top — they must be dropped, leaving 2 quads.
+    let rect = BlockRect {
+        top: 5,
+        bottom: 8,
+        left: 1,
+        right: 3,
+    };
+    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0, 6, 24);
+    assert_eq!(quads.len(), 2);
+    // Visible row indices: row 7 → visible 0, row 8 → visible 1.
+    assert_eq!(quads[0].y1, 0.0);
+    assert_eq!(quads[1].y1, 20.0);
+}
+
+#[test]
+fn block_quads_skip_rows_below_visible_viewport() {
+    // Rect spans rows 1..=10 with a 4-row viewport pinned at the
+    // top (vp_top = 0); rows 5..=10 are below the viewport and
+    // must be dropped, leaving 4 quads for rows 1..=4.
+    let rect = BlockRect {
+        top: 1,
+        bottom: 10,
+        left: 1,
+        right: 3,
+    };
+    let quads = block_selection_quads(rect, 0.0, 0.0, 8.0, 20.0, 0, 4);
+    assert_eq!(quads.len(), 4);
 }
 
 // ----- font_hash — shape cache self-invalidation ---------------
@@ -771,13 +710,38 @@ fn block_rect_from_anchors_returns_none_when_trim_empties_rect() {
 
 // ----- Stage 2c: block_copy_text -------------------------------
 
+/// Build a session whose first few dump_screen_row(y) responses match
+/// `lines`. Feeds the lines through PTY input so they land in the
+/// viewport (and, when the row count exceeds the viewport, spill into
+/// `LineBuffer` scrollback). Returns the session ready for selection
+/// tests. `cols` is sized large enough to keep each input line on a
+/// single visual row.
+fn session_with_lines(lines: &[&str], cols: u16, rows: u16) -> crate::TerminalSession {
+    let config = crate::TerminalConfig {
+        cols,
+        rows,
+        max_scrollback: 1024,
+        ..crate::TerminalConfig::default()
+    };
+    let mut s = crate::TerminalSession::new(config).expect("session");
+    let mut payload = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        payload.push_str(line);
+        if i + 1 < lines.len() {
+            payload.push_str("\r\n");
+        }
+    }
+    s.feed(payload.as_bytes()).expect("feed");
+    s
+}
+
 #[test]
 fn block_copy_extracts_rectangle_across_rows() {
-    let lines: Vec<String> = vec![
-        "0123456789abcdef".into(),
-        "hello world!!!!!".into(),
-        "terminal rocks!!".into(),
-    ];
+    let session = session_with_lines(
+        &["0123456789abcdef", "hello world!!!!!", "terminal rocks!!"],
+        32,
+        4,
+    );
     let rect = BlockRect {
         top: 1,
         bottom: 3,
@@ -786,7 +750,7 @@ fn block_copy_extracts_rectangle_across_rows() {
     };
     // Columns 3..=7 inclusive, 1-indexed → bytes [2..7) for ASCII rows.
     let expected = "23456\nllo w\nrmina";
-    assert_eq!(block_copy_text(&lines, rect), expected);
+    assert_eq!(block_copy_text(&rect, &session), expected);
 }
 
 #[test]
@@ -794,41 +758,26 @@ fn block_copy_short_row_is_clamped_to_line_len() {
     // Row 2 only has 4 columns; block asks for cols 3..=10 which
     // extends past the end. We take what's available
     // (cols 3..=4 → "o!") and do not pad with trailing spaces.
-    let lines: Vec<String> = vec!["abcdefghij".into(), "foo!".into()];
+    let session = session_with_lines(&["abcdefghij", "foo!"], 16, 4);
     let rect = BlockRect {
         top: 1,
         bottom: 2,
         left: 3,
         right: 10,
     };
-    assert_eq!(block_copy_text(&lines, rect), "cdefghij\no!");
-}
-
-#[test]
-fn block_copy_missing_row_emits_blank_line() {
-    // The block extends below the content area — those rows
-    // still appear in the output as empty lines so pasting
-    // recreates the rectangle faithfully.
-    let lines: Vec<String> = vec!["abc".into()];
-    let rect = BlockRect {
-        top: 1,
-        bottom: 3,
-        left: 1,
-        right: 3,
-    };
-    assert_eq!(block_copy_text(&lines, rect), "abc\n\n");
+    assert_eq!(block_copy_text(&rect, &session), "cdefghij\no!");
 }
 
 #[test]
 fn block_copy_single_cell_returns_single_char() {
-    let lines: Vec<String> = vec!["hello".into()];
+    let session = session_with_lines(&["hello"], 16, 4);
     let rect = BlockRect {
         top: 1,
         bottom: 1,
         left: 2,
         right: 2,
     };
-    assert_eq!(block_copy_text(&lines, rect), "e");
+    assert_eq!(block_copy_text(&rect, &session), "e");
 }
 
 #[test]
@@ -836,7 +785,7 @@ fn block_copy_wide_glyph_snaps_to_glyph_boundary() {
     // "한" occupies two display columns. Selecting col 1..=1
     // picks up the whole wide glyph because the shaper advances
     // two columns per wide char.
-    let lines: Vec<String> = vec!["한글x".into()];
+    let session = session_with_lines(&["한글x"], 16, 4);
     let rect = BlockRect {
         top: 1,
         bottom: 1,
@@ -845,12 +794,108 @@ fn block_copy_wide_glyph_snaps_to_glyph_boundary() {
     };
     // Column 2 lives inside the same wide glyph → byte index
     // for col 2 should fall on the next char boundary.
-    let out = block_copy_text(&lines, rect);
+    let out = block_copy_text(&rect, &session);
     // Must be a full glyph (no partial UTF-8).
     assert!(
         out.is_char_boundary(out.len()),
         "block slice must end on a char boundary"
     );
+}
+
+#[test]
+fn block_copy_text_pulls_rows_from_scrollback() {
+    // 20-col × 3-row viewport with 1024 lines of scrollback. Feeding
+    // 5 lines pushes the first TWO into LineBuffer (the live viewport
+    // holds the last three). Targeting rect rows 1..=2 (1-indexed →
+    // absolute rows 0 and 1) makes BOTH copied rows sit in
+    // scrollback — the test fails if `block_copy_text` reads from
+    // a viewport-only buffer instead of dispatching through
+    // `dump_screen_row`.
+    let session = session_with_lines(
+        &[
+            "alpha-beta-gamma-del",
+            "epsilon-zeta",
+            "eta",
+            "theta",
+            "iota",
+        ],
+        20,
+        3,
+    );
+    // Sanity: at least two rows are scrolled out (live viewport holds
+    // the last 3 rows — "eta", "theta", "iota").
+    assert!(
+        session.viewport_row_offset() >= 2,
+        "expected ≥2 scrollback rows above the viewport, got vp_top={}",
+        session.viewport_row_offset()
+    );
+    let rect = BlockRect {
+        top: 1,
+        bottom: 2,
+        left: 1,
+        right: 5,
+    };
+    // Columns 1..=5, 1-indexed inclusive → "alpha" / "epsil".
+    assert_eq!(block_copy_text(&rect, &session), "alpha\nepsil");
+}
+
+/// `block_copy_text` documents that a row missing from `dump_screen_row`
+/// contributes a blank line so the rectangle's geometry is preserved.
+/// Triggered here by capping `max_scrollback = 1` so LineBuffer
+/// ring-evicts older logical lines past `overflow`. Targeting a rect
+/// row that lies above the surviving unified frame (out of both
+/// LineBuffer's wrapped range and ghostty's live viewport) makes
+/// `dump_screen_row` return `Err`, which the copy path translates to a
+/// blank line followed by the live content for the remaining rows.
+#[test]
+fn block_copy_evicted_row_contributes_blank_line() {
+    use crate::{TerminalConfig, TerminalSession};
+    // Single-line scrollback cap so feeding more logical lines genuinely
+    // evicts rows past LineBuffer's ring.
+    let cfg = TerminalConfig {
+        cols: 16,
+        rows: 1,
+        max_scrollback: 1,
+        ..TerminalConfig::default()
+    };
+    let mut session = TerminalSession::new(cfg).expect("session");
+    // Feed three sealed lines: "first" and "second" get evicted (only
+    // "third" survives in LineBuffer); the viewport holds the empty
+    // current line after the trailing newline.
+    session.feed(b"first\r\nsecond\r\nthird\r\n").expect("feed");
+    assert!(
+        session.line_buffer().overflow() >= 1,
+        "expected LineBuffer eviction, got overflow={}",
+        session.line_buffer().overflow()
+    );
+    // Sanity: row 2 sits past the unified frame so `dump_screen_row`
+    // must report failure — this is the path `block_copy_text` is
+    // contracted to translate into a blank line.
+    assert!(
+        session.dump_screen_row(2).is_err(),
+        "expected dump_screen_row(2) to fail past the unified frame"
+    );
+
+    // Unified frame addresses: row 0 → "third" (LineBuffer), row 1 → ""
+    // (viewport). Row 2 is past the end — `dump_screen_row` returns
+    // `Err`, which `block_copy_text` must translate to a blank line so
+    // pasted geometry preserves the missing row's slot.
+    //
+    // 1-indexed rect: rows 1..=3 → abs rows 0, 1, 2. cols 1..=5 grabs
+    // "third"[0..5] = "third", then "" → empty, then `Err` → empty.
+    let rect = BlockRect {
+        top: 1,
+        bottom: 3,
+        left: 1,
+        right: 5,
+    };
+    let out = block_copy_text(&rect, &session);
+    // Three rows joined by '\n'. The first row has content; the
+    // second (live empty row) and third (evicted-past-frame) both
+    // contribute blank lines.
+    assert_eq!(out, "third\n\n");
+    // Geometry preserved: three rows → two '\n' separators.
+    assert_eq!(out.matches('\n').count(), 2);
 }
 
 #[test]
@@ -861,7 +906,7 @@ fn block_quads_for_single_cell_are_one_cell_square() {
         left: 7,
         right: 7,
     };
-    let quads = block_selection_quads(rect, 0.0, 0.0, 10.0, 20.0);
+    let quads = block_selection_quads(rect, 0.0, 0.0, 10.0, 20.0, 0, 24);
     assert_eq!(quads.len(), 1);
     let q = quads[0];
     // Column 7 spans [60, 70); row 4 spans [60, 80).
@@ -873,10 +918,7 @@ fn block_rect_collapses_to_single_cell_before_drag_moves() {
     // Fresh block click with no drag yet — anchor == active. The
     // rect is a 1×1 square on that cell, not empty, so the render
     // path still paints a visible highlight at click time.
-    let anchor = ScreenPos {
-        screen_row: 0,
-        byte: 0,
-    };
+    let anchor = ScreenPos::viewport(0, 0);
     let sel = ByteSelection::block(anchor, CellAnchor::new(7, 3, Side::Left));
     let rect = sel.block_rect().unwrap();
     assert_eq!((rect.top, rect.bottom, rect.left, rect.right), (3, 3, 7, 7));
@@ -993,6 +1035,128 @@ fn dirty_rows_after_cursor_to_row1_write() {
     let dirty = session.take_dirty_viewport_rows();
 
     assert!(dirty.contains(&0), "row 0 should be dirty; got {:?}", dirty);
+}
+
+/// Anchor a `ScreenPos` at a scrollback row, resize the terminal width,
+/// and confirm the anchor still resolves to the same logical content.
+///
+/// Selection used to break on resize because the stored `(screen_row,
+/// byte)` pair was a current-frame coordinate. With the
+/// `LineBufferPosition`-backed `Scrollback` anchor, the resize re-maps
+/// the same cell through the new wrap layout.
+#[test]
+fn scrollback_anchor_survives_resize_widen() {
+    use crate::{TerminalConfig, TerminalSession};
+    let cfg = TerminalConfig {
+        cols: 20,
+        rows: 3,
+        max_scrollback: 1024,
+        ..TerminalConfig::default()
+    };
+    let mut session = TerminalSession::new(cfg).unwrap();
+    // Five lines, viewport is 3 rows tall → at least the first two
+    // lines scroll off the top into LineBuffer scrollback.
+    session
+        .feed(b"the quick brown fox\r\nthe lazy dog xyzzy\r\nfin\r\nmore\r\nlast\r\n")
+        .unwrap();
+    assert!(
+        session.line_buffer().len() >= 2,
+        "expected at least 2 captured lines, got {}",
+        session.line_buffer().len()
+    );
+
+    // First captured row in LineBuffer = "the quick brown fox" — its
+    // visual row in the current frame is index 0 (top of scrollback).
+    // Anchor on column 5 ("q" of "quick").
+    let anchor_col = 5u16;
+    let anchor = ScreenPos::anchor_at(&session, 0, anchor_col);
+
+    // Resize: widen to 40 columns. The "quick" word still lives in the
+    // same logical line at the same cumulative cell column.
+    session.resize(40, 3).unwrap();
+
+    let (visual_y, byte) = anchor.resolve(&session).expect("anchor still resolves");
+    let row = session
+        .dump_screen_row(visual_y)
+        .expect("row resolves to text");
+    let row = row.strip_suffix('\n').unwrap_or(&row);
+    // The byte offset should land at the start of "quick" — verify the
+    // suffix from `byte` starts with that word.
+    assert!(
+        row[byte..].starts_with("quick"),
+        "expected 'quick' at byte {byte} of row {visual_y}: {row:?}"
+    );
+
+    // Narrow back to a width smaller than the original. The same
+    // logical cell should still resolve, just at a different visual_y.
+    // At width 8 the line "the quick brown fox" wraps mid-word; the
+    // anchor still lands on the 'q' even though the rest of "quick"
+    // straddles onto the next visual row.
+    session.resize(8, 3).unwrap();
+    let (visual_y, byte) = anchor.resolve(&session).expect("anchor still resolves");
+    let row = session
+        .dump_screen_row(visual_y)
+        .expect("row resolves to text");
+    let row = row.strip_suffix('\n').unwrap_or(&row);
+    assert!(
+        row[byte..].starts_with('q'),
+        "expected 'q' at byte {byte} of row {visual_y} after narrow: {row:?}"
+    );
+}
+
+/// Cross-line matches were impossible before Task 5 — each row was
+/// scanned in isolation. With `FindContext` driving the scrollback
+/// portion, a needle that straddles a hard newline must produce one
+/// `MatchRange` per visual row it spans.
+#[test]
+fn search_finds_cross_line_match_in_scrollback() {
+    use super::search::scan_search_matches;
+    // 20-col × 3-row viewport — feeding 5 lines pushes the first two
+    // into the line buffer. The needle "world" lives across the seam.
+    let session = session_with_lines(&["hello wor", "ld there", "row3", "row4", "row5"], 20, 3);
+    assert!(
+        session.line_buffer().len() >= 2,
+        "expected at least 2 captured lines, got {}",
+        session.line_buffer().len(),
+    );
+
+    let result = scan_search_matches(&session, "world", false, false);
+    assert!(!result.regex_error);
+    assert_eq!(
+        result.matches.len(),
+        2,
+        "cross-line needle should produce one MatchRange per visual row, got {:?}",
+        result.matches,
+    );
+    let m0 = result.matches[0];
+    let m1 = result.matches[1];
+    // "hello wor": "wor" sits at 1-indexed cols 7..=9 of visual row 0.
+    assert_eq!((m0.row, m0.start_col, m0.end_col), (0, 7, 9));
+    // "ld there": "ld" sits at 1-indexed cols 1..=2 of visual row 1.
+    assert_eq!((m1.row, m1.start_col, m1.end_col), (1, 1, 2));
+}
+
+/// Scrollback and viewport matches must surface together in row order.
+/// Confirms the dispatcher path emits both halves of the unified frame.
+#[test]
+fn search_combines_scrollback_and_viewport_matches() {
+    use super::search::scan_search_matches;
+    let session = session_with_lines(&["foo here", "row2", "row3", "row4 foo"], 20, 3);
+    assert!(!session.line_buffer().is_empty());
+
+    let result = scan_search_matches(&session, "foo", false, false);
+    assert!(!result.regex_error);
+    let rows: Vec<u32> = result.matches.iter().map(|m| m.row).collect();
+    assert!(
+        rows.len() >= 2,
+        "expected at least 2 matches across scrollback + viewport, got {:?}",
+        rows,
+    );
+    let mut sorted = rows.clone();
+    sorted.sort();
+    assert_eq!(rows, sorted, "matches must arrive in row-ascending order");
+    assert_eq!(*rows.first().unwrap(), 0, "scrollback row first");
+    assert!(*rows.last().unwrap() >= 1, "viewport row last");
 }
 
 mod mouse_protocol;

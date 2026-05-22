@@ -83,6 +83,35 @@ fn terminal_tab_binding_shadows_root_tab_binding() {
 }
 
 #[test]
+fn url_ids_survive_scroll_out() {
+    // Feed an OSC 8 hyperlink, then push it out of the viewport so the
+    // capture path moves it into LineBuffer. At least one cell of the
+    // captured line should carry the link's url_id.
+    let cfg = TerminalConfig {
+        cols: 20,
+        rows: 3,
+        ..TerminalConfig::default()
+    };
+    let mut session = TerminalSession::new(cfg).unwrap();
+
+    session
+        .feed(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n")
+        .unwrap();
+    // 3 more lines so the link row scrolls off a 3-row viewport.
+    session.feed(b"x\r\ny\r\nz\r\nq\r\n").unwrap();
+
+    let buf = session.line_buffer();
+    let link_line = (0..buf.len())
+        .filter_map(|i| buf.get(i))
+        .find(|l| l.text.contains("link"))
+        .expect("scrolled-out link line captured");
+    assert!(
+        link_line.cells.iter().any(|c| c.url_id.is_some()),
+        "at least one captured cell should carry a url_id"
+    );
+}
+
+#[test]
 fn tracks_bracketed_paste_mode_from_output() {
     let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
     assert!(!session.bracketed_paste_enabled());

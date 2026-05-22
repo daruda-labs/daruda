@@ -10,6 +10,9 @@ use regex::{Regex, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;
 use unicode_width::UnicodeWidthStr as _;
 
+use crate::TerminalSession;
+use crate::session::FindOptions;
+
 /// A single match located somewhere in the screen (scrollback +
 /// viewport) coordinate space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,12 +43,6 @@ pub struct SearchState {
     pub(super) regex_error: bool,
     pub(super) matches: Vec<MatchRange>,
     pub(super) focused: Option<usize>,
-    /// Cached compiled regex; rebuilt only when query/flags change.
-    pub(super) compiled_regex: Option<Regex>,
-    /// Key used to detect when the cached regex is still valid.
-    pub(super) compiled_regex_key: Option<(String, bool)>,
-    /// Last-known `total_rows` snapshot for incremental scan.
-    pub(super) last_scan_total_rows: u32,
     /// Byte offset of the search-bar input caret inside `query`.
     pub(super) cursor_byte: usize,
 }
@@ -73,6 +70,108 @@ impl SearchState {
 
     pub fn focused_index(&self) -> Option<usize> {
         self.focused
+    }
+}
+
+/// Combined output of [`scan_search_matches`]: a list of visual-row
+/// match ranges plus a `regex_error` flag the search bar surfaces when
+/// the user typed `is_regex = true` and the pattern failed to compile.
+pub(super) struct ScanResult {
+    pub matches: Vec<MatchRange>,
+    pub regex_error: bool,
+}
+
+/// Single entry point that produces the full match list for the
+/// search-bar overlay. Walks the scrollback portion of the unified
+/// frame via [`crate::session::LineBuffer::find_matches`] (so multi-line
+/// patterns can match across hard newlines and wrap boundaries) and
+/// then scans the live viewport rows one at a time. Viewport rows
+/// continue to use the per-row scan because the live grid lacks the
+/// cross-row continuation state `FindContext` carries.
+pub(super) fn scan_search_matches(
+    session: &TerminalSession,
+    query: &str,
+    case_insensitive: bool,
+    is_regex: bool,
+) -> ScanResult {
+    if query.is_empty() {
+        return ScanResult {
+            matches: Vec::new(),
+            regex_error: false,
+        };
+    }
+    let case = if case_insensitive {
+        Case::Insensitive
+    } else {
+        Case::Sensitive
+    };
+
+    // Validate the regex up-front so we can surface a single
+    // regex_error flag rather than relying on FindContext's silent
+    // fall-back to its Invalid state.
+    let viewport_regex = if is_regex {
+        match compile_regex(query, case) {
+            Some(re) => Some(re),
+            None => {
+                return ScanResult {
+                    matches: Vec::new(),
+                    regex_error: true,
+                };
+            }
+        }
+    } else {
+        None
+    };
+
+    let cell_cols = session.cols();
+    let lb_rows = session.line_buffer().wrapped_row_count(cell_cols);
+    let total_rows = session.total_rows();
+
+    let mut matches: Vec<MatchRange> = Vec::new();
+
+    // Scrollback portion via FindContext (cross-line aware). Cell
+    // columns are already 1-indexed inclusive in the triple returned
+    // from `find_matches`, so we forward them directly.
+    let opts = FindOptions {
+        case_sensitive: !case_insensitive,
+        regex: is_regex,
+        forward: true,
+    };
+    for (row, start_col, end_col) in session.line_buffer().find_matches(query, opts, cell_cols) {
+        matches.push(MatchRange {
+            row,
+            start_col,
+            end_col,
+        });
+    }
+
+    // Viewport portion via the existing per-row scanner. The live grid
+    // does not carry cross-row continuation state, so multi-line
+    // patterns can only match in scrollback for now.
+    if total_rows > lb_rows {
+        let mut viewport_lines: Vec<String> = Vec::with_capacity((total_rows - lb_rows) as usize);
+        for y in lb_rows..total_rows {
+            let line = match session.dump_screen_row(y) {
+                Ok(s) => s.strip_suffix('\n').unwrap_or(s.as_str()).to_string(),
+                Err(_) => String::new(),
+            };
+            viewport_lines.push(line);
+        }
+        if let Some(re) = viewport_regex.as_ref() {
+            matches.extend(find_regex_matches_from(&viewport_lines, re, lb_rows));
+        } else {
+            matches.extend(find_literal_matches_from(
+                &viewport_lines,
+                query,
+                case,
+                lb_rows,
+            ));
+        }
+    }
+
+    ScanResult {
+        matches,
+        regex_error: false,
     }
 }
 

@@ -145,12 +145,18 @@ impl TerminalTextElement {
         let focused_command_row = view.state.focused_command_row;
 
         for mark in view.session.prompt_marks().iter().rev().take(64) {
-            let Some(visible) = screen_row_to_visible(mark.screen_row, viewport_top, rows) else {
+            // Translate the mark's absolute Y to a current screen row;
+            // marks whose row was evicted from `LineBuffer` skip the
+            // paint (their gutter band would point at the wrong row).
+            let Some(screen_row) = view.session.abs_to_screen_row(mark.abs_y) else {
+                continue;
+            };
+            let Some(visible) = screen_row_to_visible(screen_row, viewport_top, rows) else {
                 continue;
             };
             let visible_row = visible as f32;
-            let is_focused = Some(mark.screen_row) == focused_prompt_row
-                || Some(mark.screen_row) == focused_command_row;
+            let is_focused =
+                Some(screen_row) == focused_prompt_row || Some(screen_row) == focused_command_row;
             let color = match (mark.kind, mark.exit_code) {
                 (crate::session::PromptMarkKind::CommandFinished, Some(code)) if code != 0 => {
                     theme::PROMPT_MARK_FOCUSED_PROMPT

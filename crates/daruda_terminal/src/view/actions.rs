@@ -60,12 +60,16 @@ impl TerminalView {
                 let Some(rect) = sel.block_rect() else {
                     return;
                 };
-                super::block_copy_text(&self.state.viewport_lines, rect)
+                super::block_copy_text(&rect, &self.session)
             }
             // Linear mode: screen-position slice, survives scroll and
-            // viewport repaints because ScreenPos is absolute.
+            // viewport repaints because ScreenPos is absolute. If
+            // either endpoint has been evicted from LineBuffer the
+            // selection has no live projection — skip the copy.
             Some(sel) => {
-                let (start, end) = sel.normalized();
+                let Some((start, end)) = sel.normalized(&self.session) else {
+                    return;
+                };
                 if start == end {
                     return;
                 }
@@ -97,15 +101,16 @@ impl TerminalView {
             .last()
             .map(|l| l.len())
             .unwrap_or(0);
+        // SelectAll covers the live viewport only — both endpoints are
+        // viewport-resident so the simpler `Viewport` anchor is enough.
+        // TODO(scrollback-selectall): Cmd+A currently selects only the
+        // live viewport, unlike iTerm2 / most terminals which extend
+        // through the full LineBuffer scrollback. Extending would need
+        // a Scrollback PosAnchor at `lb.position_at(0)` for `anchor`
+        // and a Viewport anchor at the last live cell for `active`.
         self.state.selection = Some(ByteSelection::linear(
-            ScreenPos {
-                screen_row: vp_offset,
-                byte: 0,
-            },
-            ScreenPos {
-                screen_row: last_row,
-                byte: last_byte,
-            },
+            ScreenPos::viewport(vp_offset, 0),
+            ScreenPos::viewport(last_row, last_byte),
         ));
         self.on_copy(&Copy, window, cx);
         cx.notify();

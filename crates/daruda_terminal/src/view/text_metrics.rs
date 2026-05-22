@@ -235,6 +235,24 @@ pub(crate) fn byte_index_for_column_in_line(line: &str, col: u16) -> usize {
     line.len()
 }
 
+/// Inverse of [`byte_index_for_column_in_line`]: map a UTF-8 byte
+/// offset back to its 1-indexed display column. Bytes past the end of
+/// `line` clamp to "one column past the last printable cell" so the
+/// selection start at "after the last char" survives without
+/// underflowing.
+pub(crate) fn column_for_byte_in_line(line: &str, byte: usize) -> u16 {
+    use unicode_width::UnicodeWidthChar as _;
+    let target = byte.min(line.len());
+    let mut col: u32 = 1;
+    for (bi, ch) in line.char_indices() {
+        if bi >= target {
+            return col.min(u16::MAX as u32) as u16;
+        }
+        col = col.saturating_add(ch.width().unwrap_or(0) as u32);
+    }
+    col.min(u16::MAX as u32) as u16
+}
+
 /// Pixel x coordinate of the grid's right edge: the column just past
 /// the last cell. Used by the selection highlight and drag-empty-row
 /// fill so multi-row extensions stop at the grid boundary instead of

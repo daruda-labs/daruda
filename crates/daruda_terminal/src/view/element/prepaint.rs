@@ -169,8 +169,25 @@ impl TerminalTextElement {
             }
         });
 
-        let (default_bg, shaped_lines, selection, vp_offset, marked_text, cursor_position) = {
+        let (
+            default_bg,
+            shaped_lines,
+            selection,
+            resolved_selection,
+            vp_offset,
+            marked_text,
+            cursor_position,
+        ) = {
             let view = self.view.read(cx);
+            // Resolve scrollback/viewport anchors against the live session
+            // once — the closure below treats the selection as already
+            // projected to current-frame `(screen_row, byte)` pairs.
+            let resolved = view.state.selection.and_then(|sel| {
+                let (start, end) = sel.normalized(&view.session)?;
+                let s = start.resolve(&view.session)?;
+                let e = end.resolve(&view.session)?;
+                Some((s, e))
+            });
             (
                 view.session.default_background(),
                 view.line_layouts
@@ -178,6 +195,7 @@ impl TerminalTextElement {
                     .map(|line| line.clone().unwrap_or_default())
                     .collect::<Vec<_>>(),
                 view.state.selection,
+                resolved,
                 view.session.viewport_row_offset(),
                 view.state.marked_text.clone(),
                 view.session.cursor_position(),
@@ -344,12 +362,15 @@ impl TerminalTextElement {
 
                 if sel.is_block() {
                     if let (Some(rect), Some(cell_width)) = (sel.block_rect(), base_cell_width) {
+                        let vp_rows = { self.view.read(cx).session.rows() as u32 };
                         for q in block_selection_quads(
                             rect,
                             f32::from(bounds.left()),
                             f32::from(bounds.top()),
                             cell_width,
                             f32::from(line_height),
+                            vp_offset,
+                            vp_rows,
                         ) {
                             quads.push(fill(
                                 Bounds::from_corners(
@@ -363,24 +384,27 @@ impl TerminalTextElement {
                     return quads;
                 }
 
-                let (start, end) = sel.normalized();
-                if start == end {
+                let Some(((start_row, start_byte), (end_row, end_byte))) = resolved_selection
+                else {
+                    return quads;
+                };
+                if (start_row, start_byte) == (end_row, end_byte) {
                     return quads;
                 }
 
                 for (row, line) in shaped_lines.iter().enumerate() {
                     let screen_row = vp_offset + row as u32;
-                    if screen_row < start.screen_row || screen_row > end.screen_row {
+                    if screen_row < start_row || screen_row > end_row {
                         continue;
                     }
 
-                    let local_start = if screen_row == start.screen_row {
-                        start.byte
+                    let local_start = if screen_row == start_row {
+                        start_byte
                     } else {
                         0
                     };
-                    let local_end = if screen_row == end.screen_row {
-                        end.byte
+                    let local_end = if screen_row == end_row {
+                        end_byte
                     } else {
                         line.text.len() + 1
                     };
@@ -418,7 +442,7 @@ impl TerminalTextElement {
                 let content_rows = shaped_lines.len();
                 let view = self.view.read(cx);
                 let grid_rows = view.session.rows() as usize;
-                let end_vp_row = end.screen_row.checked_sub(vp_offset).map(|r| r as usize);
+                let end_vp_row = end_row.checked_sub(vp_offset).map(|r| r as usize);
                 if let (Some(drag_row), Some(end_row)) = (view.state.drag_row, end_vp_row)
                     && end_row >= content_rows
                     && drag_row >= content_rows

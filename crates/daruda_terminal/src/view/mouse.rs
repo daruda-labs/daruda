@@ -586,11 +586,16 @@ impl TerminalView {
         let vp_offset = self.session.viewport_row_offset();
         let rows = self.session.rows() as u32;
         if let Some(sel) = self.state.selection.as_mut() {
-            sel.active.screen_row = if vel < 0 {
+            // Autoscroll extends the active endpoint to the topmost /
+            // bottommost row of the new viewport. The previous byte
+            // offset is no longer meaningful at the new row — drop to
+            // column 0 of the new row in current-frame coordinates.
+            let target_row = if vel < 0 {
                 vp_offset
             } else {
                 vp_offset + rows.saturating_sub(1)
             };
+            sel.active = ScreenPos::viewport(target_row, 0);
         }
 
         self.schedule_viewport_refresh(cx);
@@ -601,6 +606,14 @@ impl TerminalView {
     /// view's configured `font_size` / spacing is the source of
     /// truth — not `window.text_style()`, which is unset during
     /// mouse events.
+    ///
+    /// `pixel_to_cell_anchor` returns a viewport-relative row;
+    /// `viewport_row_offset` is added here so the returned anchor
+    /// carries an **absolute** screen row (matching `BlockRect.{top,
+    /// bottom}`'s post-Task-7 convention). When the click lands at
+    /// viewport row 1 the absolute row is `vp_top + 1`, which can
+    /// extend into `LineBuffer` scrollback once the viewport is
+    /// scrolled back.
     pub(super) fn cell_anchor_at(
         &self,
         position: gpui::Point<Pixels>,
@@ -608,14 +621,18 @@ impl TerminalView {
     ) -> Option<super::CellAnchor> {
         let layout = self.cell_layout(window)?;
         let local = self.mouse_position_to_local(position);
-        Some(super::pixel_to_cell_anchor(
+        let mut anchor = super::pixel_to_cell_anchor(
             f32::from(local.x),
             f32::from(local.y),
             layout.cell_width,
             layout.line_height,
             self.session.cols(),
             self.session.rows(),
-        ))
+        );
+        anchor.row = anchor
+            .row
+            .saturating_add(self.session.viewport_row_offset());
+        Some(anchor)
     }
 
     /// Recompute `hovered_url` based on the current cursor position and
@@ -790,10 +807,7 @@ impl TerminalView {
                 .map(|l| l.len() + 1)
                 .unwrap_or(0);
             let last_row = vp_offset + content_rows.saturating_sub(1) as u32;
-            return Some(ScreenPos {
-                screen_row: last_row,
-                byte: last_len,
-            });
+            return Some(ScreenPos::viewport(last_row, last_len));
         }
 
         let line_text = self
@@ -833,23 +847,49 @@ impl TerminalView {
             }
         };
 
-        Some(ScreenPos { screen_row, byte })
+        // When the row lies in scrollback (covered by `LineBuffer`),
+        // promote the anchor to a width-invariant `LineBufferPosition`
+        // so the selection survives a subsequent resize. Viewport-resident
+        // rows keep the byte-offset storage; they get re-clamped after a
+        // resize via the normal `refresh_viewport_preserving_selection`
+        // path.
+        let cell_cols = self.session.cols();
+        let lb_rows = self.session.line_buffer().wrapped_row_count(cell_cols);
+        if screen_row < lb_rows {
+            // Translate the row-local byte offset back to a 1-indexed
+            // cell column so `anchor_at` can derive the cumulative
+            // cell column within the logical line.
+            let cell_col = super::text_metrics::column_for_byte_in_line(line_text, byte);
+            return Some(ScreenPos::anchor_at(&self.session, screen_row, cell_col));
+        }
+        Some(ScreenPos::viewport(screen_row, byte))
     }
 
     /// URL at the given absolute screen position (viewport rows only).
     pub(super) fn url_at_screen_pos(&self, pos: ScreenPos) -> Option<String> {
+        let (screen_row, byte) = pos.resolve(&self.session)?;
         let vp_offset = self.session.viewport_row_offset();
-        let vp_row = pos.screen_row.checked_sub(vp_offset)? as usize;
+        let vp_row = screen_row.checked_sub(vp_offset)? as usize;
         let line = self.state.viewport_lines.get(vp_row)?;
-        super::url::url_at_byte_index(line, pos.byte.min(line.len().saturating_sub(1)))
+        super::url::url_at_byte_index(line, byte.min(line.len().saturating_sub(1)))
     }
 
     pub(super) fn word_range_at(&self, pos: ScreenPos, vp_offset: u32) -> (ScreenPos, ScreenPos) {
-        super::viewport::word_range_in_viewport(pos, &self.state.viewport_lines, vp_offset)
+        super::viewport::word_range_in_viewport(
+            pos,
+            &self.session,
+            &self.state.viewport_lines,
+            vp_offset,
+        )
     }
 
     pub(super) fn line_range_at(&self, pos: ScreenPos, vp_offset: u32) -> (ScreenPos, ScreenPos) {
-        super::viewport::line_range_in_viewport(pos, &self.state.viewport_lines, vp_offset)
+        super::viewport::line_range_in_viewport(
+            pos,
+            &self.session,
+            &self.state.viewport_lines,
+            vp_offset,
+        )
     }
 
     pub(super) fn mouse_position_to_cell(

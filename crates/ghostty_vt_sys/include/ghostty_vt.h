@@ -68,6 +68,11 @@ ghostty_vt_bytes_t ghostty_vt_terminal_dump_viewport_row_cell_styles(ghostty_vt_
                                                                      uint16_t row);
 ghostty_vt_bytes_t ghostty_vt_terminal_dump_viewport_row_style_runs(ghostty_vt_terminal_t terminal,
                                                                     uint16_t row);
+ghostty_vt_bytes_t ghostty_vt_terminal_dump_screen_row_style_runs(ghostty_vt_terminal_t terminal,
+                                                                  uint32_t y);
+ghostty_vt_bytes_t ghostty_vt_terminal_dump_screen_row_url_ids(ghostty_vt_terminal_t terminal,
+                                                               uint32_t y);
+int ghostty_vt_terminal_row_wrap_kind(ghostty_vt_terminal_t terminal, uint32_t y);
 ghostty_vt_bytes_t ghostty_vt_terminal_take_dirty_viewport_rows(ghostty_vt_terminal_t terminal,
                                                                 uint16_t rows);
 int32_t ghostty_vt_terminal_take_viewport_scroll_delta(ghostty_vt_terminal_t terminal);

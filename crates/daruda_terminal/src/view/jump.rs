@@ -116,13 +116,21 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Option<u32> {
         let viewport_top = self.session.viewport_row_offset();
-        let rows: Vec<u32> = self
+        // Translate each mark's abs_y to a current-frame screen row.
+        // Marks whose row has been evicted from `LineBuffer` drop out
+        // here — the picker only walks rows that are still reachable.
+        let mut rows: Vec<u32> = self
             .session
             .prompt_marks()
             .iter()
             .filter(|m| m.kind == kind)
-            .map(|m| m.screen_row)
+            .filter_map(|m| self.session.abs_to_screen_row(m.abs_y))
             .collect();
+        // `next_prompt_index` expects ascending order. Capture order
+        // tracks `abs_y`, which is monotonic, so the translated rows
+        // are already sorted — but sort defensively in case a future
+        // change introduces a non-monotonic path.
+        rows.sort_unstable();
 
         let jump = next_prompt_index(&rows, previous_row, viewport_top, forward)?;
         match self.session.prompt_jump_scroll_mode() {

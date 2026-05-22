@@ -2,6 +2,7 @@ use gpui::Context;
 
 use super::TerminalView;
 use super::selection::ScreenPos;
+use crate::session::TerminalSession;
 
 pub(super) fn split_viewport_lines(viewport: &str) -> Vec<String> {
     let viewport = viewport.strip_suffix('\n').unwrap_or(viewport);
@@ -13,20 +14,26 @@ pub(super) fn split_viewport_lines(viewport: &str) -> Vec<String> {
 
 /// Returns the `(start, end)` screen positions that bound the word
 /// under `pos`, clamped to the row `pos` is on.  `vp_offset` is
-/// `session.viewport_row_offset()` cast to `u32`.
+/// `session.viewport_row_offset()` cast to `u32`. `pos` is resolved
+/// against `session` so scrollback-resident anchors project to the
+/// current frame before the word walk.
 pub(crate) fn word_range_in_viewport(
     pos: ScreenPos,
+    session: &TerminalSession,
     lines: &[String],
     vp_offset: u32,
 ) -> (ScreenPos, ScreenPos) {
-    let viewport_row = (pos.screen_row.saturating_sub(vp_offset)) as usize;
+    let Some((screen_row, byte)) = pos.resolve(session) else {
+        return (pos, pos);
+    };
+    let viewport_row = (screen_row.saturating_sub(vp_offset)) as usize;
     let Some(line) = lines.get(viewport_row) else {
         return (pos, pos);
     };
     if line.is_empty() {
         return (pos, pos);
     }
-    let local = pos.byte.min(line.len().saturating_sub(1));
+    let local = byte.min(line.len().saturating_sub(1));
     // Walk back to the nearest valid UTF-8 char boundary (floor_char_boundary
     // is only stable since 1.91, so we replicate the logic inline).
     let local = (0..=local)
@@ -67,38 +74,32 @@ pub(crate) fn word_range_in_viewport(
     }
 
     (
-        ScreenPos {
-            screen_row: pos.screen_row,
-            byte: start,
-        },
-        ScreenPos {
-            screen_row: pos.screen_row,
-            byte: end,
-        },
+        ScreenPos::viewport(screen_row, start),
+        ScreenPos::viewport(screen_row, end),
     )
 }
 
 /// Returns `(start, end)` screen positions spanning the entire row
-/// `pos` is on, including the virtual newline byte (`byte = line.len()
-/// + 1`).  `vp_offset` is `session.viewport_row_offset()` as `u32`.
+/// `pos` is on, including the virtual newline byte (`byte = line.len() + 1`).
+/// `vp_offset` is `session.viewport_row_offset()` as `u32`.
+/// `pos` is resolved against `session` so scrollback-resident anchors
+/// project to the current frame before slicing.
 pub(crate) fn line_range_in_viewport(
     pos: ScreenPos,
+    session: &TerminalSession,
     lines: &[String],
     vp_offset: u32,
 ) -> (ScreenPos, ScreenPos) {
-    let viewport_row = (pos.screen_row.saturating_sub(vp_offset)) as usize;
+    let Some((screen_row, _)) = pos.resolve(session) else {
+        return (pos, pos);
+    };
+    let viewport_row = (screen_row.saturating_sub(vp_offset)) as usize;
     let line_len = lines.get(viewport_row).map(|l| l.len()).unwrap_or(0);
     (
-        ScreenPos {
-            screen_row: pos.screen_row,
-            byte: 0,
-        },
+        ScreenPos::viewport(screen_row, 0),
         // +1 to include the virtual newline so triple-click pastes with a
         // line break, matching the original line_range_in_viewport behaviour.
-        ScreenPos {
-            screen_row: pos.screen_row,
-            byte: line_len + 1,
-        },
+        ScreenPos::viewport(screen_row, line_len + 1),
     )
 }
 
@@ -135,9 +136,15 @@ impl TerminalView {
                 self.refresh_viewport();
             }
             Some(false) => {
-                // Exited alt-screen. ghostty has restored the primary screen.
-                // Clear scrollback first, then erase the visible viewport so
-                // old terminal history cannot be scrolled back to.
+                // Exited alt-screen. Distinct from the `pending_clear_scrollback`
+                // path in session: that fires on explicit OSC 1337 ClearScrollback
+                // (also \x1b[3J in some shells). This branch is the alt-screen-exit
+                // erase-and-home that gives apps like vim/htop a clean primary
+                // surface to return to.
+                //
+                // ghostty has restored the primary screen. Clear scrollback first,
+                // then erase the visible viewport so old terminal history cannot
+                // be scrolled back to.
                 let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
                 let _ = self.session.feed(crate::ansi::ERASE_DISPLAY_AND_HOME);
                 self.state.pending_refresh = true;
@@ -269,23 +276,29 @@ impl TerminalView {
     /// current viewport are read from `viewport_lines`; rows that have
     /// scrolled out of view are fetched via `session.dump_screen_row`.
     pub(super) fn viewport_slice_screen(&self, start: ScreenPos, end: ScreenPos) -> String {
-        if start == end {
+        let Some((start_row, start_byte)) = start.resolve(&self.session) else {
+            return String::new();
+        };
+        let Some((end_row, end_byte)) = end.resolve(&self.session) else {
+            return String::new();
+        };
+        if (start_row, start_byte) == (end_row, end_byte) {
             return String::new();
         }
         let vp_offset = self.session.viewport_row_offset();
         let vp_rows = self.session.rows() as u32;
         let mut out = String::new();
 
-        for screen_row in start.screen_row..=end.screen_row {
-            let row_start_byte = if screen_row == start.screen_row {
-                start.byte
+        for screen_row in start_row..=end_row {
+            let row_start_byte = if screen_row == start_row {
+                start_byte
             } else {
                 0
             };
             // End byte for this row: for intermediate rows use line.len()+1 so
             // the virtual newline is included in the copy payload.
-            let row_end_byte = if screen_row == end.screen_row {
-                end.byte
+            let row_end_byte = if screen_row == end_row {
+                end_byte
             } else {
                 usize::MAX
             };
@@ -321,11 +334,19 @@ impl TerminalView {
         let Some(sel) = self.state.selection else {
             return;
         };
-        let (start, end) = sel.normalized();
+        let Some((start, end)) = sel.normalized(&self.session) else {
+            return;
+        };
+        let Some(start_row) = start.screen_row(&self.session) else {
+            return;
+        };
+        let Some(end_row) = end.screen_row(&self.session) else {
+            return;
+        };
         let vp_offset = self.session.viewport_row_offset();
         let overlaps = dirty_rows.iter().any(|&r| {
             let sr = vp_offset + r as u32;
-            sr >= start.screen_row && sr <= end.screen_row
+            sr >= start_row && sr <= end_row
         });
         if overlaps {
             self.state.selection = None;

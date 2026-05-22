@@ -171,6 +171,25 @@ fn feed_records_prompt_marks_via_st_terminator() {
 }
 
 #[test]
+fn command_history_reports_duration_between_c_and_d_marks() {
+    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    // Need B (CommandStart) before C so command_history() records an entry.
+    // Trailing space gives extract_command_text a non-empty slice between
+    // the B and C cursor columns so the entry is not dropped as empty.
+    session.feed(b"\x1b]133;B\x07x\x1b]133;C\x07").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    session.feed(b"\x1b]133;D;0\x07").unwrap();
+    let history = session.command_history();
+    let last = history.last().expect("entry recorded");
+    assert!(
+        last.duration
+            .is_some_and(|d| d >= std::time::Duration::from_millis(5)),
+        "expected duration ≥5ms, got {:?}",
+        last.duration
+    );
+}
+
+#[test]
 fn feed_records_prompt_marks_across_chunk_boundaries() {
     let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
     // Chunk 1: start of OSC, chunk 2: rest. The session buffers the
@@ -229,7 +248,8 @@ fn prompt_marks_are_bounded() {
 #[test]
 fn prompt_mark_screen_row_follows_scrollback() {
     // PROMPT_START emitted after 50 lines of output must land on the
-    // correct absolute screen row (viewport_row_offset + cursor_y).
+    // correct absolute screen row (viewport_row_offset + cursor_y)
+    // once translated back from the mark's stored `abs_y`.
     let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
     for i in 0..50 {
         session
@@ -240,10 +260,12 @@ fn prompt_mark_screen_row_follows_scrollback() {
     session.feed(b"\x1b]133;A\x07").unwrap();
     let mark = session.prompt_marks().back().copied().unwrap();
     assert_eq!(mark.kind, PromptMarkKind::PromptStart);
+    let row = session
+        .abs_to_screen_row(mark.abs_y)
+        .expect("mark must still translate to a current row");
     assert!(
-        mark.screen_row >= offset_before,
-        "expected screen_row >= viewport offset ({offset_before}); got {}",
-        mark.screen_row
+        row >= offset_before,
+        "expected screen_row >= viewport offset ({offset_before}); got {row}"
     );
 }
 
@@ -580,10 +602,10 @@ fn osc133_marks_in_one_chunk_land_on_correct_rows() {
     assert_eq!(marks[1].kind, PromptMarkKind::CommandExecuted);
     // Rows must be strictly increasing (shell advanced between them).
     assert!(
-        marks[1].screen_row > marks[0].screen_row,
+        marks[1].abs_y > marks[0].abs_y,
         "OSC 133 rows should reflect per-segment cursor: got {} then {}",
-        marks[0].screen_row,
-        marks[1].screen_row
+        marks[0].abs_y,
+        marks[1].abs_y
     );
 }
 
@@ -857,8 +879,14 @@ fn alt_screen_legacy_modes_detected() {
 // Scrollback buffer clearing on alt-screen transitions ----------------
 
 #[test]
-fn alt_screen_entry_clears_primary_scrollback() {
-    // 24-row terminal; feed 50 lines → scrollback accumulates
+fn line_buffer_scrollback_survives_alt_screen_cycle() {
+    // Under the new LineBuffer dispatcher, daruda's persistent
+    // scrollback (`line_buffer`) is decoupled from ghostty's transient
+    // ring. An alt-screen cycle wipes ghostty's primary buffer (we
+    // still inject `\x1b[3J` for parity with the ring), but
+    // `line_buffer` keeps the captured logical lines so the user can
+    // scroll back to them after the TUI exits — matches iTerm2 /
+    // Alacritty behaviour.
     let cfg = TerminalConfig {
         cols: 80,
         rows: 24,
@@ -874,16 +902,14 @@ fn alt_screen_entry_clears_primary_scrollback() {
         "scrollback should exist before alt-screen entry: total_rows={total_before}"
     );
 
-    // Enter alt-screen — our fix should inject \x1b[3J to ghostty_vt
-    // while it is still on the primary screen, clearing scrollback.
     session.feed(b"\x1b[?1049h").unwrap();
-
-    // Exit alt-screen to return to primary screen.
     session.feed(b"\x1b[?1049l").unwrap();
+
     let total_after = session.total_rows();
     assert_eq!(
-        total_after, 24,
-        "primary scrollback should be gone after alt-screen cycle: total_rows={total_after}"
+        total_after, total_before,
+        "line_buffer scrollback must survive alt-screen cycle: \
+         before={total_before} after={total_after}"
     );
 }
 
@@ -1188,4 +1214,288 @@ fn slice_chars_handles_multibyte() {
     // Hangul syllables — 3 bytes each, one char per `nth` step.
     assert_eq!(slice_chars("가나다라", 1, 3), "나다");
     assert_eq!(slice_chars("가나다라", 0, 1), "가");
+}
+
+// LineBuffer capture wiring ---------------------------------------
+
+fn session_with(cols: u16, rows: u16, max_scrollback: usize) -> TerminalSession {
+    let config = TerminalConfig {
+        cols,
+        rows,
+        max_scrollback,
+        ..TerminalConfig::default()
+    };
+    TerminalSession::new(config).expect("failed to create session")
+}
+
+#[test]
+fn capture_appends_scrolled_out_rows() {
+    let mut s = session_with(80, 3, 1024);
+    // Feed five lines into a 3-row viewport so at least the first two
+    // scroll off the top and land in the LineBuffer.
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n").unwrap();
+    assert!(
+        s.line_buffer().len() >= 2,
+        "expected >= 2 captured lines, got {}",
+        s.line_buffer().len()
+    );
+    assert!(
+        s.line_buffer().get(0).unwrap().text.starts_with('a'),
+        "first captured line should start with 'a', got {:?}",
+        s.line_buffer().get(0).unwrap().text
+    );
+}
+
+#[test]
+fn capture_merges_soft_wrap_continuation() {
+    let mut s = session_with(5, 3, 1024);
+    // 10-char string DECAWM-wraps across two physical rows in a 5-col
+    // viewport. After the rows scroll off, they should merge into one
+    // logical line.
+    s.feed(b"abcdefghij\r\nx\r\ny\r\nz\r\n").unwrap();
+    assert!(
+        !s.line_buffer().is_empty(),
+        "expected >= 1 captured line, got {}",
+        s.line_buffer().len()
+    );
+    let first = &s.line_buffer().get(0).unwrap().text;
+    assert!(
+        first.contains("abcdefghij") || first == "abcdefghij",
+        "first captured line should join wrap-continuation, got {first:?}"
+    );
+    assert_eq!(s.line_buffer().get(0).unwrap().eol, EolKind::Hard);
+}
+
+#[test]
+fn dump_screen_row_dispatches_between_line_buffer_and_viewport() {
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n").unwrap(); // 5 lines into 3-row viewport
+    // total_rows should at least cover the live viewport.
+    let total = s.total_rows();
+    assert!(total >= 3, "total_rows must include viewport: {total}");
+    // y=0 sits in LineBuffer (rows a, b scrolled out of the 3-row
+    // viewport). Assert exact content so the dispatcher is actually
+    // exercised — a stub returning empty strings would silently pass
+    // a no-panic check.
+    let row0 = s
+        .dump_screen_row(0)
+        .expect("row 0 must dispatch to LineBuffer");
+    let row0_trimmed = row0.trim_end_matches([' ', '\n']);
+    assert_eq!(
+        row0_trimmed, "a",
+        "row 0 should be the first scrolled-out line"
+    );
+    // Last visible row sits inside the live viewport via the dispatcher.
+    let _ = s.dump_screen_row(total - 1).unwrap_or_default();
+    let _ = s.dump_screen_row(total - 2).unwrap_or_default();
+}
+
+#[test]
+fn scroll_viewport_moves_offset_into_history() {
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").unwrap();
+    let max_scroll = s.line_buffer().wrapped_row_count(80);
+    assert!(max_scroll > 0, "expected captured scrollback rows");
+    // Pinned to bottom initially.
+    assert_eq!(s.scroll_offset(), 0);
+    // negative delta = scroll UP into history (spec sign convention).
+    s.scroll_viewport(-1).unwrap();
+    assert_eq!(s.scroll_offset(), 1, "one step up should land at offset 1");
+    s.scroll_viewport(-100).unwrap();
+    assert_eq!(
+        s.scroll_offset(),
+        max_scroll,
+        "saturating scroll up should clamp to max_scroll"
+    );
+    // Scroll back down past the live grid clamps to 0.
+    s.scroll_viewport(i32::MAX).unwrap();
+    assert_eq!(
+        s.scroll_offset(),
+        0,
+        "saturating scroll down should clamp to 0"
+    );
+}
+
+#[test]
+fn line_buffer_survives_resize_widen() {
+    let mut s = session_with(40, 3, 1024);
+    // Long soft-wrapped line plus a few hard rows so the LineBuffer
+    // captures something the resize might otherwise wipe.
+    s.feed(b"a long line that will wrap at 40 cols and again somewhere\r\nx\r\ny\r\nz\r\n")
+        .unwrap();
+    let before_len = s.line_buffer().len();
+    assert!(before_len > 0, "test setup must populate LineBuffer first");
+    let before_first = s.line_buffer().get(0).unwrap().text.clone();
+    s.resize(120, 3).unwrap();
+    // A no-op feed re-enters `sync_after_ghostty_scrollback_shrink`
+    // (the false-positive wipe path) without scrolling new rows out
+    // of the viewport, so any change in LineBuffer length must come
+    // from the bug being patched here.
+    s.feed(b"").unwrap();
+    assert!(
+        s.line_buffer().len() >= before_len,
+        "widen resize must not wipe LineBuffer (was {before_len}, now {})",
+        s.line_buffer().len()
+    );
+    assert_eq!(
+        s.line_buffer().get(0).unwrap().text,
+        before_first,
+        "first logical line must survive widen resize"
+    );
+}
+
+#[test]
+fn alt_screen_seals_partial_tail() {
+    let mut s = session_with(80, 3, 1024);
+    // First chunk lacks a trailing newline so the row, once it scrolls
+    // out, would normally land with a Soft eol. We then feed enough
+    // hard-newline rows to push it off the top and observe the eol
+    // before alt-screen entry.
+    s.feed(b"partial-no-newline").unwrap();
+    s.feed(b"\r\nx\r\ny\r\nz\r\n").unwrap();
+    s.feed(b"\x1b[?1049h").unwrap();
+    // The test is meaningless unless we actually exercised the capture
+    // path; an empty LineBuffer would let the assertion vacuously pass.
+    let len = s.line_buffer().len();
+    assert!(
+        len > 0,
+        "expected at least one captured row before alt-screen entry"
+    );
+    let last = s.line_buffer().get(len - 1).unwrap();
+    assert_eq!(
+        last.eol,
+        EolKind::Hard,
+        "alt-screen entry should have sealed partial tail to Hard"
+    );
+}
+
+// PromptMark.abs_y survives LineBuffer ring eviction --------------
+
+#[test]
+fn prompt_mark_abs_y_is_stable_across_normal_scrolling() {
+    // Without any ring overflow, `abs_y` never changes — it's the
+    // tracking invariant that lets translation work.
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"x\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07").unwrap();
+    let before = s.prompt_marks()[0].abs_y;
+    s.feed(b"a\r\nb\r\nc\r\nd\r\n").unwrap();
+    let after = s.prompt_marks()[0].abs_y;
+    assert_eq!(
+        before, after,
+        "abs_y must not move when only LineBuffer captures happen"
+    );
+}
+
+#[test]
+fn prompt_mark_translates_to_screen_row_after_scrolling() {
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"\x1b]133;A\x07").unwrap(); // mark on row 0, abs_y=0
+    s.feed(b"line-1\r\nline-2\r\nline-3\r\nline-4\r\n").unwrap();
+    let mark = s.prompt_marks()[0];
+    assert_eq!(mark.abs_y, 0, "mark fired before any scroll");
+    // 4 newlines into a 3-row grid scrolls 2 rows out; both land in
+    // LineBuffer at indices 0..2. Live grid then holds line-3, line-4,
+    // empty. The mark at abs_y=0 must translate to LineBuffer index 0
+    // (top of scrollback), not just any in-range row.
+    let row = s
+        .abs_to_screen_row(mark.abs_y)
+        .expect("mark still reachable through LineBuffer dispatcher");
+    assert_eq!(
+        row, 0,
+        "mark at abs_y=0 should translate to LineBuffer row 0 (top of scrollback)"
+    );
+    assert!(row < s.total_rows());
+}
+
+#[test]
+fn prompt_mark_survives_line_buffer_eviction() {
+    // max_scrollback=2 so the LineBuffer evicts old lines, bumping
+    // its `overflow` counter and making any pre-eviction mark's
+    // `abs_y` fall below `overflow`.
+    let mut s = session_with(80, 3, 2);
+    s.feed(b"\x1b]133;A\x07prompt-1\r\n").unwrap();
+    let mark_abs = s.prompt_marks()[0].abs_y;
+    let line_buffer_overflow_before = s.line_buffer().overflow();
+    // Force enough eviction that `overflow` grows past `mark_abs`.
+    for _ in 0..10 {
+        s.feed(b"x\r\n").unwrap();
+    }
+    let line_buffer_overflow_after = s.line_buffer().overflow();
+    let marks = s.prompt_marks();
+    assert!(!marks.is_empty(), "mark must still be recorded");
+    assert_eq!(marks[0].abs_y, mark_abs, "abs_y is stable");
+    assert!(
+        line_buffer_overflow_after > line_buffer_overflow_before,
+        "test setup must trigger eviction (before={line_buffer_overflow_before}, after={line_buffer_overflow_after})"
+    );
+    assert!(
+        mark_abs < line_buffer_overflow_after,
+        "test setup must place mark below overflow (mark_abs={mark_abs}, overflow={line_buffer_overflow_after})"
+    );
+    // The line has been evicted — translation must return None and
+    // not silently alias another row.
+    assert!(
+        s.abs_to_screen_row(mark_abs).is_none(),
+        "evicted mark must not translate to a row (abs_y={mark_abs} < overflow={line_buffer_overflow_after})"
+    );
+}
+
+#[test]
+fn clear_scrollback_shifts_viewport_marks_and_drops_history_marks() {
+    let mut s = session_with(80, 3, 1024);
+    // Mark #1 lands on row 1 (after one preceding line) — it will
+    // scroll into LineBuffer history before the clear and must be
+    // dropped.
+    s.feed(b"x\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07prompt-1\r\n").unwrap();
+    // Push another mark on the line that ends up viewport-resident
+    // at clear time so we can assert it survives the shift.
+    s.feed(b"a\r\nb\r\nc\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07prompt-2").unwrap();
+    let viewport_mark_abs_before = s.prompt_marks().back().unwrap().abs_y;
+    let history = s.line_buffer().wrapped_row_count(80) as u64;
+    assert!(history > 0, "test setup must populate LineBuffer first");
+
+    s.feed(b"\x1b[3J").unwrap();
+    assert_eq!(s.line_buffer().len(), 0, "scrollback must be cleared");
+
+    // History-resident mark (#1) is gone; only the viewport-resident
+    // mark (#2) remains, with abs_y shifted down by the cleared
+    // history so it still translates to the right row.
+    let marks = s.prompt_marks();
+    assert_eq!(marks.len(), 1, "history mark dropped, viewport mark kept");
+    let after = marks[0].abs_y;
+    assert_eq!(
+        after,
+        viewport_mark_abs_before.saturating_sub(history),
+        "viewport mark shifted by cleared history"
+    );
+    let row = s
+        .abs_to_screen_row(after)
+        .expect("surviving mark must still translate");
+    assert!(row < s.total_rows());
+}
+
+#[test]
+fn prompt_mark_abs_y_accounts_for_in_flight_scroll_before_osc() {
+    // OSC 133 fires AFTER mid-feed scrolling. abs_y must point at the
+    // row where the OSC actually landed, not at a row earlier in scrollback.
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\n\x1b]133;A\x07p").unwrap();
+    let mark = s.prompt_marks()[0];
+    let row = s
+        .abs_to_screen_row(mark.abs_y)
+        .expect("mark must be reachable after capture");
+    let vp_top = s.viewport_row_offset();
+    let vp_rows = s.rows() as u32;
+    assert!(
+        row >= vp_top && row < vp_top + vp_rows,
+        "mark must land in viewport (where OSC fired), got row={row} vp_top={vp_top} vp_rows={vp_rows}"
+    );
+    let in_vp = row - vp_top;
+    assert_eq!(
+        in_vp, 2,
+        "OSC fired on viewport row 2 ('p' line) — must not point at a scrolled row"
+    );
 }

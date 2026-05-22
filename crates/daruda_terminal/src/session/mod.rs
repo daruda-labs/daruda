@@ -11,7 +11,13 @@ use crate::vt_codes::{
 };
 use crate::vt_limits::{PARSE_TAIL_LIMIT, PROMPT_MARKS_CAP};
 
+mod line_buffer;
 mod scanners;
+
+pub use line_buffer::{
+    EolKind, FindContext, FindMatchRange, FindOptions, LbCell, LineBuffer, LineBufferPosition,
+    LogicalLine,
+};
 #[cfg(test)]
 use scanners::parse_osc133_payload;
 use scanners::{
@@ -26,35 +32,48 @@ mod tests;
 /// One completed shell command surfaced by walking `prompt_marks`.
 /// Built from a `(CommandStart, CommandExecuted)` pair and, when
 /// available, a following `CommandFinished`. Each entry carries the
-/// command text the user typed, the absolute screen row of the
-/// `CommandStart` mark (for jump-to-command in scrollback), and the
-/// exit code from `D` if observed.
+/// command text the user typed, the current-frame screen row at
+/// translation time of the `CommandStart` mark (for jump-to-command
+/// in scrollback), and the exit code from `D` if observed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandHistoryEntry {
     pub command_text: String,
+    /// Current-frame screen row of the `CommandStart` mark, translated
+    /// from its stored `abs_y` at the time `command_history()` was
+    /// called. Not stable across subsequent eviction — re-query
+    /// `command_history()` after the frame to refresh.
     pub start_row: u32,
     pub exit_code: Option<i32>,
+    /// Wall-clock duration between the `CommandExecuted` (FTCS C) and
+    /// `CommandFinished` (FTCS D) marks. `None` if D has not arrived
+    /// yet or the C-mark timestamp was not captured.
+    pub duration: Option<std::time::Duration>,
 }
 
 /// One semantic boundary reported by a shell that speaks FinalTerm / OSC
-/// 133. Captured with the absolute screen row it landed on so jumps
-/// work even after the mark scrolls out of the viewport. Mirrors
-/// iTerm2 `VT100Terminal.m:4520-4616`.
+/// 133. Captured with an *absolute* Y coordinate that includes lines
+/// already evicted from `LineBuffer` (via `LineBuffer::overflow()`), so
+/// marks survive ring eviction. Translate to a current-frame screen row
+/// via [`TerminalSession::abs_to_screen_row`] before indexing into
+/// `dump_screen_row`. Mirrors iTerm2 `VT100Terminal.m:4520-4616`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PromptMark {
     pub kind: PromptMarkKind,
-    /// 0-indexed row in the screen coordinate space (scrollback +
-    /// active). Use `TerminalSession::viewport_row_offset` to translate
-    /// to viewport coordinates for rendering.
-    pub screen_row: u32,
+    /// Ever-increasing absolute Y at the time the mark fired,
+    /// computed as `line_buffer.overflow() + line_buffer.wrapped_row_count
+    /// + cursor_y - 1`. Stable across `LineBuffer` ring eviction.
+    pub abs_y: u64,
     /// 1-indexed cursor column at the moment the mark fired. Captured
-    /// alongside `screen_row` so the command-history extractor can
-    /// slice the typed command out of `[B.col .. C.col]` on the
-    /// command's row(s) without re-deriving prompt-prefix length from
-    /// the grid.
+    /// alongside `abs_y` so the command-history extractor can slice
+    /// the typed command out of `[B.col .. C.col]` on the command's
+    /// row(s) without re-deriving prompt-prefix length from the grid.
     pub screen_col: u16,
     /// Exit code attached to `CommandFinished` (FTCS D). `None` for A/B/C.
     pub exit_code: Option<i32>,
+    /// Wall-clock instant the mark was dispatched. Used by
+    /// `command_history` to compute the C→D elapsed duration. Mirrors
+    /// iTerm2 `LineBlockMetadata.lineMetadata` per-mark timestamps.
+    pub timestamp: std::time::SystemTime,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,12 +159,52 @@ pub struct TerminalSession {
     /// chunk's own pre-clear output (e.g. cursor positioning the shell
     /// emits before clearing) lands on screen first.
     pending_clear_scrollback: bool,
+    /// iTerm2-style logical-line scrollback. Filled by
+    /// `capture_scrolled_out` after every feed; consumers wrap it lazily
+    /// against the live cell width. Independent of ghostty's own
+    /// physical scrollback (which we still own for input/echo correctness).
+    line_buffer: LineBuffer,
+    /// Highest absolute screen-row index already drained into
+    /// `line_buffer`. `None` until the first capture; reset on
+    /// alt-screen entry (the grid is wiped so the row indices
+    /// associated with this counter are no longer meaningful).
+    last_captured_abs_row: Option<u32>,
+    /// Daruda-owned scroll position in rows back from the bottom. `0`
+    /// pins the viewport to the live grid; positive values reveal rows
+    /// from `line_buffer` above the live viewport. Replaces ghostty's
+    /// internal `scroll_viewport` state — we no longer rely on its
+    /// scrollback for navigation (Task 3 cut ghostty's retained
+    /// scrollback to a tiny capture window; see `GHOSTTY_TRANSIENT_SCROLLBACK`).
+    scroll_offset: u32,
 }
+
+/// Rows ghostty retains as a transient buffer so `capture_scrolled_out`
+/// can read a row after the feed that evicted it from the live viewport
+/// but before the next feed evicts it from ghostty too. Daruda's own
+/// scrollback lives in `LineBuffer`; ghostty's tiny ring exists purely
+/// to bridge "row scrolled out of live viewport" → "row copied into
+/// LineBuffer". Sized as `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)`
+/// in `new()` so taller terminals always have at least a viewport's
+/// worth of headroom.
+///
+/// LIMITATION: a single `feed()` that scrolls more rows than
+/// `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)` out of the viewport
+/// will lose the oldest ones (they evict from ghostty before
+/// `capture_scrolled_out` runs at the end of the feed). For typical
+/// interactive use (one PTY chunk per frame) this is harmless; for
+/// bulk output (`cat large_file`) the oldest lines of any feed batch
+/// may be lost. A future improvement: invoke `capture_scrolled_out`
+/// from within ghostty's eviction hook so no row can be evicted
+/// without being snapshotted first.
+const GHOSTTY_TRANSIENT_SCROLLBACK: usize = 64;
 
 impl TerminalSession {
     pub fn new(config: TerminalConfig) -> Result<Self, Error> {
-        let mut terminal =
-            Terminal::with_scrollback(config.cols, config.rows, config.max_scrollback)?;
+        // Ghostty keeps a small ring so `capture_scrolled_out` can still
+        // read evicted rows before the next feed drops them; daruda's
+        // own scrollback lives in `line_buffer`.
+        let ghostty_scrollback = GHOSTTY_TRANSIENT_SCROLLBACK.max((config.rows as usize) * 2);
+        let mut terminal = Terminal::with_scrollback(config.cols, config.rows, ghostty_scrollback)?;
         terminal.set_default_colors(config.default_fg, config.default_bg);
         if let Some(palette) = &config.palette {
             for (i, [r, g, b]) in palette.iter().enumerate() {
@@ -185,6 +244,9 @@ impl TerminalSession {
             command_started_at: None,
             pending_finished_command_elapsed: None,
             pending_clear_scrollback: false,
+            line_buffer: LineBuffer::new(config.max_scrollback),
+            last_captured_abs_row: None,
+            scroll_offset: 0,
         })
     }
 
@@ -260,20 +322,23 @@ impl TerminalSession {
 
     /// Return the row range of the most recent complete command output,
     /// derived from the last FTCS `E`…`F` pair (or `C`…`D` fallback).
-    /// Returns `None` if no closed block has been observed.
+    /// Returns `None` if no closed block has been observed, or if
+    /// either bound has been evicted from `LineBuffer`. Rows are in
+    /// the current screen-frame coordinate space — pass directly to
+    /// [`Self::dump_screen_row`].
     pub fn last_command_output_rows(&self) -> Option<std::ops::Range<u32>> {
         // Walk backwards so we always pick the most recent complete
         // pair. Prefer the semantic E/F pair (output body only) over
         // the C/D pair (which includes the command echo itself).
-        let mut end_row: Option<u32> = None;
+        let mut end_abs: Option<u64> = None;
         for mark in self.prompt_marks.iter().rev() {
             match mark.kind {
-                PromptMarkKind::SemanticTextEnd if end_row.is_none() => {
-                    end_row = Some(mark.screen_row);
+                PromptMarkKind::SemanticTextEnd if end_abs.is_none() => {
+                    end_abs = Some(mark.abs_y);
                 }
                 PromptMarkKind::SemanticTextStart => {
-                    if let Some(end) = end_row {
-                        return Some(mark.screen_row..end);
+                    if let Some(end) = end_abs {
+                        return self.abs_range_to_screen(mark.abs_y, end);
                     }
                 }
                 _ => {}
@@ -281,15 +346,15 @@ impl TerminalSession {
         }
         // Fallback: the C/D pair captures the whole command-through-
         // output region when the shell doesn't emit E/F.
-        let mut end_row: Option<u32> = None;
+        let mut end_abs: Option<u64> = None;
         for mark in self.prompt_marks.iter().rev() {
             match mark.kind {
-                PromptMarkKind::CommandFinished if end_row.is_none() => {
-                    end_row = Some(mark.screen_row);
+                PromptMarkKind::CommandFinished if end_abs.is_none() => {
+                    end_abs = Some(mark.abs_y);
                 }
                 PromptMarkKind::CommandExecuted => {
-                    if let Some(end) = end_row {
-                        return Some(mark.screen_row..end);
+                    if let Some(end) = end_abs {
+                        return self.abs_range_to_screen(mark.abs_y, end);
                     }
                 }
                 _ => {}
@@ -298,14 +363,33 @@ impl TerminalSession {
         None
     }
 
+    /// Translate an `[start_abs, end_abs)` pair of absolute Y
+    /// coordinates to a current-frame `Range<u32>`. Returns `None` if
+    /// either bound has been evicted from `LineBuffer`, or if the range
+    /// would be empty.
+    fn abs_range_to_screen(&self, start_abs: u64, end_abs: u64) -> Option<std::ops::Range<u32>> {
+        let start = self.abs_to_screen_row(start_abs)?;
+        let end = self.abs_to_screen_row(end_abs)?;
+        if start >= end {
+            return None;
+        }
+        Some(start..end)
+    }
+
     /// Walk `prompt_marks` for completed shell commands. Each
     /// `(CommandStart, CommandExecuted)` pair becomes one entry; a
     /// following `CommandFinished` populates the exit code. Entries
     /// are returned oldest-first so a UI consumer can render the
     /// natural top-down or reverse it for "most recent first".
+    /// Pairs whose `B` mark has been evicted from `LineBuffer` are
+    /// dropped (we can no longer slice the typed command text).
     pub fn command_history(&self) -> Vec<CommandHistoryEntry> {
         let mut entries: Vec<CommandHistoryEntry> = Vec::new();
         let mut last_b: Option<PromptMark> = None;
+        // Carry the C-mark timestamp of the most recently opened entry so
+        // a following D mark can compute the C→D elapsed duration. Reset
+        // when a D mark consumes it (or when a fresh C opens a new entry).
+        let mut last_c_ts: Option<std::time::SystemTime> = None;
         for mark in &self.prompt_marks {
             match mark.kind {
                 PromptMarkKind::CommandStart => {
@@ -315,21 +399,31 @@ impl TerminalSession {
                     let Some(b) = last_b.take() else {
                         continue;
                     };
-                    let text = self.extract_command_text(&b, mark);
+                    let Some(b_row) = self.abs_to_screen_row(b.abs_y) else {
+                        continue;
+                    };
+                    let Some(text) = self.extract_command_text(&b, mark, b_row) else {
+                        continue;
+                    };
                     if text.trim().is_empty() {
                         continue;
                     }
                     entries.push(CommandHistoryEntry {
                         command_text: text,
-                        start_row: b.screen_row,
+                        start_row: b_row,
                         exit_code: None,
+                        duration: None,
                     });
+                    last_c_ts = Some(mark.timestamp);
                 }
                 PromptMarkKind::CommandFinished => {
                     if let Some(last) = entries.last_mut()
                         && last.exit_code.is_none()
                     {
                         last.exit_code = mark.exit_code;
+                        if let Some(c_ts) = last_c_ts.take() {
+                            last.duration = mark.timestamp.duration_since(c_ts).ok();
+                        }
                     }
                 }
                 _ => {}
@@ -339,26 +433,40 @@ impl TerminalSession {
     }
 
     /// Slice the typed command out of the grid using the captured
-    /// `(row, col)` of the `B` and `C` marks. Spans multiple rows
+    /// `(abs_y, col)` of the `B` and `C` marks. Spans multiple rows
     /// when the shell's prompt + command wrapped. Wide characters
     /// (CJK / emoji) widen the column span by 2 each but are sliced
     /// by char count in the dumped row string — close enough for
     /// the picker label, which is truncated visually anyway.
-    fn extract_command_text(&self, b: &PromptMark, c: &PromptMark) -> String {
+    ///
+    /// Returns `None` when either mark has been evicted from
+    /// `LineBuffer` — the typed command is no longer reachable.
+    ///
+    /// `b_row` is the pre-translated screen row of `b.abs_y` — callers
+    /// already need it for `CommandHistoryEntry::start_row`, so pass it
+    /// in to avoid a redundant `abs_to_screen_row` call.
+    fn extract_command_text(&self, b: &PromptMark, c: &PromptMark, b_row: u32) -> Option<String> {
         let start_col = (b.screen_col as usize).saturating_sub(1);
         let end_col = (c.screen_col as usize).saturating_sub(1);
+        let c_row = self.abs_to_screen_row(c.abs_y)?;
+        if b_row > c_row {
+            // Defensive: monotonic abs_y + monotonic translation makes this
+            // unreachable in practice, but eviction of just one of the two
+            // marks could in principle invert the range.
+            return None;
+        }
 
-        if b.screen_row == c.screen_row {
-            let row = self.dump_screen_row(b.screen_row).unwrap_or_default();
-            return slice_chars(&row, start_col, end_col).trim_end().to_string();
+        if b_row == c_row {
+            let row = self.dump_screen_row(b_row).unwrap_or_default();
+            return Some(slice_chars(&row, start_col, end_col).trim_end().to_string());
         }
 
         let mut out = String::new();
-        if let Ok(row) = self.dump_screen_row(b.screen_row) {
+        if let Ok(row) = self.dump_screen_row(b_row) {
             out.push_str(slice_chars(&row, start_col, usize::MAX).trim_end());
         }
-        let mut r = b.screen_row + 1;
-        while r < c.screen_row {
+        let mut r = b_row + 1;
+        while r < c_row {
             if let Ok(row) = self.dump_screen_row(r) {
                 out.push('\n');
                 out.push_str(row.trim_end());
@@ -366,12 +474,12 @@ impl TerminalSession {
             r += 1;
         }
         if end_col > 0
-            && let Ok(row) = self.dump_screen_row(c.screen_row)
+            && let Ok(row) = self.dump_screen_row(c_row)
         {
             out.push('\n');
             out.push_str(slice_chars(&row, 0, end_col).trim_end());
         }
-        out.trim_end().to_string()
+        Some(out.trim_end().to_string())
     }
 
     pub fn cols(&self) -> u16 {
@@ -755,23 +863,7 @@ impl TerminalSession {
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let was_alt = self.alt_screen;
-        self.update_state_from_output(bytes);
-        if !was_alt && self.alt_screen {
-            // ghostty_vt is still on the primary screen here — \x1b[3J
-            // clears primary-screen scrollback before feed_incremental()
-            // processes \x1b[?1049h and switches buffers.
-            let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
-        }
-        let result = self.feed_incremental(bytes, |_| {});
-        if std::mem::take(&mut self.pending_clear_scrollback) {
-            // Drain after `feed_incremental` so the chunk's own
-            // pre-clear output (cursor home, status line redraw, …)
-            // is still in the visible viewport when `\x1b[3J`
-            // wipes the rows above it.
-            let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
-        }
-        result
+        self.feed_internal(bytes, |_| {})
     }
 
     pub fn feed_with_pty_responses(
@@ -779,24 +871,175 @@ impl TerminalSession {
         bytes: &[u8],
         send: impl FnMut(&[u8]),
     ) -> Result<(), Error> {
+        self.feed_internal(bytes, send)
+    }
+
+    fn feed_internal(&mut self, bytes: &[u8], send: impl FnMut(&[u8])) -> Result<(), Error> {
         let was_alt = self.alt_screen;
         self.update_state_from_output(bytes);
-        if !was_alt && self.alt_screen {
+        let entering_alt = !was_alt && self.alt_screen;
+        if entering_alt {
+            // ghostty_vt is still on the primary screen here — \x1b[3J
+            // clears primary-screen scrollback before feed_incremental()
+            // processes \x1b[?1049h and switches buffers.
             let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
         }
         let result = self.feed_incremental(bytes, send);
         if std::mem::take(&mut self.pending_clear_scrollback) {
-            let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
+            self.apply_clear_scrollback();
+        }
+        if entering_alt {
+            self.on_enter_alt_screen();
+        } else {
+            self.sync_after_ghostty_scrollback_shrink();
+            self.capture_scrolled_out();
         }
         result
+    }
+
+    /// Consolidated handler for the `OSC 1337 ; ClearScrollback`
+    /// post-feed wipe. Drains after `feed_incremental` so the chunk's
+    /// own pre-clear output (cursor home, status line redraw, …) is
+    /// still in the visible viewport when `\x1b[3J` wipes the rows
+    /// above it.
+    ///
+    /// LineBuffer mirrors ghostty's scrollback; clearing one without the
+    /// other would desync the dispatcher and leave `last_captured_abs_row`
+    /// pointing past the (now-reset) `viewport_row_offset`, silently
+    /// breaking every subsequent capture for the rest of the session.
+    fn apply_clear_scrollback(&mut self) {
+        // SILENT-OK: ERASE_SCROLLBACK is a fixed constant sequence; a feed
+        // error on a known-valid byte sequence indicates a terminal in a
+        // broken state that will surface through subsequent feeds with
+        // proper error reporting.
+        let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
+        self.clear_line_buffer_and_shift_marks();
+    }
+
+    /// Snapshot every row that has scrolled out of the live viewport
+    /// since the last call into `line_buffer`. Wrap-continuations
+    /// (DECAWM soft-wrap) merge into the same logical line so the
+    /// scrollback stores joined text irrespective of the original
+    /// physical row width.
+    ///
+    /// Idempotent fast path: if `viewport_row_offset` has not advanced
+    /// past `last_captured_abs_row`, returns without dumping.
+    fn capture_scrolled_out(&mut self) {
+        // Capture is meaningless while ghostty is rendering into the
+        // alt-screen buffer — those rows are by definition transient
+        // UI, not scrollback content. We only sample primary-screen
+        // rows as they scroll off the top.
+        if self.alt_screen {
+            return;
+        }
+        let viewport_top = self.terminal.viewport_row_offset();
+        let start = self
+            .last_captured_abs_row
+            .map(|r| r.saturating_add(1))
+            .unwrap_or(0);
+        if start >= viewport_top {
+            return;
+        }
+        for y in start..viewport_top {
+            // Empty text on dump failure (e.g., row evicted from ghostty
+            // scrollback); preserves line numbering.
+            let text = self.terminal.dump_screen_row(y).unwrap_or_default();
+            let runs = self
+                .terminal
+                .dump_screen_row_style_runs(y)
+                .unwrap_or_default();
+            let url_ids = self.terminal.dump_screen_row_url_ids(y).unwrap_or_default();
+            let eol = match self.terminal.row_wrap_kind(y) {
+                ghostty_vt::WrapKind::Soft => EolKind::Soft,
+                ghostty_vt::WrapKind::Hard => EolKind::Hard,
+            };
+            self.line_buffer.append(&text, &runs, eol);
+            self.line_buffer.attach_url_ids_to_tail(&url_ids);
+        }
+        self.last_captured_abs_row = Some(viewport_top.saturating_sub(1));
+    }
+
+    /// Borrow the logical-line scrollback buffer. Consumers wrap it
+    /// against the live cell width at render time.
+    pub fn line_buffer(&self) -> &LineBuffer {
+        &self.line_buffer
+    }
+
+    /// Detect a `\x1b[3J` (or equivalent) ghostty-side scrollback wipe
+    /// and mirror it into `line_buffer`. We don't parse the CSI ED
+    /// directly — we infer the wipe from ghostty's
+    /// `viewport_row_offset` dropping below the highest row we've
+    /// already captured. That's the only way for ghostty's scrollback
+    /// to shrink between feeds in a primary-screen session, so the
+    /// inference is unambiguous.
+    fn sync_after_ghostty_scrollback_shrink(&mut self) {
+        let Some(last) = self.last_captured_abs_row else {
+            return;
+        };
+        if self.terminal.viewport_row_offset() <= last {
+            self.clear_line_buffer_and_shift_marks();
+        }
+    }
+
+    /// Shared post-wipe bookkeeping: clear `LineBuffer`, reset the
+    /// capture cursor and scroll offset, and shift any viewport-resident
+    /// prompt marks down by the cleared history while dropping marks
+    /// whose row was inside the cleared history.
+    fn clear_line_buffer_and_shift_marks(&mut self) {
+        let overflow = self.line_buffer.overflow();
+        let history = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
+        let history_top = overflow + history;
+        self.line_buffer.clear();
+        self.last_captured_abs_row = None;
+        // `scroll_offset` indexes into the now-empty `line_buffer`;
+        // leaving it set would pin the viewport above the live grid.
+        self.scroll_offset = 0;
+        // Drop marks whose abs_y addressed a row inside the cleared
+        // history (they would alias onto unrelated viewport rows after
+        // the shift). Surviving viewport-resident marks shift down by
+        // `history` so they keep pointing at the right row.
+        //
+        // INVARIANT: LineBuffer::clear() preserves overflow(). The shift
+        // below removes the wiped-history rows from each mark's abs_y,
+        // keeping translation against the unchanged overflow valid.
+        self.prompt_marks.retain(|m| m.abs_y >= history_top);
+        for m in &mut self.prompt_marks {
+            m.abs_y = m.abs_y.saturating_sub(history);
+        }
+    }
+
+    /// Alt-screen entry handler. Seals any partial tail (the next time
+    /// we re-enter primary screen and start capturing, a soft tail
+    /// shouldn't grow into an unrelated row) and resets the capture
+    /// cursor — ghostty's screen-row indices are no longer meaningful
+    /// once the buffer is switched out.
+    ///
+    /// Asymmetric by design: entry seals + resets, but exit
+    /// (alt → primary) has no counterpart. When the primary screen
+    /// is restored, ghostty repaints it from row 0; the next
+    /// `capture_scrolled_out` pass naturally re-anchors with
+    /// `last_captured_abs_row == None`, so there's nothing to reset.
+    fn on_enter_alt_screen(&mut self) {
+        // Seal a partial tail so a re-entry into primary screen does
+        // not append into a now-stale soft-wrap continuation. We do
+        // NOT clear `line_buffer` — daruda's persistent scrollback
+        // survives alt-screen cycles (iTerm2 / Alacritty parity).
+        // Ghostty's transient ring is wiped via the `\x1b[3J`
+        // injection in `feed`, but that's a separate buffer used
+        // only as a capture window.
+        self.line_buffer.seal_partial();
+        self.last_captured_abs_row = None;
+        // Alt-screen apps own the full grid; any user-initiated scroll
+        // into history made before the switch is no longer meaningful.
+        self.scroll_offset = 0;
     }
 
     /// Feed `bytes` to ghostty_vt in segments split at points where we
     /// need to observe or respond to state:
     ///   * DSR / OSC color queries — synthesize a response.
     ///   * OSC 133 FTCS marks — capture cursor position *after* the
-    ///     segment ending with the terminator so `screen_row` reflects
-    ///     the row the shell intended.
+    ///     segment ending with the terminator so the captured `abs_y`
+    ///     reflects the row the shell intended.
     fn feed_incremental(&mut self, bytes: &[u8], mut send: impl FnMut(&[u8])) -> Result<(), Error> {
         let mut seg_start = 0usize;
         for (i, &b) in bytes.iter().enumerate() {
@@ -843,13 +1086,13 @@ impl TerminalSession {
 
             if let Some((kind, exit_code)) = osc133 {
                 let cursor = self.terminal.cursor_position().unwrap_or((1, 1));
-                let screen_row =
-                    self.terminal.viewport_row_offset() + u32::from(cursor.1.saturating_sub(1));
+                let abs_y = self.current_abs_y_at_cursor();
                 self.push_prompt_mark(PromptMark {
                     kind,
-                    screen_row,
+                    abs_y,
                     screen_col: cursor.0,
                     exit_code,
+                    timestamp: std::time::SystemTime::now(),
                 });
             }
 
@@ -882,8 +1125,29 @@ impl TerminalSession {
         Ok(())
     }
 
+    /// Dump the visible viewport. When `scroll_offset > 0` the viewport
+    /// has been scrolled into `line_buffer` history, so compose the
+    /// output from the dispatcher (`dump_screen_row`) instead of
+    /// ghostty's live grid — otherwise PageUp / scrollbar would be a
+    /// visual no-op. Output shape matches ghostty's `dump_viewport`:
+    /// rows joined by `\n`, no trailing newline (see
+    /// `view::viewport::split_viewport_lines`).
     pub fn dump_viewport(&self) -> Result<String, Error> {
-        self.terminal.dump_viewport()
+        if self.scroll_offset == 0 {
+            return self.terminal.dump_viewport();
+        }
+        let rows = self.config.rows as u32;
+        let top = self.viewport_row_offset();
+        let mut out = String::new();
+        for i in 0..rows {
+            let y = top + i;
+            let row = self.dump_screen_row(y).unwrap_or_default();
+            if i > 0 {
+                out.push('\n');
+            }
+            out.push_str(&row);
+        }
+        Ok(out)
     }
 
     pub fn dump_viewport_row(&self, row: u16) -> Result<String, Error> {
@@ -892,9 +1156,41 @@ impl TerminalSession {
 
     /// Dump a single row from the `screen` coordinate space. `y`
     /// ranges over `[0, total_rows())`, covering scrollback and the
-    /// active viewport. Used by scrollback-aware search.
+    /// active viewport.
+    ///
+    /// Dispatcher: when `y` addresses a row inside `line_buffer`'s
+    /// wrapped range, the row text comes from there; rows beyond that
+    /// land on ghostty's live viewport.
     pub fn dump_screen_row(&self, y: u32) -> Result<String, Error> {
-        self.terminal.dump_screen_row(y)
+        let cols = self.config.cols;
+        let lb_rows = self.line_buffer.wrapped_row_count(cols);
+        if y < lb_rows {
+            self.line_buffer
+                .visual_row(y, cols)
+                .ok_or(Error::DumpFailed)
+        } else {
+            let vp_row = (y - lb_rows) as u16;
+            self.terminal.dump_viewport_row(vp_row)
+        }
+    }
+
+    /// Style runs for any absolute screen row. Dispatcher mirror of
+    /// [`Self::dump_screen_row`]: scrollback rows come from
+    /// `line_buffer`, viewport rows from ghostty. Output columns are
+    /// 1-indexed inclusive (StyleRun convention).
+    pub fn dump_screen_row_styles(&self, y: u32) -> Result<Vec<ghostty_vt::StyleRun>, Error> {
+        let cols = self.config.cols;
+        let lb_rows = self.line_buffer.wrapped_row_count(cols);
+        if y < lb_rows {
+            Ok(self
+                .line_buffer
+                .visual_row_with_styles(y, cols)
+                .map(|(_, r)| r)
+                .unwrap_or_default())
+        } else {
+            let vp_row = (y - lb_rows) as u16;
+            self.terminal.dump_viewport_row_style_runs(vp_row)
+        }
     }
 
     pub fn dump_viewport_row_cell_styles(
@@ -904,11 +1200,24 @@ impl TerminalSession {
         self.terminal.dump_viewport_row_cell_styles(row)
     }
 
+    /// Viewport-relative style runs. Keeps the original 0..rows
+    /// addressing the live grid uses (background quads, dirty-row
+    /// repaint). When `scroll_offset > 0` the row addresses a position
+    /// inside `line_buffer` history, so dispatch through
+    /// [`Self::dump_screen_row_styles`] to stay consistent with
+    /// [`Self::dump_viewport`]. Pure-scrollback callers (no viewport
+    /// translation) should reach for [`Self::dump_screen_row_styles`]
+    /// directly.
     pub fn dump_viewport_row_style_runs(
         &self,
         row: u16,
     ) -> Result<Vec<ghostty_vt::StyleRun>, Error> {
-        self.terminal.dump_viewport_row_style_runs(row)
+        if self.scroll_offset == 0 {
+            return self.terminal.dump_viewport_row_style_runs(row);
+        }
+        let top = self.viewport_row_offset();
+        let y = top + row as u32;
+        self.dump_screen_row_styles(y)
     }
 
     pub fn cursor_position(&self) -> Option<(u16, u16)> {
@@ -927,30 +1236,131 @@ impl TerminalSession {
         self.terminal.take_bell()
     }
 
+    /// Total visible rows across the union (`line_buffer` scrollback +
+    /// the live viewport). Stays in sync as captures land and rows
+    /// scroll off the top of the grid.
     pub fn total_rows(&self) -> u32 {
-        self.terminal.total_rows()
+        let cols = self.config.cols;
+        self.line_buffer
+            .wrapped_row_count(cols)
+            .saturating_add(self.config.rows as u32)
     }
 
+    /// Compute the ever-increasing absolute Y of the row containing the
+    /// cursor right now. Captured when an OSC 133 mark fires so the
+    /// mark survives `LineBuffer` ring eviction — translate back to a
+    /// current-frame screen row via [`Self::abs_to_screen_row`].
+    fn current_abs_y_at_cursor(&self) -> u64 {
+        let lb_rows = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
+        // ghostty rows that scrolled out but haven't yet been captured into
+        // line_buffer (capture runs at end of feed; OSC 133 may fire mid-feed).
+        // Account for them so the captured abs_y matches the row's position
+        // after capture lands.
+        let ghostty_top = self.terminal.viewport_row_offset() as u64;
+        let next_capture = self
+            .last_captured_abs_row
+            .map(|r| r as u64 + 1)
+            .unwrap_or(0);
+        let uncaptured = ghostty_top.saturating_sub(next_capture);
+        let vp_row = self
+            .terminal
+            .cursor_position()
+            .map(|(_, y)| u32::from(y.saturating_sub(1)))
+            .unwrap_or(0);
+        self.line_buffer.overflow() + lb_rows + uncaptured + vp_row as u64
+    }
+
+    /// Translate a stored `abs_y` (captured at OSC 133 dispatch) into
+    /// a current screen-frame row. Returns `None` when the line
+    /// containing it has been evicted from `LineBuffer` (or pushed
+    /// past the live viewport bottom — should not happen in practice).
+    pub fn abs_to_screen_row(&self, abs_y: u64) -> Option<u32> {
+        let overflow = self.line_buffer.overflow();
+        if abs_y < overflow {
+            return None;
+        }
+        let rel = abs_y - overflow;
+        let total = self.total_rows() as u64;
+        if rel >= total {
+            return None;
+        }
+        Some(rel as u32)
+    }
+
+    /// Absolute row index at the top of the visible viewport.
+    /// `scroll_offset == 0` pins the viewport to the bottom; positive
+    /// `scroll_offset` walks back into `line_buffer` scrollback.
     pub fn viewport_row_offset(&self) -> u32 {
-        self.terminal.viewport_row_offset()
+        self.total_rows()
+            .saturating_sub(self.config.rows as u32)
+            .saturating_sub(self.scroll_offset)
     }
 
+    /// Current scroll offset in rows back from the bottom of the
+    /// unified frame. `0` pins the viewport to the live grid; positive
+    /// values walk back into `line_buffer` history. Exposed for tests
+    /// that need to assert exact scroll positions; production callers
+    /// should reach for [`Self::viewport_row_offset`] instead.
+    #[cfg(test)]
+    pub(crate) fn scroll_offset(&self) -> u32 {
+        self.scroll_offset
+    }
+
+    /// Move the viewport `delta_lines` rows within the unified frame.
+    /// `delta < 0` scrolls UP into history (increases `scroll_offset`),
+    /// matching existing call-site convention (`scroll_viewport(-step)`
+    /// for PageUp / wheel-up). Clamps to the available scrollback so
+    /// `scroll_offset` never exceeds `line_buffer.wrapped_row_count`.
     pub fn scroll_viewport(&mut self, delta_lines: i32) -> Result<(), Error> {
-        self.terminal.scroll_viewport(delta_lines)
+        let max_scroll = self.line_buffer.wrapped_row_count(self.config.cols);
+        let cur = self.scroll_offset as i32;
+        let new_offset = (cur - delta_lines).clamp(0, max_scroll as i32);
+        self.scroll_offset = new_offset as u32;
+        Ok(())
     }
 
+    /// Pin the viewport to the top of the unified frame (oldest
+    /// `line_buffer` row at the top of the visible area).
     pub fn scroll_viewport_top(&mut self) -> Result<(), Error> {
-        self.terminal.scroll_viewport_top()
+        self.scroll_offset = self.line_buffer.wrapped_row_count(self.config.cols);
+        Ok(())
     }
 
+    /// Pin the viewport to the live grid (`scroll_offset = 0`).
     pub fn scroll_viewport_bottom(&mut self) -> Result<(), Error> {
-        self.terminal.scroll_viewport_bottom()
+        self.scroll_offset = 0;
+        Ok(())
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
         self.config.cols = cols;
         self.config.rows = rows;
-        self.terminal.resize(cols, rows)
+        let result = self.terminal.resize(cols, rows);
+        // Ghostty reflows soft-wrapped rows on resize, so
+        // `viewport_row_offset` may drop (widen) or rise (narrow) by an
+        // unpredictable amount. Re-anchor the capture cursor against
+        // the post-resize ghostty state so:
+        //   1. `sync_after_ghostty_scrollback_shrink` does not interpret
+        //      a widen-induced drop as a `\x1b[3J` scrollback wipe and
+        //      clear LineBuffer.
+        //   2. The next `capture_scrolled_out` does not re-walk rows
+        //      we've already captured (LineBuffer keeps its contents
+        //      as-is; ghostty's pre-viewport rows are treated as
+        //      already accounted for).
+        let new_top = self.terminal.viewport_row_offset();
+        self.last_captured_abs_row = if new_top == 0 {
+            None
+        } else {
+            Some(new_top - 1)
+        };
+        // `wrapped_row_count` depends on the column count; clamp so a
+        // narrower viewport doesn't leave `scroll_offset` past the new
+        // top of the unified frame.
+        let max_scroll = self.line_buffer.wrapped_row_count(cols);
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+        result
     }
 
     pub fn take_dirty_viewport_rows(&mut self) -> Vec<u16> {

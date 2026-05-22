@@ -73,10 +73,13 @@ impl TerminalView {
     pub fn resize_terminal(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         let _ = self.session.resize(cols, rows);
         self.sync_viewport_scroll_tracking();
-        // Do not immediately refresh the viewport here. ghostty_vt reflows
-        // the alt-screen on resize, which garbles TUI content before the TUI
-        // has a chance to respond to SIGWINCH. Instead keep the pre-resize
-        // viewport_lines visible until output arrives.
+        // Refresh viewport_lines from ghostty's freshly-reflowed buffer so
+        // paint sees the post-resize content, not the stale pre-resize cache.
+        // Without this refresh, the scrollback region paints with old wrap
+        // boundaries at the new bounds, producing visible duplicate/shifted
+        // text artifacts.
+        self.refresh_viewport_preserving_selection();
+        let _ = self.session.take_dirty_viewport_rows();
         cx.notify();
     }
 

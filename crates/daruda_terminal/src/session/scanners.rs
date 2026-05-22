@@ -139,7 +139,7 @@ impl OscQueryScanState {
 /// parsed mark kind and optional exit code. Runs in lockstep with
 /// `terminal.feed()` so the caller can capture cursor position *after*
 /// the segment ending at the terminator — giving each mark the correct
-/// `screen_row`.
+/// `abs_y` (cursor position translated against current overflow).
 #[derive(Clone, Debug, Default)]
 pub(super) struct Osc133Scanner {
     state: Osc133State,

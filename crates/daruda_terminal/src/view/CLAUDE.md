@@ -266,13 +266,17 @@ Apply the same `build_*` pattern when a change motivates extraction.
    prefix **both** scanners have completed is discarded. This preserves
    cross-chunk sequences.
 4. OSC 133 payload (A / B / C / D / E / F) → the pure `parse_osc133_payload`
-   function → `PromptMark { kind, screen_row, exit_code }` pushed into a
-   `VecDeque`.
+   function → `PromptMark { kind, abs_y, screen_col, exit_code }` pushed
+   into a `VecDeque`.
 
 ### Invariants
 
-- **`screen_row` is absolute**:
-  `viewport_row_offset() + (cursor_y - 1)`.
+- **Marks store `abs_y`, not a screen row**: captured as
+  `line_buffer.overflow() + line_buffer.wrapped_row_count(cols) + (cursor_y - 1)`
+  at dispatch time. Translate to a current-frame screen row via
+  `TerminalSession::abs_to_screen_row` at read time — returns `None`
+  when the row has been evicted from `LineBuffer`, so marks survive ring
+  eviction without aliasing onto unrelated rows.
 - **`prompt_marks` is a bounded FIFO** (`PROMPT_MARKS_CAP = 4096`).
 - **No re-scan**: without the drain, re-scanning `parse_tail` re-emits
   duplicate OSC 133 marks. OSC 7 / 52 are idempotent so they do not

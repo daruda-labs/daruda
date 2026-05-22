@@ -282,77 +282,14 @@ impl TerminalView {
             self.state.search.matches.clear();
             self.state.search.focused = None;
             self.state.search.regex_error = false;
-            self.state.search.last_scan_total_rows = 0;
-            return;
-        }
-        let case = if self.state.search.case_insensitive {
-            search::Case::Insensitive
-        } else {
-            search::Case::Sensitive
-        };
-        self.state.search.regex_error = false;
-
-        let total_rows = self.session.total_rows();
-
-        if !reset_focus
-            && total_rows > self.state.search.last_scan_total_rows
-            && self.state.search.last_scan_total_rows > 0
-        {
-            let from = self.state.search.last_scan_total_rows;
-            let mut new_lines: Vec<String> = Vec::with_capacity((total_rows - from) as usize);
-            for y in from..total_rows {
-                let line = match self.session.dump_screen_row(y) {
-                    Ok(s) => s.strip_suffix('\n').unwrap_or(s.as_str()).to_string(),
-                    Err(_) => String::new(),
-                };
-                new_lines.push(line);
-            }
-            let case_for_scan = case;
-            let mut new_matches = if self.state.search.is_regex {
-                let cache_key = (
-                    self.state.search.query.clone(),
-                    self.state.search.case_insensitive,
-                );
-                if self.state.search.compiled_regex_key.as_ref() != Some(&cache_key) {
-                    self.state.search.compiled_regex =
-                        search::compile_regex(&self.state.search.query, case_for_scan);
-                    self.state.search.compiled_regex_key = Some(cache_key);
-                }
-                match self.state.search.compiled_regex.as_ref() {
-                    Some(re) => search::find_regex_matches_from(&new_lines, re, from),
-                    None => {
-                        self.state.search.regex_error = true;
-                        Vec::new()
-                    }
-                }
-            } else {
-                search::find_literal_matches_from(
-                    &new_lines,
-                    &self.state.search.query,
-                    case_for_scan,
-                    from,
-                )
-            };
-            self.state.search.matches.append(&mut new_matches);
-            self.state.search.last_scan_total_rows = total_rows;
             return;
         }
 
-        const SEARCH_SCROLLBACK_CAP: u32 = 10_000;
-        let total = total_rows.min(SEARCH_SCROLLBACK_CAP);
-        let row_offset = total_rows.saturating_sub(total);
-        let mut lines: Vec<String> = Vec::with_capacity(total as usize);
-        if total > 0 {
-            for y in row_offset..(row_offset + total) {
-                let line = match self.session.dump_screen_row(y) {
-                    Ok(s) => s.strip_suffix('\n').unwrap_or(s.as_str()).to_string(),
-                    Err(_) => String::new(),
-                };
-                lines.push(line);
-            }
-        }
-        self.state.search.last_scan_total_rows = total_rows;
-
+        // Remember the prior focus by (row, start_col) so a viewport
+        // refresh (reset_focus = false) keeps highlighting the same
+        // hit even after the match list is rebuilt. Cycling relies on
+        // each (row, start_col) being unique — see
+        // `multiple_matches_in_same_line_have_distinct_start_cols`.
         let previous_focused_key = self.state.search.focused.and_then(|i| {
             self.state
                 .search
@@ -361,28 +298,14 @@ impl TerminalView {
                 .map(|m| (m.row, m.start_col))
         });
 
-        self.state.search.matches = if self.state.search.is_regex {
-            let cache_key = (
-                self.state.search.query.clone(),
-                self.state.search.case_insensitive,
-            );
-            if self.state.search.compiled_regex_key.as_ref() != Some(&cache_key) {
-                self.state.search.compiled_regex =
-                    search::compile_regex(&self.state.search.query, case);
-                self.state.search.compiled_regex_key = Some(cache_key);
-            }
-            match self.state.search.compiled_regex.as_ref() {
-                Some(re) => search::find_regex_matches_from(&lines, re, row_offset),
-                None => {
-                    self.state.search.regex_error = true;
-                    Vec::new()
-                }
-            }
-        } else {
-            self.state.search.compiled_regex = None;
-            self.state.search.compiled_regex_key = None;
-            search::find_literal_matches_from(&lines, &self.state.search.query, case, row_offset)
-        };
+        let result = search::scan_search_matches(
+            &self.session,
+            &self.state.search.query,
+            self.state.search.case_insensitive,
+            self.state.search.is_regex,
+        );
+        self.state.search.regex_error = result.regex_error;
+        self.state.search.matches = result.matches;
 
         self.state.search.focused = if self.state.search.matches.is_empty() {
             None

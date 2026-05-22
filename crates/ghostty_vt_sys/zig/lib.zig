@@ -490,7 +490,13 @@ export fn ghostty_vt_terminal_dump_viewport_row_cell_styles(
 ) callconv(.C) ghostty_vt_bytes_t {
     if (terminal_ptr == null) return .{ .ptr = null, .len = 0 };
     const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    return dumpViewportRowCellStylesInner(handle, row) catch return .{ .ptr = null, .len = 0 };
+}
 
+fn dumpViewportRowCellStylesInner(
+    handle: *TerminalHandle,
+    row: u16,
+) !ghostty_vt_bytes_t {
     const pt: terminal.point.Point = .{ .viewport = .{ .x = 0, .y = row } };
     const pin = handle.terminal.screen.pages.pin(pt) orelse return .{ .ptr = null, .len = 0 };
     const cells = pin.cells(.all);
@@ -503,7 +509,7 @@ export fn ghostty_vt_terminal_dump_viewport_row_cell_styles(
     var out = std.ArrayList(u8).init(alloc);
     errdefer out.deinit();
 
-    out.ensureTotalCapacity(cells.len * @sizeOf(CellStyle)) catch return .{ .ptr = null, .len = 0 };
+    try out.ensureTotalCapacity(cells.len * @sizeOf(CellStyle));
 
     for (cells) |*cell| {
         const s = pin.style(cell);
@@ -539,10 +545,10 @@ export fn ghostty_vt_terminal_dump_viewport_row_cell_styles(
             .flags = flags,
             .reserved = 0,
         };
-        out.appendSlice(std.mem.asBytes(&rec)) catch return .{ .ptr = null, .len = 0 };
+        try out.appendSlice(std.mem.asBytes(&rec));
     }
 
-    const slice = out.toOwnedSlice() catch return .{ .ptr = null, .len = 0 };
+    const slice = try out.toOwnedSlice();
     return .{ .ptr = slice.ptr, .len = slice.len };
 }
 
@@ -588,8 +594,33 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
 ) callconv(.C) ghostty_vt_bytes_t {
     if (terminal_ptr == null) return .{ .ptr = null, .len = 0 };
     const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    return dumpRowStyleRunsImpl(handle, .{ .viewport = .{ .x = 0, .y = row } });
+}
 
-    const pt: terminal.point.Point = .{ .viewport = .{ .x = 0, .y = row } };
+/// Screen-coordinate variant of `ghostty_vt_terminal_dump_viewport_row_style_runs`.
+/// `y` ranges over `[0, total_rows())`, covering scrollback and the
+/// active viewport. Used by `LineBuffer` to capture style runs for rows
+/// about to scroll out of the viewport.
+export fn ghostty_vt_terminal_dump_screen_row_style_runs(
+    terminal_ptr: ?*anyopaque,
+    y: u32,
+) callconv(.C) ghostty_vt_bytes_t {
+    if (terminal_ptr == null) return .{ .ptr = null, .len = 0 };
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    return dumpRowStyleRunsImpl(handle, .{ .screen = .{ .x = 0, .y = y } });
+}
+
+fn dumpRowStyleRunsImpl(
+    handle: *TerminalHandle,
+    pt: terminal.point.Point,
+) ghostty_vt_bytes_t {
+    return dumpRowStyleRunsInner(handle, pt) catch return .{ .ptr = null, .len = 0 };
+}
+
+fn dumpRowStyleRunsInner(
+    handle: *TerminalHandle,
+    pt: terminal.point.Point,
+) !ghostty_vt_bytes_t {
     const pin = handle.terminal.screen.pages.pin(pt) orelse return .{ .ptr = null, .len = 0 };
     const cells = pin.cells(.all);
 
@@ -602,7 +633,7 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
     errdefer out.deinit();
 
     if (cells.len == 0) {
-        const slice = out.toOwnedSlice() catch return .{ .ptr = null, .len = 0 };
+        const slice = try out.toOwnedSlice();
         return .{ .ptr = slice.ptr, .len = slice.len };
     }
 
@@ -627,6 +658,12 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
     }
 
     var current_resolved = .{ .fg = current_fg, .bg = current_bg, .flags = current_flags };
+    // `start_col` / `end_col` are 1-indexed inclusive (see
+    // `text_metrics::byte_index_for_column_in_line` — col 1 == first cell).
+    // The loop starts at `col_idx = 1` (0-indexed) so column 0's style is
+    // captured by the initial `current_resolved`, and a run break at
+    // `col_idx` emits `end_col = col_idx` (= 1-indexed `col_idx`), with
+    // the next run starting at `run_start = col_idx + 1`.
     var run_start: u16 = 1;
 
     var col_idx: usize = 1;
@@ -646,7 +683,7 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
                 .flags = current_resolved.flags,
                 .reserved = 0,
             };
-            out.appendSlice(std.mem.asBytes(&rec)) catch return .{ .ptr = null, .len = 0 };
+            try out.appendSlice(std.mem.asBytes(&rec));
 
             current_style_id = cell.style_id;
             current_style = pin.style(cell);
@@ -704,7 +741,7 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
             .flags = current_resolved.flags,
             .reserved = 0,
         };
-        out.appendSlice(std.mem.asBytes(&rec)) catch return .{ .ptr = null, .len = 0 };
+        try out.appendSlice(std.mem.asBytes(&rec));
 
         run_start = @intCast(col_idx + 1);
         current_resolved = .{ .fg = fg_cell, .bg = bg, .flags = current_flags };
@@ -722,9 +759,50 @@ export fn ghostty_vt_terminal_dump_viewport_row_style_runs(
         .flags = current_resolved.flags,
         .reserved = 0,
     };
-    out.appendSlice(std.mem.asBytes(&last)) catch return .{ .ptr = null, .len = 0 };
+    try out.appendSlice(std.mem.asBytes(&last));
 
-    const slice = out.toOwnedSlice() catch return .{ .ptr = null, .len = 0 };
+    const slice = try out.toOwnedSlice();
+    return .{ .ptr = slice.ptr, .len = slice.len };
+}
+
+/// Dump per-cell OSC 8 hyperlink IDs for a row in screen coordinates.
+/// `y` ranges over `[0, total_rows())`. Returns `cells * 2` bytes — one
+/// little-endian `u16` per cell, with `0` meaning "no hyperlink". Used by
+/// `LineBuffer::attach_url_ids_to_tail` so OSC 8 link IDs survive a row
+/// scrolling out of the viewport.
+export fn ghostty_vt_terminal_dump_screen_row_url_ids(
+    terminal_ptr: ?*anyopaque,
+    y: u32,
+) callconv(.C) ghostty_vt_bytes_t {
+    if (terminal_ptr == null) return .{ .ptr = null, .len = 0 };
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    return dumpScreenRowUrlIdsInner(handle, y) catch return .{ .ptr = null, .len = 0 };
+}
+
+fn dumpScreenRowUrlIdsInner(
+    handle: *TerminalHandle,
+    y: u32,
+) !ghostty_vt_bytes_t {
+    const pt: terminal.point.Point = .{ .screen = .{ .x = 0, .y = y } };
+    const pin = handle.terminal.screen.pages.pin(pt) orelse return .{ .ptr = null, .len = 0 };
+    const cells = pin.cells(.all);
+
+    const alloc = std.heap.c_allocator;
+    var out = std.ArrayList(u8).init(alloc);
+    errdefer out.deinit();
+    try out.ensureTotalCapacity(cells.len * @sizeOf(u16));
+
+    for (cells) |*cell| {
+        var id: u16 = 0;
+        if (cell.hyperlink) {
+            if (pin.node.data.lookupHyperlink(cell)) |link_id| {
+                id = @intCast(link_id);
+            }
+        }
+        try out.appendSlice(std.mem.asBytes(&id));
+    }
+
+    const slice = try out.toOwnedSlice();
     return .{ .ptr = slice.ptr, .len = slice.len };
 }
 
@@ -971,6 +1049,25 @@ const ghostty_vt_bytes_t = extern struct {
 export fn ghostty_vt_bytes_free(bytes: ghostty_vt_bytes_t) callconv(.C) void {
     if (bytes.ptr == null or bytes.len == 0) return;
     std.heap.c_allocator.free(bytes.ptr.?[0..bytes.len]);
+}
+
+/// Returns 0 = Hard (no wrap), 1 = Soft (DECAWM wrap), -1 = invalid row.
+/// Note: DWC handling (returning 2) is deferred; ghostty's per-row `wrap`
+/// flag alone distinguishes hard vs soft. Callers default to Hard for unknown.
+export fn ghostty_vt_terminal_row_wrap_kind(
+    terminal_ptr: ?*anyopaque,
+    y: u32,
+) callconv(.C) c_int {
+    if (terminal_ptr == null) return -1;
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    const pt: terminal.point.Point = .{ .screen = .{ .x = 0, .y = y } };
+    const pin = handle.terminal.screen.pages.pin(pt) orelse return -1;
+    const row = pin.rowAndCell().row;
+    if (row.wrap) {
+        return 1;
+    } else {
+        return 0;
+    }
 }
 
 // Ghostty's terminal stream uses this symbol as an optimization hook.

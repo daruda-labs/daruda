@@ -73,6 +73,15 @@ pub struct StyleRun {
     pub flags: u8,
 }
 
+/// How a row was terminated. `Hard` means a literal newline (or no
+/// trailing content), `Soft` means DECAWM auto-wrap (the next row is a
+/// wrap-continuation of this one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WrapKind {
+    Hard,
+    Soft,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KeyModifiers {
     pub shift: bool,
@@ -324,6 +333,31 @@ impl Terminal {
         let bytes = unsafe {
             ghostty_vt_sys::ghostty_vt_terminal_dump_viewport_row_style_runs(self.ptr.as_ptr(), row)
         };
+        parse_style_runs(bytes)
+    }
+
+    /// Screen-coordinate variant of `dump_viewport_row_style_runs`. `y`
+    /// is 0-based and may address any row in scrollback or the active
+    /// viewport. Used by the LineBuffer capture path to fetch styles
+    /// for a row that has just scrolled out of the viewport.
+    pub fn dump_screen_row_style_runs(&self, y: u32) -> Result<Vec<StyleRun>, Error> {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        let bytes = unsafe {
+            ghostty_vt_sys::ghostty_vt_terminal_dump_screen_row_style_runs(self.ptr.as_ptr(), y)
+        };
+        parse_style_runs(bytes)
+    }
+
+    /// Per-cell OSC 8 hyperlink IDs for a row in screen coordinates.
+    /// `y` covers `[0, total_rows())`. Returns one `u16` per cell —
+    /// `0` indicates the cell has no hyperlink. Used by the LineBuffer
+    /// capture path so OSC 8 link IDs survive a row scrolling out of
+    /// the viewport.
+    pub fn dump_screen_row_url_ids(&self, y: u32) -> Result<Vec<u16>, Error> {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        let bytes = unsafe {
+            ghostty_vt_sys::ghostty_vt_terminal_dump_screen_row_url_ids(self.ptr.as_ptr(), y)
+        };
         if bytes.ptr.is_null() {
             return Err(Error::DumpFailed);
         }
@@ -333,38 +367,36 @@ impl Terminal {
             unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
             return Ok(Vec::new());
         }
-        if bytes.len % 12 != 0 {
+        if bytes.len % 2 != 0 {
             // SAFETY: paired free before propagating the parse error
             // (invariant #3).
             unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
             return Err(Error::DumpFailed);
         }
-
         // SAFETY: non-null buffer with C-reported length, multiple of
-        // 12 bytes per style-run record (invariant #3).
+        // 2 bytes per u16 (invariant #3).
         let slice = unsafe { std::slice::from_raw_parts(bytes.ptr, bytes.len) };
-        let mut out = Vec::with_capacity(bytes.len / 12);
-        for chunk in slice.chunks_exact(12) {
-            out.push(StyleRun {
-                start_col: u16::from_ne_bytes([chunk[0], chunk[1]]),
-                end_col: u16::from_ne_bytes([chunk[2], chunk[3]]),
-                fg: Rgb {
-                    r: chunk[4],
-                    g: chunk[5],
-                    b: chunk[6],
-                },
-                bg: Rgb {
-                    r: chunk[7],
-                    g: chunk[8],
-                    b: chunk[9],
-                },
-                flags: chunk[10],
-            });
+        let mut out = Vec::with_capacity(bytes.len / 2);
+        for chunk in slice.chunks_exact(2) {
+            out.push(u16::from_ne_bytes([chunk[0], chunk[1]]));
         }
-
         // SAFETY: paired free for the buffer parsed above (invariant #3).
         unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
         Ok(out)
+    }
+
+    /// Returns the wrap kind for the row at absolute screen coordinate
+    /// `y`. `WrapKind::Hard` means the row ended with a hard newline;
+    /// `WrapKind::Soft` means DECAWM auto-wrap. Used to merge
+    /// wrap-continuations during LineBuffer capture.
+    pub fn row_wrap_kind(&self, y: u32) -> WrapKind {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        let code =
+            unsafe { ghostty_vt_sys::ghostty_vt_terminal_row_wrap_kind(self.ptr.as_ptr(), y) };
+        match code {
+            1 => WrapKind::Soft,
+            _ => WrapKind::Hard,
+        }
     }
 
     pub fn take_dirty_viewport_rows(&mut self, rows: u16) -> Result<Vec<u16>, Error> {
@@ -509,6 +541,53 @@ impl Drop for Terminal {
         // private. The pointer is invalidated immediately after.
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_free(self.ptr.as_ptr()) }
     }
+}
+
+/// Parse a `(ptr, len)` buffer of packed 12-byte `StyleRun` records (as
+/// produced by the Zig `dump_*_row_style_runs` exports) into a
+/// `Vec<StyleRun>`. Always frees the input buffer before returning.
+fn parse_style_runs(bytes: ghostty_vt_sys::ghostty_vt_bytes_t) -> Result<Vec<StyleRun>, Error> {
+    if bytes.ptr.is_null() {
+        return Err(Error::DumpFailed);
+    }
+    if bytes.len == 0 {
+        // SAFETY: paired free of an empty (but non-null) buffer
+        // (invariant #3).
+        unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
+        return Ok(Vec::new());
+    }
+    if !bytes.len.is_multiple_of(12) {
+        // SAFETY: paired free before propagating the parse error
+        // (invariant #3).
+        unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
+        return Err(Error::DumpFailed);
+    }
+
+    // SAFETY: non-null buffer with C-reported length, multiple of
+    // 12 bytes per style-run record (invariant #3).
+    let slice = unsafe { std::slice::from_raw_parts(bytes.ptr, bytes.len) };
+    let mut out = Vec::with_capacity(bytes.len / 12);
+    for chunk in slice.chunks_exact(12) {
+        out.push(StyleRun {
+            start_col: u16::from_ne_bytes([chunk[0], chunk[1]]),
+            end_col: u16::from_ne_bytes([chunk[2], chunk[3]]),
+            fg: Rgb {
+                r: chunk[4],
+                g: chunk[5],
+                b: chunk[6],
+            },
+            bg: Rgb {
+                r: chunk[7],
+                g: chunk[8],
+                b: chunk[9],
+            },
+            flags: chunk[10],
+        });
+    }
+
+    // SAFETY: paired free for the buffer parsed above (invariant #3).
+    unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
+    Ok(out)
 }
 
 pub fn terminal_new(cols: u16, rows: u16) -> Result<Terminal, Error> {
