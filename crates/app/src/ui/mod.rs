@@ -5,8 +5,10 @@
 //! Trait imports needed to chain widget modifiers are re-exported
 //! here (`Disableable`, `ButtonVariants`, `WindowExt`, ...).
 //!
-//! `xsmall()` is the project-wide default and is auto-applied by the
+//! `small()` is the project-wide default and is auto-applied by the
 //! factory functions in each submodule (`button`, `checkbox`, ...).
+//! `xsmall()` is only used when a call site explicitly needs a tighter
+//! size (icon-only chrome buttons, badges with pixel-level sizing).
 //! Variants (`primary`, `danger`) ship as separate factories so the
 //! call site reads as one line: `crate::ui::button_primary("save", "Save")`.
 
@@ -26,6 +28,7 @@ pub mod input_panel;
 pub mod label;
 pub mod list;
 pub mod macro_key;
+pub mod menu;
 pub mod radio;
 pub mod section_header;
 pub mod select;
@@ -52,12 +55,12 @@ pub use input_panel::{
 };
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
+pub use menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder};
 pub use radio::{Radio, radio};
 pub use section_header::SectionHeader;
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
-pub use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 pub use gpui_component::scroll::ScrollableElement;
 pub use gpui_component::{ActiveTheme, Disableable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};

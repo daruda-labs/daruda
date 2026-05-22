@@ -165,5 +165,5 @@ pub fn searchable_list_state<I: FilteredItem>(
 /// `xsmall`. Caller chains `.scrollbar_visible(...)` /
 /// `.search_placeholder(...)` etc. as needed.
 pub fn list<D: ListDelegate>(state: &Entity<GpuiListState<D>>) -> List<D> {
-    List::new(state).xsmall()
+    List::new(state).small()
 }

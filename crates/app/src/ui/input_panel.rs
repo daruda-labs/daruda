@@ -277,7 +277,7 @@ impl Render for InputPanel {
                     let items = std::rc::Rc::clone(&action.dropdown_items);
                     let dropdown =
                         DropdownButton::new(SharedString::from(format!("{}-split", action.id)))
-                            .xsmall()
+                            .small()
                             .button(btn)
                             .disabled(action.disabled);
                     let dropdown = match action.variant {

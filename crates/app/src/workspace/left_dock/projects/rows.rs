@@ -4,23 +4,20 @@
 
 use crate::ui::theme;
 use daruda_terminal::ux::strings;
-use gpui::{
-    ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Rgba,
-    SharedString, div, prelude::*, px,
-};
+use gpui::{ClickEvent, Context, IntoElement, Rgba, SharedString, div, prelude::*, px};
 
 use daruda_store::project::{ProjectId, WorktreeId};
 
 use crate::surface::strings as surface_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
+    ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, Icon, IconName, PopupMenuItem,
+    SectionHeader, Sizable as _, button_bare, menu_builder,
 };
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
 use crate::worktree::Worktree;
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
-use super::context_menu::build_context_menu_items;
 use super::drag::{DragGhost, DragPayload};
 use crate::workspace::dnd_ops::TopRow;
 
@@ -183,23 +180,6 @@ pub(in crate::workspace) fn group_header_row(
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
             }
         }))
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let Some(ws) = ws_for_menu.upgrade() else {
-                    return;
-                };
-                let items = super::group_menu::build_group_menu_items(
-                    group_id,
-                    group_name_for_menu.clone(),
-                    group_is_collapsed,
-                    ws_for_menu.clone(),
-                );
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }),
-        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -242,6 +222,12 @@ pub(in crate::workspace) fn group_header_row(
             }),
         )
         .child(label_row)
+        .context_menu(super::group_menu::build_group_menu(
+            group_id,
+            group_name_for_menu,
+            group_is_collapsed,
+            ws_for_menu,
+        ))
 }
 
 /// Per-row state passed into [`project_header_row`].
@@ -348,22 +334,6 @@ pub(in crate::workspace) fn project_header_row(
                 ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
             }
         }))
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let Some(ws) = ws_for_menu.upgrade() else {
-                    return;
-                };
-                let items = super::project_menu::build_project_menu_items(
-                    project_id,
-                    last_active_worktree_id,
-                    ws_for_menu.clone(),
-                );
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }),
-        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -484,42 +454,38 @@ pub(in crate::workspace) fn project_header_row(
                     })),
             )
         })
+        .context_menu(super::project_menu::build_project_menu(
+            project_id,
+            last_active_worktree_id,
+            ws_for_menu,
+        ))
 }
 
 pub(in crate::workspace) fn section_header(
     _any_git: bool,
     snap: &LeftDockSnapshot,
-    cx: &mut Context<Dock>,
+    _cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
-    // Section-level `[+]` is a toggle: clicking it opens a flat
-    // context menu with "Add Project…" / "New Group…" so the user can
-    // pick between adding a project (folder picker routed through
-    // `prompt_and_open_folder_with_policy`, policy-aware) and
-    // creating a group (previously only reachable via Cmd+Shift+N or
-    // the Command Palette). Per-project worktree creation lives on
-    // each project's `[+ new worktree]` row.
+    // Section-level `[+]` opens a dropdown with "Add Project…" / "New Group…"
+    // so the user can pick between adding a project (folder picker routed
+    // through `prompt_and_open_folder_with_policy`) and creating a group.
     let workspace = snap.workspace.clone();
     let add_button = button_bare("section-add-toggle")
         .ghost()
         .icon(IconName::Plus)
-        .on_click(cx.listener(move |_dock, ev: &ClickEvent, _window, cx| {
-            let position: Point<Pixels> = ev.position();
+        .dropdown_menu(menu_builder(move |menu, _, _| {
             let ws_for_group = workspace.clone();
-            let items = vec![
-                ContextMenuItem::new(
-                    surface_strings::SECTION_ADD_MENU_PROJECT,
-                    move |_, _window, app_cx| {
-                        // No workspace handle needed — the global open-folder
-                        // flow reads its config from `SettingsStore` and the
-                        // resulting picker runs async without a captured
-                        // entity.
+            menu.item(
+                PopupMenuItem::new(surface_strings::SECTION_ADD_MENU_PROJECT).on_click(
+                    move |_, _, app_cx| {
                         let config =
                             crate::settings_store::SettingsStore::global(app_cx).user_arc();
                         crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
                     },
                 ),
-                ContextMenuItem::new(
-                    surface_strings::SECTION_ADD_MENU_GROUP,
+            )
+            .item(
+                PopupMenuItem::new(surface_strings::SECTION_ADD_MENU_GROUP).on_click(
                     move |_, window, app_cx| {
                         if let Some(ws) = ws_for_group.upgrade() {
                             ws.update(app_cx, |ws, cx| {
@@ -528,10 +494,7 @@ pub(in crate::workspace) fn section_header(
                         }
                     },
                 ),
-            ];
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }
+            )
         }));
 
     SectionHeader::new(surface_strings::PROJECTS_SECTION_HEADER)
@@ -749,7 +712,7 @@ pub(in crate::workspace) fn worktree_row(
 
     let ws_for_click = workspace.clone();
     let ws_for_drop = workspace.clone();
-    let ws_for_rclick = workspace.clone();
+    let ws_for_menu = workspace.clone();
     // Worktree IDs reset to 0 per project (`Worktree::bootstrap_from_project`
     // numbers each project's worktrees from 0), so `("worktree-row", wt_id)`
     // collides across projects — GPUI sees the same ElementId for the first
@@ -816,34 +779,6 @@ pub(in crate::workspace) fn worktree_row(
                 {
                     let from = *target;
                     ws.update(cx, |ws, cx| ws.reorder_worktree(from, wt_ref, cx));
-                }
-            }),
-        )
-        // Right-click opens the context menu. stop_propagation prevents
-        // the event from reaching any ancestor that might close the menu
-        // before it has a chance to render.
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
-                if let Some(ws) = ws_for_rclick.upgrade() {
-                    let items = build_context_menu_items(
-                        wt_id,
-                        path_str,
-                        wt_description_current.clone(),
-                        wt_name_current.clone(),
-                        ws_for_rclick.clone(),
-                        wt_is_git,
-                        wt_is_detached,
-                        wt_is_dirty,
-                        wt_source_branch.clone(),
-                        wt_base_ref.clone(),
-                        wt_path.clone(),
-                        wt_source_repo_root.clone(),
-                    );
-                    ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
                 }
             }),
         )
@@ -925,7 +860,20 @@ pub(in crate::workspace) fn worktree_row(
         row = row.child(close);
     }
 
-    row
+    row.context_menu(super::context_menu::build_worktree_menu(
+        wt_id,
+        wt_path.to_str().map(|s| s.to_string()).unwrap_or_default(),
+        wt_description_current,
+        wt_name_current,
+        ws_for_menu,
+        wt_is_git,
+        wt_is_detached,
+        wt_is_dirty,
+        wt_source_branch,
+        wt_base_ref,
+        wt_path,
+        wt_source_repo_root,
+    ))
 }
 
 pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {

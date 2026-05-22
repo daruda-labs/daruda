@@ -120,5 +120,5 @@ pub fn select<T: SelectTabSpec>(
     tab: T,
 ) -> Select<Vec<SelectOption>> {
     tab.apply(state, cx);
-    Select::new(state).xsmall()
+    Select::new(state).small()
 }

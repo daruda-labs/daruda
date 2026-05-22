@@ -189,7 +189,7 @@ impl Project {
         }
         let tasks: Vec<_> = ids
             .into_iter()
-            .zip(roots.into_iter())
+            .zip(roots)
             .map(|(id, root)| executor.spawn(async move { Project::bootstrap(id, root) }))
             .collect();
         let mut out = Vec::with_capacity(tasks.len());

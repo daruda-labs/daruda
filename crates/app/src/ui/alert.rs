@@ -18,20 +18,20 @@ pub use gpui_component::alert::AlertVariant;
 
 /// Inline error banner. Use inside a modal body when validation fails.
 pub fn error(id: impl Into<ElementId>, message: impl Into<Text>) -> Alert {
-    Alert::error(id, message).xsmall().banner()
+    Alert::error(id, message).small().banner()
 }
 
 /// Inline warning banner.
 pub fn warning(id: impl Into<ElementId>, message: impl Into<Text>) -> Alert {
-    Alert::warning(id, message).xsmall().banner()
+    Alert::warning(id, message).small().banner()
 }
 
 /// Inline informational banner.
 pub fn info(id: impl Into<ElementId>, message: impl Into<Text>) -> Alert {
-    Alert::info(id, message).xsmall().banner()
+    Alert::info(id, message).small().banner()
 }
 
 /// Inline success banner.
 pub fn success(id: impl Into<ElementId>, message: impl Into<Text>) -> Alert {
-    Alert::success(id, message).xsmall().banner()
+    Alert::success(id, message).small().banner()
 }
