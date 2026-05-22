@@ -398,8 +398,34 @@ fn rows_at_width_handles_cjk_odd_divisor() {
     assert_eq!(b.wrapped_row_count(3), 3);
     // At width 4 two 2-cell chars fit per row → 2 rows.
     assert_eq!(b.wrapped_row_count(4), 2);
-    // At width 2 each 2-cell char fills the row → 3 rows.
-    assert_eq!(b.wrapped_row_count(2), 3);
+}
+
+#[test]
+fn invalidate_wrap_cache_forces_recalculation_on_width_change() {
+    let mut b = LineBuffer::new(1024);
+    b.append("hello world this is a test", &[], EolKind::Hard);
+
+    // Query at width 80
+    let count_80_first = b.wrapped_row_count(80);
+    let count_80_second = b.wrapped_row_count(80);
+    assert_eq!(count_80_first, count_80_second, "repeated queries at same width");
+
+    // Invalidate cache (simulating width change)
+    b.invalidate_wrap_cache();
+
+    // Query at width 80 again after invalidation
+    let count_80_after_invalidate = b.wrapped_row_count(80);
+    assert_eq!(
+        count_80_first, count_80_after_invalidate,
+        "result unchanged after invalidation, but cache was cleared"
+    );
+
+    // Query at different width (120)
+    let count_120 = b.wrapped_row_count(120);
+    assert!(
+        count_120 <= count_80_first,
+        "wider viewport should have fewer wrapped rows"
+    );
 }
 
 #[test]

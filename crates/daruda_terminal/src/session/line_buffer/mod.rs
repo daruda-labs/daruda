@@ -257,6 +257,15 @@ impl LineBuffer {
         }
     }
 
+    /// Invalidate per-line wrap caches. Called when viewport width changes
+    /// so subsequent `wrapped_row_count` / `locate_visual_row` queries
+    /// recalculate from cells without stale cached wraps.
+    pub fn invalidate_wrap_cache(&mut self) {
+        for line in &self.lines {
+            line.invalidate_wrap_cache();
+        }
+    }
+
     /// Drop every logical line. The `overflow` counter is preserved so
     /// any outstanding [`LineBufferPosition`] keeps reporting "evicted"
     /// rather than aliasing a future line — matches iTerm2's

@@ -1353,6 +1353,11 @@ impl TerminalSession {
         } else {
             Some(new_top - 1)
         };
+        // Invalidate LineBuffer wrap cache before querying at new width.
+        // Width change → all per-line cached wraps become stale. Clearing
+        // ensures wrapped_row_count below recalculates from cells without
+        // per-line cache hits on potentially outdated (width, rows) pairs.
+        self.line_buffer.invalidate_wrap_cache();
         // `wrapped_row_count` depends on the column count; clamp so a
         // narrower viewport doesn't leave `scroll_offset` past the new
         // top of the unified frame.
