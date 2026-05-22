@@ -310,6 +310,7 @@ fn view_header(
         .unwrap_or((0, 0));
 
     let refresh_icon = button_bare("git-refresh")
+        .xsmall()
         .ghost()
         .icon(IconName::Refresh)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -335,6 +336,7 @@ fn view_header(
     let header_actions = header_actions.child(refresh_icon);
 
     let fetch_btn = button("git-fetch", app_strings::GIT_FETCH_BTN)
+        .xsmall()
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -344,6 +346,7 @@ fn view_header(
         }));
 
     let push_btn = button("git-push", app_strings::GIT_PUSH_BTN)
+        .xsmall()
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -1087,13 +1090,13 @@ fn loading_placeholder(
     let text_color = theme::current(cx).faint_text;
     let workspace = snap.workspace.clone();
     let active_ref = snap.active;
-    let refresh_btn = button("git-refresh-fallback", app_strings::GIT_REFRESH_BTN).on_click(
-        cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+    let refresh_btn = button("git-refresh-fallback", app_strings::GIT_REFRESH_BTN)
+        .xsmall()
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
             }
-        }),
-    );
+        }));
     div()
         .flex()
         .flex_col()
@@ -1125,13 +1128,13 @@ fn non_git_placeholder(
     let workspace = snap.workspace.clone();
     let in_flight = snap.git_op_in_flight;
 
-    let init_btn = button("git-init", app_strings::GIT_INIT_BTN).on_click(cx.listener(
-        move |_dock, _: &ClickEvent, _window, cx| {
+    let init_btn = button("git-init", app_strings::GIT_INIT_BTN)
+        .xsmall()
+        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.init_git_repo(worktree_id, cx));
             }
-        },
-    ));
+        }));
     use crate::ui::Disableable as _;
     let init_btn = init_btn.disabled(in_flight).loading(in_flight);
 

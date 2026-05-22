@@ -177,6 +177,7 @@ fn view_header(
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let refresh = button_bare("files-refresh")
+        .xsmall()
         .ghost()
         .icon(IconName::Refresh)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {

@@ -147,6 +147,7 @@ pub(in crate::workspace) fn group_header_row(
             // Hidden until row hover; collapsed groups keep it visible
             // as an expand affordance.
             button_bare(("group-chevron", group_id as usize))
+                .xsmall()
                 .ghost()
                 .icon(caret_icon)
                 .invisible()
@@ -387,6 +388,7 @@ pub(in crate::workspace) fn project_header_row(
             // projects keep it visible as an expand affordance.
             let row_group_for_chev = row_group.clone();
             button_bare(("project-chevron", project_id as usize))
+                .xsmall()
                 .ghost()
                 .icon(chevron_icon)
                 .invisible()
@@ -411,6 +413,7 @@ pub(in crate::workspace) fn project_header_row(
             let row_group_for_btn = row_group.clone();
             row.child(
                 button_bare(("project-add-worktree", project_id as usize))
+                    .xsmall()
                     .ghost()
                     .icon(IconName::Plus)
                     .invisible()
@@ -471,6 +474,7 @@ pub(in crate::workspace) fn section_header(
     // through `prompt_and_open_folder_with_policy`) and creating a group.
     let workspace = snap.workspace.clone();
     let add_button = button_bare("section-add-toggle")
+        .xsmall()
         .ghost()
         .icon(IconName::Plus)
         .dropdown_menu(menu_builder(move |menu, _, _| {
@@ -799,6 +803,7 @@ pub(in crate::workspace) fn worktree_row(
         let close = button_bare(SharedString::from(format!(
             "wt-remove-{project_id}-{wt_id}"
         )))
+        .xsmall()
         .ghost()
         .icon(IconName::Close)
         .invisible()

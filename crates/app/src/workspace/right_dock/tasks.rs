@@ -45,6 +45,7 @@ use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use super::status_pill;
 use crate::surface::strings;
+use crate::ui::Sizable as _;
 use crate::ui::{Badge, button, button_primary};
 
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
@@ -128,22 +129,23 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
         TaskFilter::Done => strings::TASK_FILTER_DONE,
     };
 
-    let filter_chip =
-        button("task-filter", filter_label).on_click(move |_evt: &ClickEvent, _window, app| {
+    let filter_chip = button("task-filter", filter_label).xsmall().on_click(
+        move |_evt: &ClickEvent, _window, app| {
             if let Some(w) = ws.upgrade() {
                 w.update(app, |this: &mut Workspace, cx| this.cycle_task_filter(cx));
             }
-        });
+        },
+    );
 
-    let new_btn = button_primary("task-new", strings::TASK_NEW_BUTTON).on_click(
-        move |_evt: &ClickEvent, window, app| {
+    let new_btn = button_primary("task-new", strings::TASK_NEW_BUTTON)
+        .xsmall()
+        .on_click(move |_evt: &ClickEvent, window, app| {
             if let Some(w) = new_ws.upgrade() {
                 w.update(app, |this: &mut Workspace, cx| {
                     this.open_task_edit_pane(None, window, cx);
                 });
             }
-        },
-    );
+        });
 
     div()
         .flex()
