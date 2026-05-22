@@ -39,6 +39,7 @@ use gpui::{
     AnyElement, ClickEvent, Context, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*,
     px,
 };
+use gpui_component::Sizable as _;
 
 use super::super::Workspace;
 use super::super::layout::Dock;
@@ -128,22 +129,23 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
         TaskFilter::Done => strings::task_filter_done(),
     };
 
-    let filter_chip =
-        button("task-filter", filter_label).on_click(move |_evt: &ClickEvent, _window, app| {
+    let filter_chip = button("task-filter", filter_label).xsmall().on_click(
+        move |_evt: &ClickEvent, _window, app| {
             if let Some(w) = ws.upgrade() {
                 w.update(app, |this: &mut Workspace, cx| this.cycle_task_filter(cx));
             }
-        });
+        },
+    );
 
-    let new_btn = button_primary("task-new", strings::task_new_button()).on_click(
-        move |_evt: &ClickEvent, window, app| {
+    let new_btn = button_primary("task-new", strings::task_new_button())
+        .xsmall()
+        .on_click(move |_evt: &ClickEvent, window, app| {
             if let Some(w) = new_ws.upgrade() {
                 w.update(app, |this: &mut Workspace, cx| {
                     this.open_task_edit_pane(None, window, cx);
                 });
             }
-        },
-    );
+        });
 
     div()
         .flex()
