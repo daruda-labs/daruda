@@ -176,6 +176,12 @@ impl TerminalView {
         let reason = selection_policy::invalidation_reason(&dirty, viewport_height, &grid_events);
         if reason != InvalidationReason::None {
             self.state.selection = None;
+            if matches!(
+                reason,
+                InvalidationReason::AltScreenToggle | InvalidationReason::Ris,
+            ) {
+                self.state.viewport_pin.release();
+            }
         }
 
         // Alacritty/iTerm2 convention: any viewport scroll (IND, RI, SU, SD)
