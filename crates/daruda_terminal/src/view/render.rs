@@ -139,6 +139,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::on_toggle_fullscreen))
             .on_action(cx.listener(Self::on_clear_buffer))
             .on_action(cx.listener(Self::on_clear_scrollback))
+            .on_action(cx.listener(Self::on_scroll_to_bottom))
             .on_action(cx.listener(Self::on_search_open))
             .on_action(cx.listener(Self::on_search_close))
             .on_action(cx.listener(Self::on_search_next))

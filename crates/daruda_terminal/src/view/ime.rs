@@ -114,14 +114,17 @@ impl TerminalView {
     }
 
     /// Send user-originated bytes to the PTY (keystrokes, IME commit, paste).
-    /// Snaps the viewport to the bottom because the user expects to see the
-    /// shell's echo and response.
+    /// Does not alter viewport scroll state — the user's scrollback position
+    /// is preserved. Sets `pending_refresh` so `viewport_lines` is rebuilt on
+    /// the next render; without this, PTY echo dirty-row updates land on the
+    /// wrong rows when the viewport is pinned above the bottom.
     pub(super) fn send_input_parts(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
         if parts.is_empty() {
             return;
         }
 
-        self.scroll_to_bottom_on_input();
+        self.state.pending_refresh = true;
+        self.state.pending_refresh_keep_selection = true;
         self.dispatch_parts_to_pty(parts, cx);
     }
 

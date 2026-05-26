@@ -5,10 +5,10 @@ use super::selection::ScreenPos;
 use super::text_edit::{step_char_left, step_char_right};
 use super::{
     ByteSelection, ClearBuffer, ClearScrollback, CommandJumpNext, CommandJumpPrev, Copy,
-    CopyLastCommandOutput, Paste, PromptJumpNext, PromptJumpPrev, ResetZoom, SearchBackspace,
-    SearchClearQuery, SearchClose, SearchCursorEnd, SearchCursorHome, SearchCursorLeft,
-    SearchCursorRight, SearchDeleteForward, SearchNext, SearchOpen, SearchPrev, SearchToggleRegex,
-    SelectAll, ToggleFullscreen, ZoomIn, ZoomOut,
+    CopyLastCommandOutput, Paste, PromptJumpNext, PromptJumpPrev, ResetZoom, ScrollToBottom,
+    SearchBackspace, SearchClearQuery, SearchClose, SearchCursorEnd, SearchCursorHome,
+    SearchCursorLeft, SearchCursorRight, SearchDeleteForward, SearchNext, SearchOpen, SearchPrev,
+    SearchToggleRegex, SelectAll, ToggleFullscreen, ZoomIn, ZoomOut,
 };
 
 impl TerminalView {
@@ -202,6 +202,23 @@ impl TerminalView {
     ) {
         let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
         self.schedule_viewport_refresh(cx);
+        cx.notify();
+    }
+
+    /// Release the viewport pin and snap to the bottom of the scrollback.
+    /// Clears `user_scrolled` so future PTY output is followed normally.
+    /// This is the explicit user-facing fallback for shells without OSC 133.
+    pub(super) fn on_scroll_to_bottom(
+        &mut self,
+        _: &ScrollToBottom,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.viewport_pin.release();
+        self.state.user_scrolled = false;
+        let _ = self.session.scroll_viewport_bottom();
+        self.sync_viewport_scroll_tracking();
+        self.state.pending_refresh = true;
         cx.notify();
     }
 

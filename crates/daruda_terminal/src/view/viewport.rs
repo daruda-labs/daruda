@@ -472,22 +472,6 @@ impl TerminalView {
         self.sync_viewport_scroll_tracking();
     }
 
-    /// Called when the user sends input to the PTY.  Clears the manual-scroll
-    /// lock and snaps the viewport to the bottom so the shell's echo and
-    /// response are always visible.
-    ///
-    /// Also sets `pending_refresh` so `viewport_lines` is rebuilt on the next
-    /// render.  Without this the ghostty internal offset has already moved to
-    /// bottom but `viewport_lines` still holds the scrolled-up content, causing
-    /// dirty-row updates from the PTY echo to land on wrong rows.
-    pub(super) fn scroll_to_bottom_on_input(&mut self) {
-        self.state.user_scrolled = false;
-        let _ = self.session.scroll_viewport_bottom();
-        self.sync_viewport_scroll_tracking();
-        self.state.pending_refresh = true;
-        self.state.pending_refresh_keep_selection = true;
-    }
-
     pub(super) fn apply_side_effects(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = self.session.take_clipboard_write() {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
