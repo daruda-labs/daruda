@@ -529,3 +529,16 @@ error_modal:
 # Notifications
 notification:
   long_running_title: "명령 완료"
+
+# Terminal annotations (SP-1)
+terminal:
+  annotation_action_add: "주석 추가"
+  annotation_action_add_disabled_tooltip: "먼저 한 줄의 텍스트를 선택하세요"
+  annotation_action_delete: "주석 삭제"
+  annotation_dialog_title_create: "주석 추가"
+  annotation_dialog_title_edit: "주석 편집"
+  annotation_placeholder: "주석 내용"
+  annotation_err_pane_missing_title: "주석 대상 패널이 사라졌습니다"
+  annotation_err_pane_missing_message: "터미널 패널을 더 이상 사용할 수 없습니다."
+  annotation_err_operation_failed_title: "주석 작업 실패"
+  annotation_err_operation_failed_message: "주석을 저장할 수 없습니다."

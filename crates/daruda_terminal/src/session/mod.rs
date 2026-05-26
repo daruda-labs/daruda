@@ -5,15 +5,21 @@ use ghostty_vt::{Error, Rgb, Terminal};
 
 use crate::TerminalConfig;
 use crate::ansi;
+use crate::session::interval_tree::{
+    IntervalTree, LineCoord, LineRange, MarkId, MarkPayload, MarkRecordSink,
+};
 use crate::vt_codes::{
     AttentionKind, CSI_ALT_SCREEN, CSI_ALT_SCREEN_LEGACY, CSI_ALT_SCREEN_SAVE_CURSOR, CsiMode,
     NotificationRequest, OSC_DEFAULT_BG, OSC_DEFAULT_FG,
 };
 use crate::vt_limits::{PARSE_TAIL_LIMIT, PROMPT_MARKS_CAP};
 
+mod annotation_ops;
+pub mod interval_tree;
 mod line_buffer;
 mod scanners;
 
+pub use annotation_ops::AnnotationError;
 pub use line_buffer::{
     EolKind, FindContext, FindMatchRange, FindOptions, LbCell, LineBuffer, LineBufferPosition,
     LogicalLine,
@@ -176,6 +182,12 @@ pub struct TerminalSession {
     /// scrollback for navigation (Task 3 cut ghostty's retained
     /// scrollback to a tiny capture window; see `GHOSTTY_TRANSIENT_SCROLLBACK`).
     scroll_offset: u32,
+    /// Augmented interval tree storing user-authored marks (annotations
+    /// today; prompt regions and search hits in future SP). Lifecycle is
+    /// wired through `capture_scrolled_out` (eviction), `resize` (column
+    /// clamp), and the alt-screen toggle (visibility filter). See
+    /// `crate::session::annotation_ops` for the public API.
+    pub(in crate::session) interval_tree: IntervalTree<MarkPayload>,
 }
 
 /// Rows ghostty retains as a transient buffer so `capture_scrolled_out`
@@ -247,7 +259,18 @@ impl TerminalSession {
             line_buffer: LineBuffer::new(config.max_scrollback),
             last_captured_abs_row: None,
             scroll_offset: 0,
+            interval_tree: IntervalTree::new(),
         })
+    }
+
+    /// Attach an NDJSON sink to the interval tree. Subsequent mutation
+    /// methods on `IntervalTree<MarkPayload>` will emit records into
+    /// `sink`. Replaces any previously installed sink.
+    ///
+    /// Kept `pub` because the wiring (lane_dir → sink → session) happens
+    /// in app code, outside this crate.
+    pub fn set_marks_sink(&mut self, sink: Box<dyn MarkRecordSink>) {
+        self.interval_tree.set_sink(sink);
     }
 
     /// Push updated default colors and ANSI palette to the running terminal.
@@ -268,6 +291,63 @@ impl TerminalSession {
     /// Returns whether the terminal is currently in alt-screen mode.
     pub fn is_alt_screen(&self) -> bool {
         self.alt_screen
+    }
+
+    /// Translate an absolute screen row `row` (0 = topmost scrollback row,
+    /// matching the [`Self::dump_screen_row`] / [`Self::total_rows`]
+    /// coordinate space) into a [`LineCoord`] from the interval tree's
+    /// coordinate system.
+    ///
+    /// Rows inside the `LineBuffer` region resolve to a width-invariant
+    /// [`LineCoord::Buffered`] anchor; rows on the live viewport resolve
+    /// to [`LineCoord::Viewport`] with `abs_y = overflow + row`.
+    ///
+    /// Returns `None` only when `row < lb_rows` and `position_for_visual_row`
+    /// cannot resolve the row (e.g. zero cols or a sparse buffer). Viewport
+    /// rows (`row >= lb_rows`) always return `Some(LineCoord::Viewport { .. })`.
+    pub fn screen_row_to_line_coord(&self, row: u32) -> Option<LineCoord> {
+        let cols = self.config.cols;
+        let lb_rows = self.line_buffer.wrapped_row_count(cols);
+        if row < lb_rows {
+            self.line_buffer
+                .position_for_visual_row(row, cols)
+                .map(|(pos, _, _)| LineCoord::Buffered(pos))
+        } else {
+            // Viewport region. The `abs_y` mirrors `PromptMark.abs_y`'s
+            // construction (`overflow + lb_rows + (row - lb_rows)`),
+            // which simplifies to `overflow + row`.
+            Some(LineCoord::Viewport {
+                abs_y: self.line_buffer.overflow().saturating_add(row as u64),
+            })
+        }
+    }
+
+    /// Return `true` when `screen_row` is a wrap-continuation row inside
+    /// `LineBuffer` — i.e. the sub-row index within the logical line is > 0.
+    ///
+    /// The annotation overlay paint loop uses this to skip continuation rows
+    /// so each wrapped logical line produces exactly one annotation box
+    /// (anchored to the head row, sub_row == 0) instead of one per wrapped
+    /// visual row.
+    ///
+    /// SP-1 limitation: rows in the live ghostty viewport (`screen_row >=
+    /// lb_rows`) always return `false` — ghostty_vt does not expose a
+    /// wrap-continuation predicate for viewport rows in a way that can be
+    /// consumed here without new FFI. The annotation-paint duplication bug
+    /// (resize-wrap) is triggered by rows already captured in `LineBuffer`,
+    /// so this limitation is acceptable for SP-1.
+    pub fn is_wrap_continuation(&self, screen_row: u32) -> bool {
+        let cols = self.config.cols;
+        let lb_rows = self.line_buffer.wrapped_row_count(cols);
+        if screen_row >= lb_rows {
+            // SP-1: viewport-region wrap continuations are not detected;
+            // ghostty does not expose per-row wrap info for live grid rows.
+            return false;
+        }
+        self.line_buffer
+            .position_for_visual_row(screen_row, cols)
+            .map(|(_, sub_row, _)| sub_row > 0)
+            .unwrap_or(false)
     }
 
     /// Consumes and returns the pending alt-screen state change, if any.
@@ -698,6 +778,7 @@ impl TerminalSession {
                         {
                             self.alt_screen = enabled;
                             self.screen_changed = true;
+                            self.interval_tree.set_alt_screen_active(self.alt_screen);
                         }
                     }
 
@@ -957,12 +1038,62 @@ impl TerminalSession {
             self.line_buffer.attach_url_ids_to_tail(&url_ids);
         }
         self.last_captured_abs_row = Some(viewport_top.saturating_sub(1));
+        // Rebind viewport-resident marks whose row has just been captured
+        // into LineBuffer. Design §6: a mark registered with
+        // LineCoord::Viewport{abs_y} while the row was live must be
+        // rewritten to LineCoord::Buffered once the row enters scrollback,
+        // otherwise the Ord mismatch (Buffered < Viewport) causes every
+        // range query to miss the mark from this point on.
+        {
+            let overflow = self.line_buffer.overflow();
+            let lb_rows = self.line_buffer.wrapped_row_count(self.config.cols);
+            let cols = self.config.cols;
+            let buffered_upper_excl = overflow + lb_rows as u64;
+
+            // Collect first: iter() borrows &self, update_payload_range needs &mut self.
+            let to_rebind: Vec<(MarkId, LineRange)> = self
+                .interval_tree
+                .iter()
+                .filter_map(|m| match (m.range.start, m.range.end) {
+                    // SP-1 marks are single-line (start == end).  Only rebind when
+                    // both endpoints are Viewport and fall inside the LineBuffer
+                    // window.  Multi-line marks are out of scope for SP-1.
+                    (LineCoord::Viewport { abs_y: s }, LineCoord::Viewport { abs_y: e })
+                        if s == e && s >= overflow && s < buffered_upper_excl =>
+                    {
+                        let row_in_lb = (s - overflow) as u32;
+                        let pos = self.line_buffer.position_for_visual_row(row_in_lb, cols)?.0;
+                        let new_coord = LineCoord::Buffered(pos);
+                        Some((m.id, LineRange::new(new_coord, new_coord)))
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            for (id, new_range) in to_rebind {
+                self.interval_tree.update_payload_range(id, new_range);
+            }
+        }
+        // Drop interval-tree marks whose range fell off the bottom of
+        // the live scrollback window. `min_position` returns `None` on
+        // an empty buffer (nothing to evict against).
+        if let Some(min) = self.line_buffer.min_position() {
+            self.interval_tree.evict_below(LineCoord::Buffered(min));
+        }
     }
 
     /// Borrow the logical-line scrollback buffer. Consumers wrap it
     /// against the live cell width at render time.
     pub fn line_buffer(&self) -> &LineBuffer {
         &self.line_buffer
+    }
+
+    /// Test-only direct access to the interval tree for coordinate
+    /// inspection after internal operations (e.g. after capture_scrolled_out
+    /// rebinds viewport marks to buffered positions).
+    #[cfg(test)]
+    pub(crate) fn interval_tree(&self) -> &IntervalTree<MarkPayload> {
+        &self.interval_tree
     }
 
     /// Detect a `\x1b[3J` (or equivalent) ghostty-side scrollback wipe
@@ -1296,6 +1427,19 @@ impl TerminalSession {
             .saturating_sub(self.scroll_offset)
     }
 
+    /// Absolute line index of the topmost visible row.
+    ///
+    /// This is an ever-increasing value: `line_buffer.overflow() +
+    /// viewport_row_offset()`. Use it to pin the viewport to a fixed reading
+    /// position — the value survives grid scrolls and `LineBuffer` captures
+    /// because overflow grows monotonically. Translate back to a current
+    /// screen row via [`Self::abs_to_screen_row`].
+    pub fn viewport_top_abs_y(&self) -> u64 {
+        self.line_buffer
+            .overflow()
+            .saturating_add(self.viewport_row_offset() as u64)
+    }
+
     /// Current scroll offset in rows back from the bottom of the
     /// unified frame. `0` pins the viewport to the live grid; positive
     /// values walk back into `line_buffer` history. Exposed for tests
@@ -1365,6 +1509,10 @@ impl TerminalSession {
         if self.scroll_offset > max_scroll {
             self.scroll_offset = max_scroll;
         }
+        // Drag any column-bound mark metadata down to the new width so
+        // narrowing does not leave stale start/end column pairs pointing
+        // past the right margin.
+        self.interval_tree.clamp_payload_cols(cols);
         result
     }
 

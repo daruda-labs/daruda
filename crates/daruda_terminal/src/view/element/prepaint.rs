@@ -651,6 +651,16 @@ impl TerminalTextElement {
         let hover_underline =
             self.build_hover_underline(bounds, line_height, &shaped_lines, run_color, cx);
         let search_scrollbar_ticks = self.build_search_scrollbar_ticks(bounds, cx);
+        let (annotation_quads, annotation_text_lines) = self.build_annotation_quads(
+            bounds,
+            line_height,
+            cell_width_f,
+            &shaped_lines,
+            window,
+            &run_font,
+            font_size,
+            cx,
+        );
 
         TerminalPrepaintState {
             line_height,
@@ -669,6 +679,8 @@ impl TerminalTextElement {
             prompt_marks,
             search_quads,
             search_scrollbar_ticks,
+            annotation_quads,
+            annotation_text_lines,
         }
     }
 }

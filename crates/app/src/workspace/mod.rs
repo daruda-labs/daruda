@@ -14,6 +14,8 @@
 //! tab cells and pane headers; do not rename it back to `tab_title`.
 
 mod actions;
+mod annotation_dialog;
+mod annotation_ops;
 mod claude_session_ops;
 pub(in crate::workspace) mod command;
 mod config_ops;

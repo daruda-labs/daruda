@@ -235,6 +235,33 @@ pub const BELL_FLASH_OVERLAY: Hsla = hsla(0.0, 0.0, 1.0, 0.1);
 /// Prompt-jump wrap flash stripe color (drawn at top of viewport).
 pub const PROMPT_JUMP_FLASH_STRIPE: Hsla = hsla(198.0, 0.70, 0.60, 0.85);
 
+// ============================================================================
+// Annotation overlay (SP-1)
+// ============================================================================
+//
+// Pastel-yellow palette that mirrors iTerm2's default annotation tone —
+// soft enough to leave the underlying text legible, distinct enough that
+// a sticky-note metaphor reads correctly. Stays in the same saturation
+// neighbourhood as the existing PROMPT_MARK_* and SEARCH_HIGHLIGHT
+// constants so the overlay does not draw attention away from those.
+
+/// Filled background of an annotation overlay box (resting state).
+pub const ANNOTATION_BG_PRIMARY: Hsla = hsla(50.0, 0.85, 0.78, 0.85);
+
+/// Annotation overlay background when the mouse is hovering it.
+pub const ANNOTATION_BG_HOVER: Hsla = hsla(46.0, 0.90, 0.70, 0.95);
+
+/// Border around the annotation box — slightly darker than the bg so
+/// the edge reads cleanly against terminal text and background fills.
+pub const ANNOTATION_BORDER: Hsla = hsla(42.0, 0.65, 0.45, 0.95);
+
+/// Annotation text colour — near-black for high contrast on the
+/// pastel-yellow fill.
+pub const ANNOTATION_TEXT: Hsla = hsla(40.0, 0.55, 0.12, 1.0);
+
+/// Border thickness for the annotation overlay box (px).
+pub const ANNOTATION_BORDER_W: f32 = 1.0;
+
 /// Prompt-jump wrap flash stripe height (px).
 pub const PROMPT_JUMP_FLASH_STRIPE_H: f32 = 3.0;
 

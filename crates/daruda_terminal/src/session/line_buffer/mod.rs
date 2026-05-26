@@ -25,6 +25,7 @@ use std::collections::VecDeque;
 use std::num::NonZeroU16;
 
 use ghostty_vt::{Rgb, StyleRun};
+use serde::{Deserialize, Serialize};
 use unicode_width::UnicodeWidthChar;
 
 mod find_context;
@@ -144,7 +145,7 @@ impl LogicalLine {
 /// Stable reference to a logical line. Survives appends; becomes
 /// dangling (returns `None` from [`LineBuffer::deref`]) once the line is
 /// evicted by ring overflow.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineBufferPosition {
     pub abs_index: u64,
 }
@@ -299,6 +300,13 @@ impl LineBuffer {
     /// out of range.
     pub fn get(&self, idx: usize) -> Option<&LogicalLine> {
         self.lines.get(idx)
+    }
+
+    /// Stable [`LineBufferPosition`] of the oldest still-live line, or
+    /// `None` if the buffer is empty. Delegates to `position_at(0)` so
+    /// the equivalence is enforced by code rather than comment.
+    pub fn min_position(&self) -> Option<LineBufferPosition> {
+        self.position_at(0)
     }
 
     /// Issue a stable [`LineBufferPosition`] for ring-local index `idx`.

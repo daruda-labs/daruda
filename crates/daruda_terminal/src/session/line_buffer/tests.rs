@@ -80,6 +80,22 @@ fn position_at_empty_buffer_returns_none() {
 }
 
 #[test]
+fn min_position_tracks_oldest_live_line_after_eviction() {
+    let mut b = LineBuffer::new(2);
+    assert!(
+        b.min_position().is_none(),
+        "empty buffer has no min position"
+    );
+    b.append("a", &[], EolKind::Hard);
+    let min0 = b.min_position().expect("non-empty");
+    assert_eq!(min0.abs_index, 0);
+    b.append("b", &[], EolKind::Hard);
+    b.append("c", &[], EolKind::Hard); // evicts "a", overflow=1
+    let min1 = b.min_position().expect("still non-empty");
+    assert_eq!(min1.abs_index, 1, "min position advances past evicted line");
+}
+
+#[test]
 fn clear_preserves_overflow_and_invalidates_old_positions() {
     let mut b = LineBuffer::new(2);
     b.append("a", &[], EolKind::Hard);
@@ -408,7 +424,10 @@ fn invalidate_wrap_cache_forces_recalculation_on_width_change() {
     // Query at width 80
     let count_80_first = b.wrapped_row_count(80);
     let count_80_second = b.wrapped_row_count(80);
-    assert_eq!(count_80_first, count_80_second, "repeated queries at same width");
+    assert_eq!(
+        count_80_first, count_80_second,
+        "repeated queries at same width"
+    );
 
     // Invalidate cache (simulating width change)
     b.invalidate_wrap_cache();

@@ -33,10 +33,6 @@ impl TerminalTextElement {
                 window.paint_quad(quad);
             }
 
-            for quad in prepaint.selection_quads.drain(..) {
-                window.paint_quad(quad);
-            }
-
             let origin = bounds.origin;
             for (row, line) in prepaint.shaped_lines.iter().enumerate() {
                 let y = origin.y + prepaint.line_height * row as f32;
@@ -51,6 +47,28 @@ impl TerminalTextElement {
             }
 
             for quad in prepaint.box_drawing_quads.drain(..) {
+                window.paint_quad(quad);
+            }
+
+            // Paint order (bottom-up): background → prompt_marks → search → text → annotation → selection → cursor.
+            // Spec §8 places annotation above text; selection still wins over annotation for the highlight gesture.
+            for quad in prepaint.annotation_quads.drain(..) {
+                window.paint_quad(quad);
+            }
+            // First-line text for each annotation box, painted on top of
+            // the background fill and border using ANNOTATION_TEXT colour.
+            for (line, text_origin) in prepaint.annotation_text_lines.drain(..) {
+                let _ = line.paint(
+                    text_origin,
+                    prepaint.line_height,
+                    gpui::TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                );
+            }
+
+            for quad in prepaint.selection_quads.drain(..) {
                 window.paint_quad(quad);
             }
 

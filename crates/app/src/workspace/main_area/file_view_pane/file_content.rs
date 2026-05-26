@@ -114,7 +114,11 @@ fn load_raw(
             }
 
             let total_count = text.lines().count();
-            PaneFileContent::LoadedRaw { text, total_count, byte_truncated }
+            PaneFileContent::LoadedRaw {
+                text,
+                total_count,
+                byte_truncated,
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
+mod annotation_ops_tests;
 mod config_mirror;
 mod dnd;
 mod dock;

@@ -359,4 +359,3 @@ fn render_skill_md_composes_frontmatter_and_body() {
     assert!(rendered.contains("name: alpha"));
     assert!(rendered.contains("Body goes here."));
 }
-

@@ -417,5 +417,4 @@ mod tests {
             .disabled(true);
         assert!(a.disabled);
     }
-
 }

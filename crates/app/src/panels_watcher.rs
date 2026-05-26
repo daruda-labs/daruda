@@ -114,4 +114,3 @@ pub fn spawn_panels_watcher() -> mpsc::Receiver<()> {
 
     debounced_rx
 }
-

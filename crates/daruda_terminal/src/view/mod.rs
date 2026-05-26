@@ -1,4 +1,5 @@
 mod actions;
+mod annotation_overlay;
 mod bg_merge;
 mod box_drawing;
 pub(crate) mod element;
@@ -221,6 +222,33 @@ impl TerminalView {
         self.state.selection.is_some()
     }
 
+    /// Resolve the current selection to a single-line [`LineRange`].
+    ///
+    /// Returns `Some(LineRange { start, end })` with both endpoints
+    /// sharing the same [`LineCoord`] when the selection lies entirely
+    /// within one visual row. The `start` and `end` of the returned
+    /// range are equal because the selection is collapsed to that row.
+    ///
+    /// Returns `None` when there is no active selection, when the selection
+    /// spans more than one visual row, or when an endpoint maps to a row
+    /// that has already been evicted from `LineBuffer`.
+    ///
+    /// Powers the "Add annotation" menu item raised by the
+    /// `ContextMenuRequested` event — SP-1 annotations are
+    /// single-line, so a multi-row selection disables the entry.
+    pub fn selection_single_line_range(&self) -> Option<crate::session::interval_tree::LineRange> {
+        use crate::session::interval_tree::LineRange;
+        let selection = self.state.selection.as_ref()?;
+        let (start, end) = selection.normalized(&self.session)?;
+        let (start_row, _) = start.resolve(&self.session)?;
+        let (end_row, _) = end.resolve(&self.session)?;
+        if start_row != end_row {
+            return None;
+        }
+        let line = self.session.screen_row_to_line_coord(start_row)?;
+        Some(LineRange::new(line, line))
+    }
+
     /// Terminal body font size in points. Updated by the zoom
     /// actions; readable so the surrounding app (workspace resize,
     /// settings UI) can observe the current value.
@@ -358,6 +386,71 @@ impl TerminalView {
     pub fn session(&self) -> &TerminalSession {
         &self.session
     }
+
+    /// Create a new annotation at `range` with `text`. Thin wrapper over
+    /// [`TerminalSession::add_annotation`] — exists so workspace-side
+    /// callers do not need a `&mut TerminalSession`.
+    pub fn add_annotation(
+        &mut self,
+        range: crate::session::interval_tree::LineRange,
+        text: String,
+    ) -> Result<crate::session::interval_tree::MarkId, crate::session::AnnotationError> {
+        self.session.add_annotation(range, text)
+    }
+
+    /// Replace the text of an existing annotation. See
+    /// [`TerminalSession::update_annotation_text`].
+    pub fn update_annotation_text(
+        &mut self,
+        id: crate::session::interval_tree::MarkId,
+        text: String,
+    ) -> Result<(), crate::session::AnnotationError> {
+        self.session.update_annotation_text(id, text)
+    }
+
+    /// Delete the annotation with `id`. See
+    /// [`TerminalSession::remove_annotation`].
+    pub fn remove_annotation(
+        &mut self,
+        id: crate::session::interval_tree::MarkId,
+    ) -> Result<(), crate::session::AnnotationError> {
+        self.session.remove_annotation(id)
+    }
+
+    /// Look up the annotation under a window-space position, if any.
+    /// Converts pixels through the same `mouse_position_to_cell` path
+    /// the click handlers use, then asks the session for the mark at
+    /// that cell. `None` when no annotation lives under the cursor or
+    /// the position falls outside the viewport.
+    pub fn annotation_at_window_position(
+        &self,
+        position: gpui::Point<Pixels>,
+        window: &mut gpui::Window,
+    ) -> Option<crate::session::interval_tree::MarkId> {
+        let (col, row) = self.mouse_position_to_cell(position, window)?;
+        let row0 = row.saturating_sub(1) as u32;
+        let screen_row = self.session.viewport_row_offset().saturating_add(row0);
+        let line_coord = self.session.screen_row_to_line_coord(screen_row)?;
+        self.session
+            .annotation_at_point(line_coord, col)
+            .map(|(id, _)| id)
+    }
+
+    /// Update the hovered annotation id and request a repaint when the
+    /// value changed. Drives the hover-tint switch in the annotation
+    /// paint pass (SP-1). Idempotent: passing the same id repeatedly
+    /// is a no-op, so the mouse-move hot path can call freely without
+    /// flooding the render queue.
+    pub fn set_hovered_annotation(
+        &mut self,
+        id: Option<crate::session::interval_tree::MarkId>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.hovered_annotation != id {
+            self.state.hovered_annotation = id;
+            cx.notify();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +479,30 @@ pub enum TerminalViewEvent {
     /// crossed, gated by `long_running_enabled` and
     /// `skip_focused_pane`.
     CommandFinishedAfter { elapsed: std::time::Duration },
+    /// Shift+Right-click landed on the terminal surface. Workspace
+    /// raises a host-side context menu — the terminal crate does not
+    /// own the menu UI, so it forwards the click position plus a
+    /// snapshot of the selection state that the menu uses to enable
+    /// or disable the "Add annotation" item.
+    ///
+    /// The conventional Shift+Right gesture (iTerm2 / kitty / Alacritty)
+    /// fires here even when SGR mouse reporting is enabled — host
+    /// affordances win over PTY capture for this modifier combination.
+    ContextMenuRequested {
+        /// Window-space position of the click. Workspace converts to
+        /// element-local coordinates before positioning the menu.
+        position: gpui::Point<Pixels>,
+        /// The resolved selection range when the selection occupies a
+        /// single visual row, else `None`. Pre-resolved so the
+        /// subscriber does not have to re-enter the view. Subscribers
+        /// gate the "Add annotation" entry on `range.is_some()`.
+        range: Option<crate::session::interval_tree::LineRange>,
+    },
+    /// User double-clicked an annotation overlay. The host opens the
+    /// edit dialog pre-populated with the mark's current text.
+    AnnotationDoubleClicked {
+        id: crate::session::interval_tree::MarkId,
+    },
 }
 
 impl gpui::EventEmitter<TerminalViewEvent> for TerminalView {}

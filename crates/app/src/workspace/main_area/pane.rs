@@ -573,6 +573,8 @@ fn handle_view_event(
     workspace: &mut Workspace,
     pane_id: PaneId,
     event: &daruda_terminal::TerminalViewEvent,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
 ) {
     use crate::platform;
     use crate::surface::{constants::APP_NAME, strings as s};
@@ -627,6 +629,12 @@ fn handle_view_event(
             let body = s::format_duration_compact(*elapsed);
             let title = s::notification_long_running_title();
             platform::notifications::show(&title, &body);
+        }
+        TerminalViewEvent::AnnotationDoubleClicked { id } => {
+            workspace.open_annotation_dialog_for_edit(pane_id, *id, window, cx);
+        }
+        TerminalViewEvent::ContextMenuRequested { position, range } => {
+            workspace.open_annotation_context_menu(pane_id, *position, *range, window, cx);
         }
     }
 }
@@ -805,11 +813,14 @@ impl Workspace {
         // Workspace gates by config and dispatches. `pane_id` is
         // captured by the closure so the focus-gate can identify
         // which pane raised the event without needing entity equality.
+        // Window-aware subscribe lets `ContextMenuRequested` open the
+        // host context menu / annotation dialog (both need `&mut Window`).
         let captured_pane_id = pane_id;
-        let view_event_sub = cx.subscribe(
+        let view_event_sub = cx.subscribe_in(
             &view,
-            move |this, _view, event: &daruda_terminal::TerminalViewEvent, _cx| {
-                handle_view_event(this, captured_pane_id, event);
+            window,
+            move |this, _view, event: &daruda_terminal::TerminalViewEvent, window, cx| {
+                handle_view_event(this, captured_pane_id, event, window, cx);
             },
         );
 

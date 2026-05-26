@@ -213,6 +213,40 @@ impl TerminalView {
             }
         }
 
+        // Shift+Right-click matches the iTerm2/kitty/Alacritty convention
+        // for opening a host context menu. Fires unconditionally, including
+        // under SGR mouse capture — the gesture is specifically intended to
+        // escape PTY capture. Subscribers consume the emitted event to build
+        // the actual menu, which the terminal crate does not own.
+        if event.button == MouseButton::Right && event.modifiers.shift {
+            let range = self.selection_single_line_range();
+            cx.emit(super::TerminalViewEvent::ContextMenuRequested {
+                position: event.position,
+                range,
+            });
+            cx.stop_propagation();
+            return;
+        }
+
+        // Double-click on an annotation overlay opens the edit dialog.
+        // The hit test runs against the session's interval tree at the
+        // clicked cell — when a mark covers that cell the click is
+        // intercepted before the regular word-selection path kicks in.
+        if event.button == MouseButton::Left
+            && event.click_count == 2
+            && let Some((col, row)) = self.mouse_position_to_cell(event.position, window)
+        {
+            let row0 = row.saturating_sub(1) as u32;
+            let screen_row = self.session.viewport_row_offset().saturating_add(row0);
+            if let Some(line_coord) = self.session.screen_row_to_line_coord(screen_row)
+                && let Some((mark_id, _)) = self.session.annotation_at_point(line_coord, col)
+            {
+                cx.emit(super::TerminalViewEvent::AnnotationDoubleClicked { id: mark_id });
+                cx.stop_propagation();
+                return;
+            }
+        }
+
         if event.modifiers.shift || self.input.is_none() || !self.session.mouse_reporting_enabled()
         {
             if event.button == MouseButton::Left
@@ -455,6 +489,7 @@ impl TerminalView {
         }
 
         self.update_hovered_url(event.position, event.modifiers.platform, window, cx);
+        self.update_hovered_annotation(event.position, window, cx);
 
         // If we thought we were dragging but the left button is no longer
         // pressed, the button was released outside the window where
@@ -633,6 +668,33 @@ impl TerminalView {
             .row
             .saturating_add(self.session.viewport_row_offset());
         Some(anchor)
+    }
+
+    /// Recompute `hovered_annotation` based on the current cursor
+    /// position. The lookup goes straight through
+    /// `TerminalSession::annotation_at_point` — no separate hit-test
+    /// cache — since each visible row contains at most one annotation
+    /// in SP-1 and the tree's `at_line` walk is O(matches).
+    fn update_hovered_annotation(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let next = self
+            .mouse_position_to_cell(position, window)
+            .and_then(|(col, row)| {
+                // 1-indexed → 0-indexed visual row; convert to LineCoord.
+                let row0 = row.saturating_sub(1) as u32;
+                let screen_row = self.session.viewport_row_offset().saturating_add(row0);
+                let line_coord = self.session.screen_row_to_line_coord(screen_row)?;
+                self.session
+                    .annotation_at_point(line_coord, col)
+                    .map(|(id, _)| id)
+            });
+        // Route through the public setter so the no-op short-circuit
+        // and `cx.notify()` live in exactly one place.
+        self.set_hovered_annotation(next, cx);
     }
 
     /// Recompute `hovered_url` based on the current cursor position and

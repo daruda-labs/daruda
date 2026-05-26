@@ -189,6 +189,12 @@ pub(crate) struct TerminalViewState {
     /// modifier.
     pub(crate) hovered_url: Option<super::HoveredUrl>,
 
+    /// Annotation overlay under the mouse pointer (SP-1). Drives the
+    /// hover-tint switch in the annotation paint pass. Updated by the
+    /// mouse-move hit test in `view/mouse.rs`; `None` when the cursor
+    /// is not over any annotation box.
+    pub(crate) hovered_annotation: Option<crate::session::interval_tree::MarkId>,
+
     /// Absolute screen row of the most recent prompt-jump target
     /// (FTCS A marks). Tracking the row keeps the cursor stable
     /// across `prompt_marks` evictions; manual scroll clears it so
@@ -249,6 +255,7 @@ impl TerminalViewState {
             last_known_cursor: None,
             hangul_composer: super::hangul_composer::HangulComposer::new(),
             hovered_url: None,
+            hovered_annotation: None,
             focused_prompt_row: None,
             focused_command_row: None,
             prompt_jump_flash_until: None,

@@ -1579,7 +1579,11 @@ dependencies = [
  "gpui",
  "portable-pty",
  "regex",
+ "serde",
+ "serde_json",
  "smallvec",
+ "tempfile",
+ "tracing",
  "unicode-width",
 ]
 

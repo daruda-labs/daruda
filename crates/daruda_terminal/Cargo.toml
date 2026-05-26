@@ -16,11 +16,15 @@ ghostty_vt = { path = "../ghostty_vt" }
 gpui = { workspace = true }
 portable-pty = "0.9"
 regex = "1.10"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 smallvec = { workspace = true }
+tracing = { workspace = true }
 unicode-width = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
 
 [[bench]]
 name = "render"

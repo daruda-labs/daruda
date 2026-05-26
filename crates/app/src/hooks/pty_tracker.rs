@@ -314,5 +314,4 @@ mod tests {
             assert!(!inner.panes.contains_key(&1));
         }
     }
-
 }

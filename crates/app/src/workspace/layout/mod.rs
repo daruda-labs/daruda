@@ -387,5 +387,4 @@ mod tests {
         dock.active_panel = 1;
         assert_eq!(dock.active_panel_name(), "Second");
     }
-
 }

@@ -2096,6 +2096,77 @@ pub fn error_modal_button_close() -> String {
     rust_i18n::t!("common.btn_close").into_owned()
 }
 
+// ----------------------------------------------------------------
+// Terminal annotations (SP-1)
+// ----------------------------------------------------------------
+
+/// Context-menu entry that opens the annotation create dialog.
+pub fn terminal_annotation_action_add() -> String {
+    rust_i18n::t!("terminal.annotation_action_add").into_owned()
+}
+
+/// Tooltip shown on the disabled "Add annotation" entry when the user
+/// has no single-line selection yet.
+pub fn terminal_annotation_action_add_disabled_tooltip() -> String {
+    rust_i18n::t!("terminal.annotation_action_add_disabled_tooltip").into_owned()
+}
+
+/// Context-menu entry that removes the annotation under the click.
+pub fn terminal_annotation_action_delete() -> String {
+    rust_i18n::t!("terminal.annotation_action_delete").into_owned()
+}
+
+/// Title of the annotation dialog when adding a new annotation.
+pub fn terminal_annotation_dialog_title_create() -> String {
+    rust_i18n::t!("terminal.annotation_dialog_title_create").into_owned()
+}
+
+/// Title of the annotation dialog when editing an existing annotation.
+pub fn terminal_annotation_dialog_title_edit() -> String {
+    rust_i18n::t!("terminal.annotation_dialog_title_edit").into_owned()
+}
+
+/// Placeholder shown inside the annotation-text input.
+pub fn terminal_annotation_placeholder() -> String {
+    rust_i18n::t!("terminal.annotation_placeholder").into_owned()
+}
+
+/// Toast/modal title when the workspace can no longer find the pane
+/// that an annotation operation targeted.
+pub fn terminal_annotation_err_pane_missing_title() -> String {
+    rust_i18n::t!("terminal.annotation_err_pane_missing_title").into_owned()
+}
+
+/// User-facing message body paired with
+/// [`terminal_annotation_err_pane_missing_title`].
+pub fn terminal_annotation_err_pane_missing_message() -> String {
+    rust_i18n::t!("terminal.annotation_err_pane_missing_message").into_owned()
+}
+
+/// Toast/modal title when the underlying session rejected an annotation
+/// mutation.
+pub fn terminal_annotation_err_operation_failed_title() -> String {
+    rust_i18n::t!("terminal.annotation_err_operation_failed_title").into_owned()
+}
+
+/// User-facing message body paired with
+/// [`terminal_annotation_err_operation_failed_title`].
+pub fn terminal_annotation_err_operation_failed_message() -> String {
+    rust_i18n::t!("terminal.annotation_err_operation_failed_message").into_owned()
+}
+
+/// Annotation dialog "Save" button — reuses the shared `common.btn_save`
+/// key but lives in the annotation namespace so future localizations can
+/// override the label without touching unrelated dialogs.
+pub fn annotation_dialog_save() -> String {
+    rust_i18n::t!("common.btn_save").into_owned()
+}
+
+/// Annotation dialog "Cancel" button — see [`annotation_dialog_save`].
+pub fn annotation_dialog_cancel() -> String {
+    rust_i18n::t!("common.btn_cancel").into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

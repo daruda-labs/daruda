@@ -873,7 +873,11 @@ diff --git a/bar.rs b/bar.rs
             path: "test.txt".into(),
             staged: false,
             file_status: None,
-            content: PaneFileContent::LoadedRaw { text, total_count, byte_truncated: false },
+            content: PaneFileContent::LoadedRaw {
+                text,
+                total_count,
+                byte_truncated: false,
+            },
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
             char_selection: None,
@@ -884,17 +888,21 @@ diff --git a/bar.rs b/bar.rs
     }
 
     fn diff_viewer(contents: &[&str]) -> PaneFileView {
-        let rows_all: Vec<VisualRow> = contents.iter().enumerate().map(|(i, s)| VisualRow {
-            kind: VisualRowKind::Context,
-            line_no_left: (i + 1).to_string(),
-            line_no_right: (i + 1).to_string(),
-            content: s.to_string(),
-            header_context: String::new(),
-            spans: Vec::new(),
-            word_changes: Vec::new(),
-        }).collect();
+        let rows_all: Vec<VisualRow> = contents
+            .iter()
+            .enumerate()
+            .map(|(i, s)| VisualRow {
+                kind: VisualRowKind::Context,
+                line_no_left: (i + 1).to_string(),
+                line_no_right: (i + 1).to_string(),
+                content: s.to_string(),
+                header_context: String::new(),
+                spans: Vec::new(),
+                word_changes: Vec::new(),
+            })
+            .collect();
         PaneFileView {
-            worktree_id: 0,
+            lane_id: 0,
             path: "test.diff".into(),
             staged: false,
             file_status: None,

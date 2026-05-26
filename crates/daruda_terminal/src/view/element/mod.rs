@@ -40,6 +40,16 @@ pub(super) struct TerminalPrepaintState {
     /// live across the entire scrollback. Only emitted when the
     /// scrollbar itself is visible.
     search_scrollbar_ticks: Vec<PaintQuad>,
+    /// Annotation overlay quads. Painted above terminal text but below
+    /// selection and cursor (spec §8 z-order:
+    /// cursor > selection > search > annotation > text).
+    annotation_quads: Vec<PaintQuad>,
+    /// Shaped first-line text for each annotation overlay box, paired
+    /// with the pixel origin where the text should paint. Shaped in
+    /// prepaint alongside the quads; painted in the paint phase after
+    /// the annotation background and border quads so the text sits on
+    /// top of the fill.
+    annotation_text_lines: Vec<(gpui::ShapedLine, gpui::Point<gpui::Pixels>)>,
 }
 
 pub(super) struct PreeditPostShift {
