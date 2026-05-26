@@ -118,6 +118,11 @@ impl TerminalView {
     /// is preserved. Sets `pending_refresh` so `viewport_lines` is rebuilt on
     /// the next render; without this, PTY echo dirty-row updates land on the
     /// wrong rows when the viewport is pinned above the bottom.
+    ///
+    /// `sync_viewport_scroll_tracking` is intentionally absent: this function
+    /// does not move the viewport, so there is no scroll delta to flush; the
+    /// pending delta from the user's last wheel scroll is preserved for the
+    /// output path.
     pub(super) fn send_input_parts(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
         if parts.is_empty() {
             return;

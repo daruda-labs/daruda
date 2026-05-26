@@ -455,6 +455,16 @@ impl TerminalView {
         self.sync_viewport_scroll_tracking();
     }
 
+    /// Release the viewport pin, clear `user_scrolled`, and snap the session
+    /// viewport to the bottom.  Shared by `check_prompt_arrived` (OSC 133 A
+    /// trigger) and `on_scroll_to_bottom` (explicit Cmd+End).
+    pub(super) fn snap_to_bottom(&mut self) {
+        self.state.viewport_pin.release();
+        self.state.user_scrolled = false;
+        let _ = self.session.scroll_viewport_bottom();
+        self.sync_viewport_scroll_tracking();
+    }
+
     /// Check whether a PromptStart (OSC 133 A) has arrived.  If so, clear
     /// `user_scrolled` and snap to bottom so the new shell prompt is always
     /// visible after a command completes.  Search anchors are still
@@ -466,10 +476,7 @@ impl TerminalView {
         if self.state.search_overlay || !self.state.search.query.is_empty() {
             return;
         }
-        self.state.viewport_pin.release();
-        self.state.user_scrolled = false;
-        let _ = self.session.scroll_viewport_bottom();
-        self.sync_viewport_scroll_tracking();
+        self.snap_to_bottom();
     }
 
     pub(super) fn apply_side_effects(&mut self, cx: &mut Context<Self>) {

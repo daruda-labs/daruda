@@ -214,10 +214,10 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.state.viewport_pin.release();
-        self.state.user_scrolled = false;
-        let _ = self.session.scroll_viewport_bottom();
-        self.sync_viewport_scroll_tracking();
+        self.snap_to_bottom();
+        // Snap to bottom discards the viewport window but not the selection —
+        // absolute ScreenPos coordinates remain valid until the rows are evicted.
+        self.state.pending_refresh_keep_selection = true;
         self.state.pending_refresh = true;
         cx.notify();
     }

@@ -404,13 +404,18 @@ Z-order — **do not paint in reverse**:
 | `tab` / `shift-tab` | Tab / TabPrev |
 | `cmd-=` / `cmd--` / `cmd-0` | ZoomIn / ZoomOut / ResetZoom |
 | `cmd-ctrl-f` | ToggleFullscreen |
+| `cmd-k` | ClearBuffer (wipe viewport + scrollback) |
+| `cmd-shift-k` | ClearScrollback (drop scrollback, keep viewport) |
+| `cmd-end` | ScrollToBottom (release pin, snap to bottom) |
 | `cmd-f` | SearchOpen |
+| `cmd-g` / `cmd-shift-g` | SearchNext / SearchPrev |
 | `escape` (search context) | SearchClose |
 | `enter` (search context) | SearchNext |
 | `shift-enter` (search context) | SearchPrev |
 | `backspace` (search context) | SearchBackspace |
 | `cmd-shift-up` / `cmd-shift-down` | PromptJumpPrev / PromptJumpNext |
 | `cmd-shift-alt-up` / `cmd-shift-alt-down` | CommandJumpPrev / CommandJumpNext |
+| `cmd-shift-c` | CopyLastCommandOutput |
 
 After `SearchOpen`, the `TerminalSearch` context is active and the
 keybindings above diverge accordingly.
