@@ -1429,12 +1429,17 @@ impl TerminalSession {
 
     /// Absolute line index of the topmost visible row.
     ///
-    /// This is an ever-increasing value: `line_buffer.overflow() +
-    /// viewport_row_offset()`. Use it to pin the viewport to a fixed reading
-    /// position — the value survives grid scrolls and `LineBuffer` captures
-    /// because overflow grows monotonically. Translate back to a current
-    /// screen row via [`Self::abs_to_screen_row`].
-    pub fn viewport_top_abs_y(&self) -> u64 {
+    /// Expressed as `line_buffer.overflow() + viewport_row_offset()`.
+    /// Capture this when the user scrolls and pass it to [`ViewportPin`] as
+    /// the anchor. During subsequent IND / SU grid scrolls, `viewport_row_offset`
+    /// increases as new rows are captured into `LineBuffer`, so the stored anchor
+    /// no longer matches the top-of-viewport — `restore_pinned_viewport` detects
+    /// the drift via [`Self::abs_to_screen_row`] and re-seeks. Conversely,
+    /// scrolling up (increasing `scroll_offset`) decreases this value, so it is
+    /// not monotone. Translate an anchor back to a current screen row with
+    /// [`Self::abs_to_screen_row`], which returns `None` once the row has been
+    /// evicted from the `LineBuffer` ring.
+    pub(crate) fn viewport_top_abs_y(&self) -> u64 {
         self.line_buffer
             .overflow()
             .saturating_add(self.viewport_row_offset() as u64)

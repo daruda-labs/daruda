@@ -36,6 +36,7 @@ TerminalView's GPUI rendering, input handling, and event dispatch.
 | `url.rs` | URL detection (`url_at_byte_index`, `url_range_at_column_in_line`) |
 | `search.rs` | literal / regex search, pure engine |
 | `bg_merge.rs` | background style-run RLE merge (`merge_bg_runs` → `BgSpan`) |
+| `viewport_pin.rs` | absolute-line anchor for viewport top — `ViewportPin`, `AbsLineIndex` |
 
 ### Shared helpers (split by role)
 

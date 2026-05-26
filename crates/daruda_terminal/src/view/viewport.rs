@@ -437,14 +437,13 @@ impl TerminalView {
     /// line at the viewport top. Handles grid scrolls (IND / SU) that push
     /// `viewport_row_offset` without changing `scroll_offset`.
     fn restore_pinned_viewport(&mut self) {
-        if !self.state.viewport_pin.is_pinned() {
-            return;
-        }
         let Some(anchor) = self.state.viewport_pin.anchor() else {
             return;
         };
         let Some(screen_row) = self.session.abs_to_screen_row(anchor) else {
-            // Anchor evicted from LineBuffer — fall back to staying put.
+            // Anchor evicted from LineBuffer — release the pin so
+            // is_pinned() no longer reports active for a dead anchor.
+            self.state.viewport_pin.release();
             return;
         };
         let current = self.session.viewport_row_offset();

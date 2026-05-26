@@ -18,13 +18,6 @@
 //! single source (here: the entity's `state` field, fed by config
 //! reload) is what keeps the four code paths from drifting against
 //! one another.
-//!
-//! Step 1 of the extraction migrates the Pitfall #8 quartet plus
-//! `background_alpha` (also paint-side primary). Subsequent commits
-//! pull in viewport / search / selection / IME / jump state. Each
-//! migration step preserves behaviour; the value comes from the
-//! cumulative slimming of `TerminalView` and the corresponding
-//! growth of fixture-free test surface.
 
 /// Shared paint+event state. New fields land here as they are
 /// migrated out of [`super::TerminalView`].

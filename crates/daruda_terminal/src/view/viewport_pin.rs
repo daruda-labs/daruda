@@ -3,9 +3,14 @@
 //!
 //! When the user scrolls up, the viewport is pinned to the absolute line index
 //! of the top row. Grid scrolls that occur during command execution (IND / SU)
-//! preserve the anchor so the user's reading position stays fixed. The pin is
-//! released only on an explicit user action (PTY input) or when the shell
-//! signals a new prompt (OSC 133 A / `PromptStart`).
+//! trigger `restore_pinned_viewport`, which re-seeks the anchor so the user's
+//! reading position stays fixed.
+//!
+//! The pin is released by:
+//! - OSC 133 A (`check_prompt_arrived`) — the shell signals a new prompt.
+//! - Alt-screen entry or exit — the screen buffer switches.
+//! - RIS (full terminal reset) — the session is torn down.
+//! - Explicit "scroll to bottom" action (to be wired in a later task).
 
 /// An ever-increasing absolute line index (`overflow + screen_row`).
 pub type AbsLineIndex = u64;
@@ -37,6 +42,7 @@ impl ViewportPin {
     }
 
     /// `true` when the viewport is locked to an absolute line.
+    #[allow(dead_code)]
     pub fn is_pinned(&self) -> bool {
         self.anchor.is_some()
     }
