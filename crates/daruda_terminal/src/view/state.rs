@@ -29,6 +29,11 @@
 /// Shared paint+event state. New fields land here as they are
 /// migrated out of [`super::TerminalView`].
 pub(crate) struct TerminalViewState {
+    // ---- Viewport pin ----
+    /// Absolute-line anchor set when the user manually scrolls up.
+    /// While pinned, PTY output must not pull the viewport back to the
+    /// bottom. Released when `check_prompt_arrived` fires (OSC 133 A).
+    pub(crate) viewport_pin: super::viewport_pin::ViewportPin,
     // ---- Pitfall #8: cell metrics ----
     //
     // `cell_metrics_at(window, &font, px(font_size))` is the only
@@ -228,6 +233,7 @@ impl TerminalViewState {
         background_alpha: f32,
     ) -> Self {
         Self {
+            viewport_pin: super::viewport_pin::ViewportPin::default(),
             font,
             font_size,
             vertical_spacing,
@@ -300,6 +306,7 @@ mod tests {
         // no selection, no IME, no overlays" — anything else would
         // make the entity show stale UI between PTY-output bursts.
         let s = fixture(13.0);
+        assert!(!s.viewport_pin.is_pinned());
         assert!(s.search.query.is_empty());
         assert!(!s.search_overlay);
         assert!(s.selection.is_none());

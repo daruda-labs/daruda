@@ -811,6 +811,9 @@ impl TerminalView {
         if self.session.viewport_row_offset() != offset_before {
             self.sync_viewport_scroll_tracking();
             self.apply_side_effects(cx);
+            self.state
+                .viewport_pin
+                .pin(self.session.viewport_top_abs_y());
             self.schedule_viewport_refresh(cx);
         }
 

@@ -406,11 +406,16 @@ impl TerminalView {
     /// - The user has manually scrolled away (`user_scrolled` is set).
     ///   The lock is cleared by `check_prompt_arrived()` when OSC 133 A
     ///   signals that a new shell prompt has appeared.
+    ///
+    /// When the viewport pin is active, restores the viewport to the anchored
+    /// absolute line so grid scrolls (IND / SU) do not drift the reading
+    /// position.
     pub(super) fn maybe_scroll_to_bottom_on_output(&mut self) {
         if self.state.search_overlay || !self.state.search.query.is_empty() {
             return;
         }
         if self.state.user_scrolled {
+            self.restore_pinned_viewport();
             return;
         }
         let offset = self.session.viewport_row_offset();
@@ -420,6 +425,29 @@ impl TerminalView {
             let _ = self.session.scroll_viewport_bottom();
             self.sync_viewport_scroll_tracking();
         }
+    }
+
+    /// If the viewport is pinned to an absolute line, scroll to keep that
+    /// line at the viewport top. Handles grid scrolls (IND / SU) that push
+    /// `viewport_row_offset` without changing `scroll_offset`.
+    fn restore_pinned_viewport(&mut self) {
+        if !self.state.viewport_pin.is_pinned() {
+            return;
+        }
+        let Some(anchor) = self.state.viewport_pin.anchor() else {
+            return;
+        };
+        let Some(screen_row) = self.session.abs_to_screen_row(anchor) else {
+            // Anchor evicted from LineBuffer — fall back to staying put.
+            return;
+        };
+        let current = self.session.viewport_row_offset();
+        if current == screen_row {
+            return;
+        }
+        let delta = screen_row as i32 - current as i32;
+        let _ = self.session.scroll_viewport(delta);
+        self.sync_viewport_scroll_tracking();
     }
 
     /// Check whether a PromptStart (OSC 133 A) has arrived.  If so, clear
@@ -433,6 +461,7 @@ impl TerminalView {
         if self.state.search_overlay || !self.state.search.query.is_empty() {
             return;
         }
+        self.state.viewport_pin.release();
         self.state.user_scrolled = false;
         let _ = self.session.scroll_viewport_bottom();
         self.sync_viewport_scroll_tracking();

@@ -23,6 +23,7 @@ mod text_edit;
 pub(crate) mod text_metrics;
 mod url;
 mod viewport;
+pub(crate) mod viewport_pin;
 
 use super::TerminalSession;
 use gpui::{App, Context, FocusHandle, KeyBinding, Pixels, SharedString, Subscription, actions};
