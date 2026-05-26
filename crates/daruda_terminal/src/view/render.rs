@@ -22,7 +22,7 @@ impl TerminalView {
             Some(
                 cx.on_focus_in(&self.focus_handle, window, |this, _window, cx| {
                     if this.session.focus_event_enabled() {
-                        this.send_input_parts(&[crate::ansi::FOCUS_IN], cx);
+                        this.send_protocol_parts(&[crate::ansi::FOCUS_IN], cx);
                     }
                 }),
             );
@@ -33,7 +33,7 @@ impl TerminalView {
             // partial syllable would be silently dropped when switching panes.
             this.flush_hangul(cx);
             if this.session.focus_event_enabled() {
-                this.send_input_parts(&[crate::ansi::FOCUS_OUT], cx);
+                this.send_protocol_parts(&[crate::ansi::FOCUS_OUT], cx);
             }
         }));
 

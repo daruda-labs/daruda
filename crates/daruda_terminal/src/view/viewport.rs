@@ -2,6 +2,7 @@ use gpui::Context;
 
 use super::TerminalView;
 use super::selection::ScreenPos;
+use super::selection_policy::{self, InvalidationReason};
 use crate::session::TerminalSession;
 
 pub(super) fn split_viewport_lines(viewport: &str) -> Vec<String> {
@@ -165,26 +166,28 @@ impl TerminalView {
 
     pub(super) fn reconcile_dirty_viewport_after_output(&mut self) {
         let delta = self.session.take_viewport_scroll_delta();
+        let dirty = self.session.take_dirty_viewport_rows();
+        let grid_events = self.session.take_grid_events();
+        let viewport_height = self.session.rows();
+
+        // iTerm2-style selection policy: selection survives partial dirty
+        // repaints (it lives in absolute screen coordinates). Clear only on
+        // full-viewport repaint, alt-screen toggle, or RIS.
+        let reason = selection_policy::invalidation_reason(&dirty, viewport_height, &grid_events);
+        if reason != InvalidationReason::None {
+            self.state.selection = None;
+        }
 
         // Alacritty/iTerm2 convention: any viewport scroll (IND, RI, SU, SD)
         // conservatively invalidates the whole frame. Partial rotate + dirty
         // row merge is fragile because ghostty_vt's dirty indices may refer to
         // pre- or post-scroll coordinates, causing ghost lines on vi `o`/`O`
         // at the last line.
-        //
-        // Selection uses absolute screen coordinates (ScreenPos), so it
-        // survives a viewport-window shift.  We only clear it when the
-        // content at its rows actually changed — detected via dirty rows.
-        // For the delta path we conservatively clear selection only when
-        // the dirty rows (discard them as unusable) overlap the selection.
         if delta != 0 {
-            let dirty = self.session.take_dirty_viewport_rows();
-            self.clear_selection_if_overlaps_screen_rows(&dirty);
             self.refresh_viewport_preserving_selection();
             return;
         }
 
-        let dirty = self.session.take_dirty_viewport_rows();
         if dirty.is_empty() {
             return;
         }
@@ -192,9 +195,8 @@ impl TerminalView {
         // Heuristic: large dirty sets typically mean IL/DL or region scroll.
         // Fall back to a full refresh instead of per-row dump to avoid stale
         // cells below the cursor (vi insert-mode Enter case).
-        let rows = self.session.rows() as usize;
+        let rows = viewport_height as usize;
         if rows > 0 && dirty.len() * 2 >= rows {
-            self.clear_selection_if_overlaps_screen_rows(&dirty);
             self.refresh_viewport_preserving_selection();
             return;
         }
@@ -328,31 +330,6 @@ impl TerminalView {
         out
     }
 
-    /// Clear the selection only when one of the given dirty viewport rows
-    /// (converted to absolute screen rows) overlaps the selection range.
-    pub(super) fn clear_selection_if_overlaps_screen_rows(&mut self, dirty_rows: &[u16]) {
-        let Some(sel) = self.state.selection else {
-            return;
-        };
-        let Some((start, end)) = sel.normalized(&self.session) else {
-            return;
-        };
-        let Some(start_row) = start.screen_row(&self.session) else {
-            return;
-        };
-        let Some(end_row) = end.screen_row(&self.session) else {
-            return;
-        };
-        let vp_offset = self.session.viewport_row_offset();
-        let overlaps = dirty_rows.iter().any(|&r| {
-            let sr = vp_offset + r as u32;
-            sr >= start_row && sr <= end_row
-        });
-        if overlaps {
-            self.state.selection = None;
-        }
-    }
-
     pub(super) fn apply_dirty_viewport_rows(&mut self, dirty_rows: &[u16]) -> bool {
         if dirty_rows.is_empty() {
             return false;
@@ -400,10 +377,10 @@ impl TerminalView {
         self.state.viewport_total_len =
             Self::compute_viewport_total_len(&self.state.viewport_lines);
 
-        // Only clear selection when the dirty rows overlap it.  Selection is
-        // stored in absolute screen coordinates so rows outside the dirty set
-        // are still valid.
-        self.clear_selection_if_overlaps_screen_rows(dirty_rows);
+        // Selection invalidation is decided centrally in
+        // `reconcile_dirty_viewport_after_output` via the iTerm2 policy
+        // (full-viewport / alt-screen / RIS). Partial dirty preserves the
+        // selection here — its absolute screen coordinates remain valid.
 
         if !self.state.search.query.is_empty() {
             self.recompute_search_matches_with(false);

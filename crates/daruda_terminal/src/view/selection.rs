@@ -266,6 +266,7 @@ impl ScreenPos {
     /// Current-frame screen row, used by callers that only care about
     /// the row (e.g. autoscroll, hit-tests). Returns `None` when the
     /// underlying scrollback line has been evicted.
+    #[cfg(test)]
     pub(super) fn screen_row(&self, session: &TerminalSession) -> Option<u32> {
         self.resolve(session).map(|(row, _)| row)
     }

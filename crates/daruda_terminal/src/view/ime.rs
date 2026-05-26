@@ -113,12 +113,31 @@ impl TerminalView {
         }
     }
 
+    /// Send user-originated bytes to the PTY (keystrokes, IME commit, paste).
+    /// Snaps the viewport to the bottom because the user expects to see the
+    /// shell's echo and response.
     pub(super) fn send_input_parts(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
         if parts.is_empty() {
             return;
         }
 
         self.scroll_to_bottom_on_input();
+        self.dispatch_parts_to_pty(parts, cx);
+    }
+
+    /// Send terminal-protocol bytes that were not triggered by user input
+    /// (focus reporting, mouse reporting replies, status responses). Must not
+    /// touch viewport scroll state — the user's scrollback position is
+    /// preserved across focus changes and other protocol traffic.
+    pub(super) fn send_protocol_parts(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
+        if parts.is_empty() {
+            return;
+        }
+
+        self.dispatch_parts_to_pty(parts, cx);
+    }
+
+    fn dispatch_parts_to_pty(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
         cx.notify();
 
         if let Some(input) = self.input.as_ref() {

@@ -100,6 +100,10 @@ unsafe extern "C" {
         rows: u16,
     ) -> ghostty_vt_bytes_t;
 
+    pub fn ghostty_vt_terminal_take_grid_events(
+        terminal: *mut core::ffi::c_void,
+    ) -> ghostty_vt_bytes_t;
+
     pub fn ghostty_vt_terminal_cursor_style(terminal: *mut core::ffi::c_void) -> u8;
     pub fn ghostty_vt_terminal_cursor_visible(terminal: *mut core::ffi::c_void) -> bool;
     pub fn ghostty_vt_terminal_take_bell(terminal: *mut core::ffi::c_void) -> bool;

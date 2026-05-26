@@ -1378,6 +1378,13 @@ impl TerminalSession {
         self.terminal.take_viewport_scroll_delta()
     }
 
+    /// Drain one-shot grid events (alt-screen toggle, RIS) recorded by
+    /// ghostty since the last call. Used by the viewport reconcile path
+    /// to decide whether to invalidate selection.
+    pub fn take_grid_events(&mut self) -> Vec<ghostty_vt::GridEvent> {
+        self.terminal.take_grid_events()
+    }
+
     /// DECRQM parameter value for the given private mode number.
     ///
     /// Returns: `0` = not recognised, `1` = set, `2` = reset.

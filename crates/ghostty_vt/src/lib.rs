@@ -82,6 +82,32 @@ pub enum WrapKind {
     Soft,
 }
 
+/// One-shot grid event drained by [`Terminal::take_grid_events`].
+///
+/// These signal screen-affecting transitions that consumers (terminal
+/// view, selection layer, etc.) need to react to once per occurrence:
+///
+/// - [`GridEvent::AltScreenToggle`]: alt-screen entered/exited via
+///   DECSET/DECRST 47, 1047, or 1049. `entered = true` means the
+///   alternate screen is now active.
+/// - [`GridEvent::Ris`]: hard reset (ESC c). Implies alt-screen is also
+///   left if it was active — that exit is reported as a separate
+///   `AltScreenToggle { entered: false }` immediately before the `Ris`
+///   event.
+///
+/// Tag bytes on the FFI wire must stay in sync with `GRID_EVENT_*` in
+/// `crates/ghostty_vt_sys/zig/lib.zig`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridEvent {
+    AltScreenToggle { entered: bool },
+    Ris,
+}
+
+const GRID_EVENT_TAG_ALT_SCREEN_ENTER: u8 = 0;
+const GRID_EVENT_TAG_ALT_SCREEN_EXIT: u8 = 1;
+const GRID_EVENT_TAG_RIS: u8 = 2;
+const GRID_EVENT_RECORD_BYTES: usize = 2;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct KeyModifiers {
     pub shift: bool,
@@ -424,6 +450,49 @@ impl Terminal {
         // SAFETY: paired free for the buffer parsed above (invariant #3).
         unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
         Ok(out)
+    }
+
+    /// Drain pending [`GridEvent`]s recorded by alt-screen mode changes
+    /// and hard resets since the last call. Unknown tag bytes are
+    /// skipped silently so future event kinds added on the Zig side do
+    /// not crash older callers.
+    ///
+    /// Callers are expected to drain this regularly (e.g. after each
+    /// frame's worth of feed). The internal buffer on the Zig side
+    /// otherwise grows with every alt-screen toggle and RIS.
+    pub fn take_grid_events(&mut self) -> Vec<GridEvent> {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        let bytes =
+            unsafe { ghostty_vt_sys::ghostty_vt_terminal_take_grid_events(self.ptr.as_ptr()) };
+        // Zig contract (`ghostty_vt_terminal_take_grid_events`): `ptr`
+        // is null iff `len` is 0, so a single null check covers both
+        // the "no events" and the allocation-failure paths.
+        if bytes.ptr.is_null() {
+            return Vec::new();
+        }
+        // Truncate any partial trailing record so the loop never reads
+        // past the buffer; record size is constant 2 bytes.
+        let usable = bytes.len - (bytes.len % GRID_EVENT_RECORD_BYTES);
+        // SAFETY: non-null buffer with C-reported length; `usable` is
+        // a multiple of `GRID_EVENT_RECORD_BYTES` and `<= bytes.len`
+        // (invariant #3).
+        let slice = unsafe { std::slice::from_raw_parts(bytes.ptr, usable) };
+        let mut out = Vec::with_capacity(usable / GRID_EVENT_RECORD_BYTES);
+        for chunk in slice.chunks_exact(GRID_EVENT_RECORD_BYTES) {
+            match chunk[0] {
+                GRID_EVENT_TAG_ALT_SCREEN_ENTER => {
+                    out.push(GridEvent::AltScreenToggle { entered: true });
+                }
+                GRID_EVENT_TAG_ALT_SCREEN_EXIT => {
+                    out.push(GridEvent::AltScreenToggle { entered: false });
+                }
+                GRID_EVENT_TAG_RIS => out.push(GridEvent::Ris),
+                _ => {}
+            }
+        }
+        // SAFETY: paired free for the buffer parsed above (invariant #3).
+        unsafe { ghostty_vt_sys::ghostty_vt_bytes_free(bytes) };
+        out
     }
 
     /// Returns cursor style code (DECSCUSR value).

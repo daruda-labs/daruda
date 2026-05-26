@@ -15,6 +15,7 @@ mod render;
 mod search;
 mod search_bar;
 pub(super) mod selection;
+mod selection_policy;
 pub(crate) mod state;
 mod style;
 mod text_edit;

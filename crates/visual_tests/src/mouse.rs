@@ -179,13 +179,17 @@ async fn test_selection_survives_output_on_other_row(cx: &mut TestAppContext) {
     );
 }
 
-/// Selection must be cleared when the output overwrites the selected row.
+/// Selection survives a partial dirty repaint on its own row.
 ///
-/// Counterpart to `test_selection_survives_output_on_other_row`: when
-/// ghostty marks the selection's row dirty, `clear_selection_if_overlaps_
-/// screen_rows` must fire and remove the selection.
+/// Under the iTerm2 invalidation policy adopted in
+/// `view::selection_policy::invalidation_reason`, a single-row dirty event
+/// no longer clears the selection — only full-viewport repaints,
+/// alt-screen toggles, and RIS do. Selection lives in absolute screen
+/// coordinates, so the user-visible highlight stays anchored even when
+/// the cells beneath it are rewritten by the shell (the common case
+/// while a TUI like Claude Code redraws its input box).
 #[gpui::test]
-async fn test_selection_cleared_when_selected_row_is_dirtied(cx: &mut TestAppContext) {
+async fn test_selection_survives_partial_dirty_on_selected_row(cx: &mut TestAppContext) {
     let (view, cx) = open_terminal(cx);
 
     feed(
@@ -212,8 +216,8 @@ async fn test_selection_cleared_when_selected_row_is_dirtied(cx: &mut TestAppCon
     queue_output(&view, cx, b"\x1b[1;1HXXXXXXXXX");
 
     assert!(
-        !view.update(cx, |tv, _| tv.has_selection()),
-        "selection must be cleared when its row is overwritten"
+        view.update(cx, |tv, _| tv.has_selection()),
+        "selection must survive a partial dirty repaint on its row"
     );
 }
 

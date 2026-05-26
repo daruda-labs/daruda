@@ -302,48 +302,10 @@ fn empty_selection_produces_no_copy_text() {
     assert!(sel.is_empty());
 }
 
-// ----- Selection survivability across dirty rows ----------------
-
-#[test]
-fn selection_survives_dirty_rows_outside_selection_range() {
-    use super::ByteSelection;
-    use super::viewport::split_viewport_lines;
-
-    // Simulates the clear_selection_if_overlaps_screen_rows logic:
-    // selection on screen rows 10..=12, dirty row 5 → no overlap → kept.
-    let sel = ByteSelection::linear(ScreenPos::viewport(10, 0), ScreenPos::viewport(12, 5));
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
-    let (start, end) = sel.normalized(&session).unwrap();
-    let vp_offset = 0u32;
-    let dirty_rows: &[u16] = &[5]; // row 5 is outside 10..=12
-    let start_row = start.screen_row(&session).unwrap();
-    let end_row = end.screen_row(&session).unwrap();
-    let overlaps = dirty_rows.iter().any(|&r| {
-        let sr = vp_offset + r as u32;
-        sr >= start_row && sr <= end_row
-    });
-    assert!(!overlaps, "dirty row outside selection should not clear it");
-
-    // Confirm split_viewport_lines is importable (sanity)
-    let _ = split_viewport_lines("a\nb\n");
-}
-
-#[test]
-fn selection_cleared_when_dirty_row_overlaps() {
-    // Selection on rows 10..=12, dirty row 11 → overlaps → should clear.
-    let sel = ByteSelection::linear(ScreenPos::viewport(10, 0), ScreenPos::viewport(12, 5));
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
-    let (start, end) = sel.normalized(&session).unwrap();
-    let vp_offset = 0u32;
-    let dirty_rows: &[u16] = &[11];
-    let start_row = start.screen_row(&session).unwrap();
-    let end_row = end.screen_row(&session).unwrap();
-    let overlaps = dirty_rows.iter().any(|&r| {
-        let sr = vp_offset + r as u32;
-        sr >= start_row && sr <= end_row
-    });
-    assert!(overlaps, "dirty row inside selection should clear it");
-}
+// Note: the prior "selection survives/cleared on dirty-row overlap" tests
+// were tied to the dirty-overlap policy that has been replaced with the
+// iTerm2 invalidation policy. See `view::selection_policy::tests` for the
+// canonical coverage of partial / full-viewport / alt-screen / RIS cases.
 
 // ----- Stage 2a: SelectionMode / Block selection state ---------
 

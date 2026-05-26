@@ -5,6 +5,14 @@ const csi = @import("ghostty_src/terminal/csi.zig");
 
 const Allocator = std.mem.Allocator;
 
+// Grid event discriminator bytes returned by
+// `ghostty_vt_terminal_take_grid_events`. Each event is encoded as a
+// 2-byte record `[tag, reserved]`. Keep these in sync with
+// `GridEventTag` on the Rust side (`crates/ghostty_vt/src/lib.rs`).
+const GRID_EVENT_ALT_SCREEN_ENTER: u8 = 0;
+const GRID_EVENT_ALT_SCREEN_EXIT: u8 = 1;
+const GRID_EVENT_RIS: u8 = 2;
+
 const TerminalHandle = struct {
     alloc: Allocator,
     terminal: terminal.Terminal,
@@ -16,6 +24,8 @@ const TerminalHandle = struct {
     has_viewport_top_y_screen: bool,
     cursor_style_code: u8,
     bell_pending: bool,
+    grid_events: std.ArrayList(u8),
+    on_alt_screen: bool,
 
     fn init(alloc: Allocator, cols: u16, rows: u16, max_scrollback: usize) !*TerminalHandle {
         const handle = try alloc.create(TerminalHandle);
@@ -42,6 +52,8 @@ const TerminalHandle = struct {
             .has_viewport_top_y_screen = true,
             .cursor_style_code = 0,
             .bell_pending = false,
+            .grid_events = std.ArrayList(u8).init(alloc),
+            .on_alt_screen = false,
         };
         handle.handler.terminal = &handle.terminal;
         handle.stream = terminal.Stream(*Handler).init(&handle.handler);
@@ -52,7 +64,16 @@ const TerminalHandle = struct {
     fn deinit(self: *TerminalHandle) void {
         self.stream.deinit();
         self.terminal.deinit(self.alloc);
+        self.grid_events.deinit();
         self.alloc.destroy(self);
+    }
+
+    fn pushGridEvent(self: *TerminalHandle, tag: u8) void {
+        self.grid_events.append(tag) catch return;
+        self.grid_events.append(0) catch {
+            // Roll back the tag byte so events stay 2-byte aligned.
+            _ = self.grid_events.pop();
+        };
     }
 };
 
@@ -280,7 +301,18 @@ const Handler = struct {
     }
 
     pub fn fullReset(self: *Handler) !void {
+        const handle: *TerminalHandle = @fieldParentPtr("handler", self);
         self.terminal.fullReset();
+        // RIS (ESC c) clears scrollback and resets every screen-affecting
+        // mode, including alt-screen → primary; record both transitions.
+        // Assumes ghostty's terminal.fullReset() does not internally call
+        // setMode; otherwise the implicit ALT_SCREEN_EXIT below would
+        // double-fire.
+        if (handle.on_alt_screen) {
+            handle.pushGridEvent(GRID_EVENT_ALT_SCREEN_EXIT);
+            handle.on_alt_screen = false;
+        }
+        handle.pushGridEvent(GRID_EVENT_RIS);
     }
 
     pub fn setMode(self: *Handler, mode: terminal.Mode, enabled: bool) !void {
@@ -294,10 +326,40 @@ const Handler = struct {
             }
         }
 
+        const handle: *TerminalHandle = @fieldParentPtr("handler", self);
         switch (mode) {
-            .alt_screen_legacy => self.terminal.switchScreenMode(.@"47", enabled),
-            .alt_screen => self.terminal.switchScreenMode(.@"1047", enabled),
-            .alt_screen_save_cursor_clear_enter => self.terminal.switchScreenMode(.@"1049", enabled),
+            .alt_screen_legacy => {
+                self.terminal.switchScreenMode(.@"47", enabled);
+                // `on_alt_screen` is shared across all three alt-screen mode variants
+                // (47, 1047, 1049); mixing them therefore suppresses redundant transitions.
+                if (enabled != handle.on_alt_screen) {
+                    handle.pushGridEvent(if (enabled)
+                        GRID_EVENT_ALT_SCREEN_ENTER
+                    else
+                        GRID_EVENT_ALT_SCREEN_EXIT);
+                    handle.on_alt_screen = enabled;
+                }
+            },
+            .alt_screen => {
+                self.terminal.switchScreenMode(.@"1047", enabled);
+                if (enabled != handle.on_alt_screen) {
+                    handle.pushGridEvent(if (enabled)
+                        GRID_EVENT_ALT_SCREEN_ENTER
+                    else
+                        GRID_EVENT_ALT_SCREEN_EXIT);
+                    handle.on_alt_screen = enabled;
+                }
+            },
+            .alt_screen_save_cursor_clear_enter => {
+                self.terminal.switchScreenMode(.@"1049", enabled);
+                if (enabled != handle.on_alt_screen) {
+                    handle.pushGridEvent(if (enabled)
+                        GRID_EVENT_ALT_SCREEN_ENTER
+                    else
+                        GRID_EVENT_ALT_SCREEN_EXIT);
+                    handle.on_alt_screen = enabled;
+                }
+            },
             else => {},
         }
     }
@@ -842,6 +904,24 @@ export fn ghostty_vt_terminal_take_dirty_viewport_rows(
     }
 
     const slice = out.toOwnedSlice() catch return .{ .ptr = null, .len = 0 };
+    return .{ .ptr = slice.ptr, .len = slice.len };
+}
+
+/// Drain pending grid events accumulated by mode/reset handlers. Each
+/// event is encoded as a 2-byte record `[tag, 0]` where `tag` is one of
+/// `GRID_EVENT_ALT_SCREEN_ENTER`, `GRID_EVENT_ALT_SCREEN_EXIT`, or
+/// `GRID_EVENT_RIS`. Returns an empty buffer when no events are pending.
+export fn ghostty_vt_terminal_take_grid_events(
+    terminal_ptr: ?*anyopaque,
+) callconv(.C) ghostty_vt_bytes_t {
+    if (terminal_ptr == null) return .{ .ptr = null, .len = 0 };
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+
+    if (handle.grid_events.items.len == 0) {
+        return .{ .ptr = null, .len = 0 };
+    }
+
+    const slice = handle.grid_events.toOwnedSlice() catch return .{ .ptr = null, .len = 0 };
     return .{ .ptr = slice.ptr, .len = slice.len };
 }
 
