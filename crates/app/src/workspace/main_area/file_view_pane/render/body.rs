@@ -87,7 +87,7 @@ pub(super) fn render_file_viewer_body(
             .child(strings::file_viewer_deleted())
             .into_any_element(),
 
-        PaneFileContent::LoadedRaw { .. } => frame
+        PaneFileContent::LoadedRaw => frame
             .id("file-viewer-body")
             .child(crate::ui::file_viewer_editor(editor_state))
             .into_any_element(),

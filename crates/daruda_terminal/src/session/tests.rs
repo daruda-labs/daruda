@@ -1545,3 +1545,51 @@ fn prompt_mark_abs_y_accounts_for_in_flight_scroll_before_osc() {
         "OSC fired on viewport row 2 ('p' line) — must not point at a scrolled row"
     );
 }
+
+/// Regression: daruda's own scrollback (`LineBuffer`) must retain up to
+/// `max_scrollback` logical lines, independent of ghostty's small transient
+/// ring. Feeding 5_000 lines one-at-a-time (well above the ring, below the
+/// 10k cap) must leave every scrolled-off line in the buffer.
+///
+/// Before the tracked-pin cursor fix, capture used `viewport_row_offset()`
+/// (ghostty's retained scrollback depth, not a monotonic counter); once that
+/// saturated, the capture cursor froze and `LineBuffer` stopped growing at
+/// ~1_000 lines, silently dropping the rest (overflow stayed 0).
+#[test]
+fn line_buffer_retains_scrollback_beyond_ghostty_ring() {
+    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    const N: usize = 5_000; // 80x24 grid, 10k cap
+    for i in 0..N {
+        session.feed(format!("LINE{i:06}\r\n").as_bytes()).unwrap();
+    }
+
+    let lb = session.line_buffer();
+    let texts: Vec<String> = (0..lb.len())
+        .filter_map(|idx| lb.get(idx).map(|l| l.text.clone()))
+        .collect();
+
+    // None of the fed lines reached the 10k cap, so nothing was evicted.
+    assert_eq!(
+        lb.overflow(),
+        0,
+        "no line should be evicted below the {N} < 10k cap"
+    );
+
+    // Every line that scrolled off the live grid must survive in scrollback.
+    // Leave a 32-row margin at the top for grid / partial-tail boundary fuzz.
+    let mut missing = Vec::new();
+    for i in 0..N.saturating_sub(32) {
+        let needle = format!("LINE{i:06}");
+        if !texts.iter().any(|t| t.contains(&needle)) {
+            missing.push(i);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "lost {} of {N} scrolled-off lines (effective scrollback froze at lb.len()={}); \
+         first 5 missing = {:?}",
+        missing.len(),
+        lb.len(),
+        missing.iter().take(5).collect::<Vec<_>>(),
+    );
+}

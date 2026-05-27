@@ -192,24 +192,28 @@ pub struct TerminalSession {
 }
 
 /// Rows ghostty retains as a transient buffer so `capture_scrolled_out`
-/// can read a row after the feed that evicted it from the live viewport
-/// but before the next feed evicts it from ghostty too. Daruda's own
-/// scrollback lives in `LineBuffer`; ghostty's tiny ring exists purely
-/// to bridge "row scrolled out of live viewport" → "row copied into
-/// LineBuffer". Sized as `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)`
-/// in `new()` so taller terminals always have at least a viewport's
-/// worth of headroom.
+/// can read a row after the feed that scrolled it off the active area but
+/// before the next feed evicts it from ghostty too. Daruda's own scrollback
+/// lives in `LineBuffer`; ghostty's ring exists purely to bridge "row
+/// scrolled out of the live grid" → "row copied into LineBuffer". Sized as
+/// `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)` in `new()` so taller
+/// terminals always have at least a viewport's worth of headroom.
+///
+/// `capture_scrolled_out` tracks how many rows scrolled via a monotonic
+/// tracked-pin counter (`Terminal::take_scrolled_rows`), so steady-state
+/// retention is NOT bounded by this ring — `LineBuffer` grows to its own
+/// `max_scrollback`. This ring only bounds a single oversized `feed()`:
 ///
 /// LIMITATION: a single `feed()` that scrolls more rows than
-/// `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)` out of the viewport
-/// will lose the oldest ones (they evict from ghostty before
-/// `capture_scrolled_out` runs at the end of the feed). For typical
-/// interactive use (one PTY chunk per frame) this is harmless; for
-/// bulk output (`cat large_file`) the oldest lines of any feed batch
-/// may be lost. A future improvement: invoke `capture_scrolled_out`
-/// from within ghostty's eviction hook so no row can be evicted
-/// without being snapshotted first.
-const GHOSTTY_TRANSIENT_SCROLLBACK: usize = 64;
+/// `max(GHOSTTY_TRANSIENT_SCROLLBACK, rows * 2)` out of the active area
+/// loses the oldest ones (they evict from ghostty before
+/// `capture_scrolled_out` runs at the end of the feed). Sized to absorb a
+/// typical interactive burst (tool output, a screenful of paste) in one
+/// 16 ms frame; only a pathological bulk dump (`cat huge_file`) in a single
+/// feed still drops its oldest lines. A future improvement: invoke
+/// `capture_scrolled_out` from within ghostty's eviction hook so no row can
+/// be evicted without being snapshotted first (iTerm2's synchronous model).
+const GHOSTTY_TRANSIENT_SCROLLBACK: usize = 2048;
 
 impl TerminalSession {
     pub fn new(config: TerminalConfig) -> Result<Self, Error> {
@@ -998,14 +1002,17 @@ impl TerminalSession {
         self.clear_line_buffer_and_shift_marks();
     }
 
-    /// Snapshot every row that has scrolled out of the live viewport
-    /// since the last call into `line_buffer`. Wrap-continuations
-    /// (DECAWM soft-wrap) merge into the same logical line so the
-    /// scrollback stores joined text irrespective of the original
-    /// physical row width.
+    /// Snapshot every row that has scrolled off the active area since the
+    /// last call into `line_buffer`. Wrap-continuations (DECAWM soft-wrap)
+    /// merge into the same logical line so the scrollback stores joined text
+    /// irrespective of the original physical row width.
     ///
-    /// Idempotent fast path: if `viewport_row_offset` has not advanced
-    /// past `last_captured_abs_row`, returns without dumping.
+    /// The newly-scrolled row count comes from `Terminal::take_scrolled_rows`
+    /// (a monotonic tracked-pin delta), so capture keeps advancing even after
+    /// ghostty's bounded scrollback ring saturates; `LineBuffer` grows to its
+    /// own `max_scrollback`. `last_captured_abs_row` survives only as the
+    /// bounded marker `sync_after_ghostty_scrollback_shrink` compares against
+    /// to detect a `\x1b[3J` / RIS scrollback wipe.
     fn capture_scrolled_out(&mut self) {
         // Capture is meaningless while ghostty is rendering into the
         // alt-screen buffer — those rows are by definition transient
@@ -1015,10 +1022,13 @@ impl TerminalSession {
             return;
         }
         let viewport_top = self.terminal.viewport_row_offset();
-        let start = self
-            .last_captured_abs_row
-            .map(|r| r.saturating_add(1))
-            .unwrap_or(0);
+        // Rows that scrolled off the active area since the previous capture.
+        // Backed by a tracked pin in ghostty, so this stays accurate after the
+        // transient ring saturates — where `viewport_row_offset` plateaus and
+        // the old `last_captured + 1` cursor froze, capping real scrollback at
+        // the ring size instead of `max_scrollback`.
+        let scrolled = self.terminal.take_scrolled_rows();
+        let start = viewport_top.saturating_sub(scrolled);
         if start >= viewport_top {
             return;
         }
@@ -1097,18 +1107,24 @@ impl TerminalSession {
         &self.interval_tree
     }
 
-    /// Detect a `\x1b[3J` (or equivalent) ghostty-side scrollback wipe
-    /// and mirror it into `line_buffer`. We don't parse the CSI ED
-    /// directly — we infer the wipe from ghostty's
-    /// `viewport_row_offset` dropping below the highest row we've
-    /// already captured. That's the only way for ghostty's scrollback
-    /// to shrink between feeds in a primary-screen session, so the
-    /// inference is unambiguous.
+    /// Detect a `\x1b[3J` / RIS ghostty-side scrollback wipe and mirror it
+    /// into `line_buffer`. We don't parse the CSI ED directly — we infer the
+    /// wipe from ghostty's scrollback depth (`viewport_row_offset`) dropping
+    /// to zero while the active grid keeps content. A clear is the only thing
+    /// that empties scrollback; a routine page-prune (ghostty drops whole
+    /// pages, not single rows, so the depth sawtooths by ~one page) never
+    /// reaches zero, so gating on zero avoids the false wipe that otherwise
+    /// capped real scrollback at the ring/page size.
+    ///
+    /// The `last_captured_abs_row` guard skips the check right after a reset
+    /// (alt-screen entry / explicit clear set it to `None`): on the matching
+    /// alt-screen exit the primary scrollback is legitimately empty, and we
+    /// must not mistake that for a wipe of the preserved `line_buffer`.
     fn sync_after_ghostty_scrollback_shrink(&mut self) {
-        let Some(last) = self.last_captured_abs_row else {
+        if self.last_captured_abs_row.is_none() {
             return;
-        };
-        if self.terminal.viewport_row_offset() <= last {
+        }
+        if self.terminal.viewport_row_offset() == 0 && !self.line_buffer.is_empty() {
             self.clear_line_buffer_and_shift_marks();
         }
     }

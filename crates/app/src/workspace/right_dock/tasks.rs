@@ -39,7 +39,7 @@ use gpui::{
     AnyElement, ClickEvent, Context, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*,
     px,
 };
-use gpui_component::Sizable as _;
+use crate::ui::Sizable as _;
 
 use super::super::Workspace;
 use super::super::layout::Dock;

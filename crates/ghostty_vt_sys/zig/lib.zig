@@ -26,6 +26,13 @@ const TerminalHandle = struct {
     bell_pending: bool,
     grid_events: std.ArrayList(u8),
     on_alt_screen: bool,
+    /// Tracked pin at the active-area top as of the last
+    /// `ghostty_vt_terminal_take_scrolled_rows` call. ghostty keeps it valid
+    /// across scrollback pruning, resize, and RIS (the reset repositions it),
+    /// so the distance from it to the current active-area top yields a true
+    /// monotonic per-feed scroll count even after the bounded scrollback ring
+    /// saturates. `null` until the first call.
+    capture_watermark: ?*terminal.Pin,
 
     fn init(alloc: Allocator, cols: u16, rows: u16, max_scrollback: usize) !*TerminalHandle {
         const handle = try alloc.create(TerminalHandle);
@@ -54,6 +61,7 @@ const TerminalHandle = struct {
             .bell_pending = false,
             .grid_events = std.ArrayList(u8).init(alloc),
             .on_alt_screen = false,
+            .capture_watermark = null,
         };
         handle.handler.terminal = &handle.terminal;
         handle.stream = terminal.Stream(*Handler).init(&handle.handler);
@@ -972,6 +980,41 @@ export fn ghostty_vt_terminal_viewport_row_offset(terminal_ptr: ?*anyopaque) cal
     const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
     const tl = handle.terminal.screen.pages.getTopLeft(.viewport);
     return pinScreenRow(tl);
+}
+
+/// Number of rows that scrolled off the active area into scrollback history
+/// since the previous call (0 on the first call after a reset window).
+///
+/// Implemented with a tracked pin ("capture watermark") parked at the
+/// active-area top. Because ghostty repositions tracked pins when it prunes
+/// scrollback, the row distance between the watermark and the current
+/// active-area top stays correct even after the bounded scrollback ring
+/// saturates — unlike `viewport_row_offset`, which plateaus. This is the
+/// monotonic per-feed scroll count the LineBuffer capture path needs so it
+/// never freezes at the ring size.
+///
+/// The watermark is repositioned in place each call. ghostty preserves it
+/// across RIS (`Screen.reset` keeps tracked pins) and it lives in the primary
+/// screen's page list; capture is skipped while on the alternate screen, so
+/// it is never read against the wrong page list.
+export fn ghostty_vt_terminal_take_scrolled_rows(terminal_ptr: ?*anyopaque) callconv(.C) u32 {
+    if (terminal_ptr == null) return 0;
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    const pages = &handle.terminal.screen.pages;
+    const active_top = pages.getTopLeft(.active);
+    const active_row = pinScreenRow(active_top);
+    if (handle.capture_watermark) |wm| {
+        // active_row >= watermark row in steady state; saturating-sub guards a
+        // watermark that ghostty pulled back to row 0 on prune/RIS.
+        const n = active_row -| pinScreenRow(wm.*);
+        // Reposition the tracked pin in place; its pointer remains the key in
+        // the tracked-pin set, so no re-tracking is required.
+        wm.* = active_top;
+        return n;
+    }
+    // First call: every row currently above the active area is uncaptured.
+    handle.capture_watermark = pages.trackPin(active_top) catch return active_row;
+    return active_row;
 }
 
 export fn ghostty_vt_terminal_take_viewport_scroll_delta(

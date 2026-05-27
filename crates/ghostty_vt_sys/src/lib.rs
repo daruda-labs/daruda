@@ -109,6 +109,7 @@ unsafe extern "C" {
     pub fn ghostty_vt_terminal_take_bell(terminal: *mut core::ffi::c_void) -> bool;
     pub fn ghostty_vt_terminal_total_rows(terminal: *mut core::ffi::c_void) -> u32;
     pub fn ghostty_vt_terminal_viewport_row_offset(terminal: *mut core::ffi::c_void) -> u32;
+    pub fn ghostty_vt_terminal_take_scrolled_rows(terminal: *mut core::ffi::c_void) -> u32;
     pub fn ghostty_vt_terminal_take_viewport_scroll_delta(terminal: *mut core::ffi::c_void) -> i32;
 
     pub fn ghostty_vt_terminal_hyperlink_at(

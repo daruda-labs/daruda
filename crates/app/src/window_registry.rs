@@ -274,19 +274,6 @@ impl WindowRegistry {
         cx.try_global::<WindowRegistry>()?.welcome.clone()
     }
 
-    /// Look up the `AnyWindowHandle` that owns the workspace entity with
-    /// `entity_id`. Used by async mutate closures that need `&mut Window`.
-    pub(crate) fn handle_for_workspace(
-        entity_id: gpui::EntityId,
-        cx: &App,
-    ) -> Option<AnyWindowHandle> {
-        cx.try_global::<WindowRegistry>()?
-            .workspaces
-            .iter()
-            .find(|(_, weak)| weak.entity_id() == entity_id)
-            .map(|(h, _)| *h)
-    }
-
     /// Return the window handle of the open Welcome window, if any.
     /// Used by `active_window_to_close` to detect whether the frontmost
     /// window is the Welcome screen.

@@ -45,7 +45,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let toolbar_h = px(theme::FILE_VIEWER_HEADER_H);
-    let is_raw_mode = matches!(&fv.content, PaneFileContent::LoadedRaw { .. });
+    let is_raw_mode = matches!(&fv.content, PaneFileContent::LoadedRaw);
 
     // Preview mode renders variable-height blocks; derive content height from GPUI's
     // measured max_offset rather than total_rows * fixed_line_h to keep the thumb accurate.

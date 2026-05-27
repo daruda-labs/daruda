@@ -529,6 +529,20 @@ impl Terminal {
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_viewport_row_offset(self.ptr.as_ptr()) }
     }
 
+    /// Rows that scrolled off the active area into scrollback history since
+    /// the previous call. Unlike [`viewport_row_offset`], this stays correct
+    /// after the scrollback ring saturates (it is backed by a tracked pin, so
+    /// pruning does not perturb the delta), giving callers a monotonic
+    /// per-feed scroll count for mirroring scrolled-off rows into their own
+    /// scrollback. Returns the full current scrollback depth on the first
+    /// call (and after a reset that drops the watermark).
+    ///
+    /// [`viewport_row_offset`]: Self::viewport_row_offset
+    pub fn take_scrolled_rows(&mut self) -> u32 {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        unsafe { ghostty_vt_sys::ghostty_vt_terminal_take_scrolled_rows(self.ptr.as_ptr()) }
+    }
+
     pub fn take_viewport_scroll_delta(&mut self) -> i32 {
         // SAFETY: `self.ptr` upholds invariant #1.
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_take_viewport_scroll_delta(self.ptr.as_ptr()) }

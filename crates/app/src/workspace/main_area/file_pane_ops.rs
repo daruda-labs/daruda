@@ -237,7 +237,7 @@ impl Workspace {
         let Some(fc) = self.focused_file_content_mut() else {
             return;
         };
-        if !matches!(fc.view.content, PaneFileContent::LoadedRaw { .. })
+        if !matches!(fc.view.content, PaneFileContent::LoadedRaw)
             || fc.view.staged
             || !fc.view.path.is_absolute()
         {

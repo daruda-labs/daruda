@@ -75,6 +75,7 @@ ghostty_vt_bytes_t ghostty_vt_terminal_dump_screen_row_url_ids(ghostty_vt_termin
 int ghostty_vt_terminal_row_wrap_kind(ghostty_vt_terminal_t terminal, uint32_t y);
 ghostty_vt_bytes_t ghostty_vt_terminal_take_dirty_viewport_rows(ghostty_vt_terminal_t terminal,
                                                                 uint16_t rows);
+uint32_t ghostty_vt_terminal_take_scrolled_rows(ghostty_vt_terminal_t terminal);
 int32_t ghostty_vt_terminal_take_viewport_scroll_delta(ghostty_vt_terminal_t terminal);
 ghostty_vt_bytes_t ghostty_vt_terminal_hyperlink_at(ghostty_vt_terminal_t terminal,
                                                     uint16_t col,

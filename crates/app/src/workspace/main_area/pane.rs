@@ -434,8 +434,8 @@ impl Pane {
             PaneContent::File(f) => {
                 use super::file_view_pane::PaneFileContent;
                 !f.view.staged
-                    && matches!(f.view.content, PaneFileContent::LoadedRaw { .. })
-                    && f.editor_state.read(cx).text().to_string() != f.saved_text
+                    && matches!(f.view.content, PaneFileContent::LoadedRaw)
+                    && *f.editor_state.read(cx).text() != f.saved_text
             }
             PaneContent::TaskEditPane(te) => te.is_dirty(cx),
         }
@@ -448,7 +448,7 @@ impl Pane {
             PaneContent::File(f) => {
                 use super::file_view_pane::PaneFileContent;
                 !f.view.staged
-                    && matches!(f.view.content, PaneFileContent::LoadedRaw { .. })
+                    && matches!(f.view.content, PaneFileContent::LoadedRaw)
                     && f.view.path.is_absolute()
             }
             PaneContent::TaskEditPane(te) => {

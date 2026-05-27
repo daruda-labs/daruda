@@ -192,15 +192,9 @@ pub(in crate::workspace) enum FileViewMode {
 
 pub(in crate::workspace) enum PaneFileContent {
     Loading,
-    /// Raw file content — owned by the `InputState` editor entity.
-    ///
-    /// `total_count` is the full line count of the original file.
-    /// `byte_truncated` is true when the file exceeded `FILE_VIEWER_MAX_BYTES`.
-    LoadedRaw {
-        text: String,
-        total_count: usize,
-        byte_truncated: bool,
-    },
+    /// Raw file content — owned by the `InputState` editor entity, so the
+    /// variant itself carries no data.
+    LoadedRaw,
     /// Unified diff content.
     ///
     /// `rows_all` includes context lines; `rows_no_ctx` omits them.
@@ -370,7 +364,7 @@ impl PaneFileView {
     /// Returns a slice over the currently visible rows (respects `hide_unchanged`).
     pub(in crate::workspace) fn active_rows(&self) -> &[VisualRow] {
         match &self.content {
-            PaneFileContent::LoadedRaw { .. } => &[],
+            PaneFileContent::LoadedRaw => &[],
             PaneFileContent::LoadedDiff {
                 rows_all,
                 rows_no_ctx,
@@ -563,7 +557,7 @@ impl PaneFileView {
                 }
             } else {
                 let rows: &[VisualRow] = match &self.content {
-                    PaneFileContent::LoadedRaw { .. } => &[],
+                    PaneFileContent::LoadedRaw => &[],
                     PaneFileContent::LoadedDiff {
                         rows_all,
                         rows_no_ctx,
@@ -865,19 +859,13 @@ diff --git a/bar.rs b/bar.rs
         assert!(r.word_changes.is_empty());
     }
 
-    fn raw_viewer(contents: &[&str]) -> PaneFileView {
-        let text = contents.join("\n");
-        let total_count = contents.len();
+    fn raw_viewer(_contents: &[&str]) -> PaneFileView {
         PaneFileView {
             lane_id: 0,
             path: "test.txt".into(),
             staged: false,
             file_status: None,
-            content: PaneFileContent::LoadedRaw {
-                text,
-                total_count,
-                byte_truncated: false,
-            },
+            content: PaneFileContent::LoadedRaw,
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
             char_selection: None,
