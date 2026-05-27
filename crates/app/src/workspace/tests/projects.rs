@@ -127,6 +127,61 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mut TestAppContext) {
+    // Safety net: if every surviving project is somehow lane-less
+    // (runtime corruption), closing the active project must treat the
+    // workspace as empty — signal the caller to close the window
+    // (→ Welcome) rather than leaving a blank viewport open.
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_close_no_lane_a");
+    std::fs::create_dir_all("/tmp/daruda_close_no_lane_a").unwrap();
+    std::fs::create_dir_all("/tmp/daruda_close_no_lane_b").unwrap();
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    // Add project B → it becomes the active project (id 1).
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_project(
+                std::path::PathBuf::from("/tmp/daruda_close_no_lane_b"),
+                window,
+                cx,
+            )
+        })
+    })
+    .ok();
+    // Corrupt the surviving project A (id 0): empty its lane list.
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.projects.iter_mut().find(|p| p.id == 0) {
+            p.lanes.clear();
+        }
+    });
+    // Close active project B. The only survivor (A) has no usable lane.
+    let keep = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| ws.close_active_project(window, cx))
+        })
+        .unwrap();
+    assert!(
+        !keep,
+        "a workspace with no usable lane must signal window close"
+    );
+    ws.read_with(cx, |ws, _| {
+        // Live runtime is cleared; the window is closing, so the user
+        // lands on Welcome instead of a blank viewport.
+        assert!(ws.main_area.tabs.is_empty());
+        assert_eq!(ws.active, daruda_store::project::LaneRef::default());
+    });
+}
+
+#[gpui::test]
 fn window_open_policy_round_trips_through_state(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_policy_round");

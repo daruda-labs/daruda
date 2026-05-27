@@ -200,10 +200,11 @@ impl Workspace {
     /// Remove the active project and route the workspace to the next
     /// project (or signal "close this window" when none remain).
     ///
-    /// Returns `true` when the workspace still has at least one
-    /// project after the removal — the caller should keep the window
-    /// open. Returns `false` when removing the active project emptied
-    /// the workspace; the caller should close the window.
+    /// Returns `true` when a usable lane remains after the removal — the
+    /// caller should keep the window open. Returns `false` when the
+    /// removal leaves the workspace with nothing to show (no projects
+    /// left, or every surviving project is lane-less); the caller closes
+    /// the window, which routes to the Welcome screen.
     ///
     /// Inactive lanes from the removed project also drop out of
     /// `inactive_worktree_runtimes` so memory does not leak.
@@ -271,18 +272,21 @@ impl Workspace {
         // lane). Iterating finds a valid snap_target even when
         // the natural first project's lane list is somehow empty.
         let Some(next_target) = self.projects.iter().find_map(|p| p.snap_target()) else {
-            // No surviving project has any lane — leave main_area
-            // cleared and let the caller decide. Extremely unlikely in
-            // practice (every Project bootstraps with at least one
-            // lane); reaching this branch implies bug or manual
-            // lane-list corruption.
+            // No surviving project has a usable lane. Every Project is
+            // constructed with at least one lane (bootstrap, and restore
+            // re-discovers an empty list), so this is runtime corruption
+            // that left nothing to display. Treat it as an empty
+            // workspace — same outcome as the no-projects case above — so
+            // the caller closes the window and the user lands on Welcome
+            // rather than a blank viewport.
             self.main_area.tabs.clear();
             self.main_area.panes.clear();
             self.main_area.active_tab_index = 0;
             self.main_area.tab_history.clear();
             self.main_area.focused_pane_id = 0;
+            self.active = LaneRef::default();
             self.mutate_durable(cx, |_, _| {});
-            return true;
+            return false;
         };
         // Reset live runtime; the removed project's panes are gone for
         // good and their TabEntry ids hold no PaneIds we can reuse.
