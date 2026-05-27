@@ -296,6 +296,93 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+#[gpui::test]
+fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
+    // Removing the *active* lane must re-point to a sibling and refill
+    // the viewport — never leave the main area blank.
+    let config = daruda_config::Config::default();
+    let repo = std::path::PathBuf::from("/tmp/daruda_remove_active_lane_repo");
+    let feature = std::path::PathBuf::from("/tmp/daruda_remove_active_lane_repo-feature");
+    let _ = std::fs::create_dir_all(&repo);
+    let project = daruda_store::project::Project::from_path(&repo);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    // Replace the bootstrapped Default lane with a git main lane (id 0,
+    // path == repo_root → non-removable) plus a removable linked lane
+    // (id 1, a distinct path).
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes = vec![
+                crate::lane::Lane::git(
+                    0,
+                    repo.clone(),
+                    Some("main".into()),
+                    repo.clone(),
+                    repo.clone(),
+                    0,
+                ),
+                crate::lane::Lane::git(
+                    1,
+                    feature.clone(),
+                    Some("feature".into()),
+                    repo.clone(),
+                    feature.clone(),
+                    1,
+                ),
+            ];
+        }
+    });
+
+    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
+    let lane0 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 0,
+    };
+    let lane1 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 1,
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.activate_worktree(lane1, window, cx);
+            assert_eq!(ws.active, lane1, "removable lane is active before removal");
+            ws.finalize_remove_lane(lane1, window, cx);
+        });
+    })
+    .unwrap();
+
+    ws.read_with(cx, |ws, _| {
+        // Fell back to the surviving main lane.
+        assert_eq!(ws.active, lane0);
+        let p = ws.active_project().unwrap();
+        assert_eq!(p.lanes.len(), 1);
+        assert_eq!(p.lanes[0].id, 0);
+        // The removed active lane must not blank the viewport.
+        assert!(
+            !ws.main_area.tabs.is_empty(),
+            "main area tabs must survive removing the active lane"
+        );
+        assert!(!ws.main_area.panes.is_empty());
+        // The removed lane's frozen runtime is dropped.
+        assert!(
+            !ws.main_area.inactive_worktree_runtimes.contains_key(&lane1),
+            "removed lane's runtime must be cleared"
+        );
+    });
+
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]
