@@ -105,8 +105,25 @@ impl Project {
     /// a [`ProjectState`] (intrinsic per-project fields) plus the
     /// per-workspace [`ProjectOverride`] (cosmetic decoration). Used
     /// by [`crate::workspace::Workspace::restore_from_disk`].
+    ///
+    /// A project must always carry at least one lane. When the persisted
+    /// list is empty — a corrupt or interrupted save — the lanes are
+    /// re-discovered from the filesystem so the project self-heals
+    /// rather than restoring with zero lanes (which would leave the
+    /// left dock with no row to activate).
     pub fn from_disk(id: ProjectId, ps: &ProjectState, ov: &ProjectOverride) -> Self {
-        let lanes = ps.lanes.iter().map(Lane::from_serialized).collect();
+        // Non-empty `lanes` is an invariant every other construction
+        // path (`bootstrap` / `new_with_uuid`) upholds; restore is the
+        // only one reading an externally-supplied list, so it must
+        // enforce the same floor. Falling back to `bootstrap_from_project`
+        // re-discovers the main worktree (plus any linked ones) and the
+        // next save records the recovered list, breaking the otherwise
+        // self-perpetuating empty state.
+        let lanes: Vec<Lane> = if ps.lanes.is_empty() {
+            Lane::bootstrap_from_project(&ps.root)
+        } else {
+            ps.lanes.iter().map(Lane::from_serialized).collect()
+        };
         Self {
             id,
             uuid: ps.uuid,
@@ -210,6 +227,58 @@ mod tests {
         assert_eq!(p.last_active_lane_id, p.lanes[0].id);
         assert!(p.group_id.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_disk_empty_lanes_rebootstraps() {
+        // A persisted project with an empty lane list (corrupt /
+        // interrupted save) must self-heal on restore instead of
+        // yielding a lane-less project the left dock cannot render.
+        let dir = std::env::temp_dir().join("daruda_project_from_disk_empty");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ps = ProjectState {
+            schema_version: 0,
+            uuid: ProjectUuid::new(),
+            root: dir.clone(),
+            name: Some("daruda".to_string()),
+            lanes: Vec::new(),
+            last_active_lane_id: 0,
+            next_lane_id: 0,
+        };
+        let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+        assert!(
+            !p.lanes.is_empty(),
+            "empty persisted lanes must re-bootstrap"
+        );
+        // Non-git temp dir → exactly one `Default` lane at id 0.
+        assert_eq!(p.lanes.len(), 1);
+        assert_eq!(p.lanes[0].id, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_disk_nonempty_lanes_hydrated_verbatim() {
+        // The healthy path must hydrate the stored lanes as-is and never
+        // touch the filesystem — a re-bootstrap would renumber the lane
+        // to id 0, so a surviving non-zero id proves no fallback fired.
+        let dir = std::env::temp_dir().join("daruda_project_from_disk_nonempty");
+        let stored = crate::lane::Lane::default_for_project(3, dir.clone()).to_serialized();
+        let ps = ProjectState {
+            schema_version: 0,
+            uuid: ProjectUuid::new(),
+            root: dir.clone(),
+            name: Some("daruda".to_string()),
+            lanes: vec![stored],
+            last_active_lane_id: 3,
+            next_lane_id: 4,
+        };
+        let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+        assert_eq!(p.lanes.len(), 1);
+        assert_eq!(
+            p.lanes[0].id, 3,
+            "stored lane hydrated verbatim, not re-bootstrapped"
+        );
     }
 
     #[test]
