@@ -288,7 +288,8 @@ impl TerminalView {
     /// them on the keyboard. No-op when the view was constructed
     /// without a PTY backing (test stubs). Used by external dispatchers
     /// like the bottom-dock macro buttons.
-    pub fn send_input(&self, bytes: &[u8]) {
+    pub fn send_input(&mut self, bytes: &[u8]) {
+        self.snap_to_bottom();
         if let Some(input) = &self.input {
             input.send(bytes);
         }

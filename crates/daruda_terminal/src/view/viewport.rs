@@ -182,6 +182,7 @@ impl TerminalView {
                 InvalidationReason::AltScreenToggle | InvalidationReason::Ris,
             ) {
                 self.state.viewport_pin.release();
+                self.state.user_scrolled = false;
             }
         }
 
@@ -423,7 +424,12 @@ impl TerminalView {
         }
         if self.state.user_scrolled {
             self.restore_pinned_viewport();
-            return;
+            // If restore cleared user_scrolled (anchor evicted or
+            // never set), don't return — fall through to the
+            // bottom-snap check so the viewport follows output again.
+            if self.state.user_scrolled {
+                return;
+            }
         }
         let offset = self.session.viewport_row_offset();
         let rows = self.session.rows() as u32;
@@ -439,12 +445,15 @@ impl TerminalView {
     /// `viewport_row_offset` without changing `scroll_offset`.
     fn restore_pinned_viewport(&mut self) {
         let Some(anchor) = self.state.viewport_pin.anchor() else {
+            self.state.user_scrolled = false;
             return;
         };
         let Some(screen_row) = self.session.abs_to_screen_row(anchor) else {
-            // Anchor evicted from LineBuffer — release the pin so
-            // is_pinned() no longer reports active for a dead anchor.
+            // Anchor evicted from LineBuffer — release the pin and
+            // clear user_scrolled so future PTY output can snap to
+            // bottom again.
             self.state.viewport_pin.release();
+            self.state.user_scrolled = false;
             return;
         };
         let current = self.session.viewport_row_offset();

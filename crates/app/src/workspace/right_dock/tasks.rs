@@ -28,6 +28,7 @@
 //! values from `daruda_terminal::ux::theme`. Direct `hsla(...)` /
 //! `px(N)` literals are caught by `scripts/lint-inline-literals.sh`.
 
+use crate::ui::Sizable as _;
 use crate::ui::theme;
 use chrono::{DateTime, Utc};
 use daruda_claude::SessionStatus;
@@ -39,7 +40,6 @@ use gpui::{
     AnyElement, ClickEvent, Context, Hsla, IntoElement, MouseButton, SharedString, div, prelude::*,
     px,
 };
-use crate::ui::Sizable as _;
 
 use super::super::Workspace;
 use super::super::layout::Dock;

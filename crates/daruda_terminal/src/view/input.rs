@@ -240,6 +240,7 @@ impl TerminalView {
                 && let Some(b) = ctrl_byte_for_keystroke(&keystroke)
             {
                 self.flush_hangul(cx);
+                self.snap_to_bottom();
                 if let Some(input) = self.input.as_ref() {
                     input.send(&[b]);
                 }
@@ -251,6 +252,7 @@ impl TerminalView {
                 && let Some(text) = keystroke.key_char.as_deref()
             {
                 self.flush_hangul(cx);
+                self.snap_to_bottom();
                 if let Some(input) = self.input.as_ref() {
                     input.send(&[0x1b]);
                     input.send(text.as_bytes());
@@ -269,6 +271,7 @@ impl TerminalView {
                 encode_key_named(&keystroke.key, modifiers, self.key_mode_flags())
             {
                 self.flush_hangul(cx);
+                self.snap_to_bottom();
                 if let Some(input) = self.input.as_ref() {
                     input.send(&encoded);
                 }
@@ -334,6 +337,7 @@ impl TerminalView {
         }
 
         if keystroke.key == "backspace" {
+            self.snap_to_bottom();
             if let Some(input) = self.input.as_ref() {
                 input.send(&[0x7f]);
                 cx.stop_propagation();

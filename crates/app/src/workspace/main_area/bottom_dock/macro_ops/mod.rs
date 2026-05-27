@@ -579,7 +579,7 @@ impl Workspace {
         else {
             return;
         };
-        view.read(cx).send_input(bytes);
+        view.update(cx, |view, _| view.send_input(bytes));
         self.bump_activity(focused_id);
         cx.notify();
     }
