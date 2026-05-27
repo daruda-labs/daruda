@@ -73,6 +73,15 @@ Before starting, classify the task:
 - ❌ Multiplying `if` branches for quick fixes — prefer polymorphism or the strategy pattern
 - ❌ A type with more than one reason to change (SRP violation)
 - ❌ Bypassing existing abstractions with direct calls (breaks encapsulation)
+- ❌ `bool` flag + an `Option`/value field that is only meaningful when the flag is `true` — declare them as separate fields
+  → `enum { Inactive, Active { data } }` to make the invalid state unrepresentable
+- ❌ `match (a, b) { ... _ => unreachable!() }` — a hidden state machine encoded as bool combinations
+  → replace with an `enum` whose variants cover only valid states
+- ❌ Two `Option` fields that are always `Some`/`None` together
+  → `Option<(A, B)>` or a dedicated struct
+- ❌ The same group of fields set directly across multiple call paths
+  → extract a single `fn` and seal the fields with `pub(super)`.
+     Two or more call paths copying the same N-step sequence is the extraction signal
 
 ### MVU-flavored guiding rules
 
