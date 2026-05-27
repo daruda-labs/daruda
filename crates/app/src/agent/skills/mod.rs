@@ -166,7 +166,7 @@ pub struct SkillsState {
     pub personal: Vec<Skill>,
     pub plugin: Vec<Skill>,
     /// Per-lane project-scope skills, keyed by the lane's
-    /// absolute root path (what `Workspace::active_worktree_root`
+    /// absolute root path (what `Workspace::active_lane_root`
     /// returns). An entry exists for every lane that has been
     /// scanned at least once; opening a different lane adds a new
     /// key without disturbing the others.

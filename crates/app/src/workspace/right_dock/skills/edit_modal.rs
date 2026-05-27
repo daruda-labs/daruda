@@ -509,7 +509,7 @@ pub fn open_edit_skill_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let project_root = ws.active_worktree_root();
+    let project_root = ws.active_lane_root();
     let state = cx
         .global::<crate::agent::skills::SkillsState>()
         .snapshot_for(project_root.as_deref());

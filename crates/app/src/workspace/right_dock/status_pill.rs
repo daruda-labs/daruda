@@ -153,7 +153,7 @@ fn open_item(task_id: &str, workspace: &gpui::WeakEntity<Workspace>) -> PopupMen
     PopupMenuItem::new(strings::task_action_open()).on_click(move |_, window, app| {
         if let Some(w) = ws.upgrade() {
             let id = id.clone();
-            w.update(app, |this, cx| this.focus_task_worktree(&id, window, cx));
+            w.update(app, |this, cx| this.focus_task_lane(&id, window, cx));
         }
     })
 }

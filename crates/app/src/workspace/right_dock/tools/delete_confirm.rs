@@ -18,7 +18,7 @@ pub fn open_delete_mcp_server_confirm(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let lane = ws.active_worktree_root();
+    let lane = ws.active_lane_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
         .snapshot_for(lane.as_deref());

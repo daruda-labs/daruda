@@ -99,7 +99,7 @@ impl Workspace {
             // before PtyTracker's next poll lands the binding, so the
             // indicator appears slightly later than the first hook
             // event. Acceptable for the correctness it buys.
-            claude_status_per_worktree: {
+            claude_status_per_lane: {
                 let live: std::collections::HashSet<&str> = self
                     .claude
                     .pty_claude_bindings
@@ -133,7 +133,7 @@ impl Workspace {
                 }
                 map
             },
-            claude_per_session_per_worktree: {
+            claude_per_session_per_lane: {
                 let live: std::collections::HashSet<&str> = self
                     .claude
                     .pty_claude_bindings
@@ -274,7 +274,7 @@ impl Workspace {
             usage_select: self.claude.usage_select.clone(),
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()
-                .snapshot_for(self.active_worktree_root().as_deref()),
+                .snapshot_for(self.active_lane_root().as_deref()),
             skill_search_input: self.skill_search_input.clone(),
             skill_search_query: self.skill_search_input.read(cx).value().to_string(),
             skill_plugin_expanded: self.skill_plugin_expanded.clone(),
@@ -292,7 +292,7 @@ impl Workspace {
             right_panel_scroll_handle: self.right_panel_scroll_handle.clone(),
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
-                .snapshot_for(self.active_worktree_root().as_deref()),
+                .snapshot_for(self.active_lane_root().as_deref()),
         }
     }
 }

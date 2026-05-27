@@ -176,32 +176,32 @@ pub fn menu_jump_prompt_next() -> String {
 // Lane menu
 // ============================================================================
 
-pub fn menu_activate_worktree_1() -> String {
-    rust_i18n::t!("menu.activate_worktree_1").into_owned()
+pub fn menu_activate_lane_1() -> String {
+    rust_i18n::t!("menu.activate_lane_1").into_owned()
 }
-pub fn menu_activate_worktree_2() -> String {
-    rust_i18n::t!("menu.activate_worktree_2").into_owned()
+pub fn menu_activate_lane_2() -> String {
+    rust_i18n::t!("menu.activate_lane_2").into_owned()
 }
-pub fn menu_activate_worktree_3() -> String {
-    rust_i18n::t!("menu.activate_worktree_3").into_owned()
+pub fn menu_activate_lane_3() -> String {
+    rust_i18n::t!("menu.activate_lane_3").into_owned()
 }
-pub fn menu_activate_worktree_4() -> String {
-    rust_i18n::t!("menu.activate_worktree_4").into_owned()
+pub fn menu_activate_lane_4() -> String {
+    rust_i18n::t!("menu.activate_lane_4").into_owned()
 }
-pub fn menu_activate_worktree_5() -> String {
-    rust_i18n::t!("menu.activate_worktree_5").into_owned()
+pub fn menu_activate_lane_5() -> String {
+    rust_i18n::t!("menu.activate_lane_5").into_owned()
 }
-pub fn menu_activate_worktree_6() -> String {
-    rust_i18n::t!("menu.activate_worktree_6").into_owned()
+pub fn menu_activate_lane_6() -> String {
+    rust_i18n::t!("menu.activate_lane_6").into_owned()
 }
-pub fn menu_activate_worktree_7() -> String {
-    rust_i18n::t!("menu.activate_worktree_7").into_owned()
+pub fn menu_activate_lane_7() -> String {
+    rust_i18n::t!("menu.activate_lane_7").into_owned()
 }
-pub fn menu_activate_worktree_8() -> String {
-    rust_i18n::t!("menu.activate_worktree_8").into_owned()
+pub fn menu_activate_lane_8() -> String {
+    rust_i18n::t!("menu.activate_lane_8").into_owned()
 }
-pub fn menu_activate_worktree_9() -> String {
-    rust_i18n::t!("menu.activate_worktree_9").into_owned()
+pub fn menu_activate_lane_9() -> String {
+    rust_i18n::t!("menu.activate_lane_9").into_owned()
 }
 
 // ============================================================================

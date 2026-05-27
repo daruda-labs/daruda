@@ -1,7 +1,7 @@
 //! Project / group reordering driven by the left-dock DnD pipeline.
 //!
 //! Lanes stay inside their parent project (see
-//! [`super::Workspace::reorder_worktree`]); this module handles the
+//! [`super::Workspace::reorder_lane`]); this module handles the
 //! other two payload kinds from the multi-project plan:
 //!
 //! - Projects move freely between groups and the top-level pool. The

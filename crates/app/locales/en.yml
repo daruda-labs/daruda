@@ -84,16 +84,16 @@ menu:
   jump_prompt_prev: "Jump to Previous Prompt"
   jump_prompt_next: "Jump to Next Prompt"
 
-  # Worktree menu (indexed)
-  activate_worktree_1: "Activate Worktree 1"
-  activate_worktree_2: "Activate Worktree 2"
-  activate_worktree_3: "Activate Worktree 3"
-  activate_worktree_4: "Activate Worktree 4"
-  activate_worktree_5: "Activate Worktree 5"
-  activate_worktree_6: "Activate Worktree 6"
-  activate_worktree_7: "Activate Worktree 7"
-  activate_worktree_8: "Activate Worktree 8"
-  activate_worktree_9: "Activate Worktree 9"
+  # Lane menu (indexed)
+  activate_lane_1: "Activate Worktree 1"
+  activate_lane_2: "Activate Worktree 2"
+  activate_lane_3: "Activate Worktree 3"
+  activate_lane_4: "Activate Worktree 4"
+  activate_lane_5: "Activate Worktree 5"
+  activate_lane_6: "Activate Worktree 6"
+  activate_lane_7: "Activate Worktree 7"
+  activate_lane_8: "Activate Worktree 8"
+  activate_lane_9: "Activate Worktree 9"
 
   # Window menu
   minimize: "Minimize"

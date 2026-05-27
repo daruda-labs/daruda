@@ -4,7 +4,7 @@
 //! - **Filter / expansion** (R-12) — pure UI state changes.
 //! - **CRUD** (R-13) — `create_task` / `update_task` / `delete_task`.
 //! - **Lifecycle** (R-14) — `start_task` / `cancel_task` / `reopen_task` /
-//!   `retry_task` / `focus_task_worktree`.
+//!   `retry_task` / `focus_task_lane`.
 //!
 //! Persistence routes through `save_tasks_dirty`, which always wraps the
 //! disk write in `cx.defer` (G9 + `lint-reentrant-reads.sh`) so the

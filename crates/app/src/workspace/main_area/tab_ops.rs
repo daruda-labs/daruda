@@ -66,7 +66,7 @@ impl Workspace {
         // windows (and the app itself under `QuitMode::Default`) stay
         // alive; the user reopens projects via File > New Window /
         // Open… / Open Recent. If the project had other lanes
-        // parked in `inactive_worktree_runtimes`, their PTYs drop
+        // parked in `inactive_lane_runtimes`, their PTYs drop
         // with the workspace entity when the window is removed —
         // that's fine for now, a future phase could offer a confirm.
         if self.main_area.tabs.len() <= 1 {

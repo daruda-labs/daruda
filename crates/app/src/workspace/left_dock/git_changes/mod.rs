@@ -289,7 +289,7 @@ pub(in crate::workspace) fn ordered_visible_paths(
 // ----------------------------------------------------------------
 
 fn view_header(
-    _worktree_id: LaneId,
+    _lane_id: LaneId,
     branch: &str,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
@@ -1078,7 +1078,7 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
 // ----------------------------------------------------------------
 
 fn loading_placeholder(
-    _worktree_id: LaneId,
+    _lane_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {

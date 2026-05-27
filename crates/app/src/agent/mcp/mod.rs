@@ -226,7 +226,7 @@ pub struct McpState {
     /// Whole `~/.claude/settings.json` parsed tree.
     pub personal_raw: serde_json::Value,
     /// Per-lane project-scope state, keyed by the lane's
-    /// absolute root path (what `Workspace::active_worktree_root`
+    /// absolute root path (what `Workspace::active_lane_root`
     /// returns). An entry exists for every lane that has been
     /// scanned at least once; opening a different lane adds a new
     /// key without disturbing the others.

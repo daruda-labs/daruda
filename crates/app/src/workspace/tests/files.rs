@@ -399,9 +399,9 @@ async fn cache_invalidates_on_focused_file_change(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn cache_invalidates_on_active_worktree_change(cx: &mut TestAppContext) {
+async fn cache_invalidates_on_active_lane_change(cx: &mut TestAppContext) {
     // Build a workspace, then add a second lane manually so
-    // we can `activate_worktree` between them. Building a real
+    // we can `activate_lane` between them. Building a real
     // multi-lane setup needs git plumbing; simulating one via
     // direct `lanes.push` is enough for the cache check.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
@@ -430,14 +430,14 @@ async fn cache_invalidates_on_active_worktree_change(cx: &mut TestAppContext) {
                 project: ws.active_ref().project,
                 lane: second_id,
             };
-            ws.activate_worktree(target, window, cx)
+            ws.activate_lane(target, window, cx)
         });
     })
     .unwrap();
     let v2: Arc<_> = ws.update(cx, |ws, _cx| ws.cached_or_rebuild_visible(original_ref));
     assert!(
         !Arc::ptr_eq(&v1, &v2),
-        "activate_worktree must invalidate the previous lane's visible cache"
+        "activate_lane must invalidate the previous lane's visible cache"
     );
 }
 
@@ -518,7 +518,7 @@ async fn watcher_event_creates_entry_in_expanded_dir(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn inactive_worktree_event_marks_dirty_only(cx: &mut TestAppContext) {
+async fn inactive_lane_event_marks_dirty_only(cx: &mut TestAppContext) {
     let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
     let active_ref = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_ref, cx));
@@ -566,7 +566,7 @@ async fn inactive_worktree_event_marks_dirty_only(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContext) {
+async fn activate_lane_replays_dirty_with_bulk_reload(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
     let active_ref = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_ref, cx));
@@ -609,7 +609,7 @@ async fn activate_worktree_replays_dirty_with_bulk_reload(cx: &mut TestAppContex
                 project: ws.active_ref().project,
                 lane: inactive_id,
             };
-            ws.activate_worktree(target, window, cx)
+            ws.activate_lane(target, window, cx)
         });
     })
     .unwrap();
@@ -895,7 +895,7 @@ async fn cache_invalidates_on_keyboard_selection_move(cx: &mut TestAppContext) {
 // ---------------- Lifecycle / cleanup ----------------
 
 #[gpui::test]
-async fn finalize_remove_worktree_clears_per_worktree_state(cx: &mut TestAppContext) {
+async fn finalize_remove_lane_clears_per_lane_state(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
     let active_ref = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.ensure_file_tree(active_ref, cx));
@@ -1128,13 +1128,13 @@ async fn cache_invalidates_on_watcher_event(cx: &mut TestAppContext) {
     );
 }
 
-// ---------------- W-9 activate_worktree_by_index ----------------
+// ---------------- W-9 activate_lane_by_index ----------------
 
 #[gpui::test]
-fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppContext) {
+fn activate_lane_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
     // There is one lane at startup. Add two more with shuffled
-    // tab_order so the sort inside activate_worktree_by_index is exercised.
+    // tab_order so the sort inside activate_lane_by_index is exercised.
     let (_id0, id1, id2) = ws.read_with(cx, |ws, _| {
         let base = ws.active.lane;
         (base, base + 1, base + 2)
@@ -1159,7 +1159,7 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
 
     // Index 0 → tab_order 0 → id1.
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.activate_worktree_by_index(0, window, cx));
+        ws.update(cx, |ws, cx| ws.activate_lane_by_index(0, window, cx));
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
@@ -1168,7 +1168,7 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
 
     // Index 1 → tab_order 1 → id2.
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.activate_worktree_by_index(1, window, cx));
+        ws.update(cx, |ws, cx| ws.activate_lane_by_index(1, window, cx));
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {
@@ -1177,11 +1177,11 @@ fn activate_worktree_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppConte
 }
 
 #[gpui::test]
-fn activate_worktree_by_index_out_of_range_is_noop(cx: &mut TestAppContext) {
+fn activate_lane_by_index_out_of_range_is_noop(cx: &mut TestAppContext) {
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
     let initial = ws.read_with(cx, |ws, _| ws.active.lane);
     cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.activate_worktree_by_index(99, window, cx));
+        ws.update(cx, |ws, cx| ws.activate_lane_by_index(99, window, cx));
     })
     .unwrap();
     ws.read_with(cx, |ws, _| {

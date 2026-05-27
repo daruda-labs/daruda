@@ -40,7 +40,7 @@ impl Workspace {
     /// Mints a new [`ProjectId`] from the monotonic `next_project_id`
     /// counter, walks the filesystem at `root` to discover git
     /// lanes (or falls back to one default), and pushes the result
-    /// onto `self.projects`. Then routes through `activate_worktree`
+    /// onto `self.projects`. Then routes through `activate_lane`
     /// to swap the live `MainAreaContext` over to the new lane —
     /// the previous active runtime is preserved in the inactive map.
     ///
@@ -75,16 +75,16 @@ impl Workspace {
             .unwrap_or_else(ProjectUuid::new);
         let mut project = crate::project::Project::new_with_uuid(new_id, uuid, root);
         project.tab_order = tab_order;
-        let target = project.first_worktree_ref();
+        let target = project.first_lane_ref();
         self.projects.push(project);
         // Activate the new lane. When `self.projects` was empty
         // before this call there is no prior runtime to freeze, but
-        // `activate_worktree` is still the right path: it lazy-seeds
+        // `activate_lane` is still the right path: it lazy-seeds
         // a pane at the new lane's path so the user lands on a
         // live shell immediately.
         if let Some(t) = target {
             // First project case: `self.active` is the default
-            // (project=0, lane=0). `activate_worktree` skips when
+            // (project=0, lane=0). `activate_lane` skips when
             // `self.active == target`, but with monotonic ids the new
             // project's id is always > 0 the first time so this fires.
             // Manually set `self.active` to a sentinel that differs
@@ -93,9 +93,9 @@ impl Workspace {
             if self.projects.len() == 1 {
                 self.active = LaneRef::default();
             }
-            self.activate_worktree(t, window, cx);
+            self.activate_lane(t, window, cx);
         }
-        // Empty closure: see group_ops.rs:83 for rationale. `activate_worktree`
+        // Empty closure: see group_ops.rs:83 for rationale. `activate_lane`
         // consumes `&mut Window`, so the persist trigger has to land after
         // those borrows release.
         self.mutate_durable(cx, |_, _| {});
@@ -207,7 +207,7 @@ impl Workspace {
     /// the window, which routes to the Welcome screen.
     ///
     /// Inactive lanes from the removed project also drop out of
-    /// `inactive_worktree_runtimes` so memory does not leak.
+    /// `inactive_lane_runtimes` so memory does not leak.
     pub(crate) fn close_active_project(
         &mut self,
         window: &mut Window,
@@ -220,7 +220,7 @@ impl Workspace {
         // project — the WorktreeRefs become dangling once the project
         // is gone.
         self.main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .retain(|key, _| key.project != project_id);
         // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.
@@ -293,7 +293,7 @@ impl Workspace {
         // `self.active` is intentionally left pointing at the deleted
         // project's lane ref — its project_id is guaranteed
         // distinct from `next_target.project` (we just removed it from
-        // `self.projects`), so `activate_worktree`'s same-target guard
+        // `self.projects`), so `activate_lane`'s same-target guard
         // doesn't fire. Resetting to `LaneRef::default()` here would
         // collide with the natural (project=0, lane=0) target of
         // the surviving first project and false-trigger the guard,
@@ -304,12 +304,12 @@ impl Workspace {
         self.main_area.active_tab_index = 0;
         self.main_area.tab_history.clear();
         self.main_area.focused_pane_id = 0;
-        self.activate_worktree(next_target, window, cx);
-        // `activate_worktree`'s freeze step wrote a dangling empty
+        self.activate_lane(next_target, window, cx);
+        // `activate_lane`'s freeze step wrote a dangling empty
         // runtime under the deleted project's lane ref. Drop it so
-        // `inactive_worktree_runtimes` stays clean.
+        // `inactive_lane_runtimes` stays clean.
         self.main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .retain(|key, _| key.project != project_id);
         self.mutate_durable(cx, |_, _| {});
         true
@@ -422,7 +422,7 @@ impl Workspace {
                         if ws.active.project != project_id {
                             ws.projects.retain(|p| p.id != project_id);
                             ws.main_area
-                                .inactive_worktree_runtimes
+                                .inactive_lane_runtimes
                                 .retain(|key, _| key.project != project_id);
                             ws.mutate_durable(cx, |_, _| {});
                             return ws.projects.is_empty();

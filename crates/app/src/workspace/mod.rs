@@ -278,7 +278,7 @@ pub struct Workspace {
     pub(in crate::workspace) projects: Vec<crate::project::Project>,
     /// Active (project, lane) pair. When `projects` is non-empty,
     /// always points at a live entry — kept normalized by
-    /// `activate_worktree` and `finalize_remove_*` paths.
+    /// `activate_lane` and `finalize_remove_*` paths.
     pub(in crate::workspace) active: daruda_store::project::LaneRef,
     /// User-defined groups in the left dock. Each project's
     /// `group_id` links into this list. Empty during the early
@@ -435,7 +435,7 @@ pub struct Workspace {
     /// Per-repo lock that prevents two concurrent `start_task`
     /// invocations from racing on `git worktree add` against the same
     /// repository. Cleared after `finalize_create_lane` returns.
-    pub(in crate::workspace) pending_worktree_creates: HashSet<std::path::PathBuf>,
+    pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
     /// Re-entry guard for the platform `on_window_should_close`
     /// callback. Set to `true` while the R-25 batch prompt is
     /// awaiting the user's answer; cleared once the answer lands or
@@ -885,7 +885,7 @@ impl Workspace {
                 }),
             _task_live_tick: None,
             task_filter: daruda_store::tasks::TaskFilter::default(),
-            pending_worktree_creates: HashSet::new(),
+            pending_lane_creates: HashSet::new(),
             window_close_in_flight: false,
             terminal_input,
             _terminal_input_subscription: terminal_input_sub,
@@ -1107,7 +1107,7 @@ impl Workspace {
     #[allow(dead_code)]
     pub(in crate::workspace) fn active_lane_mut(&mut self) -> Option<&mut crate::lane::Lane> {
         let id = self.active.lane;
-        self.active_project_mut()?.worktree_mut(id)
+        self.active_project_mut()?.lane_mut(id)
     }
 
     /// Resolve a `LaneRef` to its runtime lane.

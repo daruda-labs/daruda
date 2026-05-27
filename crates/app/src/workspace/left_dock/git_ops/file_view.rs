@@ -86,7 +86,7 @@ impl Workspace {
         {
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
-            let prev_worktree = self
+            let prev_lane = self
                 .main_area
                 .panes
                 .iter()
@@ -123,7 +123,7 @@ impl Workspace {
             self.activate_tab(tab_idx, window, cx);
             self.focus_pane(pane_id, window, cx);
             let project = self.active.project;
-            if let Some(prev_id) = prev_worktree {
+            if let Some(prev_id) = prev_lane {
                 self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
                     project,
                     lane: prev_id,
@@ -376,8 +376,8 @@ impl Workspace {
     /// Trigger content loads for every File pane in the live `panes`
     /// vec whose content is still `Loading`. Called at the end of
     /// `restore_state` (for the active lane's panes only — others
-    /// live in `inactive_worktree_runtimes` and load when their
-    /// lane is next activated) and at the end of `activate_worktree`.
+    /// live in `inactive_lane_runtimes` and load when their
+    /// lane is next activated) and at the end of `activate_lane`.
     /// Already-loaded panes are skipped, so re-activations are cheap.
     pub(in crate::workspace) fn load_pending_file_panes(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = self

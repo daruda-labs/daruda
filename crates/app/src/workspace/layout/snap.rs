@@ -123,13 +123,13 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// lanes from 0) don't collide. Empty when the
     /// `claude_status.enable` config flag is off, no Claude session is
     /// running, or the lane has no matching cwd.
-    pub claude_status_per_worktree:
+    pub claude_status_per_lane:
         std::collections::HashMap<daruda_store::project::LaneRef, daruda_claude::SessionStatus>,
     /// Per-session statuses for lanes that have ≥ 2 active Claude
     /// sessions. Phase D sub-row badges read this. Lanes with 0 or
     /// 1 sessions are absent (the leading indicator covers them).
     /// Keyed by `LaneRef` for the same cross-project reason.
-    pub claude_per_session_per_worktree: std::collections::HashMap<
+    pub claude_per_session_per_lane: std::collections::HashMap<
         daruda_store::project::LaneRef,
         Vec<(String, daruda_claude::SessionStatus)>,
     >,

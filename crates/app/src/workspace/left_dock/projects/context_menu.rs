@@ -79,7 +79,7 @@ pub(in crate::workspace) fn build_context_menu_items(
                         surface_strings::edit_description_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
-                            workspace.set_worktree_description(wt_id, value, cx);
+                            workspace.set_lane_description(wt_id, value, cx);
                         },
                         window,
                         cx,
@@ -104,7 +104,7 @@ pub(in crate::workspace) fn build_context_menu_items(
                         surface_strings::rename_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
-                            workspace.set_worktree_name(wt_id, value, cx);
+                            workspace.set_lane_name(wt_id, value, cx);
                         },
                         window,
                         cx,

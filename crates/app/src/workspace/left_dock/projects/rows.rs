@@ -275,7 +275,7 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
 /// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
 /// and `ChevronRight` (collapsed). The chevron carries its own click
 /// handler that toggles the flag; the rest of the row stays bound to
-/// `activate_worktree(last_active)` so a header click still snaps the
+/// `activate_lane(last_active)` so a header click still snaps the
 /// focus per §5.5.
 pub(in crate::workspace) fn project_header_row(
     args: ProjectHeaderArgs,
@@ -338,14 +338,14 @@ pub(in crate::workspace) fn project_header_row(
         // Header click snaps the workspace focus to this project's
         // last-active lane (§5.5). No-op when the click lands on
         // the already-active project — the snap target would equal
-        // the current focus and `activate_worktree` short-circuits.
+        // the current focus and `activate_lane` short-circuits.
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = ws_for_click.upgrade() {
                 let target = daruda_store::project::LaneRef {
                     project: project_id,
                     lane: last_active_lane_id,
                 };
-                ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
+                ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
             }
         }))
         .on_mouse_down(
@@ -461,7 +461,7 @@ pub(in crate::workspace) fn project_header_row(
                                     project: project_id,
                                     lane: last_active_lane_id,
                                 };
-                                ws.activate_worktree(target, window, cx);
+                                ws.activate_lane(target, window, cx);
                                 let Some(repo_root) = ws.git_repo_root() else {
                                     return;
                                 };
@@ -689,7 +689,7 @@ pub(in crate::workspace) fn worktree_row(
                 .child(sublabel),
         )
         .when_some(
-            snap.claude_per_session_per_worktree
+            snap.claude_per_session_per_lane
                 .get(&daruda_store::project::LaneRef {
                     project: project_id,
                     lane: wt.id,
@@ -755,7 +755,7 @@ pub(in crate::workspace) fn worktree_row(
     // collides across projects — GPUI sees the same ElementId for the first
     // lane of every project and routes the click to only one of them
     // (the first project's row), which is why clicking a 2nd project's
-    // lane never reaches `activate_worktree`. Encode both ids into the
+    // lane never reaches `activate_lane`. Encode both ids into the
     // id string so each row is uniquely addressable.
     let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
     let mut row = div()
@@ -785,7 +785,7 @@ pub(in crate::workspace) fn worktree_row(
                     project: project_id,
                     lane: wt_id,
                 };
-                ws.update(cx, |ws, cx| ws.activate_worktree(target, window, cx));
+                ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
             }
         }))
         // Drag source — GPUI's built-in on_drag / on_drop pipeline handles
@@ -813,7 +813,7 @@ pub(in crate::workspace) fn worktree_row(
                     && let Some(ws) = ws_for_drop.upgrade()
                 {
                     let from = *target;
-                    ws.update(cx, |ws, cx| ws.reorder_worktree(from, wt_ref, cx));
+                    ws.update(cx, |ws, cx| ws.reorder_lane(from, wt_ref, cx));
                 }
             }),
         )
@@ -846,7 +846,7 @@ pub(in crate::workspace) fn worktree_row(
             }),
         )
         .child(claude_status_cell(
-            snap.claude_status_per_worktree
+            snap.claude_status_per_lane
                 .get(&daruda_store::project::LaneRef {
                     project: project_id,
                     lane: wt.id,

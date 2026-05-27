@@ -14,7 +14,7 @@
 //! not re-walk the tree. The cache is only invalidated at the seven
 //! trigger points listed in the W-7 plan (toggle expand, load result,
 //! watcher event (W-7g), focused-file-viewer change (W-7f),
-//! activate_worktree, git status update, config change). Anything else
+//! activate_lane, git status update, config change). Anything else
 //! that calls `cx.notify()` reads the cached `Arc` directly.
 
 use std::collections::{HashSet, VecDeque};

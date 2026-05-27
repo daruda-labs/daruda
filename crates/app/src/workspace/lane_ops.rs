@@ -46,7 +46,7 @@ impl Workspace {
     /// position (0-indexed). Lanes are sorted by `tab_order` so the
     /// position matches what the user sees in the left dock. No-ops
     /// when `index` is out of range or no project is loaded.
-    pub(in crate::workspace) fn activate_worktree_by_index(
+    pub(in crate::workspace) fn activate_lane_by_index(
         &mut self,
         index: usize,
         window: &mut gpui::Window,
@@ -62,7 +62,7 @@ impl Workspace {
             .collect();
         ids.sort_unstable_by_key(|&(order, _)| order);
         if let Some(&(_, id)) = ids.get(index) {
-            self.activate_worktree(
+            self.activate_lane(
                 LaneRef {
                     project: active_project_id,
                     lane: id,
@@ -157,9 +157,9 @@ impl Workspace {
             None
         };
         if let Some(fallback) = fallback_target {
-            self.activate_worktree(fallback, window, cx);
+            self.activate_lane(fallback, window, cx);
         }
-        self.main_area.inactive_worktree_runtimes.remove(&target);
+        self.main_area.inactive_lane_runtimes.remove(&target);
         // W-7 per-lane state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
@@ -260,7 +260,7 @@ impl Workspace {
             user_label: None,
         };
 
-        let new_id = self.allocate_worktree_id();
+        let new_id = self.allocate_lane_id();
         let new_ref = LaneRef {
             project: active_project_id,
             lane: new_id,
@@ -293,9 +293,9 @@ impl Workspace {
             focused_pane_id: pane_id,
         };
         self.main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .insert(new_ref, runtime);
-        self.activate_worktree(new_ref, window, cx);
+        self.activate_lane(new_ref, window, cx);
         // New cwd → new `~/.claude/projects/<encoded>/` to watch.
         self.refresh_jsonl_watcher(cx);
         // New lane root → new project-skills directory to watch.
@@ -304,7 +304,7 @@ impl Workspace {
         // Returning the spawned pane's id lets task-driven callers
         // (start_task) write into that PTY directly instead of
         // relying on `focused_pane_id`, which races with whatever
-        // focus state activate_worktree leaves behind on edge cases.
+        // focus state activate_lane leaves behind on edge cases.
         Ok(pane_id)
     }
 
@@ -312,12 +312,12 @@ impl Workspace {
     /// Walks both the lane list and the stashed inactive runtimes
     /// so a phantom key from a crash mid-remove never collides with a
     /// fresh id.
-    fn allocate_worktree_id(&self) -> LaneId {
+    fn allocate_lane_id(&self) -> LaneId {
         let project_id = self.active.project;
         let max_list = self.active_lanes().iter().map(|w| w.id).max();
         let max_map = self
             .main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .keys()
             .filter(|r| r.project == project_id)
             .map(|r| r.lane)
@@ -339,7 +339,7 @@ impl Workspace {
     /// pane is spawned at the lane's path so the user never lands
     /// on an empty viewport. PTY entities survive the swap because
     /// `_stdout_task` moves with the Pane rather than being cloned.
-    pub(in crate::workspace) fn activate_worktree(
+    pub(in crate::workspace) fn activate_lane(
         &mut self,
         target: LaneRef,
         window: &mut Window,
@@ -374,13 +374,13 @@ impl Workspace {
             focused_pane_id: std::mem::take(&mut self.main_area.focused_pane_id),
         };
         self.main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .insert(current, frozen);
 
         // 2. Pull the target lane's runtime into the live fields.
         let next = self
             .main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .remove(&target)
             .unwrap_or_default();
         self.main_area.tabs = next.tabs;
@@ -466,7 +466,7 @@ impl Workspace {
     /// a lane never migrates between projects through the dock.
     /// Also no-ops when `from == to`, when the project is missing, or
     /// when either id is not present in that project.
-    pub(in crate::workspace) fn reorder_worktree(
+    pub(in crate::workspace) fn reorder_lane(
         &mut self,
         from: LaneRef,
         to: LaneRef,
@@ -507,7 +507,7 @@ impl Workspace {
     /// Update the free-form description for the active project's
     /// lane `id`. `None` clears it, reverting the left dock
     /// sublabel to the lane path.
-    pub(in crate::workspace) fn set_worktree_description(
+    pub(in crate::workspace) fn set_lane_description(
         &mut self,
         id: LaneId,
         description: Option<String>,
@@ -526,7 +526,7 @@ impl Workspace {
     /// Update the user-visible display name for the active project's
     /// lane `id`. `None` clears it and reverts to the branch /
     /// path fallback.
-    pub(in crate::workspace) fn set_worktree_name(
+    pub(in crate::workspace) fn set_lane_name(
         &mut self,
         id: LaneId,
         name: Option<String>,

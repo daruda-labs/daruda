@@ -13,7 +13,7 @@ use crate::workspace::layout::ops::{ContextMenuAnchor, DividerDrag};
 /// conceptual boundary and the migration path to a GPUI Entity is
 /// straightforward (the struct becomes the Entity's state verbatim).
 ///
-/// `inactive_worktree_runtimes` lives here because it is the frozen
+/// `inactive_lane_runtimes` lives here because it is the frozen
 /// mirror of this struct: activating a lane swaps those same fields
 /// in and out of `MainAreaContext`.
 #[derive(Default)]
@@ -36,7 +36,7 @@ pub(in crate::workspace) struct MainAreaContext {
     /// When `Some(id)`, that pane is rendered full-size; all others hidden.
     pub zoomed_pane_id: Option<PaneId>,
     /// Runtime tab/pane state of every inactive lane. The active
-    /// lane's runtime lives in the fields above; `activate_worktree`
+    /// lane's runtime lives in the fields above; `activate_lane`
     /// swaps those with the entry in this map.
-    pub inactive_worktree_runtimes: HashMap<LaneRef, LaneRuntime>,
+    pub inactive_lane_runtimes: HashMap<LaneRef, LaneRuntime>,
 }

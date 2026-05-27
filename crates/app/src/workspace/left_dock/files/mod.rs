@@ -171,7 +171,7 @@ fn build_files_scrollbar(
 // ----------------------------------------------------------------
 
 fn view_header(
-    _worktree_id: LaneId,
+    _lane_id: LaneId,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {

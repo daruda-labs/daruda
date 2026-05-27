@@ -274,7 +274,7 @@ impl Workspace {
         // (Available rows show in Settings → Plugin only) so the
         // palette never prompts the user to invoke something Claude
         // Code can't actually run.
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let snap = cx
             .global::<crate::agent::skills::SkillsState>()
             .snapshot_for(lane.as_deref());

@@ -60,7 +60,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let McpEvent::Reloaded(scope) = event;
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let result =
             cx.update_global::<McpState, _>(|state, _| state.reload_scope(scope, lane.as_deref()));
         if let Err(e) = result {
@@ -110,7 +110,7 @@ impl Workspace {
         self._mcp_watcher = None;
         self._mcp_event_pump = None;
 
-        let project_root = self.active_worktree_root();
+        let project_root = self.active_lane_root();
         let project_path = project_root.as_deref().map(project_mcp_path);
         let personal_path = personal_settings_path();
 

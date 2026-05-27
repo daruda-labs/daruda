@@ -92,7 +92,7 @@ impl Workspace {
         name: &str,
         cx: &mut Context<Self>,
     ) {
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let Some(path) = path_for(scope, lane.as_deref()) else {
             return;
         };
@@ -135,7 +135,7 @@ impl Workspace {
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
@@ -157,7 +157,7 @@ impl Workspace {
         draft: McpServerDraft,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
@@ -184,7 +184,7 @@ impl Workspace {
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())

@@ -399,7 +399,7 @@ impl MergeModal {
                     project: ws.active_ref().project,
                     lane: target_wt_id,
                 };
-                ws.activate_worktree(target, window, cx);
+                ws.activate_lane(target, window, cx);
             });
         }
         self.dismiss(window, cx);

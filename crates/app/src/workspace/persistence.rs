@@ -4,7 +4,7 @@
 //! and the on-disk JSON form.
 //!
 //! Owns `LaneRuntime`, the frozen-fields struct used by the
-//! tab-swap path; both `restore_from_disk` and `activate_worktree`
+//! tab-swap path; both `restore_from_disk` and `activate_lane`
 //! live across persistence + lane_ops, but the *type* belongs here
 //! so the inactive map and the save format share a single definition.
 
@@ -25,7 +25,7 @@ use super::Workspace;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
-/// Frozen runtime state of a non-active lane. `activate_worktree`
+/// Frozen runtime state of a non-active lane. `activate_lane`
 /// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
 /// Kept in its own struct so the swap is a single `std::mem::take` +
 /// assignment pair per direction, rather than a tangle of field moves.
@@ -90,8 +90,7 @@ impl Workspace {
                             &self.main_area.panes,
                             self.main_area.active_tab_index,
                         )
-                    } else if let Some(rt) = self.main_area.inactive_worktree_runtimes.get(&wt_ref)
-                    {
+                    } else if let Some(rt) = self.main_area.inactive_lane_runtimes.get(&wt_ref) {
                         (&rt.tabs, &rt.panes, rt.active_tab_index)
                     } else {
                         return s;
@@ -113,11 +112,11 @@ impl Workspace {
             // lane currently registered for this project (both live
             // lanes and any stashed inactive runtimes for the same
             // project). Matches the "monotonic — never reused" invariant
-            // enforced by `allocate_worktree_id`.
+            // enforced by `allocate_lane_id`.
             let max_live = project.lanes.iter().map(|w| w.id).max();
             let max_inactive = self
                 .main_area
-                .inactive_worktree_runtimes
+                .inactive_lane_runtimes
                 .keys()
                 .filter(|r| r.project == project.id)
                 .map(|r| r.lane)
@@ -378,7 +377,7 @@ impl Workspace {
                     .unwrap_or_default();
                 let mut p = crate::project::Project::from_disk(runtime_id, ps, &ov);
                 let root = p.root.clone();
-                anchor_worktree_paths_to_project_root(&mut p.lanes, &root);
+                anchor_lane_paths_to_project_root(&mut p.lanes, &root);
                 p
             })
             .collect();
@@ -407,7 +406,7 @@ impl Workspace {
         self.main_area.tabs.clear();
         self.main_area.panes.clear();
         self.main_area.activity_counter.clear();
-        self.main_area.inactive_worktree_runtimes.clear();
+        self.main_area.inactive_lane_runtimes.clear();
 
         let mut active_focus: Option<pane_tree::PaneId> = None;
         let mut early_exit = false;
@@ -515,7 +514,7 @@ impl Workspace {
                     active_focus = Some(runtime.focused_pane_id);
                 } else {
                     self.main_area
-                        .inactive_worktree_runtimes
+                        .inactive_lane_runtimes
                         .insert(wt_ref, runtime);
                 }
             }
@@ -572,11 +571,11 @@ impl Workspace {
             }
         }
         if let Some(first_project) = self.projects.first()
-            && let Some(first_worktree) = first_project.lanes.first()
+            && let Some(first_lane) = first_project.lanes.first()
         {
             return daruda_store::project::LaneRef {
                 project: first_project.id,
-                lane: first_worktree.id,
+                lane: first_lane.id,
             };
         }
         daruda_store::project::LaneRef::default()
@@ -755,7 +754,7 @@ fn effective_cwd(
 /// ```
 /// Only the first matching lane is updated because each project has
 /// exactly one primary checkout that maps to the project root.
-fn anchor_worktree_paths_to_project_root(
+fn anchor_lane_paths_to_project_root(
     lanes: &mut [crate::lane::Lane],
     project_root: &std::path::Path,
 ) {

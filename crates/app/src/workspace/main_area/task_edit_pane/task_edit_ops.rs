@@ -234,7 +234,7 @@ impl Workspace {
         // by absolute path. Building the option list once here keeps
         // the dropdown stable across rerenders — re-deriving on every
         // frame would burn allocations and reset list-search state.
-        let base_options = base_worktree_options(self);
+        let base_options = base_lane_options(self);
         let base_initial: Option<SharedString> = initial
             .as_ref()
             .and_then(|t| t.base_worktree_path.as_ref())
@@ -1005,7 +1005,7 @@ impl Workspace {
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
                 .with_context("path", redact_home(&path))
-                .dedup("tasks.open_prompt_file.no_worktree")
+                .dedup("tasks.open_prompt_file.no_lane")
                 .build();
             self.report_error(report, cx);
             return;
@@ -1049,7 +1049,7 @@ impl Workspace {
 /// sentinel; remaining entries are keyed by absolute path so
 /// `commit_task_edit_pane` can round-trip the user's pick back into
 /// `Task::base_worktree_path: Option<PathBuf>`.
-fn base_worktree_options(ws: &Workspace) -> Vec<SelectOption> {
+fn base_lane_options(ws: &Workspace) -> Vec<SelectOption> {
     let lanes = ws.active_lanes();
     let mut options = Vec::with_capacity(lanes.len() + 1);
     options.push(SelectOption::new(

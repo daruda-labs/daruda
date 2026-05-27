@@ -45,7 +45,7 @@ fn make_workspace_with_dirs(
 }
 
 /// Add a second project directly into the workspace without going
-/// through `add_project` (which triggers `activate_worktree`, file-tree
+/// through `add_project` (which triggers `activate_lane`, file-tree
 /// setup, and terminal pane spawn — none of which the DnD reorder ops
 /// care about). The returned id matches what production would mint.
 fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
@@ -57,10 +57,10 @@ fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
     id
 }
 
-// ---- reorder_worktree ----
+// ---- reorder_lane ----
 
 #[gpui::test]
-fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
+fn reorder_lane_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_reorder_wt");
     let ws = wh.root(cx).unwrap();
     let (project_id, ref_a, ref_b) = ws.update(cx, |ws, _| {
@@ -81,7 +81,7 @@ fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
             },
         )
     });
-    ws.update(cx, |ws, cx| ws.reorder_worktree(ref_a, ref_b, cx));
+    ws.update(cx, |ws, cx| ws.reorder_lane(ref_a, ref_b, cx));
     ws.read_with(cx, |ws, _| {
         let p = ws.projects.iter().find(|p| p.id == project_id).unwrap();
         // Expect: [0, 200, 100] in tab_order 0..2.
@@ -91,7 +91,7 @@ fn reorder_worktree_moves_before_target_and_renumbers(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
+fn reorder_lane_rejects_cross_project(cx: &mut TestAppContext) {
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_dnd_wt_cross_a");
     let ws = wh.root(cx).unwrap();
     ws.update(cx, |ws, _cx| {
@@ -119,7 +119,7 @@ fn reorder_worktree_rejects_cross_project(cx: &mut TestAppContext) {
         project: to_project,
         lane: 0,
     };
-    ws.update(cx, |ws, cx| ws.reorder_worktree(from, to, cx));
+    ws.update(cx, |ws, cx| ws.reorder_lane(from, to, cx));
     // Order is unchanged — cross-project move is rejected silently.
     ws.read_with(cx, |ws, _| {
         let after: Vec<(ProjectId, LaneId, u32)> = ws

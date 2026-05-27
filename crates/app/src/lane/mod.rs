@@ -154,7 +154,7 @@ impl Lane {
         }
 
         // Put the lane matching `project_root` first so the
-        // caller's `active_worktree_id = 0` lands on it.
+        // caller's `active_lane_id = 0` lands on it.
         if let Some(idx) = lanes.iter().position(|w| w.path == canonical_target)
             && idx != 0
         {
@@ -176,12 +176,12 @@ impl Lane {
     ///
     /// Legacy state files (saved before the `worktree_root` field was
     /// introduced) deserialize with an empty `PathBuf` for that slot.
-    /// `Self::backfill_worktree_root` re-derives it via a one-stat
+    /// `Self::backfill_lane_root` re-derives it via a one-stat
     /// filesystem walk so existing projects keep working without a
     /// schema migration step.
     pub fn from_serialized(s: &SerializedLane) -> Self {
         let mut kind = s.kind.clone();
-        Self::backfill_worktree_root(&mut kind, &s.path);
+        Self::backfill_lane_root(&mut kind, &s.path);
         Self {
             id: s.id,
             kind,
@@ -202,7 +202,7 @@ impl Lane {
     /// entry and use that as the toplevel. Silent no-op when the field
     /// is already populated or when no `.git` exists above `wt_path`
     /// (e.g. the lane was deleted on disk).
-    fn backfill_worktree_root(kind: &mut LaneKind, wt_path: &std::path::Path) {
+    fn backfill_lane_root(kind: &mut LaneKind, wt_path: &std::path::Path) {
         let LaneKind::Git { worktree_root, .. } = kind else {
             return;
         };
@@ -324,7 +324,7 @@ fn now_secs() -> u64 {
 /// Walk up from `start` to find the first ancestor that contains a
 /// `.git` entry — a regular directory for the main lane or a
 /// pointer file for linked lanes. Used only by the legacy-state
-/// migration in [`Lane::backfill_worktree_root`]; production paths
+/// migration in [`Lane::backfill_lane_root`]; production paths
 /// read the persisted `worktree_root` field directly.
 fn find_git_toplevel(start: &std::path::Path) -> Option<PathBuf> {
     let mut current: &std::path::Path = start;

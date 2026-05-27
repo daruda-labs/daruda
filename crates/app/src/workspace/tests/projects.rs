@@ -3,7 +3,7 @@ use super::*;
 // ---- add_project / close_active_project / window_open_policy ----
 
 #[gpui::test]
-fn add_project_mints_next_id_and_activates_first_worktree(cx: &mut TestAppContext) {
+fn add_project_mints_next_id_and_activates_first_lane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     // Start with a single bootstrapped project (id 0).
     let project = daruda_store::project::Project::from_path("/tmp/daruda_add_first");

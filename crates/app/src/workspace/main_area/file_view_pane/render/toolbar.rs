@@ -50,7 +50,7 @@ pub(super) fn render_file_viewer_toolbar(
     };
 
     let path_for_menu = fv.path.clone();
-    let worktree_id_for_menu = fv.lane_id;
+    let lane_id_for_menu = fv.lane_id;
 
     let is_raw = fv.view_mode == FileViewMode::Raw;
     let is_preview = fv.view_mode == FileViewMode::Preview;
@@ -98,7 +98,7 @@ pub(super) fn render_file_viewer_toolbar(
                         let wt = this
                             .active_lanes()
                             .iter()
-                            .find(|wt| wt.id == worktree_id_for_menu);
+                            .find(|wt| wt.id == lane_id_for_menu);
                         let worktree_root = wt.map(|wt| wt.path.clone());
                         // `path_for_menu` is absolute (set at the left-dock entry point).
                         // For legacy relative paths from old session state use

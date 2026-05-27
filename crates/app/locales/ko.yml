@@ -84,16 +84,16 @@ menu:
   jump_prompt_prev: "이전 프롬프트로 이동"
   jump_prompt_next: "다음 프롬프트로 이동"
 
-  # Worktree menu (indexed)
-  activate_worktree_1: "Worktree 1 활성화"
-  activate_worktree_2: "Worktree 2 활성화"
-  activate_worktree_3: "Worktree 3 활성화"
-  activate_worktree_4: "Worktree 4 활성화"
-  activate_worktree_5: "Worktree 5 활성화"
-  activate_worktree_6: "Worktree 6 활성화"
-  activate_worktree_7: "Worktree 7 활성화"
-  activate_worktree_8: "Worktree 8 활성화"
-  activate_worktree_9: "Worktree 9 활성화"
+  # Lane menu (indexed)
+  activate_lane_1: "Worktree 1 활성화"
+  activate_lane_2: "Worktree 2 활성화"
+  activate_lane_3: "Worktree 3 활성화"
+  activate_lane_4: "Worktree 4 활성화"
+  activate_lane_5: "Worktree 5 활성화"
+  activate_lane_6: "Worktree 6 활성화"
+  activate_lane_7: "Worktree 7 활성화"
+  activate_lane_8: "Worktree 8 활성화"
+  activate_lane_9: "Worktree 9 활성화"
 
   # Window menu
   minimize: "최소화"

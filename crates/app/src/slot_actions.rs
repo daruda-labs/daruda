@@ -345,47 +345,47 @@ macro_rules! lane_slot_table {
     (@register_listeners $cx:expr, $div:expr) => {
         $div.on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane1, window, cx| {
-                this.activate_worktree_by_index(0, window, cx);
+                this.activate_lane_by_index(0, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane2, window, cx| {
-                this.activate_worktree_by_index(1, window, cx);
+                this.activate_lane_by_index(1, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane3, window, cx| {
-                this.activate_worktree_by_index(2, window, cx);
+                this.activate_lane_by_index(2, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane4, window, cx| {
-                this.activate_worktree_by_index(3, window, cx);
+                this.activate_lane_by_index(3, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane5, window, cx| {
-                this.activate_worktree_by_index(4, window, cx);
+                this.activate_lane_by_index(4, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane6, window, cx| {
-                this.activate_worktree_by_index(5, window, cx);
+                this.activate_lane_by_index(5, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane7, window, cx| {
-                this.activate_worktree_by_index(6, window, cx);
+                this.activate_lane_by_index(6, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane8, window, cx| {
-                this.activate_worktree_by_index(7, window, cx);
+                this.activate_lane_by_index(7, window, cx);
             },
         ))
         .on_action($cx.listener(
             |this: &mut Self, _: &$crate::workspace::ActivateLane9, window, cx| {
-                this.activate_worktree_by_index(8, window, cx);
+                this.activate_lane_by_index(8, window, cx);
             },
         ))
     };
@@ -407,39 +407,39 @@ macro_rules! lane_slot_table {
     (@menu_items) => {
         ::std::vec![
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_1(),
+                $crate::surface::strings::menu_activate_lane_1(),
                 $crate::workspace::ActivateLane1,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_2(),
+                $crate::surface::strings::menu_activate_lane_2(),
                 $crate::workspace::ActivateLane2,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_3(),
+                $crate::surface::strings::menu_activate_lane_3(),
                 $crate::workspace::ActivateLane3,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_4(),
+                $crate::surface::strings::menu_activate_lane_4(),
                 $crate::workspace::ActivateLane4,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_5(),
+                $crate::surface::strings::menu_activate_lane_5(),
                 $crate::workspace::ActivateLane5,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_6(),
+                $crate::surface::strings::menu_activate_lane_6(),
                 $crate::workspace::ActivateLane6,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_7(),
+                $crate::surface::strings::menu_activate_lane_7(),
                 $crate::workspace::ActivateLane7,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_8(),
+                $crate::surface::strings::menu_activate_lane_8(),
                 $crate::workspace::ActivateLane8,
             ),
             ::gpui::MenuItem::action(
-                $crate::surface::strings::menu_activate_worktree_9(),
+                $crate::surface::strings::menu_activate_lane_9(),
                 $crate::workspace::ActivateLane9,
             ),
         ]

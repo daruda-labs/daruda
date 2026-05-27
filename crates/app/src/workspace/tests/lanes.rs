@@ -3,7 +3,7 @@ use super::*;
 // ---- Lanes (W-2) ----
 
 #[gpui::test]
-fn test_workspace_without_project_has_no_worktrees(cx: &mut TestAppContext) {
+fn test_workspace_without_project_has_no_lanes(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.read_with(cx, |ws, _| {
         assert!(ws.active_lanes().is_empty());
@@ -11,7 +11,7 @@ fn test_workspace_without_project_has_no_worktrees(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_workspace_with_project_bootstraps_one_default_worktree(cx: &mut TestAppContext) {
+fn test_workspace_with_project_bootstraps_one_default_lane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_bootstrap_wt");
     let wh = cx.add_window(|window, cx| {
@@ -40,7 +40,7 @@ fn test_workspace_with_project_bootstraps_one_default_worktree(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn test_activate_worktree_requires_existing_id(cx: &mut TestAppContext) {
+fn test_activate_lane_requires_existing_id(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_wt_activate");
     let wh = cx.add_window(|window, cx| {
@@ -61,10 +61,10 @@ fn test_activate_worktree_requires_existing_id(cx: &mut TestAppContext) {
                 project: proj,
                 lane: id,
             };
-            ws.activate_worktree(mk(99), window, cx);
+            ws.activate_lane(mk(99), window, cx);
             assert_eq!(ws.active.lane, 0);
             // Self id → no-op (already active).
-            ws.activate_worktree(mk(0), window, cx);
+            ws.activate_lane(mk(0), window, cx);
             assert_eq!(ws.active.lane, 0);
         });
     })
@@ -72,7 +72,7 @@ fn test_activate_worktree_requires_existing_id(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_worktree_removable_excludes_main_and_default(cx: &mut TestAppContext) {
+fn test_lane_removable_excludes_main_and_default(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |_ws, _| {
         let default_wt =
@@ -123,7 +123,7 @@ fn test_git_repo_root_returns_none_for_non_git_workspace(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn test_validate_remove_worktree_rejects_unknown_id(cx: &mut TestAppContext) {
+fn test_validate_remove_lane_rejects_unknown_id(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_remove_unknown");
     let wh = cx.add_window(|window, cx| {
@@ -148,7 +148,7 @@ fn test_validate_remove_worktree_rejects_unknown_id(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_validate_remove_worktree_rejects_default_kind(cx: &mut TestAppContext) {
+fn test_validate_remove_lane_rejects_default_kind(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_remove_default");
     let wh = cx.add_window(|window, cx| {
@@ -174,7 +174,7 @@ fn test_validate_remove_worktree_rejects_default_kind(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_validate_remove_worktree_rejects_default(cx: &mut TestAppContext) {
+fn test_validate_remove_lane_rejects_default(cx: &mut TestAppContext) {
     // Default-kind lane → not removable. The `×` click handler in
     // dock/lanes/list.rs uses validate_remove_lane() to
     // decide whether to even open the modal.
@@ -202,7 +202,7 @@ fn test_validate_remove_worktree_rejects_default(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
+fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_wt_swap");
     let wh = cx.add_window(|window, cx| {
@@ -227,7 +227,7 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     });
 
     // Swap to lane 1 → the previous runtime lands in the
-    // inactive map, and activate_worktree lazy-spawns a new pane
+    // inactive map, and activate_lane lazy-spawns a new pane
     // rooted at the target lane's path (so the viewport isn't
     // empty).
     cx.update_window(wh.into(), |_, window, cx| {
@@ -235,7 +235,7 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
             let proj = ws.active_ref().project;
-            ws.activate_worktree(
+            ws.activate_lane(
                 daruda_store::project::LaneRef {
                     project: proj,
                     lane: 1,
@@ -247,11 +247,11 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
             // Lazy seed: exactly one tab/pane materialized.
             assert_eq!(ws.main_area.tabs.len(), 1);
             assert_eq!(ws.main_area.panes.len(), 1);
-            assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
+            assert_eq!(ws.main_area.inactive_lane_runtimes.len(), 1);
             let proj = ws.active_ref().project;
             let stashed = ws
                 .main_area
-                .inactive_worktree_runtimes
+                .inactive_lane_runtimes
                 .get(&daruda_store::project::LaneRef {
                     project: proj,
                     lane: 0,
@@ -269,7 +269,7 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             let proj = ws.active_ref().project;
-            ws.activate_worktree(
+            ws.activate_lane(
                 daruda_store::project::LaneRef {
                     project: proj,
                     lane: 0,
@@ -282,7 +282,7 @@ fn test_activate_worktree_swaps_tabs(cx: &mut TestAppContext) {
             assert_eq!(ws.main_area.panes.len(), 1);
             let stashed = ws
                 .main_area
-                .inactive_worktree_runtimes
+                .inactive_lane_runtimes
                 .get(&daruda_store::project::LaneRef {
                     project: proj,
                     lane: 1,
@@ -354,7 +354,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.activate_worktree(lane1, window, cx);
+            ws.activate_lane(lane1, window, cx);
             assert_eq!(ws.active, lane1, "removable lane is active before removal");
             ws.finalize_remove_lane(lane1, window, cx);
         });
@@ -375,7 +375,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
         assert!(!ws.main_area.panes.is_empty());
         // The removed lane's frozen runtime is dropped.
         assert!(
-            !ws.main_area.inactive_worktree_runtimes.contains_key(&lane1),
+            !ws.main_area.inactive_lane_runtimes.contains_key(&lane1),
             "removed lane's runtime must be cleared"
         );
     });
@@ -386,7 +386,7 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]
-fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext) {
+fn test_save_state_serializes_inactive_lane_runtime(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_wt_save_inactive");
     let wh = cx.add_window(|window, cx| {
@@ -429,7 +429,7 @@ fn test_save_state_serializes_inactive_worktree_runtime(cx: &mut TestAppContext)
 // legacy `ProjectState`).
 #[cfg(any())]
 #[gpui::test]
-fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
+fn test_restore_state_rebuilds_all_lanes(cx: &mut TestAppContext) {
     // Create the lane directories so the path-exists check in
     // restore_state doesn't skip the inactive lane layout rebuild.
     std::fs::create_dir_all("/tmp/test_wt_restore_all/main").unwrap();
@@ -486,7 +486,7 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
                     description: None,
                 },
             ],
-            active_worktree_id: 5,
+            active_lane_id: 5,
             active_dock_view: daruda_store::project::LeftDockView::default(),
             active_right_panel_view: daruda_store::project::RightDockView::default(),
             active_usage_window: daruda_store::project::UsageWindow::default(),
@@ -511,11 +511,11 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
         assert_eq!(ws.main_area.tabs.len(), 2);
         assert_eq!(ws.main_area.active_tab_index, 1);
         // Inactive lane 0 rebuilt into the inactive map with 1 tab.
-        assert_eq!(ws.main_area.inactive_worktree_runtimes.len(), 1);
+        assert_eq!(ws.main_area.inactive_lane_runtimes.len(), 1);
         let proj = ws.active_ref().project;
         let stashed = ws
             .main_area
-            .inactive_worktree_runtimes
+            .inactive_lane_runtimes
             .get(&daruda_store::project::LaneRef {
                 project: proj,
                 lane: 0,
@@ -528,7 +528,7 @@ fn test_restore_state_rebuilds_all_worktrees(cx: &mut TestAppContext) {
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]
-fn test_save_state_captures_bootstrapped_worktree(cx: &mut TestAppContext) {
+fn test_save_state_captures_bootstrapped_lane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/test_save_wt");
     let wh = cx.add_window(|window, cx| {
@@ -557,7 +557,7 @@ fn test_save_state_captures_bootstrapped_worktree(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
+fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
         UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
@@ -641,7 +641,7 @@ fn test_restore_state_reads_tabs_from_active_worktree(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn test_restore_state_clamps_stale_active_worktree_id(cx: &mut TestAppContext) {
+fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
         UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,

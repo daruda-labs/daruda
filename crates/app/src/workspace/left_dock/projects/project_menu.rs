@@ -42,7 +42,7 @@ pub(in crate::workspace) fn build_project_menu_items(
                 return;
             };
             workspace.update(app_cx, |ws, cx| {
-                ws.activate_worktree(snap_target, window, cx);
+                ws.activate_lane(snap_target, window, cx);
                 ws.on_rename_active_project(&RenameActiveProject, window, cx);
             });
         },
@@ -57,7 +57,7 @@ pub(in crate::workspace) fn build_project_menu_items(
                 return;
             };
             workspace.update(app_cx, |ws, cx| {
-                ws.activate_worktree(snap_target, window, cx);
+                ws.activate_lane(snap_target, window, cx);
                 ws.on_move_active_project_to_group(&MoveActiveProjectToGroup, window, cx);
             });
         },
@@ -97,7 +97,7 @@ pub(in crate::workspace) fn build_project_menu_items(
             let window_handle = window.window_handle();
             let ws_for_submit = ws_delete.clone();
             workspace.update(app_cx, |ws, cx| {
-                ws.activate_worktree(snap_target, window, cx);
+                ws.activate_lane(snap_target, window, cx);
                 let Some(project_name) = ws.active_project_name() else {
                     return;
                 };

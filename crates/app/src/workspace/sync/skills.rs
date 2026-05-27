@@ -61,7 +61,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let SkillsEvent::Reloaded(scope) = event;
-        let lane = self.active_worktree_root();
+        let lane = self.active_lane_root();
         let personal = scan::skills_personal_dir();
         cx.update_global::<SkillsState, _>(|state, _| {
             state.reload_scope(scope, lane.as_deref(), &personal);
@@ -71,7 +71,7 @@ impl Workspace {
 
     /// Project-skills root for the active lane. `None` when the
     /// workspace has no active lane (welcome window).
-    pub(in crate::workspace) fn active_worktree_root(&self) -> Option<PathBuf> {
+    pub(in crate::workspace) fn active_lane_root(&self) -> Option<PathBuf> {
         self.active_lane().map(|wt| wt.path.clone())
     }
 
@@ -86,7 +86,7 @@ impl Workspace {
         self._skills_watcher = None;
         self._skills_event_pump = None;
 
-        let project_root = self.active_worktree_root();
+        let project_root = self.active_lane_root();
         let personal = scan::skills_personal_dir();
 
         cx.update_global::<SkillsState, _>(|state, _| {

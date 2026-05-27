@@ -58,7 +58,7 @@ pub(in crate::workspace) struct FileTreeContext {
     pub(in crate::workspace) files_panel_focus: FocusHandle,
 
     /// Keyboard cursor inside the Files view. Cleared on
-    /// `activate_worktree`. Distinct from the focused file viewer's
+    /// `activate_lane`. Distinct from the focused file viewer's
     /// path — the cursor is a "highlighted but not opened" row.
     pub(in crate::workspace) files_selection: Option<EntryId>,
 

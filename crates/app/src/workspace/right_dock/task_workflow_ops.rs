@@ -2,7 +2,7 @@
 //!
 //! Hosts the long-running task workflows: `start_task` (open the
 //! lane → write the prompt file → dispatch `claude` into the
-//! new pane's PTY), `cancel_task`, `focus_task_worktree`,
+//! new pane's PTY), `cancel_task`, `focus_task_lane`,
 //! `reopen_task`, `retry_task`, plus the supporting Claude-Code
 //! session bookkeeping (`apply_task_session_changed`,
 //! `apply_task_session_ended`, `apply_todo_write`, …).
@@ -55,12 +55,11 @@ impl Workspace {
     /// second one fail fast with a user-visible error rather than
     /// risk a half-created lane.
     fn acquire_repo_lock(&mut self, repo_root: &Path) -> bool {
-        self.pending_worktree_creates
-            .insert(repo_root.to_path_buf())
+        self.pending_lane_creates.insert(repo_root.to_path_buf())
     }
 
     fn release_repo_lock(&mut self, repo_root: &Path) {
-        self.pending_worktree_creates.remove(repo_root);
+        self.pending_lane_creates.remove(repo_root);
     }
 
     /// Resolve the branch name we should base the new lane on.
@@ -244,7 +243,7 @@ impl Workspace {
     /// success, `Error` on prompt-file write failure.
     ///
     /// Takes `pane_id` rather than relying on `focused_pane_id` —
-    /// `activate_worktree` does call `focus_pane` on the happy path,
+    /// `activate_lane` does call `focus_pane` on the happy path,
     /// but routing the command through the pane the lane spawned
     /// is bug-resistant against any future change to focus handling.
     fn dispatch_claude_for_task(
@@ -333,7 +332,7 @@ impl Workspace {
     /// Lazily transitions to `Error { "lane gone" }` when the
     /// path no longer exists on disk (D-10), so a deleted-from-the-
     /// outside checkout doesn't dangle in `Running` forever.
-    pub(in crate::workspace) fn focus_task_worktree(
+    pub(in crate::workspace) fn focus_task_lane(
         &mut self,
         task_id: &str,
         window: &mut Window,
@@ -380,7 +379,7 @@ impl Workspace {
                 project: self.active.project,
                 lane: id,
             };
-            self.activate_worktree(target, window, cx);
+            self.activate_lane(target, window, cx);
         }
     }
 

@@ -426,7 +426,7 @@ pub fn open_edit_mcp_server_modal(
     cx: &mut Context<Workspace>,
 ) {
     let workspace = cx.weak_entity();
-    let lane = ws.active_worktree_root();
+    let lane = ws.active_lane_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
         .snapshot_for(lane.as_deref());
