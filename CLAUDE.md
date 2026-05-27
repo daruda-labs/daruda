@@ -52,6 +52,7 @@ scripts/lint-reentrant-reads.sh
 scripts/lint-direct-gpui-component.sh
 scripts/lint-no-eprintln.sh
 scripts/lint-no-silent-update.sh
+scripts/lint-viewport-row-scroll.sh
 ```
 
 ## Coding Best Practices
