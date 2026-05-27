@@ -1,6 +1,7 @@
 use super::scanners::{parse_osc7_path, percent_decode};
 use super::*;
 use crate::TerminalConfig;
+use crate::coords::ViewportRow;
 
 #[test]
 fn parses_osc7_with_hostname() {
@@ -1311,7 +1312,7 @@ fn dump_viewport_row_respects_scroll_offset() {
 
     let top = s.viewport_row_offset();
     for r in 0..s.rows() {
-        let via_row = s.dump_viewport_row(r).unwrap_or_default();
+        let via_row = s.dump_viewport_row(ViewportRow::new(r)).unwrap_or_default();
         let via_row = via_row.trim_end_matches([' ', '\n']);
         let via_frame = s.dump_screen_row(top + r as u32).unwrap_or_default();
         let via_frame = via_frame.trim_end_matches([' ', '\n']);
@@ -1327,7 +1328,7 @@ fn dump_viewport_row_respects_scroll_offset() {
 
     // Concrete anchor: at the top of history, row 0 is the oldest scrolled-out
     // line ("a"), never a live-grid row.
-    let row0 = s.dump_viewport_row(0).unwrap_or_default();
+    let row0 = s.dump_viewport_row(ViewportRow::new(0)).unwrap_or_default();
     assert_eq!(
         row0.trim_end_matches([' ', '\n']),
         "a",

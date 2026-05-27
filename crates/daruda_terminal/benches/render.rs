@@ -18,6 +18,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use daruda_terminal::coords::ViewportRow;
 use daruda_terminal::{TerminalConfig, TerminalSession};
 
 const ROWS: u16 = 24;
@@ -80,7 +81,9 @@ fn bench_style_run_extraction_full_viewport(c: &mut Criterion) {
     c.bench_function("style_runs_full_viewport", |b| {
         b.iter(|| {
             for row in 0..ROWS {
-                let runs = session.dump_viewport_row_style_runs(row).unwrap();
+                let runs = session
+                    .dump_viewport_row_style_runs(ViewportRow::new(row))
+                    .unwrap();
                 black_box(runs);
             }
         });
@@ -106,7 +109,7 @@ fn bench_dump_viewport_row_loop(c: &mut Criterion) {
     c.bench_function("dump_viewport_per_row", |b| {
         b.iter(|| {
             for row in 0..ROWS {
-                let line = session.dump_viewport_row(row).unwrap();
+                let line = session.dump_viewport_row(ViewportRow::new(row)).unwrap();
                 black_box(line);
             }
         });

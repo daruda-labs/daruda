@@ -5,6 +5,7 @@ use ghostty_vt::{Error, Rgb, Terminal};
 
 use crate::TerminalConfig;
 use crate::ansi;
+use crate::coords::ViewportRow;
 use crate::session::interval_tree::{
     IntervalTree, LineCoord, LineRange, MarkId, MarkPayload, MarkRecordSink,
 };
@@ -1288,7 +1289,8 @@ impl TerminalSession {
     /// to stay consistent with [`Self::dump_viewport`] and
     /// [`Self::dump_viewport_row_style_runs`]. Without this, the dirty-row
     /// fast path paints live-grid rows over scrolled-back content.
-    pub fn dump_viewport_row(&self, row: u16) -> Result<String, Error> {
+    pub fn dump_viewport_row(&self, row: ViewportRow) -> Result<String, Error> {
+        let row = row.get();
         if self.scroll_offset == 0 {
             return self.terminal.dump_viewport_row(row);
         }
@@ -1346,8 +1348,9 @@ impl TerminalSession {
     /// directly.
     pub fn dump_viewport_row_style_runs(
         &self,
-        row: u16,
+        row: ViewportRow,
     ) -> Result<Vec<ghostty_vt::StyleRun>, Error> {
+        let row = row.get();
         if self.scroll_offset == 0 {
             return self.terminal.dump_viewport_row_style_runs(row);
         }

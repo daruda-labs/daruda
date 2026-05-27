@@ -3,6 +3,7 @@ use gpui::Context;
 use super::TerminalView;
 use super::selection::ScreenPos;
 use super::selection_policy::{self, InvalidationReason};
+use crate::coords::ViewportRow;
 use crate::session::TerminalSession;
 
 pub(super) fn split_viewport_lines(viewport: &str) -> Vec<String> {
@@ -250,7 +251,7 @@ impl TerminalView {
         self.state.viewport_style_runs = (0..self.session.rows())
             .map(|row| {
                 self.session
-                    .dump_viewport_row_style_runs(row)
+                    .dump_viewport_row_style_runs(ViewportRow::new(row))
                     .unwrap_or_default()
             })
             .collect();
@@ -358,7 +359,7 @@ impl TerminalView {
                 continue;
             }
 
-            let line = match self.session.dump_viewport_row(row as u16) {
+            let line = match self.session.dump_viewport_row(ViewportRow::new(row as u16)) {
                 Ok(s) => s,
                 Err(_) => {
                     self.refresh_viewport();
@@ -371,7 +372,7 @@ impl TerminalView {
             self.state.viewport_lines[row].push_str(line);
             self.state.viewport_style_runs[row] = self
                 .session
-                .dump_viewport_row_style_runs(row as u16)
+                .dump_viewport_row_style_runs(ViewportRow::new(row as u16))
                 .unwrap_or_default();
             if row < self.line_layouts.len() {
                 self.line_layouts[row] = None;

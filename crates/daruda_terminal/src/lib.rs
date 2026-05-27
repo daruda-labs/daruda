@@ -1,5 +1,6 @@
 pub mod ansi;
 mod config;
+pub mod coords;
 mod font;
 pub mod pty;
 pub mod session;

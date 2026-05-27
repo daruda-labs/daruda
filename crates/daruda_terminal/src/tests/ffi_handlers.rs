@@ -9,7 +9,7 @@ use super::*;
 
 fn row_text(session: &TerminalSession, row0: u16) -> String {
     session
-        .dump_viewport_row(row0)
+        .dump_viewport_row(crate::coords::ViewportRow::new(row0))
         .unwrap()
         .trim_end_matches('\n')
         .trim_end()
