@@ -2,7 +2,9 @@ use super::super::box_drawing::{
     block_glyph_for_char, box_drawing_mask, box_drawing_quads_for_char, line_has_box_drawing,
     powerline_for_char,
 };
-use super::super::overlay::flash_overlay_if_active;
+use super::super::overlay::{
+    flash_overlay_if_active, grid_row_to_screen_row, screen_row_to_visible,
+};
 use super::super::selection::block_selection_quads;
 use super::super::style::{
     CELL_STYLE_FLAG_BOLD, CELL_STYLE_FLAG_FAINT, CELL_STYLE_FLAG_ITALIC,
@@ -210,7 +212,25 @@ impl TerminalTextElement {
                 if text.is_empty() {
                     return None;
                 }
-                let (col, row) = cursor_position?;
+                let (col, grid_row) = cursor_position?;
+                // Same scroll-offset dispatch as the cursor: map the live-grid
+                // cursor row to its viewport row, skipping the preedit overlay
+                // when the cursor has scrolled into history. `row` below is the
+                // 1-indexed viewport row used by cell_left_x_for_col / row_index.
+                let (total_rows, vp_rows, viewport_top) = {
+                    let v = self.view.read(cx);
+                    (
+                        v.session.total_rows(),
+                        v.session.rows() as u32,
+                        v.session.viewport_row_offset(),
+                    )
+                };
+                let visible_row = screen_row_to_visible(
+                    grid_row_to_screen_row(grid_row, total_rows, vp_rows),
+                    viewport_top,
+                    vp_rows,
+                )?;
+                let row = (visible_row as u16).saturating_add(1);
                 let cell_width = cell_width_f;
 
                 let (origin_x, origin_y) = {
@@ -563,8 +583,27 @@ impl TerminalTextElement {
             }
         }
         .and_then(|(pos, style_code)| {
-            let (col, row) = pos?;
-            let background = { self.view.read(cx).session.default_background() };
+            let (col, grid_row) = pos?;
+            // Map the live-grid cursor row to its viewport row. When the
+            // viewport is scrolled into history the cursor is off-screen, so
+            // bail rather than paint it over scrollback — the same
+            // scroll-offset dispatch as dump_viewport and the prompt/search
+            // overlays. `row` below is the 1-indexed viewport row.
+            let (background, total_rows, vp_rows, viewport_top) = {
+                let v = self.view.read(cx);
+                (
+                    v.session.default_background(),
+                    v.session.total_rows(),
+                    v.session.rows() as u32,
+                    v.session.viewport_row_offset(),
+                )
+            };
+            let visible_row = screen_row_to_visible(
+                grid_row_to_screen_row(grid_row, total_rows, vp_rows),
+                viewport_top,
+                vp_rows,
+            )?;
+            let row = (visible_row as u16).saturating_add(1);
             let cursor_color = cursor_color_for_background(background);
             let y = bounds.top() + line_height * (row.saturating_sub(1)) as f32;
             let row_index = row.saturating_sub(1) as usize;

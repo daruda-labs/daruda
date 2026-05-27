@@ -127,6 +127,39 @@ mapping accumulates error as the text grows longer.
 
 ---
 
+## Coordinate spaces — grid row vs viewport row vs absolute screen row
+
+Three vertical row spaces coexist and are all bare integers, so the
+compiler will **not** catch a mix-up:
+
+| Space | Range | Source |
+|-------|-------|--------|
+| **Grid row** | `1..=rows` (1-indexed) | `session.cursor_position()`, ghostty's live grid |
+| **Viewport row** | `0..rows` | what is painted right now (`viewport_lines[i]`) |
+| **Absolute screen row** | `0..total_rows()` | unified `line_buffer` scrollback + grid; what `viewport_row_offset()` and prompt-mark `abs_y` live in |
+
+**The rule:** when the user has scrolled into history (`scroll_offset > 0`)
+the viewport shows scrollback, so **grid row `r` is no longer at viewport
+row `r - 1`**. Any read addressed by a viewport-relative `row`, and any
+paint anchored to a *grid* coordinate, must translate through the
+scroll-offset dispatch — never assume `viewport_row == grid_row - 1`.
+
+- **Reading a viewport row's content** → `session.dump_viewport*` already
+  dispatch on `scroll_offset` (text, style runs, full dump). Keep the
+  three in lockstep — adding a new `*_viewport_row*` reader on
+  `TerminalSession` means copying that `if self.scroll_offset == 0 { … }`
+  branch, not pass-through to `self.terminal.*` (the cause of the Claude
+  Code "input box afterimage": one sibling skipped the branch).
+- **Painting a grid-anchored overlay** (cursor, IME preedit) → map the
+  grid row to an absolute screen row with
+  `overlay::grid_row_to_screen_row(grid_row, total_rows, rows)`, then to a
+  visible viewport row with `overlay::screen_row_to_visible(.., viewport_top, rows)`.
+  A `None` result means the anchor scrolled out of view — **skip the
+  paint**, don't clamp it onto unrelated scrollback. Prompt marks and
+  search highlights already follow this via `screen_row_to_visible`.
+
+---
+
 ## Pitfall #8 entry point — `cell_layout` is the only door
 
 Root CLAUDE.md §8 ("paint-scope state must not leak into events")
