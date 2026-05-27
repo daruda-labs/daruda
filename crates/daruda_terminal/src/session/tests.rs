@@ -1291,6 +1291,51 @@ fn dump_screen_row_dispatches_between_line_buffer_and_viewport() {
 }
 
 #[test]
+fn dump_viewport_row_respects_scroll_offset() {
+    // Regression: dump_viewport_row (TEXT) used to ignore scroll_offset and
+    // always dump ghostty's live grid, unlike its siblings dump_viewport and
+    // dump_viewport_row_style_runs. When the user scrolled up during streaming,
+    // the dirty-row repaint fast-path (apply_dirty_viewport_rows) then painted
+    // live-grid rows over the scrolled-back content — the Claude Code "input
+    // box afterimage" overlay. dump_viewport_row must dispatch through the
+    // unified frame like the other two dumps.
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").unwrap();
+    let max_scroll = s.line_buffer().wrapped_row_count(80);
+    assert!(max_scroll > 0, "expected captured scrollback rows");
+
+    // Scroll to the very top of history; the viewport now shows the oldest
+    // unified-frame rows, not the live grid.
+    s.scroll_viewport(-(max_scroll as i32)).unwrap();
+    assert_eq!(s.scroll_offset(), max_scroll);
+
+    let top = s.viewport_row_offset();
+    for r in 0..s.rows() {
+        let via_row = s.dump_viewport_row(r).unwrap_or_default();
+        let via_row = via_row.trim_end_matches([' ', '\n']);
+        let via_frame = s.dump_screen_row(top + r as u32).unwrap_or_default();
+        let via_frame = via_frame.trim_end_matches([' ', '\n']);
+        assert_eq!(
+            via_row,
+            via_frame,
+            "dump_viewport_row({r}) must match unified-frame row {} when \
+             scroll_offset={}",
+            top + r as u32,
+            s.scroll_offset()
+        );
+    }
+
+    // Concrete anchor: at the top of history, row 0 is the oldest scrolled-out
+    // line ("a"), never a live-grid row.
+    let row0 = s.dump_viewport_row(0).unwrap_or_default();
+    assert_eq!(
+        row0.trim_end_matches([' ', '\n']),
+        "a",
+        "top-of-history viewport row 0 should be the first scrolled-out line"
+    );
+}
+
+#[test]
 fn scroll_viewport_moves_offset_into_history() {
     let mut s = session_with(80, 3, 1024);
     s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").unwrap();

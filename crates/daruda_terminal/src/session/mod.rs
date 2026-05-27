@@ -1281,8 +1281,20 @@ impl TerminalSession {
         Ok(out)
     }
 
+    /// Viewport-relative row text. Keeps the original `0..rows`
+    /// addressing the live grid uses (dirty-row repaint). When
+    /// `scroll_offset > 0` the row addresses a position inside
+    /// `line_buffer` history, so dispatch through [`Self::dump_screen_row`]
+    /// to stay consistent with [`Self::dump_viewport`] and
+    /// [`Self::dump_viewport_row_style_runs`]. Without this, the dirty-row
+    /// fast path paints live-grid rows over scrolled-back content.
     pub fn dump_viewport_row(&self, row: u16) -> Result<String, Error> {
-        self.terminal.dump_viewport_row(row)
+        if self.scroll_offset == 0 {
+            return self.terminal.dump_viewport_row(row);
+        }
+        let top = self.viewport_row_offset();
+        let y = top + row as u32;
+        self.dump_screen_row(y)
     }
 
     /// Dump a single row from the `screen` coordinate space. `y`
@@ -1322,13 +1334,6 @@ impl TerminalSession {
             let vp_row = (y - lb_rows) as u16;
             self.terminal.dump_viewport_row_style_runs(vp_row)
         }
-    }
-
-    pub fn dump_viewport_row_cell_styles(
-        &self,
-        row: u16,
-    ) -> Result<Vec<ghostty_vt::CellStyle>, Error> {
-        self.terminal.dump_viewport_row_cell_styles(row)
     }
 
     /// Viewport-relative style runs. Keeps the original 0..rows
