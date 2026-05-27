@@ -23,7 +23,7 @@ mod text_edit;
 pub(crate) mod text_metrics;
 mod url;
 mod viewport;
-pub(crate) mod viewport_pin;
+pub(crate) mod viewport_lock;
 
 use super::TerminalSession;
 use gpui::{App, Context, FocusHandle, KeyBinding, Pixels, SharedString, Subscription, actions};
@@ -289,7 +289,7 @@ impl TerminalView {
     /// without a PTY backing (test stubs). Used by external dispatchers
     /// like the bottom-dock macro buttons.
     pub fn send_input(&mut self, bytes: &[u8]) {
-        self.snap_to_bottom();
+        self.snap_to_bottom_on_pty_input();
         if let Some(input) = &self.input {
             input.send(bytes);
         }
@@ -382,6 +382,11 @@ impl TerminalView {
     /// Scroll the viewport so an absolute screen row sits at the top.
     pub fn jump_to_screen_row_top(&mut self, row: u32, cx: &mut Context<Self>) {
         self.scroll_screen_row_to_top(row);
+        // Lock so PTY output does not snap back to the bottom while
+        // the caller's UI (e.g. command history) is in focus.
+        self.state
+            .viewport_lock
+            .lock(self.session.viewport_top_abs_y());
         cx.notify();
     }
 

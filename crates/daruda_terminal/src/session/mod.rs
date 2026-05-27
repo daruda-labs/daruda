@@ -1454,7 +1454,7 @@ impl TerminalSession {
     /// Absolute line index of the topmost visible row.
     ///
     /// Expressed as `line_buffer.overflow() + viewport_row_offset()`.
-    /// Capture this when the user scrolls and pass it to [`ViewportPin`] as
+    /// Capture this when the user scrolls and pass it to [`ViewportLock`] as
     /// the anchor. During subsequent IND / SU grid scrolls, `viewport_row_offset`
     /// increases as new rows are captured into `LineBuffer`, so the stored anchor
     /// no longer matches the top-of-viewport — `restore_pinned_viewport` detects

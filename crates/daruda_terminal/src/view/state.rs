@@ -22,11 +22,22 @@
 /// Shared paint+event state. New fields land here as they are
 /// migrated out of [`super::TerminalView`].
 pub(crate) struct TerminalViewState {
-    // ---- Viewport pin ----
-    /// Absolute-line anchor set when the user manually scrolls up.
-    /// While pinned, PTY output must not pull the viewport back to the
-    /// bottom. Released when `check_prompt_arrived` fires (OSC 133 A).
-    pub(crate) viewport_pin: super::viewport_pin::ViewportPin,
+    // ---- Viewport scroll-lock ----
+    /// Combined scroll-lock flag + absolute-line anchor.
+    /// `Live` → the viewport follows PTY output.
+    /// `Pinned { anchor }` → the user is reading scrollback; the anchor
+    /// tracks the viewport-top abs line so IND/SU grid scrolls do not
+    /// drift the reading position.  Released by `snap_to_bottom`,
+    /// OSC 133 A, alt-screen toggle, and RIS.
+    pub(crate) viewport_lock: super::viewport_lock::ViewportLock,
+
+    /// Deadline before which trackpad momentum scroll events must not
+    /// re-lock the viewport. Set by PTY-input paths
+    /// (`snap_to_bottom_on_pty_input`) so that residual inertia from a
+    /// scroll-then-type gesture cannot immediately re-pin the viewport
+    /// after the input snapped it to the bottom.  Cleared when a new
+    /// physical gesture begins (`TouchPhase::Started`).
+    pub(crate) suppress_scroll_lock_until: Option<std::time::Instant>,
     // ---- Pitfall #8: cell metrics ----
     //
     // `cell_metrics_at(window, &font, px(font_size))` is the only
@@ -101,11 +112,6 @@ pub(crate) struct TerminalViewState {
     /// Pixel offset between cursor and thumb-top when the scrollbar
     /// is being dragged. `None` means not dragging the scrollbar.
     pub(crate) scrollbar_drag_start: Option<f32>,
-
-    /// `true` when the user manually scrolled away from the bottom;
-    /// new PTY output must not pull the viewport back. Cleared on
-    /// PromptStart (OSC 133 A) or when the viewport reaches bottom.
-    pub(crate) user_scrolled: bool,
 
     // ---- Viewport snapshot ----
     //
@@ -226,7 +232,8 @@ impl TerminalViewState {
         background_alpha: f32,
     ) -> Self {
         Self {
-            viewport_pin: super::viewport_pin::ViewportPin::default(),
+            viewport_lock: super::viewport_lock::ViewportLock::default(),
+            suppress_scroll_lock_until: None,
             font,
             font_size,
             vertical_spacing,
@@ -239,7 +246,6 @@ impl TerminalViewState {
             is_dragging: false,
             scrollbar_thumb_bounds: None,
             scrollbar_drag_start: None,
-            user_scrolled: false,
             viewport_lines: Vec::new(),
             viewport_line_offsets: Vec::new(),
             viewport_total_len: 0,
@@ -299,13 +305,13 @@ mod tests {
         // no selection, no IME, no overlays" — anything else would
         // make the entity show stale UI between PTY-output bursts.
         let s = fixture(13.0);
-        assert!(!s.viewport_pin.is_pinned());
+        assert!(!s.viewport_lock.is_locked());
+        assert!(s.suppress_scroll_lock_until.is_none());
         assert!(s.search.query.is_empty());
         assert!(!s.search_overlay);
         assert!(s.selection.is_none());
         assert!(!s.is_dragging);
         assert!(s.scrollbar_drag_start.is_none());
-        assert!(!s.user_scrolled);
         assert!(s.viewport_lines.is_empty());
         assert_eq!(s.viewport_total_len, 0);
         assert!(s.pending_output.is_empty());

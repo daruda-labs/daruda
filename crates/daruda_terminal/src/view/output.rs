@@ -73,6 +73,15 @@ impl TerminalView {
     pub fn resize_terminal(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         let _ = self.session.resize(cols, rows);
         self.sync_viewport_scroll_tracking();
+        // If not reading scrollback, snap to bottom so the live prompt stays
+        // visible after line rewrapping shifts the internal viewport offset.
+        // Matches iTerm2's resize policy: scrollEnd when not in user-scroll mode.
+        // When locked, leave the anchor in place — restore_pinned_viewport will
+        // re-seek it on the next output tick (or unlock if the anchor was evicted
+        // by the reflow).
+        if !self.state.viewport_lock.is_locked() {
+            let _ = self.session.scroll_viewport_bottom();
+        }
         // Refresh viewport_lines from ghostty's freshly-reflowed buffer so
         // paint sees the post-resize content, not the stale pre-resize cache.
         // Without this refresh, the scrollback region paints with old wrap

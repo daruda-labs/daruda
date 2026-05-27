@@ -184,12 +184,15 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Unlock before erasing so the viewport snaps to the now-empty live
+        // screen immediately rather than waiting for anchor eviction on the
+        // next PTY output tick.
+        self.snap_to_bottom();
         let _ = self.session.feed(crate::ansi::ERASE_DISPLAY_AND_HOME);
         let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
         self.line_layouts.clear();
         self.line_layout_key = None;
         self.schedule_viewport_refresh(cx);
-        cx.notify();
     }
 
     /// Drop scrollback history but keep the current viewport intact —
@@ -200,13 +203,14 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Scrollback is gone — any saved anchor is now invalid. Unlock
+        // immediately so future output is followed normally.
+        self.snap_to_bottom();
         let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
         self.schedule_viewport_refresh(cx);
-        cx.notify();
     }
 
-    /// Release the viewport pin and snap to the bottom of the scrollback.
-    /// Clears `user_scrolled` so future PTY output is followed normally.
+    /// Unlock the viewport and snap to the bottom of the scrollback.
     /// This is the explicit user-facing fallback for shells without OSC 133.
     pub(super) fn on_scroll_to_bottom(
         &mut self,

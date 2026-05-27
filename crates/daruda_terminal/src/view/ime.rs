@@ -128,7 +128,7 @@ impl TerminalView {
             return;
         }
 
-        self.snap_to_bottom();
+        self.snap_to_bottom_on_pty_input();
         self.state.pending_refresh = true;
         self.state.pending_refresh_keep_selection = true;
         self.dispatch_parts_to_pty(parts, cx);

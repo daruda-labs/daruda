@@ -181,8 +181,7 @@ impl TerminalView {
                 reason,
                 InvalidationReason::AltScreenToggle | InvalidationReason::Ris,
             ) {
-                self.state.viewport_pin.release();
-                self.state.user_scrolled = false;
+                self.state.viewport_lock.unlock();
             }
         }
 
@@ -403,31 +402,38 @@ impl TerminalView {
         // Selection uses absolute ScreenPos coordinates — it survives a
         // viewport-window shift (scroll, search navigation).
         self.state.pending_refresh_keep_selection = true;
-        self.state.user_scrolled = true;
         cx.notify();
+    }
+
+    /// Lock the viewport to the current top abs line and schedule a repaint.
+    /// Call this instead of `schedule_viewport_refresh` whenever a scroll
+    /// action should hold the reading position against PTY output.
+    pub(super) fn lock_viewport_and_refresh(&mut self, cx: &mut Context<Self>) {
+        self.state
+            .viewport_lock
+            .lock(self.session.viewport_top_abs_y());
+        self.schedule_viewport_refresh(cx);
     }
 
     /// Snap the viewport to the bottom when PTY output arrives.
     ///
     /// Skipped when:
     /// - A search anchor is active (`search_overlay` or non-empty query).
-    /// - The user has manually scrolled away (`user_scrolled` is set).
+    /// - The viewport is locked (`viewport_lock` is `Pinned`).
     ///   The lock is cleared by `check_prompt_arrived()` when OSC 133 A
     ///   signals that a new shell prompt has appeared.
     ///
-    /// When the viewport pin is active, restores the viewport to the anchored
-    /// absolute line so grid scrolls (IND / SU) do not drift the reading
-    /// position.
+    /// When locked, restores the viewport to the anchored absolute line
+    /// so grid scrolls (IND / SU) do not drift the reading position.
     pub(super) fn maybe_scroll_to_bottom_on_output(&mut self) {
         if self.state.search_overlay || !self.state.search.query.is_empty() {
             return;
         }
-        if self.state.user_scrolled {
+        if self.state.viewport_lock.is_locked() {
             self.restore_pinned_viewport();
-            // If restore cleared user_scrolled (anchor evicted or
-            // never set), don't return — fall through to the
+            // If restore unlocked (anchor evicted), fall through to the
             // bottom-snap check so the viewport follows output again.
-            if self.state.user_scrolled {
+            if self.state.viewport_lock.is_locked() {
                 return;
             }
         }
@@ -440,20 +446,18 @@ impl TerminalView {
         }
     }
 
-    /// If the viewport is pinned to an absolute line, scroll to keep that
+    /// If the viewport is locked to an absolute line, scroll to keep that
     /// line at the viewport top. Handles grid scrolls (IND / SU) that push
     /// `viewport_row_offset` without changing `scroll_offset`.
     fn restore_pinned_viewport(&mut self) {
-        let Some(anchor) = self.state.viewport_pin.anchor() else {
-            self.state.user_scrolled = false;
+        let Some(anchor) = self.state.viewport_lock.anchor() else {
+            // Live state — nothing to restore.
             return;
         };
         let Some(screen_row) = self.session.abs_to_screen_row(anchor) else {
-            // Anchor evicted from LineBuffer — release the pin and
-            // clear user_scrolled so future PTY output can snap to
-            // bottom again.
-            self.state.viewport_pin.release();
-            self.state.user_scrolled = false;
+            // Anchor evicted from LineBuffer — unlock so future PTY
+            // output snaps to bottom again.
+            self.state.viewport_lock.unlock();
             return;
         };
         let current = self.session.viewport_row_offset();
@@ -465,18 +469,28 @@ impl TerminalView {
         self.sync_viewport_scroll_tracking();
     }
 
-    /// Release the viewport pin, clear `user_scrolled`, and snap the session
-    /// viewport to the bottom.  Shared by `check_prompt_arrived` (OSC 133 A
-    /// trigger) and `on_scroll_to_bottom` (explicit Cmd+End).
+    /// Unlock the viewport and snap to the bottom of the scrollback.
+    /// Shared by `check_prompt_arrived` (OSC 133 A), `on_scroll_to_bottom`
+    /// (Cmd+End), and all PTY input paths.
     pub(super) fn snap_to_bottom(&mut self) {
-        self.state.viewport_pin.release();
-        self.state.user_scrolled = false;
+        self.state.viewport_lock.unlock();
         let _ = self.session.scroll_viewport_bottom();
         self.sync_viewport_scroll_tracking();
     }
 
-    /// Check whether a PromptStart (OSC 133 A) has arrived.  If so, clear
-    /// `user_scrolled` and snap to bottom so the new shell prompt is always
+    /// `snap_to_bottom` + set the momentum-scroll suppression window.
+    /// Call this from every PTY-input path (keyboard, IME, paste) so
+    /// trackpad inertia from a prior scroll-then-type gesture cannot
+    /// re-lock the viewport immediately after the input snaps it back.
+    pub(super) fn snap_to_bottom_on_pty_input(&mut self) {
+        self.snap_to_bottom();
+        self.state.suppress_scroll_lock_until = Some(
+            std::time::Instant::now() + std::time::Duration::from_millis(300),
+        );
+    }
+
+    /// Check whether a PromptStart (OSC 133 A) has arrived.  If so, unlock
+    /// the viewport and snap to bottom so the new shell prompt is always
     /// visible after a command completes.  Search anchors are still
     /// respected.
     pub(super) fn check_prompt_arrived(&mut self) {

@@ -1,6 +1,6 @@
 use gpui::{
     Bounds, Context, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    ScrollDelta, ScrollWheelEvent, Window, point, px,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
 };
 
 use super::selection::ScreenPos;
@@ -150,6 +150,15 @@ impl TerminalView {
                     let delta = offset - current;
                     if delta != 0 {
                         let _ = self.session.scroll_viewport(delta);
+                        self.sync_viewport_scroll_tracking();
+                        let new_offset = self.session.viewport_row_offset();
+                        if new_offset + rows >= total {
+                            self.state.viewport_lock.unlock();
+                        } else {
+                            self.state
+                                .viewport_lock
+                                .lock(self.session.viewport_top_abs_y());
+                        }
                         self.refresh_viewport();
                         cx.notify();
                     }
@@ -477,6 +486,15 @@ impl TerminalView {
                     let delta = offset - current;
                     if delta != 0 {
                         let _ = self.session.scroll_viewport(delta);
+                        self.sync_viewport_scroll_tracking();
+                        let new_offset = self.session.viewport_row_offset();
+                        if new_offset + rows >= total {
+                            self.state.viewport_lock.unlock();
+                        } else {
+                            self.state
+                                .viewport_lock
+                                .lock(self.session.viewport_top_abs_y());
+                        }
                         self.refresh_viewport();
                         cx.notify();
                     }
@@ -556,6 +574,12 @@ impl TerminalView {
     /// that happened before the drag began.
     pub(super) fn start_autoscroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.is_dragging = true;
+        // Lock the viewport so PTY output does not snap back to the bottom
+        // while the user is dragging to make a selection. Mirrors iTerm2's
+        // selectionScrollWillStart which sets userScroll = YES unconditionally.
+        self.state
+            .viewport_lock
+            .lock(self.session.viewport_top_abs_y());
         let entity = cx.entity().downgrade();
         let cell_h = self
             .cell_layout(window)
@@ -620,6 +644,18 @@ impl TerminalView {
 
         let vp_offset = self.session.viewport_row_offset();
         let rows = self.session.rows() as u32;
+        let total = self.session.total_rows();
+        // Keep the viewport lock anchored to the new position so PTY output
+        // arriving during an autoscroll burst does not fight the autoscroll.
+        // Unlock if autoscroll has dragged us back to the live edge.
+        if vp_offset + rows >= total {
+            self.state.viewport_lock.unlock();
+        } else {
+            self.state
+                .viewport_lock
+                .lock(self.session.viewport_top_abs_y());
+        }
+
         if let Some(sel) = self.state.selection.as_mut() {
             // Autoscroll extends the active endpoint to the topmost /
             // bottommost row of the new viewport. The previous byte
@@ -737,6 +773,12 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A new physical gesture clears the momentum-suppression window so
+        // intentional scrolling after PTY input locks the viewport normally.
+        if matches!(event.touch_phase, TouchPhase::Started) {
+            self.state.suppress_scroll_lock_until = None;
+        }
+
         let dy_lines: f32 = match event.delta {
             ScrollDelta::Lines(p) => p.y,
             ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
@@ -811,10 +853,22 @@ impl TerminalView {
         if self.session.viewport_row_offset() != offset_before {
             self.sync_viewport_scroll_tracking();
             self.apply_side_effects(cx);
-            self.state
-                .viewport_pin
-                .pin(self.session.viewport_top_abs_y());
-            self.schedule_viewport_refresh(cx);
+            // Suppress re-locking for pixel-delta (trackpad) events that
+            // arrive during a momentum burst following PTY input: the input
+            // snapped the viewport to the bottom and inertia must not
+            // immediately re-pin it there.  Lines-delta (physical wheel)
+            // and new gestures (TouchPhase::Started clears the flag) are
+            // never suppressed.
+            let is_momentum = matches!(event.delta, ScrollDelta::Pixels(_))
+                && self
+                    .state
+                    .suppress_scroll_lock_until
+                    .map_or(false, |until| std::time::Instant::now() < until);
+            if is_momentum {
+                self.schedule_viewport_refresh(cx);
+            } else {
+                self.lock_viewport_and_refresh(cx);
+            }
         }
 
         // While the left button is held (is_dragging), extend the selection

@@ -141,6 +141,11 @@ impl TerminalView {
                 self.scroll_to_screen_row(jump.row);
             }
         }
+        // Lock the viewport so PTY output doesn't snap back to the bottom
+        // while the user is reading the jumped-to prompt or command block.
+        self.state
+            .viewport_lock
+            .lock(self.session.viewport_top_abs_y());
         if jump.wrapped {
             self.schedule_prompt_jump_flash(window, cx);
         }
