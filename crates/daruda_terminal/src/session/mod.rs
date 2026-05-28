@@ -1587,6 +1587,15 @@ impl TerminalSession {
         } else {
             Some(new_top - 1)
         };
+        // Drain the Zig-side capture watermark so it re-anchors at the
+        // post-reflow active-area top. Without this drain, reflow's shift
+        // of the active row index would surface in the next
+        // `take_scrolled_rows` call as a phantom scroll count, and
+        // `capture_scrolled_out` would re-walk rows already in
+        // LineBuffer. The return value is intentionally discarded — the
+        // scroll math is satisfied by the `last_captured_abs_row`
+        // re-anchor above; this call exists purely to update the pin.
+        let _ = self.terminal.take_scrolled_rows();
         // Invalidate LineBuffer wrap cache before querying at new width.
         // Width change → all per-line cached wraps become stale. Clearing
         // ensures wrapped_row_count below recalculates from cells without
