@@ -121,7 +121,7 @@ impl TerminalView {
         // current-frame screen row so [`next_prompt_index`] — which works
         // in screen-row space — can step relative to it. A focused mark
         // that has been wiped (`\x1b[3J` mirror in
-        // `clear_line_buffer_and_shift_marks`) or evicted from
+        // `clear_line_buffer_and_drop_history_marks`) or evicted from
         // `LineBuffer` collapses to `None`, triggering the fresh-anchor
         // fallback inside `next_prompt_index`.
         let previous_row = previous_seq.and_then(|seq| {

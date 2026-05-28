@@ -251,7 +251,7 @@ fn prompt_mark_seq_is_strictly_monotonic() {
     // Every pushed mark gets a unique, strictly-increasing `seq` so it can
     // serve as a position-independent identity for jump-focus tracking.
     // Unlike a mark's screen row (re-flow / scroll move it) or the mark's
-    // list position (`clear_line_buffer_and_shift_marks` drops wiped
+    // list position (`clear_line_buffer_and_drop_history_marks` drops wiped
     // entries), `seq` is never reused and never resets.
     let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
     for _ in 0..5 {
@@ -267,7 +267,7 @@ fn prompt_mark_seq_is_strictly_monotonic() {
 
 #[test]
 fn clear_scrollback_preserves_surviving_mark_seq() {
-    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+    // The `\x1b[3J` mirror in `clear_line_buffer_and_drop_history_marks`
     // leaves the viewport-resident mark's `abs_y` untouched — the
     // wipe is absorbed into `LineBuffer::overflow` (line-symmetric
     // with the logical-line `abs_y`). What it must never touch is
@@ -1700,9 +1700,10 @@ fn line_buffer_retains_scrollback_beyond_ghostty_ring() {
 // Logical-line grid-walk helpers ----------------------------------
 //
 // `peek_uncaptured_logical_lines` and `logical_lines_until_cursor`
-// are the building blocks Task 2 will wire into
-// `current_abs_y_at_cursor`. They live on the session as private
-// helpers; these tests pin the contract.
+// back `current_abs_y_at_cursor`'s logical-line abs computation. They
+// live on the session as private helpers; these tests pin the
+// post-feed invariants and the grid-walk contract that
+// `logical_lines_until_cursor_after_hard_lines` exercises.
 
 #[test]
 fn peek_uncaptured_logical_lines_post_feed_is_empty() {

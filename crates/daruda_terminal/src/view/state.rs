@@ -233,7 +233,7 @@ pub(crate) struct TerminalViewState {
     /// Identity ([`crate::session::PromptMark::seq`]) of the most recent
     /// prompt-jump target (FTCS A marks). Storing the mark's `seq` — not
     /// a screen row — keeps the highlight stable across `prompt_marks`
-    /// churn (`\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+    /// churn (`\x1b[3J` mirror in `clear_line_buffer_and_drop_history_marks`
     /// may drop wiped marks, ring eviction may shrink the list, but
     /// surviving marks keep their `seq` and `abs_y`): the focused mark
     /// either still exists (highlight follows it) or is gone (no

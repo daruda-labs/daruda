@@ -156,7 +156,7 @@ impl TerminalTextElement {
             };
             let visible_row = visible as f32;
             // Compare by mark identity (`seq`), not by screen row.
-            // A `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+            // A `\x1b[3J` mirror in `clear_line_buffer_and_drop_history_marks`
             // can drop wiped marks, and re-flow / scroll moves the
             // surviving marks' screen rows; row-based comparison would
             // drift off the focused mark across either. `seq` is the

@@ -81,7 +81,7 @@ pub struct PromptMark {
     /// Monotonic push-order identity, assigned exclusively in
     /// [`TerminalSession::push_prompt_mark`] from a private counter.
     /// Unlike `abs_y` (whose owning mark can be dropped by
-    /// `clear_line_buffer_and_shift_marks` after a `\x1b[3J` / RIS
+    /// `clear_line_buffer_and_drop_history_marks` after a `\x1b[3J` / RIS
     /// scrollback wipe), `seq` is never reused and never resets. Use
     /// it as the position-independent identity for jump-focus
     /// tracking — analogous to iTerm2's `_selectedScreenMark` weak
@@ -103,7 +103,7 @@ pub struct PromptMark {
     /// surviving marks (the wipe absorbs cleared logical lines into
     /// `LineBuffer::overflow` and drops marks anchored inside the
     /// wiped region without shifting the rest — see
-    /// `clear_line_buffer_and_shift_marks`). Translate back to a
+    /// `clear_line_buffer_and_drop_history_marks`). Translate back to a
     /// current-frame screen row via [`TerminalSession::abs_to_screen_row`].
     pub abs_y: u64,
     /// 1-indexed cursor column at the moment the mark fired. Captured
@@ -1090,7 +1090,7 @@ impl TerminalSession {
         // broken state that will surface through subsequent feeds with
         // proper error reporting.
         let _ = self.terminal.feed(crate::ansi::ERASE_SCROLLBACK);
-        self.clear_line_buffer_and_shift_marks();
+        self.clear_line_buffer_and_drop_history_marks();
     }
 
     /// Snapshot every row that has scrolled off the active area since the
@@ -1244,7 +1244,7 @@ impl TerminalSession {
             return;
         }
         if self.terminal.viewport_row_offset() == 0 && !self.line_buffer.is_empty() {
-            self.clear_line_buffer_and_shift_marks();
+            self.clear_line_buffer_and_drop_history_marks();
         }
     }
 
@@ -1266,7 +1266,7 @@ impl TerminalSession {
     /// were viewport-resident (or beyond the LB tail) and survive;
     /// marks below it pointed into the wiped logical lines and are
     /// dropped to avoid aliasing onto unrelated rows.
-    fn clear_line_buffer_and_shift_marks(&mut self) {
+    fn clear_line_buffer_and_drop_history_marks(&mut self) {
         let logical_top = self.line_buffer.overflow() + self.line_buffer.len() as u64;
         self.line_buffer.clear();
         self.last_captured_lb_abs = None;
@@ -1682,8 +1682,19 @@ impl TerminalSession {
     ///   reached it — should not happen for a stored OSC 133 mark, but
     ///   guarded to keep the projection total).
     ///
-    /// **Algorithm.** Two branches, mirroring `current_abs_y_at_cursor`'s
-    /// `overflow + lb.len() + grid` decomposition:
+    /// **Soft-wrap precision.** The returned row is always the *first*
+    /// visual row of the target logical line. When the cursor was on a
+    /// soft-wrap continuation row at OSC 133 dispatch, the captured
+    /// `abs_y` identifies the logical line correctly but `abs_to_screen_row`
+    /// resolves to that line's head row, not the continuation row the
+    /// cursor was on. The gutter band painted on the head row is the
+    /// intended UX (one band per logical prompt), so this is by design,
+    /// not a defect — it mirrors iTerm2's mark gutter, which also
+    /// anchors to the head visual row regardless of wrap.
+    ///
+    /// **Algorithm.** Two branches, inverse of `current_abs_y_at_cursor`'s
+    /// `overflow + lb.len() + grid` decomposition (capture sums up to
+    /// the cursor; projection walks down from a given abs to the row):
     ///
     /// 1. **LineBuffer branch** (`line_offset < lb.len()`): sum
     ///    `rows_at_width` for the prefix `lines[0..line_offset]`

@@ -351,7 +351,7 @@ Apply the same `build_*` pattern when a change motivates extraction.
   stores the focused mark's [`PromptMark::seq`] (a monotonic push-order
   identity assigned in `push_prompt_mark`).
 - Tracking indices breaks on FIFO eviction; tracking a screen row
-  breaks on re-flow and on `clear_line_buffer_and_shift_marks`
+  breaks on re-flow and on `clear_line_buffer_and_drop_history_marks`
   (which drops marks anchored inside the wiped region after a
   `\x1b[3J` mirror). `seq` is the only field that is **never reused
   and never resets**, so the highlight follows the focused mark

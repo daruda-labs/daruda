@@ -313,7 +313,7 @@ impl LineBuffer {
     /// visual-row correction is required. The caller still needs to
     /// drop marks anchored inside the wiped logical range so they
     /// don't alias future appends; see
-    /// `TerminalSession::clear_line_buffer_and_shift_marks`.
+    /// `TerminalSession::clear_line_buffer_and_drop_history_marks`.
     pub fn clear(&mut self) {
         // `lines.len() as u64` cast is safe — `usize` is at most 64-bit
         // on every supported target. `saturating_add` is for the
