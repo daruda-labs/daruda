@@ -340,7 +340,13 @@ impl TerminalView {
     ) {
         self.state.search.query = query.to_string();
         self.state.search.case_insensitive = case_insensitive;
-        self.state.search.is_regex = is_regex;
+        self.state.search.mode = if is_regex {
+            search::SearchMode::Regex {
+                compile_error: None,
+            }
+        } else {
+            search::SearchMode::Literal
+        };
         self.recompute_search_matches();
         cx.notify();
     }
@@ -364,7 +370,9 @@ impl TerminalView {
 
         let target_row = self.state.search.matches[next].row;
         self.scroll_to_screen_row(target_row);
-        self.state.pending_refresh = true;
+        // Search navigation only shifts the viewport window to the focused
+        // match; the selection's absolute anchors stay valid, so preserve it.
+        self.state.pending_refresh = state::PendingRefresh::Preserve;
         cx.notify();
     }
 

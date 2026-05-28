@@ -20,7 +20,6 @@ use gpui::KeyDownEvent;
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
 use super::layout::DockSnapshot;
-use super::main_area::file_view_pane::{CharPos, CharSelection};
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::status_bar::{self, StatusBarData};
@@ -876,20 +875,9 @@ impl Render for Workspace {
                             }
                         }
                         "a" if ev.keystroke.modifiers.platform && !search_open => {
-                            let n = this
-                                .focused_file_view()
-                                .map(|fv| fv.visible_row_count())
-                                .unwrap_or(0);
-                            if n > 0
-                                && let Some(fv) = this.focused_file_view_mut()
+                            if let Some(fv) = this.focused_file_view_mut()
+                                && fv.select_all()
                             {
-                                fv.char_selection = Some(CharSelection {
-                                    anchor: CharPos { row: 0, byte: 0 },
-                                    active: CharPos {
-                                        row: n - 1,
-                                        byte: usize::MAX,
-                                    },
-                                });
                                 cx.notify();
                             }
                         }
@@ -964,9 +952,8 @@ impl Render for Workspace {
                     this.end_divider_drag(cx);
                     this.end_dock_drag(cx);
                     if let Some(fv) = this.focused_file_view_mut()
-                        && fv.is_drag_selecting
+                        && fv.end_selection_drag()
                     {
-                        fv.is_drag_selecting = false;
                         cx.notify();
                     }
                 }),

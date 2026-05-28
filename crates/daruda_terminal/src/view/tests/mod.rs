@@ -1083,7 +1083,7 @@ fn search_finds_cross_line_match_in_scrollback() {
     );
 
     let result = scan_search_matches(&session, "world", false, false);
-    assert!(!result.regex_error);
+    assert!(result.compile_error.is_none());
     assert_eq!(
         result.matches.len(),
         2,
@@ -1107,7 +1107,7 @@ fn search_combines_scrollback_and_viewport_matches() {
     assert!(!session.line_buffer().is_empty());
 
     let result = scan_search_matches(&session, "foo", false, false);
-    assert!(!result.regex_error);
+    assert!(result.compile_error.is_none());
     let rows: Vec<u32> = result.matches.iter().map(|m| m.row).collect();
     assert!(
         rows.len() >= 2,

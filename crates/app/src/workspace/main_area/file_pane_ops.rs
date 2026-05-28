@@ -2,7 +2,7 @@ use gpui::{AppContext as _, Context, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
-use super::file_view_pane::{CharPos, FileViewMode, PaneFileContent, PaneFileView};
+use super::file_view_pane::{CharPos, FileViewMode, PaneFileContent, PaneFileView, SelectionDrag};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
 use crate::workspace::Workspace;
@@ -215,9 +215,7 @@ impl Workspace {
                     content: PaneFileContent::Loading,
                     view_mode,
                     hide_unchanged: false,
-                    char_selection: None,
-                    char_anchor: None,
-                    is_drag_selecting: false,
+                    selection_drag: SelectionDrag::None,
                     search: None,
                 },
                 scroll_handle: gpui::ScrollHandle::new(),

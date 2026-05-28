@@ -4,6 +4,7 @@ use gpui::{
 };
 
 use super::selection::ScreenPos;
+use super::state::MouseDragState;
 use super::url::url_at_column_in_line;
 use super::{ByteSelection, TerminalView};
 use gpui::ClipboardItem;
@@ -107,7 +108,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.focus_handle.focus(window, cx);
-        self.state.drag_row = None;
+        self.state.mouse_drag = MouseDragState::None;
 
         if event.first_mouse {
             return;
@@ -125,7 +126,9 @@ impl TerminalView {
                     let cursor_y = f32::from(event.position.y) - f32::from(bounds.origin.y);
                     let thumb_top = f32::from(thumb.origin.y) - f32::from(bounds.origin.y);
                     let click_offset = cursor_y - thumb_top;
-                    self.state.scrollbar_drag_start = Some(click_offset);
+                    self.state.mouse_drag = MouseDragState::ScrollbarDrag {
+                        offset: click_offset,
+                    };
                     cx.notify();
                     return;
                 }
@@ -149,16 +152,8 @@ impl TerminalView {
                     let current = self.session.viewport_row_offset() as i32;
                     let delta = offset - current;
                     if delta != 0 {
-                        let _ = self.session.scroll_viewport(delta);
-                        self.sync_viewport_scroll_tracking();
-                        let new_offset = self.session.viewport_row_offset();
-                        if new_offset + rows >= total {
-                            self.state.viewport_lock.unlock();
-                        } else {
-                            self.state
-                                .viewport_lock
-                                .lock(self.session.viewport_top_abs_y());
-                        }
+                        self.scroll_viewport_and_sync(delta);
+                        self.reanchor_viewport_lock();
                         self.refresh_viewport();
                         cx.notify();
                     }
@@ -339,11 +334,9 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.state.drag_row = None;
-        self.state.is_dragging = false;
-        self.autoscroll_task = None;
-        if event.button == MouseButton::Left && self.state.scrollbar_drag_start.is_some() {
-            self.state.scrollbar_drag_start = None;
+        let was_scrollbar = matches!(self.state.mouse_drag, MouseDragState::ScrollbarDrag { .. });
+        self.end_mouse_drag();
+        if event.button == MouseButton::Left && was_scrollbar {
             cx.notify();
             return;
         }
@@ -459,7 +452,10 @@ impl TerminalView {
         }
 
         // Scrollbar thumb drag.
-        if let Some(click_offset) = self.state.scrollbar_drag_start {
+        if let MouseDragState::ScrollbarDrag {
+            offset: click_offset,
+        } = self.state.mouse_drag
+        {
             if event.pressed_button == Some(MouseButton::Left) {
                 if let Some(bounds) = self.state.last_bounds {
                     let track_height = f32::from(bounds.size.height);
@@ -485,23 +481,15 @@ impl TerminalView {
                     let current = self.session.viewport_row_offset() as i32;
                     let delta = offset - current;
                     if delta != 0 {
-                        let _ = self.session.scroll_viewport(delta);
-                        self.sync_viewport_scroll_tracking();
-                        let new_offset = self.session.viewport_row_offset();
-                        if new_offset + rows >= total {
-                            self.state.viewport_lock.unlock();
-                        } else {
-                            self.state
-                                .viewport_lock
-                                .lock(self.session.viewport_top_abs_y());
-                        }
+                        self.scroll_viewport_and_sync(delta);
+                        self.reanchor_viewport_lock();
                         self.refresh_viewport();
                         cx.notify();
                     }
                 }
                 return;
             } else {
-                self.state.scrollbar_drag_start = None;
+                self.state.mouse_drag = MouseDragState::None;
                 cx.notify();
             }
         }
@@ -513,12 +501,14 @@ impl TerminalView {
         // pressed, the button was released outside the window where
         // on_mouse_up never fires.  Treat re-entry without the button as
         // an implicit mouse-up.
-        if self.state.is_dragging && event.pressed_button != Some(MouseButton::Left) {
-            self.state.is_dragging = false;
-            self.autoscroll_task = None;
-            self.state.drag_row = None;
-            if self.state.selection.map(|s| s.is_empty()).unwrap_or(false) {
-                self.state.selection = None;
+        if matches!(self.state.mouse_drag, MouseDragState::TextSelection { .. })
+            && event.pressed_button != Some(MouseButton::Left)
+        {
+            self.end_mouse_drag();
+            if let Some(sel) = self.state.selection {
+                if sel.is_empty() {
+                    self.state.selection = None;
+                }
             }
             cx.notify();
             return;
@@ -533,7 +523,9 @@ impl TerminalView {
         }
 
         let drag_row = self.mouse_row_index(event.position, window);
-        self.state.drag_row = Some(drag_row);
+        if let MouseDragState::TextSelection { row } = &mut self.state.mouse_drag {
+            *row = drag_row;
+        }
 
         let Some(screen_pos) = self.mouse_position_to_screen_pos(event.position, window) else {
             return;
@@ -561,6 +553,15 @@ impl TerminalView {
         }
     }
 
+    /// Clear all mouse-drag state (text-selection or scrollbar) and cancel any
+    /// autoscroll polling. The single entry point for ending a drag, so new
+    /// drag-state additions can't be silently missed by one of the two mouse-up
+    /// paths.
+    fn end_mouse_drag(&mut self) {
+        self.state.mouse_drag = MouseDragState::None;
+        self.autoscroll_task = None;
+    }
+
     /// Spawn the autoscroll polling task.  Called on every left-button
     /// mouse-down that creates a selection.  The task polls
     /// `window.mouse_position()` every 50 ms (which wraps
@@ -573,7 +574,7 @@ impl TerminalView {
     /// than a stale field that would not reflect a zoom or config change
     /// that happened before the drag began.
     pub(super) fn start_autoscroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.is_dragging = true;
+        self.state.mouse_drag = MouseDragState::TextSelection { row: 0 };
         // Lock the viewport so PTY output does not snap back to the bottom
         // while the user is dragging to make a selection. Mirrors iTerm2's
         // selectionScrollWillStart which sets userScroll = YES unconditionally.
@@ -621,7 +622,7 @@ impl TerminalView {
         cell_h: f32,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.state.is_dragging {
+        if !matches!(self.state.mouse_drag, MouseDragState::TextSelection { .. }) {
             return false;
         }
         let Some(vb) = self.state.last_bounds else {
@@ -639,23 +640,17 @@ impl TerminalView {
             return true;
         };
 
-        let _ = self.session.scroll_viewport(vel);
-        self.sync_viewport_scroll_tracking();
-
-        let vp_offset = self.session.viewport_row_offset();
-        let rows = self.session.rows() as u32;
-        let total = self.session.total_rows();
+        self.scroll_viewport_and_sync(vel);
         // Keep the viewport lock anchored to the new position so PTY output
         // arriving during an autoscroll burst does not fight the autoscroll.
         // Unlock if autoscroll has dragged us back to the live edge.
-        if vp_offset + rows >= total {
-            self.state.viewport_lock.unlock();
-        } else {
-            self.state
-                .viewport_lock
-                .lock(self.session.viewport_top_abs_y());
-        }
+        self.reanchor_viewport_lock();
 
+        // Re-query the post-scroll geometry for the selection update —
+        // `reanchor_viewport_lock` reads these internally but does not
+        // expose them.
+        let vp_offset = self.session.viewport_row_offset();
+        let rows = self.session.rows() as u32;
         if let Some(sel) = self.state.selection.as_mut() {
             // Autoscroll extends the active endpoint to the topmost /
             // bottommost row of the new viewport. The previous byte
@@ -863,7 +858,7 @@ impl TerminalView {
                 && self
                     .state
                     .suppress_scroll_lock_until
-                    .map_or(false, |until| std::time::Instant::now() < until);
+                    .is_some_and(|until| std::time::Instant::now() < until);
             if is_momentum {
                 self.schedule_viewport_refresh(cx);
             } else {
@@ -871,10 +866,10 @@ impl TerminalView {
             }
         }
 
-        // While the left button is held (is_dragging), extend the selection
-        // active endpoint to the row now under the cursor so scrolling during
-        // a drag extends the selection — matching iTerm2 / Alacritty behaviour.
-        if self.state.is_dragging
+        // While the left button is held (a text-selection drag), extend the
+        // selection active endpoint to the row now under the cursor so scrolling
+        // during a drag extends the selection — matching iTerm2 / Alacritty.
+        if matches!(self.state.mouse_drag, MouseDragState::TextSelection { .. })
             && self
                 .state
                 .selection

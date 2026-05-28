@@ -61,7 +61,10 @@ impl TerminalView {
         let total = self.state.search.matches.len();
         let focused = self.state.search.focused.map(|i| i + 1).unwrap_or(0);
         use crate::ux::{strings as ux_strings, theme as ux_theme};
-        let (counter, counter_color) = if self.state.search.regex_error {
+        let (counter, counter_color) = if let search::SearchMode::Regex {
+            compile_error: Some(_),
+        } = &self.state.search.mode
+        {
             (
                 ux_strings::SEARCH_REGEX_ERROR.to_string(),
                 ux_theme::SEARCH_LABEL_ERROR,
@@ -127,7 +130,7 @@ impl TerminalView {
                             cx.stop_propagation();
                         }),
                     )
-                    .child(if self.state.search.is_regex {
+                    .child(if self.state.search.is_regex() {
                         ".*"
                     } else {
                         "⌕"
@@ -281,7 +284,6 @@ impl TerminalView {
         if self.state.search.query.is_empty() {
             self.state.search.matches.clear();
             self.state.search.focused = None;
-            self.state.search.regex_error = false;
             return;
         }
 
@@ -302,9 +304,11 @@ impl TerminalView {
             &self.session,
             &self.state.search.query,
             self.state.search.case_insensitive,
-            self.state.search.is_regex,
+            self.state.search.is_regex(),
         );
-        self.state.search.regex_error = result.regex_error;
+        if let search::SearchMode::Regex { compile_error } = &mut self.state.search.mode {
+            *compile_error = result.compile_error;
+        }
         self.state.search.matches = result.matches;
 
         self.state.search.focused = if self.state.search.matches.is_empty() {

@@ -210,10 +210,7 @@ impl TerminalView {
                     }
                     "end" => {
                         self.apply_side_effects(cx);
-                        self.snap_to_bottom();
-                        self.state.pending_refresh_keep_selection = true;
-                        self.state.pending_refresh = true;
-                        cx.notify();
+                        self.snap_to_bottom_and_refresh(cx);
                         cx.stop_propagation();
                         return;
                     }
@@ -236,10 +233,7 @@ impl TerminalView {
                             offset + rows >= total
                         };
                         if at_bottom {
-                            self.snap_to_bottom();
-                            self.state.pending_refresh_keep_selection = true;
-                            self.state.pending_refresh = true;
-                            cx.notify();
+                            self.snap_to_bottom_and_refresh(cx);
                         } else {
                             self.lock_viewport_and_refresh(cx);
                         }
@@ -310,10 +304,7 @@ impl TerminalView {
             }
             "end" => {
                 self.apply_side_effects(cx);
-                self.snap_to_bottom();
-                self.state.pending_refresh_keep_selection = true;
-                self.state.pending_refresh = true;
-                cx.notify();
+                self.snap_to_bottom_and_refresh(cx);
                 cx.stop_propagation();
                 return;
             }
@@ -336,10 +327,7 @@ impl TerminalView {
                     offset + rows >= total
                 };
                 if at_bottom {
-                    self.snap_to_bottom();
-                    self.state.pending_refresh_keep_selection = true;
-                    self.state.pending_refresh = true;
-                    cx.notify();
+                    self.snap_to_bottom_and_refresh(cx);
                 } else {
                     self.lock_viewport_and_refresh(cx);
                 }

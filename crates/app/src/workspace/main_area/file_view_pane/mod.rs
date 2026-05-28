@@ -44,6 +44,11 @@ pub(in crate::workspace) struct CharSelection {
 }
 
 impl CharSelection {
+    /// True when the anchor and active ends coincide (zero-width selection).
+    pub(in crate::workspace) fn is_empty(&self) -> bool {
+        self.anchor == self.active
+    }
+
     /// Return `(start, end)` in document order (start.row ≤ end.row).
     pub(in crate::workspace) fn ordered(&self) -> (&CharPos, &CharPos) {
         if self.anchor.row < self.active.row
@@ -82,6 +87,39 @@ impl CharSelection {
             return None;
         }
         Some(start_byte..end_byte)
+    }
+}
+
+/// File-viewer text-selection drag state. Encodes the three valid states the
+/// three former `bool`/`Option` fields allowed only by convention.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(in crate::workspace) enum SelectionDrag {
+    #[default]
+    None,
+    /// Button held, dragging. `sel.anchor` fixed, `sel.active` tracks the cursor.
+    InProgress(CharSelection),
+    /// Button released but anchor retained — shift+click can extend from `sel.anchor`.
+    Complete(CharSelection),
+}
+
+impl SelectionDrag {
+    /// The current selection range, regardless of drag phase. `None` when there
+    /// is no selection (Cmd+C then copies all visible rows).
+    pub(in crate::workspace) fn char_selection(&self) -> Option<&CharSelection> {
+        match self {
+            Self::InProgress(sel) | Self::Complete(sel) => Some(sel),
+            Self::None => None,
+        }
+    }
+
+    /// The fixed end of the current selection, or `None` when there is none.
+    pub(in crate::workspace) fn anchor(&self) -> Option<CharPos> {
+        self.char_selection().map(|s| s.anchor)
+    }
+
+    /// True while the left button is held (drag-select in progress).
+    pub(in crate::workspace) fn is_in_progress(&self) -> bool {
+        matches!(self, Self::InProgress(_))
     }
 }
 
@@ -172,13 +210,10 @@ pub(in crate::workspace) struct PaneFileView {
     pub content: PaneFileContent,
     pub view_mode: FileViewMode,
     pub hide_unchanged: bool,
-    /// Character-level selection. `None` means no selection (Cmd+C copies all).
-    pub char_selection: Option<CharSelection>,
-    /// Fixed end of the selection. Set on plain click, kept across mouse-up
-    /// so subsequent shift+clicks extend from here.
-    pub char_anchor: Option<CharPos>,
-    /// True while the left button is held (drag-select in progress).
-    pub is_drag_selecting: bool,
+    /// Character-level selection + drag state. `SelectionDrag::None` means no
+    /// selection (Cmd+C copies all); the anchor is retained across mouse-up so
+    /// subsequent shift+clicks extend from it.
+    pub selection_drag: SelectionDrag,
     /// Active find-panel state. `None` when the panel is closed.
     pub search: Option<FileViewerSearch>,
 }
@@ -385,34 +420,33 @@ impl PaneFileView {
         }
     }
 
-    /// Apply a mouse-down hit. `shift=true` extends the existing
-    /// selection from `char_anchor` (or `hit` if no anchor) to `hit`;
-    /// otherwise resets anchor + selection to `hit` and starts a drag.
-    /// Caller is responsible for `cx.notify()` afterwards.
+    /// Apply a mouse-down hit. `shift=true` extends the existing selection
+    /// from the retained anchor (or `hit` if no anchor) to `hit` and settles
+    /// immediately — a shift+click adjusts the selection without starting a
+    /// drag. Otherwise resets anchor + selection to `hit` and starts a drag.
+    /// Mirrors [`Self::handle_block_mouse_down`]. Caller is responsible for
+    /// `cx.notify()` afterwards.
     pub(in crate::workspace) fn handle_mouse_down(&mut self, hit: CharPos, shift: bool) {
-        if shift {
-            let anchor = self.char_anchor.unwrap_or(hit);
-            self.char_selection = Some(CharSelection {
+        self.selection_drag = if shift {
+            let anchor = self.selection_drag.anchor().unwrap_or(hit);
+            SelectionDrag::Complete(CharSelection {
                 anchor,
                 active: hit,
-            });
+            })
         } else {
-            self.char_anchor = Some(hit);
-            self.char_selection = Some(CharSelection {
+            SelectionDrag::InProgress(CharSelection {
                 anchor: hit,
                 active: hit,
-            });
-            self.is_drag_selecting = true;
-        }
+            })
+        };
     }
 
     /// Apply a mouse-move event during (or after) a drag-select.
     /// Returns `true` when internal state changed so the caller can
-    /// decide whether to `cx.notify()`. Branch order matches the
-    /// pre-refactor View closure exactly:
-    ///   1. drag in progress but button released → reset flag (true)
-    ///   2. not drag-selecting OR cursor outside hitbox → noop (false)
-    ///   3. no anchor → noop (false)
+    /// decide whether to `cx.notify()`. Branch order:
+    ///   1. not in progress → noop (false)
+    ///   2. button released → settle to `Complete` (or `None` if empty) (true)
+    ///   3. cursor outside hitbox → noop (false)
     ///   4. new selection differs from current → set (true)
     ///   5. otherwise → noop (false)
     pub(in crate::workspace) fn handle_mouse_drag(
@@ -421,19 +455,109 @@ impl PaneFileView {
         still_pressed: bool,
         hovered: bool,
     ) -> bool {
-        if self.is_drag_selecting && !still_pressed {
-            self.is_drag_selecting = false;
-            return true;
-        }
-        if !self.is_drag_selecting || !hovered {
+        if !self.selection_drag.is_in_progress() {
             return false;
         }
-        let Some(anchor) = self.char_anchor else {
+        if !still_pressed {
+            // Release detected on a (possibly lazy) move event. Settle to the
+            // last confirmed position via the shared path — never adopt this
+            // event's `active`, which may be wherever the cursor drifted after
+            // the button came up (the file viewer has no pane-local mouse-up
+            // handler; the workspace-level one also routes through here).
+            return self.end_selection_drag();
+        }
+        if !hovered {
+            return false;
+        }
+        let Some(anchor) = self.selection_drag.anchor() else {
             return false;
         };
         let new_sel = CharSelection { anchor, active };
-        if self.char_selection.as_ref() != Some(&new_sel) {
-            self.char_selection = Some(new_sel);
+        if self.selection_drag.char_selection() != Some(&new_sel) {
+            self.selection_drag = SelectionDrag::InProgress(new_sel);
+            return true;
+        }
+        false
+    }
+
+    /// Select every visible row (Cmd+A). Anchors at the first row and extends
+    /// past the end of the last row. Returns `true` when a selection was made
+    /// so the caller can `cx.notify()`; `false` when there is nothing to select.
+    pub(in crate::workspace) fn select_all(&mut self) -> bool {
+        let n = self.visible_row_count();
+        if n == 0 {
+            return false;
+        }
+        self.selection_drag = SelectionDrag::Complete(CharSelection {
+            anchor: CharPos { row: 0, byte: 0 },
+            active: CharPos {
+                row: n - 1,
+                byte: usize::MAX,
+            },
+        });
+        true
+    }
+
+    /// Settle an in-progress drag on button release: a non-empty range becomes
+    /// `Complete` (anchor retained for shift+click), an empty range collapses to
+    /// `None`. Returns `true` when state changed; a no-op when not dragging.
+    pub(in crate::workspace) fn end_selection_drag(&mut self) -> bool {
+        if !self.selection_drag.is_in_progress() {
+            return false;
+        }
+        self.selection_drag = match self.selection_drag.char_selection() {
+            Some(sel) if !sel.is_empty() => SelectionDrag::Complete(sel.clone()),
+            _ => SelectionDrag::None,
+        };
+        true
+    }
+
+    /// Block-level mouse-down for the Markdown preview (selection is row-granular,
+    /// `byte` is always 0). `shift=true` extends from the retained anchor and
+    /// completes immediately; otherwise it starts a fresh in-progress drag.
+    pub(in crate::workspace) fn handle_block_mouse_down(&mut self, block_idx: usize, shift: bool) {
+        let pos = CharPos {
+            row: block_idx,
+            byte: 0,
+        };
+        self.selection_drag = if shift {
+            let anchor = self.selection_drag.anchor().unwrap_or(pos);
+            SelectionDrag::Complete(CharSelection {
+                anchor,
+                active: pos,
+            })
+        } else {
+            SelectionDrag::InProgress(CharSelection {
+                anchor: pos,
+                active: pos,
+            })
+        };
+    }
+
+    /// Block-level mouse-move for the Markdown preview. While the left button is
+    /// held the active end tracks `block_idx`; once released the drag settles via
+    /// [`Self::end_selection_drag`]. Returns `true` when state changed.
+    pub(in crate::workspace) fn handle_block_mouse_move(
+        &mut self,
+        block_idx: usize,
+        left_pressed: bool,
+    ) -> bool {
+        if !self.selection_drag.is_in_progress() {
+            return false;
+        }
+        if !left_pressed {
+            return self.end_selection_drag();
+        }
+        let Some(anchor) = self.selection_drag.anchor() else {
+            return false;
+        };
+        let active = CharPos {
+            row: block_idx,
+            byte: 0,
+        };
+        let new_sel = CharSelection { anchor, active };
+        if self.selection_drag.char_selection() != Some(&new_sel) {
+            self.selection_drag = SelectionDrag::InProgress(new_sel);
             return true;
         }
         false
@@ -587,7 +711,7 @@ impl PaneFileView {
     }
 
     /// Text to put in the clipboard for Cmd+C.
-    /// When `char_selection` is `None`, copies all visible rows (or blocks for Markdown).
+    /// When there is no selection, copies all visible rows (or blocks for Markdown).
     pub(in crate::workspace) fn selected_text_for_copy(&self) -> String {
         // Markdown preview: block-level copy only — byte offsets don't apply to rendered blocks.
         if let PaneFileContent::LoadedMarkdown { blocks, .. } = &self.content
@@ -598,8 +722,8 @@ impl PaneFileView {
                 return String::new();
             }
             let (s, e) = self
-                .char_selection
-                .as_ref()
+                .selection_drag
+                .char_selection()
                 .map(|sel| {
                     let (start, end) = sel.ordered();
                     (start.row.min(n - 1), end.row.min(n - 1))
@@ -618,7 +742,7 @@ impl PaneFileView {
         }
         let n = rows.len();
 
-        let Some(sel) = &self.char_selection else {
+        let Some(sel) = self.selection_drag.char_selection() else {
             // No selection: copy all rows with diff markers.
             return rows
                 .iter()
@@ -839,9 +963,7 @@ diff --git a/bar.rs b/bar.rs
             },
             view_mode: FileViewMode::Changes,
             hide_unchanged: false,
-            char_selection: None,
-            char_anchor: None,
-            is_drag_selecting: false,
+            selection_drag: SelectionDrag::None,
             search: None,
         };
         // No selection → all rows copied.
@@ -868,9 +990,7 @@ diff --git a/bar.rs b/bar.rs
             content: PaneFileContent::LoadedRaw,
             view_mode: FileViewMode::Raw,
             hide_unchanged: false,
-            char_selection: None,
-            char_anchor: None,
-            is_drag_selecting: false,
+            selection_drag: SelectionDrag::None,
             search: None,
         }
     }
@@ -902,9 +1022,7 @@ diff --git a/bar.rs b/bar.rs
             },
             view_mode: FileViewMode::Changes,
             hide_unchanged: false,
-            char_selection: None,
-            char_anchor: None,
-            is_drag_selecting: false,
+            selection_drag: SelectionDrag::None,
             search: None,
         }
     }
@@ -1033,51 +1151,95 @@ diff --git a/bar.rs b/bar.rs
     fn mouse_down_clears_anchor_and_starts_drag() {
         let mut fv = raw_viewer(&["hello world"]);
         fv.handle_mouse_down(CharPos { row: 0, byte: 5 }, false);
-        assert_eq!(fv.char_anchor, Some(CharPos { row: 0, byte: 5 }));
         assert_eq!(
-            fv.char_selection,
-            Some(CharSelection {
+            fv.selection_drag.anchor(),
+            Some(CharPos { row: 0, byte: 5 })
+        );
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::InProgress(CharSelection {
                 anchor: CharPos { row: 0, byte: 5 },
                 active: CharPos { row: 0, byte: 5 },
             })
         );
-        assert!(fv.is_drag_selecting);
+        assert!(fv.selection_drag.is_in_progress());
     }
 
     #[test]
-    fn shift_click_extends_selection_without_starting_drag() {
+    fn shift_click_extends_selection_from_retained_anchor() {
         let mut fv = raw_viewer(&["hello world"]);
-        // Prime: plain click at (0, 0).
+        // Prime: click at (0, 0), drag to (0, 5), then release so the anchor at
+        // (0, 0) is retained in a `Complete` state. This lets us observe
+        // shift-click extending from that retained anchor.
         fv.handle_mouse_down(CharPos { row: 0, byte: 0 }, false);
-        // Drop the drag flag so we can observe shift-click in isolation.
-        fv.is_drag_selecting = false;
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 5 }, true, true);
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 5 }, false, true);
 
         fv.handle_mouse_down(CharPos { row: 0, byte: 10 }, true);
 
         assert_eq!(
-            fv.char_anchor,
+            fv.selection_drag.anchor(),
             Some(CharPos { row: 0, byte: 0 }),
-            "anchor unchanged by shift-click"
+            "shift-click extends from the retained anchor"
         );
         assert_eq!(
-            fv.char_selection.as_ref().map(|s| s.active),
+            fv.selection_drag.char_selection().map(|s| s.active),
             Some(CharPos { row: 0, byte: 10 })
         );
-        assert!(!fv.is_drag_selecting, "shift-click does not start a drag");
+        assert!(
+            !fv.selection_drag.is_in_progress(),
+            "shift-click settles immediately and does not start a drag"
+        );
     }
 
     #[test]
-    fn drag_released_resets_is_drag_selecting() {
+    fn drag_release_settles_to_complete() {
         let mut fv = raw_viewer(&["hello world"]);
         fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
-
-        // mouse-move with button released.
+        // Extend the active end while the button is held.
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 7 }, true, true);
+        // Button released — settle at the last confirmed end.
         let changed = fv.handle_mouse_drag(CharPos { row: 0, byte: 7 }, false, true);
-        assert!(changed, "releasing flag must report state changed");
-        assert!(!fv.is_drag_selecting);
-        assert!(
-            fv.char_selection.is_some(),
-            "selection from mouse-down is preserved"
+        assert!(changed, "releasing must report state changed");
+        assert!(!fv.selection_drag.is_in_progress());
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 0, byte: 3 },
+                active: CharPos { row: 0, byte: 7 },
+            })
+        );
+    }
+
+    #[test]
+    fn release_uses_last_confirmed_position_not_release_event() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 1 }, false);
+        // Confirmed drag end while the button is held: byte 5.
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 5 }, true, true);
+        // A lazy release-move reports byte 9 — it must NOT be adopted.
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 9 }, false, true);
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 0, byte: 1 },
+                active: CharPos { row: 0, byte: 5 },
+            }),
+            "release settles to the last in-hitbox position, not the release-move byte"
+        );
+    }
+
+    #[test]
+    fn plain_click_without_drag_clears_to_none() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
+        // Release-move at a different byte with no intervening pressed drag:
+        // the click never produced a confirmed range, so no selection remains.
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 8 }, false, true);
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::None,
+            "a click with no confirmed drag leaves no selection"
         );
     }
 
@@ -1085,15 +1247,141 @@ diff --git a/bar.rs b/bar.rs
     fn drag_outside_hitbox_does_not_update_selection() {
         let mut fv = raw_viewer(&["hello world"]);
         fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
-        let baseline = fv.char_selection.clone();
+        let baseline = fv.selection_drag.clone();
 
         // drag while not hovered.
         let changed = fv.handle_mouse_drag(CharPos { row: 0, byte: 50 }, true, false);
         assert!(!changed, "out-of-hitbox drag must not change state");
-        assert_eq!(fv.char_selection, baseline, "selection unchanged");
+        assert_eq!(fv.selection_drag, baseline, "selection unchanged");
         assert!(
-            fv.is_drag_selecting,
-            "drag flag still set while button held"
+            fv.selection_drag.is_in_progress(),
+            "drag still in progress while button held"
         );
+    }
+
+    // ------------------------------------------------------------
+    // select_all / end_selection_drag / block-level selection
+    // ------------------------------------------------------------
+
+    #[test]
+    fn select_all_spans_all_visible_rows() {
+        let mut fv = diff_viewer(&["a", "b", "c"]);
+        assert!(fv.select_all(), "select-all reports a change");
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 0, byte: 0 },
+                active: CharPos {
+                    row: 2,
+                    byte: usize::MAX,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn select_all_noop_when_no_rows() {
+        let mut fv = diff_viewer(&[]);
+        assert!(!fv.select_all(), "no rows → no change");
+        assert_eq!(fv.selection_drag, SelectionDrag::None);
+    }
+
+    #[test]
+    fn end_selection_drag_settles_nonempty_to_complete() {
+        let mut fv = raw_viewer(&["hello world"]);
+        fv.handle_mouse_down(CharPos { row: 0, byte: 0 }, false);
+        fv.handle_mouse_drag(CharPos { row: 0, byte: 5 }, true, true);
+        assert!(fv.selection_drag.is_in_progress());
+
+        assert!(fv.end_selection_drag(), "settling reports a change");
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 0, byte: 0 },
+                active: CharPos { row: 0, byte: 5 },
+            })
+        );
+    }
+
+    #[test]
+    fn end_selection_drag_empty_becomes_none() {
+        let mut fv = raw_viewer(&["hello world"]);
+        // mouse-down at a single point → in-progress but zero-width.
+        fv.handle_mouse_down(CharPos { row: 0, byte: 3 }, false);
+        assert!(fv.end_selection_drag());
+        assert_eq!(fv.selection_drag, SelectionDrag::None);
+    }
+
+    #[test]
+    fn end_selection_drag_noop_when_not_in_progress() {
+        let mut fv = raw_viewer(&["hello world"]);
+        assert!(!fv.end_selection_drag(), "no drag in progress → no change");
+        assert_eq!(fv.selection_drag, SelectionDrag::None);
+    }
+
+    #[test]
+    fn block_mouse_down_starts_in_progress() {
+        let mut fv = raw_viewer(&["x"]);
+        fv.handle_block_mouse_down(2, false);
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::InProgress(CharSelection {
+                anchor: CharPos { row: 2, byte: 0 },
+                active: CharPos { row: 2, byte: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn block_mouse_down_shift_extends_to_complete() {
+        let mut fv = raw_viewer(&["x"]);
+        // Prime an anchor at block 1.
+        fv.handle_block_mouse_down(1, false);
+        // Shift+click block 4 extends from the retained anchor and completes.
+        fv.handle_block_mouse_down(4, true);
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 1, byte: 0 },
+                active: CharPos { row: 4, byte: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn block_mouse_move_updates_active_while_pressed() {
+        let mut fv = raw_viewer(&["x"]);
+        fv.handle_block_mouse_down(0, false);
+        assert!(fv.handle_block_mouse_move(3, true));
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::InProgress(CharSelection {
+                anchor: CharPos { row: 0, byte: 0 },
+                active: CharPos { row: 3, byte: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn block_mouse_move_settles_when_button_released() {
+        let mut fv = raw_viewer(&["x"]);
+        fv.handle_block_mouse_down(0, false);
+        fv.handle_block_mouse_move(3, true);
+        // Button no longer held → settle to Complete.
+        assert!(fv.handle_block_mouse_move(3, false));
+        assert_eq!(
+            fv.selection_drag,
+            SelectionDrag::Complete(CharSelection {
+                anchor: CharPos { row: 0, byte: 0 },
+                active: CharPos { row: 3, byte: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn block_mouse_move_noop_when_not_in_progress() {
+        let mut fv = raw_viewer(&["x"]);
+        assert!(!fv.handle_block_mouse_move(2, true));
+        assert_eq!(fv.selection_drag, SelectionDrag::None);
     }
 }

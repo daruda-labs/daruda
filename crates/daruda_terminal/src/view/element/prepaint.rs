@@ -6,6 +6,7 @@ use super::super::overlay::{
     flash_overlay_if_active, grid_row_to_screen_row, screen_row_to_visible,
 };
 use super::super::selection::block_selection_quads;
+use super::super::state::MouseDragState;
 use super::super::style::{
     CELL_STYLE_FLAG_BOLD, CELL_STYLE_FLAG_FAINT, CELL_STYLE_FLAG_ITALIC,
     CELL_STYLE_FLAG_STRIKETHROUGH, CELL_STYLE_FLAG_UNDERLINE, TextRunKey, color_for_key,
@@ -463,7 +464,8 @@ impl TerminalTextElement {
                 let view = self.view.read(cx);
                 let grid_rows = view.session.rows() as usize;
                 let end_vp_row = end_row.checked_sub(vp_offset).map(|r| r as usize);
-                if let (Some(drag_row), Some(end_row)) = (view.state.drag_row, end_vp_row)
+                if let (MouseDragState::TextSelection { row: drag_row }, Some(end_row)) =
+                    (view.state.mouse_drag, end_vp_row)
                     && end_row >= content_rows
                     && drag_row >= content_rows
                     && content_rows < grid_rows
@@ -626,18 +628,17 @@ impl TerminalTextElement {
             Some(fill(cursor_bounds, cursor_color))
         });
 
-        let bell_flash = flash_overlay_if_active(self.view.read(cx).state.bell_flash_until, || {
-            fill(bounds, theme::BELL_FLASH_OVERLAY)
-        });
+        let flash = self.view.read(cx).state.flash;
+        let bell_flash =
+            flash_overlay_if_active(flash.bell, || fill(bounds, theme::BELL_FLASH_OVERLAY));
 
-        let prompt_jump_flash =
-            flash_overlay_if_active(self.view.read(cx).state.prompt_jump_flash_until, || {
-                let stripe = Bounds::new(
-                    bounds.origin,
-                    gpui::size(bounds.size.width, px(theme::PROMPT_JUMP_FLASH_STRIPE_H)),
-                );
-                fill(stripe, theme::PROMPT_JUMP_FLASH_STRIPE)
-            });
+        let prompt_jump_flash = flash_overlay_if_active(flash.prompt_jump, || {
+            let stripe = Bounds::new(
+                bounds.origin,
+                gpui::size(bounds.size.width, px(theme::PROMPT_JUMP_FLASH_STRIPE_H)),
+            );
+            fill(stripe, theme::PROMPT_JUMP_FLASH_STRIPE)
+        });
 
         let scrollbar = {
             let (total_rows, viewport_rows, viewport_offset, is_dragging) = {
@@ -646,7 +647,7 @@ impl TerminalTextElement {
                     v.session.total_rows(),
                     v.session.rows() as u32,
                     v.session.viewport_row_offset(),
-                    v.state.scrollbar_drag_start.is_some(),
+                    matches!(v.state.mouse_drag, MouseDragState::ScrollbarDrag { .. }),
                 )
             };
             let (quad, new_thumb_bounds) = if total_rows > viewport_rows {

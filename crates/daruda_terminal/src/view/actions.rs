@@ -218,12 +218,9 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.snap_to_bottom();
         // Snap to bottom discards the viewport window but not the selection —
         // absolute ScreenPos coordinates remain valid until the rows are evicted.
-        self.state.pending_refresh_keep_selection = true;
-        self.state.pending_refresh = true;
-        cx.notify();
+        self.snap_to_bottom_and_refresh(cx);
     }
 
     pub(super) fn on_search_open(
@@ -330,7 +327,7 @@ impl TerminalView {
             return;
         }
         cx.stop_propagation();
-        let new_is_regex = !self.state.search.is_regex;
+        let new_is_regex = !self.state.search.is_regex();
         let q = self.state.search.query.clone();
         let case = self.state.search.case_insensitive;
         self.set_search_query(&q, case, new_is_regex, cx);
@@ -347,7 +344,7 @@ impl TerminalView {
         }
         cx.stop_propagation();
         let case_insensitive = self.state.search.case_insensitive;
-        let is_regex = self.state.search.is_regex;
+        let is_regex = self.state.search.is_regex();
         self.set_search_query("", case_insensitive, is_regex, cx);
         self.state.search.cursor_byte = 0;
     }
@@ -370,7 +367,7 @@ impl TerminalView {
         }
         q.replace_range(cur..next, "");
         let case_insensitive = self.state.search.case_insensitive;
-        let is_regex = self.state.search.is_regex;
+        let is_regex = self.state.search.is_regex();
         self.set_search_query(&q, case_insensitive, is_regex, cx);
         self.state.search.cursor_byte = cur;
     }
@@ -413,7 +410,7 @@ impl TerminalView {
         }
         q.replace_range(prev..cur, "");
         let case_insensitive = self.state.search.case_insensitive;
-        let is_regex = self.state.search.is_regex;
+        let is_regex = self.state.search.is_regex();
         self.set_search_query(&q, case_insensitive, is_regex, cx);
         self.state.search.cursor_byte = prev;
     }
@@ -495,7 +492,7 @@ impl TerminalView {
         let cur = self.state.search.cursor_byte.min(q.len());
         q.insert_str(cur, text);
         let case_insensitive = self.state.search.case_insensitive;
-        let is_regex = self.state.search.is_regex;
+        let is_regex = self.state.search.is_regex();
         self.set_search_query(&q, case_insensitive, is_regex, cx);
         self.state.search.cursor_byte = cur + text.len();
     }

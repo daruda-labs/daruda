@@ -33,14 +33,26 @@ pub(super) enum Case {
     Insensitive,
 }
 
+/// How the current query is interpreted, and — for regex — whether it
+/// compiled. Modeled as an enum so the "compile failed" detail cannot
+/// exist while the mode is literal (the invalid `(literal, error=true)`
+/// state is unrepresentable).
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(super) enum SearchMode {
+    #[default]
+    Literal,
+    Regex {
+        /// None: before-compile or success. Some when the pattern failed to compile.
+        compile_error: Option<String>,
+    },
+}
+
 /// Literal or regex search state shared between paint and event paths.
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {
     pub(super) query: String,
     pub(super) case_insensitive: bool,
-    pub(super) is_regex: bool,
-    /// True when `is_regex` but the pattern failed to compile.
-    pub(super) regex_error: bool,
+    pub(super) mode: SearchMode,
     pub(super) matches: Vec<MatchRange>,
     pub(super) focused: Option<usize>,
     /// Byte offset of the search-bar input caret inside `query`.
@@ -53,11 +65,16 @@ impl SearchState {
     }
 
     pub fn is_regex(&self) -> bool {
-        self.is_regex
+        matches!(self.mode, SearchMode::Regex { .. })
     }
 
     pub fn regex_error(&self) -> bool {
-        self.regex_error
+        matches!(
+            self.mode,
+            SearchMode::Regex {
+                compile_error: Some(_)
+            }
+        )
     }
 
     pub fn case_insensitive(&self) -> bool {
@@ -74,11 +91,13 @@ impl SearchState {
 }
 
 /// Combined output of [`scan_search_matches`]: a list of visual-row
-/// match ranges plus a `regex_error` flag the search bar surfaces when
-/// the user typed `is_regex = true` and the pattern failed to compile.
+/// match ranges plus a `compile_error` the search bar surfaces when the
+/// user typed `is_regex = true` and the pattern failed to compile.
+/// Presence (`Some`) signals the error; the contained string is the
+/// offending pattern, kept for diagnostics and never shown in the UI.
 pub(super) struct ScanResult {
     pub matches: Vec<MatchRange>,
-    pub regex_error: bool,
+    pub compile_error: Option<String>,
 }
 
 /// Single entry point that produces the full match list for the
@@ -97,7 +116,7 @@ pub(super) fn scan_search_matches(
     if query.is_empty() {
         return ScanResult {
             matches: Vec::new(),
-            regex_error: false,
+            compile_error: None,
         };
     }
     let case = if case_insensitive {
@@ -107,15 +126,16 @@ pub(super) fn scan_search_matches(
     };
 
     // Validate the regex up-front so we can surface a single
-    // regex_error flag rather than relying on FindContext's silent
-    // fall-back to its Invalid state.
+    // compile_error rather than relying on FindContext's silent
+    // fall-back to its Invalid state. The stored string is the offending
+    // pattern (diagnostics only) — the UI keys off presence, not content.
     let viewport_regex = if is_regex {
         match compile_regex(query, case) {
             Some(re) => Some(re),
             None => {
                 return ScanResult {
                     matches: Vec::new(),
-                    regex_error: true,
+                    compile_error: Some(query.to_string()),
                 };
             }
         }
@@ -171,7 +191,7 @@ pub(super) fn scan_search_matches(
 
     ScanResult {
         matches,
-        regex_error: false,
+        compile_error: None,
     }
 }
 

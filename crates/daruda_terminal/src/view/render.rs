@@ -2,7 +2,7 @@ use gpui::{Context, IntoElement, KeyContext, MouseButton, Render, Window, div, p
 
 use super::{
     KEY_CONTEXT, SEARCH_KEY_CONTEXT, TerminalView, element::TerminalTextElement,
-    ensure_key_bindings,
+    ensure_key_bindings, state::PendingRefresh,
 };
 
 impl TerminalView {
@@ -67,15 +67,12 @@ impl Render for TerminalView {
             self.reconcile_dirty_viewport_after_output();
         }
 
-        if self.state.pending_refresh {
-            if self.state.pending_refresh_keep_selection {
-                self.refresh_viewport_preserving_selection();
-            } else {
-                self.refresh_viewport();
-            }
-            self.state.pending_refresh = false;
-            self.state.pending_refresh_keep_selection = false;
+        match self.state.pending_refresh {
+            PendingRefresh::Preserve => self.refresh_viewport_preserving_selection(),
+            PendingRefresh::Clear => self.refresh_viewport(),
+            PendingRefresh::No => {}
         }
+        self.state.pending_refresh = PendingRefresh::No;
 
         if self.session.window_title_updates_enabled() {
             let title = self
@@ -92,7 +89,7 @@ impl Render for TerminalView {
         // doesn't accumulate.
         if self.session.take_bell() && self.session.visual_bell_enabled() {
             let bell = crate::ux::strings::BELL_FLASH;
-            self.state.bell_flash_until = Some(std::time::Instant::now() + bell);
+            self.state.flash.bell = Some(std::time::Instant::now() + bell);
             cx.notify();
             let entity = cx.entity().downgrade();
             window

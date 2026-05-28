@@ -3,6 +3,7 @@ use gpui::Context;
 use super::TerminalView;
 use super::selection::ScreenPos;
 use super::selection_policy::{self, InvalidationReason};
+use super::state::PendingRefresh;
 use crate::coords::ViewportRow;
 use crate::session::TerminalSession;
 
@@ -149,13 +150,7 @@ impl TerminalView {
                 // be scrolled back to.
                 let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
                 let _ = self.session.feed(crate::ansi::ERASE_DISPLAY_AND_HOME);
-                self.state.pending_refresh = true;
-                // Explicitly clear selection: any ScreenPos anchors held from
-                // the primary screen are now invalid after the buffer switch.
-                // pending_refresh_keep_selection must be false so the deferred
-                // refresh calls refresh_viewport() (clears selection) rather
-                // than refresh_viewport_preserving_selection().
-                self.state.pending_refresh_keep_selection = false;
+                self.state.pending_refresh = PendingRefresh::Clear;
             }
             None => {}
         }
@@ -209,7 +204,10 @@ impl TerminalView {
         }
 
         if !self.apply_dirty_viewport_rows(&dirty) {
-            self.state.pending_refresh = true;
+            // Partial-dirty dump failed; fall back to a full rebuild. Selection
+            // invalidation for the output path is decided centrally above, so
+            // preserve the selection here like the other refresh branches.
+            self.state.pending_refresh = PendingRefresh::Preserve;
         }
     }
 
@@ -398,10 +396,9 @@ impl TerminalView {
     pub(super) fn schedule_viewport_refresh(&mut self, cx: &mut Context<Self>) {
         self.state.focused_prompt_row = None;
         self.state.focused_command_row = None;
-        self.state.pending_refresh = true;
         // Selection uses absolute ScreenPos coordinates — it survives a
         // viewport-window shift (scroll, search navigation).
-        self.state.pending_refresh_keep_selection = true;
+        self.state.pending_refresh = PendingRefresh::Preserve;
         cx.notify();
     }
 
@@ -413,6 +410,28 @@ impl TerminalView {
             .viewport_lock
             .lock(self.session.viewport_top_abs_y());
         self.schedule_viewport_refresh(cx);
+    }
+
+    /// Move the viewport by `delta` rows and consume the session's scroll
+    /// delta event so the next output reconcile does not re-apply it.
+    pub(super) fn scroll_viewport_and_sync(&mut self, delta: i32) {
+        let _ = self.session.scroll_viewport(delta);
+        self.sync_viewport_scroll_tracking();
+    }
+
+    /// Re-decide the viewport lock after a scroll: unlock when the new
+    /// position sits at the live edge, otherwise pin to the new top line.
+    pub(super) fn reanchor_viewport_lock(&mut self) {
+        let new_offset = self.session.viewport_row_offset();
+        let rows = self.session.rows() as u32;
+        let total = self.session.total_rows();
+        if new_offset + rows >= total {
+            self.state.viewport_lock.unlock();
+        } else {
+            self.state
+                .viewport_lock
+                .lock(self.session.viewport_top_abs_y());
+        }
     }
 
     /// Snap the viewport to the bottom when PTY output arrives.
@@ -465,8 +484,7 @@ impl TerminalView {
             return;
         }
         let delta = screen_row as i32 - current as i32;
-        let _ = self.session.scroll_viewport(delta);
-        self.sync_viewport_scroll_tracking();
+        self.scroll_viewport_and_sync(delta);
     }
 
     /// Unlock the viewport and snap to the bottom of the scrollback.
@@ -478,15 +496,24 @@ impl TerminalView {
         self.sync_viewport_scroll_tracking();
     }
 
+    /// `snap_to_bottom` + `schedule_viewport_refresh`. Use for scroll
+    /// actions (End / PageDown-at-bottom / ScrollToBottom) that snap to the
+    /// live bottom and want a refresh that preserves the selection.
+    /// `schedule_viewport_refresh` already sets `pending_refresh` to
+    /// `Preserve`, clears the jump-focus rows, and calls `cx.notify()`.
+    pub(super) fn snap_to_bottom_and_refresh(&mut self, cx: &mut Context<Self>) {
+        self.snap_to_bottom();
+        self.schedule_viewport_refresh(cx);
+    }
+
     /// `snap_to_bottom` + set the momentum-scroll suppression window.
     /// Call this from every PTY-input path (keyboard, IME, paste) so
     /// trackpad inertia from a prior scroll-then-type gesture cannot
     /// re-lock the viewport immediately after the input snaps it back.
     pub(super) fn snap_to_bottom_on_pty_input(&mut self) {
         self.snap_to_bottom();
-        self.state.suppress_scroll_lock_until = Some(
-            std::time::Instant::now() + std::time::Duration::from_millis(300),
-        );
+        self.state.suppress_scroll_lock_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(300));
     }
 
     /// Check whether a PromptStart (OSC 133 A) has arrived.  If so, unlock

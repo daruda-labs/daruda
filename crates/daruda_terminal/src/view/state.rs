@@ -19,6 +19,45 @@
 //! reload) is what keeps the four code paths from drifting against
 //! one another.
 
+/// Deferred-refresh intent for the next render. Replaces the former
+/// `(pending_refresh, pending_refresh_keep_selection)` bool pair, whose
+/// `(false, true)` combination was illegal yet representable. The three
+/// variants enumerate exactly the valid states.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingRefresh {
+    /// No refresh pending.
+    #[default]
+    No,
+    /// Refresh and clear the linear selection (full content change).
+    Clear,
+    /// Refresh and preserve the linear selection (viewport-window shift:
+    /// user scroll, search / prompt navigation, PTY echo).
+    Preserve,
+}
+
+/// The mouse drag currently in progress. Replaces the former
+/// `(is_dragging, drag_row, scrollbar_drag_start)` trio, which could
+/// represent illegal combinations (both drag types active at once, or
+/// `is_dragging == false` while `drag_row == Some`). The variants
+/// enumerate exactly the valid states: idle, a text-selection drag
+/// tracking the live drag row, or a scrollbar-thumb drag tracking the
+/// cursor-to-thumb-top pixel offset.
+#[derive(Default, Clone, Copy, PartialEq)]
+pub(crate) enum MouseDragState {
+    /// No drag in progress.
+    #[default]
+    None,
+    /// Left button held during a text selection. `row` is the grid row
+    /// (0-based viewport) of the last drag-mouse position; paint extends
+    /// selection highlights on otherwise-empty rows down to this row so a
+    /// drag past the last text line still reads as "selected".
+    TextSelection { row: usize },
+    /// Scrollbar thumb being dragged. `offset` is the pixel offset between
+    /// the cursor and the thumb top, captured at drag start so the thumb
+    /// does not jump on the first move event.
+    ScrollbarDrag { offset: f32 },
+}
+
 /// Shared paint+event state. New fields land here as they are
 /// migrated out of [`super::TerminalView`].
 pub(crate) struct TerminalViewState {
@@ -93,25 +132,16 @@ pub(crate) struct TerminalViewState {
     /// means no selection — Cmd+C copies the visible viewport.
     pub(crate) selection: Option<super::selection::ByteSelection>,
 
-    /// Grid row (0-based viewport) of the last drag-mouse position.
-    /// Paint extends selection highlights on otherwise-empty rows
-    /// down to this row so a drag past the last text line still
-    /// reads as "selected".
-    pub(crate) drag_row: Option<usize>,
-
-    /// `true` while the left button is held during a selection
-    /// drag. Drives the autoscroll task (kept on the entity)
-    /// and tells mouse-up handlers whether to finalise a selection.
-    pub(crate) is_dragging: bool,
+    /// The mouse drag currently in progress, if any. A drag is
+    /// either a text selection (drives the autoscroll task and
+    /// selection-extend highlights) or a scrollbar-thumb drag;
+    /// the two are mutually exclusive.
+    pub(crate) mouse_drag: MouseDragState,
 
     /// Bounds of the scrollbar thumb painted last frame. Mouse
     /// handlers read this to detect a thumb-click without
     /// recomputing scroll metrics.
     pub(crate) scrollbar_thumb_bounds: Option<gpui::Bounds<gpui::Pixels>>,
-
-    /// Pixel offset between cursor and thumb-top when the scrollbar
-    /// is being dragged. `None` means not dragging the scrollbar.
-    pub(crate) scrollbar_drag_start: Option<f32>,
 
     // ---- Viewport snapshot ----
     //
@@ -153,15 +183,11 @@ pub(crate) struct TerminalViewState {
     /// command (`cat large_file`) doesn't render once per chunk.
     pub(crate) pending_output: Vec<u8>,
 
-    /// `true` when `apply_side_effects` should rebuild the viewport
+    /// Whether `apply_side_effects` should rebuild the viewport
     /// snapshot on the next render (after batched PTY output landed
-    /// or a setting changed dirty rows).
-    pub(crate) pending_refresh: bool,
-
-    /// `true` when the upcoming `refresh_viewport` should preserve
-    /// the linear selection rather than clearing it (set by user
-    /// scroll / search navigation paths).
-    pub(crate) pending_refresh_keep_selection: bool,
+    /// or a setting changed dirty rows), and if so whether the linear
+    /// selection should be cleared or preserved across the rebuild.
+    pub(crate) pending_refresh: PendingRefresh,
 
     // ---- IME composition ----
     /// Active IME preedit. `None` when no composition is in flight.
@@ -209,14 +235,24 @@ pub(crate) struct TerminalViewState {
     /// Cmd+Shift+Option+↑/↓.
     pub(crate) focused_command_row: Option<u32>,
 
+    /// Independent flash-overlay deadlines (bell + prompt-jump wrap).
+    /// Both are additive — paint renders each separately.
+    pub(crate) flash: FlashOverlay,
+}
+
+/// Deadlines for the two additive viewport flash overlays. They are
+/// triggered and painted independently (not mutually exclusive), so each
+/// effect owns its own field rather than sharing one slot.
+#[derive(Default, Clone, Copy, PartialEq)]
+pub(crate) struct FlashOverlay {
+    /// Deadline for the visual bell flash (BEL char / DECSET 1004
+    /// bell). Paint draws a translucent overlay until this time.
+    pub bell: Option<std::time::Instant>,
+
     /// Deadline after which the wrap-around flash overlay clears.
     /// Mirrors iTerm2's `kiTermIndicatorWrapToTop` flash signalling
     /// that a prompt jump looped back to the other end.
-    pub(crate) prompt_jump_flash_until: Option<std::time::Instant>,
-
-    /// Deadline for the visual bell flash (BEL char / DECSET 1004
-    /// bell). Paint draws a translucent overlay until this time.
-    pub(crate) bell_flash_until: Option<std::time::Instant>,
+    pub prompt_jump: Option<std::time::Instant>,
 }
 
 impl TerminalViewState {
@@ -242,10 +278,8 @@ impl TerminalViewState {
             search: super::SearchState::default(),
             search_overlay: false,
             selection: None,
-            drag_row: None,
-            is_dragging: false,
+            mouse_drag: MouseDragState::None,
             scrollbar_thumb_bounds: None,
-            scrollbar_drag_start: None,
             viewport_lines: Vec::new(),
             viewport_line_offsets: Vec::new(),
             viewport_total_len: 0,
@@ -253,8 +287,7 @@ impl TerminalViewState {
             last_bounds: None,
             last_window_title: None,
             pending_output: Vec::new(),
-            pending_refresh: false,
-            pending_refresh_keep_selection: false,
+            pending_refresh: PendingRefresh::No,
             marked_text: None,
             marked_selected_range_utf16: 0..0,
             last_known_cursor: None,
@@ -263,8 +296,7 @@ impl TerminalViewState {
             hovered_annotation: None,
             focused_prompt_row: None,
             focused_command_row: None,
-            prompt_jump_flash_until: None,
-            bell_flash_until: None,
+            flash: FlashOverlay::default(),
         }
     }
 }
@@ -310,19 +342,17 @@ mod tests {
         assert!(s.search.query.is_empty());
         assert!(!s.search_overlay);
         assert!(s.selection.is_none());
-        assert!(!s.is_dragging);
-        assert!(s.scrollbar_drag_start.is_none());
+        assert!(s.mouse_drag == MouseDragState::None);
         assert!(s.viewport_lines.is_empty());
         assert_eq!(s.viewport_total_len, 0);
         assert!(s.pending_output.is_empty());
-        assert!(!s.pending_refresh);
-        assert!(!s.pending_refresh_keep_selection);
+        assert!(s.pending_refresh == PendingRefresh::No);
         assert!(s.marked_text.is_none());
         assert!(s.hovered_url.is_none());
         assert!(s.focused_prompt_row.is_none());
         assert!(s.focused_command_row.is_none());
-        assert!(s.bell_flash_until.is_none());
-        assert!(s.prompt_jump_flash_until.is_none());
+        assert!(s.flash.bell.is_none());
+        assert!(s.flash.prompt_jump.is_none());
     }
 
     #[test]
@@ -337,34 +367,5 @@ mod tests {
         s.search_overlay = true;
         assert_eq!(s.search.query, "needle");
         assert_eq!(s.search.cursor_byte, "needle".len());
-    }
-
-    #[test]
-    fn pending_refresh_flags_are_independent() {
-        // `pending_refresh` and `pending_refresh_keep_selection` are
-        // two booleans that gate the next `refresh_viewport`; setting
-        // one must not flip the other, otherwise scroll + search
-        // navigation would clobber each other's selection-preserve
-        // intent.
-        let mut s = fixture(13.0);
-        s.pending_refresh = true;
-        assert!(!s.pending_refresh_keep_selection);
-        s.pending_refresh_keep_selection = true;
-        assert!(s.pending_refresh);
-    }
-
-    #[test]
-    fn flash_deadlines_are_independent() {
-        // Bell flash and prompt-jump flash share an underlying type
-        // (Option<Instant>) but mean different things. A regression
-        // that aliased them would either show both flashes at once
-        // or neither.
-        let mut s = fixture(13.0);
-        let now = std::time::Instant::now();
-        s.bell_flash_until = Some(now);
-        assert!(s.prompt_jump_flash_until.is_none());
-        s.prompt_jump_flash_until = Some(now);
-        assert_eq!(s.bell_flash_until, Some(now));
-        assert_eq!(s.prompt_jump_flash_until, Some(now));
     }
 }

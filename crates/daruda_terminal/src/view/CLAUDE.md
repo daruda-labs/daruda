@@ -365,7 +365,7 @@ Manual scroll (wheel, PageUp / PageDown, Home / End) or PTY input →
 
 ### Wrap flash
 
-`PromptJump.wrapped == true` → `prompt_jump_flash_until` set for 180 ms →
+`PromptJump.wrapped == true` → `state.flash.prompt_jump` set for 180 ms →
 `flash_overlay_if_active` paints a 3 px band at the top.
 
 ---

@@ -2,6 +2,7 @@ use gpui::{Context, SharedString};
 use std::ops::Range;
 
 use super::TerminalView;
+use super::state::PendingRefresh;
 
 impl TerminalView {
     pub(super) fn utf16_len(s: &str) -> usize {
@@ -129,8 +130,7 @@ impl TerminalView {
         }
 
         self.snap_to_bottom_on_pty_input();
-        self.state.pending_refresh = true;
-        self.state.pending_refresh_keep_selection = true;
+        self.state.pending_refresh = PendingRefresh::Preserve;
         self.dispatch_parts_to_pty(parts, cx);
     }
 

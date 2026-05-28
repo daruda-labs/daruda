@@ -6,7 +6,7 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent};
+use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
 
 impl Workspace {
     /// Select a file in the Git Changes view: open the pane-area file viewer
@@ -107,9 +107,7 @@ impl Workspace {
                 fc.view.view_mode = effective_mode;
                 fc.view.content = PaneFileContent::Loading;
                 fc.view.hide_unchanged = false;
-                fc.view.char_selection = None;
-                fc.view.char_anchor = None;
-                fc.view.is_drag_selecting = false;
+                fc.view.selection_drag = SelectionDrag::None;
                 fc.view.search = None;
                 fc.scroll_handle = gpui::ScrollHandle::new();
                 fc.cached_title = new_title;
@@ -287,9 +285,7 @@ impl Workspace {
             fv.view_mode = mode;
             // Clear search — match indices are mode-specific.
             fv.search = None;
-            fv.char_selection = None;
-            fv.char_anchor = None;
-            fv.is_drag_selecting = false;
+            fv.selection_drag = SelectionDrag::None;
             fc.scroll_handle = gpui::ScrollHandle::new();
 
             if skip_reload {
@@ -317,9 +313,7 @@ impl Workspace {
         // now index into the wrong slice. Mirror `set_file_view_mode`
         // and drop the search alongside the other view-derived state.
         fv.search = None;
-        fv.char_selection = None;
-        fv.char_anchor = None;
-        fv.is_drag_selecting = false;
+        fv.selection_drag = SelectionDrag::None;
         cx.notify();
     }
 

@@ -28,7 +28,7 @@ pub(super) fn render_file_viewer_body(
     bottom_offset: gpui::Pixels,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
-    let char_selection = fv.char_selection.clone();
+    let char_selection = fv.selection_drag.char_selection().cloned();
     let hide_unchanged = fv.hide_unchanged;
     let search_state: Option<(&[usize], Option<usize>)> = fv.search.as_ref().map(|s| {
         let focused_row = s.focused.and_then(|fi| s.matches.get(fi).copied());

@@ -1,6 +1,7 @@
 use gpui::{Context, Window};
 
 use super::TerminalView;
+use super::state::PendingRefresh;
 
 /// Resolved target of a `Cmd+Shift+Up/Down` press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,14 +150,16 @@ impl TerminalView {
         if jump.wrapped {
             self.schedule_prompt_jump_flash(window, cx);
         }
-        self.state.pending_refresh = true;
+        // A prompt/command jump only shifts the viewport window; the
+        // selection's absolute ScreenPos anchors stay valid, so preserve it.
+        self.state.pending_refresh = PendingRefresh::Preserve;
         cx.notify();
         Some(jump.row)
     }
 
     fn schedule_prompt_jump_flash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let flash = crate::ux::strings::PROMPT_JUMP_FLASH;
-        self.state.prompt_jump_flash_until = Some(std::time::Instant::now() + flash);
+        self.state.flash.prompt_jump = Some(std::time::Instant::now() + flash);
         let entity = cx.entity().downgrade();
         window
             .spawn(cx, async move |cx| {

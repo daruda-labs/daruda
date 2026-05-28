@@ -9,8 +9,8 @@ use gpui::{
 };
 
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::CharSelection;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan};
-use crate::workspace::main_area::file_view_pane::{CharPos, CharSelection};
 
 /// Top-level Markdown body: a padded column of selectable blocks.
 pub(super) fn render_md_body(
@@ -415,46 +415,15 @@ fn block_with_selection(
 ) -> gpui::Div {
     let down_handler = cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
         if let Some(fv) = this.focused_file_view_mut() {
-            let pos = CharPos {
-                row: block_idx,
-                byte: 0,
-            };
-            if ev.modifiers.shift {
-                let anchor = fv.char_anchor.unwrap_or(pos);
-                fv.char_selection = Some(CharSelection {
-                    anchor,
-                    active: pos,
-                });
-            } else {
-                fv.char_anchor = Some(pos);
-                fv.char_selection = Some(CharSelection {
-                    anchor: pos,
-                    active: pos,
-                });
-                fv.is_drag_selecting = true;
-            }
+            fv.handle_block_mouse_down(block_idx, ev.modifiers.shift);
             cx.notify();
         }
     });
     let move_handler = cx.listener(move |this, ev: &MouseMoveEvent, _window, cx| {
         if let Some(fv) = this.focused_file_view_mut() {
-            if fv.is_drag_selecting && ev.pressed_button != Some(MouseButton::Left) {
-                fv.is_drag_selecting = false;
+            let left_pressed = ev.pressed_button == Some(MouseButton::Left);
+            if fv.handle_block_mouse_move(block_idx, left_pressed) {
                 cx.notify();
-                return;
-            }
-            if fv.is_drag_selecting
-                && let Some(anchor) = fv.char_anchor
-            {
-                let active = CharPos {
-                    row: block_idx,
-                    byte: 0,
-                };
-                let new_sel = CharSelection { anchor, active };
-                if fv.char_selection.as_ref() != Some(&new_sel) {
-                    fv.char_selection = Some(new_sel);
-                    cx.notify();
-                }
             }
         }
     });
