@@ -7,7 +7,7 @@ fn default_clones_compile_time_palette() {
     // to reading `palette::FOO` directly — the invariant Phase 3-B
     // relies on when it switches call sites over.
     let t = DarudaTheme::default();
-    assert_eq!(t.title_bar_bg, palette::TITLE_BAR_BG);
+    assert_eq!(t.title_bar_bg, palette::BG_BASE);
     assert_eq!(t.tab_bar_bg, palette::TAB_BAR_BG);
     assert_eq!(t.tab_active_bg, palette::TAB_ACTIVE_BG);
     assert_eq!(t.tab_active_text, palette::TAB_ACTIVE_TEXT);
@@ -68,7 +68,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.input_selection_bg, palette::INPUT_SELECTION_BG);
     assert_eq!(
         t.textarea_scrollbar_thumb,
-        palette::TEXTAREA_SCROLLBAR_THUMB
+        palette::SCROLLBAR_THUMB
     );
     assert_eq!(t.banner_error_bg, palette::BANNER_ERROR_BG);
     assert_eq!(t.banner_error_text, palette::BANNER_ERROR_TEXT);
@@ -78,15 +78,15 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.banner_info_text, palette::BANNER_INFO_TEXT);
     assert_eq!(t.banner_success_bg, palette::BANNER_SUCCESS_BG);
     assert_eq!(t.banner_success_text, palette::BANNER_SUCCESS_TEXT);
-    assert_eq!(t.settings_scrollbar_thumb, palette::DOCK_SCROLLBAR_THUMB);
+    assert_eq!(t.settings_scrollbar_thumb, palette::SCROLLBAR_THUMB);
     assert_eq!(
         t.settings_scrollbar_thumb_hover,
-        palette::DOCK_SCROLLBAR_THUMB_HOVER
+        palette::SCROLLBAR_THUMB_HOVER
     );
-    assert_eq!(t.right_panel_scrollbar_thumb, palette::DOCK_SCROLLBAR_THUMB);
+    assert_eq!(t.right_panel_scrollbar_thumb, palette::SCROLLBAR_THUMB);
     assert_eq!(
         t.right_panel_scrollbar_thumb_hover,
-        palette::DOCK_SCROLLBAR_THUMB_HOVER
+        palette::SCROLLBAR_THUMB_HOVER
     );
     assert_eq!(t.settings_sidebar_bg, palette::SETTINGS_SIDEBAR_BG);
     assert_eq!(
@@ -134,10 +134,10 @@ fn default_clones_compile_time_palette() {
         palette::INPUT_PANEL_DROP_TARGET_BG
     );
     assert_eq!(t.terminal_drop_target_bg, palette::TERMINAL_DROP_TARGET_BG);
-    assert_eq!(t.dock_scrollbar_thumb, palette::DOCK_SCROLLBAR_THUMB);
+    assert_eq!(t.dock_scrollbar_thumb, palette::SCROLLBAR_THUMB);
     assert_eq!(
         t.dock_scrollbar_thumb_hover,
-        palette::DOCK_SCROLLBAR_THUMB_HOVER
+        palette::SCROLLBAR_THUMB_HOVER
     );
     assert_eq!(t.pane_header_focused_bg, palette::BG_HOVER);
     assert_eq!(t.pane_header_unfocused_bg, palette::BG_PANEL);
@@ -179,13 +179,10 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.file_diff_hunk_border, palette::BORDER);
     assert_eq!(t.file_diff_ctx_text, palette::TEXT_MUTE);
     assert_eq!(t.file_viewer_divider, palette::BORDER);
-    assert_eq!(
-        t.file_viewer_scrollbar_thumb,
-        palette::DOCK_SCROLLBAR_THUMB
-    );
+    assert_eq!(t.file_viewer_scrollbar_thumb, palette::SCROLLBAR_THUMB);
     assert_eq!(
         t.file_viewer_scrollbar_thumb_hover,
-        palette::DOCK_SCROLLBAR_THUMB_HOVER
+        palette::SCROLLBAR_THUMB_HOVER
     );
     assert_eq!(t.file_diff_hunk_ctx_text, palette::FILE_DIFF_HUNK_CTX_TEXT);
     assert_eq!(t.file_diff_stat_add, palette::FILE_DIFF_STAT_ADD);

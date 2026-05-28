@@ -1049,12 +1049,12 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
     }
     let content_h = viewport_h + max_offset;
     let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
-    let thumb_h = (viewport_h * thumb_ratio).max(px(theme::DOCK_SCROLLBAR_MIN_THUMB_H));
+    let thumb_h = (viewport_h * thumb_ratio).max(px(theme::SCROLLBAR_MIN_THUMB_H));
     let track_h = viewport_h - thumb_h;
     let scroll_frac = ((-handle.offset().y) / max_offset).clamp(0.0_f32, 1.0_f32);
     let thumb_top = track_h * scroll_frac;
-    let w = px(theme::DOCK_SCROLLBAR_W);
-    let r = px(theme::DOCK_SCROLLBAR_MARGIN_R);
+    let w = px(theme::SCROLLBAR_W);
+    let r = px(theme::SCROLLBAR_MARGIN_R);
     let t = theme::current(cx);
     let thumb_bg = t.dock_scrollbar_thumb;
     let thumb_hover_bg = t.dock_scrollbar_thumb_hover;

@@ -142,11 +142,11 @@ fn build_files_scrollbar(
     let content_h = viewport_h + max_offset_h;
     let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
     let raw_thumb_h = viewport_h * thumb_ratio;
-    let thumb_h = raw_thumb_h.max(px(theme::DOCK_SCROLLBAR_MIN_THUMB_H));
+    let thumb_h = raw_thumb_h.max(px(theme::SCROLLBAR_MIN_THUMB_H));
     let track_h = viewport_h - thumb_h;
     let scroll_frac = ((-offset_y) / max_offset_h).clamp(0.0_f32, 1.0_f32);
     let thumb_top = track_h * scroll_frac;
-    let thumb_w = px(theme::DOCK_SCROLLBAR_W);
+    let thumb_w = px(theme::SCROLLBAR_W);
     let t = theme::current(cx);
     let thumb_bg = t.dock_scrollbar_thumb;
     let thumb_hover_bg = t.dock_scrollbar_thumb_hover;
@@ -156,7 +156,7 @@ fn build_files_scrollbar(
             .id("files-scrollbar")
             .absolute()
             .top(thumb_top)
-            .right(px(theme::DOCK_SCROLLBAR_MARGIN_R))
+            .right(px(theme::SCROLLBAR_MARGIN_R))
             .w(thumb_w)
             .h(thumb_h)
             .rounded(thumb_w / 2.0)

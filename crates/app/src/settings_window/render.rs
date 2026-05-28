@@ -242,12 +242,12 @@ fn settings_scrollbar(
     let content_h = viewport_h + max_offset;
     let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
     let raw_thumb_h = viewport_h * thumb_ratio;
-    let thumb_h = raw_thumb_h.max(px(theme::SETTINGS_SCROLLBAR_MIN_THUMB_H));
+    let thumb_h = raw_thumb_h.max(px(theme::SCROLLBAR_MIN_THUMB_H));
     let track_h = viewport_h - thumb_h;
     let scroll_frac = ((-scroll_handle.offset().y) / max_offset).clamp(0.0_f32, 1.0_f32);
     let thumb_top = track_h * scroll_frac;
-    let w = px(theme::SETTINGS_SCROLLBAR_W);
-    let r = px(theme::SETTINGS_SCROLLBAR_MARGIN_R);
+    let w = px(theme::SCROLLBAR_W);
+    let r = px(theme::SCROLLBAR_MARGIN_R);
     let t = theme::current(cx);
     let thumb_bg = t.settings_scrollbar_thumb;
     let thumb_hover_bg = t.settings_scrollbar_thumb_hover;
