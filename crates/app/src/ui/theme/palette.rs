@@ -39,6 +39,32 @@ const fn hsla(h_degrees: f32, s: f32, l: f32, a: f32) -> Hsla {
 }
 
 // ============================================================================
+// Design tokens — primitive colour literals (single source of truth)
+// ============================================================================
+
+pub const CANVAS: Hsla = hsla(240.0, 0.333, 0.006, 1.0);
+pub const SURFACE_1: Hsla = hsla(210.0, 0.063, 0.063, 1.0);
+pub const SURFACE_2: Hsla = hsla(210.0, 0.048, 0.082, 1.0);
+pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
+pub const HAIRLINE: Hsla = hsla(223.0, 0.091, 0.151, 1.0);
+pub const ACCENT: Hsla = hsla(233.8, 0.563, 0.596, 1.0);
+pub const INK: Hsla = hsla(0.0, 0.0, 0.97, 1.0);
+pub const TEXT_BODY: Hsla = hsla(218.0, 0.089, 0.847, 1.0);
+pub const TEXT_MUTE: Hsla = hsla(218.0, 0.064, 0.569, 1.0);
+pub const TEXT_SUBTLE: Hsla = hsla(218.0, 0.053, 0.406, 1.0);
+
+// ============================================================================
+// Role tokens — semantic aliases over design tokens
+// ============================================================================
+
+pub const BG_BASE:   Hsla = CANVAS;
+pub const BG_PANEL:  Hsla = SURFACE_1;
+pub const BG_RAISED: Hsla = SURFACE_2;
+pub const BG_HOVER:  Hsla = SURFACE_2;
+pub const BG_ACTIVE: Hsla = SURFACE_3;
+pub const BORDER:    Hsla = HAIRLINE;
+
+// ============================================================================
 // Workspace chrome — title bar, tab bar, status bar, docks
 // ============================================================================
 
@@ -63,21 +89,6 @@ pub const TAB_ACTIVE_TEXT: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 /// Focused pane header text color (white).
 pub const PANE_HEADER_FOCUSED_TEXT: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 
-/// Inactive tab background.
-pub const TAB_INACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.165, 1.0);
-
-/// Inactive tab hover background.
-pub const TAB_INACTIVE_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-
-/// Inactive tab text color.
-pub const TAB_INACTIVE_TEXT: Hsla = hsla(0.0, 0.0, 0.65, 1.0);
-
-/// Status bar background.
-pub const STATUS_BAR_BG: Hsla = hsla(0.0, 0.0, 0.10, 1.0);
-
-/// Status bar top border.
-pub const STATUS_BAR_BORDER: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-
 /// Status bar error text color (used by transient failure messages).
 pub const STATUS_BAR_ERROR: Hsla = hsla(0.0, 0.7, 0.55, 1.0);
 
@@ -94,42 +105,6 @@ pub const STATUS_BAR_PROJECT_DOT: Hsla = hsla(180.0, 0.55, 0.55, 1.0);
 pub const STATUS_BAR_DETACHED_BG: Hsla = hsla(35.0, 0.45, 0.22, 1.0);
 pub const STATUS_BAR_DETACHED_TEXT: Hsla = hsla(35.0, 0.85, 0.72, 1.0);
 
-/// Dock panel background.
-pub const DOCK_BG: Hsla = hsla(0.0, 0.0, 0.12, 1.0);
-
-/// Dock border (separates dock from center content).
-pub const DOCK_BORDER: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-
-/// Dock header text color.
-pub const DOCK_HEADER_TEXT: Hsla = hsla(0.0, 0.0, 0.55, 1.0);
-
-/// Dock placeholder text color (empty panel message).
-pub const DOCK_PLACEHOLDER_TEXT: Hsla = hsla(0.0, 0.0, 0.35, 1.0);
-
-/// Macro / widget button background (text & icon modes share this).
-pub const BUTTON_WIDGET_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-
-/// Macro / widget button background on hover.
-pub const BUTTON_WIDGET_BG_HOVER: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
-
-/// Macro / widget button label / icon color.
-pub const BUTTON_WIDGET_TEXT: Hsla = hsla(0.0, 0.0, 0.85, 1.0);
-
-/// Background of a panel tab while a draggable tab hovers over it
-/// (drop target highlight). Same hue as button-widget hover for
-/// visual consistency.
-pub const PANEL_TAB_DROP_TARGET_BG: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
-
-/// Muted text (status bar labels, close buttons, dim UI).
-pub const MUTED_TEXT: Hsla = hsla(0.0, 0.0, 0.55, 1.0);
-
-/// Faint text (secondary info like cwd in status bar).
-pub const FAINT_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
-
-/// Background for disabled interactive items (buttons, menu rows).
-pub const DISABLED_ITEM_BG: Hsla = hsla(0.0, 0.0, 0.30, 1.0);
-/// Text color for disabled interactive items.
-pub const DISABLED_ITEM_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
 
 /// Tab/pane close button hover background (destructive red).
 pub const CLOSE_BUTTON_HOVER_BG: Hsla = hsla(0.0, 0.55, 0.55, 1.0);
@@ -139,26 +114,11 @@ pub const CLOSE_BUTTON_HOVER_BG: Hsla = hsla(0.0, 0.55, 0.55, 1.0);
 /// `KEYSTROKE_INPUT_BORDER_ACTIVE`, `RIGHT_PANEL_TASK_RUNNING_COLOR`).
 pub const ACCENT_GREEN: Hsla = hsla(135.0, 0.55, 0.55, 1.0);
 
-/// Dock toggle icon inactive color.
-pub const DOCK_ICON_INACTIVE: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
-
-/// Dock toggle icon inactive hover color.
-pub const DOCK_ICON_HOVER: Hsla = hsla(0.0, 0.0, 0.70, 1.0);
-
-/// Dock toggle icon active background.
-pub const DOCK_ICON_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.235, 1.0);
-
-/// Dock view tab strip — inactive tab text color.
-pub const DOCK_VIEW_TAB_INACTIVE: Hsla = hsla(0.0, 0.0, 0.50, 1.0);
-
 /// Dock view tab strip — active tab text color.
 pub const DOCK_VIEW_TAB_ACTIVE: Hsla = hsla(0.0, 0.0, 0.95, 1.0);
 
 /// Dock view tab strip — active underline accent.
 pub const DOCK_VIEW_TAB_ACCENT: Hsla = hsla(210.0, 0.70, 0.60, 1.0);
-
-/// Dock view tab strip — hover background.
-pub const DOCK_VIEW_TAB_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 
 /// Dock view tab strip — horizontal padding per tab (px).
 pub const DOCK_VIEW_TAB_PAD_X: f32 = 10.0;
@@ -174,8 +134,6 @@ pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
 pub const LANE_ROW_PAD_X: f32 = 10.0;
 /// Lanes list — unread marker tint (warning).
 pub const LANE_UNREAD: Hsla = hsla(30.0, 0.80, 0.60, 1.0);
-/// Lanes list — inactive row hover background.
-pub const LANE_ROW_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 /// Lanes list — primary label font size (px).
 pub const LANE_LABEL_FONT_SIZE: f32 = 12.0;
 /// Lanes list — secondary (path / status) font size (px).
@@ -241,19 +199,9 @@ pub const LANE_CARD_MARGIN_X: f32 = 8.0;
 pub const LANE_LIST_GAP_Y: f32 = 3.0;
 /// Lanes card — border width (px).
 pub const LANE_CARD_BORDER_W: f32 = 1.0;
-/// Lanes card — base background. Sits a step above `DOCK_BG` (#0a)
-/// so the card edge is visible without leaning on the border alone.
-pub const LANE_CARD_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
 /// Lanes card — border at 8% alpha. Higher than the original 4%
 /// so the card outline reads on the dark dock surface.
 pub const LANE_CARD_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
-/// Lanes card — hover background (one tonal step above the base).
-pub const LANE_CARD_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
-/// Lanes card — active background when this card holds the focused
-/// project (group card with an active member, or the ungrouped shell's
-/// project row). One tonal step above hover so "selected" reads
-/// distinct from "hovered" without competing with row-level highlights.
-pub const LANE_CARD_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
 /// Lanes active row — subtle bg only (no left bar / no glow).
 pub const LANE_ROW_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
 /// Group label font size (px) — uppercase eyebrow.
@@ -265,10 +213,6 @@ pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = 11.0;
 
 /// Modal backdrop dim alpha (0..1).
 pub const MODAL_BACKDROP_ALPHA: f32 = 0.50;
-/// Modal panel background.
-pub const MODAL_PANEL_BG: Hsla = hsla(0.0, 0.0, 0.14, 1.0);
-/// Modal panel border.
-pub const MODAL_PANEL_BORDER: Hsla = hsla(0.0, 0.0, 0.30, 1.0);
 /// Modal panel corner radius (px).
 pub const MODAL_PANEL_RADIUS: f32 = 8.0;
 /// Modal panel width (px).
@@ -281,10 +225,6 @@ pub const MODAL_TOP_OFFSET: f32 = 140.0;
 pub const MODAL_TITLE_FONT_SIZE: f32 = 14.0;
 /// Modal body font size (px).
 pub const MODAL_BODY_FONT_SIZE: f32 = 12.0;
-/// Modal input background.
-pub const MODAL_INPUT_BG: Hsla = hsla(0.0, 0.0, 0.08, 1.0);
-/// Modal input border.
-pub const MODAL_INPUT_BORDER: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
 /// Border color shown around any focused text input — daruda `TextInput`
 /// and the `gpui_component::input::Input` we use for the markdown
 /// prompt / notes editors. Wiring both through a single constant keeps
@@ -300,8 +240,6 @@ pub const MODAL_ERROR_TEXT: Hsla = hsla(0.0, 0.70, 0.65, 1.0);
 pub const MODAL_PRIMARY_BG: Hsla = hsla(210.0, 0.70, 0.55, 1.0);
 /// Modal primary button hover background.
 pub const MODAL_PRIMARY_HOVER_BG: Hsla = hsla(210.0, 0.70, 0.65, 1.0);
-/// Modal secondary (cancel) button text.
-pub const MODAL_SECONDARY_TEXT: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 /// Modal button padding X (px).
 pub const MODAL_BUTTON_PAD_X: f32 = 14.0;
 /// Modal button padding Y (px).
@@ -408,20 +346,6 @@ pub const SETTINGS_SCROLLBAR_W: f32 = 4.0;
 pub const SETTINGS_SCROLLBAR_MARGIN_R: f32 = 2.0;
 /// Settings window scrollbar minimum thumb height (px).
 pub const SETTINGS_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
-/// Settings window scrollbar thumb color.
-pub const SETTINGS_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
-/// Settings window scrollbar thumb hover color.
-pub const SETTINGS_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
-/// Right-dock panel scrollbar thumb width (px).
-pub const RIGHT_PANEL_SCROLLBAR_W: f32 = 4.0;
-/// Right-dock panel scrollbar right margin (px).
-pub const RIGHT_PANEL_SCROLLBAR_MARGIN_R: f32 = 2.0;
-/// Right-dock panel scrollbar minimum thumb height (px).
-pub const RIGHT_PANEL_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
-/// Right-dock panel scrollbar thumb color.
-pub const RIGHT_PANEL_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
-/// Right-dock panel scrollbar thumb hover color.
-pub const RIGHT_PANEL_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Width of the section-nav sidebar (px). Sized to fit `Claude Status`
 /// (the longest builtin nav label) at the body font size with comfort.
 pub const SETTINGS_SIDEBAR_W: f32 = 168.0;
@@ -452,20 +376,6 @@ pub const SETTINGS_PLUGIN_LABEL_W: f32 = 110.0;
 pub const MODAL_SELECT_MIN_W: f32 = 160.0;
 /// Maximum height for Select dropdown lists before they start scrolling (px).
 pub const MODAL_SELECT_MAX_H: f32 = 280.0;
-/// Command palette panel background.
-pub const PALETTE_BG: Hsla = hsla(0.0, 0.0, 0.145, 1.0);
-/// Command palette border.
-pub const PALETTE_BORDER: Hsla = hsla(0.0, 0.0, 0.33, 1.0);
-/// Command palette input separator border.
-pub const PALETTE_INPUT_BORDER: Hsla = hsla(0.0, 0.0, 0.27, 1.0);
-/// Command palette focused entry background.
-pub const PALETTE_FOCUSED_BG: Hsla = hsla(0.0, 0.0, 0.235, 1.0);
-/// Command palette normal entry text.
-pub const PALETTE_ENTRY_TEXT: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
-/// Command palette shortcut hint text.
-pub const PALETTE_SHORTCUT_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
-/// Command palette "no matching" text.
-pub const PALETTE_EMPTY_TEXT: Hsla = hsla(0.0, 0.0, 0.40, 1.0);
 /// macOS traffic light X offset from window left edge.
 pub const TRAFFIC_LIGHT_X: f32 = 8.0;
 /// macOS traffic light Y offset from window top edge.
@@ -522,14 +432,6 @@ pub const GIT_STAGED_COLOR: Hsla = hsla(135.0, 0.55, 0.55, 1.0);
 pub const GIT_UNSTAGED_COLOR: Hsla = hsla(45.0, 0.75, 0.60, 1.0);
 /// Untracked ("??") status char color (muted green).
 pub const GIT_UNTRACKED_COLOR: Hsla = hsla(135.0, 0.35, 0.50, 1.0);
-/// Selected file-row background.
-pub const GIT_FILE_ROW_SELECTED_BG: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
-/// Hovered (unselected) file-row background.
-pub const GIT_FILE_ROW_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
-/// Diff panel background.
-pub const GIT_DIFF_PANEL_BG: Hsla = hsla(0.0, 0.0, 0.09, 1.0);
-/// Diff panel top border.
-pub const GIT_DIFF_BORDER: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
 /// Diff added-line background (dark green).
 pub const GIT_DIFF_ADD_BG: Hsla = hsla(135.0, 0.55, 0.12, 1.0);
 /// Diff removed-line background (dark red).
@@ -538,10 +440,6 @@ pub const GIT_DIFF_DEL_BG: Hsla = hsla(0.0, 0.55, 0.12, 1.0);
 pub const GIT_DIFF_ADD_TEXT: Hsla = hsla(135.0, 0.65, 0.70, 1.0);
 /// Diff removed-line text (light red).
 pub const GIT_DIFF_DEL_TEXT: Hsla = hsla(0.0, 0.65, 0.70, 1.0);
-/// Diff context / header text (muted gray).
-pub const GIT_DIFF_CONTEXT_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
-/// Diff hunk-header line background (muted blue).
-pub const GIT_DIFF_HUNK_BG: Hsla = hsla(210.0, 0.25, 0.18, 1.0);
 /// Diff line font size (px) — compact monospace.
 pub const GIT_DIFF_FONT_SIZE: f32 = 10.0;
 /// Diff line horizontal padding (px).
@@ -554,12 +452,8 @@ pub const GIT_DIFF_MAX_LINES: usize = 120;
 pub const GIT_STAGE_CHECKBOX_SIZE: f32 = 13.0;
 /// Stage checkbox border radius (px).
 pub const GIT_STAGE_CHECKBOX_RADIUS: f32 = 2.0;
-/// Stage checkbox border color.
-pub const GIT_STAGE_CHECKBOX_BORDER: Hsla = hsla(0.0, 0.0, 0.38, 1.0);
 /// Stage checkbox background when staged (green tint).
 pub const GIT_STAGE_CHECKBOX_CHECKED_BG: Hsla = hsla(135.0, 0.50, 0.30, 1.0);
-/// Stage checkbox background when unstaged.
-pub const GIT_STAGE_CHECKBOX_UNCHECKED_BG: Hsla = hsla(0.0, 0.0, 0.14, 1.0);
 /// Tick glyph font size inside the stage checkbox (px).
 pub const GIT_STAGE_CHECKBOX_TICK_SIZE: f32 = 9.0;
 /// Git Changes header padding X (px).
@@ -572,8 +466,6 @@ pub const GIT_DIR_HEADER_PAD_Y: f32 = 2.0;
 pub const GIT_DIR_HEADER_FONT_SIZE: f32 = 10.0;
 /// Refresh icon size in the Git Changes header (px).
 pub const GIT_REFRESH_ICON_SIZE: f32 = 16.0;
-/// Commit footer top-border color.
-pub const GIT_COMMIT_BORDER: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
 /// Commit footer inner padding (px).
 pub const GIT_COMMIT_PAD: f32 = 8.0;
 /// Gap between Commit and Push buttons (px).
@@ -712,12 +604,6 @@ pub const DOCK_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
 /// so the dock scrollbars feel consistent.
 pub const DOCK_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
 pub const DOCK_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
-/// Focused pane header background.
-pub const PANE_HEADER_FOCUSED_BG: Hsla = hsla(0.0, 0.0, 0.176, 1.0);
-/// Unfocused pane header background.
-pub const PANE_HEADER_UNFOCUSED_BG: Hsla = hsla(0.0, 0.0, 0.12, 1.0);
-/// Pane header cwd text color.
-pub const PANE_HEADER_CWD_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
 /// Pane header horizontal padding (px).
 pub const PANE_HEADER_PAD_X: f32 = 8.0;
 /// Pane header item gap (px).
@@ -897,13 +783,6 @@ pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 /// visible boundary width so the hit zone can be widened without
 /// affecting layout (handles are absolute overlays).
 pub const RESIZE_HANDLE_HIT_PX: f32 = 3.0;
-/// Visible line color for pane dividers (the 1px bar between two
-/// panes in a split). Dock boundaries use `DOCK_BORDER` instead —
-/// keep the two distinct so reskinning dock vs pane splits stays
-/// orthogonal.
-pub const PANE_DIVIDER_BG: Hsla = hsla(0.0, 0.0, 0.25, 1.0);
-/// Welcome screen background.
-pub const WELCOME_BG: Hsla = hsla(0.0, 0.0, 0.10, 1.0);
 /// Welcome screen title font size (px).
 pub const WELCOME_TITLE_FONT_SIZE: f32 = 28.0;
 /// Welcome screen version font size (px).
@@ -912,16 +791,8 @@ pub const WELCOME_VERSION_FONT_SIZE: f32 = 14.0;
 pub const WELCOME_HEADING_FONT_SIZE: f32 = 13.0;
 /// Welcome screen button font size (px).
 pub const WELCOME_BUTTON_FONT_SIZE: f32 = 14.0;
-/// Welcome screen button background.
-pub const WELCOME_BUTTON_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
-/// Welcome screen button hover background.
-pub const WELCOME_BUTTON_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.25, 1.0);
-/// Welcome screen button border.
-pub const WELCOME_BUTTON_BORDER: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
 /// Welcome screen recent entry font size (px).
 pub const WELCOME_RECENT_FONT_SIZE: f32 = 13.0;
-/// Welcome screen recent entry hover background.
-pub const WELCOME_RECENT_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 /// Welcome screen panel width (px).
 pub const WELCOME_PANEL_WIDTH: f32 = 420.0;
 /// Welcome screen panel padding (px).
@@ -946,14 +817,6 @@ pub const WELCOME_TEXT: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 pub const WELCOME_GAP_TIGHT: f32 = 4.0;
 /// Welcome screen loose inner gap (px) — used between recent entry rows.
 pub const WELCOME_GAP_LOOSE: f32 = 8.0;
-/// File viewer main background.
-pub const FILE_VIEWER_BG: Hsla = hsla(0.0, 0.0, 0.08, 1.0);
-/// File viewer toolbar background.
-pub const FILE_VIEWER_HEADER_BG: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
-/// File viewer toolbar bottom border.
-pub const FILE_VIEWER_HEADER_BORDER: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
-/// File viewer toolbar text (path label).
-pub const FILE_VIEWER_HEADER_TEXT: Hsla = hsla(0.0, 0.0, 0.80, 1.0);
 /// File viewer toolbar height (px).
 pub const FILE_VIEWER_HEADER_H: f32 = 28.0;
 /// File viewer toolbar horizontal padding (px).
@@ -966,14 +829,10 @@ pub const FILE_VIEWER_CLOSE_FONT_SIZE: f32 = 14.0;
 pub const FILE_VIEWER_CLOSE_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 /// File viewer body font size (px).
 pub const FILE_VIEWER_FONT_SIZE: f32 = 12.0;
-/// File viewer body text color.
-pub const FILE_VIEWER_TEXT: Hsla = hsla(0.0, 0.0, 0.82, 1.0);
 /// File viewer line number column width (px).
 pub const FILE_VIEWER_LINE_NO_W: f32 = 50.0;
 /// Selection highlight background in the file viewer.
 pub const FILE_VIEWER_SELECTION_BG: Hsla = hsla(220.0, 0.35, 0.22, 1.0);
-/// File viewer line number text color.
-pub const FILE_VIEWER_LINE_NO_TEXT: Hsla = hsla(0.0, 0.0, 0.35, 1.0);
 /// Maximum lines shown in file viewer body before truncation.
 pub const FILE_VIEWER_MAX_LINES: usize = 2000;
 /// Maximum bytes read from a file in Raw mode. Files larger than this are
@@ -987,10 +846,6 @@ pub const FILE_VIEWER_LINE_H: f32 = FILE_VIEWER_FONT_SIZE * 1.7;
 pub const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Gap between toolbar button group items (px).
 pub const FILE_VIEWER_TOOLBAR_GAP: f32 = 6.0;
-/// Active mode tab background in file viewer toolbar.
-pub const FILE_VIEWER_TAB_ACTIVE_BG: Hsla = hsla(0.0, 0.0, 0.25, 1.0);
-/// Inactive mode tab text in file viewer toolbar.
-pub const FILE_VIEWER_TAB_TEXT: Hsla = hsla(0.0, 0.0, 0.65, 1.0);
 /// Active mode tab text in file viewer toolbar.
 pub const FILE_VIEWER_TAB_ACTIVE_TEXT: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 /// Mode tab horizontal padding (px).
@@ -1007,34 +862,16 @@ pub const FILE_DIFF_DEL_BG: Hsla = hsla(0.0, 0.45, 0.15, 1.0);
 pub const FILE_DIFF_ADD_TEXT: Hsla = hsla(135.0, 0.60, 0.70, 1.0);
 /// Diff removed-line text color.
 pub const FILE_DIFF_DEL_TEXT: Hsla = hsla(0.0, 0.60, 0.70, 1.0);
-/// Diff hunk-header background.
-pub const FILE_DIFF_HUNK_BG: Hsla = hsla(220.0, 0.20, 0.18, 1.0);
 /// Diff hunk-header text color.
 pub const FILE_DIFF_HUNK_TEXT: Hsla = hsla(220.0, 0.40, 0.60, 1.0);
-/// Diff hunk-header top/bottom border color.
-pub const FILE_DIFF_HUNK_BORDER: Hsla = hsla(220.0, 0.25, 0.30, 1.0);
 /// Vertical padding added above and below the hunk-header content (px).
 pub const FILE_DIFF_HUNK_PADDING_Y: f32 = 5.0;
-/// Diff context line text color.
-pub const FILE_DIFF_CTX_TEXT: Hsla = hsla(0.0, 0.0, 0.60, 1.0);
 /// Line number right padding in the raw file view (px).
 pub const FILE_VIEWER_LINE_NO_PAD_R: f32 = 8.0;
 /// Line number right padding in the diff view dual-column (px).
 pub const FILE_VIEWER_DIFF_LINE_NO_PAD_R: f32 = 4.0;
 /// Diff marker (`+`/`-`/` `) column width (px).
 pub const FILE_VIEWER_DIFF_MARKER_W: f32 = 10.0;
-/// Vertical divider between two diff columns (side-by-side mode).
-pub const FILE_VIEWER_DIVIDER: Hsla = hsla(0.0, 0.0, 0.20, 1.0);
-/// Scrollbar track width (px).
-pub const FILE_VIEWER_SCROLLBAR_W: f32 = 6.0;
-/// Scrollbar track right margin (px).
-pub const FILE_VIEWER_SCROLLBAR_MARGIN_R: f32 = 2.0;
-/// Minimum scrollbar thumb height (px).
-pub const FILE_VIEWER_SCROLLBAR_MIN_THUMB_H: f32 = 24.0;
-/// Scrollbar thumb color.
-pub const FILE_VIEWER_SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
-/// Scrollbar thumb hover color.
-pub const FILE_VIEWER_SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Hunk header trailing context text color (function name / class name, dim).
 pub const FILE_DIFF_HUNK_CTX_TEXT: Hsla = hsla(220.0, 0.20, 0.45, 1.0);
 /// syntect theme name used for diff syntax highlighting.
@@ -1057,10 +894,6 @@ pub const FILE_DIFF_WORD_DEL_BG: Hsla = hsla(0.0, 0.60, 0.27, 1.0);
 pub const FILE_VIEWER_SEARCH_PANEL_H: f32 = 36.0;
 /// Search panel horizontal padding (px).
 pub const FILE_VIEWER_SEARCH_PAD_X: f32 = 12.0;
-/// Search input text color.
-pub const FILE_VIEWER_SEARCH_TEXT: Hsla = hsla(0.0, 0.0, 0.90, 1.0);
-/// Match counter color ("3/12").
-pub const FILE_VIEWER_SEARCH_COUNT: Hsla = hsla(0.0, 0.0, 0.55, 1.0);
 /// "No matches" label color (same value as SEARCH_LABEL_EMPTY).
 pub const FILE_VIEWER_SEARCH_EMPTY: Hsla = hsla(0.0, 0.50, 0.65, 1.0);
 /// Non-focused match row highlight background.
@@ -1103,38 +936,20 @@ pub const MD_H2_FONT_SIZE: f32 = 18.0;
 pub const MD_H3_FONT_SIZE: f32 = 15.0;
 /// H4–H6 heading font size (same as body).
 pub const MD_H4_FONT_SIZE: f32 = FILE_VIEWER_FONT_SIZE;
-/// H1 heading text color (bright white).
-pub const MD_H1_COLOR: Hsla = hsla(0.0, 0.0, 0.97, 1.0);
 /// H2 heading text color.
 pub const MD_H2_COLOR: Hsla = hsla(0.0, 0.0, 0.92, 1.0);
-/// H3 heading text color.
-pub const MD_H3_COLOR: Hsla = hsla(0.0, 0.0, 0.85, 1.0);
-/// H4–H6 heading text color (same as body).
-pub const MD_H4_COLOR: Hsla = FILE_VIEWER_TEXT;
-/// Inline code background.
-pub const MD_CODE_INLINE_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 /// Inline code text color.
 pub const MD_CODE_INLINE_TEXT: Hsla = hsla(29.0, 0.55, 0.72, 1.0);
-/// Code block background.
-pub const MD_CODE_BLOCK_BG: Hsla = hsla(0.0, 0.0, 0.11, 1.0);
-/// Code block border color.
-pub const MD_CODE_BLOCK_BORDER: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
 /// Code block corner radius (px).
 pub const MD_CODE_BLOCK_RADIUS: f32 = 6.0;
 /// Code block horizontal padding (px).
 pub const MD_CODE_BLOCK_PAD_X: f32 = 12.0;
 /// Code block vertical padding (px).
 pub const MD_CODE_BLOCK_PAD_Y: f32 = 8.0;
-/// Blockquote left border color.
-pub const MD_BLOCKQUOTE_BORDER: Hsla = hsla(0.0, 0.0, 0.35, 1.0);
-/// Blockquote text color (dimmed).
-pub const MD_BLOCKQUOTE_TEXT: Hsla = hsla(0.0, 0.0, 0.60, 1.0);
 /// Blockquote left border width (px).
 pub const MD_BLOCKQUOTE_BORDER_W: f32 = 3.0;
 /// Blockquote left padding (px).
 pub const MD_BLOCKQUOTE_PAD_L: f32 = 12.0;
-/// Horizontal rule color.
-pub const MD_RULE_COLOR: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
 /// Horizontal rule height (px).
 pub const MD_RULE_H: f32 = 1.0;
 /// Link text color.
@@ -1163,14 +978,6 @@ pub const MD_FOOTNOTE_FONT_SIZE: f32 = 11.0;
 pub const MD_HTML_COLOR: Hsla = hsla(0.0, 0.0, 0.42, 1.0);
 /// HTML passthrough font size (px).
 pub const MD_HTML_FONT_SIZE: f32 = 11.0;
-/// Table border color.
-pub const MD_TABLE_BORDER: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
-/// Table header row background.
-pub const MD_TABLE_HEADER_BG: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
-/// Even body row background.
-pub const MD_TABLE_ROW_BG_EVEN: Hsla = hsla(0.0, 0.0, 0.11, 1.0);
-/// Odd body row background.
-pub const MD_TABLE_ROW_BG_ODD: Hsla = hsla(0.0, 0.0, 0.13, 1.0);
 /// Horizontal cell padding (px).
 pub const MD_TABLE_CELL_PAD_X: f32 = 10.0;
 /// Vertical cell padding (px).
@@ -1193,14 +1000,8 @@ pub const MD_CODE_INLINE_PAD_X: f32 = 3.0;
 pub const RENDER_MIN_DIM: f32 = 1.0;
 /// Background for the toast pill.
 pub const TOAST_BG: Hsla = hsla(0.0, 0.0, 0.18, 0.97);
-/// 1-px border around the toast pill.
-pub const TOAST_BORDER: Hsla = hsla(0.0, 0.0, 0.32, 1.0);
 /// Corner radius of the toast pill (px).
 pub const TOAST_RADIUS: f32 = 8.0;
-/// Primary text color in toasts.
-pub const TOAST_TEXT: Hsla = hsla(0.0, 0.0, 0.90, 1.0);
-/// Action-button label color (accent green).
-pub const TOAST_ACTION_TEXT: Hsla = ACCENT_GREEN;
 /// Horizontal padding inside the toast pill (px).
 pub const TOAST_PAD_X: f32 = 16.0;
 /// Vertical padding inside the toast pill (px).
@@ -1224,9 +1025,6 @@ pub const TOAST_TINT_ERROR: Hsla = hsla(0.0, 0.70, 0.60, 1.0);
 /// Secondary text inside the toast (message / context). Slightly dimmer
 /// than [`TOAST_TEXT`] so the title row reads first.
 pub const TOAST_TEXT_DIM: Hsla = hsla(0.0, 0.0, 0.70, 1.0);
-/// Repeat-counter chip background (×N badge). Subtle so it doesn't
-/// dominate the title.
-pub const TOAST_REPEAT_BG: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
 /// Vertical gap between stacked toasts.
 pub const TOAST_STACK_GAP: f32 = 4.0;
 /// Padding below the toast stack before the status bar starts.
@@ -1249,11 +1047,6 @@ pub const ERROR_MODAL_WIDTH: f32 = 640.0;
 /// Body monospace font size. Slightly smaller than the modal title so a
 /// long backtrace fits without horizontal scroll.
 pub const ERROR_MODAL_BODY_FONT_SIZE: f32 = 11.0;
-/// Body container — dim panel inset behind the monospace text so it
-/// reads as quoted output rather than free-flowing copy.
-pub const ERROR_MODAL_BODY_BG: Hsla = hsla(0.0, 0.0, 0.08, 1.0);
-/// Body container border.
-pub const ERROR_MODAL_BODY_BORDER: Hsla = hsla(0.0, 0.0, 0.22, 1.0);
 /// Padding inside the body container.
 pub const ERROR_MODAL_BODY_PAD: f32 = 10.0;
 /// Maximum body height — beyond this the container scrolls.
@@ -1264,12 +1057,6 @@ pub const TERMINAL_BG: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
 pub const TERMINAL_SCROLLBAR_TRACK_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.04);
 /// Corner radius of the scrollbar thumb (px).
 pub const TERMINAL_SCROLLBAR_THUMB_RADIUS: f32 = 3.0;
-/// Container background (idle).
-pub const KEYSTROKE_INPUT_BG: Hsla = hsla(0.0, 0.0, 0.14, 1.0);
-/// Container border (idle).
-pub const KEYSTROKE_INPUT_BORDER: Hsla = hsla(0.0, 0.0, 0.28, 1.0);
-/// Container border when recording.
-pub const KEYSTROKE_INPUT_BORDER_ACTIVE: Hsla = ACCENT_GREEN;
 /// Container corner radius (px).
 pub const KEYSTROKE_INPUT_RADIUS: f32 = 6.0;
 /// Horizontal padding inside the container (px).
@@ -1278,12 +1065,6 @@ pub const KEYSTROKE_INPUT_PAD_X: f32 = 8.0;
 pub const KEYSTROKE_INPUT_PAD_Y: f32 = 5.0;
 /// Minimum width so the recording hint has room (px).
 pub const KEYSTROKE_INPUT_MIN_W: f32 = 140.0;
-/// Badge background (individual key pill).
-pub const KEYSTROKE_BADGE_BG: Hsla = hsla(0.0, 0.0, 0.24, 1.0);
-/// Badge border.
-pub const KEYSTROKE_BADGE_BORDER: Hsla = hsla(0.0, 0.0, 0.38, 1.0);
-/// Badge text color.
-pub const KEYSTROKE_BADGE_TEXT: Hsla = hsla(0.0, 0.0, 0.88, 1.0);
 /// Badge corner radius (px).
 pub const KEYSTROKE_BADGE_RADIUS: f32 = 4.0;
 /// Badge horizontal padding (px).
@@ -1294,14 +1075,10 @@ pub const KEYSTROKE_BADGE_PAD_Y: f32 = 2.0;
 pub const KEYSTROKE_BADGE_FONT_SIZE: f32 = 12.0;
 /// Gap between key badges in a sequence (px).
 pub const KEYSTROKE_BADGE_GAP: f32 = 4.0;
-/// Muted hint text (placeholder / recording hint).
-pub const KEYSTROKE_HINT_TEXT: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
 /// Font size for container hint text (px).
 pub const KEYSTROKE_INPUT_FONT_SIZE: f32 = 12.0;
 /// Popover panel background.
 pub const POPOVER_BG: Hsla = hsla(0.0, 0.0, 0.16, 0.98);
-/// Popover 1-px border.
-pub const POPOVER_BORDER: Hsla = hsla(0.0, 0.0, 0.30, 1.0);
 /// Corner radius of the popover panel (px).
 pub const POPOVER_RADIUS: f32 = 6.0;
 /// Vertical padding above/below the item list inside the panel (px).
@@ -1438,9 +1215,6 @@ pub const RIGHT_PANEL_TASK_TITLE_TEXT: Hsla = hsla(0.0, 0.0, 0.85, 1.0);
 /// Maximum number of characters of an `Error` task message echoed
 /// inline next to the row title before it's truncated with `…`.
 pub const RIGHT_PANEL_TASK_ERROR_TRUNCATE: usize = 30;
-/// Indicator color for `Running` rows — matches the agent's working
-/// accent so a running task reads as live, not just queued.
-pub const RIGHT_PANEL_TASK_RUNNING_COLOR: Hsla = ACCENT_GREEN;
 /// Indicator color for `Done` rows.
 pub const RIGHT_PANEL_TASK_DONE_COLOR: Hsla = hsla(0.0, 0.0, 0.65, 1.0);
 /// Indicator color for `Error` rows.
@@ -1494,12 +1268,6 @@ pub const RIGHT_PANEL_TASK_SESSION_NEEDS_ATTENTION_TEXT: Hsla = hsla(40.0, 0.70,
 /// Horizontal gap between the session-id badge and its trailing
 /// status glyph (`⟳` / `●` / `⚠`) (px).
 pub const RIGHT_PANEL_TASK_SESSION_GAP: f32 = 4.0;
-/// 1 px error border drawn around the branch input on the TaskEdit
-/// pane while `BranchValidation::Invalid` — error border around the
-/// input plus inline reason text below. Tone matches
-/// [`RIGHT_PANEL_TASK_ERROR_COLOR`] so the row indicator and the
-/// invalid field read as the same visual class.
-pub const TASK_EDIT_BRANCH_INVALID_BORDER: Hsla = RIGHT_PANEL_TASK_ERROR_COLOR;
 /// Width of the error border around the branch input (px).
 pub const TASK_EDIT_BRANCH_INVALID_BORDER_W: f32 = 1.0;
 /// Corner radius matched to the embedded `TextInput` so the error
@@ -1530,12 +1298,6 @@ pub const RIGHT_PANEL_STATUS_PILL_BG_ALPHA: f32 = 0.12;
 /// font. daruda is macOS-only (see project README), so this can be
 /// a literal `&'static str` rather than a runtime lookup.
 pub const FONT_FAMILY_MONOSPACE: &str = "Menlo";
-/// Default fill behind a `Badge`.
-pub const BADGE_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
-/// Default border around a `Badge`.
-pub const BADGE_BORDER: Hsla = hsla(0.0, 0.0, 0.30, 1.0);
-/// Default text color inside a `Badge`.
-pub const BADGE_TEXT: Hsla = hsla(0.0, 0.0, 0.85, 1.0);
 /// Corner radius (px). Slightly rounded so the badge reads as one
 /// unit but not pill-shaped.
 pub const BADGE_RADIUS: f32 = 3.0;
@@ -1545,11 +1307,6 @@ pub const BADGE_PAD_X: f32 = 5.0;
 pub const BADGE_PAD_Y: f32 = 1.0;
 /// Font size inside a `Badge` (px). Slightly smaller than body text.
 pub const BADGE_FONT_SIZE: f32 = 11.0;
-/// Default color for `ui::Divider`. Sits ~20% lighter than
-/// `DOCK_BG` (`l = 0.12`) so a 1px line stays subtle but readable
-/// against dock chrome; callers that want a louder separator pass
-/// `MUTED_TEXT` or a custom value via `Divider::color`.
-pub const DIVIDER_DEFAULT_COLOR: Hsla = hsla(0.0, 0.0, 0.32, 1.0);
 /// Inset margin applied when `Divider::inset()` is set (px).
 pub const DIVIDER_INSET: f32 = 6.0;
 /// Dash + gap lengths used by `Divider::horizontal_dashed()` and
@@ -1574,10 +1331,6 @@ pub const GAUGE_BAR_HEIGHT: f32 = 8.0;
 /// Corner radius for the gauge bar's outer rounded rectangle. Half
 /// the height — pure pill shape.
 pub const GAUGE_BAR_RADIUS: f32 = 4.0;
-/// Track color (the unfilled portion of the gauge). Sits at the
-/// same lightness as `DIVIDER_DEFAULT_COLOR` so the gauge background
-/// melts into the dock chrome but the filled portion still pops.
-pub const GAUGE_TRACK_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 /// Vertical padding (px) of the status row.
 pub const STATUS_PILL_PAD_Y: f32 = 4.0;
 /// Diameter (px) of the small dot rendered inside the status row.
@@ -1611,8 +1364,6 @@ pub const SKILL_SECTION_HEADER_TEXT: Hsla = hsla(0.0, 0.0, 0.62, 1.0);
 pub const SKILL_NAME_TEXT: Hsla = hsla(0.0, 0.0, 0.95, 1.0);
 /// Description / metadata text — slightly dimmer than the name.
 pub const SKILL_META_TEXT: Hsla = hsla(0.0, 0.0, 0.72, 1.0);
-/// Hover background for skill rows.
-pub const SKILL_ROW_HOVER_BG: Hsla = hsla(0.0, 0.0, 0.18, 1.0);
 pub const SKILL_ROW_RADIUS: f32 = 4.0;
 pub const SKILL_ROW_PAD_X: f32 = 8.0;
 pub const SKILL_ROW_PAD_Y: f32 = 4.0;

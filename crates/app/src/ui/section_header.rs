@@ -4,7 +4,7 @@
 //! `workspace/left_dock/{lanes/list, git_changes/mod, files/mod}.rs`.
 //! Each rendered the same shape — `flex_row + items_center +
 //! justify_between + theme::LANE_SECTION_HEADER_FONT_SIZE +
-//! DOCK_HEADER_TEXT + label + optional actions` — only differing in
+//! TEXT_MUTE + label + optional actions` — only differing in
 //! padding (some sites embed the header inside an outer column whose
 //! padding is handled separately) and whether the label needs
 //! truncation.

@@ -30,7 +30,7 @@ pub(super) fn file_viewer_scrollbar(
 
     let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
     let raw_thumb_h = viewport_h * thumb_ratio;
-    let thumb_h = raw_thumb_h.max(px(theme::FILE_VIEWER_SCROLLBAR_MIN_THUMB_H));
+    let thumb_h = raw_thumb_h.max(px(theme::DOCK_SCROLLBAR_MIN_THUMB_H));
     let track_h = viewport_h - thumb_h;
 
     let scroll_frac = {
@@ -41,8 +41,8 @@ pub(super) fn file_viewer_scrollbar(
     // excluded), so the thumb range is [body_top, body_top + viewport_h].
     let thumb_top = body_top + track_h * scroll_frac;
 
-    let scrollbar_right = px(theme::FILE_VIEWER_SCROLLBAR_MARGIN_R);
-    let scrollbar_w = px(theme::FILE_VIEWER_SCROLLBAR_W);
+    let scrollbar_right = px(theme::DOCK_SCROLLBAR_MARGIN_R);
+    let scrollbar_w = px(theme::DOCK_SCROLLBAR_W);
 
     let t = theme::current(cx);
     let thumb_bg = t.file_viewer_scrollbar_thumb;
