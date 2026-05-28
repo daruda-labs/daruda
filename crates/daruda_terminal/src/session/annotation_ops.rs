@@ -432,7 +432,7 @@ mod tests {
             .screen_row_to_line_coord(0)
             .expect("screen row 0 resolves");
         assert!(
-            matches!(top_coord, LineCoord::Viewport { .. }),
+            top_coord.is_viewport(),
             "row 0 must still be Viewport before scrolling; got {top_coord:?}"
         );
 
@@ -450,7 +450,7 @@ mod tests {
             .map(|m| m.range)
             .expect("mark present before scroll");
         assert!(
-            matches!(mark_range_before.start, LineCoord::Viewport { .. }),
+            mark_range_before.start.is_viewport(),
             "mark start must be Viewport before scroll; got {:?}",
             mark_range_before.start
         );
@@ -467,12 +467,12 @@ mod tests {
             .map(|m| m.range)
             .expect("mark still present after rebind");
         assert!(
-            matches!(mark_range_after.start, LineCoord::Buffered(_)),
+            mark_range_after.start.is_buffered(),
             "mark start must be Buffered after scrollback capture; got {:?}",
             mark_range_after.start
         );
         assert!(
-            matches!(mark_range_after.end, LineCoord::Buffered(_)),
+            mark_range_after.end.is_buffered(),
             "mark end must be Buffered after scrollback capture; got {:?}",
             mark_range_after.end
         );
@@ -526,7 +526,7 @@ mod tests {
             .screen_row_to_line_coord(0)
             .expect("buffered row resolves");
         assert!(
-            matches!(coord, LineCoord::Buffered(_)),
+            coord.is_buffered(),
             "row 0 must resolve to Buffered; got {coord:?}"
         );
     }
@@ -573,7 +573,7 @@ mod tests {
             .screen_row_to_line_coord(lb_rows - 1)
             .expect("last buffered row resolves");
         assert!(
-            matches!(last_buffered, LineCoord::Buffered(_)),
+            last_buffered.is_buffered(),
             "row lb_rows-1 must be Buffered; got {last_buffered:?}"
         );
         // First viewport row.
@@ -581,7 +581,7 @@ mod tests {
             .screen_row_to_line_coord(lb_rows)
             .expect("first viewport row resolves");
         assert!(
-            matches!(first_viewport, LineCoord::Viewport { .. }),
+            first_viewport.is_viewport(),
             "row lb_rows must be Viewport; got {first_viewport:?}"
         );
     }

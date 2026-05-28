@@ -506,6 +506,28 @@ impl LineBuffer {
         None
     }
 
+    /// Resolve a viewport-resident mark's `abs_y` (defined as
+    /// `overflow + visual_row` at mark-creation time) into a stable
+    /// [`LineBufferPosition`] once the row has scrolled into this
+    /// buffer. Returns `None` if `abs_y` no longer maps to a live row
+    /// — either because it sits in the active grid still (`>=
+    /// overflow + wrapped_row_count`) or has been evicted (`< overflow`).
+    ///
+    /// Single source of truth for the viewport→buffered rebind that
+    /// `TerminalSession::capture_scrolled_out` runs at end-of-feed; pulls
+    /// the math out of the call site so future variant changes have one
+    /// place to update.
+    pub fn rebind_viewport_abs(&self, abs_y: u64, cell_cols: u16) -> Option<LineBufferPosition> {
+        let overflow = self.overflow;
+        let lb_rows = self.wrapped_row_count(cell_cols) as u64;
+        if abs_y < overflow || abs_y >= overflow + lb_rows {
+            return None;
+        }
+        let row_in_lb = (abs_y - overflow) as u32;
+        self.position_for_visual_row(row_in_lb, cell_cols)
+            .map(|(pos, _, _)| pos)
+    }
+
     /// Promote a visual-row index `y` (at the current `cell_cols`) to a
     /// stable [`LineBufferPosition`] plus the wrap-local `(sub_row,
     /// sub_col_origin)` pair.

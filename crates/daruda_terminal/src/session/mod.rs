@@ -1154,31 +1154,28 @@ impl TerminalSession {
             }
         }
         self.last_captured_lb_abs = Some(self.line_buffer.next_append_abs());
-        // Rebind viewport-resident marks whose row has just been captured
-        // into LineBuffer. Design §6: a mark registered with
-        // LineCoord::Viewport{abs_y} while the row was live must be
-        // rewritten to LineCoord::Buffered once the row enters scrollback,
-        // otherwise the Ord mismatch (Buffered < Viewport) causes every
-        // range query to miss the mark from this point on.
+        // Rebind viewport-resident marks whose row has just been
+        // captured into LineBuffer. A mark registered with
+        // `LineCoord::Viewport { abs_y }` while the row was live must
+        // be rewritten to `LineCoord::Buffered` once the row enters
+        // scrollback — otherwise the `Ord` rule (Buffered < Viewport)
+        // makes every subsequent range query miss it. The rebind math
+        // lives on `LineBuffer::rebind_viewport_abs`; this loop just
+        // walks SP-1 single-line marks and forwards.
         {
-            let overflow = self.line_buffer.overflow();
-            let lb_rows = self.line_buffer.wrapped_row_count(self.config.cols);
             let cols = self.config.cols;
-            let buffered_upper_excl = overflow + lb_rows as u64;
-
-            // Collect first: iter() borrows &self, update_payload_range needs &mut self.
+            // Collect first: `iter()` borrows `&self`, `update_payload_range`
+            // needs `&mut self`.
             let to_rebind: Vec<(MarkId, LineRange)> = self
                 .interval_tree
                 .iter()
                 .filter_map(|m| match (m.range.start, m.range.end) {
-                    // SP-1 marks are single-line (start == end).  Only rebind when
-                    // both endpoints are Viewport and fall inside the LineBuffer
-                    // window.  Multi-line marks are out of scope for SP-1.
+                    // SP-1 marks are single-line (start == end). Multi-line
+                    // marks are out of scope.
                     (LineCoord::Viewport { abs_y: s }, LineCoord::Viewport { abs_y: e })
-                        if s == e && s >= overflow && s < buffered_upper_excl =>
+                        if s == e =>
                     {
-                        let row_in_lb = (s - overflow) as u32;
-                        let pos = self.line_buffer.position_for_visual_row(row_in_lb, cols)?.0;
+                        let pos = self.line_buffer.rebind_viewport_abs(s, cols)?;
                         let new_coord = LineCoord::Buffered(pos);
                         Some((m.id, LineRange::new(new_coord, new_coord)))
                     }

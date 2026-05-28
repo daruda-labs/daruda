@@ -35,6 +35,22 @@ pub enum LineCoord {
 }
 
 impl LineCoord {
+    /// `true` when this coord still lives in the live viewport (i.e. has
+    /// not yet been bound to a [`LineBufferPosition`]). Sole inspection
+    /// point so call sites do not litter `matches!(_, LineCoord::Viewport
+    /// { .. })` patterns that all describe the same condition.
+    #[inline]
+    pub fn is_viewport(&self) -> bool {
+        matches!(self, LineCoord::Viewport { .. })
+    }
+
+    /// `true` when this coord has been bound to a stable
+    /// [`LineBufferPosition`]. Complement of [`Self::is_viewport`].
+    #[inline]
+    pub fn is_buffered(&self) -> bool {
+        matches!(self, LineCoord::Buffered(_))
+    }
+
     /// Inline key for ordering. Returns `(kind_rank, inner_index)` where
     /// `kind_rank == 0` for `Buffered` and `1` for `Viewport`.
     fn sort_key(&self) -> (u8, u64) {
