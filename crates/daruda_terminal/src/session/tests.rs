@@ -302,7 +302,7 @@ fn clear_scrollback_preserves_surviving_mark_seq() {
     // for a viewport row above the wiped history) still sits above the
     // new overflow and remains reachable through `abs_to_screen_row`.
     assert!(
-        mark_after.abs_y >= s.line_buffer().overflow(),
+        mark_after.abs_y.as_u64() >= s.line_buffer().overflow(),
         "surviving viewport mark must remain past the new overflow",
     );
 }
@@ -1500,7 +1500,7 @@ fn prompt_mark_translates_to_screen_row_after_scrolling() {
     s.feed(b"\x1b]133;A\x07").unwrap(); // mark on row 0, abs_y=0
     s.feed(b"line-1\r\nline-2\r\nline-3\r\nline-4\r\n").unwrap();
     let mark = s.prompt_marks()[0];
-    assert_eq!(mark.abs_y, 0, "mark fired before any scroll");
+    assert_eq!(mark.abs_y.as_u64(), 0, "mark fired before any scroll");
     // 4 newlines into a 3-row grid scrolls 2 rows out; both land in
     // LineBuffer at indices 0..2. Live grid then holds line-3, line-4,
     // empty. The mark at abs_y=0 must translate to LineBuffer index 0
@@ -1537,7 +1537,7 @@ fn prompt_mark_survives_line_buffer_eviction() {
         "test setup must trigger eviction (before={line_buffer_overflow_before}, after={line_buffer_overflow_after})"
     );
     assert!(
-        mark_abs < line_buffer_overflow_after,
+        mark_abs.as_u64() < line_buffer_overflow_after,
         "test setup must place mark below overflow (mark_abs={mark_abs}, overflow={line_buffer_overflow_after})"
     );
     // The line has been evicted — translation must return None and
@@ -1849,15 +1849,22 @@ fn abs_y_unchanged_after_resize() {
         abs_before, abs_after,
         "stored abs_y must be invariant under wrap reflow (logical-line space)"
     );
-    // The visual row projection should still resolve — the mark's
-    // logical line lives in the post-resize frame either in
-    // LineBuffer (if captured) or on the grid. We assert reachability
-    // rather than a specific row number, since the post-reflow visual
-    // position depends on whether the line landed in LineBuffer or
-    // remained on the grid; the round-trip not returning `None` is
-    // the load-bearing property here.
-    assert!(
-        s.abs_to_screen_row(abs_after).is_some(),
-        "post-resize projection must still resolve the mark to a row"
+    // Stronger than reachability: the projected visual row must
+    // anchor a row that the cursor was logically on. The mark sits on
+    // an empty prompt row (OSC 133 fires before the prompt body is
+    // drawn), so the projected row's text starts empty — sufficient
+    // for the round-trip identity. Cells around the mark are blanks
+    // on both sides of resize, so the projected row's leading
+    // characters compare equal pre/post.
+    let row_after = s
+        .abs_to_screen_row(abs_after)
+        .expect("post-resize projection must still resolve the mark to a row");
+    let text_after = s.dump_screen_row(row_after).unwrap_or_default();
+    let row_before_recap = s.abs_to_screen_row(abs_before).unwrap();
+    let text_before_recap = s.dump_screen_row(row_before_recap).unwrap_or_default();
+    assert_eq!(
+        text_after.trim_end(),
+        text_before_recap.trim_end(),
+        "the projected row's content must match the mark's logical line across resize"
     );
 }

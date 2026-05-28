@@ -105,7 +105,11 @@ pub struct PromptMark {
     /// wiped region without shifting the rest — see
     /// `clear_line_buffer_and_drop_history_marks`). Translate back to a
     /// current-frame screen row via [`TerminalSession::abs_to_screen_row`].
-    pub abs_y: u64,
+    ///
+    /// Stored as [`LogicalLineAbs`] so a future caller cannot pass a
+    /// visual-row anchor (e.g. `viewport_top_abs_y()`'s return) here
+    /// by accident — the type check rejects it at the seam.
+    pub abs_y: LogicalLineAbs,
     /// 1-indexed cursor column at the moment the mark fired. Captured
     /// alongside `abs_y` so the command-history extractor can slice
     /// the typed command out of `[B.col .. C.col]` on the command's
@@ -129,7 +133,7 @@ pub struct PromptMark {
 /// impossible.
 struct PromptMarkInit {
     kind: PromptMarkKind,
-    abs_y: u64,
+    abs_y: LogicalLineAbs,
     screen_col: u16,
     exit_code: Option<i32>,
     timestamp: std::time::SystemTime,
@@ -280,6 +284,58 @@ pub struct TerminalSession {
 /// `capture_scrolled_out` from within ghostty's eviction hook so no row can
 /// be evicted without being snapshotted first (iTerm2's synchronous model).
 const GHOSTTY_TRANSIENT_SCROLLBACK: usize = 2048;
+
+/// Logical-line absolute index inside the unified `LineBuffer` + grid
+/// frame. Computed as
+/// `LineBuffer::overflow() + LineBuffer::len() + Hard-EOL-count-above-cursor`
+/// (see [`TerminalSession::current_abs_y_at_cursor`]). Wrap-blind: the
+/// value survives viewport resize without re-projection.
+///
+/// **Distinct namespace** from `LineCoord::Viewport::abs_y`
+/// (visual-row space, `overflow + visual_row`), even though both wrap
+/// a `u64`. Mixing them — passing a visual-row anchor to
+/// [`TerminalSession::abs_to_screen_row`], or storing a logical-line
+/// abs as a `LineCoord::Viewport.abs_y` — silently mis-projects under
+/// wrap-inflated widths. The newtype turns that mistake into a
+/// compile error wherever this type is named on the seam, and the
+/// shared-type sites that remain (the interval tree's `Viewport`
+/// variant) keep their visual-row contract explicit in comments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct LogicalLineAbs(pub u64);
+
+impl LogicalLineAbs {
+    /// Unwrap to the raw `u64`. Used at the rare arithmetic sites
+    /// (mark abs differences, `saturating_sub` against `overflow`)
+    /// where the newtype's monoid is insufficient.
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for LogicalLineAbs {
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+impl std::fmt::Display for LogicalLineAbs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Classify a ghostty row's wrap kind as "ends a logical line" or
+/// "soft-wraps into the next row". Defined as a free function with
+/// an exhaustive `match` so a future [`ghostty_vt::WrapKind`] variant
+/// makes both call sites a compile error instead of silently
+/// counting the new variant as "not Hard". Sole interpretation of
+/// the wrap-kind → logical-line-boundary mapping inside this crate.
+fn is_hard_eol(kind: ghostty_vt::WrapKind) -> bool {
+    match kind {
+        ghostty_vt::WrapKind::Hard => true,
+        ghostty_vt::WrapKind::Soft => false,
+    }
+}
 
 impl TerminalSession {
     pub fn new(config: TerminalConfig) -> Result<Self, Error> {
@@ -505,7 +561,7 @@ impl TerminalSession {
         // Walk backwards so we always pick the most recent complete
         // pair. Prefer the semantic E/F pair (output body only) over
         // the C/D pair (which includes the command echo itself).
-        let mut end_abs: Option<u64> = None;
+        let mut end_abs: Option<LogicalLineAbs> = None;
         for mark in self.prompt_marks.iter().rev() {
             match mark.kind {
                 PromptMarkKind::SemanticTextEnd if end_abs.is_none() => {
@@ -521,7 +577,7 @@ impl TerminalSession {
         }
         // Fallback: the C/D pair captures the whole command-through-
         // output region when the shell doesn't emit E/F.
-        let mut end_abs: Option<u64> = None;
+        let mut end_abs: Option<LogicalLineAbs> = None;
         for mark in self.prompt_marks.iter().rev() {
             match mark.kind {
                 PromptMarkKind::CommandFinished if end_abs.is_none() => {
@@ -542,7 +598,11 @@ impl TerminalSession {
     /// coordinates to a current-frame `Range<u32>`. Returns `None` if
     /// either bound has been evicted from `LineBuffer`, or if the range
     /// would be empty.
-    fn abs_range_to_screen(&self, start_abs: u64, end_abs: u64) -> Option<std::ops::Range<u32>> {
+    fn abs_range_to_screen(
+        &self,
+        start_abs: LogicalLineAbs,
+        end_abs: LogicalLineAbs,
+    ) -> Option<std::ops::Range<u32>> {
         let start = self.abs_to_screen_row(start_abs)?;
         let end = self.abs_to_screen_row(end_abs)?;
         if start >= end {
@@ -1267,7 +1327,8 @@ impl TerminalSession {
     /// marks below it pointed into the wiped logical lines and are
     /// dropped to avoid aliasing onto unrelated rows.
     fn clear_line_buffer_and_drop_history_marks(&mut self) {
-        let logical_top = self.line_buffer.overflow() + self.line_buffer.len() as u64;
+        let logical_top =
+            LogicalLineAbs(self.line_buffer.overflow() + self.line_buffer.len() as u64);
         self.line_buffer.clear();
         self.last_captured_lb_abs = None;
         // `scroll_offset` indexes into the now-empty `line_buffer`;
@@ -1353,6 +1414,47 @@ impl TerminalSession {
             }
 
             if let Some((kind, exit_code)) = osc133 {
+                if self.alt_screen {
+                    // No known shell emits OSC 133 from inside an
+                    // alt-screen application, but if one does, the
+                    // mark's abs_y would be an unrooted baseline
+                    // (`overflow + lb.len()` per `current_abs_y_at_cursor`'s
+                    // alt-screen path) — disconnected from the
+                    // primary-screen LineBuffer geometry. Surface
+                    // the anomaly through the error pipeline so it
+                    // shows up in NDJSON instead of silently
+                    // poisoning a future jump target. The mark is
+                    // still pushed (callers may want the seq
+                    // identity); the abs_y reflects the unrooted
+                    // state and `abs_to_screen_row` will resolve
+                    // best-effort.
+                    LogWriter::log(
+                        ErrorReport::new(
+                            "OSC 133 dispatched while on alt-screen — abs_y is unrooted",
+                        )
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("session.osc133.alt_screen")
+                        .build(),
+                    );
+                }
+                // Seal any partial tail in the LineBuffer before stamping
+                // the mark. Without this, the next `capture_scrolled_out`
+                // could fold an uncaptured Hard-EOL row into the partial
+                // tail (per `append_at_or_after`'s iTerm2-derived
+                // `would_extend_partial` rule), producing a `len()`
+                // delta smaller than the Hard-EOL count
+                // `logical_lines_until_cursor` walked through — i.e.
+                // `mark.abs_y` would point at a logical line the
+                // LineBuffer never grew to, and `abs_to_screen_row`
+                // would project it onto the wrong row. Sealing
+                // collapses the partial-fold path so the round-trip
+                // identity holds. Shells emit OSC 133 only after
+                // finishing the previous command output, so any
+                // surviving partial tail at this point is a
+                // mid-output artifact — sealing it is the right
+                // semantic (the prompt is on a fresh logical line).
+                self.line_buffer.seal_partial();
                 let cursor = self.terminal.cursor_position().unwrap_or((1, 1));
                 let abs_y = self.current_abs_y_at_cursor();
                 self.push_prompt_mark(PromptMarkInit {
@@ -1554,7 +1656,7 @@ impl TerminalSession {
     /// — `push_prompt_mark` — could additionally suppress the mark, but
     /// no shell we know of emits OSC 133 from inside an alt-screen app,
     /// so the surface area of this branch is purely defensive.
-    fn current_abs_y_at_cursor(&self) -> u64 {
+    fn current_abs_y_at_cursor(&self) -> LogicalLineAbs {
         let base = self
             .line_buffer
             .overflow()
@@ -1563,14 +1665,14 @@ impl TerminalSession {
             // See doc: skip the grid/uncaptured term so the returned
             // value at least stays anchored at the primary-screen
             // logical baseline the caller will compare against.
-            return base;
+            return LogicalLineAbs(base);
         }
         // `logical_lines_until_cursor` already walks the entire
         // post-LineBuffer region (uncaptured scrolled rows + grid above
         // the cursor) in one pass, counting Hard EOLs — so we add it
         // exactly once instead of summing a separate `uncaptured_logical`
         // term that would double-count the uncaptured Hard EOLs.
-        base.saturating_add(self.logical_lines_until_cursor())
+        LogicalLineAbs(base.saturating_add(self.logical_lines_until_cursor()))
     }
 
     /// Logical-line count among ghostty rows that scrolled out but
@@ -1635,11 +1737,27 @@ impl TerminalSession {
         // grid. The grid-above-cursor region is
         // `[viewport_top, viewport_top + cursor_row - 1)` — the
         // cursor's own row is excluded.
-        let cursor_row_1 = self
-            .terminal
-            .cursor_position()
-            .map(|(_, y)| u32::from(y))
-            .unwrap_or(1);
+        //
+        // A `None` here means ghostty has no cursor (transient VT state
+        // during a reset, an alt-screen edge case the alt-screen guard
+        // above might not have absorbed). Defaulting to row 1 is
+        // conservative — the count walks only the uncaptured region and
+        // skips the grid — but the silent fallback can hide a real VT
+        // bug. Log it through the error pipeline so the dedup'd report
+        // surfaces in NDJSON rather than swallowing it.
+        let cursor_row_1 = match self.terminal.cursor_position() {
+            Some((_, y)) => u32::from(y),
+            None => {
+                LogWriter::log(
+                    ErrorReport::new("cursor_position unavailable during logical-line walk")
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("session.logical_lines.no_cursor")
+                        .build(),
+                );
+                1
+            }
+        };
         // `saturating_add`: with `viewport_top` near `u32::MAX` (deep
         // long-lived session) the result clamps; the empty-range guard
         // inside `count_hard_eols_in_ghostty_range` returns 0 in that
@@ -1660,7 +1778,7 @@ impl TerminalSession {
             return 0;
         }
         (start..end)
-            .filter(|&y| matches!(self.terminal.row_wrap_kind(y), ghostty_vt::WrapKind::Hard))
+            .filter(|&y| is_hard_eol(self.terminal.row_wrap_kind(y)))
             .count() as u64
     }
 
@@ -1681,6 +1799,18 @@ impl TerminalSession {
     ///   stamped a mark for a row that scrolled out before capture
     ///   reached it — should not happen for a stored OSC 133 mark, but
     ///   guarded to keep the projection total).
+    ///
+    /// Production callers (paint, jump) treat both `None` cases the
+    /// same — skip the mark — so a single return value suffices. A
+    /// caller that needs to distinguish the two should compare
+    /// `abs_y` against [`LineBuffer::overflow`] directly *before*
+    /// calling this method:
+    ///
+    /// ```text
+    /// if abs_y < session.line_buffer().overflow() { /* evicted */ }
+    /// else if let Some(row) = session.abs_to_screen_row(abs_y) { /* visible */ }
+    /// else { /* past frame — extremely rare, debug-level concern */ }
+    /// ```
     ///
     /// **Soft-wrap precision.** The returned row is always the *first*
     /// visual row of the target logical line. When the cursor was on a
@@ -1711,7 +1841,8 @@ impl TerminalSession {
     /// abs vs. ghostty screen-space rows — so the per-branch comments
     /// matter: do not collapse the math even when the lengths line up
     /// numerically in a wrap-free trace.
-    pub fn abs_to_screen_row(&self, abs_y: u64) -> Option<u32> {
+    pub fn abs_to_screen_row(&self, abs_y: LogicalLineAbs) -> Option<u32> {
+        let abs_y = abs_y.as_u64();
         let overflow = self.line_buffer.overflow();
         if abs_y < overflow {
             // Line evicted — caller (e.g. paint loop, jump candidate
@@ -1755,7 +1886,7 @@ impl TerminalSession {
                 let rel = (y - frame_start) as u64;
                 return u32::try_from(lb_visual.saturating_add(rel)).ok();
             }
-            if matches!(self.terminal.row_wrap_kind(y), ghostty_vt::WrapKind::Hard) {
+            if is_hard_eol(self.terminal.row_wrap_kind(y)) {
                 count = count.saturating_add(1);
             }
             y = y.saturating_add(1);
