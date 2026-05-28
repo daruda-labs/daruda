@@ -227,7 +227,7 @@ impl TerminalTextElement {
                     )
                 };
                 let visible_row = screen_row_to_visible(
-                    grid_row_to_screen_row(grid_row, total_rows, vp_rows),
+                    grid_row_to_screen_row(grid_row, total_rows, vp_rows)?,
                     viewport_top,
                     vp_rows,
                 )?;
@@ -601,7 +601,7 @@ impl TerminalTextElement {
                 )
             };
             let visible_row = screen_row_to_visible(
-                grid_row_to_screen_row(grid_row, total_rows, vp_rows),
+                grid_row_to_screen_row(grid_row, total_rows, vp_rows)?,
                 viewport_top,
                 vp_rows,
             )?;
