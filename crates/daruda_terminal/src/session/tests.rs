@@ -266,19 +266,22 @@ fn prompt_mark_seq_is_strictly_monotonic() {
 
 #[test]
 fn clear_scrollback_preserves_surviving_mark_seq() {
-    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks` shifts
-    // viewport-resident marks' `abs_y` down by the wiped history, but
-    // must NOT touch `seq` — that is the load-bearing identity invariant
-    // the seq-based focus model relies on (see
-    // `view/state.rs::focused_prompt`). Without it, `focused_prompt`'s
-    // stored seq would no longer match any surviving mark and the jump
-    // highlight would silently drop after a scrollback wipe.
+    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks` may
+    // (post-Step 5) leave the viewport-resident mark's `abs_y`
+    // untouched — the line-layer half of the wipe is absorbed into
+    // `LineBuffer::overflow`, and a wrap-free LineBuffer has no visual
+    // residual to shift. What it must never touch is `seq`: that is
+    // the load-bearing identity invariant the focus model relies on
+    // (see `view/state.rs::focused_prompt`). Without it,
+    // `focused_prompt`'s stored seq would no longer match any
+    // surviving mark and the jump highlight would silently drop after
+    // a scrollback wipe.
     let mut s = session_with(80, 3, 1024);
     // History-resident mark — dropped by the wipe (`m.abs_y < history_top`).
     s.feed(b"x\r\n").unwrap();
     s.feed(b"\x1b]133;A\x07prompt-1\r\n").unwrap();
-    // Viewport-resident mark — must survive with abs_y shifted but seq
-    // unchanged. We capture it here as the "focus candidate".
+    // Viewport-resident mark — must survive with `seq` unchanged. We
+    // capture it here as the "focus candidate".
     s.feed(b"a\r\nb\r\nc\r\n").unwrap();
     s.feed(b"\x1b]133;A\x07prompt-2").unwrap();
     let mark_before = *s.prompt_marks().back().unwrap();
@@ -292,11 +295,15 @@ fn clear_scrollback_preserves_surviving_mark_seq() {
     let mark_after = marks[0];
     assert_eq!(
         mark_after.seq, mark_before.seq,
-        "seq must survive abs_y shift — without this, identity-based focus breaks across \\x1b[3J",
+        "seq must survive the wipe — without this, identity-based focus breaks across \\x1b[3J",
     );
-    assert_ne!(
-        mark_after.abs_y, mark_before.abs_y,
-        "sanity: abs_y did shift (otherwise this test does not exercise the shift path)",
+    // The post-wipe overflow has absorbed every line that the LineBuffer
+    // held pre-wipe, so the surviving mark's `abs_y` (which was issued
+    // for a viewport row above the wiped history) still sits above the
+    // new overflow and remains reachable through `abs_to_screen_row`.
+    assert!(
+        mark_after.abs_y >= s.line_buffer().overflow(),
+        "surviving viewport mark must remain past the new overflow",
     );
 }
 
@@ -1550,26 +1557,31 @@ fn clear_scrollback_shifts_viewport_marks_and_drops_history_marks() {
     s.feed(b"x\r\n").unwrap();
     s.feed(b"\x1b]133;A\x07prompt-1\r\n").unwrap();
     // Push another mark on the line that ends up viewport-resident
-    // at clear time so we can assert it survives the shift.
+    // at clear time so we can assert it survives the wipe.
     s.feed(b"a\r\nb\r\nc\r\n").unwrap();
     s.feed(b"\x1b]133;A\x07prompt-2").unwrap();
     let viewport_mark_abs_before = s.prompt_marks().back().unwrap().abs_y;
     let history = s.line_buffer().wrapped_row_count(80) as u64;
+    let logical_pre = s.line_buffer().len() as u64;
     assert!(history > 0, "test setup must populate LineBuffer first");
 
     s.feed(b"\x1b[3J").unwrap();
     assert_eq!(s.line_buffer().len(), 0, "scrollback must be cleared");
 
     // History-resident mark (#1) is gone; only the viewport-resident
-    // mark (#2) remains, with abs_y shifted down by the cleared
-    // history so it still translates to the right row.
+    // mark (#2) remains. Step 5 contract: `LineBuffer::clear` absorbs
+    // the cleared logical lines into `overflow`, and the visual residual
+    // (history - logical_pre, the wrap inflation) is the only portion
+    // that still shifts `abs_y`. In an 80-wide buffer with no wrap that
+    // residual is zero and the mark's `abs_y` survives untouched.
     let marks = s.prompt_marks();
     assert_eq!(marks.len(), 1, "history mark dropped, viewport mark kept");
     let after = marks[0].abs_y;
+    let visual_residual = history.saturating_sub(logical_pre);
     assert_eq!(
         after,
-        viewport_mark_abs_before.saturating_sub(history),
-        "viewport mark shifted by cleared history"
+        viewport_mark_abs_before.saturating_sub(visual_residual),
+        "viewport mark shifted only by the visual residual ({visual_residual}); logical lines absorbed by overflow"
     );
     let row = s
         .abs_to_screen_row(after)

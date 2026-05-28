@@ -143,12 +143,50 @@ impl LogicalLine {
 }
 
 /// Stable reference to a logical line. Survives appends; becomes
-/// dangling (returns `None` from [`LineBuffer::deref`]) once the line is
-/// evicted by ring overflow.
+/// dangling (returns `None` from [`LineBuffer::deref`]) once the line
+/// is evicted — either by ring overflow or by [`LineBuffer::clear`],
+/// which absorbs the cleared count into `overflow` and so pushes every
+/// outstanding position below the live range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineBufferPosition {
     pub abs_index: u64,
 }
+
+/// Why an [`LineBuffer::append_at_or_after`] call was refused. Producers
+/// of capture deltas (notably `TerminalSession::capture_scrolled_out`)
+/// inspect this to log the desync site instead of silently corrupting
+/// the buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppendError {
+    /// `target_abs` lies below the buffer's `next_append_abs()` — the
+    /// producer is trying to push a row that the buffer already holds
+    /// (or has already evicted). Indicates a double-count somewhere
+    /// upstream; the safe response is to skip and keep going.
+    AlreadyAppended { target: u64, next: u64 },
+    /// `target_abs` lies above the buffer's `next_append_abs()` — the
+    /// producer claims to have scrolled past rows it never delivered.
+    /// The buffer refuses to insert placeholder lines; the caller
+    /// either lost intermediate rows or its `target_abs` math is wrong.
+    GapWouldOpen { target: u64, next: u64 },
+}
+
+impl std::fmt::Display for AppendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyAppended { target, next } => write!(
+                f,
+                "append_at_or_after({target}) refused: buffer already at next={next} (would double-append)",
+            ),
+            Self::GapWouldOpen { target, next } => write!(
+                f,
+                "append_at_or_after({target}) refused: buffer at next={next} (gap of {} rows)",
+                target - next,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AppendError {}
 
 /// Bounded FIFO of [`LogicalLine`]s. Evicts the oldest line on overflow
 /// and bumps an `overflow` counter so [`LineBufferPosition`] math stays
@@ -182,14 +220,7 @@ impl LineBuffer {
     /// 2-cell char spans `[col, col+1]`. Cells outside any run use the
     /// default fg/bg/flags.
     pub fn append(&mut self, text: &str, runs: &[StyleRun], eol: EolKind) {
-        // iTerm2 LineBlock.mm:864 treats an empty Hard append after a partial
-        // tail as a fresh logical line rather than silently sealing the
-        // previous one — preserves the distinction between "kernel printed
-        // a partial chunk" and "kernel terminated with a newline".
-        let extend = matches!(
-            self.lines.back().map(|l| l.eol),
-            Some(EolKind::Soft) | Some(EolKind::Dwc)
-        ) && !(text.is_empty() && eol == EolKind::Hard);
+        let extend = self.would_extend_partial(text, eol);
 
         if extend {
             // Safe: `extend` is true only when `lines.back()` is `Some`.
@@ -267,16 +298,29 @@ impl LineBuffer {
         }
     }
 
-    /// Drop every logical line. The `overflow` counter is preserved so
-    /// any outstanding [`LineBufferPosition`] keeps reporting "evicted"
-    /// rather than aliasing a future line — matches iTerm2's
-    /// `cumulativeScrollbackOverflow` semantics.
+    /// Drop every logical line. `overflow` is bumped by the cleared
+    /// count so [`Self::next_append_abs`] is monotonic across the
+    /// wipe — the new abs index a fresh append claims sits *past* the
+    /// cleared range, never aliasing it.
+    ///
+    /// Mirrors iTerm2's `clear` + pre-flush pattern: iTerm2 flushes
+    /// the grid into the LineBuffer before clearing, which extends
+    /// `cumulativeScrollbackOverflow` (the wrap-aware caller's
+    /// version of `overflow`) across the wiped content; marks above
+    /// the wipe stay valid because the new overflow grew past them.
+    /// Daruda's `clear` does the line-layer half of that absorption
+    /// (`overflow += lines.len()`); the visual-row residual (wrap
+    /// makes a logical line cost more than one visual row) is the
+    /// caller's responsibility — see
+    /// `TerminalSession::clear_line_buffer_and_shift_marks`.
     pub fn clear(&mut self) {
-        // Preserves overflow (matches iTerm2 cumulativeScrollbackOverflow
-        // semantics). Load-bearing for callers that shift mark `abs_y`
-        // values by the wiped history — see
-        // `TerminalSession::clear_line_buffer_and_shift_marks`.
+        // `lines.len() as u64` cast is safe — `usize` is at most 64-bit
+        // on every supported target. `saturating_add` is for the
+        // 128-bit-cosmic-ray edge; `overflow` never realistically
+        // approaches `u64::MAX`.
+        let cleared = self.lines.len() as u64;
         self.lines.clear();
+        self.overflow = self.overflow.saturating_add(cleared);
     }
 
     /// Number of logical lines currently retained (post-eviction).
@@ -294,6 +338,95 @@ impl LineBuffer {
     /// before the clear remain invalidated rather than aliasing.
     pub fn overflow(&self) -> u64 {
         self.overflow
+    }
+
+    /// Absolute index the next [`Self::append`] would assign to a *new*
+    /// logical line (i.e. when the tail is not partial). Equals
+    /// `overflow() + len() as u64`. Soft-tail extension does not advance
+    /// this value; an append-then-soft-tail observer should re-read.
+    ///
+    /// Mirrors iTerm2's `firstAbsoluteLineNumber + numberOfLines`
+    /// accounting at the line layer. Lets callers express capture state
+    /// in the buffer's own abs-y space — see
+    /// `TerminalSession::capture_scrolled_out` — instead of in the
+    /// producer's row-index space, where any reset (resize, alt-screen,
+    /// wipe) would require bespoke synchronization.
+    pub fn next_append_abs(&self) -> u64 {
+        self.overflow + self.lines.len() as u64
+    }
+
+    /// Like [`Self::append`] but conditioned on the caller-asserted
+    /// absolute index `target_abs`:
+    ///
+    /// - `target_abs == self.next_append_abs()` → behaves identically to
+    ///   `append` (the happy path).
+    /// - `target_abs < self.next_append_abs()` → returns
+    ///   [`AppendError::AlreadyAppended`]; the call is a no-op. A
+    ///   producer that over-reports its scroll delta (a phantom
+    ///   `take_scrolled_rows` spike, a stale watermark) is surfaced
+    ///   instead of silently double-appending the same row.
+    /// - `target_abs > self.next_append_abs()` → returns
+    ///   [`AppendError::GapWouldOpen`]; the call is a no-op. The buffer
+    ///   refuses to invent placeholders for rows the producer claimed
+    ///   to have scrolled past but never delivered.
+    ///
+    /// On `Ok`, returns the abs index a *new* line append would claim
+    /// after this call. For a hard-EOL push that equals `target_abs + 1`;
+    /// for a soft-tail extension (which folds into the existing tail) it
+    /// equals `target_abs`. Callers iterating row-by-row should use the
+    /// returned value as the `target_abs` of the next call.
+    pub fn append_at_or_after(
+        &mut self,
+        target_abs: u64,
+        text: &str,
+        runs: &[StyleRun],
+        eol: EolKind,
+    ) -> Result<u64, AppendError> {
+        let next = self.next_append_abs();
+        if target_abs < next {
+            return Err(AppendError::AlreadyAppended {
+                target: target_abs,
+                next,
+            });
+        }
+        if target_abs > next {
+            return Err(AppendError::GapWouldOpen {
+                target: target_abs,
+                next,
+            });
+        }
+        // Soft-tail extension folds into the existing tail and does not
+        // advance `next_append_abs`; a new push moves it forward by one,
+        // capped at the eviction floor (eviction increments `overflow`
+        // by the same amount it shrinks `len`, so `next_append_abs` is
+        // monotonic regardless). The predicate must match `append`'s own
+        // branch decision exactly — sharing one helper rather than two
+        // parallel `matches!` arms keeps a future `EolKind` variant from
+        // silently diverging the return value from the actual buffer state.
+        let extends_partial = self.would_extend_partial(text, eol);
+        self.append(text, runs, eol);
+        Ok(if extends_partial {
+            target_abs
+        } else {
+            target_abs + 1
+        })
+    }
+
+    /// True when a subsequent [`Self::append`] / [`Self::append_at_or_after`]
+    /// with `(text, eol)` would fold into the existing tail instead of
+    /// pushing a new logical line. Sole source of truth for that
+    /// decision — both append paths consult it so their behavior stays
+    /// lockstep across future `EolKind` additions.
+    ///
+    /// iTerm2 `LineBlock.mm:864` treats an empty Hard append after a
+    /// partial tail as a fresh logical line rather than silently sealing
+    /// the previous one — preserves the distinction between "kernel
+    /// printed a partial chunk" and "kernel terminated with a newline".
+    fn would_extend_partial(&self, text: &str, eol: EolKind) -> bool {
+        matches!(
+            self.lines.back().map(|l| l.eol),
+            Some(EolKind::Soft) | Some(EolKind::Dwc)
+        ) && !(text.is_empty() && eol == EolKind::Hard)
     }
 
     /// Borrow the logical line at ring-local index `idx`, or `None` if

@@ -543,6 +543,15 @@ impl Terminal {
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_take_scrolled_rows(self.ptr.as_ptr()) }
     }
 
+    /// Same delta as [`take_scrolled_rows`] but without repositioning the
+    /// capture watermark. Useful when a mid-feed observer needs to ask
+    /// "how many rows scrolled out since the last capture" without
+    /// consuming the count the end-of-feed capture loop will read.
+    pub fn peek_scrolled_rows(&self) -> u32 {
+        // SAFETY: `self.ptr` upholds invariant #1.
+        unsafe { ghostty_vt_sys::ghostty_vt_terminal_peek_scrolled_rows(self.ptr.as_ptr()) }
+    }
+
     pub fn take_viewport_scroll_delta(&mut self) -> i32 {
         // SAFETY: `self.ptr` upholds invariant #1.
         unsafe { ghostty_vt_sys::ghostty_vt_terminal_take_viewport_scroll_delta(self.ptr.as_ptr()) }

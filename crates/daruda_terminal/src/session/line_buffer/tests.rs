@@ -96,15 +96,28 @@ fn min_position_tracks_oldest_live_line_after_eviction() {
 }
 
 #[test]
-fn clear_preserves_overflow_and_invalidates_old_positions() {
+fn clear_bumps_overflow_and_invalidates_old_positions() {
+    // Step 5 contract: `clear` absorbs the cleared count into
+    // `overflow`, so `next_append_abs` does not regress and every
+    // outstanding `LineBufferPosition` lands below `overflow`
+    // (treated as evicted, never aliasing a future line). Mirrors
+    // iTerm2's pre-clear `cumulativeScrollbackOverflow` extension.
     let mut b = LineBuffer::new(2);
     b.append("a", &[], EolKind::Hard);
     b.append("b", &[], EolKind::Hard);
-    b.append("c", &[], EolKind::Hard); // overflow=1
-    let pos = b.position_at(0).unwrap(); // points at "b"
+    b.append("c", &[], EolKind::Hard); // overflow=1, lines=[b, c]
+    let pos = b.position_at(0).unwrap(); // points at "b" (abs 1)
     b.clear();
-    assert_eq!(b.overflow(), 1);
-    assert!(b.deref(&pos).is_none()); // evicted by clear
+    assert_eq!(b.overflow(), 3, "overflow grew by the cleared count");
+    assert_eq!(
+        b.next_append_abs(),
+        3,
+        "next append claims an index past every pre-clear position"
+    );
+    assert!(
+        b.deref(&pos).is_none(),
+        "pre-clear positions read as evicted"
+    );
 }
 
 #[test]
@@ -486,4 +499,113 @@ fn position_for_visual_row_zero_cols_returns_none() {
     assert!(b.position_for_visual_row(0, 0).is_none());
     let pos = b.position_at(0).unwrap();
     assert!(b.coordinate_for_position(&pos, 0, 0).is_none());
+}
+
+#[test]
+fn next_append_abs_tracks_overflow_plus_len() {
+    let mut b = LineBuffer::new(2);
+    assert_eq!(b.next_append_abs(), 0);
+    b.append("a", &[], EolKind::Hard);
+    assert_eq!(b.next_append_abs(), 1);
+    b.append("b", &[], EolKind::Hard);
+    assert_eq!(b.next_append_abs(), 2);
+    // Eviction bumps `overflow`; `len` falls back to `max_lines`. The
+    // sum — the abs index a fresh append would claim — keeps growing.
+    b.append("c", &[], EolKind::Hard);
+    assert_eq!(b.overflow(), 1);
+    assert_eq!(b.len(), 2);
+    assert_eq!(b.next_append_abs(), 3);
+}
+
+#[test]
+fn next_append_abs_equals_overflow_after_clear() {
+    // Under the current `clear` contract (lines dropped, overflow held),
+    // a cleared buffer's `next_append_abs` equals its `overflow`. Step 5
+    // reshapes this so `clear` also bumps `overflow` by the cleared
+    // length — both contracts agree that the value never aliases a
+    // position issued before the clear.
+    let mut b = LineBuffer::new(1024);
+    for _ in 0..5 {
+        b.append("x", &[], EolKind::Hard);
+    }
+    b.clear();
+    assert_eq!(b.next_append_abs(), b.overflow());
+}
+
+#[test]
+fn append_at_or_after_happy_path_advances_abs() {
+    let mut b = LineBuffer::new(1024);
+    let next = b
+        .append_at_or_after(0, "a", &[], EolKind::Hard)
+        .expect("first push at abs 0 is legal");
+    assert_eq!(next, 1);
+    let next = b
+        .append_at_or_after(1, "b", &[], EolKind::Hard)
+        .expect("second push at abs 1 is legal");
+    assert_eq!(next, 2);
+    assert_eq!(b.len(), 2);
+}
+
+#[test]
+fn append_at_or_after_already_appended_refuses_double_count() {
+    // A producer reporting the same abs twice — a phantom scroll delta,
+    // a stale capture watermark — must be rejected so the buffer never
+    // holds two copies of the same row.
+    let mut b = LineBuffer::new(1024);
+    b.append_at_or_after(0, "a", &[], EolKind::Hard).unwrap();
+    let err = b
+        .append_at_or_after(0, "duplicate", &[], EolKind::Hard)
+        .unwrap_err();
+    assert!(matches!(err, AppendError::AlreadyAppended { .. }));
+    assert_eq!(b.len(), 1);
+    assert_eq!(b.get(0).unwrap().text, "a");
+}
+
+#[test]
+fn append_at_or_after_gap_would_open_refuses_silent_blank_fill() {
+    // The buffer refuses to invent placeholder rows for a producer that
+    // claims to have scrolled past content it never delivered. The
+    // caller either lost intermediate rows or its math is wrong; either
+    // way the buffer surfaces it instead of papering over with blanks.
+    let mut b = LineBuffer::new(1024);
+    b.append_at_or_after(0, "a", &[], EolKind::Hard).unwrap();
+    let err = b
+        .append_at_or_after(3, "skipped", &[], EolKind::Hard)
+        .unwrap_err();
+    assert!(matches!(err, AppendError::GapWouldOpen { .. }));
+    assert_eq!(b.len(), 1);
+}
+
+#[test]
+fn append_at_or_after_soft_tail_returns_unchanged_target() {
+    // First push lays down a new logical line with a Soft EOL — abs
+    // advances by one. The second push targets that same abs, but a
+    // partial tail is already there so it extends in place; abs does
+    // not advance again. The caller's row loop reuses that returned
+    // value as the next target_abs.
+    let mut b = LineBuffer::new(1024);
+    let target = b.next_append_abs();
+    let after_first = b
+        .append_at_or_after(target, "hello", &[], EolKind::Soft)
+        .unwrap();
+    assert_eq!(after_first, target + 1);
+    let after_second = b
+        .append_at_or_after(after_first, " world", &[], EolKind::Hard)
+        .unwrap();
+    assert_eq!(after_second, after_first);
+    assert_eq!(b.len(), 1);
+    assert_eq!(b.get(0).unwrap().text, "hello world");
+}
+
+#[test]
+fn next_append_abs_unchanged_by_soft_tail_extension() {
+    // Soft-tail extension folds the next append into the existing tail,
+    // so the abs index a *new* line would claim stays put. Callers can
+    // therefore snapshot `next_append_abs` before a capture loop and use
+    // it as the anchoring abs index of the first newly-pushed line.
+    let mut b = LineBuffer::new(1024);
+    b.append("hello", &[], EolKind::Soft);
+    let after_partial = b.next_append_abs();
+    b.append(" world", &[], EolKind::Hard);
+    assert_eq!(b.next_append_abs(), after_partial);
 }

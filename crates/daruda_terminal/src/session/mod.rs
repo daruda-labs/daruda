@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use ghostty_vt::{Error, Rgb, Terminal};
 
 use crate::TerminalConfig;
@@ -213,11 +215,21 @@ pub struct TerminalSession {
     /// against the live cell width. Independent of ghostty's own
     /// physical scrollback (which we still own for input/echo correctness).
     line_buffer: LineBuffer,
-    /// Highest absolute screen-row index already drained into
-    /// `line_buffer`. `None` until the first capture; reset on
-    /// alt-screen entry (the grid is wiped so the row indices
-    /// associated with this counter are no longer meaningful).
-    last_captured_abs_row: Option<u32>,
+    /// LineBuffer abs index the *next* capture would assign to a new
+    /// logical line, snapshotted at the end of the previous
+    /// `capture_scrolled_out`. Equal to `line_buffer.next_append_abs()`
+    /// at the moment of that snapshot. `None` until the first capture;
+    /// reset on alt-screen entry and `\x1b[3J` / RIS wipe (the
+    /// LineBuffer / grid relationship that defined the snapshot no
+    /// longer applies).
+    ///
+    /// Lives in LineBuffer abs space — not ghostty's row-index space —
+    /// so resize, alt-screen toggle, and ring saturation don't require
+    /// re-projecting it. The wipe-detection check in
+    /// `sync_after_ghostty_scrollback_shrink` reads only its
+    /// `is_none()` state; uncaptured-row counting at OSC 133 dispatch
+    /// reads `Terminal::peek_scrolled_rows` directly from ghostty.
+    last_captured_lb_abs: Option<u64>,
     /// Daruda-owned scroll position in rows back from the bottom. `0`
     /// pins the viewport to the live grid; positive values reveal rows
     /// from `line_buffer` above the live viewport. Replaces ghostty's
@@ -305,7 +317,7 @@ impl TerminalSession {
             pending_finished_command_elapsed: None,
             pending_clear_scrollback: false,
             line_buffer: LineBuffer::new(config.max_scrollback),
-            last_captured_abs_row: None,
+            last_captured_lb_abs: None,
             scroll_offset: 0,
             interval_tree: IntervalTree::new(),
         })
@@ -1051,9 +1063,10 @@ impl TerminalSession {
     /// above it.
     ///
     /// LineBuffer mirrors ghostty's scrollback; clearing one without the
-    /// other would desync the dispatcher and leave `last_captured_abs_row`
-    /// pointing past the (now-reset) `viewport_row_offset`, silently
-    /// breaking every subsequent capture for the rest of the session.
+    /// other would desync the dispatcher and leave `last_captured_lb_abs`
+    /// pointing past the (now-reset) `line_buffer.next_append_abs()`,
+    /// silently breaking every subsequent capture for the rest of the
+    /// session.
     fn apply_clear_scrollback(&mut self) {
         // SILENT-OK: ERASE_SCROLLBACK is a fixed constant sequence; a feed
         // error on a known-valid byte sequence indicates a terminal in a
@@ -1071,9 +1084,10 @@ impl TerminalSession {
     /// The newly-scrolled row count comes from `Terminal::take_scrolled_rows`
     /// (a monotonic tracked-pin delta), so capture keeps advancing even after
     /// ghostty's bounded scrollback ring saturates; `LineBuffer` grows to its
-    /// own `max_scrollback`. `last_captured_abs_row` survives only as the
-    /// bounded marker `sync_after_ghostty_scrollback_shrink` compares against
-    /// to detect a `\x1b[3J` / RIS scrollback wipe.
+    /// own `max_scrollback`. `last_captured_lb_abs` records the LineBuffer
+    /// abs index a fresh append would claim *after* this capture; it acts
+    /// as the bounded marker `sync_after_ghostty_scrollback_shrink`
+    /// inspects to detect a `\x1b[3J` / RIS wipe.
     fn capture_scrolled_out(&mut self) {
         // Capture is meaningless while ghostty is rendering into the
         // alt-screen buffer — those rows are by definition transient
@@ -1093,6 +1107,14 @@ impl TerminalSession {
         if start >= viewport_top {
             return;
         }
+        // Anchor the append loop in LineBuffer abs space rather than
+        // ghostty row space: `intended` advances by one logical line per
+        // appended row (modulo soft-tail extension), so a producer-side
+        // glitch — phantom `take_scrolled_rows` spike, stale tracked
+        // pin, RIS-induced active_row slip — is caught at the first
+        // mismatched row instead of silently re-appending. Pre-Step 3
+        // the loop simply called `append` without any such cross-check.
+        let mut intended = self.line_buffer.next_append_abs();
         for y in start..viewport_top {
             // Empty text on dump failure (e.g., row evicted from ghostty
             // scrollback); preserves line numbering.
@@ -1106,10 +1128,32 @@ impl TerminalSession {
                 ghostty_vt::WrapKind::Soft => EolKind::Soft,
                 ghostty_vt::WrapKind::Hard => EolKind::Hard,
             };
-            self.line_buffer.append(&text, &runs, eol);
-            self.line_buffer.attach_url_ids_to_tail(&url_ids);
+            match self
+                .line_buffer
+                .append_at_or_after(intended, &text, &runs, eol)
+            {
+                Ok(next) => {
+                    self.line_buffer.attach_url_ids_to_tail(&url_ids);
+                    intended = next;
+                }
+                Err(err) => {
+                    LogWriter::log(
+                        ErrorReport::new("LineBuffer capture desync — append refused")
+                            .severity(ErrorSeverity::Warning)
+                            .with_context("detail", err.to_string())
+                            .at(file!(), line!())
+                            .dedup("session.capture.desync")
+                            .build(),
+                    );
+                    // Resync the local cursor to the buffer's own tail so
+                    // subsequent rows in this loop don't fire the same
+                    // error repeatedly. Skip `attach_url_ids_to_tail` —
+                    // there is no fresh tail to attach to.
+                    intended = self.line_buffer.next_append_abs();
+                }
+            }
         }
-        self.last_captured_abs_row = Some(viewport_top.saturating_sub(1));
+        self.last_captured_lb_abs = Some(self.line_buffer.next_append_abs());
         // Rebind viewport-resident marks whose row has just been captured
         // into LineBuffer. Design §6: a mark registered with
         // LineCoord::Viewport{abs_y} while the row was live must be
@@ -1177,12 +1221,12 @@ impl TerminalSession {
     /// reaches zero, so gating on zero avoids the false wipe that otherwise
     /// capped real scrollback at the ring/page size.
     ///
-    /// The `last_captured_abs_row` guard skips the check right after a reset
+    /// The `last_captured_lb_abs` guard skips the check right after a reset
     /// (alt-screen entry / explicit clear set it to `None`): on the matching
     /// alt-screen exit the primary scrollback is legitimately empty, and we
     /// must not mistake that for a wipe of the preserved `line_buffer`.
     fn sync_after_ghostty_scrollback_shrink(&mut self) {
-        if self.last_captured_abs_row.is_none() {
+        if self.last_captured_lb_abs.is_none() {
             return;
         }
         if self.terminal.viewport_row_offset() == 0 && !self.line_buffer.is_empty() {
@@ -1195,25 +1239,39 @@ impl TerminalSession {
     /// prompt marks down by the cleared history while dropping marks
     /// whose row was inside the cleared history.
     fn clear_line_buffer_and_shift_marks(&mut self) {
-        let overflow = self.line_buffer.overflow();
+        // Pre-clear measurements: `history` counts visual rows
+        // (wrap-aware), `logical_pre` counts logical lines (one per
+        // VecDeque entry). They differ when soft-wrap has joined cells
+        // wider than one visual row into a single logical line.
+        let overflow_pre = self.line_buffer.overflow();
+        let logical_pre = self.line_buffer.len() as u64;
         let history = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
-        let history_top = overflow + history;
+        let history_top = overflow_pre + history;
+        // `LineBuffer::clear` (post-Step 5) bumps `overflow` by
+        // `logical_pre`. That absorbs the line-layer half of the wipe
+        // automatically — marks anchored above the new overflow stay
+        // valid without touching their `abs_y`. The remaining visual
+        // residual (`history - logical_pre`) is the wrap inflation that
+        // `overflow` (line-granular) can't express; marks whose `abs_y`
+        // lives in visual-row space still need to be shifted by it so
+        // their wrap-aware translation through
+        // `abs_to_screen_row` stays correct.
         self.line_buffer.clear();
-        self.last_captured_abs_row = None;
+        let visual_residual = history.saturating_sub(logical_pre);
+        self.last_captured_lb_abs = None;
         // `scroll_offset` indexes into the now-empty `line_buffer`;
         // leaving it set would pin the viewport above the live grid.
         self.scroll_offset = 0;
         // Drop marks whose abs_y addressed a row inside the cleared
-        // history (they would alias onto unrelated viewport rows after
-        // the shift). Surviving viewport-resident marks shift down by
-        // `history` so they keep pointing at the right row.
-        //
-        // INVARIANT: LineBuffer::clear() preserves overflow(). The shift
-        // below removes the wiped-history rows from each mark's abs_y,
-        // keeping translation against the unchanged overflow valid.
+        // history (`history_top` is the pre-clear viewport-bottom
+        // boundary in visual space) — they would alias onto unrelated
+        // viewport rows after the wipe. Surviving viewport-resident
+        // marks only need the `visual_residual` shift; the
+        // `logical_pre` portion is already absorbed by the new
+        // `overflow`.
         self.prompt_marks.retain(|m| m.abs_y >= history_top);
         for m in &mut self.prompt_marks {
-            m.abs_y = m.abs_y.saturating_sub(history);
+            m.abs_y = m.abs_y.saturating_sub(visual_residual);
         }
     }
 
@@ -1227,7 +1285,7 @@ impl TerminalSession {
     /// (alt → primary) has no counterpart. When the primary screen
     /// is restored, ghostty repaints it from row 0; the next
     /// `capture_scrolled_out` pass naturally re-anchors with
-    /// `last_captured_abs_row == None`, so there's nothing to reset.
+    /// `last_captured_lb_abs == None`, so there's nothing to reset.
     fn on_enter_alt_screen(&mut self) {
         // Seal a partial tail so a re-entry into primary screen does
         // not append into a now-stale soft-wrap continuation. We do
@@ -1237,7 +1295,7 @@ impl TerminalSession {
         // injection in `feed`, but that's a separate buffer used
         // only as a capture window.
         self.line_buffer.seal_partial();
-        self.last_captured_abs_row = None;
+        self.last_captured_lb_abs = None;
         // Alt-screen apps own the full grid; any user-initiated scroll
         // into history made before the switch is no longer meaningful.
         self.scroll_offset = 0;
@@ -1466,23 +1524,42 @@ impl TerminalSession {
     /// cursor right now. Captured when an OSC 133 mark fires so the
     /// mark survives `LineBuffer` ring eviction — translate back to a
     /// current-frame screen row via [`Self::abs_to_screen_row`].
+    ///
+    /// **Alt-screen caveat.** `peek_scrolled_rows` reads ghostty's
+    /// currently-active page list. While `self.alt_screen` is true that
+    /// list is the alt-screen's, not the primary's that backs
+    /// `line_buffer`. A mark dispatched in alt-screen would therefore be
+    /// stamped with an `abs_y` that mixes two coordinate spaces and
+    /// cannot resolve back to a primary-screen row. Returning early
+    /// (with the unrooted `overflow + lb_rows + vp_row` estimate, but no
+    /// `uncaptured` component) keeps the mark from poisoning the
+    /// primary-screen translation path; the caller — `push_prompt_mark`
+    /// — could additionally suppress the mark, but no shell we know of
+    /// emits OSC 133 from inside an alt-screen app, so the surface area
+    /// of this branch is purely defensive.
     fn current_abs_y_at_cursor(&self) -> u64 {
         let lb_rows = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
-        // ghostty rows that scrolled out but haven't yet been captured into
-        // line_buffer (capture runs at end of feed; OSC 133 may fire mid-feed).
-        // Account for them so the captured abs_y matches the row's position
-        // after capture lands.
-        let ghostty_top = self.terminal.viewport_row_offset() as u64;
-        let next_capture = self
-            .last_captured_abs_row
-            .map(|r| r as u64 + 1)
-            .unwrap_or(0);
-        let uncaptured = ghostty_top.saturating_sub(next_capture);
         let vp_row = self
             .terminal
             .cursor_position()
             .map(|(_, y)| u32::from(y.saturating_sub(1)))
             .unwrap_or(0);
+        // Alt-screen: skip the cross-page `uncaptured` term so the
+        // returned value at least stays in the primary-screen abs Y
+        // space the caller will compare against. See doc above.
+        if self.alt_screen {
+            return self.line_buffer.overflow() + lb_rows + vp_row as u64;
+        }
+        // Ghostty rows that scrolled out but haven't yet been captured
+        // into line_buffer (capture runs at end of feed; OSC 133 may
+        // fire mid-feed). Read the pending delta straight from
+        // ghostty's tracked-pin counter via the non-consuming peek —
+        // the value `take_scrolled_rows` would return at end-of-feed —
+        // so this stays correct regardless of resize or ring
+        // saturation. Pre-Step 2 this was inferred from a row-space
+        // watermark and required bespoke resynchronization at every
+        // viewport-shaping event.
+        let uncaptured = self.terminal.peek_scrolled_rows() as u64;
         self.line_buffer.overflow() + lb_rows + uncaptured + vp_row as u64
     }
 
@@ -1581,21 +1658,32 @@ impl TerminalSession {
         //      we've already captured (LineBuffer keeps its contents
         //      as-is; ghostty's pre-viewport rows are treated as
         //      already accounted for).
-        let new_top = self.terminal.viewport_row_offset();
-        self.last_captured_abs_row = if new_top == 0 {
-            None
-        } else {
-            Some(new_top - 1)
-        };
         // Drain the Zig-side capture watermark so it re-anchors at the
         // post-reflow active-area top. Without this drain, reflow's shift
         // of the active row index would surface in the next
         // `take_scrolled_rows` call as a phantom scroll count, and
         // `capture_scrolled_out` would re-walk rows already in
         // LineBuffer. The return value is intentionally discarded — the
-        // scroll math is satisfied by the `last_captured_abs_row`
-        // re-anchor above; this call exists purely to update the pin.
+        // capture cursor we hand the rest of the session is the
+        // LineBuffer's own `next_append_abs` below; this call exists
+        // purely to reset the pin so subsequent peeks/takes see a clean
+        // delta.
         let _ = self.terminal.take_scrolled_rows();
+        // Re-anchor the LineBuffer-space watermark to the buffer's
+        // current tail. The buffer's contents are unchanged by resize
+        // (only the wrap cache was invalidated), so `next_append_abs`
+        // continues to identify the same logical position. Pre-Step 2
+        // this stored ghostty's `new_top - 1` and conflated two
+        // coordinate spaces; the new value lives entirely in LineBuffer
+        // abs. An empty buffer drops back to `None` — the invariant
+        // sustained everywhere else is "`Some` ⇔ a capture has reached
+        // the buffer", and an empty buffer cannot meet that. Leaving an
+        // older `Some` here would be the only path to a stale watermark.
+        self.last_captured_lb_abs = if self.line_buffer.is_empty() {
+            None
+        } else {
+            Some(self.line_buffer.next_append_abs())
+        };
         // Invalidate LineBuffer wrap cache before querying at new width.
         // Width change → all per-line cached wraps become stale. Clearing
         // ensures wrapped_row_count below recalculates from cells without

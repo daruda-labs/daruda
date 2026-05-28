@@ -1017,6 +1017,25 @@ export fn ghostty_vt_terminal_take_scrolled_rows(terminal_ptr: ?*anyopaque) call
     return active_row;
 }
 
+/// Same scroll-delta computation as `take_scrolled_rows` but
+/// non-destructive: the watermark is not repositioned. Lets a caller
+/// reason about "rows above the active area that haven't been captured
+/// yet" without consuming the delta (e.g. computing an OSC 133 mark's
+/// absolute Y mid-feed without disturbing the capture cursor that the
+/// end-of-feed loop relies on).
+export fn ghostty_vt_terminal_peek_scrolled_rows(terminal_ptr: ?*anyopaque) callconv(.C) u32 {
+    if (terminal_ptr == null) return 0;
+    const handle: *TerminalHandle = @ptrCast(@alignCast(terminal_ptr.?));
+    const pages = &handle.terminal.screen.pages;
+    const active_top = pages.getTopLeft(.active);
+    const active_row = pinScreenRow(active_top);
+    if (handle.capture_watermark) |wm| {
+        return active_row -| pinScreenRow(wm.*);
+    }
+    // No watermark yet: mirrors the take-side first-call result.
+    return active_row;
+}
+
 export fn ghostty_vt_terminal_take_viewport_scroll_delta(
     terminal_ptr: ?*anyopaque,
 ) callconv(.C) i32 {

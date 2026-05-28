@@ -6,10 +6,15 @@
 //! from the previous match's end so the caller can drive a single
 //! iterator forward until exhaustion.
 //!
-//! Coordinates are returned as ring-local line indices plus byte
-//! offsets within each line's `text`. Convert to display coordinates
-//! via [`super::LineBuffer::position_at`] + the dispatcher-aware
-//! wrappers in `TerminalSession`.
+//! Coordinates in returned [`MatchRange`]s are ring-local line indices
+//! plus byte offsets within each line's `text`. The internal resume
+//! cursor is anchored in the buffer's absolute index space (`overflow
+//! + ring_local`), mirroring iTerm2's `FindContext.absBlockNum`:
+//! eviction *under* an in-flight cursor clamps to the first live line
+//! instead of silently shifting under the caller. Convert match
+//! coordinates to display coordinates via
+//! [`super::LineBuffer::position_at`] + the dispatcher-aware wrappers
+//! in `TerminalSession`.
 //!
 //! ## Stream construction
 //!
@@ -80,7 +85,14 @@ pub struct FindContext {
     /// case rule survives explicit `seek` resets.
     case_insensitive_literal: bool,
     forward: bool,
-    cursor_line: usize,
+    /// Resume position in the buffer's absolute index space (`overflow
+    /// + ring_local`). Per-call resolution to a ring-local index does
+    /// `cursor_abs.saturating_sub(buf.overflow())`, so a buffer that
+    /// evicts the line under the cursor between calls clamps the
+    /// cursor to the first surviving line instead of aliasing onto an
+    /// unrelated one. Mirrors iTerm2's `FindContext.absBlockNum`
+    /// `< num_dropped_blocks` clamp.
+    cursor_abs: u64,
     cursor_byte: usize,
 }
 
@@ -106,16 +118,18 @@ impl FindContext {
             pattern,
             case_insensitive_literal: !opts.regex && !opts.case_sensitive,
             forward: opts.forward,
-            cursor_line: 0,
+            cursor_abs: 0,
             cursor_byte: 0,
         }
     }
 
     /// Reset the cursor so the next [`Self::next_match`] starts at
-    /// `(line_idx, byte_offset)`. Use to skip past a match the caller
-    /// has rejected or to restart from a viewport-induced anchor.
-    pub fn seek(&mut self, line_idx: usize, byte_offset: usize) {
-        self.cursor_line = line_idx;
+    /// absolute line index `line_abs` + `byte_offset`. `line_abs` is
+    /// in the same space as [`super::LineBuffer::position_at`] — i.e.
+    /// `overflow + ring_local`. Lines evicted before the next call
+    /// clamp the cursor to the first surviving line.
+    pub fn seek(&mut self, line_abs: u64, byte_offset: usize) {
+        self.cursor_abs = line_abs;
         self.cursor_byte = byte_offset;
     }
 
@@ -140,8 +154,19 @@ impl FindContext {
         if needle_empty {
             return None;
         }
-        if self.cursor_line >= buf.len() {
+        // Resolve abs → ring-local. Lines below `overflow` were evicted
+        // since the cursor was last positioned; clamp upward so the
+        // next pass starts at the first surviving line. Lines above
+        // `overflow + len` simply don't exist yet — bail.
+        let mut cursor_line = self.cursor_abs.saturating_sub(buf.overflow()) as usize;
+        if cursor_line >= buf.len() {
             return None;
+        }
+        // If we clamped (cursor_abs was below `overflow`), the byte
+        // offset belonged to a now-evicted line — reset it so the
+        // surviving line is scanned from its start.
+        if self.cursor_abs < buf.overflow() {
+            self.cursor_byte = 0;
         }
 
         loop {
@@ -151,10 +176,10 @@ impl FindContext {
             // ring-local line `cursor_line + i` begins (after the partial
             // prefix skip on i == 0).
             let mut stream = String::new();
-            let mut line_starts: Vec<usize> = Vec::with_capacity(buf.len() - self.cursor_line);
-            for local in 0..(buf.len() - self.cursor_line) {
+            let mut line_starts: Vec<usize> = Vec::with_capacity(buf.len() - cursor_line);
+            for local in 0..(buf.len() - cursor_line) {
                 line_starts.push(stream.len());
-                let line = buf.get(self.cursor_line + local)?;
+                let line = buf.get(cursor_line + local)?;
                 let text = if local == 0 {
                     let clamp = self.cursor_byte.min(line.text.len());
                     // SAFETY: ensure clamp is at a char boundary to avoid
@@ -190,8 +215,8 @@ impl FindContext {
                         // and retry. Prevents `a*` against `"bbb"` from looping
                         // forever. Iterative loop (not recursion) prevents stack
                         // overflow on large lines.
-                        self.advance_cursor_by_one(buf);
-                        if self.cursor_line >= buf.len() {
+                        self.advance_cursor_by_one(buf, &mut cursor_line);
+                        if cursor_line >= buf.len() {
                             return None;
                         }
                         continue;
@@ -202,8 +227,8 @@ impl FindContext {
 
             let (start_local, start_byte_in_local) = locate_in_stream(stream_start, &line_starts);
             let (end_local, end_byte_in_local) = locate_in_stream(stream_end, &line_starts);
-            let start_line = self.cursor_line + start_local;
-            let end_line = self.cursor_line + end_local;
+            let start_line = cursor_line + start_local;
+            let end_line = cursor_line + end_local;
             // The first segment of the stream is offset by `cursor_byte`
             // inside its line; later segments start at byte 0 of their line.
             let start_byte = if start_local == 0 {
@@ -220,8 +245,10 @@ impl FindContext {
             // Advance the cursor past the match so the next call returns the
             // next non-overlapping hit. An empty trailing line (end_byte at
             // line.text.len()) still leaves us inside that line — the next
-            // call will see no more text there and move on.
-            self.cursor_line = end_line;
+            // call will see no more text there and move on. Store the
+            // ring-local resume position back in abs space so any eviction
+            // between this call and the next clamps correctly.
+            self.cursor_abs = buf.overflow() + end_line as u64;
             self.cursor_byte = end_byte;
             return Some(MatchRange {
                 start_line,
@@ -232,8 +259,13 @@ impl FindContext {
         }
     }
 
-    fn advance_cursor_by_one(&mut self, buf: &LineBuffer) {
-        let Some(line) = buf.get(self.cursor_line) else {
+    /// Step the local ring-local cursor forward by one char boundary,
+    /// crossing into the next line when the current line is exhausted.
+    /// Updates `self.cursor_abs` in lockstep so a re-entry from outside
+    /// the current `next_match` call resumes from the same position
+    /// even after eviction.
+    fn advance_cursor_by_one(&mut self, buf: &LineBuffer, cursor_line: &mut usize) {
+        let Some(line) = buf.get(*cursor_line) else {
             return;
         };
         if self.cursor_byte < line.text.len() {
@@ -245,8 +277,9 @@ impl FindContext {
             }
             self.cursor_byte = next;
         } else {
-            self.cursor_line = self.cursor_line.saturating_add(1);
+            *cursor_line = cursor_line.saturating_add(1);
             self.cursor_byte = 0;
+            self.cursor_abs = buf.overflow() + *cursor_line as u64;
         }
     }
 }
@@ -395,6 +428,34 @@ mod tests {
         ctx.seek(0, 0);
         let again = ctx.next_match(&b).unwrap();
         assert_eq!(again.start_byte, 0);
+    }
+
+    #[test]
+    fn cursor_survives_eviction_between_calls() {
+        // The cursor is anchored in abs space (`overflow + ring_local`),
+        // so when the buffer evicts the line under it between
+        // `next_match` calls the resume position clamps to the first
+        // surviving line. Mirrors iTerm2's `absBlockNum < num_dropped`
+        // clamp.
+        let mut b = LineBuffer::new(2);
+        b.append("alpha foo", &[], EolKind::Hard);
+        let mut ctx = FindContext::new("foo", FindOptions::default());
+        let first = ctx.next_match(&b).unwrap();
+        assert_eq!(first.start_line, 0);
+        // Push two more lines so the original "alpha foo" line at abs
+        // 0 evicts, and `overflow` advances to 1.
+        b.append("beta foo", &[], EolKind::Hard);
+        b.append("gamma foo", &[], EolKind::Hard);
+        assert_eq!(b.overflow(), 1);
+        // The cursor advanced past abs 0 inside `next_match`; under
+        // pre-Step 4 ring-local indexing it would now point at the
+        // 2nd ring-local line (gamma's row). With abs anchoring it
+        // clamps to abs 1 (now ring-local 0, "beta foo"), so the next
+        // hit is the "foo" inside "beta foo".
+        let second = ctx.next_match(&b).unwrap();
+        assert_eq!(second.start_line, 0);
+        let line = b.get(second.start_line).unwrap();
+        assert!(line.text.starts_with("beta"));
     }
 
     #[test]
