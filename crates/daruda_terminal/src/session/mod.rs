@@ -60,11 +60,14 @@ pub struct CommandHistoryEntry {
 }
 
 /// One semantic boundary reported by a shell that speaks FinalTerm / OSC
-/// 133. Captured with an *absolute* Y coordinate that includes lines
-/// already evicted from `LineBuffer` (via `LineBuffer::overflow()`), so
-/// marks survive ring eviction. Translate to a current-frame screen row
-/// via [`TerminalSession::abs_to_screen_row`] before indexing into
-/// `dump_screen_row`. Mirrors iTerm2 `VT100Terminal.m:4520-4616`.
+/// 133. Captured with an *absolute* logical-line index that includes
+/// lines already evicted from `LineBuffer` (via `LineBuffer::overflow()`),
+/// so marks survive ring eviction. `abs_y` counts Hard-EOL line
+/// boundaries — wrap-invariant under resize — and is translated to a
+/// current-frame screen row via [`TerminalSession::abs_to_screen_row`]
+/// before indexing into `dump_screen_row`. Mirrors iTerm2
+/// `VT100Terminal.m:4520-4616` (which also separates the wrap-blind abs
+/// from the wrap-aware projection).
 ///
 /// **Equality is not derived.** Adding `seq` made the auto-derived
 /// `PartialEq` an ambiguous mix of "same identity" (would compare seq)
@@ -89,10 +92,15 @@ pub struct PromptMark {
     /// [`PromptMarkInit`] + `push_prompt_mark`, which is the single
     /// source of truth for the monotonic invariant.
     pub(crate) seq: u64,
-    /// Ever-increasing absolute Y at the time the mark fired,
-    /// computed as `line_buffer.overflow() + line_buffer.wrapped_row_count
-    /// + cursor_y - 1`. Stable across `LineBuffer` ring eviction, but
-    /// shifted by `clear_line_buffer_and_shift_marks` on scrollback wipe.
+    /// Ever-increasing **logical-line** absolute index at the time the
+    /// mark fired, computed as `line_buffer.overflow() +
+    /// line_buffer.len() + logical_lines_until_cursor()` (see
+    /// [`TerminalSession::current_abs_y_at_cursor`]). Units are logical
+    /// lines (one per Hard EOL), **not** visual rows — re-flow at a
+    /// new width does not move the mark. Stable across `LineBuffer`
+    /// ring eviction, but shifted by `clear_line_buffer_and_shift_marks`
+    /// on scrollback wipe. Translate back to a current-frame screen row
+    /// via [`TerminalSession::abs_to_screen_row`].
     pub abs_y: u64,
     /// 1-indexed cursor column at the moment the mark fired. Captured
     /// alongside `abs_y` so the command-history extractor can slice
@@ -373,9 +381,14 @@ impl TerminalSession {
                 .position_for_visual_row(row, cols)
                 .map(|(pos, _, _)| LineCoord::Buffered(pos))
         } else {
-            // Viewport region. The `abs_y` mirrors `PromptMark.abs_y`'s
-            // construction (`overflow + lb_rows + (row - lb_rows)`),
-            // which simplifies to `overflow + row`.
+            // Viewport region. `LineCoord::Viewport.abs_y` lives in
+            // **visual-row** space (`overflow + row`); a separate
+            // coordinate system from [`PromptMark::abs_y`], which is now
+            // logical-line based. Migrating `LineCoord::Viewport` is a
+            // separate surgery — wrap-projection's predictive abs is
+            // ill-defined for the interval-tree consumers — so do not
+            // collapse the two spaces by reusing the mark-side
+            // translator on this value.
             Some(LineCoord::Viewport {
                 abs_y: self.line_buffer.overflow().saturating_add(row as u64),
             })
@@ -1235,6 +1248,18 @@ impl TerminalSession {
     /// capture cursor and scroll offset, and shift any viewport-resident
     /// prompt marks down by the cleared history while dropping marks
     /// whose row was inside the cleared history.
+    ///
+    /// **Mixed-units transitional state.** After the PromptMark logical-
+    /// line abs migration, `mark.abs_y` lives in logical-line space but
+    /// the `visual_residual` shift below is still computed in visual
+    /// rows. For an unwrapped buffer (`history == logical_pre`) the
+    /// residual is zero and the inconsistency is invisible; for a
+    /// wrap-inflated buffer it over-shifts viewport-resident marks. A
+    /// follow-up surgery drops the residual shift entirely
+    /// (`LineBuffer::clear` already absorbs the full logical history
+    /// into `overflow`, so logical-space marks above the new overflow
+    /// need no further adjustment). Tracked in
+    /// `Tasks/2026-05-28_PromptMark-Logical-Abs-Surgery.md` Task 4.
     fn clear_line_buffer_and_shift_marks(&mut self) {
         // Pre-clear measurements: `history` counts visual rows
         // (wrap-aware), `logical_pre` counts logical lines (one per
@@ -1249,10 +1274,9 @@ impl TerminalSession {
         // automatically — marks anchored above the new overflow stay
         // valid without touching their `abs_y`. The remaining visual
         // residual (`history - logical_pre`) is the wrap inflation that
-        // `overflow` (line-granular) can't express; marks whose `abs_y`
-        // lives in visual-row space still need to be shifted by it so
-        // their wrap-aware translation through
-        // `abs_to_screen_row` stays correct.
+        // `overflow` (line-granular) can't express. See doc note above:
+        // post-migration `abs_y` is logical-line, so the residual shift
+        // is a leftover that the follow-up Task 4 surgery will remove.
         self.line_buffer.clear();
         let visual_residual = history.saturating_sub(logical_pre);
         self.last_captured_lb_abs = None;
@@ -1517,47 +1541,56 @@ impl TerminalSession {
             .saturating_add(self.config.rows as u32)
     }
 
-    /// Compute the ever-increasing absolute Y of the row containing the
-    /// cursor right now. Captured when an OSC 133 mark fires so the
-    /// mark survives `LineBuffer` ring eviction — translate back to a
-    /// current-frame screen row via [`Self::abs_to_screen_row`].
+    /// Compute the ever-increasing absolute Y of the **logical line**
+    /// containing the cursor right now. Captured when an OSC 133 mark
+    /// fires so the mark survives `LineBuffer` ring eviction — translate
+    /// back to a current-frame screen row via [`Self::abs_to_screen_row`].
     ///
-    /// **Alt-screen caveat.** `peek_scrolled_rows` reads ghostty's
-    /// currently-active page list. While `self.alt_screen` is true that
-    /// list is the alt-screen's, not the primary's that backs
-    /// `line_buffer`. A mark dispatched in alt-screen would therefore be
-    /// stamped with an `abs_y` that mixes two coordinate spaces and
-    /// cannot resolve back to a primary-screen row. Returning early
-    /// (with the unrooted `overflow + lb_rows + vp_row` estimate, but no
-    /// `uncaptured` component) keeps the mark from poisoning the
-    /// primary-screen translation path; the caller — `push_prompt_mark`
-    /// — could additionally suppress the mark, but no shell we know of
-    /// emits OSC 133 from inside an alt-screen app, so the surface area
-    /// of this branch is purely defensive.
+    /// **Units are logical lines, not visual rows.** The value increments
+    /// once per Hard-EOL line boundary, not once per wrapped visual row,
+    /// so it is invariant under resize-driven reflow: re-flowing a single
+    /// "echo foo" line from 3 wrapped rows to 1 changes its visual row
+    /// position but not its logical-line abs. Mirrors iTerm2's
+    /// `cumulativeScrollbackOverflow + numberOfScrollbackLines + cursorY`
+    /// accounting, which is also wrap-blind at the abs layer (`LineBuffer`
+    /// is iTerm2's `LineBlock` analogue; wrap-awareness lives in the
+    /// projection back to screen rows).
+    ///
+    /// Formula: `line_buffer.overflow() + line_buffer.len() +
+    /// logical_lines_until_cursor()`. The helper walks ghostty rows
+    /// across both the uncaptured-scrolled region and the live grid up
+    /// to (but not including) the cursor's row, counting Hard EOLs —
+    /// so the call site does not need a separate `uncaptured_logical`
+    /// term.
+    ///
+    /// **Alt-screen caveat.** `peek_scrolled_rows` and `row_wrap_kind`
+    /// read ghostty's currently-active page list. While `self.alt_screen`
+    /// is true that list is the alt-screen's, not the primary's that
+    /// backs `line_buffer`. A mark dispatched in alt-screen would
+    /// therefore mix two coordinate spaces and cannot resolve back to a
+    /// primary-screen row. Returning the unrooted logical baseline
+    /// `overflow + lb.len()` (no grid/uncaptured term) keeps the mark
+    /// from poisoning the primary-screen translation path; the caller
+    /// — `push_prompt_mark` — could additionally suppress the mark, but
+    /// no shell we know of emits OSC 133 from inside an alt-screen app,
+    /// so the surface area of this branch is purely defensive.
     fn current_abs_y_at_cursor(&self) -> u64 {
-        let lb_rows = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
-        let vp_row = self
-            .terminal
-            .cursor_position()
-            .map(|(_, y)| u32::from(y.saturating_sub(1)))
-            .unwrap_or(0);
-        // Alt-screen: skip the cross-page `uncaptured` term so the
-        // returned value at least stays in the primary-screen abs Y
-        // space the caller will compare against. See doc above.
+        let base = self
+            .line_buffer
+            .overflow()
+            .saturating_add(self.line_buffer.len() as u64);
         if self.alt_screen {
-            return self.line_buffer.overflow() + lb_rows + vp_row as u64;
+            // See doc: skip the grid/uncaptured term so the returned
+            // value at least stays anchored at the primary-screen
+            // logical baseline the caller will compare against.
+            return base;
         }
-        // Ghostty rows that scrolled out but haven't yet been captured
-        // into line_buffer (capture runs at end of feed; OSC 133 may
-        // fire mid-feed). Read the pending delta straight from
-        // ghostty's tracked-pin counter via the non-consuming peek —
-        // the value `take_scrolled_rows` would return at end-of-feed —
-        // so this stays correct regardless of resize or ring
-        // saturation. Pre-Step 2 this was inferred from a row-space
-        // watermark and required bespoke resynchronization at every
-        // viewport-shaping event.
-        let uncaptured = self.terminal.peek_scrolled_rows() as u64;
-        self.line_buffer.overflow() + lb_rows + uncaptured + vp_row as u64
+        // `logical_lines_until_cursor` already walks the entire
+        // post-LineBuffer region (uncaptured scrolled rows + grid above
+        // the cursor) in one pass, counting Hard EOLs — so we add it
+        // exactly once instead of summing a separate `uncaptured_logical`
+        // term that would double-count the uncaptured Hard EOLs.
+        base.saturating_add(self.logical_lines_until_cursor())
     }
 
     /// Logical-line count among ghostty rows that scrolled out but
@@ -1573,7 +1606,13 @@ impl TerminalSession {
     /// count with primary-screen `LineBuffer` abs would corrupt the
     /// translation; callers should additionally short-circuit on
     /// alt-screen.
-    #[allow(dead_code)] // reserved for Task 2+ (current_abs_y_at_cursor migration)
+    // Used only by tests pinning the post-feed invariant — production
+    // `current_abs_y_at_cursor` and `abs_to_screen_row` walk the
+    // uncaptured+grid region in one pass via `logical_lines_until_cursor`
+    // / `abs_to_screen_row`'s grid branch, so this helper is intentionally
+    // not on a production path. `#[cfg(test)]` excludes it from non-test
+    // builds entirely rather than just silencing the warning.
+    #[cfg(test)]
     fn peek_uncaptured_logical_lines(&self) -> u64 {
         if self.alt_screen {
             return 0;
@@ -1603,7 +1642,6 @@ impl TerminalSession {
     ///
     /// Returns `0` in alt-screen for the same reasoning as
     /// [`Self::peek_uncaptured_logical_lines`].
-    #[allow(dead_code)] // reserved for Task 2+ (current_abs_y_at_cursor migration)
     fn logical_lines_until_cursor(&self) -> u64 {
         if self.alt_screen {
             return 0;
@@ -1646,21 +1684,95 @@ impl TerminalSession {
             .count() as u64
     }
 
-    /// Translate a stored `abs_y` (captured at OSC 133 dispatch) into
-    /// a current screen-frame row. Returns `None` when the line
-    /// containing it has been evicted from `LineBuffer` (or pushed
-    /// past the live viewport bottom — should not happen in practice).
+    /// Project a stored logical-line `abs_y` (captured at OSC 133
+    /// dispatch via [`Self::current_abs_y_at_cursor`]) onto a
+    /// current screen-frame row.
+    ///
+    /// **Input space:** logical-line abs. `abs_y - overflow` is the
+    /// 0-indexed logical-line offset, **not** a visual-row count.
+    ///
+    /// **Output space:** the unified frame row in
+    /// [`Self::dump_screen_row`] coordinates (0 = topmost scrollback
+    /// row; `total_rows() - 1` = bottommost grid row).
+    ///
+    /// **Returns `None` when**
+    /// - the line has been evicted from `LineBuffer` (`abs_y < overflow`)
+    /// - the logical line sits past the live grid bottom (the caller
+    ///   stamped a mark for a row that scrolled out before capture
+    ///   reached it — should not happen for a stored OSC 133 mark, but
+    ///   guarded to keep the projection total).
+    ///
+    /// **Algorithm.** Two branches, mirroring `current_abs_y_at_cursor`'s
+    /// `overflow + lb.len() + grid` decomposition:
+    ///
+    /// 1. **LineBuffer branch** (`line_offset < lb.len()`): sum
+    ///    `rows_at_width` for the prefix `lines[0..line_offset]`
+    ///    (via [`LineBuffer::visual_rows_through`] — which encapsulates
+    ///    the otherwise-private `rows_at_width`). That sum is the first
+    ///    visual row of the target logical line within the unified frame.
+    /// 2. **Grid branch** (`line_offset >= lb.len()`): walk ghostty
+    ///    screen-space rows from the top of the uncaptured-scrolled
+    ///    region forward, counting Hard EOLs to find the start of the
+    ///    `(line_offset - lb.len())`-th logical line. The visual row in
+    ///    the unified frame is `lb_visual + (y - frame_start)`.
+    ///
+    /// The two branches use distinct coordinate spaces — `LineBuffer`
+    /// abs vs. ghostty screen-space rows — so the per-branch comments
+    /// matter: do not collapse the math even when the lengths line up
+    /// numerically in a wrap-free trace.
     pub fn abs_to_screen_row(&self, abs_y: u64) -> Option<u32> {
         let overflow = self.line_buffer.overflow();
         if abs_y < overflow {
+            // Line evicted — caller (e.g. paint loop, jump candidate
+            // walker) must skip this mark rather than alias onto an
+            // unrelated row.
             return None;
         }
-        let rel = abs_y - overflow;
-        let total = self.total_rows() as u64;
-        if rel >= total {
-            return None;
+        let line_offset = abs_y - overflow;
+        let lb_lines = self.line_buffer.len() as u64;
+        let cols = self.config.cols;
+        if line_offset < lb_lines {
+            // LineBuffer branch: sum the wrapped row counts of every
+            // logical line strictly before `idx` to land on the target's
+            // first visual row. `visual_rows_through` mirrors
+            // `wrapped_row_count`'s wrap walk so the two stay in sync as
+            // `LogicalLine::rows_at_width` evolves.
+            let idx = line_offset as usize;
+            return Some(self.line_buffer.visual_rows_through(idx, cols));
         }
-        Some(rel as u32)
+        // Grid branch — ghostty screen space (NOT LineBuffer abs).
+        //
+        // The post-LineBuffer region starts at `lb_visual` rows from the
+        // top of the unified frame and contains both the uncaptured-
+        // scrolled rows (a transient buffer mid-feed) and the live
+        // grid. Walk it from `frame_start` looking for the `n`-th Hard
+        // EOL boundary; once `count == n` the current `y` is the first
+        // ghostty row of the target logical line.
+        let n = line_offset - lb_lines;
+        let lb_visual = self.line_buffer.wrapped_row_count(cols) as u64;
+        let scrolled = self.terminal.peek_scrolled_rows();
+        let viewport_top = self.terminal.viewport_row_offset();
+        let frame_start = viewport_top.saturating_sub(scrolled);
+        let frame_end = viewport_top.saturating_add(self.config.rows as u32);
+        let mut count: u64 = 0;
+        let mut y = frame_start;
+        while y < frame_end {
+            if count == n {
+                // The visual row of `y` in the unified frame is the
+                // `lb_visual` LineBuffer-side rows plus the offset
+                // walked through the post-LineBuffer region.
+                let rel = (y - frame_start) as u64;
+                return u32::try_from(lb_visual.saturating_add(rel)).ok();
+            }
+            if matches!(self.terminal.row_wrap_kind(y), ghostty_vt::WrapKind::Hard) {
+                count = count.saturating_add(1);
+            }
+            y = y.saturating_add(1);
+        }
+        // `line_offset` points past the live frame — the mark is in the
+        // future (shouldn't normally happen for a stored OSC 133 mark,
+        // but guarded so the projection is total).
+        None
     }
 
     /// Absolute row index at the top of the visible viewport.
@@ -1672,22 +1784,57 @@ impl TerminalSession {
             .saturating_sub(self.scroll_offset)
     }
 
-    /// Absolute line index of the topmost visible row.
+    /// Absolute **visual-row** index at the topmost visible row.
     ///
-    /// Expressed as `line_buffer.overflow() + viewport_row_offset()`.
-    /// Capture this when the user scrolls and pass it to [`ViewportLock`] as
-    /// the anchor. During subsequent IND / SU grid scrolls, `viewport_row_offset`
-    /// increases as new rows are captured into `LineBuffer`, so the stored anchor
-    /// no longer matches the top-of-viewport — `restore_pinned_viewport` detects
-    /// the drift via [`Self::abs_to_screen_row`] and re-seeks. Conversely,
-    /// scrolling up (increasing `scroll_offset`) decreases this value, so it is
-    /// not monotone. Translate an anchor back to a current screen row with
-    /// [`Self::abs_to_screen_row`], which returns `None` once the row has been
-    /// evicted from the `LineBuffer` ring.
+    /// Expressed as `line_buffer.overflow() + viewport_row_offset()`,
+    /// where `viewport_row_offset` is in visual-row (`total_rows`) space.
+    /// Capture this when the user scrolls and pass it to [`ViewportLock`]
+    /// as the anchor. During subsequent IND / SU grid scrolls,
+    /// `viewport_row_offset` increases as new rows are captured into
+    /// `LineBuffer`, so the stored anchor no longer matches the
+    /// top-of-viewport — `restore_pinned_viewport` detects the drift via
+    /// [`Self::viewport_anchor_to_screen_row`] and re-seeks. Conversely,
+    /// scrolling up (increasing `scroll_offset`) decreases this value, so
+    /// it is not monotone.
+    ///
+    /// **Distinct space from `PromptMark.abs_y`.** This value lives in
+    /// visual-row space (`overflow + screen_row`); [`PromptMark::abs_y`]
+    /// lives in logical-line space. The two are NOT interchangeable —
+    /// translate the viewport anchor via
+    /// [`Self::viewport_anchor_to_screen_row`] (visual-row math) and the
+    /// mark abs via [`Self::abs_to_screen_row`] (logical-line projection).
+    /// Mixing them would put the viewport pin on the wrong row at any
+    /// wrap-inflated width.
     pub(crate) fn viewport_top_abs_y(&self) -> u64 {
         self.line_buffer
             .overflow()
             .saturating_add(self.viewport_row_offset() as u64)
+    }
+
+    /// Translate a viewport anchor (captured via
+    /// [`Self::viewport_top_abs_y`], visual-row space) back to a
+    /// current screen-frame row. Returns `None` when the anchor row has
+    /// been evicted from `LineBuffer` or pushed past the live frame.
+    ///
+    /// **Why this exists alongside [`Self::abs_to_screen_row`].** The
+    /// mark-side translator now takes logical-line abs; the viewport
+    /// anchor stays in visual-row space because the user may park the
+    /// viewport top on a wrap-continuation row (which has no
+    /// logical-line abs of its own). A 1-row precision loss on
+    /// continuation rows would make `restore_pinned_viewport`'s round
+    /// trip silently snap up to the head of the logical line on every
+    /// IND / SU, so the two spaces remain separated by call path.
+    pub(crate) fn viewport_anchor_to_screen_row(&self, anchor: u64) -> Option<u32> {
+        let overflow = self.line_buffer.overflow();
+        if anchor < overflow {
+            return None;
+        }
+        let rel = anchor - overflow;
+        let total = self.total_rows() as u64;
+        if rel >= total {
+            return None;
+        }
+        u32::try_from(rel).ok()
     }
 
     /// Current scroll offset in rows back from the bottom of the

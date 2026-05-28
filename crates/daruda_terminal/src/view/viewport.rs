@@ -489,9 +489,13 @@ impl TerminalView {
             // Live state — nothing to restore.
             return;
         };
-        let Some(screen_row) = self.session.abs_to_screen_row(anchor) else {
+        let Some(screen_row) = self.session.viewport_anchor_to_screen_row(anchor) else {
             // Anchor evicted from LineBuffer — unlock so future PTY
-            // output snaps to bottom again.
+            // output snaps to bottom again. The anchor is in visual-row
+            // space (captured via `viewport_top_abs_y`); do NOT use
+            // `abs_to_screen_row` here — that translator takes a
+            // logical-line abs and would mis-project a continuation
+            // row to the head of its logical line.
             self.state.viewport_lock.unlock();
             return;
         };

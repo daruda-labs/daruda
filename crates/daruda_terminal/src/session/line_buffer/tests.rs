@@ -318,6 +318,29 @@ fn wrap_cache_returns_same_value_for_same_width() {
 }
 
 #[test]
+fn visual_rows_through_is_prefix_of_wrapped_row_count() {
+    // Three logical lines at width 3: "abcdef" → 2 rows, "gh" → 1 row,
+    // "ijklm" → 2 rows. visual_rows_through must sum prefix-wise so
+    // [0..0]=0, [0..1]=2, [0..2]=3, [0..3]=5, and any larger idx
+    // clamps to the full count.
+    let mut b = LineBuffer::new(1024);
+    b.append("abcdef", &[], EolKind::Hard);
+    b.append("gh", &[], EolKind::Hard);
+    b.append("ijklm", &[], EolKind::Hard);
+    assert_eq!(b.visual_rows_through(0, 3), 0);
+    assert_eq!(b.visual_rows_through(1, 3), 2);
+    assert_eq!(b.visual_rows_through(2, 3), 3);
+    assert_eq!(b.visual_rows_through(3, 3), 5);
+    assert_eq!(b.visual_rows_through(3, 3), b.wrapped_row_count(3));
+    // Out-of-range idx clamps rather than panicking.
+    assert_eq!(b.visual_rows_through(99, 3), b.wrapped_row_count(3));
+    // cell_cols == 0 falls back to one row per logical line, capped at
+    // the prefix length.
+    assert_eq!(b.visual_rows_through(2, 0), 2);
+    assert_eq!(b.visual_rows_through(99, 0), b.len() as u32);
+}
+
+#[test]
 fn wrap_cache_invalidates_on_extend() {
     let mut b = LineBuffer::new(1024);
     b.append("hello", &[], EolKind::Soft);

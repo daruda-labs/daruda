@@ -136,7 +136,10 @@ compiler will **not** catch a mix-up:
 |-------|-------|--------|
 | **Grid row** | `1..=rows` (1-indexed) | `session.cursor_position()`, ghostty's live grid |
 | **Viewport row** | `0..rows` | what is painted right now (`viewport_lines[i]`) |
-| **Absolute screen row** | `0..total_rows()` | unified `line_buffer` scrollback + grid; what `viewport_row_offset()` and prompt-mark `abs_y` live in |
+| **Absolute screen row** | `0..total_rows()` | unified `line_buffer` scrollback + grid; what `viewport_row_offset()` and the viewport-pin anchor live in (visual-row, wrap-aware) |
+| **Logical-line abs** | `0..` (ever-increasing) | `PromptMark::abs_y`, `LineBuffer::overflow() + len()`; wrap-blind, projected back to a visual row via `abs_to_screen_row` |
+
+`clear_line_buffer_and_shift_marks` still applies a `visual_residual` correction to mark `abs_y` as a transitional state — under wrap-inflated buffers this over-shifts. The Task 4 follow-up drops that shift once the logical-line semantics are fully self-consistent across the wipe path.
 
 **The rule:** when the user has scrolled into history (`scroll_offset > 0`)
 the viewport shows scrollback, so **grid row `r` is no longer at viewport
@@ -313,12 +316,17 @@ Apply the same `build_*` pattern when a change motivates extraction.
 
 ### Invariants
 
-- **Marks store `abs_y`, not a screen row**: captured as
-  `line_buffer.overflow() + line_buffer.wrapped_row_count(cols) + (cursor_y - 1)`
-  at dispatch time. Translate to a current-frame screen row via
-  `TerminalSession::abs_to_screen_row` at read time — returns `None`
-  when the row has been evicted from `LineBuffer`, so marks survive ring
-  eviction without aliasing onto unrelated rows.
+- **Marks store a logical-line `abs_y`, not a screen row**: captured as
+  `line_buffer.overflow() + line_buffer.len() + logical_lines_until_cursor()`
+  at dispatch time. Units are logical lines (Hard-EOL boundaries), so
+  the value is wrap-invariant under resize. Translate to a current-frame
+  screen row via `TerminalSession::abs_to_screen_row` at read time —
+  the wrap-aware projection happens there. Returns `None` when the line
+  has been evicted from `LineBuffer`, so marks survive ring eviction
+  without aliasing onto unrelated rows. (The viewport-pin anchor lives
+  in a separate visual-row space — see `viewport_top_abs_y` /
+  `viewport_anchor_to_screen_row` — and must not be mixed with mark
+  abs.)
 - **`prompt_marks` is a bounded FIFO** (`PROMPT_MARKS_CAP = 4096`).
 - **No re-scan**: without the drain, re-scanning `parse_tail` re-emits
   duplicate OSC 133 marks. OSC 7 / 52 are idempotent so they do not

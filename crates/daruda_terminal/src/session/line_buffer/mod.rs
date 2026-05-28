@@ -483,6 +483,29 @@ impl LineBuffer {
         total
     }
 
+    /// Visual rows occupied by the prefix `lines[0..idx]` when wrapped at
+    /// `cell_cols`. `idx == 0` returns `0`; `idx >= len()` returns the
+    /// full [`Self::wrapped_row_count`]. Same wrap rule as
+    /// [`Self::wrapped_row_count`] so the two stay in sync.
+    ///
+    /// Used by [`crate::session::TerminalSession::abs_to_screen_row`] to
+    /// project a logical-line abs that lands inside `LineBuffer` (line
+    /// index `idx`) onto its first visual row — keeping
+    /// `LogicalLine::rows_at_width` private to the line-buffer module.
+    pub fn visual_rows_through(&self, idx: usize, cell_cols: u16) -> u32 {
+        if cell_cols == 0 {
+            // Mirror `wrapped_row_count`'s zero-cols fallback: every line
+            // contributes one row, capped at the prefix length.
+            return idx.min(self.lines.len()) as u32;
+        }
+        let bound = idx.min(self.lines.len());
+        let mut total: u32 = 0;
+        for line in self.lines.iter().take(bound) {
+            total = total.saturating_add(line.rows_at_width(cell_cols));
+        }
+        total
+    }
+
     /// Translate a flat visual-row index `y` (over the whole wrapped
     /// buffer) into `(logical_line_idx, sub_row_within_line)`.
     ///

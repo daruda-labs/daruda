@@ -1727,3 +1727,99 @@ fn peek_uncaptured_logical_lines_returns_zero_in_alt_screen() {
     assert_eq!(s.peek_uncaptured_logical_lines(), 0);
     assert_eq!(s.logical_lines_until_cursor(), 0);
 }
+
+// PromptMark.abs_y logical-line migration ---------------------------
+//
+// The two tests below pin the migration's load-bearing properties:
+// (1) the abs_y → screen-row round-trip lands the mark back on the
+// row that dispatched it, and (2) the stored abs_y is invariant under
+// resize-driven reflow (visual-row counts change, the logical-line
+// abs does not).
+
+#[test]
+fn current_abs_y_at_cursor_round_trips_through_abs_to_screen_row() {
+    // Dispatch OSC 133 at a known cursor row, then verify that
+    // `abs_to_screen_row(mark.abs_y)` maps back to a row that
+    // matches the cursor's pre-feed position in the unified frame.
+    // The round trip is the contract for paint / jump consumers
+    // — anything else and the gutter band paints on the wrong row.
+    let mut s = session_with(80, 5, 1024);
+    // Feed two lines so the cursor lands on row 3 (1-indexed) before
+    // dispatch — exercises the grid-above-cursor walk inside
+    // `logical_lines_until_cursor`.
+    s.feed(b"alpha\r\nbeta\r\n\x1b]133;A\x07").unwrap();
+    let mark = s.prompt_marks().back().copied().expect("mark must exist");
+    // The mark was dispatched while the cursor was on grid row 3 of a
+    // 5-row viewport with no scrollback. In the unified frame that is
+    // absolute screen row 2 (zero-indexed).
+    let row = s
+        .abs_to_screen_row(mark.abs_y)
+        .expect("round-trip translation must resolve");
+    assert_eq!(
+        row, 2,
+        "mark dispatched on grid row 3 (zero-indexed row 2) must round-trip back to row 2"
+    );
+    // And after PTY-driven capture (lines scroll into LineBuffer),
+    // the round-trip still lands on the original row's unified-frame
+    // position — LineBuffer absorbed rows 0..N, so the row count
+    // grows but the mark's abs_y is invariant.
+    s.feed(b"gamma\r\ndelta\r\nepsilon\r\nzeta\r\n").unwrap();
+    let row_after = s
+        .abs_to_screen_row(mark.abs_y)
+        .expect("mark must still resolve after scroll");
+    // Unified-frame row of the mark's source line stays at 2 — two
+    // logical lines ('alpha', 'beta') precede it regardless of where
+    // the live grid currently sits.
+    assert_eq!(
+        row_after, 2,
+        "scroll-driven capture must not move the mark's resolved row"
+    );
+}
+
+#[test]
+fn abs_y_unchanged_after_resize() {
+    // Logical-line abs is wrap-invariant: dispatching OSC 133 at a
+    // given cursor position, then resizing to a width that reflows
+    // earlier lines, must NOT change the stored `mark.abs_y` (the
+    // mark is an identity in logical-line space). `abs_to_screen_row`
+    // then projects through the new wrap to land on the post-reflow
+    // visual row.
+    let mut s = session_with(40, 5, 1024);
+    // Two lines wide enough to wrap at the post-resize 20-cols width
+    // but fit in 40 cols pre-resize. The mark sits on row 3 of a
+    // wrap-free pre-resize grid.
+    s.feed(b"this-line-is-thirty-chars-long-aaaa\r\n").unwrap();
+    s.feed(b"another-thirty-char-line-bbbbbbbbbbb\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07").unwrap();
+    let abs_before = s
+        .prompt_marks()
+        .back()
+        .copied()
+        .expect("mark must exist")
+        .abs_y;
+    // Narrow enough to reflow the two earlier lines into wrap
+    // continuations. Visual-row count of the LineBuffer prefix
+    // therefore grows; logical-line count does not.
+    s.resize(20, 5).expect("resize must succeed");
+    let abs_after = s
+        .prompt_marks()
+        .back()
+        .copied()
+        .expect("mark must survive resize")
+        .abs_y;
+    assert_eq!(
+        abs_before, abs_after,
+        "stored abs_y must be invariant under wrap reflow (logical-line space)"
+    );
+    // The visual row projection should still resolve — the mark's
+    // logical line lives in the post-resize frame either in
+    // LineBuffer (if captured) or on the grid. We assert reachability
+    // rather than a specific row number, since the post-reflow visual
+    // position depends on whether the line landed in LineBuffer or
+    // remained on the grid; the round-trip not returning `None` is
+    // the load-bearing property here.
+    assert!(
+        s.abs_to_screen_row(abs_after).is_some(),
+        "post-resize projection must still resolve the mark to a row"
+    );
+}
