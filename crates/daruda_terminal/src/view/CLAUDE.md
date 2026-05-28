@@ -157,6 +157,14 @@ scroll-offset dispatch — never assume `viewport_row == grid_row - 1`.
   A `None` result means the anchor scrolled out of view — **skip the
   paint**, don't clamp it onto unrelated scrollback. Prompt marks and
   search highlights already follow this via `screen_row_to_visible`.
+- **Painting a viewport-anchored overlay** (URL hover underline) → the
+  cached `row` *is* a 0-indexed viewport row, so the dispatch lives at
+  the cache, not at paint: clear it whenever the viewport shifts.
+  `update_hovered_url` only fires on mouse-move, so without that clear a
+  keyboard scroll / PTY output would leave the underline painted onto
+  whatever happens to occupy that row next. `schedule_viewport_refresh`
+  resets `state.hovered_url` for this reason; the next mouse-move
+  re-derives it.
 
 ---
 
@@ -331,13 +339,21 @@ Apply the same `build_*` pattern when a change motivates extraction.
 
 ## Jump navigation (prompt / command)
 
-### State is row-based (do not use indices)
+### Focus is identity-based (do not use indices, do not use screen rows)
 
-- `focused_prompt_row: Option<u32>` / `focused_command_row: Option<u32>`.
-- Tracking indices breaks on FIFO eviction — the index would
-  **silently point at a different mark**.
+- `focused_prompt: Option<u64>` / `focused_command: Option<u64>` —
+  stores the focused mark's [`PromptMark::seq`] (a monotonic push-order
+  identity assigned in `push_prompt_mark`).
+- Tracking indices breaks on FIFO eviction; tracking a screen row
+  breaks on `clear_line_buffer_and_shift_marks` (which shifts
+  `abs_y` of viewport-resident marks after a `\x1b[3J` mirror). `seq`
+  is the only field that is **never shifted and never resets**, so
+  the highlight follows the focused mark across both — mirroring
+  iTerm2's `_selectedScreenMark` weak-ref pattern.
 - `next_prompt_index(sorted_starts, previous_row, viewport_top, forward)
-  -> Option<PromptJump>`: row-based, so it is eviction-safe.
+  -> Option<PromptJump>` stays in screen-row space; `jump_to_mark`
+  converts the stored `seq` → current screen row at entry and maps
+  the chosen row → mark `seq` at exit.
 
 ### `PromptJump { row, wrapped }` contract
 
@@ -361,7 +377,10 @@ Apply the same `build_*` pattern when a change motivates extraction.
 ### Re-anchor triggers
 
 Manual scroll (wheel, PageUp / PageDown, Home / End) or PTY input →
-`schedule_viewport_refresh` → `focused_*_row = None`.
+`schedule_viewport_refresh` → `focused_* = None`. This is a deliberate
+UX clear (turn the jump highlight off when the user moves on), not a
+staleness workaround — with identity-based focus the mark would
+otherwise remain correctly highlighted across content changes.
 
 ### Wrap flash
 

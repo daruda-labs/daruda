@@ -394,8 +394,24 @@ impl TerminalView {
     }
 
     pub(super) fn schedule_viewport_refresh(&mut self, cx: &mut Context<Self>) {
-        self.state.focused_prompt_row = None;
-        self.state.focused_command_row = None;
+        // Deliberate UX clear: when the user scrolls manually or PTY
+        // output arrives, the jump-highlight band should disappear so
+        // the next Cmd+Shift+↑/↓ feels like a fresh anchor. With
+        // identity-based focus ([`crate::session::PromptMark::seq`]),
+        // this is *not* a staleness workaround — the focused mark would
+        // otherwise remain correctly highlighted across content changes
+        // (iTerm2 behavior). Re-evaluate this clear if the UX preference
+        // shifts.
+        self.state.focused_prompt = None;
+        self.state.focused_command = None;
+        // `hovered_url.row` is a 0-indexed viewport row captured by
+        // `update_hovered_url`, which only fires on mouse-move. Keyboard
+        // scroll / PTY output shifts the viewport without that callback
+        // running, so the cached row would now point at unrelated
+        // content and `build_hover_underline` would paint the underline
+        // onto whatever happens to sit there. Clear it here; the next
+        // mouse-move re-derives it for the new viewport.
+        self.state.hovered_url = None;
         // Selection uses absolute ScreenPos coordinates — it survives a
         // viewport-window shift (scroll, search navigation).
         self.state.pending_refresh = PendingRefresh::Preserve;

@@ -257,7 +257,10 @@ impl Workspace {
         self.projects.retain(|p| p.id != project_id);
 
         // No more projects — clear the active runtime fields and tell
-        // the caller to close the window.
+        // the caller to close the window. Persist the empty list (mirrors
+        // the no-survivor-lane branch below) so a force-quit between this
+        // point and the natural shutdown save can't resurrect the closed
+        // project from a stale on-disk snapshot.
         if self.projects.is_empty() {
             self.main_area.tabs.clear();
             self.main_area.panes.clear();
@@ -265,6 +268,7 @@ impl Workspace {
             self.main_area.tab_history.clear();
             self.main_area.focused_pane_id = 0;
             self.active = LaneRef::default();
+            self.mutate_durable(cx, |_, _| {});
             return false;
         }
 

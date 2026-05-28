@@ -141,8 +141,8 @@ impl TerminalTextElement {
         let mut out: Vec<PaintQuad> = Vec::new();
         let origin = bounds.origin;
         let strip_w = px(theme::PROMPT_MARK_STRIP_W);
-        let focused_prompt_row = view.state.focused_prompt_row;
-        let focused_command_row = view.state.focused_command_row;
+        let focused_prompt = view.state.focused_prompt;
+        let focused_command = view.state.focused_command;
 
         for mark in view.session.prompt_marks().iter().rev().take(64) {
             // Translate the mark's absolute Y to a current screen row;
@@ -155,8 +155,12 @@ impl TerminalTextElement {
                 continue;
             };
             let visible_row = visible as f32;
-            let is_focused =
-                Some(screen_row) == focused_prompt_row || Some(screen_row) == focused_command_row;
+            // Compare by mark identity (`seq`), not by screen row.
+            // `mark.abs_y` is shifted by `clear_line_buffer_and_shift_marks`
+            // on `\x1b[3J` mirror, so screen-row comparison would drift
+            // off the focused mark after a scrollback wipe; `seq` is the
+            // position-independent identity that never shifts.
+            let is_focused = Some(mark.seq) == focused_prompt || Some(mark.seq) == focused_command;
             let color = match (mark.kind, mark.exit_code) {
                 (crate::session::PromptMarkKind::CommandFinished, Some(code)) if code != 0 => {
                     theme::PROMPT_MARK_FOCUSED_PROMPT

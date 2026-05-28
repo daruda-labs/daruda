@@ -91,15 +91,15 @@ impl TerminalView {
 
     pub fn jump_to_prompt(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         use crate::session::PromptMarkKind;
-        let previous = self.state.focused_prompt_row;
-        self.state.focused_prompt_row =
+        let previous = self.state.focused_prompt;
+        self.state.focused_prompt =
             self.jump_to_mark(PromptMarkKind::PromptStart, previous, forward, window, cx);
     }
 
     pub fn jump_to_command(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         use crate::session::PromptMarkKind;
-        let previous = self.state.focused_command_row;
-        self.state.focused_command_row = self.jump_to_mark(
+        let previous = self.state.focused_command;
+        self.state.focused_command = self.jump_to_mark(
             PromptMarkKind::CommandExecuted,
             previous,
             forward,
@@ -111,27 +111,54 @@ impl TerminalView {
     fn jump_to_mark(
         &mut self,
         kind: crate::session::PromptMarkKind,
-        previous_row: Option<u32>,
+        previous_seq: Option<u64>,
         forward: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<u32> {
+    ) -> Option<u64> {
         let viewport_top = self.session.viewport_row_offset();
-        // Translate each mark's abs_y to a current-frame screen row.
-        // Marks whose row has been evicted from `LineBuffer` drop out
-        // here — the picker only walks rows that are still reachable.
-        let mut rows: Vec<u32> = self
+        // Translate the stored focus identity (`PromptMark::seq`) into a
+        // current-frame screen row so [`next_prompt_index`] — which works
+        // in screen-row space — can step relative to it. A focused mark
+        // that has been wiped (`\x1b[3J` mirror in
+        // `clear_line_buffer_and_shift_marks`) or evicted from
+        // `LineBuffer` collapses to `None`, triggering the fresh-anchor
+        // fallback inside `next_prompt_index`.
+        let previous_row = previous_seq.and_then(|seq| {
+            self.session
+                .prompt_marks()
+                .iter()
+                .find(|m| m.kind == kind && m.seq == seq)
+                .and_then(|m| self.session.abs_to_screen_row(m.abs_y))
+        });
+        // Pair each candidate's current screen row with its identity so
+        // the picker's chosen row can be mapped back to a `seq` for
+        // storage. Marks whose row has been evicted from `LineBuffer`
+        // drop out here — the picker only walks rows that are still
+        // reachable.
+        let candidates: Vec<(u32, u64)> = self
             .session
             .prompt_marks()
             .iter()
             .filter(|m| m.kind == kind)
-            .filter_map(|m| self.session.abs_to_screen_row(m.abs_y))
+            .filter_map(|m| {
+                self.session
+                    .abs_to_screen_row(m.abs_y)
+                    .map(|row| (row, m.seq))
+            })
             .collect();
         // `next_prompt_index` expects ascending order. Capture order
-        // tracks `abs_y`, which is monotonic, so the translated rows
-        // are already sorted — but sort defensively in case a future
-        // change introduces a non-monotonic path.
-        rows.sort_unstable();
+        // tracks `abs_y`, which is monotonic, and `abs_to_screen_row` is
+        // order-preserving (subtracts a fixed `overflow`), so candidates
+        // are already sorted by construction. Assert the invariant in
+        // debug instead of paying an O(n log n) sort in release — if a
+        // future change introduces a non-monotonic path, tests will
+        // panic here loudly.
+        debug_assert!(
+            candidates.windows(2).all(|w| w[0].0 <= w[1].0),
+            "candidates must be sorted by screen row (abs_y monotonic + abs_to_screen_row order-preserving)",
+        );
+        let rows: Vec<u32> = candidates.iter().map(|&(row, _)| row).collect();
 
         let jump = next_prompt_index(&rows, previous_row, viewport_top, forward)?;
         match self.session.prompt_jump_scroll_mode() {
@@ -154,7 +181,13 @@ impl TerminalView {
         // selection's absolute ScreenPos anchors stay valid, so preserve it.
         self.state.pending_refresh = PendingRefresh::Preserve;
         cx.notify();
-        Some(jump.row)
+        // Map the chosen screen row back to its mark identity. Screen
+        // rows are unique per mark within a frame (`abs_to_screen_row`
+        // is injective on live `abs_y`), so this lookup is unambiguous.
+        candidates
+            .into_iter()
+            .find(|&(row, _)| row == jump.row)
+            .map(|(_, seq)| seq)
     }
 
     fn schedule_prompt_jump_flash(&mut self, window: &mut Window, cx: &mut Context<Self>) {

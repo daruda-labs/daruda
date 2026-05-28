@@ -34,18 +34,22 @@ SCAN_DIR="crates/daruda_terminal/src/session"
 # Walk each function body (tracked by brace depth, with string literals
 # and line comments stripped first so format!("{}") braces don't skew the
 # count) and flag any that reach the grid FFI without a scroll dispatch.
+#
+# The bad-pattern check runs against the *stripped* body so a comment that
+# happens to mention `scroll_offset` ("// scroll_offset handled by caller")
+# can't whitewash a body that never branches on it.
 violations=$(
     find "$SCAN_DIR" -name '*.rs' -not -name 'tests.rs' -print0 \
     | xargs -0 awk '
         function flush(    bad) {
-            bad = (body ~ /self\.terminal\.dump_viewport_row/) \
-               && (body !~ /scroll_offset/) \
-               && (body !~ /wrapped_row_count/)
+            bad = (stripped_body ~ /self\.terminal\.dump_viewport_row/) \
+               && (stripped_body !~ /scroll_offset/) \
+               && (stripped_body !~ /wrapped_row_count/)
             if (in_fn && bad) {
                 printf "%s:%d: fn %s reaches self.terminal.dump_viewport_row* without a scroll_offset / wrapped_row_count dispatch\n", \
                     fname, fn_line, fn_name
             }
-            in_fn = 0; body = ""; depth = 0; opened = 0
+            in_fn = 0; stripped_body = ""; depth = 0; opened = 0
         }
         {
             fname = FILENAME
@@ -55,9 +59,12 @@ violations=$(
             o = gsub(/\{/, "{", stripped)   # count braces
             c = gsub(/\}/, "}", stripped)
 
+            # Match every Rust fn modifier combination we use today:
+            # `pub(crate)/pub(super)` parenthesized visibility, plus any
+            # ordering of `unsafe / const / async / extern ["abi"]`.
             if (!in_fn) {
-                if (stripped ~ /^[[:space:]]*(pub[[:space:]]+)?(async[[:space:]]+)?fn[[:space:]]/) {
-                    in_fn = 1; fn_line = FNR; body = $0; depth = 0; opened = 0
+                if (stripped ~ /^[[:space:]]*(pub(\([^)]+\))?[[:space:]]+)?((unsafe|const|async|extern)[[:space:]]+("[^"]+"[[:space:]]+)?)*fn[[:space:]]/) {
+                    in_fn = 1; fn_line = FNR; stripped_body = stripped; depth = 0; opened = 0
                     name = $0
                     sub(/^.*fn[[:space:]]+/, "", name); sub(/[^A-Za-z0-9_].*$/, "", name)
                     fn_name = name
@@ -68,7 +75,7 @@ violations=$(
                 next
             }
 
-            body = body "\n" $0
+            stripped_body = stripped_body "\n" stripped
             depth += o - c
             if (o > 0) opened = 1
             if (opened && depth <= 0) flush()

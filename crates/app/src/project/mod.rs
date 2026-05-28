@@ -118,10 +118,21 @@ impl Project {
         // re-discovers the main worktree (plus any linked ones) and the
         // next save records the recovered list, breaking the otherwise
         // self-perpetuating empty state.
-        let lanes: Vec<Lane> = if ps.lanes.is_empty() {
-            Lane::bootstrap_from_project(&ps.root)
+        //
+        // When re-bootstrapping, also reset `last_active_lane_id` to the
+        // first synthesized lane: the persisted hint refers to a lane id
+        // that no longer exists in the freshly-bootstrapped set (ids
+        // restart at 0), so keeping it would write the stale id back to
+        // disk on the next save. `snap_target()` would mask the mismatch
+        // at read time, but a later session that happens to allocate the
+        // same id would inherit a hint that means nothing.
+        let (lanes, last_active_lane_id) = if ps.lanes.is_empty() {
+            let lanes = Lane::bootstrap_from_project(&ps.root);
+            let head = lanes.first().map(|w| w.id).unwrap_or(0);
+            (lanes, head)
         } else {
-            ps.lanes.iter().map(Lane::from_serialized).collect()
+            let lanes: Vec<Lane> = ps.lanes.iter().map(Lane::from_serialized).collect();
+            (lanes, ps.last_active_lane_id)
         };
         Self {
             id,
@@ -129,7 +140,7 @@ impl Project {
             root: ps.root.clone(),
             name: ps.name.clone().unwrap_or_default(),
             lanes,
-            last_active_lane_id: ps.last_active_lane_id,
+            last_active_lane_id,
             group_id: ov.group_id,
             color: ov.color.clone(),
             // `ProjectOverride::tab_order` is persisted as `usize` for
@@ -218,6 +229,39 @@ mod tests {
         // Non-git temp dir → exactly one `Default` lane at id 0.
         assert_eq!(p.lanes.len(), 1);
         assert_eq!(p.lanes[0].id, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_disk_empty_lanes_resets_stale_last_active_hint() {
+        // Re-bootstrapping assigns lane ids from 0, but the persisted
+        // `last_active_lane_id` was captured against the (now-discarded)
+        // old lane set and may point at an id the new lanes never
+        // produced. Keeping that stale value would let `snap_target`'s
+        // fallback mask the inconsistency while the field round-trips
+        // back to disk on the next save — a later session whose ids
+        // happen to grow back into that range would then activate an
+        // unrelated lane on a hint that just coincidentally matched.
+        // The re-bootstrap branch must reset the hint to the synthesized
+        // first lane.
+        let dir = std::env::temp_dir().join("daruda_project_from_disk_stale_hint");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ps = ProjectState {
+            schema_version: 0,
+            uuid: ProjectUuid::new(),
+            root: dir.clone(),
+            name: Some("daruda".to_string()),
+            lanes: Vec::new(),
+            last_active_lane_id: 7,
+            next_lane_id: 0,
+        };
+        let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+        assert_eq!(p.lanes.len(), 1);
+        assert_eq!(
+            p.last_active_lane_id, p.lanes[0].id,
+            "stale hint must follow the synthesized lane set, not survive into the next snapshot"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

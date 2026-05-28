@@ -247,6 +247,60 @@ fn prompt_marks_are_bounded() {
 }
 
 #[test]
+fn prompt_mark_seq_is_strictly_monotonic() {
+    // Every pushed mark gets a unique, strictly-increasing `seq` so it can
+    // serve as a position-independent identity for jump-focus tracking.
+    // Unlike `abs_y`, `seq` is never shifted (see
+    // `clear_line_buffer_and_shift_marks`) and never resets.
+    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    for _ in 0..5 {
+        session.feed(b"\x1b]133;A\x07").unwrap();
+    }
+    let seqs: Vec<u64> = session.prompt_marks().iter().map(|m| m.seq).collect();
+    assert_eq!(seqs.len(), 5);
+    assert!(
+        seqs.windows(2).all(|w| w[0] < w[1]),
+        "expected strictly monotonic seqs, got {seqs:?}"
+    );
+}
+
+#[test]
+fn clear_scrollback_preserves_surviving_mark_seq() {
+    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks` shifts
+    // viewport-resident marks' `abs_y` down by the wiped history, but
+    // must NOT touch `seq` — that is the load-bearing identity invariant
+    // the seq-based focus model relies on (see
+    // `view/state.rs::focused_prompt`). Without it, `focused_prompt`'s
+    // stored seq would no longer match any surviving mark and the jump
+    // highlight would silently drop after a scrollback wipe.
+    let mut s = session_with(80, 3, 1024);
+    // History-resident mark — dropped by the wipe (`m.abs_y < history_top`).
+    s.feed(b"x\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07prompt-1\r\n").unwrap();
+    // Viewport-resident mark — must survive with abs_y shifted but seq
+    // unchanged. We capture it here as the "focus candidate".
+    s.feed(b"a\r\nb\r\nc\r\n").unwrap();
+    s.feed(b"\x1b]133;A\x07prompt-2").unwrap();
+    let mark_before = *s.prompt_marks().back().unwrap();
+    let history = s.line_buffer().wrapped_row_count(80) as u64;
+    assert!(history > 0, "test setup must populate LineBuffer first");
+
+    s.feed(b"\x1b[3J").unwrap();
+
+    let marks = s.prompt_marks();
+    assert_eq!(marks.len(), 1, "history mark dropped, viewport mark kept");
+    let mark_after = marks[0];
+    assert_eq!(
+        mark_after.seq, mark_before.seq,
+        "seq must survive abs_y shift — without this, identity-based focus breaks across \\x1b[3J",
+    );
+    assert_ne!(
+        mark_after.abs_y, mark_before.abs_y,
+        "sanity: abs_y did shift (otherwise this test does not exercise the shift path)",
+    );
+}
+
+#[test]
 fn prompt_mark_screen_row_follows_scrollback() {
     // PROMPT_START emitted after 50 lines of output must land on the
     // correct absolute screen row (viewport_row_offset + cursor_y)

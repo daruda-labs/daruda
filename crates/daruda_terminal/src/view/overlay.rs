@@ -36,14 +36,24 @@ pub(crate) fn screen_row_to_visible(
 /// (cursor, IME preedit) correctly when the viewport is scrolled into
 /// history — without this shift they paint at `grid_row - 1`, landing on
 /// scrollback content rather than the live grid.
+///
+/// Returns `None` when `grid_row_1indexed == 0`. The grid is 1-indexed
+/// (`1..=rows`), so 0 is always a caller bug — usually a stale 0-indexed
+/// value smuggled in from a different coordinate space. A naked
+/// `saturating_sub(1)` would silently collapse `0` and `1` to the same
+/// screen row, masking the bug; surfacing `None` forces the caller to
+/// either fix the conversion or skip the paint.
 pub(crate) fn grid_row_to_screen_row(
     grid_row_1indexed: u16,
     total_rows: u32,
     viewport_rows: u32,
-) -> u32 {
-    total_rows
-        .saturating_sub(viewport_rows)
-        .saturating_add(u32::from(grid_row_1indexed).saturating_sub(1))
+) -> Option<u32> {
+    let zero_indexed = u32::from(grid_row_1indexed.checked_sub(1)?);
+    Some(
+        total_rows
+            .saturating_sub(viewport_rows)
+            .saturating_add(zero_indexed),
+    )
 }
 
 /// Build a time-limited overlay quad only while `deadline` is in the
@@ -93,15 +103,24 @@ mod tests {
     fn grid_row_offsets_by_scrollback_height() {
         // 3-row grid with 5 rows of scrollback (total = 8): grid row 1 lands
         // at absolute row 5, grid row 3 at 7.
-        assert_eq!(grid_row_to_screen_row(1, 8, 3), 5);
-        assert_eq!(grid_row_to_screen_row(3, 8, 3), 7);
+        assert_eq!(grid_row_to_screen_row(1, 8, 3), Some(5));
+        assert_eq!(grid_row_to_screen_row(3, 8, 3), Some(7));
     }
 
     #[test]
     fn grid_row_with_no_scrollback_starts_at_zero() {
         // total_rows == viewport_rows: the grid is the whole frame.
-        assert_eq!(grid_row_to_screen_row(1, 3, 3), 0);
-        assert_eq!(grid_row_to_screen_row(3, 3, 3), 2);
+        assert_eq!(grid_row_to_screen_row(1, 3, 3), Some(0));
+        assert_eq!(grid_row_to_screen_row(3, 3, 3), Some(2));
+    }
+
+    #[test]
+    fn grid_row_zero_returns_none_instead_of_aliasing_row_one() {
+        // 0 is never a valid live-grid row (grid is `1..=rows`). The
+        // previous `saturating_sub(1)` shape silently mapped 0 to the
+        // same screen row as 1, hiding off-by-one bugs at every caller.
+        assert_eq!(grid_row_to_screen_row(0, 8, 3), None);
+        assert_eq!(grid_row_to_screen_row(0, 3, 3), None);
     }
 
     #[test]
@@ -112,7 +131,7 @@ mod tests {
         let (total, rows) = (20u32, 5u32);
         let viewport_top = total - rows; // scroll_offset == 0
         for grid_row in 1..=rows as u16 {
-            let abs = grid_row_to_screen_row(grid_row, total, rows);
+            let abs = grid_row_to_screen_row(grid_row, total, rows).unwrap();
             assert_eq!(
                 screen_row_to_visible(abs, viewport_top, rows),
                 Some(u32::from(grid_row) - 1)
@@ -128,11 +147,19 @@ mod tests {
         let (total, rows) = (20u32, 5u32);
         let viewport_top = total - rows - 4;
         assert_eq!(
-            screen_row_to_visible(grid_row_to_screen_row(1, total, rows), viewport_top, rows),
+            screen_row_to_visible(
+                grid_row_to_screen_row(1, total, rows).unwrap(),
+                viewport_top,
+                rows
+            ),
             Some(4)
         );
         assert_eq!(
-            screen_row_to_visible(grid_row_to_screen_row(2, total, rows), viewport_top, rows),
+            screen_row_to_visible(
+                grid_row_to_screen_row(2, total, rows).unwrap(),
+                viewport_top,
+                rows
+            ),
             None
         );
     }

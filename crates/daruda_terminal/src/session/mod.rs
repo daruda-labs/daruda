@@ -63,12 +63,34 @@ pub struct CommandHistoryEntry {
 /// marks survive ring eviction. Translate to a current-frame screen row
 /// via [`TerminalSession::abs_to_screen_row`] before indexing into
 /// `dump_screen_row`. Mirrors iTerm2 `VT100Terminal.m:4520-4616`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// **Equality is not derived.** Adding `seq` made the auto-derived
+/// `PartialEq` an ambiguous mix of "same identity" (would compare seq)
+/// and "same data" (would compare every field), so it is removed. Callers
+/// must say what they mean explicitly: identity → `a.seq == b.seq`;
+/// content match → compare specific fields. Compile-fails any
+/// `mark_a == mark_b` until the intent is spelled out.
+#[derive(Clone, Copy, Debug)]
 pub struct PromptMark {
     pub kind: PromptMarkKind,
+    /// Monotonic push-order identity, assigned exclusively in
+    /// [`TerminalSession::push_prompt_mark`] from a private counter.
+    /// Unlike `abs_y` (which is shifted by `clear_line_buffer_and_shift_marks`
+    /// after a `\x1b[3J` / RIS scrollback wipe), `seq` is never shifted and
+    /// never resets. Use it as the position-independent identity for
+    /// jump-focus tracking — analogous to iTerm2's `_selectedScreenMark`
+    /// weak ref, which survives the mark's position changing.
+    ///
+    /// `pub(crate)` rather than `pub`: this blocks external crates from
+    /// constructing `PromptMark` literals (every field must be visible
+    /// for struct-literal syntax), forcing them to go through
+    /// [`PromptMarkInit`] + `push_prompt_mark`, which is the single
+    /// source of truth for the monotonic invariant.
+    pub(crate) seq: u64,
     /// Ever-increasing absolute Y at the time the mark fired,
     /// computed as `line_buffer.overflow() + line_buffer.wrapped_row_count
-    /// + cursor_y - 1`. Stable across `LineBuffer` ring eviction.
+    /// + cursor_y - 1`. Stable across `LineBuffer` ring eviction, but
+    /// shifted by `clear_line_buffer_and_shift_marks` on scrollback wipe.
     pub abs_y: u64,
     /// 1-indexed cursor column at the moment the mark fired. Captured
     /// alongside `abs_y` so the command-history extractor can slice
@@ -81,6 +103,22 @@ pub struct PromptMark {
     /// `command_history` to compute the C→D elapsed duration. Mirrors
     /// iTerm2 `LineBlockMetadata.lineMetadata` per-mark timestamps.
     pub timestamp: std::time::SystemTime,
+}
+
+/// Init payload for [`TerminalSession::push_prompt_mark`]. Carries every
+/// [`PromptMark`] field except `seq`, which the session assigns from its
+/// monotonic counter — making "every mark in `prompt_marks` has a seq
+/// from the counter" the only constructable shape inside the module.
+/// Previously the call site passed `PromptMark { seq: 0, .. }` as a
+/// placeholder; that pattern silently broke the uniqueness invariant if
+/// `push_prompt_mark` was ever bypassed, and is now structurally
+/// impossible.
+struct PromptMarkInit {
+    kind: PromptMarkKind,
+    abs_y: u64,
+    screen_col: u16,
+    exit_code: Option<i32>,
+    timestamp: std::time::SystemTime,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +175,10 @@ pub struct TerminalSession {
     capability_scanner: CapabilityScanner,
     xtgettcap_scanner: XtGetTcapScanner,
     prompt_marks: VecDeque<PromptMark>,
+    /// Monotonic counter assigning [`PromptMark::seq`] on push. Never
+    /// resets across `\x1b[3J` / RIS wipes, so it is safe to use as the
+    /// position-independent identity of a focused mark.
+    prompt_mark_seq: u64,
     /// Whether the terminal is currently in alt-screen mode (DECSET 47/1047/1049).
     alt_screen: bool,
     /// Set whenever alt-screen state transitions; consumed by
@@ -253,6 +295,7 @@ impl TerminalSession {
             capability_scanner: CapabilityScanner::default(),
             xtgettcap_scanner: XtGetTcapScanner::default(),
             prompt_marks: VecDeque::new(),
+            prompt_mark_seq: 0,
             alt_screen: false,
             screen_changed: false,
             prompt_arrived: false,
@@ -373,8 +416,19 @@ impl TerminalSession {
         &self.prompt_marks
     }
 
-    fn push_prompt_mark(&mut self, mark: PromptMark) {
-        match mark.kind {
+    /// Assign a monotonic `seq` to the init payload, run the FTCS state
+    /// transitions, and push the resulting [`PromptMark`] into the FIFO.
+    /// The only place that constructs a `PromptMark` literal with a seq,
+    /// so the uniqueness invariant lives in one site.
+    fn push_prompt_mark(&mut self, init: PromptMarkInit) {
+        // `+= 1` (debug-panics on u64 overflow, idiomatic) is preferred
+        // over `saturating_add` for the seq uniqueness invariant — silent
+        // saturation at `u64::MAX` would alias every subsequent mark to
+        // the same seq and break identity-based focus tracking. Overflow
+        // is unreachable in practice (~2^64 marks), but a loud failure
+        // mode beats silent corruption if it ever happens.
+        self.prompt_mark_seq += 1;
+        match init.kind {
             PromptMarkKind::PromptStart => {
                 self.prompt_arrived = true;
                 // A new prompt without an intervening CommandFinished
@@ -396,7 +450,14 @@ impl TerminalSession {
         if self.prompt_marks.len() >= PROMPT_MARKS_CAP {
             self.prompt_marks.pop_front();
         }
-        self.prompt_marks.push_back(mark);
+        self.prompt_marks.push_back(PromptMark {
+            kind: init.kind,
+            seq: self.prompt_mark_seq,
+            abs_y: init.abs_y,
+            screen_col: init.screen_col,
+            exit_code: init.exit_code,
+            timestamp: init.timestamp,
+        });
     }
 
     /// Consume the pending prompt-arrival signal set when a PromptStart
@@ -1235,7 +1296,7 @@ impl TerminalSession {
             if let Some((kind, exit_code)) = osc133 {
                 let cursor = self.terminal.cursor_position().unwrap_or((1, 1));
                 let abs_y = self.current_abs_y_at_cursor();
-                self.push_prompt_mark(PromptMark {
+                self.push_prompt_mark(PromptMarkInit {
                     kind,
                     abs_y,
                     screen_col: cursor.0,

@@ -214,9 +214,14 @@ pub(crate) struct TerminalViewState {
 
     // ---- Hover / jump / flash ----
     /// URL currently under the mouse pointer while the hover modifier
-    /// (Cmd by default) is held. Paint underlines the URL; mouse
-    /// move / modifier release clear it. `None` when no URL or no
-    /// modifier.
+    /// (Cmd by default) is held. `row` is a 0-indexed viewport row, so
+    /// the cached hit is only valid for the viewport snapshot that
+    /// produced it; keyboard scroll / PTY output would otherwise leave
+    /// the underline painted onto an unrelated row. `update_hovered_url`
+    /// is mouse-move only, so `schedule_viewport_refresh` clears this
+    /// on every viewport shift — the next mouse-move re-derives it.
+    /// Paint underlines the URL; mouse move / modifier release clear it.
+    /// `None` when no URL or no modifier.
     pub(crate) hovered_url: Option<super::HoveredUrl>,
 
     /// Annotation overlay under the mouse pointer (SP-1). Drives the
@@ -225,15 +230,21 @@ pub(crate) struct TerminalViewState {
     /// is not over any annotation box.
     pub(crate) hovered_annotation: Option<crate::session::interval_tree::MarkId>,
 
-    /// Absolute screen row of the most recent prompt-jump target
-    /// (FTCS A marks). Tracking the row keeps the cursor stable
-    /// across `prompt_marks` evictions; manual scroll clears it so
-    /// the next Cmd+Shift+↑/↓ re-anchors to the visible region.
-    pub(crate) focused_prompt_row: Option<u32>,
+    /// Identity ([`crate::session::PromptMark::seq`]) of the most recent
+    /// prompt-jump target (FTCS A marks). Storing the mark's `seq` — not
+    /// a screen row — keeps the highlight stable across `prompt_marks`
+    /// shifts (`\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+    /// shifts `abs_y` but never `seq`) and ring eviction: the focused
+    /// mark either still exists (highlight follows it) or is gone (no
+    /// paint), with no manual reset needed. `schedule_viewport_refresh`
+    /// still clears this on manual scroll / PTY input — that is a
+    /// deliberate UX choice (turn the jump highlight off when the user
+    /// moves on), not a staleness workaround.
+    pub(crate) focused_prompt: Option<u64>,
 
     /// Same, for the `CommandExecuted` (FTCS C) list. Walked by
     /// Cmd+Shift+Option+↑/↓.
-    pub(crate) focused_command_row: Option<u32>,
+    pub(crate) focused_command: Option<u64>,
 
     /// Independent flash-overlay deadlines (bell + prompt-jump wrap).
     /// Both are additive — paint renders each separately.
@@ -294,8 +305,8 @@ impl TerminalViewState {
             hangul_composer: super::hangul_composer::HangulComposer::new(),
             hovered_url: None,
             hovered_annotation: None,
-            focused_prompt_row: None,
-            focused_command_row: None,
+            focused_prompt: None,
+            focused_command: None,
             flash: FlashOverlay::default(),
         }
     }
@@ -349,8 +360,8 @@ mod tests {
         assert!(s.pending_refresh == PendingRefresh::No);
         assert!(s.marked_text.is_none());
         assert!(s.hovered_url.is_none());
-        assert!(s.focused_prompt_row.is_none());
-        assert!(s.focused_command_row.is_none());
+        assert!(s.focused_prompt.is_none());
+        assert!(s.focused_command.is_none());
         assert!(s.flash.bell.is_none());
         assert!(s.flash.prompt_jump.is_none());
     }
