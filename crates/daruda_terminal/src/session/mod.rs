@@ -1560,6 +1560,92 @@ impl TerminalSession {
         self.line_buffer.overflow() + lb_rows + uncaptured + vp_row as u64
     }
 
+    /// Logical-line count among ghostty rows that scrolled out but
+    /// haven't yet entered `LineBuffer`. Mirrors `peek_scrolled_rows`
+    /// — non-consuming, reads the tracked-pin delta — but walks each
+    /// row's `row_wrap_kind` and counts only Hard-terminated
+    /// boundaries. Wrap-continuation (`Soft`) rows fold into the
+    /// preceding logical line on capture, so they must not bump the
+    /// logical-line count.
+    ///
+    /// Returns `0` in alt-screen — `peek_scrolled_rows` reflects the
+    /// active page list, which is the alt-screen's there. Mixing that
+    /// count with primary-screen `LineBuffer` abs would corrupt the
+    /// translation; callers should additionally short-circuit on
+    /// alt-screen.
+    #[allow(dead_code)] // reserved for Task 2+ (current_abs_y_at_cursor migration)
+    fn peek_uncaptured_logical_lines(&self) -> u64 {
+        if self.alt_screen {
+            return 0;
+        }
+        // ghostty screen-space row index (the input space `row_wrap_kind`
+        // expects). Distinct from `self.viewport_row_offset()` (line ~1660)
+        // which sits in the unified line_buffer+grid abs space — the two
+        // are same-named on intentionally different receivers.
+        let viewport_top = self.terminal.viewport_row_offset();
+        let start = viewport_top.saturating_sub(self.terminal.peek_scrolled_rows());
+        self.count_hard_eols_in_ghostty_range(start, viewport_top)
+    }
+
+    /// Logical-line offset of the cursor's row inside the
+    /// post-LineBuffer frame (uncaptured scrolled rows + the live
+    /// grid). Walks Hard EOLs from the top of the uncaptured region,
+    /// across the grid up to but not including the cursor's own row,
+    /// and returns the count. The cursor's own line is *not* counted
+    /// — it is the current logical line — so a call site computes the
+    /// cursor's logical abs as `line_buffer.overflow() +
+    /// line_buffer.len() + helper_result`.
+    ///
+    /// Returns `0` when the cursor is at row 1 with no preceding Hard
+    /// EOL in the uncaptured/grid region (cursor is still on the
+    /// continuation of the LineBuffer's tail, or at the very top of a
+    /// fresh logical line).
+    ///
+    /// Returns `0` in alt-screen for the same reasoning as
+    /// [`Self::peek_uncaptured_logical_lines`].
+    #[allow(dead_code)] // reserved for Task 2+ (current_abs_y_at_cursor migration)
+    fn logical_lines_until_cursor(&self) -> u64 {
+        if self.alt_screen {
+            return 0;
+        }
+        // ghostty screen-space — see note in
+        // `peek_uncaptured_logical_lines` about the same-named methods
+        // living in different coordinate systems.
+        let viewport_top = self.terminal.viewport_row_offset();
+        let uncaptured_start = viewport_top.saturating_sub(self.terminal.peek_scrolled_rows());
+        // `cursor_position` returns a 1-indexed row inside the live
+        // grid. The grid-above-cursor region is
+        // `[viewport_top, viewport_top + cursor_row - 1)` — the
+        // cursor's own row is excluded.
+        let cursor_row_1 = self
+            .terminal
+            .cursor_position()
+            .map(|(_, y)| u32::from(y))
+            .unwrap_or(1);
+        // `saturating_add`: with `viewport_top` near `u32::MAX` (deep
+        // long-lived session) the result clamps; the empty-range guard
+        // inside `count_hard_eols_in_ghostty_range` returns 0 in that
+        // degenerate case rather than wrapping.
+        let cursor_abs = viewport_top.saturating_add(cursor_row_1.saturating_sub(1));
+        self.count_hard_eols_in_ghostty_range(uncaptured_start, cursor_abs)
+    }
+
+    /// Walk ghostty screen-space rows in `[start, end)` and count those
+    /// whose [`Terminal::row_wrap_kind`] is [`WrapKind::Hard`]. Empty or
+    /// inverted ranges return 0. Shared by [`Self::peek_uncaptured_logical_lines`]
+    /// and [`Self::logical_lines_until_cursor`] so the walk lives in
+    /// exactly one place — duplicating it across the two callers would
+    /// be an N-step sequence inviting silent divergence under future
+    /// `WrapKind` additions.
+    fn count_hard_eols_in_ghostty_range(&self, start: u32, end: u32) -> u64 {
+        if start >= end {
+            return 0;
+        }
+        (start..end)
+            .filter(|&y| matches!(self.terminal.row_wrap_kind(y), ghostty_vt::WrapKind::Hard))
+            .count() as u64
+    }
+
     /// Translate a stored `abs_y` (captured at OSC 133 dispatch) into
     /// a current screen-frame row. Returns `None` when the line
     /// containing it has been evicted from `LineBuffer` (or pushed

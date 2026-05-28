@@ -1659,3 +1659,71 @@ fn line_buffer_retains_scrollback_beyond_ghostty_ring() {
         missing.iter().take(5).collect::<Vec<_>>(),
     );
 }
+
+// Logical-line grid-walk helpers ----------------------------------
+//
+// `peek_uncaptured_logical_lines` and `logical_lines_until_cursor`
+// are the building blocks Task 2 will wire into
+// `current_abs_y_at_cursor`. They live on the session as private
+// helpers; these tests pin the contract.
+
+#[test]
+fn peek_uncaptured_logical_lines_post_feed_is_empty() {
+    // `feed()` always runs `capture_scrolled_out` at the end, draining
+    // the tracked-pin delta. The Hard-EOL counting branch itself is
+    // only reachable mid-feed (when OSC 133 dispatches before the
+    // end-of-feed capture); from a black-box public API there is no
+    // way to observe it directly. This test pins the post-capture
+    // invariant — uncaptured region empty — and confirms the helper
+    // isn't trivially zero because nothing scrolled (LineBuffer did
+    // receive the rows). The counting-branch correctness is exercised
+    // indirectly via `logical_lines_until_cursor_after_hard_lines`,
+    // which walks the same code path through a non-empty grid region.
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n").unwrap();
+    assert_eq!(
+        s.peek_uncaptured_logical_lines(),
+        0,
+        "after capture, uncaptured region must be empty"
+    );
+    assert!(
+        s.line_buffer().len() >= 2,
+        "expected >= 2 captured lines, got {}",
+        s.line_buffer().len()
+    );
+
+    s.feed(b"f\r\ng\r\n").unwrap();
+    assert_eq!(s.peek_uncaptured_logical_lines(), 0);
+}
+
+#[test]
+fn logical_lines_until_cursor_at_top_of_grid() {
+    // Fresh session, no feed: cursor sits at row 1, no Hard EOL
+    // precedes it in the uncaptured/grid region.
+    let s = session_with(80, 3, 1024);
+    assert_eq!(s.logical_lines_until_cursor(), 0);
+}
+
+#[test]
+fn logical_lines_until_cursor_after_hard_lines() {
+    // Feed "a\r\nb\r\nc" into an 80x3 grid: cursor lands on the row
+    // containing 'c' (row 3), preceded by 2 Hard EOLs on rows 1 and
+    // 2. Nothing has scrolled out yet (3 lines fit), so the count
+    // comes entirely from the grid-above-cursor walk.
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc").unwrap();
+    assert_eq!(
+        s.logical_lines_until_cursor(),
+        2,
+        "two Hard EOLs precede the cursor's row"
+    );
+}
+
+#[test]
+fn peek_uncaptured_logical_lines_returns_zero_in_alt_screen() {
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"\x1b[?1049h").unwrap();
+    assert!(s.is_alt_screen());
+    assert_eq!(s.peek_uncaptured_logical_lines(), 0);
+    assert_eq!(s.logical_lines_until_cursor(), 0);
+}
