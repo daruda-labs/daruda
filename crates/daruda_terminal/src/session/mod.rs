@@ -80,11 +80,12 @@ pub struct PromptMark {
     pub kind: PromptMarkKind,
     /// Monotonic push-order identity, assigned exclusively in
     /// [`TerminalSession::push_prompt_mark`] from a private counter.
-    /// Unlike `abs_y` (which is shifted by `clear_line_buffer_and_shift_marks`
-    /// after a `\x1b[3J` / RIS scrollback wipe), `seq` is never shifted and
-    /// never resets. Use it as the position-independent identity for
-    /// jump-focus tracking — analogous to iTerm2's `_selectedScreenMark`
-    /// weak ref, which survives the mark's position changing.
+    /// Unlike `abs_y` (whose owning mark can be dropped by
+    /// `clear_line_buffer_and_shift_marks` after a `\x1b[3J` / RIS
+    /// scrollback wipe), `seq` is never reused and never resets. Use
+    /// it as the position-independent identity for jump-focus
+    /// tracking — analogous to iTerm2's `_selectedScreenMark` weak
+    /// ref, which survives the mark's position changing.
     ///
     /// `pub(crate)` rather than `pub`: this blocks external crates from
     /// constructing `PromptMark` literals (every field must be visible
@@ -98,9 +99,12 @@ pub struct PromptMark {
     /// [`TerminalSession::current_abs_y_at_cursor`]). Units are logical
     /// lines (one per Hard EOL), **not** visual rows — re-flow at a
     /// new width does not move the mark. Stable across `LineBuffer`
-    /// ring eviction, but shifted by `clear_line_buffer_and_shift_marks`
-    /// on scrollback wipe. Translate back to a current-frame screen row
-    /// via [`TerminalSession::abs_to_screen_row`].
+    /// ring eviction and across `\x1b[3J` / RIS scrollback wipes for
+    /// surviving marks (the wipe absorbs cleared logical lines into
+    /// `LineBuffer::overflow` and drops marks anchored inside the
+    /// wiped region without shifting the rest — see
+    /// `clear_line_buffer_and_shift_marks`). Translate back to a
+    /// current-frame screen row via [`TerminalSession::abs_to_screen_row`].
     pub abs_y: u64,
     /// 1-indexed cursor column at the moment the mark fired. Captured
     /// alongside `abs_y` so the command-history extractor can slice
@@ -1245,55 +1249,31 @@ impl TerminalSession {
     }
 
     /// Shared post-wipe bookkeeping: clear `LineBuffer`, reset the
-    /// capture cursor and scroll offset, and shift any viewport-resident
-    /// prompt marks down by the cleared history while dropping marks
-    /// whose row was inside the cleared history.
+    /// capture cursor and scroll offset, and drop any prompt marks
+    /// whose `abs_y` addressed a line inside the wiped history.
     ///
-    /// **Mixed-units transitional state.** After the PromptMark logical-
-    /// line abs migration, `mark.abs_y` lives in logical-line space but
-    /// the `visual_residual` shift below is still computed in visual
-    /// rows. For an unwrapped buffer (`history == logical_pre`) the
-    /// residual is zero and the inconsistency is invisible; for a
-    /// wrap-inflated buffer it over-shifts viewport-resident marks. A
-    /// follow-up surgery drops the residual shift entirely
-    /// (`LineBuffer::clear` already absorbs the full logical history
-    /// into `overflow`, so logical-space marks above the new overflow
-    /// need no further adjustment). Tracked in
-    /// `Tasks/2026-05-28_PromptMark-Logical-Abs-Surgery.md` Task 4.
+    /// `PromptMark.abs_y` is logical-line abs. `LineBuffer::clear`
+    /// bumps `overflow` by `lines.len()`, so every wiped logical line
+    /// is absorbed into `overflow` automatically — surviving marks
+    /// above the wipe boundary stay valid against the new overflow
+    /// without any shift. The wipe is line-symmetric: line-granular
+    /// state in, line-granular state out, no visual-row correction
+    /// needed (and applying one would over-shift on wrap-inflated
+    /// buffers).
+    ///
+    /// The retention floor is `overflow + lines.len()` — the post-LB
+    /// logical boundary just before the wipe. Marks at or above it
+    /// were viewport-resident (or beyond the LB tail) and survive;
+    /// marks below it pointed into the wiped logical lines and are
+    /// dropped to avoid aliasing onto unrelated rows.
     fn clear_line_buffer_and_shift_marks(&mut self) {
-        // Pre-clear measurements: `history` counts visual rows
-        // (wrap-aware), `logical_pre` counts logical lines (one per
-        // VecDeque entry). They differ when soft-wrap has joined cells
-        // wider than one visual row into a single logical line.
-        let overflow_pre = self.line_buffer.overflow();
-        let logical_pre = self.line_buffer.len() as u64;
-        let history = self.line_buffer.wrapped_row_count(self.config.cols) as u64;
-        let history_top = overflow_pre + history;
-        // `LineBuffer::clear` (post-Step 5) bumps `overflow` by
-        // `logical_pre`. That absorbs the line-layer half of the wipe
-        // automatically — marks anchored above the new overflow stay
-        // valid without touching their `abs_y`. The remaining visual
-        // residual (`history - logical_pre`) is the wrap inflation that
-        // `overflow` (line-granular) can't express. See doc note above:
-        // post-migration `abs_y` is logical-line, so the residual shift
-        // is a leftover that the follow-up Task 4 surgery will remove.
+        let logical_top = self.line_buffer.overflow() + self.line_buffer.len() as u64;
         self.line_buffer.clear();
-        let visual_residual = history.saturating_sub(logical_pre);
         self.last_captured_lb_abs = None;
         // `scroll_offset` indexes into the now-empty `line_buffer`;
         // leaving it set would pin the viewport above the live grid.
         self.scroll_offset = 0;
-        // Drop marks whose abs_y addressed a row inside the cleared
-        // history (`history_top` is the pre-clear viewport-bottom
-        // boundary in visual space) — they would alias onto unrelated
-        // viewport rows after the wipe. Surviving viewport-resident
-        // marks only need the `visual_residual` shift; the
-        // `logical_pre` portion is already absorbed by the new
-        // `overflow`.
-        self.prompt_marks.retain(|m| m.abs_y >= history_top);
-        for m in &mut self.prompt_marks {
-            m.abs_y = m.abs_y.saturating_sub(visual_residual);
-        }
+        self.prompt_marks.retain(|m| m.abs_y >= logical_top);
     }
 
     /// Alt-screen entry handler. Seals any partial tail (the next time

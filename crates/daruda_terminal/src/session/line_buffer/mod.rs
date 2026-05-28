@@ -308,10 +308,11 @@ impl LineBuffer {
     /// `cumulativeScrollbackOverflow` (the wrap-aware caller's
     /// version of `overflow`) across the wiped content; marks above
     /// the wipe stay valid because the new overflow grew past them.
-    /// Daruda's `clear` does the line-layer half of that absorption
-    /// (`overflow += lines.len()`); the visual-row residual (wrap
-    /// makes a logical line cost more than one visual row) is the
-    /// caller's responsibility — see
+    /// Daruda's marks are logical-line indexed, so `overflow +=
+    /// lines.len()` absorbs the wipe in full — no caller-side
+    /// visual-row correction is required. The caller still needs to
+    /// drop marks anchored inside the wiped logical range so they
+    /// don't alias future appends; see
     /// `TerminalSession::clear_line_buffer_and_shift_marks`.
     pub fn clear(&mut self) {
         // `lines.len() as u64` cast is safe — `usize` is at most 64-bit

@@ -156,10 +156,11 @@ impl TerminalTextElement {
             };
             let visible_row = visible as f32;
             // Compare by mark identity (`seq`), not by screen row.
-            // `mark.abs_y` is shifted by `clear_line_buffer_and_shift_marks`
-            // on `\x1b[3J` mirror, so screen-row comparison would drift
-            // off the focused mark after a scrollback wipe; `seq` is the
-            // position-independent identity that never shifts.
+            // A `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+            // can drop wiped marks, and re-flow / scroll moves the
+            // surviving marks' screen rows; row-based comparison would
+            // drift off the focused mark across either. `seq` is the
+            // position-independent identity that never reuses.
             let is_focused = Some(mark.seq) == focused_prompt || Some(mark.seq) == focused_command;
             let color = match (mark.kind, mark.exit_code) {
                 (crate::session::PromptMarkKind::CommandFinished, Some(code)) if code != 0 => {

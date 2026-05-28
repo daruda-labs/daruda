@@ -139,8 +139,6 @@ compiler will **not** catch a mix-up:
 | **Absolute screen row** | `0..total_rows()` | unified `line_buffer` scrollback + grid; what `viewport_row_offset()` and the viewport-pin anchor live in (visual-row, wrap-aware) |
 | **Logical-line abs** | `0..` (ever-increasing) | `PromptMark::abs_y`, `LineBuffer::overflow() + len()`; wrap-blind, projected back to a visual row via `abs_to_screen_row` |
 
-`clear_line_buffer_and_shift_marks` still applies a `visual_residual` correction to mark `abs_y` as a transitional state — under wrap-inflated buffers this over-shifts. The Task 4 follow-up drops that shift once the logical-line semantics are fully self-consistent across the wipe path.
-
 **The rule:** when the user has scrolled into history (`scroll_offset > 0`)
 the viewport shows scrollback, so **grid row `r` is no longer at viewport
 row `r - 1`**. Any read addressed by a viewport-relative `row`, and any
@@ -353,11 +351,12 @@ Apply the same `build_*` pattern when a change motivates extraction.
   stores the focused mark's [`PromptMark::seq`] (a monotonic push-order
   identity assigned in `push_prompt_mark`).
 - Tracking indices breaks on FIFO eviction; tracking a screen row
-  breaks on `clear_line_buffer_and_shift_marks` (which shifts
-  `abs_y` of viewport-resident marks after a `\x1b[3J` mirror). `seq`
-  is the only field that is **never shifted and never resets**, so
-  the highlight follows the focused mark across both — mirroring
-  iTerm2's `_selectedScreenMark` weak-ref pattern.
+  breaks on re-flow and on `clear_line_buffer_and_shift_marks`
+  (which drops marks anchored inside the wiped region after a
+  `\x1b[3J` mirror). `seq` is the only field that is **never reused
+  and never resets**, so the highlight follows the focused mark
+  across both — mirroring iTerm2's `_selectedScreenMark` weak-ref
+  pattern.
 - `next_prompt_index(sorted_starts, previous_row, viewport_top, forward)
   -> Option<PromptJump>` stays in screen-row space; `jump_to_mark`
   converts the stored `seq` → current screen row at entry and maps

@@ -250,8 +250,9 @@ fn prompt_marks_are_bounded() {
 fn prompt_mark_seq_is_strictly_monotonic() {
     // Every pushed mark gets a unique, strictly-increasing `seq` so it can
     // serve as a position-independent identity for jump-focus tracking.
-    // Unlike `abs_y`, `seq` is never shifted (see
-    // `clear_line_buffer_and_shift_marks`) and never resets.
+    // Unlike a mark's screen row (re-flow / scroll move it) or the mark's
+    // list position (`clear_line_buffer_and_shift_marks` drops wiped
+    // entries), `seq` is never reused and never resets.
     let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
     for _ in 0..5 {
         session.feed(b"\x1b]133;A\x07").unwrap();
@@ -266,16 +267,15 @@ fn prompt_mark_seq_is_strictly_monotonic() {
 
 #[test]
 fn clear_scrollback_preserves_surviving_mark_seq() {
-    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks` may
-    // (post-Step 5) leave the viewport-resident mark's `abs_y`
-    // untouched — the line-layer half of the wipe is absorbed into
-    // `LineBuffer::overflow`, and a wrap-free LineBuffer has no visual
-    // residual to shift. What it must never touch is `seq`: that is
-    // the load-bearing identity invariant the focus model relies on
-    // (see `view/state.rs::focused_prompt`). Without it,
-    // `focused_prompt`'s stored seq would no longer match any
-    // surviving mark and the jump highlight would silently drop after
-    // a scrollback wipe.
+    // The `\x1b[3J` mirror in `clear_line_buffer_and_shift_marks`
+    // leaves the viewport-resident mark's `abs_y` untouched — the
+    // wipe is absorbed into `LineBuffer::overflow` (line-symmetric
+    // with the logical-line `abs_y`). What it must never touch is
+    // `seq`: that is the load-bearing identity invariant the focus
+    // model relies on (see `view/state.rs::focused_prompt`). Without
+    // it, `focused_prompt`'s stored seq would no longer match any
+    // surviving mark and the jump highlight would silently drop
+    // after a scrollback wipe.
     let mut s = session_with(80, 3, 1024);
     // History-resident mark — dropped by the wipe (`m.abs_y < history_top`).
     s.feed(b"x\r\n").unwrap();
@@ -1549,7 +1549,7 @@ fn prompt_mark_survives_line_buffer_eviction() {
 }
 
 #[test]
-fn clear_scrollback_shifts_viewport_marks_and_drops_history_marks() {
+fn clear_scrollback_drops_history_marks_keeps_viewport_marks_abs_y() {
     let mut s = session_with(80, 3, 1024);
     // Mark #1 lands on row 1 (after one preceding line) — it will
     // scroll into LineBuffer history before the clear and must be
@@ -1561,31 +1561,68 @@ fn clear_scrollback_shifts_viewport_marks_and_drops_history_marks() {
     s.feed(b"a\r\nb\r\nc\r\n").unwrap();
     s.feed(b"\x1b]133;A\x07prompt-2").unwrap();
     let viewport_mark_abs_before = s.prompt_marks().back().unwrap().abs_y;
-    let history = s.line_buffer().wrapped_row_count(80) as u64;
-    let logical_pre = s.line_buffer().len() as u64;
-    assert!(history > 0, "test setup must populate LineBuffer first");
+    assert!(
+        !s.line_buffer().is_empty(),
+        "test setup must populate LineBuffer first"
+    );
 
     s.feed(b"\x1b[3J").unwrap();
     assert_eq!(s.line_buffer().len(), 0, "scrollback must be cleared");
 
     // History-resident mark (#1) is gone; only the viewport-resident
-    // mark (#2) remains. Step 5 contract: `LineBuffer::clear` absorbs
-    // the cleared logical lines into `overflow`, and the visual residual
-    // (history - logical_pre, the wrap inflation) is the only portion
-    // that still shifts `abs_y`. In an 80-wide buffer with no wrap that
-    // residual is zero and the mark's `abs_y` survives untouched.
+    // mark (#2) remains. With logical-line `abs_y`, `LineBuffer::clear`
+    // bumps `overflow` by the wiped logical line count and absorbs the
+    // full wipe — surviving marks keep their `abs_y` untouched.
     let marks = s.prompt_marks();
     assert_eq!(marks.len(), 1, "history mark dropped, viewport mark kept");
     let after = marks[0].abs_y;
-    let visual_residual = history.saturating_sub(logical_pre);
     assert_eq!(
-        after,
-        viewport_mark_abs_before.saturating_sub(visual_residual),
-        "viewport mark shifted only by the visual residual ({visual_residual}); logical lines absorbed by overflow"
+        after, viewport_mark_abs_before,
+        "viewport mark's abs_y must be unchanged across the wipe"
     );
     let row = s
         .abs_to_screen_row(after)
         .expect("surviving mark must still translate");
+    assert!(row < s.total_rows());
+}
+
+#[test]
+fn clear_scrollback_under_wrap_does_not_over_shift_marks() {
+    // Pin Task 4's fix: a wrap-inflated buffer (visual rows > logical
+    // lines) used to apply a `visual_residual` shift on top of the
+    // logical-line `abs_y`, over-shifting viewport-resident marks.
+    // Post-Task-4 the wipe is line-symmetric, so `abs_y` must survive
+    // intact regardless of wrap inflation.
+    let mut s = session_with(4, 3, 1024);
+    // Feed several logical lines each wider than 4 cols so soft-wrap
+    // inflates the visual row count well past the logical line count.
+    s.feed(b"abcdefgh\r\n").unwrap();
+    s.feed(b"ijklmnop\r\n").unwrap();
+    s.feed(b"qrstuvwx\r\n").unwrap();
+    // Capture a mark on the line that ends up viewport-resident at
+    // clear time.
+    s.feed(b"\x1b]133;A\x07p").unwrap();
+    let viewport_mark_abs_before = s.prompt_marks().back().unwrap().abs_y;
+
+    let logical_pre = s.line_buffer().len() as u64;
+    let visual_pre = s.line_buffer().wrapped_row_count(4) as u64;
+    assert!(
+        visual_pre > logical_pre,
+        "test setup must wrap-inflate the buffer (visual={visual_pre}, logical={logical_pre})"
+    );
+
+    s.feed(b"\x1b[3J").unwrap();
+    assert_eq!(s.line_buffer().len(), 0, "scrollback must be cleared");
+
+    let marks = s.prompt_marks();
+    assert_eq!(marks.len(), 1, "viewport-resident mark must survive");
+    assert_eq!(
+        marks[0].abs_y, viewport_mark_abs_before,
+        "wrap inflation must not shift abs_y — pre-Task-4 this over-shifted"
+    );
+    let row = s
+        .abs_to_screen_row(marks[0].abs_y)
+        .expect("surviving mark must still translate to a row");
     assert!(row < s.total_rows());
 }
 
