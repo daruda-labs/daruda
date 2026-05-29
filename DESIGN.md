@@ -128,15 +128,18 @@ typography:
 Base unit: **4px**.
 
 ```yaml
+# daruda uses a dense 2px-step scale (palette PAD_*/GAP_* tokens),
+# not a doubling scale — the chrome is compact terminal UI.
 spacing:
   px:   1px    # Hairline separators
-  xxs:  2px    # Tightest badge padding
-  xs:   4px    # Icon gutter, tight chip padding
-  sm:   8px    # Row horizontal padding, dock inner padding
-  md:   12px   # Card inner padding
-  lg:   16px   # Panel inner padding, standard button padding
-  xl:   24px   # Modal inner padding
-  2xl:  32px   # Section gap within a panel
+  xxs:  2px    # GAP_XS — tightest gap / badge padding
+  xs:   4px    # PAD_XS, GAP_SM — icon gutter, tight chip padding
+  sm:   6px    # PAD_SM, GAP_STANDARD — compact row / gap
+  md:   8px    # PAD_STANDARD, GAP_LG — standard row / dock inner padding
+  lg:   10px   # PAD_LG — panel inner padding, dock view tab padding
+  xl:   14px   # PAD_XL — settings rows, modal buttons, wide controls
+# Larger values (16 / 24) exist only as feature-specific
+# constants (modal/card/welcome padding), not part of the shared scale.
 ```
 
 **Fixed heights:**

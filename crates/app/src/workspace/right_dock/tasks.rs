@@ -80,7 +80,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         let empty = if query.is_empty() {
             empty_state(snap.task_filter, cx)
         } else {
-            search_empty_hint(snap.task_search_query.clone(), cx).into_any_element()
+            search_empty_hint(snap.task_search_query.clone()).into_any_element()
         };
         body = body.child(empty);
     } else {
@@ -169,9 +169,8 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.task_search_query.trim().is_empty();
     let workspace = snap.workspace.clone();
-    let t = theme::current(cx);
-    let chip_text = t.skill_aux_chip_text;
-    let chip_hover_text = t.skill_name_text;
+    let chip_text = theme::TEXT_SECONDARY;
+    let chip_hover_text = theme::TEXT_PRIMARY;
     div()
         .relative()
         .flex()
@@ -209,11 +208,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 /// Body shown when a non-empty search yields zero matches across
 /// every state bucket. Text-only — the in-field `✕` already provides
 /// one-click recovery so a second affordance here would be redundant.
-fn search_empty_hint(query: String, cx: &gpui::App) -> impl IntoElement {
+fn search_empty_hint(query: String) -> impl IntoElement {
     let display_query = SharedString::from(format!("\"{}\"", query.trim()));
     div()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).skill_empty_text)
+        .text_color(theme::TEXT_DISABLED)
         .child(SharedString::from(format!(
             "{}{}.",
             strings::task_search_empty_prefix(),
@@ -249,12 +248,12 @@ fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
 
 fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let pill = status_pill::status_pill(task, snap, state_label(&task.state), cx);
-    let session_badge = session_badge(task, snap, cx);
-    let duration = duration_cell(task, snap, cx);
-    let failures = failure_indicator(task, snap, cx);
+    let session_badge = session_badge(task, snap);
+    let duration = duration_cell(task, snap);
+    let failures = failure_indicator(task, snap);
     let subtask_progress = subtask_progress_cell(task, cx);
 
-    let row_hover_bg = theme::current(cx).right_panel_task_hover_bg;
+    let row_hover_bg = theme::OVERLAY_HOVER;
     let ws = snap.workspace.clone();
     let id_for_open = task.id.clone();
 
@@ -276,7 +275,7 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
             }
         })
         .child(indicator_cell(&task.state, snap.now, cx))
-        .child(title_cell(&task.title, cx))
+        .child(title_cell(&task.title))
         .children(duration)
         .children(session_badge)
         .children(failures)
@@ -379,30 +378,24 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
     }
 }
 
-fn title_cell(title: &str, cx: &gpui::App) -> impl IntoElement {
+fn title_cell(title: &str) -> impl IntoElement {
     div()
         .flex_1()
-        .text_color(theme::current(cx).right_panel_task_title_text)
+        .text_color(theme::TEXT_SECONDARY)
         .child(SharedString::from(title.to_string()))
 }
 
 fn state_indicator(state: &TaskState, cx: &gpui::App) -> (&'static str, Hsla) {
     let t = theme::current(cx);
     match state {
-        TaskState::Backlog => (
-            ux_strings::AGENT_TASK_QUEUED,
-            t.right_panel_task_backlog_color,
-        ),
+        TaskState::Backlog => (ux_strings::AGENT_TASK_QUEUED, theme::TEXT_DISABLED),
         TaskState::Running { .. } => (
             ux_strings::AGENT_TASK_RUNNING,
             t.right_panel_task_running_color,
         ),
-        TaskState::Done { .. } => (ux_strings::AGENT_TASK_DONE, t.right_panel_task_done_color),
-        TaskState::Error { .. } => (ux_strings::AGENT_TASK_ERROR, t.right_panel_task_error_color),
-        TaskState::Cancelled { .. } => (
-            ux_strings::AGENT_TASK_CANCELLED,
-            t.right_panel_task_cancelled_color,
-        ),
+        TaskState::Done { .. } => (ux_strings::AGENT_TASK_DONE, theme::TEXT_TERTIARY),
+        TaskState::Error { .. } => (ux_strings::AGENT_TASK_ERROR, theme::ERROR),
+        TaskState::Cancelled { .. } => (ux_strings::AGENT_TASK_CANCELLED, theme::TEXT_DISABLED),
     }
 }
 
@@ -462,7 +455,7 @@ fn done_flavour_label(reason: SessionEndReason) -> String {
 /// second rounding follows `surface::strings::format_duration_compact`,
 /// which already powers the long-running notification body so a
 /// single helper keeps both surfaces in sync.
-fn duration_cell(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+fn duration_cell(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement> {
     let end = match &task.state {
         TaskState::Backlog => return None,
         TaskState::Running { .. } => snap.now,
@@ -482,7 +475,7 @@ fn duration_cell(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Optio
         div()
             .flex_none()
             .text_size(px(theme::RIGHT_PANEL_TASK_DURATION_FONT_SIZE))
-            .text_color(theme::current(cx).right_panel_task_duration_text)
+            .text_color(theme::TEXT_TERTIARY)
             .child(SharedString::from(text))
             .into_any_element(),
     )
@@ -498,7 +491,7 @@ fn duration_cell(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Optio
 /// isn't known to the store (hook + jsonl both silent) so a fresh
 /// task that hasn't yet emitted any event reads as "no session
 /// activity yet" rather than "idle".
-fn session_badge(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+fn session_badge(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement> {
     let sid = task.session_ids.first()?;
     let take = ux_strings::RIGHT_PANEL_TASK_SESSION_BADGE_LEN.min(sid.len());
     let prefix: String = sid.chars().take(take).collect();
@@ -506,7 +499,7 @@ fn session_badge(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Optio
     let glyph = snap
         .claude_status_per_session
         .get(sid)
-        .map(|status| session_status_glyph(*status, cx));
+        .map(|status| session_status_glyph(*status));
 
     let mut row = div()
         .flex()
@@ -523,23 +516,22 @@ fn session_badge(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Optio
 
 /// Maps the abstract `SessionStatus` enum to the trailing-glyph
 /// `(text, color)` pair surfaced next to the session-id badge.
-fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str, Hsla) {
-    let t = theme::current(cx);
+fn session_status_glyph(status: SessionStatus) -> (&'static str, Hsla) {
     match status {
         SessionStatus::Working | SessionStatus::ExecutingTool => (
             ux_strings::RIGHT_PANEL_TASK_SESSION_STATUS_WORKING,
-            t.right_panel_task_session_status_text,
+            theme::TEXT_TERTIARY,
         ),
         SessionStatus::NeedsAttention => (
             ux_strings::RIGHT_PANEL_TASK_SESSION_STATUS_NEEDS_ATTENTION,
-            t.right_panel_task_session_needs_attention_text,
+            theme::WARNING,
         ),
         // `Connecting` and `Idle` both read as "quiet" — a session
         // that hasn't produced any output yet looks the same as one
         // that finished its turn and is waiting for the next prompt.
         SessionStatus::Idle | SessionStatus::Connecting => (
             ux_strings::RIGHT_PANEL_TASK_SESSION_STATUS_IDLE,
-            t.right_panel_task_session_status_text,
+            theme::TEXT_TERTIARY,
         ),
     }
 }
@@ -565,7 +557,7 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 ///
 /// Drops out for terminal states (the row has already settled) and
 /// when no session has crossed the soft threshold yet.
-fn failure_indicator(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> Option<AnyElement> {
+fn failure_indicator(task: &Task, snap: &RightDockSnapshot) -> Option<AnyElement> {
     if !matches!(task.state, TaskState::Running { .. }) {
         return None;
     }
@@ -587,7 +579,7 @@ fn failure_indicator(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> O
         div()
             .flex_none()
             .text_size(px(theme::RIGHT_PANEL_TASK_FAILURE_FONT_SIZE))
-            .text_color(theme::current(cx).right_panel_task_failure_text)
+            .text_color(theme::WARNING)
             .child(SharedString::from(text))
             .into_any_element(),
     )

@@ -319,9 +319,9 @@ impl Render for CreateSkillModal {
                 };
                 let t = theme::current(cx);
                 let (bg, text_color) = if active {
-                    (t.skill_badge_user_only_bg, t.skill_badge_user_only_text)
+                    (theme::ACCENT_MUTED, theme::PRIMARY)
                 } else {
-                    (t.skill_aux_chip_bg, t.skill_aux_chip_text)
+                    (t.skill_aux_chip_bg, theme::TEXT_SECONDARY)
                 };
                 let chip = div()
                     .id(SharedString::from(format!("scope-{}", scope.slug())))
@@ -350,21 +350,21 @@ impl Render for CreateSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_name(), cx))
+            .child(field_label(strings::skills_field_name()))
             .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::skills_field_scope(), cx))
+            .child(field_label(strings::skills_field_scope()))
             .child(scope_chip)
-            .child(field_label(strings::skills_field_description(), cx))
+            .child(field_label(strings::skills_field_description()))
             .child(input(&self.description_input, cx, 1))
-            .child(field_label(strings::skills_field_when_to_use(), cx))
+            .child(field_label(strings::skills_field_when_to_use()))
             .child(input(&self.when_to_use_input, cx, 2))
-            .child(field_label(strings::skills_field_allowed_tools(), cx))
+            .child(field_label(strings::skills_field_allowed_tools()))
             .child(input(&self.allowed_tools_input, cx, 3))
-            .child(field_label(strings::skills_field_arg_hint(), cx))
+            .child(field_label(strings::skills_field_arg_hint()))
             .child(input(&self.argument_hint_input, cx, 4))
-            .child(field_label(strings::skills_field_paths(), cx))
+            .child(field_label(strings::skills_field_paths()))
             .child(input(&self.paths_input, cx, 5))
-            .child(field_label(strings::skills_field_model(), cx))
+            .child(field_label(strings::skills_field_model()))
             .child(input(&self.model_input, cx, 6))
             .child(
                 checkbox(
@@ -396,7 +396,7 @@ impl Render for CreateSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_body(), cx))
+            .child(field_label(strings::skills_field_body()))
             // body_editor sits between the left-column inputs and the
             // toggles so Tab flows from the last metadata field into
             // the markdown body before reaching the tail-of-form

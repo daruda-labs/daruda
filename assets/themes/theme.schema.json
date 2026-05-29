@@ -4,34 +4,9 @@
   "type": "object",
   "properties": {
     "title_bar_bg": {
-      "description": "Maps to `palette::TITLE_BAR_BG`.",
+      "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#1a1a1aff"
-    },
-    "tab_bar_bg": {
-      "description": "Maps to `palette::TAB_BAR_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#1f1f1fff"
-    },
-    "tab_bar_border": {
-      "description": "Maps to `palette::TAB_BAR_BORDER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#4d4d4dff"
-    },
-    "tab_active_bg": {
-      "description": "Maps to `palette::TAB_ACTIVE_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#3c3c3cff"
-    },
-    "tab_active_text": {
-      "description": "Maps to `palette::TAB_ACTIVE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "pane_header_focused_text": {
-      "description": "Maps to `palette::PANE_HEADER_FOCUSED_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
+      "default": "#010102ff"
     },
     "tab_inactive_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
@@ -58,11 +33,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
-    "status_bar_error": {
-      "description": "Maps to `palette::STATUS_BAR_ERROR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#dd3c3cff"
-    },
     "status_bar_project_dot": {
       "description": "Maps to `palette::STATUS_BAR_PROJECT_DOT`.",
       "$ref": "#/$defs/Rgba",
@@ -71,12 +41,12 @@
     "status_bar_detached_bg": {
       "description": "Maps to `palette::STATUS_BAR_DETACHED_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#513c1fff"
+      "default": "#5a4316ff"
     },
     "status_bar_detached_text": {
       "description": "Maps to `palette::STATUS_BAR_DETACHED_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#f4c27bff"
+      "default": "#e2c58dff"
     },
     "dock_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
@@ -138,16 +108,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#62666dff"
     },
-    "close_button_hover_bg": {
-      "description": "Maps to `palette::CLOSE_BUTTON_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#cb4d4dff"
-    },
-    "accent_green": {
-      "description": "Maps to `palette::ACCENT_GREEN`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#4dcb6dff"
-    },
     "dock_icon_inactive": {
       "description": "Maps to `palette::TEXT_MUTE`.",
       "$ref": "#/$defs/Rgba",
@@ -168,25 +128,10 @@
       "$ref": "#/$defs/Rgba",
       "default": "#8a8f98ff"
     },
-    "dock_view_tab_active": {
-      "description": "Maps to `palette::DOCK_VIEW_TAB_ACTIVE`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#f2f2f2ff"
-    },
-    "dock_view_tab_accent": {
-      "description": "Maps to `palette::DOCK_VIEW_TAB_ACCENT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#5299e0ff"
-    },
     "dock_view_tab_hover_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
-    },
-    "lane_unread": {
-      "description": "Maps to `palette::LANE_UNREAD`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#eb9947ff"
     },
     "lane_row_hover_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
@@ -204,14 +149,9 @@
       "default": "#7e252533"
     },
     "lane_card_bg": {
-      "description": "Maps to `palette::LANE_CARD_BG`.",
+      "description": "Maps to `palette::BG_PANEL`.",
       "$ref": "#/$defs/Rgba",
       "default": "#0f1011ff"
-    },
-    "lane_card_border": {
-      "description": "Maps to `palette::LANE_CARD_BORDER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff14"
     },
     "lane_card_hover_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
@@ -222,11 +162,6 @@
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
-    },
-    "lane_row_active_bg": {
-      "description": "Maps to `palette::LANE_ROW_ACTIVE_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff14"
     },
     "modal_panel_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -248,120 +183,80 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
-    "input_focus_border": {
-      "description": "Maps to `palette::INPUT_FOCUS_BORDER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#f2f2f2ff"
-    },
-    "modal_error_text": {
-      "description": "Maps to `palette::MODAL_ERROR_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e46767ff"
-    },
-    "modal_primary_bg": {
-      "description": "Maps to `palette::MODAL_PRIMARY_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#3c8cddff"
-    },
-    "modal_primary_hover_bg": {
-      "description": "Maps to `palette::MODAL_PRIMARY_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#67a6e4ff"
-    },
     "modal_secondary_text": {
       "description": "Maps to `palette::TEXT_BODY`.",
       "$ref": "#/$defs/Rgba",
       "default": "#d5d7dbff"
     },
-    "modal_text_primary": {
-      "description": "Maps to `palette::MODAL_TEXT_PRIMARY`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "input_selection_bg": {
-      "description": "Maps to `palette::INPUT_SELECTION_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#3c8cdd59"
-    },
     "textarea_scrollbar_thumb": {
-      "description": "Maps to `palette::TEXTAREA_SCROLLBAR_THUMB`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#b3b3b366"
+      "default": "#ffffff40"
     },
     "banner_error_bg": {
       "description": "Maps to `palette::BANNER_ERROR_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#dd3c3c1a"
+      "default": "#e060601a"
     },
     "banner_error_text": {
       "description": "Maps to `palette::BANNER_ERROR_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#e87d7dff"
+      "default": "#e67f7fff"
     },
     "banner_warning_bg": {
       "description": "Maps to `palette::BANNER_WARNING_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#e8ab301a"
+      "default": "#d4a8531a"
     },
     "banner_warning_text": {
       "description": "Maps to `palette::BANNER_WARNING_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#f0c775ff"
+      "default": "#e0c185ff"
     },
     "banner_info_bg": {
       "description": "Maps to `palette::BANNER_INFO_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#3c8cdd1a"
+      "default": "#5e6ad21a"
     },
     "banner_info_text": {
       "description": "Maps to `palette::BANNER_INFO_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#93bfecff"
+      "default": "#9ba3e3ff"
     },
     "banner_success_bg": {
       "description": "Maps to `palette::BANNER_SUCCESS_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#34b25e1a"
+      "default": "#4aaf781a"
     },
     "banner_success_text": {
       "description": "Maps to `palette::BANNER_SUCCESS_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#75d795ff"
+      "default": "#82caa2ff"
     },
     "settings_scrollbar_thumb": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
     "settings_scrollbar_thumb_hover": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB_HOVER`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },
     "right_panel_scrollbar_thumb": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
     "right_panel_scrollbar_thumb_hover": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB_HOVER`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },
     "settings_sidebar_bg": {
       "description": "Maps to `palette::SETTINGS_SIDEBAR_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#0000002e"
-    },
-    "settings_sidebar_row_active_bg": {
-      "description": "Maps to `palette::SETTINGS_SIDEBAR_ROW_ACTIVE_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff1a"
-    },
-    "settings_sidebar_row_hover_bg": {
-      "description": "Maps to `palette::SETTINGS_SIDEBAR_ROW_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff0f"
+      "default": "#0101022e"
     },
     "palette_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -398,36 +293,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#62666dff"
     },
-    "git_badge_pill_bg": {
-      "description": "Maps to `palette::GIT_BADGE_PILL_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff1a"
-    },
-    "git_badge_pill_text": {
-      "description": "Maps to `palette::GIT_BADGE_PILL_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ebebebff"
-    },
-    "git_badge_arrow_text": {
-      "description": "Maps to `palette::GIT_BADGE_ARROW_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#a6a6a6ff"
-    },
-    "git_staged_color": {
-      "description": "Maps to `palette::GIT_STAGED_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#4dcb6dff"
-    },
-    "git_unstaged_color": {
-      "description": "Maps to `palette::GIT_UNSTAGED_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e6bf4dff"
-    },
-    "git_untracked_color": {
-      "description": "Maps to `palette::GIT_UNTRACKED_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#53ac69ff"
-    },
     "git_file_row_selected_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",
@@ -448,26 +313,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
-    "git_diff_add_bg": {
-      "description": "Maps to `palette::GIT_DIFF_ADD_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#0e2f16ff"
-    },
-    "git_diff_del_bg": {
-      "description": "Maps to `palette::GIT_DIFF_DEL_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#2f0e0eff"
-    },
-    "git_diff_add_text": {
-      "description": "Maps to `palette::GIT_DIFF_ADD_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#81e49aff"
-    },
-    "git_diff_del_text": {
-      "description": "Maps to `palette::GIT_DIFF_DEL_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e48181ff"
-    },
     "git_diff_context_text": {
       "description": "Maps to `palette::TEXT_SUBTLE`.",
       "$ref": "#/$defs/Rgba",
@@ -486,7 +331,7 @@
     "git_stage_checkbox_checked_bg": {
       "description": "Maps to `palette::GIT_STAGE_CHECKBOX_CHECKED_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#267339ff"
+      "default": "#2d6c4aff"
     },
     "git_stage_checkbox_unchecked_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -497,16 +342,6 @@
       "description": "Maps to `palette::BORDER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
-    },
-    "palette_query_text": {
-      "description": "Maps to `palette::PALETTE_QUERY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "palette_focused_text": {
-      "description": "Maps to `palette::PALETTE_FOCUSED_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
     },
     "input_panel_drop_target_bg": {
       "description": "Maps to `palette::INPUT_PANEL_DROP_TARGET_BG`.",
@@ -519,12 +354,12 @@
       "default": "#264d734d"
     },
     "dock_scrollbar_thumb": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
     "dock_scrollbar_thumb_hover": {
-      "description": "Maps to `palette::DOCK_SCROLLBAR_THUMB_HOVER`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },
@@ -542,26 +377,6 @@
       "description": "Maps to `palette::TEXT_MUTE`.",
       "$ref": "#/$defs/Rgba",
       "default": "#8a8f98ff"
-    },
-    "agent_log_status_text": {
-      "description": "Maps to `palette::AGENT_LOG_STATUS_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "agent_chat_user_text": {
-      "description": "Maps to `palette::AGENT_CHAT_USER_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "agent_task_running_fg": {
-      "description": "Maps to `palette::AGENT_TASK_RUNNING_FG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
-    "agent_task_running_bg": {
-      "description": "Maps to `palette::AGENT_TASK_RUNNING_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
     },
     "pane_divider_bg": {
       "description": "Maps to `palette::BORDER`.",
@@ -593,11 +408,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
     },
-    "welcome_text": {
-      "description": "Maps to `palette::WELCOME_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
     "file_viewer_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
@@ -618,20 +428,10 @@
       "$ref": "#/$defs/Rgba",
       "default": "#d5d7dbff"
     },
-    "file_viewer_close_hover": {
-      "description": "Maps to `palette::FILE_VIEWER_CLOSE_HOVER`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
-    },
     "file_viewer_text": {
       "description": "Maps to `palette::TEXT_BODY`.",
       "$ref": "#/$defs/Rgba",
       "default": "#d5d7dbff"
-    },
-    "file_viewer_selection_bg": {
-      "description": "Maps to `palette::FILE_VIEWER_SELECTION_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#24324cff"
     },
     "file_viewer_line_no_text": {
       "description": "Maps to `palette::TEXT_SUBTLE`.",
@@ -647,11 +447,6 @@
       "description": "Maps to `palette::TEXT_MUTE`.",
       "$ref": "#/$defs/Rgba",
       "default": "#8a8f98ff"
-    },
-    "file_viewer_tab_active_text": {
-      "description": "Maps to `palette::FILE_VIEWER_TAB_ACTIVE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffffff"
     },
     "file_diff_add_bg": {
       "description": "Maps to `palette::FILE_DIFF_ADD_BG`.",
@@ -699,12 +494,12 @@
       "default": "#23252aff"
     },
     "file_viewer_scrollbar_thumb": {
-      "description": "Maps to `palette::FILE_VIEWER_SCROLLBAR_THUMB`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff40"
     },
     "file_viewer_scrollbar_thumb_hover": {
-      "description": "Maps to `palette::FILE_VIEWER_SCROLLBAR_THUMB_HOVER`.",
+      "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },
@@ -783,11 +578,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
     },
-    "md_code_inline_text": {
-      "description": "Maps to `palette::MD_CODE_INLINE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#dfb690ff"
-    },
     "md_code_block_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
       "$ref": "#/$defs/Rgba",
@@ -813,35 +603,10 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
-    "md_link_color": {
-      "description": "Maps to `palette::MD_LINK_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#67a8e4ff"
-    },
-    "md_strikethrough_color": {
-      "description": "Maps to `palette::MD_STRIKETHROUGH_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
-    },
-    "md_list_bullet_color": {
-      "description": "Maps to `palette::MD_LIST_BULLET_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
-    },
-    "md_task_checked_color": {
-      "description": "Maps to `palette::MD_TASK_CHECKED_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#4dcb71ff"
-    },
     "md_footnote_color": {
       "description": "Maps to `palette::MD_FOOTNOTE_COLOR`.",
       "$ref": "#/$defs/Rgba",
       "default": "#6b9bc7ff"
-    },
-    "md_html_color": {
-      "description": "Maps to `palette::MD_HTML_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#6b6b6bff"
     },
     "md_table_border": {
       "description": "Maps to `palette::BORDER`.",
@@ -863,11 +628,6 @@
       "$ref": "#/$defs/Rgba",
       "default": "#0f1011ff"
     },
-    "toast_bg": {
-      "description": "Maps to `palette::TOAST_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#2e2e2ef7"
-    },
     "toast_border": {
       "description": "Maps to `palette::BORDER`.",
       "$ref": "#/$defs/Rgba",
@@ -879,29 +639,9 @@
       "default": "#d5d7dbff"
     },
     "toast_action_text": {
-      "description": "Maps to `palette::ACCENT_GREEN`.",
+      "description": "Maps to `palette::PRIMARY`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#4dcb6dff"
-    },
-    "toast_tint_info": {
-      "description": "Maps to `palette::TOAST_TINT_INFO`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#75b6d7ff"
-    },
-    "toast_tint_warning": {
-      "description": "Maps to `palette::TOAST_TINT_WARNING`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#f0b042ff"
-    },
-    "toast_tint_error": {
-      "description": "Maps to `palette::TOAST_TINT_ERROR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e05252ff"
-    },
-    "toast_text_dim": {
-      "description": "Maps to `palette::TOAST_TEXT_DIM`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#b3b3b3ff"
+      "default": "#5e6ad2ff"
     },
     "toast_repeat_bg": {
       "description": "Maps to `palette::BG_ACTIVE`.",
@@ -924,7 +664,7 @@
       "default": "#000000ff"
     },
     "terminal_scrollbar_track_bg": {
-      "description": "Maps to `palette::TERMINAL_SCROLLBAR_TRACK_BG`.",
+      "description": "Maps to `palette::SCROLLBAR_TRACK_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff0a"
     },
@@ -939,9 +679,9 @@
       "default": "#23252aff"
     },
     "keystroke_input_border_active": {
-      "description": "Maps to `palette::ACCENT_GREEN`.",
+      "description": "Maps to `palette::PRIMARY`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#4dcb6dff"
+      "default": "#5e6ad2ff"
     },
     "keystroke_badge_bg": {
       "description": "Maps to `palette::BG_ACTIVE`.",
@@ -963,35 +703,10 @@
       "$ref": "#/$defs/Rgba",
       "default": "#62666dff"
     },
-    "popover_bg": {
-      "description": "Maps to `palette::POPOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#292929fa"
-    },
     "popover_border": {
       "description": "Maps to `palette::BORDER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
-    },
-    "popover_item_text": {
-      "description": "Maps to `palette::POPOVER_ITEM_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e0e0e0ff"
-    },
-    "popover_item_hover_bg": {
-      "description": "Maps to `palette::POPOVER_ITEM_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff14"
-    },
-    "popover_item_danger_text": {
-      "description": "Maps to `palette::POPOVER_ITEM_DANGER_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#db5757ff"
-    },
-    "popover_separator": {
-      "description": "Maps to `palette::POPOVER_SEPARATOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff14"
     },
     "status_working_light": {
       "description": "Maps to `palette::STATUS_WORKING_LIGHT`.",
@@ -1063,90 +778,20 @@
       "$ref": "#/$defs/Rgba",
       "default": "#5cadff24"
     },
-    "claude_banner_text": {
-      "description": "Maps to `palette::CLAUDE_BANNER_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#bfbfbfff"
-    },
     "claude_banner_icon": {
       "description": "Maps to `palette::CLAUDE_BANNER_ICON`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5cadffff"
     },
-    "right_panel_cost_color": {
-      "description": "Maps to `palette::RIGHT_PANEL_COST_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e0b96cff"
-    },
-    "right_panel_task_hover_bg": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff0a"
-    },
-    "right_panel_task_selected_bg": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_SELECTED_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff0f"
-    },
-    "right_panel_task_state_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_STATE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#8c8c8cff"
-    },
-    "right_panel_task_title_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_TITLE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#d9d9d9ff"
-    },
     "right_panel_task_running_color": {
-      "description": "Maps to `palette::ACCENT_GREEN`.",
+      "description": "Maps to `palette::SIGNAL_GREEN`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#4dcb6dff"
-    },
-    "right_panel_task_done_color": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_DONE_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#a6a6a6ff"
-    },
-    "right_panel_task_error_color": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_ERROR_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#d36969ff"
-    },
-    "right_panel_task_cancelled_color": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_CANCELLED_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#737373ff"
-    },
-    "right_panel_task_backlog_color": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_BACKLOG_COLOR`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
-    },
-    "right_panel_task_duration_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_DURATION_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#999999ff"
-    },
-    "right_panel_task_failure_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_FAILURE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e0b96cff"
-    },
-    "right_panel_task_session_status_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_SESSION_STATUS_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#a6a6a6ff"
-    },
-    "right_panel_task_session_needs_attention_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_SESSION_NEEDS_ATTENTION_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#e4bb67ff"
+      "default": "#33c758ff"
     },
     "task_edit_branch_invalid_border": {
-      "description": "Maps to `palette::RIGHT_PANEL_TASK_ERROR_COLOR`.",
+      "description": "Maps to `palette::ERROR`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#d36969ff"
+      "default": "#e06060ff"
     },
     "badge_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
@@ -1168,160 +813,25 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
-    "gauge_green": {
-      "description": "Maps to `palette::GAUGE_GREEN`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#33c758ff"
-    },
-    "gauge_yellow": {
-      "description": "Maps to `palette::GAUGE_YELLOW`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffd60aff"
-    },
-    "gauge_red": {
-      "description": "Maps to `palette::GAUGE_RED`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ff4a3dff"
-    },
-    "status_orange": {
-      "description": "Maps to `palette::STATUS_ORANGE`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ff910aff"
-    },
     "gauge_track_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
-    },
-    "right_panel_dim_text": {
-      "description": "Maps to `palette::RIGHT_PANEL_DIM_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#8c8c8cff"
-    },
-    "skill_badge_both_bg": {
-      "description": "Maps to `palette::SKILL_BADGE_BOTH_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#3399552e"
-    },
-    "skill_badge_both_text": {
-      "description": "Maps to `palette::SKILL_BADGE_BOTH_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#9ce2b4ff"
-    },
-    "skill_badge_user_only_bg": {
-      "description": "Maps to `palette::SKILL_BADGE_USER_ONLY_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#3473b22e"
-    },
-    "skill_badge_user_only_text": {
-      "description": "Maps to `palette::SKILL_BADGE_USER_ONLY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#a8c7e6ff"
-    },
-    "skill_badge_model_only_bg": {
-      "description": "Maps to `palette::SKILL_BADGE_MODEL_ONLY_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#8639ac2e"
-    },
-    "skill_badge_model_only_text": {
-      "description": "Maps to `palette::SKILL_BADGE_MODEL_ONLY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#d5b3e6ff"
-    },
-    "skill_badge_disabled_bg": {
-      "description": "Maps to `palette::SKILL_BADGE_DISABLED_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#4d4d4d4d"
-    },
-    "skill_badge_disabled_text": {
-      "description": "Maps to `palette::SKILL_BADGE_DISABLED_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#8c8c8cff"
     },
     "skill_aux_chip_bg": {
       "description": "Maps to `palette::SKILL_AUX_CHIP_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#333333d9"
     },
-    "skill_aux_chip_text": {
-      "description": "Maps to `palette::SKILL_AUX_CHIP_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#c7c7c7ff"
-    },
-    "skill_section_header_text": {
-      "description": "Maps to `palette::SKILL_SECTION_HEADER_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#9e9e9eff"
-    },
-    "skill_name_text": {
-      "description": "Maps to `palette::SKILL_NAME_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#f2f2f2ff"
-    },
-    "skill_meta_text": {
-      "description": "Maps to `palette::SKILL_META_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#b8b8b8ff"
-    },
     "skill_row_hover_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#141516ff"
     },
-    "skill_empty_text": {
-      "description": "Maps to `palette::SKILL_EMPTY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
-    },
-    "mcp_indicator_enabled": {
-      "description": "Maps to `palette::MCP_INDICATOR_ENABLED`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#2dd248ff"
-    },
-    "mcp_indicator_disabled": {
-      "description": "Maps to `palette::MCP_INDICATOR_DISABLED`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#666666ff"
-    },
     "mcp_indicator_malformed": {
       "description": "Maps to `palette::MCP_INDICATOR_MALFORMED`.",
       "$ref": "#/$defs/Rgba",
       "default": "#dd613cff"
-    },
-    "mcp_row_hover_bg": {
-      "description": "Maps to `palette::MCP_ROW_HOVER_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff0a"
-    },
-    "mcp_section_header_text": {
-      "description": "Maps to `palette::MCP_SECTION_HEADER_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#9e9e9eff"
-    },
-    "mcp_row_body_text": {
-      "description": "Maps to `palette::MCP_ROW_BODY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#b3b3b3ff"
-    },
-    "mcp_row_meta_text": {
-      "description": "Maps to `palette::MCP_ROW_META_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#8c8c8cff"
-    },
-    "mcp_empty_text": {
-      "description": "Maps to `palette::MCP_EMPTY_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#808080ff"
-    },
-    "mcp_transport_badge_bg": {
-      "description": "Maps to `palette::MCP_TRANSPORT_BADGE_BG`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#ffffff0f"
-    },
-    "mcp_transport_badge_text": {
-      "description": "Maps to `palette::MCP_TRANSPORT_BADGE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#bfbfbfff"
     },
     "mcp_malformed_badge_bg": {
       "description": "Maps to `palette::MCP_MALFORMED_BADGE_BG`.",
@@ -1332,11 +842,6 @@
       "description": "Maps to `palette::MCP_MALFORMED_BADGE_TEXT`.",
       "$ref": "#/$defs/Rgba",
       "default": "#f4cabeff"
-    },
-    "mcp_disabled_badge_text": {
-      "description": "Maps to `palette::MCP_DISABLED_BADGE_TEXT`.",
-      "$ref": "#/$defs/Rgba",
-      "default": "#737373ff"
     }
   },
   "$defs": {

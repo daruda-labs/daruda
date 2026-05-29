@@ -12,7 +12,6 @@ use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, Right
 impl Workspace {
     pub(super) fn prepare_left_dock_snapshot(
         &mut self,
-        should_animate: bool,
         cx: &mut Context<Self>,
     ) -> LeftDockSnapshot {
         LeftDockSnapshot {
@@ -173,7 +172,6 @@ impl Workspace {
                 .map(|b| b.session_id.clone()),
             claude_install_banner_visible: self.claude.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
-            claude_animate: should_animate,
             workspace: self.left_dock.read(cx).workspace.clone(),
         }
     }

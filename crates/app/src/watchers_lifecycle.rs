@@ -83,11 +83,13 @@ fn spawn_needs_attention_demote(cx: &mut App) {
 }
 
 /// Drive the shared status-badge animation clock. Advances one
-/// `StatusPulseClock` tick every `STATUS_INDICATOR_TICK_MS` (~6 fps) and
-/// repaints only active windows that have an animating Claude session —
-/// idle/backgrounded windows stay at zero redraws. Replaces per-badge
-/// `with_animation` (which repainted the whole window ~60×/s). See
-/// `ui::agent_status_badge` and root `CLAUDE.md` Pitfall #10.
+/// `StatusPulseClock` tick every `STATUS_INDICATOR_TICK_MS` (~4 fps) and
+/// repaints every window that has an animating Claude session —
+/// backgrounded windows included, so a session in another window keeps
+/// pulsing. Windows with no animating session stay at zero redraws.
+/// Replaces per-badge `with_animation` (which repainted the whole
+/// window ~60×/s). See `ui::agent_status_badge` and root `CLAUDE.md`
+/// Pitfall #10.
 fn spawn_status_pulse(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         "status-pulse",
@@ -100,8 +102,8 @@ fn spawn_status_pulse(cx: &mut App) {
                 let clock = cx.global_mut::<StatusPulseClock>();
                 clock.tick = clock.tick.wrapping_add(1);
             }
-            WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
-                if window.is_window_active() && ws.has_animating_claude_status() {
+            WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+                if ws.has_animating_claude_status() {
                     cx.notify();
                 }
             });

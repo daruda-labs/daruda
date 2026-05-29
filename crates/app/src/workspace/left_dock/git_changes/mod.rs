@@ -406,7 +406,7 @@ fn summary_bar(
     let summary_text_color = t.dock_header_text;
     let toggle_inflight = t.faint_text;
     let toggle_idle = t.muted_text;
-    let toggle_hover = t.dock_view_tab_active;
+    let toggle_hover = theme::TEXT_PRIMARY;
 
     let label = match (staged_count, unstaged_count) {
         (s, 0) => format!("{s} staged"),
@@ -553,7 +553,7 @@ fn dir_header(
     let checkbox_border = t.git_stage_checkbox_border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    let checkbox_tick_color = t.modal_text_primary;
+    let checkbox_tick_color = theme::TEXT_PRIMARY;
     let dir_label_color = t.faint_text;
     let dir_label_hover = t.muted_text;
 
@@ -775,8 +775,8 @@ fn unified_file_row(
     let checkbox_border = t.git_stage_checkbox_border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    let checkbox_tick_color = t.modal_text_primary;
-    let cursor_border_color = t.dock_view_tab_accent;
+    let checkbox_tick_color = theme::TEXT_PRIMARY;
+    let cursor_border_color = theme::PRIMARY;
     let row_selected_bg = t.git_file_row_selected_bg;
     let row_hover_bg = t.git_file_row_hover_bg;
     let filename_color = t.muted_text;

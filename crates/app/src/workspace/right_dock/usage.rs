@@ -223,7 +223,7 @@ fn metrics_group(
         .child(token_count(strings::usage_in_label(), input_tokens, cx))
         .child(token_count(strings::usage_out_label(), output_tokens, cx))
         .child(token_count(strings::usage_cache_label(), cache_tokens, cx))
-        .child(cost_label(cost, cx))
+        .child(cost_label(cost))
 }
 
 /// First 8 characters of the session id (or the whole id if it's
@@ -285,11 +285,11 @@ fn token_count(label: impl Into<gpui::SharedString>, n: u64, cx: &gpui::App) -> 
 /// "$0.32"-style price with two decimal places. The `~` prefix hints
 /// to the user that this is an estimate based on default pricing —
 /// real billing depends on the user's Anthropic plan.
-fn cost_label(cost: f64, cx: &gpui::App) -> impl IntoElement {
+fn cost_label(cost: f64) -> impl IntoElement {
     div()
         .flex_none()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).right_panel_cost_color)
+        .text_color(theme::WARNING)
         .child(SharedString::from(format!("~${cost:.2}")))
 }
 
@@ -343,7 +343,7 @@ fn gauge_row(
         return placeholder_gauge(label, cx);
     };
     let pct = win.utilization;
-    let color = severity_color(LimitSeverity::from_utilization(pct), cx);
+    let color = severity_color(LimitSeverity::from_utilization(pct));
     let reset_text = win
         .resets_at
         .and_then(|t| t.duration_since(SystemTime::now()).ok())
@@ -384,7 +384,7 @@ fn placeholder_gauge(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> An
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
         .child(gauge_label(label, cx))
         .child(gauge_bar(0.0, track_bg, cx))
-        .child(placeholder_unavailable_text(cx))
+        .child(placeholder_unavailable_text())
         .into_any_element()
 }
 
@@ -394,11 +394,11 @@ fn placeholder_gauge(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> An
 /// children — only direct text content on the same div inherits.
 /// Without this the text fell back to a near-zero default and
 /// looked invisible.
-fn placeholder_unavailable_text(cx: &gpui::App) -> impl IntoElement {
+fn placeholder_unavailable_text() -> impl IntoElement {
     div()
         .flex_none()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).right_panel_dim_text)
+        .text_color(theme::TEXT_TERTIARY)
         .child(strings::usage_limit_unavailable())
 }
 
@@ -456,12 +456,11 @@ fn gauge_reset_text(text: String, color: Hsla) -> impl IntoElement {
 /// (rather than a method on `LimitSeverity` in `daruda_claude`)
 /// because the data layer is GPUI-free — `Hsla` lives in
 /// `daruda_terminal::ux::theme`.
-fn severity_color(severity: LimitSeverity, cx: &gpui::App) -> Hsla {
-    let t = theme::current(cx);
+fn severity_color(severity: LimitSeverity) -> Hsla {
     match severity {
-        LimitSeverity::Low => t.gauge_green,
-        LimitSeverity::Medium => t.gauge_yellow,
-        LimitSeverity::High => t.gauge_red,
+        LimitSeverity::Low => theme::SIGNAL_GREEN,
+        LimitSeverity::Medium => theme::SIGNAL_YELLOW,
+        LimitSeverity::High => theme::SIGNAL_RED,
     }
 }
 
@@ -476,7 +475,7 @@ fn severity_color(severity: LimitSeverity, cx: &gpui::App) -> Hsla {
 /// behavior). No pill chrome (bg / border / rounded) — the row
 /// sits flush with the surrounding panel padding.
 fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
-    let color = indicator_color(status.indicator, cx);
+    let color = indicator_color(status.indicator);
     let label = strings::service_status_label(status);
     let muted_text = theme::current(cx).muted_text;
 
@@ -505,14 +504,13 @@ fn status_dot(color: Hsla) -> impl IntoElement {
 
 /// Map an indicator to its pill color. `Unknown` uses the dim
 /// placeholder color so a parse miss doesn't look like green.
-fn indicator_color(indicator: StatusIndicator, cx: &gpui::App) -> Hsla {
-    let t = theme::current(cx);
+fn indicator_color(indicator: StatusIndicator) -> Hsla {
     match indicator {
-        StatusIndicator::None => t.gauge_green,
-        StatusIndicator::Minor => t.gauge_yellow,
-        StatusIndicator::Major => t.status_orange,
-        StatusIndicator::Critical => t.gauge_red,
-        StatusIndicator::Unknown => t.right_panel_dim_text,
+        StatusIndicator::None => theme::SIGNAL_GREEN,
+        StatusIndicator::Minor => theme::SIGNAL_YELLOW,
+        StatusIndicator::Major => theme::SIGNAL_ORANGE,
+        StatusIndicator::Critical => theme::SIGNAL_RED,
+        StatusIndicator::Unknown => theme::TEXT_TERTIARY,
     }
 }
 
@@ -609,39 +607,33 @@ mod tests {
     #[gpui::test]
     fn severity_color_matches_uebersicht_palette(cx: &mut gpui::TestAppContext) {
         crate::test_support::init_gpui_component(cx);
-        cx.update(|cx| {
-            assert_eq!(severity_color(LimitSeverity::Low, cx), theme::GAUGE_GREEN);
-            assert_eq!(
-                severity_color(LimitSeverity::Medium, cx),
-                theme::GAUGE_YELLOW
-            );
-            assert_eq!(severity_color(LimitSeverity::High, cx), theme::GAUGE_RED);
+        cx.update(|_cx| {
+            assert_eq!(severity_color(LimitSeverity::Low), theme::SIGNAL_GREEN);
+            assert_eq!(severity_color(LimitSeverity::Medium), theme::SIGNAL_YELLOW);
+            assert_eq!(severity_color(LimitSeverity::High), theme::SIGNAL_RED);
         });
     }
 
     #[gpui::test]
     fn indicator_color_dims_unknown(cx: &mut gpui::TestAppContext) {
         crate::test_support::init_gpui_component(cx);
-        cx.update(|cx| {
+        cx.update(|_cx| {
+            assert_eq!(indicator_color(StatusIndicator::None), theme::SIGNAL_GREEN);
             assert_eq!(
-                indicator_color(StatusIndicator::None, cx),
-                theme::GAUGE_GREEN
+                indicator_color(StatusIndicator::Minor),
+                theme::SIGNAL_YELLOW
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Minor, cx),
-                theme::GAUGE_YELLOW
+                indicator_color(StatusIndicator::Major),
+                theme::SIGNAL_ORANGE
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Major, cx),
-                theme::STATUS_ORANGE
+                indicator_color(StatusIndicator::Critical),
+                theme::SIGNAL_RED
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Critical, cx),
-                theme::GAUGE_RED
-            );
-            assert_eq!(
-                indicator_color(StatusIndicator::Unknown, cx),
-                theme::RIGHT_PANEL_DIM_TEXT
+                indicator_color(StatusIndicator::Unknown),
+                theme::TEXT_TERTIARY
             );
         });
     }

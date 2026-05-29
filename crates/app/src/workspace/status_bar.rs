@@ -48,7 +48,7 @@ impl RenderOnce for StatusBar {
         let muted = t.muted_text;
         let faint = t.faint_text;
         let project_dot = t.status_bar_project_dot;
-        let error_color = t.status_bar_error;
+        let error_color = theme::ERROR;
         let detached_bg = t.status_bar_detached_bg;
         let detached_text = t.status_bar_detached_text;
         let bg = t.status_bar_bg;

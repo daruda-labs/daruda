@@ -25,14 +25,15 @@
 //! badge therefore cost ~40% CPU while it pulsed.
 //!
 //! Instead, a single [`StatusPulseClock`] global advances one `tick`
-//! every `STATUS_INDICATOR_TICK_MS` (~6 fps), driven by a gated pump
-//! (`watchers_lifecycle::spawn_status_pulse`) that only notifies
-//! windows which are active *and* have an animating session. Each badge
-//! derives its frame from the tick and renders a static frame — no
-//! per-frame `request_animation_frame`. Result: ~6 redraws/s instead of
-//! ~60 while a badge animates, and zero while idle. The visible
-//! resolution of the comet (6/4 discrete frames) is unchanged by the
-//! lower rate; the smooth fades become 2-frame blinks (Pitfall #10).
+//! every `STATUS_INDICATOR_TICK_MS` (~4 fps), driven by a gated pump
+//! (`watchers_lifecycle::spawn_status_pulse`) that notifies every window
+//! with an animating session — backgrounded windows included, so a
+//! session in another window keeps pulsing. Each badge derives its
+//! frame from the tick — no per-frame `request_animation_frame`. Result:
+//! ~4 redraws/s instead of ~60 while a badge animates, and zero while
+//! idle. The visible resolution of the comet (6/4 discrete frames) is
+//! unchanged by the lower rate; the smooth fades become 2-frame blinks
+//! (Pitfall #10).
 
 use crate::ui::theme;
 use daruda_claude::SessionStatus;
@@ -52,8 +53,8 @@ pub struct StatusPulseClock {
 impl Global for StatusPulseClock {}
 
 /// Ticks each 2-frame blink holds per state before toggling. At
-/// ~6 fps (`TICK_MS ≈ 167`), 3 ticks ≈ 500 ms → ~1 Hz blink.
-const BLINK_HOLD_TICKS: u64 = 3;
+/// ~4 fps (`TICK_MS = 250`), 2 ticks = 500 ms → ~1 Hz blink.
+const BLINK_HOLD_TICKS: u64 = 2;
 
 /// `true` on the "lit" half of a 2-frame blink cycle.
 fn blink_on(tick: u64) -> bool {
@@ -113,13 +114,6 @@ pub struct AgentStatusBadge {
     /// Phase E — when true, the indicator is wrapped in a 1 px outline
     /// ring marking it as the session attached to the focused tab.
     active: bool,
-    /// When false, the indicator renders a single static frame instead
-    /// of stepping with the shared clock. The dock gates this on
-    /// `window.is_window_active()` so a backgrounded window shows a
-    /// frozen frame (the pump also skips inactive windows). The decision
-    /// lives in one place — `Workspace::render` →
-    /// `LeftDockSnapshot::claude_animate` — and is threaded down here.
-    animate: bool,
 }
 
 impl AgentStatusBadge {
@@ -129,7 +123,6 @@ impl AgentStatusBadge {
             size,
             color,
             active: false,
-            animate: true,
         }
     }
 
@@ -146,13 +139,6 @@ impl AgentStatusBadge {
         self.active = true;
         self
     }
-
-    /// Gate the animation. When `false`, the indicator draws a single
-    /// static frame. See the `animate` field doc.
-    pub fn animate(mut self, animate: bool) -> Self {
-        self.animate = animate;
-        self
-    }
 }
 
 impl RenderOnce for AgentStatusBadge {
@@ -162,13 +148,12 @@ impl RenderOnce for AgentStatusBadge {
             .try_global::<StatusPulseClock>()
             .map(|c| c.tick)
             .unwrap_or(0);
-        let anim = self.animate;
         let inner = match self.status {
             SessionStatus::Idle => idle_grid(dim, self.color),
-            SessionStatus::Connecting => connecting_grid(dim, self.color, anim, tick),
-            SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color, anim, tick),
-            SessionStatus::Working => dot_grid(dim, self.color, anim, tick),
-            SessionStatus::ExecutingTool => quadrant_grid(dim, self.color, anim, tick),
+            SessionStatus::Connecting => connecting_grid(dim, self.color, tick),
+            SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color, tick),
+            SessionStatus::Working => dot_grid(dim, self.color, tick),
+            SessionStatus::ExecutingTool => quadrant_grid(dim, self.color, tick),
         };
         if self.active {
             wrap_active(inner, dim, cx).into_any_element()
@@ -212,9 +197,8 @@ fn idle_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
 // ── NeedsAttention ───────────────────────────────────────────────────────────
 
 /// 3×3 grid, all dots; opacity blinks `1.0 ↔ PULSE_OPACITY_MIN` (2-frame).
-/// Static frame (no animation) is the fully-lit grid.
-fn needs_attention_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
-    let opacity = if !animate || blink_on(tick) {
+fn needs_attention_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
+    let opacity = if blink_on(tick) {
         1.0
     } else {
         theme::STATUS_INDICATOR_PULSE_OPACITY_MIN
@@ -231,9 +215,9 @@ fn needs_attention_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> 
 
 /// 3×3 grid, plus (+) ↔ cross (×) 2-frame blink. Centre stays lit.
 /// `ConnectingGrid` derives the pattern from `phase`: `0.0` = full plus,
-/// `0.5` = full cross. Static frame is the plus.
-fn connecting_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
-    let phase = if !animate || blink_on(tick) { 0.0 } else { 0.5 };
+/// `0.5` = full cross.
+fn connecting_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
+    let phase = if blink_on(tick) { 0.0 } else { 0.5 };
     ConnectingGrid {
         dim: size,
         color,
@@ -359,9 +343,8 @@ const DOT_ORDER: [(usize, usize); 9] = [
 ];
 
 /// Working-state comet. `tick` drives a 6-frame serpentine sweep.
-/// Static frame (no animation) is head on the first dot.
-fn dot_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
-    let head = if animate { snake_head(tick) } else { 0 };
+fn dot_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
+    let head = snake_head(tick);
     // `DotGrid` recovers the head via `floor(phase * 9)`; offset by 0.5
     // so the floor lands exactly on `head`.
     let phase = (head as f32 + 0.5) / DOT_ORDER.len() as f32;
@@ -427,9 +410,9 @@ const QUADRANT_FRAMES: [[(usize, usize); 3]; 4] = [
 ];
 
 /// ExecutingTool rotating quadrant. `tick` drives the 4-frame clockwise
-/// sweep. Static frame (no animation) is the top-left quadrant.
-fn quadrant_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
-    let frame = if animate { (tick % 4) as usize } else { 0 };
+/// sweep.
+fn quadrant_grid(size: Pixels, color: Hsla, tick: u64) -> gpui::AnyElement {
+    let frame = (tick % 4) as usize;
     QuadrantGrid {
         dim: size,
         color,
@@ -503,24 +486,10 @@ mod tests {
     }
 
     #[test]
-    fn animate_defaults_on_and_builder_overrides() {
-        let badge = AgentStatusBadge::new(
-            SessionStatus::Working,
-            IndicatorSize::Leading,
-            Hsla::default(),
-        );
-        assert!(badge.animate, "new() must default to animated");
-        assert!(
-            !badge.animate(false).animate,
-            "animate(false) must disable the animation"
-        );
-    }
-
-    #[test]
     fn tick_ms_is_positive_and_low_rate() {
         const {
-            // ~6 fps target: low enough to slash redraws, high enough that
-            // the 6-frame comet still reads as motion.
+            // ~4 fps target: low enough to bound off-focus redraws, high
+            // enough that the 6-frame comet still reads as motion.
             assert!(theme::STATUS_INDICATOR_TICK_MS >= 80);
             assert!(theme::STATUS_INDICATOR_TICK_MS <= 300);
         }

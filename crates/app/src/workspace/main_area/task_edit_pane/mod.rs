@@ -49,7 +49,7 @@ pub(in crate::workspace) fn render(
 ) -> impl IntoElement {
     let theme_t = theme::current(cx);
     let pane_bg = theme_t.terminal_bg;
-    let pane_text = theme_t.modal_text_primary;
+    let pane_text = theme::TEXT_PRIMARY;
     let label_color = theme_t.muted_text;
 
     let title_block = labeled_field(
@@ -350,7 +350,7 @@ fn subtask_row(
 
     let t = theme::current(cx);
     let muted_color = t.muted_text;
-    let strong_color = t.modal_text_primary;
+    let strong_color = theme::TEXT_PRIMARY;
 
     let title_body: gpui::AnyElement = if is_editing {
         div()
@@ -555,15 +555,15 @@ fn branch_field(te: &TaskEditContent, cx: &gpui::App) -> gpui::AnyElement {
         .gap(px(theme::MODAL_PANEL_GAP))
         .child(input_frame);
     if let BranchValidation::Invalid { reason } = &te.branch_validation {
-        col = col.child(branch_error(reason.clone(), cx));
+        col = col.child(branch_error(reason.clone()));
     }
     col.into_any_element()
 }
 
-fn branch_error(reason: SharedString, cx: &gpui::App) -> impl IntoElement {
+fn branch_error(reason: SharedString) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).right_panel_task_error_color)
+        .text_color(theme::ERROR)
         .child(reason)
 }
 

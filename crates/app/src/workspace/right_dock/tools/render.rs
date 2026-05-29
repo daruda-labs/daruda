@@ -22,7 +22,7 @@ use gpui::{AnyElement, Context, IntoElement, MouseButton, SharedString, div, pre
 
 use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
 use crate::surface::strings;
-use crate::ui::Divider;
+use crate::ui::{Divider, button_primary};
 use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::RightDockSnapshot;
@@ -39,7 +39,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .px(px(theme::RIGHT_PANEL_PAD_X))
         .py(px(theme::RIGHT_PANEL_PAD_Y))
         .gap(px(theme::MCP_SECTION_GAP))
-        .child(header_row(workspace.clone(), &t))
+        .child(header_row(workspace.clone()))
         .child(scope_section(
             strings::mcp_project(),
             McpScope::Project,
@@ -60,7 +60,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .into_any_element()
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl IntoElement {
+fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
@@ -70,33 +70,18 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
         .child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(t.mcp_section_header_text)
+                .text_color(theme::TEXT_TERTIARY)
                 .child(strings::right_panel_tab_tools()),
         )
-        .child(new_server_button(workspace, t))
+        .child(new_server_button(workspace))
 }
 
-fn new_server_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl IntoElement {
-    let badge_bg = t.mcp_transport_badge_bg;
-    let badge_text = t.mcp_transport_badge_text;
-    let hover_bg = t.mcp_row_hover_bg;
-    div()
-        .flex()
-        .flex_none()
-        .px(px(theme::MCP_BADGE_PAD_X))
-        .py(px(theme::MCP_BADGE_PAD_Y))
-        .rounded(px(theme::MCP_BADGE_RADIUS))
-        .bg(badge_bg)
-        .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(badge_text)
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover_bg))
-        .child(strings::mcp_new_button())
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
-            }
-        })
+fn new_server_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
+    button_primary("mcp-new", strings::mcp_new_button()).on_click(move |_, window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
+        }
+    })
 }
 
 fn scope_section(
@@ -115,7 +100,7 @@ fn scope_section(
             .items_center()
             .gap(px(theme::MCP_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(t.mcp_section_header_text)
+            .text_color(theme::TEXT_TERTIARY)
             .child(label.into()),
     );
 
@@ -124,7 +109,7 @@ fn scope_section(
             .child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.mcp_empty_text)
+                    .text_color(theme::TEXT_DISABLED)
                     .child(strings::mcp_no_project_hint()),
             )
             .into_any_element();
@@ -138,7 +123,7 @@ fn scope_section(
         col = col.child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.mcp_empty_text)
+                .text_color(theme::TEXT_DISABLED)
                 .child(msg),
         );
         return col.into_any_element();
@@ -164,23 +149,23 @@ fn server_row(
     let name_for_edit = name.clone();
     let name_for_delete = name.clone();
 
-    let row_hover_bg = t.mcp_row_hover_bg;
-    let actions_bg = t.mcp_row_hover_bg;
+    let row_hover_bg = theme::OVERLAY_HOVER;
+    let actions_bg = theme::OVERLAY_HOVER;
 
     let indicator_color = if s.disabled {
-        t.mcp_indicator_disabled
+        theme::TEXT_DISABLED
     } else if s.is_malformed() {
         t.mcp_indicator_malformed
     } else {
-        t.mcp_indicator_enabled
+        theme::SIGNAL_GREEN
     };
 
     let (status_label, status_color) = if s.disabled {
-        (strings::mcp_status_disabled(), t.mcp_disabled_badge_text)
+        (strings::mcp_status_disabled(), theme::TEXT_DISABLED)
     } else if s.is_malformed() {
         (strings::mcp_status_malformed(), t.mcp_malformed_badge_text)
     } else {
-        (strings::mcp_status_enabled(), t.mcp_row_body_text)
+        (strings::mcp_status_enabled(), theme::TEXT_SECONDARY)
     };
 
     let server_name = SharedString::from(s.name.clone());
@@ -223,13 +208,13 @@ fn server_row(
                 .flex_none()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                 .text_color(if s.disabled {
-                    t.mcp_disabled_badge_text
+                    theme::TEXT_DISABLED
                 } else {
-                    t.modal_text_primary
+                    theme::TEXT_PRIMARY
                 })
                 .child(server_name),
         )
-        .child(transport_chip(transport_label, t))
+        .child(transport_chip(transport_label))
         .child(
             div()
                 .flex_1()
@@ -260,7 +245,6 @@ fn server_row(
                     name_for_delete,
                     workspace_edit,
                     workspace_delete,
-                    t,
                 )),
         )
         .into_any_element()
@@ -272,7 +256,6 @@ fn row_actions(
     name_for_delete: String,
     workspace_edit: gpui::WeakEntity<Workspace>,
     workspace_delete: gpui::WeakEntity<Workspace>,
-    t: &DarudaTheme,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -282,7 +265,6 @@ fn row_actions(
         .child(text_action_button(
             "edit",
             strings::mcp_button_edit(),
-            t,
             move |window, cx| {
                 if let Some(ws) = workspace_edit.upgrade() {
                     let n = name_for_edit.clone();
@@ -293,7 +275,6 @@ fn row_actions(
         .child(text_action_button(
             "del",
             strings::mcp_button_delete(),
-            t,
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
                     let n = name_for_delete.clone();
@@ -305,15 +286,15 @@ fn row_actions(
         ))
 }
 
-fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
+fn transport_chip(label: &'static str) -> impl IntoElement {
     div()
         .flex_none()
         .px(px(theme::MCP_BADGE_PAD_X))
         .py(px(theme::MCP_BADGE_PAD_Y))
         .rounded(px(theme::MCP_BADGE_RADIUS))
-        .bg(t.mcp_transport_badge_bg)
+        .bg(theme::OVERLAY_SELECTED)
         .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(t.mcp_transport_badge_text)
+        .text_color(theme::TEXT_SECONDARY)
         .child(label)
 }
 
@@ -325,14 +306,13 @@ fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
 fn text_action_button<F>(
     id: impl Into<gpui::ElementId>,
     label: impl Into<gpui::SharedString>,
-    t: &DarudaTheme,
     on_click: F,
 ) -> impl IntoElement
 where
     F: Fn(&mut gpui::Window, &mut gpui::App) + 'static,
 {
-    let idle_color = t.mcp_transport_badge_text;
-    let hover_color = t.modal_text_primary;
+    let idle_color = theme::TEXT_SECONDARY;
+    let hover_color = theme::TEXT_PRIMARY;
     div()
         .id(id)
         .flex_none()

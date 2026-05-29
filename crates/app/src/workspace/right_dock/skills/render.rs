@@ -25,7 +25,7 @@ use super::super::super::layout::Dock;
 use super::super::super::layout::RightDockSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
-use crate::ui::Divider;
+use crate::ui::{Divider, button, button_primary};
 use crate::workspace::Workspace;
 
 /// Render the Skills tab body.
@@ -66,11 +66,11 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .px(px(theme::RIGHT_PANEL_PAD_X))
         .py(px(theme::RIGHT_PANEL_PAD_Y))
         .gap(px(theme::SKILL_SECTION_GAP))
-        .child(header_row(workspace.clone(), &t))
-        .child(search_row(snap, cx, &t));
+        .child(header_row(workspace.clone()))
+        .child(search_row(snap, cx));
 
     if searching && !any_match {
-        col = col.child(search_empty_hint(snap.skill_search_query.clone(), &t));
+        col = col.child(search_empty_hint(snap.skill_search_query.clone()));
         return col.into_any_element();
     }
 
@@ -151,10 +151,10 @@ fn filter_skills(skills: &[Skill], query_lower: &str) -> Vec<Skill> {
 /// relative container so the in-field `✕` button can sit absolutely on
 /// the trailing edge. The icon only renders while the query is
 /// non-empty — the row collapses back to a plain input at rest.
-fn search_row(snap: &RightDockSnapshot, cx: &gpui::App, t: &DarudaTheme) -> impl IntoElement {
+fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.skill_search_query.trim().is_empty();
-    let chip_text = t.skill_aux_chip_text;
-    let chip_hover_text = t.skill_name_text;
+    let chip_text = theme::TEXT_SECONDARY;
+    let chip_hover_text = theme::TEXT_PRIMARY;
     let workspace = snap.workspace.clone();
     div()
         .relative()
@@ -194,11 +194,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App, t: &DarudaTheme) -> impl
 /// Body shown when a non-empty search yields zero matches across every
 /// scope. Text-only — the in-field `✕` already provides one-click
 /// recovery, so a second affordance here would be redundant.
-fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
+fn search_empty_hint(query: String) -> impl IntoElement {
     let display_query = SharedString::from(format!("\"{}\"", query.trim()));
     div()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(t.skill_empty_text)
+        .text_color(theme::TEXT_DISABLED)
         .child(SharedString::from(format!(
             "{}{}.",
             strings::skills_search_empty_prefix(),
@@ -206,7 +206,7 @@ fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
         )))
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl IntoElement {
+fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
@@ -216,7 +216,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
         .child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(t.skill_section_header_text)
+                .text_color(theme::TEXT_TERTIARY)
                 .child(strings::right_panel_tab_skills()),
         )
         .child(
@@ -224,8 +224,8 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
                 .flex()
                 .flex_row()
                 .gap(px(theme::SKILL_HEADER_GAP))
-                .child(manage_plugins_button(t))
-                .child(new_skill_button(workspace, t)),
+                .child(manage_plugins_button())
+                .child(new_skill_button(workspace)),
         )
 }
 
@@ -233,53 +233,26 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl I
 /// `OpenSettings(BuiltinSection::Plugin)` so the user lands on the
 /// install / uninstall page in the Settings window. The Skills tab
 /// itself stays read-only — see Settings → Plugin for the CRUD UI.
-fn manage_plugins_button(t: &DarudaTheme) -> impl IntoElement {
+fn manage_plugins_button() -> impl IntoElement {
     use crate::workspace::OpenSettings;
-    let chip_bg = t.skill_aux_chip_bg;
-    let chip_text = t.skill_aux_chip_text;
-    let hover_bg = t.skill_row_hover_bg;
-    div()
-        .flex()
-        .flex_none()
-        .id("plugin-manage-open-settings")
-        .px(px(theme::SKILL_BADGE_PAD_X))
-        .py(px(theme::SKILL_BADGE_PAD_Y))
-        .rounded(px(theme::SKILL_BADGE_RADIUS))
-        .bg(chip_bg)
-        .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-        .text_color(chip_text)
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover_bg))
-        .child(strings::skills_manage_plugins_button())
-        .on_mouse_down(MouseButton::Left, |_, window, cx| {
-            window.dispatch_action(
-                Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
-                cx,
-            );
-        })
+    button(
+        "plugin-manage-open-settings",
+        strings::skills_manage_plugins_button(),
+    )
+    .on_click(|_, window, cx| {
+        window.dispatch_action(
+            Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
+            cx,
+        );
+    })
 }
 
-fn new_skill_button(workspace: gpui::WeakEntity<Workspace>, t: &DarudaTheme) -> impl IntoElement {
-    let chip_bg = t.skill_badge_user_only_bg;
-    let chip_text = t.skill_badge_user_only_text;
-    let hover_bg = t.skill_row_hover_bg;
-    div()
-        .flex()
-        .flex_none()
-        .px(px(theme::SKILL_BADGE_PAD_X))
-        .py(px(theme::SKILL_BADGE_PAD_Y))
-        .rounded(px(theme::SKILL_BADGE_RADIUS))
-        .bg(chip_bg)
-        .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-        .text_color(chip_text)
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover_bg))
-        .child(strings::skills_new_button())
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
-            }
-        })
+fn new_skill_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
+    button_primary("skills-new", strings::skills_new_button()).on_click(move |_, window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -319,7 +292,7 @@ fn scope_section(
             .items_center()
             .gap(px(theme::SKILL_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(t.skill_section_header_text)
+            .text_color(theme::TEXT_TERTIARY)
             .child(label.into())
             .child(neutral_chip(count_text, t)),
     );
@@ -330,7 +303,7 @@ fn scope_section(
             col.child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.skill_empty_text)
+                    .text_color(theme::TEXT_DISABLED)
                     .child(strings::skills_no_project_hint()),
             )
             .into_any_element(),
@@ -352,7 +325,7 @@ fn scope_section(
             col.child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(t.skill_empty_text)
+                    .text_color(theme::TEXT_DISABLED)
                     .child(msg),
             )
             .into_any_element(),
@@ -497,7 +470,7 @@ fn plugin_title(plugin_local: &str, count: usize, t: &DarudaTheme) -> gpui::AnyE
             div()
                 .flex_1()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(t.skill_name_text)
+                .text_color(theme::TEXT_PRIMARY)
                 .child(SharedString::from(plugin_local.to_string())),
         )
         .child(neutral_chip(SharedString::from(format!("{count}")), t))
@@ -515,7 +488,7 @@ fn skill_row(
 
     let dir = s.dir.clone();
     let scope = s.scope;
-    let meta_color = t.skill_meta_text;
+    let meta_color = theme::TEXT_SECONDARY;
     let row_hover_bg = t.skill_row_hover_bg;
     let actions_bg = t.skill_row_hover_bg;
 
@@ -748,7 +721,7 @@ fn neutral_chip(label: impl Into<SharedString>, t: &DarudaTheme) -> impl IntoEle
         .rounded(px(theme::SKILL_BADGE_RADIUS))
         .bg(t.skill_aux_chip_bg)
         .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-        .text_color(t.skill_aux_chip_text)
+        .text_color(theme::TEXT_SECONDARY)
         .child(label.into())
 }
 

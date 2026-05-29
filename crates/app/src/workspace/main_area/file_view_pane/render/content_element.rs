@@ -115,7 +115,7 @@ impl gpui::Element for FileViewerContentElement {
         cx: &mut App,
     ) -> FileViewerContentPrepaint {
         let t = theme::current(cx);
-        let selection_bg = t.file_viewer_selection_bg;
+        let selection_bg = theme::SELECTION_BG;
         let word_del_bg = t.file_diff_word_del_bg;
         let word_add_bg = t.file_diff_word_add_bg;
         let font_size = px(theme::FILE_VIEWER_FONT_SIZE);

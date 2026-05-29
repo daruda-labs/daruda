@@ -20,15 +20,14 @@ pub(in crate::workspace) struct PathDrag {
 }
 
 impl Render for PathDrag {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let label = self
             .path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.path.to_string_lossy().into_owned());
-        let t = theme::current(cx);
-        let pill_bg = t.tab_active_bg;
-        let pill_text = t.tab_active_text;
+        let pill_bg = theme::CANVAS;
+        let pill_text = theme::TEXT_PRIMARY;
         // GPUI positions the ghost at (cursor - offset), so padding the wrapper
         // by (offset + DRAG_PILL_CURSOR_OFFSET) places the pill at cursor + (4, 4).
         div()

@@ -47,14 +47,14 @@ pub(in crate::workspace) fn git_status_color(ch: char, staged: bool, cx: &gpui::
     match ch {
         'M' | 'D' => {
             if staged {
-                t.git_staged_color
+                theme::GIT_STAGED
             } else {
-                t.git_unstaged_color
+                theme::GIT_MODIFIED
             }
         }
-        'A' | 'R' | 'C' => t.git_staged_color,
-        '?' => t.git_untracked_color,
-        'U' => t.git_unstaged_color,
+        'A' | 'R' | 'C' => theme::GIT_STAGED,
+        '?' => theme::GIT_UNTRACKED,
+        'U' => theme::GIT_MODIFIED,
         _ => t.faint_text,
     }
 }

@@ -359,21 +359,21 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_name(), cx))
+            .child(field_label(strings::skills_field_name()))
             .child(readonly_value(name_label, cx))
-            .child(field_label(strings::skills_field_scope(), cx))
+            .child(field_label(strings::skills_field_scope()))
             .child(readonly_value(scope_label.to_string(), cx))
-            .child(field_label(strings::skills_field_description(), cx))
+            .child(field_label(strings::skills_field_description()))
             .child(input(&self.description_input, cx, 0))
-            .child(field_label(strings::skills_field_when_to_use(), cx))
+            .child(field_label(strings::skills_field_when_to_use()))
             .child(input(&self.when_to_use_input, cx, 1))
-            .child(field_label(strings::skills_field_allowed_tools(), cx))
+            .child(field_label(strings::skills_field_allowed_tools()))
             .child(input(&self.allowed_tools_input, cx, 2))
-            .child(field_label(strings::skills_field_arg_hint(), cx))
+            .child(field_label(strings::skills_field_arg_hint()))
             .child(input(&self.argument_hint_input, cx, 3))
-            .child(field_label(strings::skills_field_paths(), cx))
+            .child(field_label(strings::skills_field_paths()))
             .child(input(&self.paths_input, cx, 4))
-            .child(field_label(strings::skills_field_model(), cx))
+            .child(field_label(strings::skills_field_model()))
             .child(input(&self.model_input, cx, 5))
             .child(
                 checkbox(
@@ -405,7 +405,7 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_body(), cx))
+            .child(field_label(strings::skills_field_body()))
             // body_editor sits between the left-column inputs and the
             // two toggles so Tab moves directly from the last metadata
             // field into the markdown body — toggles come last as
@@ -498,7 +498,7 @@ fn readonly_value(value: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .border_1()
         .border_color(t.modal_input_border)
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(t.modal_text_primary)
+        .text_color(theme::TEXT_PRIMARY)
         .child(value.into())
 }
 

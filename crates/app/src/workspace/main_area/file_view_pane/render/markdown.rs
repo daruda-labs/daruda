@@ -20,7 +20,7 @@ pub(super) fn render_md_body(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let body_text = t.file_viewer_text;
-    let block_sel_bg = t.file_viewer_selection_bg;
+    let block_sel_bg = theme::SELECTION_BG;
     let t = t.clone();
     let mut col = div()
         .flex()
@@ -122,9 +122,9 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             let mut list = div().flex().flex_col().gap(px(theme::MD_LIST_ITEM_GAP));
             for item in items {
                 let (bullet, bullet_color) = match item.checked {
-                    Some(true) => ("☑", t.md_task_checked_color),
-                    Some(false) => ("☐", t.md_list_bullet_color),
-                    None => ("•", t.md_list_bullet_color),
+                    Some(true) => ("☑", theme::SUCCESS),
+                    Some(false) => ("☐", theme::TEXT_TERTIARY),
+                    None => ("•", theme::TEXT_TERTIARY),
                 };
                 let mut item_col = div().flex().flex_col();
                 let row = div()
@@ -165,7 +165,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                         div()
                             .flex_none()
                             .min_w(px(theme::MD_LIST_INDENT))
-                            .text_color(t.md_list_bullet_color)
+                            .text_color(theme::TEXT_TERTIARY)
                             .child(num),
                     )
                     .child(
@@ -237,7 +237,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         MdBlock::HtmlBlock(html) => div()
             .font(gpui::font("monospace"))
             .text_size(px(theme::MD_HTML_FONT_SIZE))
-            .text_color(t.md_html_color)
+            .text_color(theme::TEXT_DISABLED)
             .child(html.clone())
             .into_any_element(),
 
@@ -357,14 +357,14 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
         MdSpan::Code(s) => div()
             .font(gpui::font("monospace"))
             .bg(t.md_code_inline_bg)
-            .text_color(t.md_code_inline_text)
+            .text_color(theme::AGENT_RUNNING)
             .px(px(theme::MD_CODE_INLINE_PAD_X))
             .rounded(px(theme::MD_BLOCK_RADIUS))
             .child(s.clone())
             .into_any_element(),
 
         MdSpan::Link { text, .. } => div()
-            .text_color(t.md_link_color)
+            .text_color(theme::PRIMARY)
             .child(text.clone())
             .into_any_element(),
 
@@ -372,7 +372,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .flex()
             .flex_row()
             .flex_wrap()
-            .text_color(t.md_strikethrough_color)
+            .text_color(theme::TEXT_DISABLED)
             .children(render_md_spans(inner, t))
             .into_any_element(),
 
@@ -390,7 +390,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
 
         MdSpan::Html(s) => div()
             .font(gpui::font("monospace"))
-            .text_color(t.md_html_color)
+            .text_color(theme::TEXT_DISABLED)
             .text_size(px(theme::MD_HTML_FONT_SIZE))
             .child(s.clone())
             .into_any_element(),

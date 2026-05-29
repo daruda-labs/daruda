@@ -369,26 +369,26 @@ impl Render for AddMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp_field_name(), cx))
+            .child(field_label(strings::mcp_field_name()))
             .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::mcp_field_scope(), cx))
+            .child(field_label(strings::mcp_field_scope()))
             .child(scope_chip)
-            .child(field_label(strings::mcp_field_transport(), cx))
+            .child(field_label(strings::mcp_field_transport()))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::mcp_field_command(), cx))
+                    .child(field_label(strings::mcp_field_command()))
                     .child(input(&self.command_input, cx, 1))
-                    .child(field_label(strings::mcp_field_args(), cx))
+                    .child(field_label(strings::mcp_field_args()))
                     .child(input(&self.args_input, cx, 2));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::mcp_field_url(), cx))
+                    .child(field_label(strings::mcp_field_url()))
                     .child(input(&self.url_input, cx, 1))
-                    .child(field_label(strings::mcp_field_headers(), cx))
+                    .child(field_label(strings::mcp_field_headers()))
                     .child(input(&self.headers_input, cx, 2));
             }
         }
@@ -398,7 +398,7 @@ impl Render for AddMcpServerModal {
         // regardless of the active transport (Stdio uses 1,2; remote
         // uses 1,2 for url+headers — env uses 3 across both branches).
         body = body
-            .child(field_label(strings::mcp_field_env(), cx))
+            .child(field_label(strings::mcp_field_env()))
             .child(input(&self.env_input, cx, 3))
             .child(
                 checkbox("mcp-disabled", strings::mcp_field_disabled(), 4)

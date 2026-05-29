@@ -19,7 +19,7 @@ pub(in crate::workspace) fn claude_install_banner(
     let bg = t.claude_banner_bg;
     let border = t.claude_banner_border;
     let hover_bg = t.claude_banner_hover_bg;
-    let text = t.claude_banner_text;
+    let text = theme::TEXT_SECONDARY;
     let icon = t.claude_banner_icon;
     let hint_text = t.faint_text;
     div()

@@ -39,7 +39,7 @@ pub(in crate::workspace::left_dock::projects) fn group_card(
         .rounded(px(theme::LANE_CARD_RADIUS))
         .bg(bg)
         .border(px(theme::LANE_CARD_BORDER_W))
-        .border_color(t.lane_card_border)
+        .border_color(theme::OVERLAY_ACTIVE)
         .when(!is_active, move |d| d.hover(move |d| d.bg(hover_bg)))
         .child(header)
         .child(body)

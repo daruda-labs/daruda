@@ -94,12 +94,12 @@ fn toast_pill(
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let pill_bg = t.toast_bg;
+    let pill_bg = theme::SURFACE_4;
     let pill_border = t.toast_border;
     let pill_text = t.toast_text;
-    let pill_text_dim = t.toast_text_dim;
+    let pill_text_dim = theme::TEXT_SECONDARY;
     let repeat_bg = t.toast_repeat_bg;
-    let tint = severity_tint(snap.severity, t);
+    let tint = severity_tint(snap.severity);
     let glyph = severity_glyph(snap.severity);
     let id = snap.id;
 
@@ -216,11 +216,11 @@ fn dismiss_button(
     )
 }
 
-fn severity_tint(severity: ErrorSeverity, t: &crate::ui::theme::DarudaTheme) -> gpui::Hsla {
+fn severity_tint(severity: ErrorSeverity) -> gpui::Hsla {
     match severity {
-        ErrorSeverity::Info => t.toast_tint_info,
-        ErrorSeverity::Warning => t.toast_tint_warning,
-        ErrorSeverity::Error => t.toast_tint_error,
+        ErrorSeverity::Info => theme::PRIMARY,
+        ErrorSeverity::Warning => theme::WARNING,
+        ErrorSeverity::Error => theme::ERROR,
     }
 }
 

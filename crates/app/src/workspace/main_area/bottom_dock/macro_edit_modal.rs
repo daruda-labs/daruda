@@ -365,7 +365,7 @@ impl Render for MacroEditModal {
             "Create"
         };
 
-        let error_text_color = theme::current(cx).modal_error_text;
+        let error_text_color = theme::ERROR;
 
         // Dialog provides outer chrome (panel bg / border / radius /
         // padding / title / backdrop). The modal body is just the

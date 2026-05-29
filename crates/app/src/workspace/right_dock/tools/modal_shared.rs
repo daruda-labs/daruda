@@ -33,10 +33,10 @@ pub(super) fn scope_options() -> Vec<(McpScope, String)> {
 
 /// Small label rendered above a form field in the modal stack-style
 /// layout (label-on-top instead of inline).
-pub(super) fn field_label(text: impl Into<SharedString>, cx: &gpui::App) -> impl IntoElement {
+pub(super) fn field_label(text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).mcp_section_header_text)
+        .text_color(theme::TEXT_TERTIARY)
         .child(text.into())
 }
 
@@ -55,9 +55,9 @@ where
 {
     let t = theme::current(cx);
     let (bg, text_color) = if active {
-        (t.mcp_transport_badge_text, t.modal_panel_bg)
+        (theme::TEXT_SECONDARY, t.modal_panel_bg)
     } else {
-        (t.mcp_transport_badge_bg, t.mcp_transport_badge_text)
+        (theme::OVERLAY_SELECTED, theme::TEXT_SECONDARY)
     };
     div()
         .id(id)

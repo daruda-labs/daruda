@@ -165,7 +165,7 @@ impl Render for SkillInvocationModal {
         let title = SharedString::from(format!("/{}", self.label.display_name));
 
         let t = theme::current(cx);
-        let title_text = t.modal_text_primary;
+        let title_text = theme::TEXT_PRIMARY;
         let description_text = t.modal_secondary_text;
 
         let mut header = div()

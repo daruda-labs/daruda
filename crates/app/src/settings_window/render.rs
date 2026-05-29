@@ -14,9 +14,9 @@ use crate::surface::strings as s;
 impl Render for SettingsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
-        let header_bg = t.tab_bar_bg;
-        let header_text = t.tab_active_text;
-        let error_text = t.modal_error_text;
+        let header_bg = theme::SURFACE_1;
+        let header_text = theme::TEXT_PRIMARY;
+        let error_text = theme::ERROR;
         let panel_bg = t.modal_panel_bg;
 
         // Header bar (window-wide, above sidebar+body).
@@ -181,10 +181,9 @@ impl SettingsWindow {
         label: impl Into<gpui::SharedString>,
         is_active: bool,
     ) -> impl IntoElement {
-        let t = theme::current(cx);
-        let row_text = t.modal_text_primary;
-        let active_bg = t.settings_sidebar_row_active_bg;
-        let hover_bg = t.settings_sidebar_row_hover_bg;
+        let row_text = theme::TEXT_PRIMARY;
+        let active_bg = theme::OVERLAY_PROMINENT;
+        let hover_bg = theme::OVERLAY_SELECTED;
 
         let row_id: gpui::ElementId =
             gpui::ElementId::Name(format!("settings-nav-{}", section.slug()).into());

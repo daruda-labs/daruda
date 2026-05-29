@@ -67,10 +67,10 @@ fn group_plugins_for_settings(skills: &[Skill]) -> Vec<PluginGroupForSettings> {
     out
 }
 
-fn plugin_subheading(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
+fn plugin_subheading(label: impl Into<gpui::SharedString>) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).modal_text_primary)
+        .text_color(theme::TEXT_PRIMARY)
         .child(label.into())
 }
 
@@ -92,7 +92,7 @@ fn detail_row(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let label_color = t.modal_secondary_text;
-    let value_color = t.modal_text_primary;
+    let value_color = theme::TEXT_PRIMARY;
     div()
         .flex()
         .flex_row()
@@ -185,7 +185,7 @@ impl SettingsWindow {
             header_col = header_col.child(
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(theme::current(cx).modal_error_text)
+                    .text_color(theme::ERROR)
                     .child(err),
             );
         }
@@ -228,7 +228,7 @@ impl SettingsWindow {
 
         let mut col = div().flex().flex_col().gap(px(theme::MODAL_PANEL_GAP));
 
-        col = col.child(plugin_subheading(s::settings_plugin_installed_header(), cx));
+        col = col.child(plugin_subheading(s::settings_plugin_installed_header()));
         if installed.is_empty() {
             col = col.child(plugin_empty_hint(s::settings_plugin_none_installed(), cx));
         } else {
@@ -237,7 +237,7 @@ impl SettingsWindow {
             }
         }
 
-        col = col.child(plugin_subheading(s::settings_plugin_available_header(), cx));
+        col = col.child(plugin_subheading(s::settings_plugin_available_header()));
         if available.is_empty() {
             col = col.child(plugin_empty_hint(s::settings_plugin_none_available(), cx));
         } else {
@@ -266,9 +266,9 @@ impl SettingsWindow {
         let plugin_id = group.plugin_id.clone();
 
         let t = theme::current(cx);
-        let title_color = t.modal_text_primary;
+        let title_color = theme::TEXT_PRIMARY;
         let subtitle_color = t.modal_secondary_text;
-        let active_bg = t.settings_sidebar_row_active_bg;
+        let active_bg = theme::OVERLAY_PROMINENT;
         let hover_bg = t.skill_row_hover_bg;
 
         let mut row = div()
@@ -341,7 +341,7 @@ impl SettingsWindow {
             .filter(|sk| sk.plugin_id.as_deref() == Some(group.plugin_id.as_str()))
             .collect();
 
-        let title_color = theme::current(cx).modal_text_primary;
+        let title_color = theme::TEXT_PRIMARY;
         let header = div().flex().flex_col().gap(px(theme::SKILL_ROW_GAP)).child(
             div()
                 .text_size(px(theme::MODAL_TITLE_FONT_SIZE))
@@ -399,15 +399,11 @@ impl SettingsWindow {
 
         let action_row = self.plugin_action_row(group, in_flight, cx);
 
-        let mut skills_col =
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(theme::SKILL_ROW_GAP))
-                .child(plugin_subheading(
-                    s::settings_plugin_detail_skills_header(),
-                    cx,
-                ));
+        let mut skills_col = div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::SKILL_ROW_GAP))
+            .child(plugin_subheading(s::settings_plugin_detail_skills_header()));
         if skills_for_plugin.is_empty() {
             skills_col =
                 skills_col.child(plugin_empty_hint(s::settings_plugin_detail_no_skills(), cx));
@@ -513,8 +509,8 @@ impl SettingsWindow {
         ));
 
         let t = theme::current(cx);
-        let name_color = t.modal_text_primary;
-        let meta_color = t.skill_meta_text;
+        let name_color = theme::TEXT_PRIMARY;
+        let meta_color = theme::TEXT_SECONDARY;
         let row_hover_bg = t.skill_row_hover_bg;
 
         let header_line = div()
@@ -605,13 +601,13 @@ impl SettingsWindow {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let t = theme::current(cx);
-        let title_color = t.modal_text_primary;
+        let title_color = theme::TEXT_PRIMARY;
         let secondary_color = t.modal_secondary_text;
-        let error_color = t.modal_error_text;
-        let section_header_color = t.skill_section_header_text;
+        let error_color = theme::ERROR;
+        let section_header_color = theme::TEXT_TERTIARY;
         let input_bg = t.modal_input_bg;
         let input_border = t.modal_input_border;
-        let body_text_color = t.modal_text_primary;
+        let body_text_color = theme::TEXT_PRIMARY;
 
         let header = div()
             .flex()

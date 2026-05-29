@@ -17,7 +17,7 @@
 //!
 //! This module re-exports both palettes so app-side call sites can
 //! write `use crate::ui::theme;` and reach every constant through one
-//! path — `theme::TAB_BAR_BG`, `theme::MODAL_PANEL_BG`,
+//! path — `theme::SURFACE_1`, `theme::MODAL_PANEL_BG`,
 //! `theme::TERMINAL_FG`, etc. The split is purely a code-organization
 //! concern; consumers should not need to know whether a given
 //! constant lives in [`palette`] or in `daruda_terminal::ux::theme`.
@@ -30,7 +30,7 @@ pub use daruda_theme::DarudaTheme;
 /// Read the currently-installed `DarudaTheme` palette. Wraps
 /// `cx.global::<DarudaTheme>()` so call sites read like
 /// `theme::current(cx).tab_bar_bg` — visually parallel to the
-/// existing `theme::TAB_BAR_BG` const path.
+/// existing `theme::SURFACE_1` const path.
 ///
 /// Phase 3-C migrates the workspace-chrome call sites (tab strip,
 /// pane header, dock, status bar, lanes list) to this helper;
@@ -108,7 +108,7 @@ pub use daruda_terminal::ux::theme::*;
 // `crate::ui::theme` surface so the underlying split between
 // `palette` and `daruda_terminal::ux::theme` is transparent.
 use crate::ui::theme as p;
-use gpui::{App, hsla, px};
+use gpui::{App, px};
 use gpui_component::{Theme, ThemeMode};
 
 /// Idempotent installer — ensures `gpui_component::Theme` Global
@@ -148,10 +148,10 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     // Surfaces
     // ---------------------------------------------------------------
-    t.background = d.tab_bar_bg;
+    t.background = SURFACE_1;
     t.popover = d.modal_panel_bg;
-    t.popover_foreground = d.modal_text_primary;
-    t.list = d.tab_bar_bg;
+    t.popover_foreground = TEXT_PRIMARY;
+    t.list = SURFACE_1;
     t.list_head = d.tab_inactive_bg;
     t.list_even = d.modal_panel_bg;
     // Transparent accordion bg so the right-bar Skills tab's plugin
@@ -159,7 +159,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // panel-on-panel sandwich. `hsla(_, _, _, 0.0)` = invisible — the
     // parent's background shows through. `accordion_hover` keeps its
     // subtle tint below for affordance.
-    t.accordion = hsla(0.0, 0.0, 0.0, 0.0);
+    t.accordion = TRANSPARENT;
     t.muted = d.tab_inactive_bg;
     t.group_box = d.modal_panel_bg;
     t.group_box_foreground = d.muted_text;
@@ -167,7 +167,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     // Foreground (text)
     // ---------------------------------------------------------------
-    t.foreground = d.modal_text_primary;
+    t.foreground = TEXT_PRIMARY;
     t.muted_foreground = d.muted_text;
     t.description_list_label_foreground = d.muted_text;
 
@@ -176,44 +176,44 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.border = d.modal_panel_border;
     t.input = d.modal_input_border;
-    t.drag_border = d.modal_primary_bg;
+    t.drag_border = PRIMARY;
 
     // ---------------------------------------------------------------
     // Primary / accent / focus ring
     // ---------------------------------------------------------------
-    t.primary = d.modal_primary_bg;
-    t.primary_hover = d.modal_primary_hover_bg;
-    t.primary_active = d.modal_primary_bg;
-    t.primary_foreground = d.modal_text_primary;
+    t.primary = PRIMARY;
+    t.primary_hover = ACCENT_HOVER;
+    t.primary_active = PRIMARY;
+    t.primary_foreground = TEXT_PRIMARY;
     t.accent = d.lane_row_hover_bg;
-    t.accent_foreground = d.modal_text_primary;
-    t.ring = d.input_focus_border;
+    t.accent_foreground = TEXT_PRIMARY;
+    t.ring = PRIMARY;
 
     // ---------------------------------------------------------------
     // Info / link — share the primary blue tint.
     // ---------------------------------------------------------------
-    t.info = d.modal_primary_bg;
-    t.info_hover = d.modal_primary_hover_bg;
-    t.info_active = d.modal_primary_bg;
-    t.info_foreground = d.modal_text_primary;
-    t.link = d.modal_primary_bg;
-    t.link_hover = d.modal_primary_hover_bg;
-    t.link_active = d.modal_primary_hover_bg;
+    t.info = PRIMARY;
+    t.info_hover = ACCENT_HOVER;
+    t.info_active = PRIMARY;
+    t.info_foreground = TEXT_PRIMARY;
+    t.link = PRIMARY;
+    t.link_hover = ACCENT_HOVER;
+    t.link_active = ACCENT_HOVER;
 
     // ---------------------------------------------------------------
     // Secondary
     // ---------------------------------------------------------------
     t.secondary = d.button_widget_bg;
     t.secondary_hover = d.button_widget_bg_hover;
-    t.secondary_active = d.tab_active_bg;
+    t.secondary_active = CANVAS;
     t.secondary_foreground = d.modal_secondary_text;
 
     // ---------------------------------------------------------------
     // List rows / accordion (hover + selection)
     // ---------------------------------------------------------------
     t.list_hover = d.lane_row_hover_bg;
-    t.list_active = d.tab_active_bg;
-    t.list_active_border = d.modal_primary_bg;
+    t.list_active = CANVAS;
+    t.list_active_border = PRIMARY;
     t.accordion_hover = d.lane_row_hover_bg;
 
     // ---------------------------------------------------------------
@@ -221,26 +221,26 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // the same hue family at a slightly darker lightness so the icon
     // / state colour remains readable on the light surface.
     // ---------------------------------------------------------------
-    t.danger = hsla(0.0, 0.70, 0.55, 1.0);
-    t.danger_hover = hsla(0.0, 0.70, 0.60, 1.0);
-    t.danger_active = hsla(0.0, 0.70, 0.45, 1.0);
-    t.danger_foreground = d.modal_text_primary;
+    t.danger = ERROR;
+    t.danger_hover = with_lightness(ERROR, 0.68);
+    t.danger_active = with_lightness(ERROR, 0.53);
+    t.danger_foreground = TEXT_PRIMARY;
 
-    t.warning = hsla(40.0 / 360.0, 0.80, 0.55, 1.0);
-    t.warning_hover = hsla(40.0 / 360.0, 0.80, 0.65, 1.0);
-    t.warning_active = hsla(40.0 / 360.0, 0.80, 0.50, 1.0);
-    t.warning_foreground = d.modal_text_primary;
+    t.warning = WARNING;
+    t.warning_hover = with_lightness(WARNING, 0.68);
+    t.warning_active = with_lightness(WARNING, 0.53);
+    t.warning_foreground = TEXT_PRIMARY;
 
-    t.success = d.accent_green;
-    t.success_hover = hsla(135.0 / 360.0, 0.55, 0.65, 1.0);
-    t.success_active = hsla(135.0 / 360.0, 0.55, 0.50, 1.0);
-    t.success_foreground = d.modal_text_primary;
+    t.success = SUCCESS;
+    t.success_hover = with_lightness(SUCCESS, 0.59);
+    t.success_active = with_lightness(SUCCESS, 0.44);
+    t.success_foreground = TEXT_PRIMARY;
 
     // ---------------------------------------------------------------
     // Caret / selection / drop target
     // ---------------------------------------------------------------
-    t.caret = d.modal_primary_bg;
-    t.selection = hsla(210.0 / 360.0, 0.70, 0.55, 0.40);
+    t.caret = PRIMARY;
+    t.selection = SELECTION_BG;
     t.drop_target = d.lane_drop_target_bg;
 
     // ---------------------------------------------------------------
@@ -248,9 +248,9 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // sub-tab usage (left/right dock view tabs, segmented controls).
     // ---------------------------------------------------------------
     t.tab = d.tab_inactive_bg;
-    t.tab_active = d.tab_active_bg;
-    t.tab_active_foreground = d.tab_active_text;
-    t.tab_bar = d.tab_bar_bg;
+    t.tab_active = CANVAS;
+    t.tab_active_foreground = TEXT_PRIMARY;
+    t.tab_bar = SURFACE_1;
     t.tab_bar_segmented = d.tab_inactive_bg;
     t.tab_foreground = d.tab_inactive_text;
 
@@ -261,20 +261,20 @@ pub fn apply_daruda_palette(cx: &mut App) {
     t.scrollbar_thumb = d.button_widget_bg;
     t.scrollbar_thumb_hover = d.button_widget_bg_hover;
     t.skeleton = d.button_widget_bg;
-    t.progress_bar = d.modal_primary_bg;
+    t.progress_bar = PRIMARY;
 
     // ---------------------------------------------------------------
     // Switch / slider — muted gray track + bright thumb.
     // ---------------------------------------------------------------
     t.switch = d.button_widget_bg;
-    t.switch_thumb = d.modal_text_primary;
+    t.switch_thumb = TEXT_PRIMARY;
     t.slider_bar = d.button_widget_bg;
-    t.slider_thumb = d.modal_text_primary;
+    t.slider_thumb = TEXT_PRIMARY;
 
     // ---------------------------------------------------------------
     // Overlay (backdrop behind dialogs)
     // ---------------------------------------------------------------
-    t.overlay = hsla(0.0, 0.0, 0.0, 0.50);
+    t.overlay = with_alpha(CANVAS, MODAL_BACKDROP_ALPHA);
 
     // ---------------------------------------------------------------
     // Radii

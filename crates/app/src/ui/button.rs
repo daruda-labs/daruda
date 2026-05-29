@@ -53,7 +53,7 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
 
 /// `×` close glyph sized to a pane header — hidden by default, fades
 /// in when `group_name` is hovered, fills bg with the destructive
-/// `close_button_hover_bg` on direct hover.
+/// `ERROR` token on direct hover.
 ///
 /// `.invisible() + .group_hover(name, |d| d.visible())` is applied at
 /// the `Button` level, which currently routes the style refinement
@@ -71,7 +71,7 @@ pub fn button_close(
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
         .foreground(t.muted_text)
-        .hover(t.close_button_hover_bg);
+        .hover(theme::ERROR);
     Button::new(id)
         .small()
         .tab_stop(false)
@@ -97,7 +97,7 @@ pub fn button_header_action(
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
         .foreground(t.muted_text)
-        .hover(t.dock_view_tab_active);
+        .hover(theme::TEXT_PRIMARY);
     Button::new(id)
         .small()
         .tab_stop(false)
@@ -139,7 +139,7 @@ pub fn button_toggle(
 ) -> Button {
     let t = theme::current(cx);
     let fg = if active {
-        t.modal_text_primary
+        theme::TEXT_PRIMARY
     } else {
         t.dock_icon_inactive
     };

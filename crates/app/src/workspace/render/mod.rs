@@ -195,15 +195,15 @@ impl Render for Workspace {
 
         let t = theme::current(cx);
         let title_bar_bg = t.title_bar_bg;
-        let tab_bar_bg = t.tab_bar_bg;
-        let tab_bar_border = t.tab_bar_border;
-        let tab_active_bg = t.tab_active_bg;
-        let tab_active_text = t.tab_active_text;
+        let tab_bar_bg = theme::SURFACE_1;
+        let tab_bar_border = theme::HAIRLINE;
+        let tab_active_bg = theme::CANVAS;
+        let tab_active_text = theme::TEXT_PRIMARY;
         let tab_inactive_bg = t.tab_inactive_bg;
         let tab_inactive_text = t.tab_inactive_text;
         let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
         let muted_text = t.muted_text;
-        let close_button_hover_bg = t.close_button_hover_bg;
+        let close_button_hover_bg = theme::ERROR;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         // User-set label (Window > Edit Tab Title…) wins; otherwise fall
@@ -304,14 +304,7 @@ impl Render for Workspace {
         }
 
         // — Build dock snapshots ————————————————————————————————————————
-        // Gate the status-indicator animations on window activation. A
-        // backgrounded window keeps pumping animation frames otherwise,
-        // repainting the whole tree ~60×/s while the user is elsewhere.
-        // GPUI calls `window.refresh()` on activation change, so this
-        // re-renders (and flips back to animated) when the window
-        // regains focus — no explicit observer needed.
-        let should_animate = window.is_window_active();
-        let left_snap = self.prepare_left_dock_snapshot(should_animate, cx);
+        let left_snap = self.prepare_left_dock_snapshot(cx);
         let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
         let right_snap = self.prepare_right_dock_snapshot(cx);
 

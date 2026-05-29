@@ -78,7 +78,7 @@ struct DraggedPanelTabGhost {
 impl Render for DraggedPanelTabGhost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
-        let text_color = t.dock_view_tab_active;
+        let text_color = theme::TEXT_PRIMARY;
         let bg = t.panel_tab_drop_target_bg;
         div()
             .px(px(theme::DOCK_VIEW_TAB_PAD_X))

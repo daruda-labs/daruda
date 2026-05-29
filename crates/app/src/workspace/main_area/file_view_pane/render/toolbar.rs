@@ -27,8 +27,8 @@ pub(super) fn render_file_viewer_toolbar(
     let stat_del = t.file_diff_stat_del;
     let tab_text = t.file_viewer_tab_text;
     let tab_active_bg = t.file_viewer_tab_active_bg;
-    let tab_active_text = t.file_viewer_tab_active_text;
-    let close_hover = t.file_viewer_close_hover;
+    let tab_active_text = theme::TEXT_PRIMARY;
+    let close_hover = theme::TEXT_PRIMARY;
 
     let file_name = fv.path.file_name_lossy();
     let parent_name = fv

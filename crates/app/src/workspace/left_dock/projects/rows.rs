@@ -86,7 +86,7 @@ pub(in crate::workspace) fn group_header_row(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let label_color = t.dock_view_tab_active;
+    let label_color = theme::TEXT_PRIMARY;
     let row_hover_bg = t.lane_row_hover_bg;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
@@ -293,7 +293,7 @@ pub(in crate::workspace) fn project_header_row(
     } = args;
     let t = theme::current(cx);
     let label_color = if is_active {
-        t.dock_view_tab_active
+        theme::TEXT_PRIMARY
     } else {
         t.muted_text
     };
@@ -614,15 +614,15 @@ pub(in crate::workspace) fn worktree_row(
     // Snapshot every row colour from the live theme so the closures
     // below (hover, drag_over) capture stable values.
     let t = theme::current(cx);
-    let unread_dot_color = t.lane_unread;
-    let label_active = t.dock_view_tab_active;
+    let unread_dot_color = theme::WARNING;
+    let label_active = theme::TEXT_PRIMARY;
     let label_inactive = t.muted_text;
-    let badge_pill_bg = t.git_badge_pill_bg;
-    let badge_pill_text = t.git_badge_pill_text;
-    let badge_arrow_text = t.git_badge_arrow_text;
+    let badge_pill_bg = theme::OVERLAY_PROMINENT;
+    let badge_pill_text = theme::TEXT_PRIMARY;
+    let badge_arrow_text = theme::TEXT_TERTIARY;
     let sublabel_color = t.faint_text;
     let row_hover_bg = t.lane_row_hover_bg;
-    let row_active_bg = t.lane_row_active_bg;
+    let row_active_bg = theme::OVERLAY_ACTIVE;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
@@ -698,7 +698,6 @@ pub(in crate::workspace) fn worktree_row(
                 d.child(claude_badges_row(
                     sessions,
                     snap.claude_active_session_id.as_deref(),
-                    snap.claude_animate,
                     cx,
                 ))
             },
@@ -853,7 +852,6 @@ pub(in crate::workspace) fn worktree_row(
                     lane: wt.id,
                 })
                 .copied(),
-            snap.claude_animate,
             cx,
         ))
         .child(body);

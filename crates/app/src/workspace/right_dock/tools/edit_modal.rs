@@ -306,7 +306,7 @@ impl Render for EditMcpServerModal {
             .map(|msg| crate::ui::alert::error("edit-tool-error", msg.clone()));
 
         // Read-only summary line: "Name @ Scope"
-        let summary_text = theme::current(cx).mcp_row_body_text;
+        let summary_text = theme::TEXT_SECONDARY;
         let summary = div()
             .flex()
             .flex_row()
@@ -341,30 +341,30 @@ impl Render for EditMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp_field_name(), cx))
+            .child(field_label(strings::mcp_field_name()))
             .child(summary)
-            .child(field_label(strings::mcp_field_transport(), cx))
+            .child(field_label(strings::mcp_field_transport()))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::mcp_field_command(), cx))
+                    .child(field_label(strings::mcp_field_command()))
                     .child(input(&self.command_input, cx, 0))
-                    .child(field_label(strings::mcp_field_args(), cx))
+                    .child(field_label(strings::mcp_field_args()))
                     .child(input(&self.args_input, cx, 1));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::mcp_field_url(), cx))
+                    .child(field_label(strings::mcp_field_url()))
                     .child(input(&self.url_input, cx, 0))
-                    .child(field_label(strings::mcp_field_headers(), cx))
+                    .child(field_label(strings::mcp_field_headers()))
                     .child(input(&self.headers_input, cx, 3));
             }
         }
 
         body = body
-            .child(field_label(strings::mcp_field_env(), cx))
+            .child(field_label(strings::mcp_field_env()))
             .child(input(&self.env_input, cx, 4))
             .child(
                 checkbox("mcp-edit-disabled", strings::mcp_field_disabled(), 5)
