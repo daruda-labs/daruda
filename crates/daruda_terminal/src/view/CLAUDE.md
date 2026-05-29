@@ -168,29 +168,37 @@ scroll-offset dispatch — never assume `viewport_row == grid_row - 1`.
   resets `state.hovered_url` for this reason; the next mouse-move
   re-derives it.
 
-## Viewport lock — one settle path after every scroll
+## Event-handler dispatch — route through the single-source helper, never re-inline
 
-`ViewportLock` (`Live` vs `Pinned { anchor }`) decides whether PTY output
-auto-follows the bottom. **Every scroll path that moves the offset settles
-through exactly one method — `reanchor_and_refresh` (`viewport.rs`).** It
-calls `reanchor_viewport_lock`, which unlocks at the live edge
-(`viewport_row_offset() + rows >= total_rows()`, i.e. `scroll_offset == 0`)
-and pins otherwise.
+`on_key_down` and the mouse handlers are wide `match` / `if` ladders. The
+recurring failure mode is copy-pasting a multi-step sequence (scroll →
+settle, flush → send → stop) into each arm — then one copy drifts. That is
+exactly how the wheel path kept an unconditional viewport lock that froze
+streaming output while every sibling path had already learned to unlock at
+the bottom. Root `CLAUDE.md`'s rule — *"two or more call paths copying the
+same N-step sequence is the extraction signal → extract one fn and seal
+it"* — binds hardest here. Each domain sequence has **one** owner; call it,
+never paste it:
 
-- **Do not** reintroduce an "always lock" helper. An upward-only path
-  (Home / PageUp) never reaches the live edge, so reanchor pins it all the
-  same; a path that *can* reach the bottom (PageDown, scrollbar, wheel /
-  trackpad) **must** unlock there. A path that pins unconditionally freezes
-  the viewport for the whole of a long streaming run that emits no new
-  OSC 133 A prompt — the only other thing that clears the lock
-  (`check_prompt_arrived`) — e.g. Claude Code mid-stream.
-- New gesture / keybinding that scrolls? Call `reanchor_and_refresh` after
-  the `scroll_viewport*` + `sync_viewport_scroll_tracking` pair. Use
-  `snap_to_bottom*` only for *force-to-bottom* intents (End, ScrollToBottom,
-  PTY input), never for relative scrolls.
-- The lock decision is GPUI-bound (`TerminalView`), so it is not unit-tested
-  headlessly; the session-level predicate it reads is pinned by
-  `session/tests.rs::live_edge_predicate_tracks_scroll_to_bottom`.
+| Sequence | Single-source helper | Callers |
+|---|---|---|
+| Scroll → settle (re-decide lock + repaint) | `reanchor_and_refresh` (`viewport.rs`) | wheel, scrollbar click / drag, keyboard `settle_after_scroll` |
+| Relative-scroll-key tail (sync + side-effects + settle) | `settle_after_scroll` (`input.rs`) | Home / PageUp / PageDown |
+| Home/End/PageUp/PageDown dispatch | `handle_scroll_key` (`input.rs`) | shift **and** non-shift blocks (so they cannot drift) |
+| Key bytes → PTY (flush Hangul + snap + send + stop) | `send_key_bytes` (`input.rs`) | ctrl / alt / encoded / natural-edit |
+
+Adding a new gesture or key branch? Find the matching helper and call it. If
+none fits, **extend the helper** — do not open a parallel path. `return`
+stays at the call site (a helper cannot return for its caller); everything
+before it belongs in the helper. Reach for `snap_to_bottom*` only on
+force-to-bottom intents (End, ScrollToBottom, PTY input), never a relative
+scroll — the helper rationale lives in the `reanchor_and_refresh` doc comment.
+
+**Sanctioned exception:** selection-drag autoscroll (`mouse.rs`) interleaves
+a selection-endpoint update between `reanchor_viewport_lock` and
+`schedule_viewport_refresh`, so it calls the two steps directly instead of
+`reanchor_and_refresh`. That is the only split, and it is split because a
+step genuinely sits *between* the two — not for convenience.
 
 ---
 

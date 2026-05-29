@@ -152,10 +152,13 @@ impl TerminalView {
                     let current = self.session.viewport_row_offset() as i32;
                     let delta = offset - current;
                     if delta != 0 {
+                        // Same settle path as the wheel: reanchor (unlock at
+                        // the live edge) + selection-preserving repaint. Using
+                        // `refresh_viewport` here would clear the selection and
+                        // strand the hovered-URL underline, unlike every other
+                        // user-scroll path.
                         self.scroll_viewport_and_sync(delta);
-                        self.reanchor_viewport_lock();
-                        self.refresh_viewport();
-                        cx.notify();
+                        self.reanchor_and_refresh(cx);
                     }
                     return;
                 }
@@ -481,10 +484,13 @@ impl TerminalView {
                     let current = self.session.viewport_row_offset() as i32;
                     let delta = offset - current;
                     if delta != 0 {
+                        // Same settle path as the wheel: reanchor (unlock at
+                        // the live edge) + selection-preserving repaint. Using
+                        // `refresh_viewport` here would clear the selection and
+                        // strand the hovered-URL underline, unlike every other
+                        // user-scroll path.
                         self.scroll_viewport_and_sync(delta);
-                        self.reanchor_viewport_lock();
-                        self.refresh_viewport();
-                        cx.notify();
+                        self.reanchor_and_refresh(cx);
                     }
                 }
                 return;

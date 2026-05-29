@@ -171,6 +171,26 @@ impl TerminalView {
         true
     }
 
+    /// Flush any pending Hangul, snap the viewport to the live bottom, send
+    /// the key's raw bytes to the PTY, then stop event propagation. The
+    /// shared body of every special-key → PTY branch in `on_key_down`.
+    ///
+    /// Deliberately leaner than [`Self::send_input_parts`]: it owns the
+    /// `flush_hangul`-before-borrow ordering and the `stop_propagation` that
+    /// protocol sends do not need, and it skips the `pending_refresh` /
+    /// `notify` those add — a raw keystroke's repaint is driven by the PTY
+    /// echo round-trip, not an immediate refresh.
+    fn send_key_bytes(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
+        self.flush_hangul(cx);
+        self.snap_to_bottom_on_pty_input();
+        if let Some(input) = self.input.as_ref() {
+            for bytes in parts {
+                input.send(bytes);
+            }
+        }
+        cx.stop_propagation();
+    }
+
     pub(super) fn on_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -206,12 +226,7 @@ impl TerminalView {
                 keystroke.modifiers.platform,
             )
         {
-            self.flush_hangul(cx);
-            self.snap_to_bottom_on_pty_input();
-            if let Some(input) = self.input.as_ref() {
-                input.send(bytes);
-            }
-            cx.stop_propagation();
+            self.send_key_bytes(&[bytes], cx);
             return;
         }
 
@@ -254,11 +269,9 @@ impl TerminalView {
             // Only handle special keys / escape sequences here.
             // Printable characters MUST go through IME pipeline
             // (replace_text_in_range) so Korean/CJK composition works.
-            // Call cx.stop_propagation() for every key we handle to
-            // prevent it from also reaching the IME. Each PTY-send
-            // branch re-borrows `self.input.as_ref()` locally so
-            // `flush_hangul` (which takes `&mut self`) can run first
-            // and release any pending Hangul syllable to the PTY.
+            // Every PTY-send branch routes through `send_key_bytes`, which
+            // flushes pending Hangul before borrowing `self.input` and stops
+            // propagation so the key does not also reach the IME.
 
             // Shift + Home/End/PageUp/PageDown still scrolls the viewport —
             // intercept before the generic encoder turns it into a PTY
@@ -271,25 +284,14 @@ impl TerminalView {
             if keystroke.modifiers.control
                 && let Some(b) = ctrl_byte_for_keystroke(&keystroke)
             {
-                self.flush_hangul(cx);
-                self.snap_to_bottom_on_pty_input();
-                if let Some(input) = self.input.as_ref() {
-                    input.send(&[b]);
-                }
-                cx.stop_propagation();
+                self.send_key_bytes(&[&[b]], cx);
                 return;
             }
 
             if keystroke.modifiers.alt
                 && let Some(text) = keystroke.key_char.as_deref()
             {
-                self.flush_hangul(cx);
-                self.snap_to_bottom_on_pty_input();
-                if let Some(input) = self.input.as_ref() {
-                    input.send(&[0x1b]);
-                    input.send(text.as_bytes());
-                }
-                cx.stop_propagation();
+                self.send_key_bytes(&[&[0x1b], text.as_bytes()], cx);
                 return;
             }
 
@@ -302,12 +304,7 @@ impl TerminalView {
             if let Some(encoded) =
                 encode_key_named(&keystroke.key, modifiers, self.key_mode_flags())
             {
-                self.flush_hangul(cx);
-                self.snap_to_bottom_on_pty_input();
-                if let Some(input) = self.input.as_ref() {
-                    input.send(&encoded);
-                }
-                cx.stop_propagation();
+                self.send_key_bytes(&[&encoded], cx);
                 return;
             }
 
