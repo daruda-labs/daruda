@@ -206,6 +206,10 @@ impl SettingsWindow {
                 s::settings_label_scrollback(),
                 crate::ui::input(&self.scrollback_input, cx, ()),
             ))
+            .child(field_row(
+                s::settings_label_max_fps(),
+                crate::ui::select::select(&self.max_fps_select, cx, ()),
+            ))
             .into_any_element()
     }
 
@@ -325,7 +329,7 @@ impl SettingsWindow {
         body: impl Into<gpui::SharedString>,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let body_color = theme::current(cx).modal_text_primary;
+        let body_color = theme::TEXT_PRIMARY;
         div()
             .flex()
             .flex_col()

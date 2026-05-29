@@ -363,6 +363,8 @@ settings:
   ui_theme_phase3_tooltip: "More themes coming in Phase 3."
   label_scrollback: "Scrollback Lines"
   err_scrollback: "Scrollback must be a number between 1 000 and 500 000."
+  label_max_fps: "Refresh Rate"
+  max_fps_option: "%{fps} fps"
   label_show_hidden: "Show Hidden Files"
   label_use_gitignore: "Respect .gitignore"
   label_syntax_theme: "Syntax Theme"

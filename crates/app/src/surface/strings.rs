@@ -1350,6 +1350,12 @@ pub fn settings_label_cursor_style() -> String {
 pub fn settings_label_cursor_blinking() -> String {
     rust_i18n::t!("settings.label_cursor_blinking").into_owned()
 }
+pub fn settings_label_max_fps() -> String {
+    rust_i18n::t!("settings.label_max_fps").into_owned()
+}
+pub fn settings_max_fps_option(fps: u32) -> String {
+    rust_i18n::t!("settings.max_fps_option", fps => fps).into_owned()
+}
 pub fn settings_label_close_on_exit() -> String {
     rust_i18n::t!("settings.label_close_on_exit").into_owned()
 }

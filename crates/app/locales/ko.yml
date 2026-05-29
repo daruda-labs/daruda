@@ -363,6 +363,8 @@ settings:
   ui_theme_phase3_tooltip: "Phase 3에서 더 많은 테마가 추가될 예정입니다."
   label_scrollback: "스크롤백 줄 수"
   err_scrollback: "스크롤백은 1,000에서 500,000 사이의 숫자여야 합니다."
+  label_max_fps: "화면 갱신 빈도"
+  max_fps_option: "%{fps} fps"
   label_show_hidden: "숨긴 파일 표시"
   label_use_gitignore: ".gitignore 적용"
   label_syntax_theme: "구문 테마"

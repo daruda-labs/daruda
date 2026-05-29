@@ -84,6 +84,8 @@ pub struct SettingsWindow {
     // Cursor
     cursor_style_select: Entity<SelectState>,
     cursor_blinking: bool,
+    // Render
+    max_fps_select: Entity<SelectState>,
     // Shell
     close_pane_on_exit: bool,
     // Window
@@ -281,6 +283,20 @@ impl SettingsWindow {
             )
         });
 
+        let max_fps_str: SharedString = config.render.max_fps.to_string().into();
+        let max_fps_select = cx.new(|cx| {
+            let opts = daruda_config::ALLOWED_MAX_FPS
+                .iter()
+                .map(|fps| {
+                    SelectOption::new(
+                        SharedString::from(fps.to_string()),
+                        s::settings_max_fps_option(*fps),
+                    )
+                })
+                .collect();
+            select::state_with_options(opts, Some(&max_fps_str), window, cx)
+        });
+
         let syntax_theme = SharedString::from(config.file_viewer.syntax_theme.clone());
         let syntax_theme_select = cx.new(|cx| {
             let opts = SYNTAX_THEMES
@@ -350,6 +366,7 @@ impl SettingsWindow {
             horizontal_spacing_input,
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
+            max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
             window_blur: config.window.blur,
@@ -511,6 +528,14 @@ impl SettingsWindow {
             _ => daruda_config::CursorStyle::Block,
         };
         config.cursor.blinking = self.cursor_blinking;
+
+        config.render.max_fps = self
+            .max_fps_select
+            .read(cx)
+            .selected_value()
+            .and_then(|s| s.as_ref().parse::<u32>().ok())
+            .unwrap_or(config.render.max_fps);
+        config.render.clamp();
 
         config.shell.close_pane_on_exit = self.close_pane_on_exit;
 

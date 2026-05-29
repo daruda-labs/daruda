@@ -4,6 +4,8 @@
 //! mirror field here forces the sync site to be updated, so sync
 //! omissions become compile errors instead of silent state divergence.
 
+use std::time::Duration;
+
 use daruda_config::{Config, IconColorMode};
 
 #[derive(Clone)]
@@ -28,6 +30,12 @@ pub(in crate::workspace) struct ConfigMirrors {
 
     /// Mirror of `daruda_config::LeftDockConfig::file_icon_color_mode`.
     pub files_icon_color_mode: IconColorMode,
+
+    /// PTY-output batch / repaint interval derived from
+    /// `daruda_config::RenderConfig::max_fps` (`1000 / max_fps` ms).
+    /// Read by the per-pane stdout poll loop to cap how often terminal
+    /// output triggers a repaint; live-updates on config reload.
+    pub terminal_redraw_interval: Duration,
 }
 
 impl ConfigMirrors {
@@ -38,6 +46,7 @@ impl ConfigMirrors {
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
+            terminal_redraw_interval: config.render.redraw_interval(),
         }
     }
 }

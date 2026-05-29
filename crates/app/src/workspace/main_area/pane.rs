@@ -861,14 +861,37 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Task<()> {
         window.spawn(cx, async move |cx| {
+            // Responsive idle poll so first output after a quiet period
+            // appears promptly; the cap interval only kicks in once output
+            // is sustained (see `streaming_ticks` below).
+            const IDLE_POLL: Duration = Duration::from_millis(16);
+            // Consecutive non-empty drains before backing off to the cap.
+            const STREAM_ENTER_TICKS: u32 = 3;
+            let mut streaming_ticks: u32 = 0;
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
+                // Cap interval = `1000 / render.max_fps` ms, mirrored on
+                // Workspace (live-updates on config reload; 30 fps default).
+                // While interactive/idle, poll at the faster of cap/IDLE_POLL
+                // so a single keystroke echo isn't held for a full cap frame;
+                // sustained output backs off to the cap to halve redraws.
+                let cap = cx
+                    .update(|_, app| workspace.read(app).mirrors.terminal_redraw_interval)
+                    .unwrap_or_else(|_| Duration::from_millis(33));
+                let interval = if streaming_ticks >= STREAM_ENTER_TICKS {
+                    cap
+                } else {
+                    cap.min(IDLE_POLL)
+                };
+                cx.background_executor().timer(interval).await;
 
                 let mut batch = Vec::new();
                 while let Ok(chunk) = stdout_rx.try_recv() {
                     batch.extend_from_slice(&chunk);
+                }
+                if batch.is_empty() {
+                    streaming_ticks = 0;
+                } else {
+                    streaming_ticks = streaming_ticks.saturating_add(1);
                 }
 
                 // Drain PTY thread errors (writer/reader death) on

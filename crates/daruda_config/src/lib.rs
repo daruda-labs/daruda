@@ -17,6 +17,7 @@ pub mod logs;
 pub mod notifications;
 pub mod panels;
 pub mod project;
+pub mod render;
 pub mod scrollback;
 pub mod settings_section;
 pub mod shell;
@@ -44,6 +45,7 @@ pub use logs::LogsConfig;
 pub use notifications::NotificationsConfig;
 pub use panels::PanelsConfig;
 pub use project::{ProjectConfig, project_config_dir, project_config_path, project_id};
+pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
@@ -104,6 +106,7 @@ pub struct Config {
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
     pub logs: LogsConfig,
+    pub render: RenderConfig,
 }
 
 impl Config {
@@ -132,6 +135,7 @@ impl Config {
         self.left_dock.clamp();
         self.claude_status.clamp();
         self.panels.clamp();
+        self.render.clamp();
     }
 
     /// Return the effective `ColorConfig` for this configuration.
