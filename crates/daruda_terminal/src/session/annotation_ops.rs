@@ -191,9 +191,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::TerminalConfig;
     use crate::session::interval_tree::{MarkRecord, MarkRecordSink};
     use crate::session::line_buffer::LineBufferPosition;
+    use crate::{TerminalConfig, TerminalDims};
 
     fn buf(i: u64) -> LineCoord {
         LineCoord::Buffered(LineBufferPosition { abs_index: i })
@@ -218,7 +218,8 @@ mod tests {
 
     #[test]
     fn add_then_lookup_round_trip() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let id = session
             .add_annotation(single_line_range(7), "hello".into())
             .expect("add succeeds");
@@ -231,7 +232,8 @@ mod tests {
 
     #[test]
     fn annotation_by_id_returns_payload_for_known_mark() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let id = session
             .add_annotation(single_line_range(0), "note".into())
             .expect("add");
@@ -246,7 +248,8 @@ mod tests {
 
     #[test]
     fn annotation_by_id_filters_alt_screen() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let id = session
             .add_annotation(single_line_range(0), "primary".into())
             .expect("add");
@@ -259,7 +262,8 @@ mod tests {
 
     #[test]
     fn rejects_multi_line_range() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let multi = LineRange::new(buf(3), buf(5));
         let err = session
             .add_annotation(multi, "spans".into())
@@ -269,7 +273,8 @@ mod tests {
 
     #[test]
     fn evicted_annotation_drops_from_query() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         // Mark sits at abs_index=2; we will evict everything <= 4.
         let id = session
             .add_annotation(single_line_range(2), "old".into())
@@ -292,11 +297,14 @@ mod tests {
 
     #[test]
     fn resize_clamps_payload_cols() {
-        let cfg = TerminalConfig {
-            cols: 120,
-            ..TerminalConfig::default()
-        };
-        let mut session = TerminalSession::new(cfg).unwrap();
+        let mut session = TerminalSession::new(
+            TerminalDims {
+                cols: 120,
+                rows: 24,
+            },
+            TerminalConfig::default(),
+        )
+        .unwrap();
         // Build a payload with a wide column span, then resize down.
         let id = session
             .add_annotation(single_line_range(0), "wide".into())
@@ -308,7 +316,7 @@ mod tests {
                 a.end_col = Some(118);
             }
         });
-        session.resize(80, session.config.rows).expect("resize");
+        session.resize(80, session.rows()).expect("resize");
         let hits = session.annotations_in_range(LineRange::new(buf(0), buf(0)));
         assert_eq!(hits.len(), 1);
         let (_, payload, _) = hits[0];
@@ -318,7 +326,8 @@ mod tests {
 
     #[test]
     fn alt_screen_filters_hidden_annotations() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         // First mark: visible everywhere.
         let visible_id = session
             .add_annotation(single_line_range(10), "always".into())
@@ -356,7 +365,8 @@ mod tests {
 
     #[test]
     fn add_and_remove_without_sink() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         // No sink attached; default state.
         let id = session
             .add_annotation(single_line_range(0), "no-sink".into())
@@ -368,7 +378,8 @@ mod tests {
 
     #[test]
     fn sink_setter_routes_records() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let records: Arc<Mutex<Vec<MarkRecord>>> = Arc::new(Mutex::new(Vec::new()));
         session.set_marks_sink(Box::new(RecordingSink {
             records: Arc::clone(&records),
@@ -385,7 +396,8 @@ mod tests {
 
     #[test]
     fn update_then_remove_round_trip() {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let id = session
             .add_annotation(single_line_range(4), "first".into())
             .expect("add");
@@ -408,13 +420,12 @@ mod tests {
         // when capture_scrolled_out fires.
         let rows: u16 = 4;
         let cols: u16 = 20;
+        let dims = TerminalDims { cols, rows };
         let cfg = crate::TerminalConfig {
-            cols,
-            rows,
             max_scrollback: 1024,
             ..crate::TerminalConfig::default()
         };
-        let mut session = crate::TerminalSession::new(cfg).expect("session");
+        let mut session = crate::TerminalSession::new(dims, cfg).expect("session");
 
         // Fill rows-1 lines so the viewport is nearly full but no scrolling
         // has occurred yet.  Feeding the last \r\n on a full viewport is what
@@ -494,13 +505,12 @@ mod tests {
     /// at least the first `min_buffered` rows have scrolled into
     /// `LineBuffer`. Returns the session ready for screen-row queries.
     fn session_with_buffered_rows(cols: u16, rows: u16, lines: &[&str]) -> crate::TerminalSession {
+        let dims = TerminalDims { cols, rows };
         let cfg = crate::TerminalConfig {
-            cols,
-            rows,
             max_scrollback: 1024,
             ..crate::TerminalConfig::default()
         };
-        let mut s = crate::TerminalSession::new(cfg).expect("session");
+        let mut s = crate::TerminalSession::new(dims, cfg).expect("session");
         let mut payload = String::new();
         for line in lines {
             payload.push_str(line);
@@ -589,7 +599,8 @@ mod tests {
     #[test]
     fn screen_row_to_line_coord_empty_buffer_is_viewport() {
         // Fresh session, no PTY output: every row is in the viewport.
-        let session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         assert_eq!(session.line_buffer().len(), 0);
         let coord = session
             .screen_row_to_line_coord(0)
@@ -619,13 +630,12 @@ mod tests {
         // rows=4: feed 5 lines to push the first one into LineBuffer.
         let cols: u16 = 10;
         let rows: u16 = 4;
+        let dims = TerminalDims { cols, rows };
         let cfg = crate::TerminalConfig {
-            cols,
-            rows,
             max_scrollback: 1024,
             ..crate::TerminalConfig::default()
         };
-        let mut session = crate::TerminalSession::new(cfg).expect("session");
+        let mut session = crate::TerminalSession::new(dims, cfg).expect("session");
 
         // Feed the long line (25 ASCII chars) as a soft-wrap sequence:
         // ghostty receives no newline at the right margin, so the row wraps.

@@ -1,7 +1,7 @@
 use super::scanners::{parse_osc7_path, percent_decode};
 use super::*;
-use crate::TerminalConfig;
 use crate::coords::ViewportRow;
+use crate::{TerminalConfig, TerminalDims};
 
 #[test]
 fn parses_osc7_with_hostname() {
@@ -27,14 +27,16 @@ fn rejects_non_file_scheme() {
 
 #[test]
 fn feed_sets_cwd_via_osc7_bel() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]7;file://host/home/user\x07").unwrap();
     assert_eq!(session.cwd(), Some("/home/user"));
 }
 
 #[test]
 fn feed_sets_cwd_via_osc7_st() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]7;file://host/tmp/daruda\x1b\\")
         .unwrap();
@@ -47,7 +49,7 @@ fn track_cwd_disabled_skips_osc7() {
         track_cwd: false,
         ..TerminalConfig::default()
     };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    let mut session = TerminalSession::new(TerminalDims::default(), cfg).unwrap();
     session.feed(b"\x1b]7;file://host/home/user\x07").unwrap();
     assert_eq!(session.cwd(), None);
 }
@@ -76,7 +78,8 @@ fn parses_osc133_semantic_text_start_end() {
 
 #[test]
 fn last_command_output_prefers_ef_pair() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // C..E..F..D cycle (iTerm2 output-only annotation).
     session.feed(b"\x1b]133;C\x07").unwrap();
     session.feed(b"\x1b]133;E\x07").unwrap();
@@ -91,7 +94,8 @@ fn last_command_output_prefers_ef_pair() {
 
 #[test]
 fn last_command_output_falls_back_to_cd_pair() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;C\x07").unwrap();
     for _ in 0..3 {
         session.feed(b"output\r\n").unwrap();
@@ -103,7 +107,8 @@ fn last_command_output_falls_back_to_cd_pair() {
 
 #[test]
 fn last_command_output_none_until_pair_closes() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;C\x07").unwrap(); // only start
     assert!(session.last_command_output_rows().is_none());
 }
@@ -154,7 +159,8 @@ fn parses_osc133_rejects_unknown_subcommands() {
 
 #[test]
 fn feed_records_prompt_marks_via_bel_terminator() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;A\x07").unwrap();
     let marks = session.prompt_marks();
     assert_eq!(marks.len(), 1);
@@ -163,7 +169,8 @@ fn feed_records_prompt_marks_via_bel_terminator() {
 
 #[test]
 fn feed_records_prompt_marks_via_st_terminator() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;D;1\x1b\\").unwrap();
     let marks = session.prompt_marks();
     assert_eq!(marks.len(), 1);
@@ -173,7 +180,8 @@ fn feed_records_prompt_marks_via_st_terminator() {
 
 #[test]
 fn command_history_reports_duration_between_c_and_d_marks() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Need B (CommandStart) before C so command_history() records an entry.
     // Trailing space gives extract_command_text a non-empty slice between
     // the B and C cursor columns so the entry is not dropped as empty.
@@ -192,7 +200,8 @@ fn command_history_reports_duration_between_c_and_d_marks() {
 
 #[test]
 fn feed_records_prompt_marks_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Chunk 1: start of OSC, chunk 2: rest. The session buffers the
     // tail between calls so the mark must still land.
     session.feed(b"\x1b]133;A").unwrap();
@@ -205,7 +214,8 @@ fn feed_does_not_duplicate_osc133_when_csi_and_osc_share_a_chunk() {
     // If a complete CSI mode sequence arrives in the same feed as
     // a complete OSC 133, the drain must not re-scan the OSC on
     // the next feed and push a duplicate mark.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b[?2004h\x1b]133;A\x07more-output")
         .unwrap();
@@ -218,7 +228,8 @@ fn feed_does_not_duplicate_osc133_when_csi_and_osc_share_a_chunk() {
 
 #[test]
 fn feed_captures_sequence_of_prompt_events() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07")
         .unwrap();
@@ -237,7 +248,8 @@ fn feed_captures_sequence_of_prompt_events() {
 
 #[test]
 fn prompt_marks_are_bounded() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Emit PROMPT_MARKS_CAP + 5 events via many small feeds so the
     // OSC parse tail (2 KB cap) does not truncate the stream.
     for _ in 0..(PROMPT_MARKS_CAP + 5) {
@@ -253,7 +265,8 @@ fn prompt_mark_seq_is_strictly_monotonic() {
     // Unlike a mark's screen row (re-flow / scroll move it) or the mark's
     // list position (`clear_line_buffer_and_drop_history_marks` drops wiped
     // entries), `seq` is never reused and never resets.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     for _ in 0..5 {
         session.feed(b"\x1b]133;A\x07").unwrap();
     }
@@ -312,7 +325,8 @@ fn prompt_mark_screen_row_follows_scrollback() {
     // PROMPT_START emitted after 50 lines of output must land on the
     // correct absolute screen row (viewport_row_offset + cursor_y)
     // once translated back from the mark's stored `abs_y`.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     for i in 0..50 {
         session
             .feed(format!("line-{:02}\r\n", i).as_bytes())
@@ -333,7 +347,8 @@ fn prompt_mark_screen_row_follows_scrollback() {
 
 #[test]
 fn feed_ignores_malformed_osc133() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;X\x07").unwrap();
     assert!(session.prompt_marks().is_empty());
 }
@@ -345,7 +360,8 @@ fn feed_ignores_malformed_osc133() {
 // mis-attributed or an OSC that followed it re-scanned.
 #[test]
 fn csi_with_unknown_terminator_is_fully_skipped() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // The unknown-terminator CSI, then a valid mode-set and an OSC
     // 133;A all in one chunk. We expect exactly one prompt mark and
     // bracketed paste enabled — the unknown CSI must not corrupt
@@ -362,7 +378,8 @@ fn csi_with_unknown_terminator_is_fully_skipped() {
 #[test]
 fn osc1337_request_attention_yes_maps_to_critical() {
     use crate::vt_codes::AttentionKind;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]1337;RequestAttention=yes\x07").unwrap();
     assert_eq!(
         session.take_attention_request(),
@@ -380,7 +397,8 @@ fn osc1337_request_attention_recognises_no_once_fireworks() {
         ("fireworks", AttentionKind::Once),
     ];
     for (value, expect) in cases {
-        let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
         let bytes = format!("\x1b]1337;RequestAttention={value}\x07");
         session.feed(bytes.as_bytes()).unwrap();
         assert_eq!(session.take_attention_request(), Some(expect));
@@ -389,7 +407,8 @@ fn osc1337_request_attention_recognises_no_once_fireworks() {
 
 #[test]
 fn osc1337_unknown_key_is_ignored() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]1337;SetMark\x07\x1b]1337;CurrentDir=/tmp\x07")
         .unwrap();
@@ -402,7 +421,8 @@ fn osc1337_unknown_key_is_ignored() {
 #[test]
 fn osc1337_request_attention_split_across_feeds() {
     use crate::vt_codes::AttentionKind;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]1337;Request").unwrap();
     assert_eq!(session.take_attention_request(), None);
     session.feed(b"Attention=yes\x07").unwrap();
@@ -416,7 +436,8 @@ fn osc1337_request_attention_split_across_feeds() {
 #[test]
 fn osc1337_request_attention_st_terminator() {
     use crate::vt_codes::AttentionKind;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]1337;RequestAttention=once\x1b\\")
         .unwrap();
@@ -428,7 +449,8 @@ fn osc1337_request_attention_st_terminator() {
 #[test]
 fn osc1337_coexists_with_title_in_same_chunk() {
     use crate::vt_codes::AttentionKind;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]2;tab title\x07\x1b]1337;RequestAttention=yes\x07")
         .unwrap();
@@ -444,7 +466,8 @@ fn osc1337_coexists_with_title_in_same_chunk() {
 #[test]
 fn osc1337_request_attention_key_is_case_insensitive() {
     use crate::vt_codes::AttentionKind;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]1337;requestattention=yes\x07").unwrap();
     assert_eq!(
         session.take_attention_request(),
@@ -457,7 +480,8 @@ fn osc1337_request_attention_key_is_case_insensitive() {
 #[test]
 fn osc9_emits_notification_with_body_only() {
     use crate::vt_codes::NotificationRequest;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]9;build finished\x07").unwrap();
     assert_eq!(
         session.take_notification_request(),
@@ -470,7 +494,8 @@ fn osc9_emits_notification_with_body_only() {
 // Empty OSC 9 payload is dropped (no-op notification is just noise).
 #[test]
 fn osc9_empty_body_is_ignored() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]9;\x07").unwrap();
     assert_eq!(session.take_notification_request(), None);
 }
@@ -479,7 +504,8 @@ fn osc9_empty_body_is_ignored() {
 #[test]
 fn osc777_notify_emits_title_and_body() {
     use crate::vt_codes::NotificationRequest;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]777;notify;Build;all green\x07")
         .unwrap();
@@ -497,7 +523,8 @@ fn osc777_notify_emits_title_and_body() {
 #[test]
 fn osc777_notify_preserves_semicolons_in_body() {
     use crate::vt_codes::NotificationRequest;
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session
         .feed(b"\x1b]777;notify;deploy;ok; staged; verified\x07")
         .unwrap();
@@ -513,7 +540,8 @@ fn osc777_notify_preserves_semicolons_in_body() {
 // Subcommand `preexec` and any other unknown sub-OSC fall through.
 #[test]
 fn osc777_unknown_subcommand_is_ignored() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]777;preexec\x07").unwrap();
     assert_eq!(session.take_notification_request(), None);
 }
@@ -523,7 +551,8 @@ fn osc777_unknown_subcommand_is_ignored() {
 // once and then drained.
 #[test]
 fn ftcs_b_to_d_emits_finished_command_elapsed() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;B\x07").unwrap();
     session.feed(b"\x1b]133;D;0\x07").unwrap();
     assert!(session.take_finished_command_elapsed().is_some());
@@ -534,7 +563,8 @@ fn ftcs_b_to_d_emits_finished_command_elapsed() {
 // (e.g. shell exits before the first prompt or a malformed stream).
 #[test]
 fn ftcs_d_without_b_emits_no_elapsed() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;D;0\x07").unwrap();
     assert!(session.take_finished_command_elapsed().is_none());
 }
@@ -544,7 +574,8 @@ fn ftcs_d_without_b_emits_no_elapsed() {
 // next CommandFinished does not measure a multi-prompt span.
 #[test]
 fn aborted_command_drops_command_start() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]133;B\x07").unwrap(); // command starts
     session.feed(b"\x1b]133;A\x07").unwrap(); // user hits Ctrl-C, new prompt drawn
     session.feed(b"\x1b]133;D;130\x07").unwrap(); // stale D from somewhere
@@ -557,7 +588,8 @@ fn aborted_command_drops_command_start() {
 // asserts parser tolerates the form without crashing.
 #[test]
 fn osc1337_clear_scrollback_is_accepted() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"hello\r\n").unwrap();
     session.feed(b"\x1b]1337;ClearScrollback\x07").unwrap();
     // No attention or notification should leak from ClearScrollback.
@@ -567,7 +599,8 @@ fn osc1337_clear_scrollback_is_accepted() {
 
 #[test]
 fn osc1337_clear_scrollback_is_case_insensitive() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]1337;clearscrollback\x07").unwrap();
     // No assertion on internal flag — the test passes if parser
     // accepts the case variant without erroring.
@@ -587,7 +620,8 @@ fn osc1337_copy_decodes_base64_to_clipboard() {
     bytes.extend_from_slice(encoded.as_bytes());
     bytes.extend_from_slice(b"\x07");
 
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(&bytes).unwrap();
     assert_eq!(session.take_clipboard_write().as_deref(), Some(body));
 }
@@ -603,7 +637,8 @@ fn osc1337_copy_with_selection_prefix_still_writes_clipboard() {
     bytes.extend_from_slice(encoded.as_bytes());
     bytes.extend_from_slice(b"\x07");
 
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(&bytes).unwrap();
     assert_eq!(session.take_clipboard_write().as_deref(), Some(body));
 }
@@ -621,7 +656,8 @@ fn osc1337_copy_above_generic_tail_limit_still_lands() {
     bytes.extend_from_slice(encoded.as_bytes());
     bytes.extend_from_slice(b"\x07");
 
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(&bytes).unwrap();
     let clip = session
         .take_clipboard_write()
@@ -641,7 +677,8 @@ fn large_osc52_payload_survives_truncation() {
     bytes.extend_from_slice(b"\x1b]52;c;");
     bytes.extend_from_slice(encoded.as_bytes());
     bytes.extend_from_slice(b"\x07");
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(&bytes).unwrap();
     let clip = session.take_clipboard_write().expect("clipboard set");
     assert_eq!(clip.len(), 4096);
@@ -653,7 +690,8 @@ fn large_osc52_payload_survives_truncation() {
 // cursor's pre-feed or post-feed row.
 #[test]
 fn osc133_marks_in_one_chunk_land_on_correct_rows() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // A on row 0, then 3 newlines of output, then C on row ~3.
     session
         .feed(b"\x1b]133;A\x07line1\r\nline2\r\nline3\r\n\x1b]133;C\x07")
@@ -683,63 +721,72 @@ fn collect_responses(session: &mut TerminalSession, query: &[u8]) -> Vec<u8> {
 
 #[test]
 fn primary_da_responds_to_esc_bracket_c() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[c");
     assert_eq!(resp, ansi::PRIMARY_DA);
 }
 
 #[test]
 fn primary_da_responds_to_esc_bracket_0c() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[0c");
     assert_eq!(resp, ansi::PRIMARY_DA);
 }
 
 #[test]
 fn secondary_da_responds_to_esc_bracket_gt_c() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[>c");
     assert_eq!(resp, ansi::SECONDARY_DA);
 }
 
 #[test]
 fn secondary_da_responds_to_esc_bracket_gt_0c() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[>0c");
     assert_eq!(resp, ansi::SECONDARY_DA);
 }
 
 #[test]
 fn tertiary_da_responds_to_esc_bracket_eq_c() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[=c");
     assert_eq!(resp, ansi::TERTIARY_DA);
 }
 
 #[test]
 fn xtversion_responds_to_esc_bracket_gt_0q() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[>0q");
     assert_eq!(resp, ansi::XTVERSION);
 }
 
 #[test]
 fn xtversion_responds_to_esc_bracket_gt_q() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[>q");
     assert_eq!(resp, ansi::XTVERSION);
 }
 
 #[test]
 fn kitty_keyboard_responds_to_esc_bracket_q_u() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[?u");
     assert_eq!(resp, ansi::KITTY_KEYBOARD_RESPONSE);
 }
 
 #[test]
 fn decrqm_returns_set_for_active_bracketed_paste() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     collect_responses(&mut session, b"\x1b[?2004h");
     let resp = collect_responses(&mut session, b"\x1b[?2004$p");
     assert_eq!(resp, b"\x1b[?2004;1$y");
@@ -747,7 +794,8 @@ fn decrqm_returns_set_for_active_bracketed_paste() {
 
 #[test]
 fn decrqm_returns_reset_for_inactive_mode() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // SGR mouse is off by default
     let resp = collect_responses(&mut session, b"\x1b[?1006$p");
     assert_eq!(resp, b"\x1b[?1006;2$y");
@@ -755,14 +803,16 @@ fn decrqm_returns_reset_for_inactive_mode() {
 
 #[test]
 fn decrqm_returns_not_recognised_for_unknown_mode() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let resp = collect_responses(&mut session, b"\x1b[?9999$p");
     assert_eq!(resp, b"\x1b[?9999;0$y");
 }
 
 #[test]
 fn decrqm_alt_screen_tracks_current_state() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let off = collect_responses(&mut session, b"\x1b[?1049$p");
     assert_eq!(off, b"\x1b[?1049;2$y");
 
@@ -773,7 +823,8 @@ fn decrqm_alt_screen_tracks_current_state() {
 
 #[test]
 fn xtgettcap_tn_returns_terminal_name() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // TN hex-encoded = 544e
     let resp = collect_responses(&mut session, b"\x1bP+q544e\x1b\\");
     let resp_str = String::from_utf8(resp).unwrap();
@@ -791,7 +842,8 @@ fn xtgettcap_tn_returns_terminal_name() {
 
 #[test]
 fn xtgettcap_rgb_returns_one() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // RGB hex-encoded = 524742
     let resp = collect_responses(&mut session, b"\x1bP+q524742\x1b\\");
     let resp_str = String::from_utf8(resp).unwrap();
@@ -804,7 +856,8 @@ fn xtgettcap_rgb_returns_one() {
 
 #[test]
 fn xtgettcap_unknown_returns_not_found() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // "XY" hex = 5859
     let resp = collect_responses(&mut session, b"\x1bP+q5859\x1b\\");
     let resp_str = String::from_utf8(resp).unwrap();
@@ -816,7 +869,8 @@ fn xtgettcap_unknown_returns_not_found() {
 
 #[test]
 fn xtgettcap_multiple_caps_in_one_query() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // TN;RGB = 544e;524742
     let resp = collect_responses(&mut session, b"\x1bP+q544e;524742\x1b\\");
     let resp_str = String::from_utf8(resp).unwrap();
@@ -829,7 +883,8 @@ fn xtgettcap_multiple_caps_in_one_query() {
 
 #[test]
 fn primary_da_does_not_fire_on_nonzero_param() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // ESC[3c is not a Primary DA query (Ps≠0 undefined)
     let resp = collect_responses(&mut session, b"\x1b[3c");
     assert!(resp.is_empty(), "no response for ESC[3c: {resp:?}");
@@ -837,7 +892,8 @@ fn primary_da_does_not_fire_on_nonzero_param() {
 
 #[test]
 fn secondary_da_does_not_fire_on_nonzero_gt_param() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // ESC[>1c is not a Secondary DA query
     let resp = collect_responses(&mut session, b"\x1b[>1c");
     assert!(resp.is_empty(), "no response for ESC[>1c: {resp:?}");
@@ -845,7 +901,8 @@ fn secondary_da_does_not_fire_on_nonzero_gt_param() {
 
 #[test]
 fn capability_query_survives_chunk_boundary_split_at_bracket() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Feed "ESC[" in first chunk, "c" in second
     let mut resp = Vec::new();
     session
@@ -859,7 +916,8 @@ fn capability_query_survives_chunk_boundary_split_at_bracket() {
 
 #[test]
 fn decrqm_survives_chunk_boundary_mid_digits() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Enable bracketed paste, then query across chunk boundary:
     // "ESC[?200" in chunk 1, "4$p" in chunk 2
     collect_responses(&mut session, b"\x1b[?2004h");
@@ -875,7 +933,8 @@ fn decrqm_survives_chunk_boundary_mid_digits() {
 
 #[test]
 fn xtgettcap_survives_chunk_boundary_mid_dcs() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Split "ESC P + q 544e ESC \" at the ESC of the ST terminator
     let mut resp = Vec::new();
     session
@@ -893,7 +952,8 @@ fn xtgettcap_survives_chunk_boundary_mid_dcs() {
 
 #[test]
 fn capability_scanner_does_not_fire_on_dsr_sequences() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // ESC[5n is DSR, not a DA query — should not produce DA response
     let resp = collect_responses(&mut session, b"\x1b[5n");
     assert_eq!(resp, ansi::DSR_OK);
@@ -905,7 +965,8 @@ fn capability_scanner_does_not_fire_on_dsr_sequences() {
 
 #[test]
 fn alt_screen_entry_sets_screen_changed() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.is_alt_screen());
     assert_eq!(session.take_screen_changed(), None);
 
@@ -917,7 +978,8 @@ fn alt_screen_entry_sets_screen_changed() {
 
 #[test]
 fn alt_screen_exit_sets_screen_changed() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b[?1049h").unwrap();
     let _ = session.take_screen_changed();
 
@@ -928,7 +990,7 @@ fn alt_screen_exit_sets_screen_changed() {
 
 #[test]
 fn alt_screen_legacy_modes_detected() {
-    let mut s = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut s = TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     s.feed(b"\x1b[?47h").unwrap();
     assert!(s.is_alt_screen());
     assert_eq!(s.take_screen_changed(), Some(true));
@@ -949,12 +1011,11 @@ fn line_buffer_scrollback_survives_alt_screen_cycle() {
     // `line_buffer` keeps the captured logical lines so the user can
     // scroll back to them after the TUI exits — matches iTerm2 /
     // Alacritty behaviour.
-    let cfg = TerminalConfig {
-        cols: 80,
-        rows: 24,
-        ..TerminalConfig::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    let mut session = TerminalSession::new(
+        TerminalDims { cols: 80, rows: 24 },
+        TerminalConfig::default(),
+    )
+    .unwrap();
     for i in 0..50u32 {
         session.feed(format!("line-{i:02}\r\n").as_bytes()).unwrap();
     }
@@ -978,12 +1039,11 @@ fn line_buffer_scrollback_survives_alt_screen_cycle() {
 #[test]
 fn ghostty_vt_ed3_clears_scrollback() {
     // Direct verification that \x1b[3J works in ghostty_vt at all.
-    let cfg = TerminalConfig {
-        cols: 80,
-        rows: 24,
-        ..TerminalConfig::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    let mut session = TerminalSession::new(
+        TerminalDims { cols: 80, rows: 24 },
+        TerminalConfig::default(),
+    )
+    .unwrap();
     for i in 0..30u32 {
         session.feed(format!("line-{i:02}\r\n").as_bytes()).unwrap();
     }
@@ -1000,7 +1060,8 @@ fn ghostty_vt_ed3_clears_scrollback() {
 
 #[test]
 fn dump_viewport_is_blank_after_alt_screen_entry() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Write content on the primary screen
     session.feed(b"hello world").unwrap();
     let primary = session.dump_viewport().unwrap();
@@ -1020,7 +1081,8 @@ fn dump_viewport_is_blank_after_alt_screen_entry() {
 
 #[test]
 fn dump_viewport_returns_to_primary_after_alt_screen_exit() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"hello world").unwrap();
     session.feed(b"\x1b[?1049h").unwrap();
     session.feed(b"tui content").unwrap();
@@ -1043,7 +1105,8 @@ fn dump_viewport_returns_to_primary_after_alt_screen_exit() {
 
 #[test]
 fn decckm_tracks_set_and_reset() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.decckm_enabled(), "DECCKM off by default");
 
     session.feed(b"\x1b[?1h").unwrap();
@@ -1055,7 +1118,8 @@ fn decckm_tracks_set_and_reset() {
 
 #[test]
 fn decckm_decrqm_reflects_current_state() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Default: reset (2)
     let resp = collect_responses(&mut session, b"\x1b[?1$p");
     assert_eq!(resp, b"\x1b[?1;2$y", "DECCKM reset by default");
@@ -1067,7 +1131,8 @@ fn decckm_decrqm_reflects_current_state() {
 
 #[test]
 fn decnkm_tracks_set_and_reset() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.decnkm_enabled(), "DECNKM off by default");
 
     session.feed(b"\x1b[?66h").unwrap();
@@ -1079,7 +1144,8 @@ fn decnkm_tracks_set_and_reset() {
 
 #[test]
 fn synchronized_output_tracks_set_and_reset() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(
         !session.synchronized_output_enabled(),
         "sync output off by default"
@@ -1108,7 +1174,8 @@ fn synchronized_output_tracks_set_and_reset() {
 
 #[test]
 fn mouse_x10_only_true_when_only_x10_active() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.mouse_x10_only());
 
     session.feed(b"\x1b[?1000h").unwrap();
@@ -1128,7 +1195,8 @@ fn mouse_x10_only_true_when_only_x10_active() {
 
 #[test]
 fn mouse_x10_only_false_when_any_event_active() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b[?1000h").unwrap();
     session.feed(b"\x1b[?1003h").unwrap();
     assert!(!session.mouse_x10_only(), "X10 + AnyEvent → not press-only");
@@ -1146,7 +1214,8 @@ fn mouse_x10_only_false_when_any_event_active() {
 // "git status" out of the row by the captured columns.
 #[test]
 fn command_history_extracts_single_row_command() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Prompt + B mark, user types, C mark, D mark with exit 0.
     session.feed(b"$ \x1b]133;A\x07\x1b]133;B\x07").unwrap();
     session.feed(b"git status").unwrap();
@@ -1161,7 +1230,8 @@ fn command_history_extracts_single_row_command() {
 // Non-zero exit propagates from D.
 #[test]
 fn command_history_propagates_nonzero_exit_code() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"$ \x1b]133;A\x07\x1b]133;B\x07").unwrap();
     session.feed(b"false").unwrap();
     session.feed(b"\x1b]133;C\x07\x1b]133;D;1\x07").unwrap();
@@ -1173,7 +1243,8 @@ fn command_history_propagates_nonzero_exit_code() {
 // closed the prompt with ^C before pressing Enter.
 #[test]
 fn command_history_drops_unfinished_command_start() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"$ \x1b]133;A\x07\x1b]133;B\x07").unwrap();
     session.feed(b"git st").unwrap();
     // No C — user aborted with ^C, next prompt drawn instead.
@@ -1188,7 +1259,8 @@ fn command_history_drops_unfinished_command_start() {
 // Multiple commands, oldest-first ordering.
 #[test]
 fn command_history_returns_entries_in_chronological_order() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     for cmd in ["echo 1", "echo 2", "echo 3"] {
         session.feed(b"$ \x1b]133;A\x07\x1b]133;B\x07").unwrap();
         session.feed(cmd.as_bytes()).unwrap();
@@ -1212,7 +1284,8 @@ fn command_history_returns_entries_in_chronological_order() {
 // records "the user pressed Enter on an empty line".
 #[test]
 fn command_history_drops_empty_command() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"$ \x1b]133;A\x07\x1b]133;B\x07").unwrap();
     // No bytes between B and C.
     session.feed(b"\x1b]133;C\x07\x1b]133;D;0\x07").unwrap();
@@ -1226,7 +1299,8 @@ fn command_history_drops_empty_command() {
 // next char rather than emitting an empty slice.
 #[test]
 fn command_history_empty_command_with_long_prompt_is_dropped() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // ~30-char prompt — long enough that nth(B.col) is `Some`
     // (which is the precondition that surfaced the bug).
     session
@@ -1281,13 +1355,12 @@ fn slice_chars_handles_multibyte() {
 // LineBuffer capture wiring ---------------------------------------
 
 fn session_with(cols: u16, rows: u16, max_scrollback: usize) -> TerminalSession {
+    let dims = TerminalDims { cols, rows };
     let config = TerminalConfig {
-        cols,
-        rows,
         max_scrollback,
         ..TerminalConfig::default()
     };
-    TerminalSession::new(config).expect("failed to create session")
+    TerminalSession::new(dims, config).expect("failed to create session")
 }
 
 #[test]
@@ -1704,7 +1777,8 @@ fn prompt_mark_abs_y_accounts_for_in_flight_scroll_before_osc() {
 /// ~1_000 lines, silently dropping the rest (overflow stayed 0).
 #[test]
 fn line_buffer_retains_scrollback_beyond_ghostty_ring() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     const N: usize = 5_000; // 80x24 grid, 10k cap
     for i in 0..N {
         session.feed(format!("LINE{i:06}\r\n").as_bytes()).unwrap();

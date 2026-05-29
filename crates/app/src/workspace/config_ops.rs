@@ -28,31 +28,19 @@ impl Workspace {
     /// full `gpui_component::init` chain) don't accidentally trigger
     /// a paint that reaches into uninitialised theme Globals.
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
-        let colors = config.effective_colors();
-        let pal = colors.to_ansi_palette();
-
-        // Update terminal config for future panes.
-        let fg = ghostty_vt::Rgb {
-            r: colors.foreground.r,
-            g: colors.foreground.g,
-            b: colors.foreground.b,
-        };
-        let bg = ghostty_vt::Rgb {
-            r: colors.background.r,
-            g: colors.background.g,
-            b: colors.background.b,
-        };
-        self.terminal_config.default_fg = fg;
-        self.terminal_config.default_bg = bg;
-        self.terminal_config.palette = Some(pal);
-        self.terminal_config.font_size = config.font.size;
-        self.terminal_config.vertical_spacing = config.font.vertical_spacing;
-        self.terminal_config.horizontal_spacing = config.font.horizontal_spacing;
-        self.terminal_config.clamp_font_settings();
-        self.terminal_config.max_scrollback = config.scrollback.max_rows;
-        self.terminal_config.background_alpha = config.window.opacity;
-        self.terminal_config.osc1337_max_bytes = config.clipboard.streaming_max_bytes;
-        self.terminal_config.natural_text_editing = config.shell.natural_text_editing;
+        // A config reload may create/remove the active project's config
+        // layer; drop the memo so the status-bar dot re-stats on next render.
+        self.cached_project_config = None;
+        // Derive the terminal config once (single source of truth), then reuse
+        // its resolved colors to patch live panes — so existing panes and
+        // future panes always resolve to identical fg/bg/palette values.
+        self.terminal_config = terminal_config_from(config);
+        let fg = self.terminal_config.default_fg;
+        let bg = self.terminal_config.default_bg;
+        let pal = self
+            .terminal_config
+            .palette
+            .expect("terminal_config_from always sets palette");
         self.font_family = config.font.family.clone();
         self.shell_program = config.shell.program.clone();
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
@@ -185,6 +173,48 @@ pub(in crate::workspace) fn effective_config_for(
     user.clone().resolve(&project_cfg)
 }
 
+/// Build a [`TerminalConfig`] from the resolved app config. Single source
+/// of truth for the config → terminal-config mapping: both pane creation
+/// (`new_with_project_impl`) and reload (`apply_config`) call this, so a new
+/// config-derived field can only be wired in one place.
+///
+/// No `..TerminalConfig::default()` — every field is named so the compiler
+/// rejects an incomplete mapping. The four fields that are not yet wired to
+/// `daruda_config` are spelled out explicitly to keep that gap visible.
+pub(in crate::workspace) fn terminal_config_from(
+    config: &daruda_config::Config,
+) -> daruda_terminal::TerminalConfig {
+    let colors = config.effective_colors();
+    let mut c = daruda_terminal::TerminalConfig {
+        // ── wired to daruda_config ──
+        default_fg: ghostty_vt::Rgb {
+            r: colors.foreground.r,
+            g: colors.foreground.g,
+            b: colors.foreground.b,
+        },
+        default_bg: ghostty_vt::Rgb {
+            r: colors.background.r,
+            g: colors.background.g,
+            b: colors.background.b,
+        },
+        palette: Some(colors.to_ansi_palette()),
+        font_size: config.font.size,
+        vertical_spacing: config.font.vertical_spacing,
+        horizontal_spacing: config.font.horizontal_spacing,
+        max_scrollback: config.scrollback.max_rows,
+        background_alpha: config.window.opacity,
+        osc1337_max_bytes: config.clipboard.streaming_max_bytes,
+        natural_text_editing: config.shell.natural_text_editing,
+        // ── not yet wired to daruda_config (named to force completeness) ──
+        update_window_title: true,
+        track_cwd: true,
+        visual_bell: false,
+        prompt_jump_scroll: daruda_terminal::PromptJumpScroll::AlwaysTop,
+    };
+    c.clamp_font_settings();
+    c
+}
+
 /// Translate `[usage.pricing]` (TOML-facing) into the data-layer
 /// [`daruda_claude::usage::UsagePricing`].
 pub(in crate::workspace) fn usage_pricing_from_config(
@@ -195,5 +225,30 @@ pub(in crate::workspace) fn usage_pricing_from_config(
         output_per_mtok: p.output_per_mtok,
         cache_read_per_mtok: p.cache_read_per_mtok,
         cache_write_per_mtok: p.cache_write_per_mtok,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_config_honors_scrollback_max_rows() {
+        let mut c = daruda_config::Config::default();
+        c.scrollback.max_rows = 5000;
+        // Guards the startup-drift bug: the creation site used to fall back
+        // to `TerminalConfig::default()`'s 10_000 and ignore the user value
+        // until the first config reload.
+        assert_eq!(terminal_config_from(&c).max_scrollback, 5000);
+    }
+
+    #[test]
+    fn terminal_config_clamps_font_size() {
+        let mut c = daruda_config::Config::default();
+        c.font.size = 1000.0;
+        assert_eq!(
+            terminal_config_from(&c).font_size,
+            daruda_terminal::FONT_SIZE_MAX
+        );
     }
 }

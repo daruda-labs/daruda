@@ -12,7 +12,7 @@ pub mod view;
 
 pub use config::{
     DEFAULT_FONT_SIZE, DEFAULT_SPACING, FONT_SIZE_MAX, FONT_SIZE_MIN, PromptJumpScroll,
-    SPACING_MAX, SPACING_MIN, TerminalConfig,
+    SPACING_MAX, SPACING_MIN, TerminalConfig, TerminalDims,
 };
 pub use font::{default_terminal_font, default_terminal_font_features, terminal_font_with_family};
 pub use ghostty_vt::Error as VtError;

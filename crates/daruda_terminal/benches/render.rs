@@ -19,17 +19,19 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use daruda_terminal::coords::ViewportRow;
-use daruda_terminal::{TerminalConfig, TerminalSession};
+use daruda_terminal::{TerminalConfig, TerminalDims, TerminalSession};
 
 const ROWS: u16 = 24;
 const COLS: u16 = 80;
 
 fn fresh_session() -> TerminalSession {
-    TerminalSession::new(TerminalConfig {
-        cols: COLS,
-        rows: ROWS,
-        ..TerminalConfig::default()
-    })
+    TerminalSession::new(
+        TerminalDims {
+            cols: COLS,
+            rows: ROWS,
+        },
+        TerminalConfig::default(),
+    )
     .expect("session")
 }
 

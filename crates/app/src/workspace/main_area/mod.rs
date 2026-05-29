@@ -22,8 +22,8 @@ pub(in crate::workspace) use context::MainAreaContext;
 
 use crate::ui::theme;
 use gpui::{
-    AnyElement, ClickEvent, Context, CursorStyle, ExternalPaths, IntoElement, MouseButton,
-    MouseDownEvent, SharedString, div, prelude::*, px,
+    AnyElement, AnyView, ClickEvent, Context, CursorStyle, ExternalPaths, IntoElement, MouseButton,
+    MouseDownEvent, SharedString, StyleRefinement, div, prelude::*, px,
 };
 
 use crate::shell_quote::{Shell, format_paths_for_drop, quote_path};
@@ -351,7 +351,18 @@ pub(in crate::workspace) fn render_layout(
                                 });
                             },
                         ))
-                        .child(t.view.clone());
+                        // Cache the terminal view as an element: when only a
+                        // sibling (e.g. a left-dock status-badge animation)
+                        // dirties the Workspace, the terminal isn't in
+                        // `dirty_views`, so GPUI reuses its prior prepaint+paint
+                        // instead of re-shaping the whole grid. Real terminal
+                        // updates call `cx.notify()` on the view, which marks it
+                        // dirty and forces a re-render. Style mirrors the view's
+                        // own root (`size_full().flex()`).
+                        .child(
+                            AnyView::from(t.view.clone())
+                                .cached(StyleRefinement::default().size_full().flex()),
+                        );
                     if has_splits && !is_focused && dim_alpha > 0.0 {
                         terminal_area = terminal_area.child(dim_overlay(dim_alpha));
                     }

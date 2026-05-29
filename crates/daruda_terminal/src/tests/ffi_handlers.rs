@@ -19,7 +19,8 @@ fn row_text(session: &TerminalSession, row0: u16) -> String {
 #[test]
 fn ffi_handler_index_advances_cursor_and_scrolls_at_bottom() {
     // IND (ESC D) — advances cursor, scrolls when at bottom margin.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     place_cursor_at(&mut session, 2, 1);
@@ -42,7 +43,8 @@ fn ffi_handler_index_advances_cursor_and_scrolls_at_bottom() {
 #[test]
 fn ffi_handler_scroll_up_cs_s_shifts_content() {
     // SU (CSI S) — shift viewport up by 1.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"row1\r\nrow2\r\nrow3\r\n").unwrap();
     drain_scroll_and_dirty(&mut session);
@@ -65,7 +67,8 @@ fn ffi_handler_scroll_up_cs_s_shifts_content() {
 #[test]
 fn ffi_handler_scroll_down_cs_t_shifts_content() {
     // SD (CSI T) — shift viewport down by 1.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"row1\r\nrow2\r\n").unwrap();
     drain_scroll_and_dirty(&mut session);
@@ -87,7 +90,8 @@ fn ffi_handler_scroll_down_cs_t_shifts_content() {
 #[test]
 fn ffi_handler_insert_blanks_cs_at() {
     // ICH (CSI @) — insert N blank cells at cursor, shifting right.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"abcdef").unwrap();
     place_cursor_at(&mut session, 1, 2); // cursor on 'b'
@@ -99,7 +103,8 @@ fn ffi_handler_insert_blanks_cs_at() {
 #[test]
 fn ffi_handler_delete_chars_cs_p() {
     // DCH (CSI P) — delete N cells at cursor, shifting left.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"abcdef").unwrap();
     place_cursor_at(&mut session, 1, 2); // cursor on 'b'
@@ -111,7 +116,8 @@ fn ffi_handler_delete_chars_cs_p() {
 #[test]
 fn ffi_handler_erase_chars_cs_x() {
     // ECH (CSI X) — replace N cells with blanks, no shift.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"abcdef").unwrap();
     place_cursor_at(&mut session, 1, 2);
@@ -128,7 +134,8 @@ fn ffi_handler_erase_chars_cs_x() {
 fn ffi_handler_decstbm_confines_il_to_scroll_region() {
     // DECSTBM (CSI r) — set scroll region. IL outside the region must no-op,
     // inside the region must shift. Proves setTopAndBottomMargin dispatches.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"l1\r\nl2\r\nl3\r\nl4\r\nl5\r\n").unwrap();
     session.feed(b"\x1b[2;4r").unwrap(); // scroll region: rows 2..=4
@@ -150,7 +157,8 @@ fn ffi_handler_decstbm_confines_il_to_scroll_region() {
 #[test]
 fn ffi_handler_save_restore_cursor() {
     // DECSC / DECRC (ESC 7 / ESC 8) — round-trip cursor position.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     place_cursor_at(&mut session, 5, 10);
     session.feed(b"\x1b7").unwrap(); // save
@@ -164,7 +172,8 @@ fn ffi_handler_save_restore_cursor() {
 #[test]
 fn ffi_handler_next_line_esc_e() {
     // NEL (ESC E) — CR + LF combined.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     place_cursor_at(&mut session, 2, 5);
     session.feed(b"\x1bE").unwrap();
@@ -177,7 +186,8 @@ fn ffi_handler_next_line_esc_e() {
 #[test]
 fn ffi_handler_print_repeat_esc_b() {
     // REP (CSI b) — repeat last printed character N times.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"a\x1b[3b").unwrap();
     assert_eq!(
@@ -190,7 +200,8 @@ fn ffi_handler_print_repeat_esc_b() {
 #[test]
 fn ffi_handler_full_reset_esc_c() {
     // RIS (ESC c) — full reset. Must clear screen and reset cursor.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
 
     session.feed(b"some text\r\nmore text\r\n").unwrap();
     session.feed(b"\x1bc").unwrap();

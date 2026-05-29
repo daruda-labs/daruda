@@ -1,9 +1,23 @@
 use ghostty_vt::Rgb;
 
-#[derive(Clone, Copy, Debug)]
-pub struct TerminalConfig {
+/// Runtime grid geometry. Owned by [`crate::TerminalSession`] as a field
+/// separate from [`TerminalConfig`] so that a config reload can swap the
+/// config-derived fields wholesale without clobbering the live `cols`/`rows`
+/// that `resize()` maintains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalDims {
     pub cols: u16,
     pub rows: u16,
+}
+
+impl Default for TerminalDims {
+    fn default() -> Self {
+        Self { cols: 80, rows: 24 }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalConfig {
     pub default_fg: Rgb,
     pub default_bg: Rgb,
     pub update_window_title: bool,
@@ -87,8 +101,6 @@ pub enum PromptJumpScroll {
 impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
-            cols: 80,
-            rows: 24,
             default_fg: Rgb {
                 r: 0xFF,
                 g: 0xFF,

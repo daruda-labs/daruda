@@ -59,27 +59,21 @@ fn normal_mouse_sequence_boundary_col95_uses_utf8() {
 
 #[test]
 fn alternate_scroll_defaults_to_enabled() {
-    use crate::TerminalConfig;
     use crate::session::TerminalSession;
-    let cfg = TerminalConfig {
-        cols: 80,
-        rows: 24,
-        ..Default::default()
-    };
-    let session = TerminalSession::new(cfg).unwrap();
+    use crate::{TerminalConfig, TerminalDims};
+    let dims = TerminalDims { cols: 80, rows: 24 };
+    let cfg = TerminalConfig::default();
+    let session = TerminalSession::new(dims, cfg).unwrap();
     assert!(session.alternate_scroll_enabled());
 }
 
 #[test]
 fn alternate_scroll_disabled_by_decset_reset() {
-    use crate::TerminalConfig;
     use crate::session::TerminalSession;
-    let cfg = TerminalConfig {
-        cols: 80,
-        rows: 24,
-        ..Default::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    use crate::{TerminalConfig, TerminalDims};
+    let dims = TerminalDims { cols: 80, rows: 24 };
+    let cfg = TerminalConfig::default();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
     assert!(session.alternate_scroll_enabled());
     let _ = session.feed(b"\x1b[?1007l"); // disable
     assert!(!session.alternate_scroll_enabled());
@@ -93,14 +87,11 @@ fn alternate_scroll_disabled_by_decset_reset() {
 
 #[test]
 fn mouse_utf8_mode_parsed_correctly() {
-    use crate::TerminalConfig;
     use crate::session::TerminalSession;
-    let cfg = TerminalConfig {
-        cols: 80,
-        rows: 24,
-        ..Default::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    use crate::{TerminalConfig, TerminalDims};
+    let dims = TerminalDims { cols: 80, rows: 24 };
+    let cfg = TerminalConfig::default();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
     assert!(!session.mouse_utf8_enabled());
     let _ = session.feed(b"\x1b[?1005h");
     assert!(session.mouse_utf8_enabled());

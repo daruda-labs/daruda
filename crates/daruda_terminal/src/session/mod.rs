@@ -5,7 +5,6 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use ghostty_vt::{Error, Rgb, Terminal};
 
-use crate::TerminalConfig;
 use crate::ansi;
 use crate::coords::ViewportRow;
 use crate::session::interval_tree::{
@@ -16,6 +15,7 @@ use crate::vt_codes::{
     NotificationRequest, OSC_DEFAULT_BG, OSC_DEFAULT_FG,
 };
 use crate::vt_limits::{PARSE_TAIL_LIMIT, PROMPT_MARKS_CAP};
+use crate::{TerminalConfig, TerminalDims};
 
 mod annotation_ops;
 pub mod interval_tree;
@@ -158,6 +158,7 @@ pub enum PromptMarkKind {
 }
 
 pub struct TerminalSession {
+    dims: TerminalDims,
     config: TerminalConfig,
     terminal: Terminal,
     bracketed_paste_enabled: bool,
@@ -338,12 +339,12 @@ fn is_hard_eol(kind: ghostty_vt::WrapKind) -> bool {
 }
 
 impl TerminalSession {
-    pub fn new(config: TerminalConfig) -> Result<Self, Error> {
+    pub fn new(dims: TerminalDims, config: TerminalConfig) -> Result<Self, Error> {
         // Ghostty keeps a small ring so `capture_scrolled_out` can still
         // read evicted rows before the next feed drops them; daruda's
         // own scrollback lives in `line_buffer`.
-        let ghostty_scrollback = GHOSTTY_TRANSIENT_SCROLLBACK.max((config.rows as usize) * 2);
-        let mut terminal = Terminal::with_scrollback(config.cols, config.rows, ghostty_scrollback)?;
+        let ghostty_scrollback = GHOSTTY_TRANSIENT_SCROLLBACK.max((dims.rows as usize) * 2);
+        let mut terminal = Terminal::with_scrollback(dims.cols, dims.rows, ghostty_scrollback)?;
         terminal.set_default_colors(config.default_fg, config.default_bg);
         if let Some(palette) = &config.palette {
             for (i, [r, g, b]) in palette.iter().enumerate() {
@@ -352,6 +353,7 @@ impl TerminalSession {
             }
         }
         Ok(Self {
+            dims,
             config,
             terminal,
             bracketed_paste_enabled: false,
@@ -434,7 +436,7 @@ impl TerminalSession {
     /// cannot resolve the row (e.g. zero cols or a sparse buffer). Viewport
     /// rows (`row >= lb_rows`) always return `Some(LineCoord::Viewport { .. })`.
     pub fn screen_row_to_line_coord(&self, row: u32) -> Option<LineCoord> {
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         let lb_rows = self.line_buffer.wrapped_row_count(cols);
         if row < lb_rows {
             self.line_buffer
@@ -470,7 +472,7 @@ impl TerminalSession {
     /// (resize-wrap) is triggered by rows already captured in `LineBuffer`,
     /// so this limitation is acceptable for SP-1.
     pub fn is_wrap_continuation(&self, screen_row: u32) -> bool {
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         let lb_rows = self.line_buffer.wrapped_row_count(cols);
         if screen_row >= lb_rows {
             // SP-1: viewport-region wrap continuations are not detected;
@@ -718,11 +720,11 @@ impl TerminalSession {
     }
 
     pub fn cols(&self) -> u16 {
-        self.config.cols
+        self.dims.cols
     }
 
     pub fn rows(&self) -> u16 {
-        self.config.rows
+        self.dims.rows
     }
 
     pub fn default_foreground(&self) -> Rgb {
@@ -1244,7 +1246,7 @@ impl TerminalSession {
         // lives on `LineBuffer::rebind_viewport_abs`; this loop just
         // walks SP-1 single-line marks and forwards.
         {
-            let cols = self.config.cols;
+            let cols = self.dims.cols;
             // Collect first: `iter()` borrows `&self`, `update_payload_range`
             // needs `&mut self`.
             let to_rebind: Vec<(MarkId, LineRange)> = self
@@ -1510,7 +1512,7 @@ impl TerminalSession {
         if self.scroll_offset == 0 {
             return self.terminal.dump_viewport();
         }
-        let rows = self.config.rows as u32;
+        let rows = self.dims.rows as u32;
         let top = self.viewport_row_offset();
         let mut out = String::new();
         for i in 0..rows {
@@ -1549,7 +1551,7 @@ impl TerminalSession {
     /// wrapped range, the row text comes from there; rows beyond that
     /// land on ghostty's live viewport.
     pub fn dump_screen_row(&self, y: u32) -> Result<String, Error> {
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         let lb_rows = self.line_buffer.wrapped_row_count(cols);
         if y < lb_rows {
             self.line_buffer
@@ -1566,7 +1568,7 @@ impl TerminalSession {
     /// `line_buffer`, viewport rows from ghostty. Output columns are
     /// 1-indexed inclusive (StyleRun convention).
     pub fn dump_screen_row_styles(&self, y: u32) -> Result<Vec<ghostty_vt::StyleRun>, Error> {
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         let lb_rows = self.line_buffer.wrapped_row_count(cols);
         if y < lb_rows {
             Ok(self
@@ -1621,10 +1623,10 @@ impl TerminalSession {
     /// the live viewport). Stays in sync as captures land and rows
     /// scroll off the top of the grid.
     pub fn total_rows(&self) -> u32 {
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         self.line_buffer
             .wrapped_row_count(cols)
-            .saturating_add(self.config.rows as u32)
+            .saturating_add(self.dims.rows as u32)
     }
 
     /// Compute the ever-increasing absolute Y of the **logical line**
@@ -1856,7 +1858,7 @@ impl TerminalSession {
         }
         let line_offset = abs_y - overflow;
         let lb_lines = self.line_buffer.len() as u64;
-        let cols = self.config.cols;
+        let cols = self.dims.cols;
         if line_offset < lb_lines {
             // LineBuffer branch: sum the wrapped row counts of every
             // logical line strictly before `idx` to land on the target's
@@ -1879,7 +1881,7 @@ impl TerminalSession {
         let scrolled = self.terminal.peek_scrolled_rows();
         let viewport_top = self.terminal.viewport_row_offset();
         let frame_start = viewport_top.saturating_sub(scrolled);
-        let frame_end = viewport_top.saturating_add(self.config.rows as u32);
+        let frame_end = viewport_top.saturating_add(self.dims.rows as u32);
         let mut count: u64 = 0;
         let mut y = frame_start;
         while y < frame_end {
@@ -1906,7 +1908,7 @@ impl TerminalSession {
     /// `scroll_offset` walks back into `line_buffer` scrollback.
     pub fn viewport_row_offset(&self) -> u32 {
         self.total_rows()
-            .saturating_sub(self.config.rows as u32)
+            .saturating_sub(self.dims.rows as u32)
             .saturating_sub(self.scroll_offset)
     }
 
@@ -1979,7 +1981,7 @@ impl TerminalSession {
     /// for PageUp / wheel-up). Clamps to the available scrollback so
     /// `scroll_offset` never exceeds `line_buffer.wrapped_row_count`.
     pub fn scroll_viewport(&mut self, delta_lines: i32) -> Result<(), Error> {
-        let max_scroll = self.line_buffer.wrapped_row_count(self.config.cols);
+        let max_scroll = self.line_buffer.wrapped_row_count(self.dims.cols);
         let cur = self.scroll_offset as i32;
         let new_offset = (cur - delta_lines).clamp(0, max_scroll as i32);
         self.scroll_offset = new_offset as u32;
@@ -1989,7 +1991,7 @@ impl TerminalSession {
     /// Pin the viewport to the top of the unified frame (oldest
     /// `line_buffer` row at the top of the visible area).
     pub fn scroll_viewport_top(&mut self) -> Result<(), Error> {
-        self.scroll_offset = self.line_buffer.wrapped_row_count(self.config.cols);
+        self.scroll_offset = self.line_buffer.wrapped_row_count(self.dims.cols);
         Ok(())
     }
 
@@ -2000,8 +2002,8 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
-        self.config.cols = cols;
-        self.config.rows = rows;
+        self.dims.cols = cols;
+        self.dims.rows = rows;
         let result = self.terminal.resize(cols, rows);
         // Ghostty reflows soft-wrapped rows on resize, so
         // `viewport_row_offset` may drop (widen) or rise (narrow) by an
@@ -2061,7 +2063,7 @@ impl TerminalSession {
 
     pub fn take_dirty_viewport_rows(&mut self) -> Vec<u16> {
         self.terminal
-            .take_dirty_viewport_rows(self.config.rows)
+            .take_dirty_viewport_rows(self.dims.rows)
             .unwrap_or_default()
     }
 

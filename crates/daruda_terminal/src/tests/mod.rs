@@ -1,7 +1,7 @@
 use gpui::{KeyBinding, KeyContext, Keymap, Keystroke, actions};
 use std::any::TypeId;
 
-use crate::{TerminalConfig, TerminalSession};
+use crate::{TerminalConfig, TerminalDims, TerminalSession};
 
 actions!(tab_shadow_test, [RootTab, TerminalTab]);
 
@@ -87,12 +87,9 @@ fn url_ids_survive_scroll_out() {
     // Feed an OSC 8 hyperlink, then push it out of the viewport so the
     // capture path moves it into LineBuffer. At least one cell of the
     // captured line should carry the link's url_id.
-    let cfg = TerminalConfig {
-        cols: 20,
-        rows: 3,
-        ..TerminalConfig::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    let dims = TerminalDims { cols: 20, rows: 3 };
+    let cfg = TerminalConfig::default();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
 
     session
         .feed(b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n")
@@ -113,7 +110,8 @@ fn url_ids_survive_scroll_out() {
 
 #[test]
 fn tracks_bracketed_paste_mode_from_output() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.bracketed_paste_enabled());
 
     session.feed(b"\x1b[?2004h").unwrap();
@@ -125,7 +123,8 @@ fn tracks_bracketed_paste_mode_from_output() {
 
 #[test]
 fn tracks_mouse_reporting_mode_from_output() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     assert!(!session.mouse_reporting_enabled());
     assert!(!session.mouse_sgr_enabled());
 
@@ -162,7 +161,8 @@ fn viewport_index_accounts_for_wide_characters() {
 
 #[test]
 fn tracks_modes_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b[?1000;").unwrap();
     assert!(!session.mouse_reporting_enabled());
 
@@ -173,7 +173,8 @@ fn tracks_modes_across_chunk_boundaries() {
 
 #[test]
 fn tracks_osc_title_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]0;hi").unwrap();
     assert!(session.title().is_none());
 
@@ -183,7 +184,8 @@ fn tracks_osc_title_across_chunk_boundaries() {
 
 #[test]
 fn tracks_osc_52_clipboard_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     session.feed(b"\x1b]52;c;").unwrap();
     assert!(session.take_clipboard_write().is_none());
 
@@ -193,7 +195,8 @@ fn tracks_osc_52_clipboard_across_chunk_boundaries() {
 
 #[test]
 fn responds_to_csi_6n_cursor_position_request() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -207,7 +210,8 @@ fn responds_to_csi_6n_cursor_position_request() {
 
 #[test]
 fn responds_to_csi_6n_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -228,7 +232,8 @@ fn responds_to_csi_6n_across_chunk_boundaries() {
 
 #[test]
 fn responds_to_csi_5n_device_status_request() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -242,7 +247,8 @@ fn responds_to_csi_5n_device_status_request() {
 
 #[test]
 fn responds_to_csi_5n_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -263,7 +269,8 @@ fn responds_to_csi_5n_across_chunk_boundaries() {
 
 #[test]
 fn responds_to_osc_10_default_foreground_color_query() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -278,7 +285,8 @@ fn responds_to_osc_10_default_foreground_color_query() {
 
 #[test]
 fn responds_to_osc_11_default_background_color_query() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -306,7 +314,7 @@ fn responds_to_osc_10_and_11_use_configured_defaults() {
         },
         ..TerminalConfig::default()
     };
-    let mut session = TerminalSession::new(config).unwrap();
+    let mut session = TerminalSession::new(TerminalDims::default(), config).unwrap();
     let mut response = Vec::new();
 
     session
@@ -325,7 +333,8 @@ fn responds_to_osc_10_and_11_use_configured_defaults() {
 
 #[test]
 fn responds_to_osc_11_across_chunk_boundaries() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -347,7 +356,8 @@ fn responds_to_osc_11_across_chunk_boundaries() {
 
 #[test]
 fn responds_to_osc_11_query_terminated_by_bel() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let mut response = Vec::new();
 
     session
@@ -500,7 +510,8 @@ fn line_has_box_drawing_detects_glyphs() {
 #[test]
 fn search_finds_matches_in_scrollback() {
     use crate::{TerminalConfig, TerminalSession};
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Drop a keyword into the scrollback region.
     for i in 0..40 {
         let token = if i == 2 { "NEEDLE" } else { "filler" };
@@ -524,7 +535,8 @@ fn search_finds_matches_in_scrollback() {
 
 #[test]
 fn dump_screen_row_returns_scrollback_content() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     // Fill more rows than the viewport to force scrollback (default
     // rows=24). 30 lines pushes 6 of them off the top.
     for i in 0..30 {
@@ -585,7 +597,8 @@ fn linefeed_at_bottom_margin_reports_scroll_delta_and_dirty_rows() {
     // This is the real-world "vi `o` on last line" path: vi does not emit
     // IND/SU itself — it just writes `\n` and relies on the terminal to
     // scroll. The reconcile path must react via `take_viewport_scroll_delta`.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     place_cursor_at(&mut session, rows, 1);
@@ -610,7 +623,8 @@ fn linefeed_at_bottom_margin_reports_scroll_delta_and_dirty_rows() {
 fn plain_character_output_keeps_dirty_set_small() {
     // Sanity check: single-character writes must stay under the rows/2
     // threshold so normal typing uses the partial-update fast path.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     place_cursor_at(&mut session, 5, 1);
@@ -631,7 +645,8 @@ fn plain_character_output_keeps_dirty_set_small() {
 fn erase_display_marks_every_viewport_row_dirty() {
     // ED (CSI 2 J) must mark the whole viewport dirty, which saturates the
     // `dirty.len() * 2 >= rows` heuristic and forces a full refresh.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     session.feed(b"seed\r\n").unwrap();
@@ -654,7 +669,8 @@ fn insert_line_marks_cursor_through_bottom_margin_dirty() {
     // ghostty_vt_sys, markDirty now propagates to `take_dirty_viewport_rows`.
     // Since `rem = bottom - cursor.y + 1` rows are marked, the
     // `dirty.len() * 2 >= rows` heuristic will trigger a full refresh.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     session.feed(b"a\r\nb\r\nc\r\n").unwrap();
@@ -686,7 +702,8 @@ fn insert_line_marks_cursor_through_bottom_margin_dirty() {
 
 #[test]
 fn delete_line_marks_cursor_through_bottom_margin_dirty() {
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     session.feed(b"a\r\nb\r\nc\r\n").unwrap();
@@ -709,7 +726,8 @@ fn reverse_index_at_top_margin_reports_scroll_or_dirty() {
     // RI (ESC M) at top row should either produce a scroll delta or at
     // minimum mark rows dirty. Guards against regressions in the reverseIndex
     // FFI handler.
-    let mut session = TerminalSession::new(TerminalConfig::default()).unwrap();
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
     let rows = session.rows();
 
     session.feed(b"content\r\n").unwrap();

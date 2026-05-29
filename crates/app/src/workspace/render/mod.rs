@@ -771,13 +771,27 @@ impl Render for Workspace {
             .panes
             .iter()
             .find(|p| p.id == self.main_area.focused_pane_id);
-        // Cheap stat per render — the path is a single file under the
-        // user config dir and renders only fire on `cx.notify()`, not
-        // in a tight loop.
-        let has_project_config = self
-            .active_project()
-            .and_then(|p| daruda_config::project_config_path(&p.root))
-            .is_some_and(|path: std::path::PathBuf| path.exists());
+        // `project_config_path` (canonicalize) + `Path::exists` are
+        // filesystem stats, and `render()` re-runs on every animation frame
+        // (status badges request frames without `cx.notify`). Memoize the
+        // flag keyed by the active project root so the stat only fires when
+        // the active project changes; `reload_config` clears the memo so a
+        // freshly created project layer surfaces immediately.
+        let active_root = self.active_project().map(|p| p.root.clone());
+        let has_project_config = match &active_root {
+            Some(root) => {
+                if self.cached_project_config.as_ref().map(|(r, _)| r) != Some(root) {
+                    let exists = daruda_config::project_config_path(root)
+                        .is_some_and(|path: std::path::PathBuf| path.exists());
+                    self.cached_project_config = Some((root.clone(), exists));
+                }
+                self.cached_project_config
+                    .as_ref()
+                    .map(|(_, exists)| *exists)
+                    .unwrap_or(false)
+            }
+            None => false,
+        };
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),

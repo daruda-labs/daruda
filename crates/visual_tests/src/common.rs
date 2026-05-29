@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use gpui::{Context, Entity, TestAppContext, VisualTestContext};
 
 use daruda_terminal::view::{TerminalInput, TerminalView};
-use daruda_terminal::{TerminalConfig, TerminalSession};
+use daruda_terminal::{TerminalConfig, TerminalDims, TerminalSession};
 
 /// Opens a window containing a `TerminalView` with no PTY. Returns the entity
 /// and the window-scoped test context. Shadow `cx` with the returned
@@ -13,8 +13,8 @@ pub fn open_terminal<'a>(
 ) -> (Entity<TerminalView>, &'a mut VisualTestContext) {
     cx.add_window_view(|_window, cx: &mut Context<TerminalView>| {
         let focus = cx.focus_handle();
-        let session =
-            TerminalSession::new(TerminalConfig::default()).expect("TerminalSession::new failed");
+        let session = TerminalSession::new(TerminalDims::default(), TerminalConfig::default())
+            .expect("TerminalSession::new failed");
         TerminalView::new(session, focus)
     })
 }
@@ -27,8 +27,8 @@ pub fn open_terminal_with_sink<'a>(
 ) -> (Entity<TerminalView>, &'a mut VisualTestContext) {
     cx.add_window_view(|_window, cx: &mut Context<TerminalView>| {
         let focus = cx.focus_handle();
-        let session =
-            TerminalSession::new(TerminalConfig::default()).expect("TerminalSession::new failed");
+        let session = TerminalSession::new(TerminalDims::default(), TerminalConfig::default())
+            .expect("TerminalSession::new failed");
         let input = TerminalInput::new({
             let sink = sink.clone();
             move |bytes| sink.lock().unwrap().extend_from_slice(bytes)

@@ -165,7 +165,11 @@ fn selection_at_end_of_line_includes_newline() {
     let active = ScreenPos::viewport(1, 0);
     let sel = ByteSelection::linear(anchor, active);
     assert!(!sel.is_empty());
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
     let (start, end) = sel.normalized(&session).unwrap();
     assert_eq!(start, anchor);
     assert_eq!(end, active);
@@ -182,7 +186,11 @@ fn selection_beyond_content_uses_total_len() {
     let anchor = ScreenPos::viewport(0, 1);
     let active = ScreenPos::viewport(1, 3);
     let sel = ByteSelection::linear(anchor, active);
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
     let (start, end) = sel.normalized(&session).unwrap();
     assert_eq!(start.screen_row(&session), Some(0));
     assert_eq!(end.screen_row(&session), Some(1));
@@ -219,7 +227,11 @@ fn selection_range_clamped_to_total_len() {
     // Full viewport selection (row 0 byte 0 → row 1 byte 3) is non-empty
     // and normalized with anchor before active.
     let sel = ByteSelection::linear(ScreenPos::viewport(0, 0), ScreenPos::viewport(1, 3));
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
     let (start, end) = sel.normalized(&session).unwrap();
     assert!(start.screen_row(&session) <= end.screen_row(&session));
     assert!(!sel.is_empty());
@@ -233,7 +245,11 @@ fn selection_range_clamped_to_total_len() {
 fn word_range_stays_within_line() {
     let lines: Vec<String> = vec!["hello world".into(), "foo bar".into()];
     let vp_offset = 0u32;
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
 
     // byte 6 on row 0 → selects "world" (bytes 6..11 on row 0)
     let pos = ScreenPos::viewport(0, 6);
@@ -264,7 +280,11 @@ fn word_range_stays_within_line() {
 fn line_range_last_line_does_not_select_below() {
     let lines: Vec<String> = vec!["abc".into(), "def".into()];
     let vp_offset = 0u32;
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
 
     // A position on row 1 → full row 1 range: byte 0 to len+1
     let pos = ScreenPos::viewport(1, 1);
@@ -285,7 +305,11 @@ fn line_range_last_line_does_not_select_below() {
 fn line_range_at_total_len_selects_last_line() {
     let lines: Vec<String> = vec!["abc".into(), "def".into()];
     let vp_offset = 0u32;
-    let session = crate::TerminalSession::new(crate::TerminalConfig::default()).unwrap();
+    let session = crate::TerminalSession::new(
+        crate::TerminalDims::default(),
+        crate::TerminalConfig::default(),
+    )
+    .unwrap();
 
     // Clamped past-end position on row 1 still returns full row 1
     let pos = ScreenPos::viewport(1, 100);
@@ -679,13 +703,12 @@ fn block_rect_from_anchors_returns_none_when_trim_empties_rect() {
 /// tests. `cols` is sized large enough to keep each input line on a
 /// single visual row.
 fn session_with_lines(lines: &[&str], cols: u16, rows: u16) -> crate::TerminalSession {
+    let dims = crate::TerminalDims { cols, rows };
     let config = crate::TerminalConfig {
-        cols,
-        rows,
         max_scrollback: 1024,
         ..crate::TerminalConfig::default()
     };
-    let mut s = crate::TerminalSession::new(config).expect("session");
+    let mut s = crate::TerminalSession::new(dims, config).expect("session");
     let mut payload = String::new();
     for (i, line) in lines.iter().enumerate() {
         payload.push_str(line);
@@ -811,16 +834,15 @@ fn block_copy_text_pulls_rows_from_scrollback() {
 /// blank line followed by the live content for the remaining rows.
 #[test]
 fn block_copy_evicted_row_contributes_blank_line() {
-    use crate::{TerminalConfig, TerminalSession};
+    use crate::{TerminalConfig, TerminalDims, TerminalSession};
     // Single-line scrollback cap so feeding more logical lines genuinely
     // evicts rows past LineBuffer's ring.
+    let dims = TerminalDims { cols: 16, rows: 1 };
     let cfg = TerminalConfig {
-        cols: 16,
-        rows: 1,
         max_scrollback: 1,
         ..TerminalConfig::default()
     };
-    let mut session = TerminalSession::new(cfg).expect("session");
+    let mut session = TerminalSession::new(dims, cfg).expect("session");
     // Feed three sealed lines: "first" and "second" get evicted (only
     // "third" survives in LineBuffer); the viewport holds the empty
     // current line after the trailing newline.
@@ -949,13 +971,10 @@ fn cursor_color_contrasts_with_background() {
 /// selection-survives logic.
 #[test]
 fn dirty_rows_after_cursor_to_row2_write() {
-    use crate::{TerminalConfig, TerminalSession};
-    let cfg = TerminalConfig {
-        rows: 24,
-        cols: 80,
-        ..TerminalConfig::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    use crate::{TerminalConfig, TerminalDims, TerminalSession};
+    let dims = TerminalDims { cols: 80, rows: 24 };
+    let cfg = TerminalConfig::default();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
 
     let _ = session.feed(b"row zero content here\r\nrow one content here\r\n");
     let _ = session.take_dirty_viewport_rows(); // consume initial dirty set
@@ -981,13 +1000,10 @@ fn dirty_rows_after_cursor_to_row2_write() {
 /// writing there does mark row 0 dirty.
 #[test]
 fn dirty_rows_after_cursor_to_row1_write() {
-    use crate::{TerminalConfig, TerminalSession};
-    let cfg = TerminalConfig {
-        rows: 24,
-        cols: 80,
-        ..TerminalConfig::default()
-    };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    use crate::{TerminalConfig, TerminalDims, TerminalSession};
+    let dims = TerminalDims { cols: 80, rows: 24 };
+    let cfg = TerminalConfig::default();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
 
     let _ = session.feed(b"row zero content here\r\nrow one content here\r\n");
     let _ = session.take_dirty_viewport_rows();
@@ -1008,14 +1024,13 @@ fn dirty_rows_after_cursor_to_row1_write() {
 /// the same cell through the new wrap layout.
 #[test]
 fn scrollback_anchor_survives_resize_widen() {
-    use crate::{TerminalConfig, TerminalSession};
+    use crate::{TerminalConfig, TerminalDims, TerminalSession};
+    let dims = TerminalDims { cols: 20, rows: 3 };
     let cfg = TerminalConfig {
-        cols: 20,
-        rows: 3,
         max_scrollback: 1024,
         ..TerminalConfig::default()
     };
-    let mut session = TerminalSession::new(cfg).unwrap();
+    let mut session = TerminalSession::new(dims, cfg).unwrap();
     // Five lines, viewport is 3 rows tall → at least the first two
     // lines scroll off the top into LineBuffer scrollback.
     session

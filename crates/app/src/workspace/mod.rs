@@ -356,6 +356,14 @@ pub struct Workspace {
     /// persist the live window geometry without taking `Window` as a
     /// parameter.
     pub(in crate::workspace) cached_window_bounds: Option<daruda_store::project::WindowState>,
+    /// Memoized status-bar "project config layer exists" flag, keyed by the
+    /// active project root. `project_config_path` + `Path::exists` are
+    /// filesystem stats; `render()` runs on every animation frame (status
+    /// badges request frames without `cx.notify`), so statting per render
+    /// burned syscalls in a tight loop. Recompute only when the active root
+    /// changes; `reload_config` clears it so a freshly created project layer
+    /// surfaces immediately.
+    pub(in crate::workspace) cached_project_config: Option<(std::path::PathBuf, bool)>,
     /// User-set window title (Window > Edit Window Title…). When
     /// `Some`, replaces the auto-derived `"<pane title> — <cwd>"`
     /// string passed to `window.set_window_title`. Persisted to
@@ -724,34 +732,7 @@ impl Workspace {
             dock_drag: None,
             dim_alpha: render::DEFAULT_INACTIVE_PANE_DIM_ALPHA,
             inherit_cwd: true,
-            terminal_config: {
-                // Build ANSI 16-color palette from the effective colors
-                // (preset overrides the [colors] section when set).
-                let colors = config.effective_colors();
-                let pal = colors.to_ansi_palette();
-                let mut cfg = TerminalConfig {
-                    default_fg: ghostty_vt::Rgb {
-                        r: colors.foreground.r,
-                        g: colors.foreground.g,
-                        b: colors.foreground.b,
-                    },
-                    default_bg: ghostty_vt::Rgb {
-                        r: colors.background.r,
-                        g: colors.background.g,
-                        b: colors.background.b,
-                    },
-                    font_size: config.font.size,
-                    vertical_spacing: config.font.vertical_spacing,
-                    horizontal_spacing: config.font.horizontal_spacing,
-                    palette: Some(pal),
-                    background_alpha: config.window.opacity,
-                    osc1337_max_bytes: config.clipboard.streaming_max_bytes,
-                    natural_text_editing: config.shell.natural_text_editing,
-                    ..TerminalConfig::default()
-                };
-                cfg.clamp_font_settings();
-                cfg
-            },
+            terminal_config: config_ops::terminal_config_from(config),
             font_family: config.font.family.clone(),
             left_dock: {
                 let ws = ws_weak.clone();
@@ -863,6 +844,7 @@ impl Workspace {
             error_history: Vec::new(),
             toast_layer,
             cached_window_bounds: None,
+            cached_project_config: None,
             window_user_label: None,
             shell_program: config.shell.program.clone(),
             syntax_theme: config.file_viewer.syntax_theme.clone(),

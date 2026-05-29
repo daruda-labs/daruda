@@ -6,9 +6,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use daruda_store::tasks::TaskId;
-use daruda_terminal::TerminalSession;
 use daruda_terminal::ux::strings as term_strings;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
+use daruda_terminal::{TerminalDims, TerminalSession};
 use gpui::{
     App, Context, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task, Window,
     prelude::*,
@@ -781,7 +781,10 @@ impl Workspace {
 
         // Create the VT session up front so its error can propagate out
         // of create_pane rather than panicking inside the cx.new closure.
-        let session = TerminalSession::new(config).map_err(PaneSpawnError::Vt)?;
+        // Start at the default grid; `resize_terminal` immediately reshapes
+        // the session to the pane's measured cols/rows on first layout.
+        let session =
+            TerminalSession::new(TerminalDims::default(), config).map_err(PaneSpawnError::Vt)?;
 
         let pane_id = self.alloc_id();
 
