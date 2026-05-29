@@ -862,7 +862,7 @@ impl TerminalView {
             if is_momentum {
                 self.schedule_viewport_refresh(cx);
             } else {
-                self.lock_viewport_and_refresh(cx);
+                self.reanchor_and_refresh(cx);
             }
         }
 

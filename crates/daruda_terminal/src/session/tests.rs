@@ -1309,6 +1309,50 @@ fn capture_appends_scrolled_out_rows() {
 }
 
 #[test]
+fn live_edge_predicate_tracks_scroll_to_bottom() {
+    // Guards the session-level predicate that `reanchor_viewport_lock`
+    // (a GPUI-bound `TerminalView` method, not exercised here) feeds on:
+    // `viewport_row_offset() + rows >= total_rows()`. The wheel/trackpad
+    // path must release the viewport lock when the user scrolls back down
+    // to the live edge (matching PageDown and the scrollbar) — otherwise a
+    // long streaming run that emits no new OSC 133 prompt stays pinned and
+    // never follows output again. The View-level unlock decision itself
+    // needs a `Window` and is covered by manual smoke testing.
+    let mut s = session_with(80, 5, 1024);
+    // 20 lines into a 5-row viewport — ~15 land in the LineBuffer, so
+    // there is real scrollback to walk back into.
+    for i in 0..20 {
+        s.feed(format!("line{i:02}\r\n").as_bytes()).unwrap();
+    }
+    let rows = s.rows() as u32;
+    let total = s.total_rows();
+
+    // At the bottom (scroll_offset == 0) the predicate reports the live
+    // edge → reanchor unlocks.
+    assert_eq!(s.scroll_offset(), 0);
+    assert!(
+        s.viewport_row_offset() + rows >= total,
+        "fresh session must sit at the live edge"
+    );
+
+    // Scroll up into history → no longer at the live edge → reanchor locks.
+    s.scroll_viewport(-3).unwrap();
+    assert_eq!(s.scroll_offset(), 3);
+    assert!(
+        s.viewport_row_offset() + rows < total,
+        "scrolled-back viewport must not report the live edge"
+    );
+
+    // Scroll back down to the bottom → live edge again → reanchor unlocks.
+    s.scroll_viewport(3).unwrap();
+    assert_eq!(s.scroll_offset(), 0);
+    assert!(
+        s.viewport_row_offset() + rows >= total,
+        "scrolling back to the bottom must re-report the live edge"
+    );
+}
+
+#[test]
 fn capture_merges_soft_wrap_continuation() {
     let mut s = session_with(5, 3, 1024);
     // 10-char string DECAWM-wraps across two physical rows in a 5-col

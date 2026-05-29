@@ -418,13 +418,19 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Lock the viewport to the current top abs line and schedule a repaint.
-    /// Call this instead of `schedule_viewport_refresh` whenever a scroll
-    /// action should hold the reading position against PTY output.
-    pub(super) fn lock_viewport_and_refresh(&mut self, cx: &mut Context<Self>) {
-        self.state
-            .viewport_lock
-            .lock(self.session.viewport_top_abs_y());
+    /// Re-decide the viewport lock for the settled scroll position, then
+    /// schedule a selection-preserving repaint. The single entry point every
+    /// scroll path (keyboard, wheel, trackpad) calls after moving the
+    /// viewport: `reanchor_viewport_lock` unlocks at the live edge so output
+    /// resumes following, and locks otherwise to hold the reading position.
+    ///
+    /// There is deliberately no "always lock" variant. An upward-only path
+    /// (Home / PageUp) can never reach the live edge, so reanchor locks it
+    /// all the same; a path that *can* reach the bottom (PageDown, scrollbar,
+    /// wheel) must unlock there or output freezes — the bug this consolidation
+    /// makes unrepresentable.
+    pub(super) fn reanchor_and_refresh(&mut self, cx: &mut Context<Self>) {
+        self.reanchor_viewport_lock();
         self.schedule_viewport_refresh(cx);
     }
 

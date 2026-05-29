@@ -168,6 +168,30 @@ scroll-offset dispatch — never assume `viewport_row == grid_row - 1`.
   resets `state.hovered_url` for this reason; the next mouse-move
   re-derives it.
 
+## Viewport lock — one settle path after every scroll
+
+`ViewportLock` (`Live` vs `Pinned { anchor }`) decides whether PTY output
+auto-follows the bottom. **Every scroll path that moves the offset settles
+through exactly one method — `reanchor_and_refresh` (`viewport.rs`).** It
+calls `reanchor_viewport_lock`, which unlocks at the live edge
+(`viewport_row_offset() + rows >= total_rows()`, i.e. `scroll_offset == 0`)
+and pins otherwise.
+
+- **Do not** reintroduce an "always lock" helper. An upward-only path
+  (Home / PageUp) never reaches the live edge, so reanchor pins it all the
+  same; a path that *can* reach the bottom (PageDown, scrollbar, wheel /
+  trackpad) **must** unlock there. A path that pins unconditionally freezes
+  the viewport for the whole of a long streaming run that emits no new
+  OSC 133 A prompt — the only other thing that clears the lock
+  (`check_prompt_arrived`) — e.g. Claude Code mid-stream.
+- New gesture / keybinding that scrolls? Call `reanchor_and_refresh` after
+  the `scroll_viewport*` + `sync_viewport_scroll_tracking` pair. Use
+  `snap_to_bottom*` only for *force-to-bottom* intents (End, ScrollToBottom,
+  PTY input), never for relative scrolls.
+- The lock decision is GPUI-bound (`TerminalView`), so it is not unit-tested
+  headlessly; the session-level predicate it reads is pinned by
+  `session/tests.rs::live_edge_predicate_tracks_scroll_to_bottom`.
+
 ---
 
 ## Pitfall #8 entry point — `cell_layout` is the only door

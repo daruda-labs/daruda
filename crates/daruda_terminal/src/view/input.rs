@@ -132,6 +132,45 @@ impl TerminalView {
         }
     }
 
+    /// Settle the viewport after a relative scroll: drain the scroll-delta
+    /// tracking, flush any pending session side-effects, then re-decide the
+    /// lock and repaint. The shared tail of every relative-scroll key.
+    fn settle_after_scroll(&mut self, cx: &mut Context<Self>) {
+        self.sync_viewport_scroll_tracking();
+        self.apply_side_effects(cx);
+        self.reanchor_and_refresh(cx);
+    }
+
+    /// Handle a viewport navigation key (Home / End / PageUp / PageDown).
+    /// Returns `true` when `key` was a navigation key and has been handled —
+    /// the caller then stops propagation and returns. Shared by the shift
+    /// and non-shift dispatch so the two can never drift out of sync.
+    fn handle_scroll_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        let scroll_step = (self.session.rows() as i32 / 2).max(1);
+        match key {
+            "home" => {
+                let _ = self.session.scroll_viewport_top();
+                self.settle_after_scroll(cx);
+            }
+            "end" => {
+                self.apply_side_effects(cx);
+                self.snap_to_bottom_and_refresh(cx);
+            }
+            "pageup" | "page_up" | "page-up" => {
+                let _ = self.session.scroll_viewport(-scroll_step);
+                self.settle_after_scroll(cx);
+            }
+            "pagedown" | "page_down" | "page-down" => {
+                // reanchor unlocks iff the page landed at the live edge
+                // (scroll_offset clamped to 0) — no separate bottom-snap.
+                let _ = self.session.scroll_viewport(scroll_step);
+                self.settle_after_scroll(cx);
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub(super) fn on_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -211,8 +250,6 @@ impl TerminalView {
             return;
         }
 
-        let scroll_step = (self.session.rows() as i32 / 2).max(1);
-
         if self.input.is_some() {
             // Only handle special keys / escape sequences here.
             // Printable characters MUST go through IME pipeline
@@ -223,50 +260,12 @@ impl TerminalView {
             // `flush_hangul` (which takes `&mut self`) can run first
             // and release any pending Hangul syllable to the PTY.
 
-            if keystroke.modifiers.shift {
-                match keystroke.key.as_str() {
-                    "home" => {
-                        let _ = self.session.scroll_viewport_top();
-                        self.sync_viewport_scroll_tracking();
-                        self.apply_side_effects(cx);
-                        self.lock_viewport_and_refresh(cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                    "end" => {
-                        self.apply_side_effects(cx);
-                        self.snap_to_bottom_and_refresh(cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                    "pageup" | "page_up" | "page-up" => {
-                        let _ = self.session.scroll_viewport(-scroll_step);
-                        self.sync_viewport_scroll_tracking();
-                        self.apply_side_effects(cx);
-                        self.lock_viewport_and_refresh(cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                    "pagedown" | "page_down" | "page-down" => {
-                        let _ = self.session.scroll_viewport(scroll_step);
-                        self.sync_viewport_scroll_tracking();
-                        self.apply_side_effects(cx);
-                        let at_bottom = {
-                            let offset = self.session.viewport_row_offset();
-                            let rows = self.session.rows() as u32;
-                            let total = self.session.total_rows();
-                            offset + rows >= total
-                        };
-                        if at_bottom {
-                            self.snap_to_bottom_and_refresh(cx);
-                        } else {
-                            self.lock_viewport_and_refresh(cx);
-                        }
-                        cx.stop_propagation();
-                        return;
-                    }
-                    _ => {}
-                }
+            // Shift + Home/End/PageUp/PageDown still scrolls the viewport —
+            // intercept before the generic encoder turns it into a PTY
+            // escape sequence. Same handler as the unshifted keys below.
+            if keystroke.modifiers.shift && self.handle_scroll_key(keystroke.key.as_str(), cx) {
+                cx.stop_propagation();
+                return;
             }
 
             if keystroke.modifiers.control
@@ -318,48 +317,9 @@ impl TerminalView {
             return;
         }
 
-        match keystroke.key.as_str() {
-            "home" => {
-                let _ = self.session.scroll_viewport_top();
-                self.sync_viewport_scroll_tracking();
-                self.apply_side_effects(cx);
-                self.lock_viewport_and_refresh(cx);
-                cx.stop_propagation();
-                return;
-            }
-            "end" => {
-                self.apply_side_effects(cx);
-                self.snap_to_bottom_and_refresh(cx);
-                cx.stop_propagation();
-                return;
-            }
-            "pageup" | "page_up" | "page-up" => {
-                let _ = self.session.scroll_viewport(-scroll_step);
-                self.sync_viewport_scroll_tracking();
-                self.apply_side_effects(cx);
-                self.lock_viewport_and_refresh(cx);
-                cx.stop_propagation();
-                return;
-            }
-            "pagedown" | "page_down" | "page-down" => {
-                let _ = self.session.scroll_viewport(scroll_step);
-                self.sync_viewport_scroll_tracking();
-                self.apply_side_effects(cx);
-                let at_bottom = {
-                    let offset = self.session.viewport_row_offset();
-                    let rows = self.session.rows() as u32;
-                    let total = self.session.total_rows();
-                    offset + rows >= total
-                };
-                if at_bottom {
-                    self.snap_to_bottom_and_refresh(cx);
-                } else {
-                    self.lock_viewport_and_refresh(cx);
-                }
-                cx.stop_propagation();
-                return;
-            }
-            _ => {}
+        if self.handle_scroll_key(keystroke.key.as_str(), cx) {
+            cx.stop_propagation();
+            return;
         }
 
         let modifiers = KeyModifiers {
