@@ -7,26 +7,66 @@
 //! inline literals).
 //!
 //! All states render as a 3×3 dot grid at the same footprint.
-//! State is expressed through colour, animation pattern, and timing:
+//! State is expressed through colour and a low-rate stepped pattern:
 //!
 //! - **Idle** — all 9 dots fully lit, no animation.
-//! - **Connecting** — plus (+) pattern cross-fades to cross (×) and back.
-//!   The centre dot stays fully lit throughout.
-//! - **NeedsAttention** — all 9 dots, opacity pulses `0.4 ↔ 1.0` over
-//!   `1000 ms` ease-in-out.
-//! - **Working** — serpentine "comet" head sweeps all 9 dots; head at full
-//!   alpha, trailing dots fade to `STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN`.
-//! - **ExecutingTool** — amber comet sweeps the outer 8-dot ring clockwise;
-//!   centre dot stays at `STATUS_INDICATOR_RING_CENTER_ALPHA`.
-
-use std::time::Duration;
+//! - **Connecting** — plus (+) ↔ cross (×), 2-frame blink. Centre stays lit.
+//! - **NeedsAttention** — all 9 dots blink `1.0 ↔ 0.4` (2-frame).
+//! - **Working** — serpentine "comet" head sweeps the grid in 6 stepped frames;
+//!   head at full alpha, trail fades to `STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN`.
+//! - **ExecutingTool** — a quadrant (corner + two edges) rotates clockwise in
+//!   4 frames; centre stays dim at `STATUS_INDICATOR_RING_CENTER_ALPHA`.
+//!
+//! ## Why a shared clock instead of `with_animation`
+//!
+//! GPUI has no partial redraw: `with_animation` requests a frame every
+//! display refresh (~60 fps), and each frame marks the view dirty →
+//! the whole window tree re-lays-out and re-paints. A small status
+//! badge therefore cost ~40% CPU while it pulsed.
+//!
+//! Instead, a single [`StatusPulseClock`] global advances one `tick`
+//! every `STATUS_INDICATOR_TICK_MS` (~6 fps), driven by a gated pump
+//! (`watchers_lifecycle::spawn_status_pulse`) that only notifies
+//! windows which are active *and* have an animating session. Each badge
+//! derives its frame from the tick and renders a static frame — no
+//! per-frame `request_animation_frame`. Result: ~6 redraws/s instead of
+//! ~60 while a badge animates, and zero while idle. The visible
+//! resolution of the comet (6/4 discrete frames) is unchanged by the
+//! lower rate; the smooth fades become 2-frame blinks (Pitfall #10).
 
 use crate::ui::theme;
 use daruda_claude::SessionStatus;
 use gpui::{
-    Animation, AnimationExt, App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled,
-    Window, div, pulsating_between, px,
+    App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px,
 };
+
+/// Monotonic animation clock shared by every status badge. Advanced by
+/// the gated status-pulse pump (~`STATUS_INDICATOR_TICK_MS` per tick);
+/// badges read it during render to pick their current frame. Set as a
+/// global at app startup (`main.rs`) so `try_global` never misses after
+/// init; badges fall back to tick 0 (static frame) if read before.
+#[derive(Default)]
+pub struct StatusPulseClock {
+    pub tick: u64,
+}
+impl Global for StatusPulseClock {}
+
+/// Ticks each 2-frame blink holds per state before toggling. At
+/// ~6 fps (`TICK_MS ≈ 167`), 3 ticks ≈ 500 ms → ~1 Hz blink.
+const BLINK_HOLD_TICKS: u64 = 3;
+
+/// `true` on the "lit" half of a 2-frame blink cycle.
+fn blink_on(tick: u64) -> bool {
+    (tick / BLINK_HOLD_TICKS).is_multiple_of(2)
+}
+
+/// Serpentine head position (0..9) for the Working comet's 6-frame
+/// cycle. `round(frame * 9 / 6)` spreads 6 heads across the 9-dot path:
+/// `[0, 2, 3, 5, 6, 8]`.
+fn snake_head(tick: u64) -> usize {
+    let f = tick % 6;
+    ((3 * f).div_ceil(2) % 9) as usize
+}
 
 /// Size variant of the indicator.
 #[derive(Clone, Copy)]
@@ -73,6 +113,13 @@ pub struct AgentStatusBadge {
     /// Phase E — when true, the indicator is wrapped in a 1 px outline
     /// ring marking it as the session attached to the focused tab.
     active: bool,
+    /// When false, the indicator renders a single static frame instead
+    /// of stepping with the shared clock. The dock gates this on
+    /// `window.is_window_active()` so a backgrounded window shows a
+    /// frozen frame (the pump also skips inactive windows). The decision
+    /// lives in one place — `Workspace::render` →
+    /// `LeftDockSnapshot::claude_animate` — and is threaded down here.
+    animate: bool,
 }
 
 impl AgentStatusBadge {
@@ -82,6 +129,7 @@ impl AgentStatusBadge {
             size,
             color,
             active: false,
+            animate: true,
         }
     }
 
@@ -98,17 +146,29 @@ impl AgentStatusBadge {
         self.active = true;
         self
     }
+
+    /// Gate the animation. When `false`, the indicator draws a single
+    /// static frame. See the `animate` field doc.
+    pub fn animate(mut self, animate: bool) -> Self {
+        self.animate = animate;
+        self
+    }
 }
 
 impl RenderOnce for AgentStatusBadge {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let dim = self.size.dim();
+        let tick = cx
+            .try_global::<StatusPulseClock>()
+            .map(|c| c.tick)
+            .unwrap_or(0);
+        let anim = self.animate;
         let inner = match self.status {
             SessionStatus::Idle => idle_grid(dim, self.color),
-            SessionStatus::Connecting => connecting_grid(dim, self.color),
-            SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color),
-            SessionStatus::Working => dot_grid(dim, self.color),
-            SessionStatus::ExecutingTool => ring_grid(dim, self.color),
+            SessionStatus::Connecting => connecting_grid(dim, self.color, anim, tick),
+            SessionStatus::NeedsAttention => needs_attention_grid(dim, self.color, anim, tick),
+            SessionStatus::Working => dot_grid(dim, self.color, anim, tick),
+            SessionStatus::ExecutingTool => quadrant_grid(dim, self.color, anim, tick),
         };
         if self.active {
             wrap_active(inner, dim, cx).into_any_element()
@@ -151,65 +211,47 @@ fn idle_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
 
 // ── NeedsAttention ───────────────────────────────────────────────────────────
 
-/// 3×3 grid, all dots, opacity pulses 0.4 ↔ 1.0.
-fn needs_attention_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
+/// 3×3 grid, all dots; opacity blinks `1.0 ↔ PULSE_OPACITY_MIN` (2-frame).
+/// Static frame (no animation) is the fully-lit grid.
+fn needs_attention_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
+    let opacity = if !animate || blink_on(tick) {
+        1.0
+    } else {
+        theme::STATUS_INDICATOR_PULSE_OPACITY_MIN
+    };
     FullGrid {
         dim: size,
         color,
-        opacity: 1.0,
+        opacity,
     }
-    .with_animation(
-        "claude-status-pulse",
-        Animation::new(Duration::from_millis(
-            theme::STATUS_INDICATOR_PULSE_DURATION_MS,
-        ))
-        .repeat()
-        .with_easing(pulsating_between(
-            theme::STATUS_INDICATOR_PULSE_OPACITY_MIN,
-            1.0,
-        )),
-        |grid, alpha| grid.with_opacity(alpha),
-    )
     .into_any_element()
 }
 
 // ── Connecting ───────────────────────────────────────────────────────────────
 
-/// 3×3 grid, plus (+) ↔ cross (×) cross-fade.
-fn connecting_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
+/// 3×3 grid, plus (+) ↔ cross (×) 2-frame blink. Centre stays lit.
+/// `ConnectingGrid` derives the pattern from `phase`: `0.0` = full plus,
+/// `0.5` = full cross. Static frame is the plus.
+fn connecting_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
+    let phase = if !animate || blink_on(tick) { 0.0 } else { 0.5 };
     ConnectingGrid {
         dim: size,
         color,
-        phase: 0.0,
+        phase,
     }
-    .with_animation(
-        "claude-status-connecting",
-        Animation::new(Duration::from_millis(
-            theme::STATUS_INDICATOR_CONNECTING_PERIOD_MS,
-        ))
-        .repeat(),
-        |grid, phase| grid.with_phase(phase),
-    )
     .into_any_element()
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// 3×3 grid with all dots at a uniform opacity multiplier.
-/// Used for Idle (opacity = 1.0) and NeedsAttention (opacity animated).
+/// Used for Idle (opacity = 1.0) and NeedsAttention (opacity blinked).
 #[derive(IntoElement)]
 struct FullGrid {
     dim: Pixels,
     color: Hsla,
-    /// Multiplied into `color.a` for every dot; driven by animation.
+    /// Multiplied into `color.a` for every dot; driven by the blink.
     opacity: f32,
-}
-
-impl FullGrid {
-    fn with_opacity(mut self, opacity: f32) -> Self {
-        self.opacity = opacity;
-        self
-    }
 }
 
 impl RenderOnce for FullGrid {
@@ -244,20 +286,13 @@ const PLUS_DOTS: [(usize, usize); 5] = [(1, 0), (0, 1), (1, 1), (2, 1), (1, 2)];
 /// Dot positions forming the cross (×) pattern (centre + 4 corners).
 const CROSS_DOTS: [(usize, usize); 5] = [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)];
 
-/// Connecting-state 3×3 grid that cross-fades between plus (+) and cross (×).
+/// Connecting-state 3×3 grid that shows plus (+) or cross (×).
 /// The centre dot (shared by both patterns) stays fully lit throughout.
 #[derive(IntoElement)]
 struct ConnectingGrid {
     dim: Pixels,
     color: Hsla,
     phase: f32,
-}
-
-impl ConnectingGrid {
-    fn with_phase(mut self, phase: f32) -> Self {
-        self.phase = phase;
-        self
-    }
 }
 
 impl RenderOnce for ConnectingGrid {
@@ -268,7 +303,7 @@ impl RenderOnce for ConnectingGrid {
         let pad = (cell - dot) * 0.5;
         let color = self.color;
 
-        // + peaks at phase = 0 / 1; × peaks at phase = 0.5.
+        // + peaks at phase = 0; × peaks at phase = 0.5.
         let plus_alpha = (1.0 + (self.phase * 2.0 * std::f32::consts::PI).cos()) * 0.5;
         let cross_alpha = 1.0 - plus_alpha;
 
@@ -323,20 +358,18 @@ const DOT_ORDER: [(usize, usize); 9] = [
     (2, 2),
 ];
 
-fn dot_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
+/// Working-state comet. `tick` drives a 6-frame serpentine sweep.
+/// Static frame (no animation) is head on the first dot.
+fn dot_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
+    let head = if animate { snake_head(tick) } else { 0 };
+    // `DotGrid` recovers the head via `floor(phase * 9)`; offset by 0.5
+    // so the floor lands exactly on `head`.
+    let phase = (head as f32 + 0.5) / DOT_ORDER.len() as f32;
     DotGrid {
         dim: size,
         color,
-        phase: 0.0,
+        phase,
     }
-    .with_animation(
-        "claude-status-dot-grid",
-        Animation::new(Duration::from_millis(
-            theme::STATUS_INDICATOR_SPINNER_PERIOD_MS,
-        ))
-        .repeat(),
-        |grid, phase| grid.with_phase(phase),
-    )
     .into_any_element()
 }
 
@@ -347,13 +380,6 @@ struct DotGrid {
     dim: Pixels,
     color: Hsla,
     phase: f32,
-}
-
-impl DotGrid {
-    fn with_phase(mut self, phase: f32) -> Self {
-        self.phase = phase;
-        self
-    }
 }
 
 impl RenderOnce for DotGrid {
@@ -391,61 +417,43 @@ impl RenderOnce for DotGrid {
 
 // ── ExecutingTool ─────────────────────────────────────────────────────────────
 
-/// Clockwise ring order — 8 outer dots, centre excluded.
-const RING_ORDER: [(usize, usize); 8] = [
-    (1, 0), // top
-    (2, 0), // top-right
-    (2, 1), // right
-    (2, 2), // bottom-right
-    (1, 2), // bottom
-    (0, 2), // bottom-left
-    (0, 1), // left
-    (0, 0), // top-left
+/// Four clockwise quadrant frames — each lights a corner plus its two
+/// adjacent edge dots. The centre is excluded (kept dim as an anchor).
+const QUADRANT_FRAMES: [[(usize, usize); 3]; 4] = [
+    [(0, 0), (1, 0), (0, 1)], // top-left
+    [(2, 0), (1, 0), (2, 1)], // top-right
+    [(2, 2), (2, 1), (1, 2)], // bottom-right
+    [(0, 2), (0, 1), (1, 2)], // bottom-left
 ];
 
-fn ring_grid(size: Pixels, color: Hsla) -> gpui::AnyElement {
-    RingGrid {
+/// ExecutingTool rotating quadrant. `tick` drives the 4-frame clockwise
+/// sweep. Static frame (no animation) is the top-left quadrant.
+fn quadrant_grid(size: Pixels, color: Hsla, animate: bool, tick: u64) -> gpui::AnyElement {
+    let frame = if animate { (tick % 4) as usize } else { 0 };
+    QuadrantGrid {
         dim: size,
         color,
-        phase: 0.0,
+        frame,
     }
-    .with_animation(
-        "claude-status-ring",
-        Animation::new(Duration::from_millis(
-            theme::STATUS_INDICATOR_RING_PERIOD_MS,
-        ))
-        .repeat(),
-        |grid, phase| grid.with_phase(phase),
-    )
     .into_any_element()
 }
 
-/// ExecutingTool-state grid: amber comet sweeps the outer ring clockwise;
-/// the centre dot stays dim at `STATUS_INDICATOR_RING_CENTER_ALPHA`.
+/// ExecutingTool-state grid: a 3-dot quadrant rotates clockwise; the
+/// centre dot stays dim at `STATUS_INDICATOR_RING_CENTER_ALPHA`.
 #[derive(IntoElement)]
-struct RingGrid {
+struct QuadrantGrid {
     dim: Pixels,
     color: Hsla,
-    phase: f32,
+    frame: usize,
 }
 
-impl RingGrid {
-    fn with_phase(mut self, phase: f32) -> Self {
-        self.phase = phase;
-        self
-    }
-}
-
-impl RenderOnce for RingGrid {
+impl RenderOnce for QuadrantGrid {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let dim_f: f32 = self.dim.into();
         let cell = dim_f / 3.0;
         let dot = cell * theme::STATUS_INDICATOR_DOT_GRID_RATIO;
         let pad = (cell - dot) * 0.5;
-
-        let n = RING_ORDER.len();
-        let head = (self.phase * n as f32).floor() as usize % n;
-        let tail_min = theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN;
+        let lit = QUADRANT_FRAMES[self.frame % QUADRANT_FRAMES.len()];
 
         div()
             .relative()
@@ -456,15 +464,15 @@ impl RenderOnce for RingGrid {
                 (0..3usize)
                     .flat_map(|col| (0..3usize).map(move |row| (col, row)))
                     .map(move |(col, row)| {
-                        let mut c = self.color;
-                        c.a *= match RING_ORDER.iter().position(|&pos| pos == (col, row)) {
-                            Some(i) => {
-                                let lag = (head + n - i) % n;
-                                let t = lag as f32 / (n - 1) as f32;
-                                1.0 - t * (1.0 - tail_min)
-                            }
-                            None => theme::STATUS_INDICATOR_RING_CENTER_ALPHA,
+                        let alpha = if lit.contains(&(col, row)) {
+                            1.0
+                        } else if (col, row) == (1, 1) {
+                            theme::STATUS_INDICATOR_RING_CENTER_ALPHA
+                        } else {
+                            0.0
                         };
+                        let mut c = self.color;
+                        c.a *= alpha;
                         div()
                             .absolute()
                             .left(px(cell * col as f32 + pad))
@@ -495,12 +503,47 @@ mod tests {
     }
 
     #[test]
-    fn animation_periods_are_positive() {
+    fn animate_defaults_on_and_builder_overrides() {
+        let badge = AgentStatusBadge::new(
+            SessionStatus::Working,
+            IndicatorSize::Leading,
+            Hsla::default(),
+        );
+        assert!(badge.animate, "new() must default to animated");
+        assert!(
+            !badge.animate(false).animate,
+            "animate(false) must disable the animation"
+        );
+    }
+
+    #[test]
+    fn tick_ms_is_positive_and_low_rate() {
         const {
-            assert!(theme::STATUS_INDICATOR_SPINNER_PERIOD_MS > 0);
-            assert!(theme::STATUS_INDICATOR_PULSE_DURATION_MS > 0);
-            assert!(theme::STATUS_INDICATOR_CONNECTING_PERIOD_MS > 0);
-            assert!(theme::STATUS_INDICATOR_RING_PERIOD_MS > 0);
+            // ~6 fps target: low enough to slash redraws, high enough that
+            // the 6-frame comet still reads as motion.
+            assert!(theme::STATUS_INDICATOR_TICK_MS >= 80);
+            assert!(theme::STATUS_INDICATOR_TICK_MS <= 300);
+        }
+    }
+
+    #[test]
+    fn blink_toggles_every_hold_ticks() {
+        // On for the first BLINK_HOLD_TICKS, off for the next.
+        assert!(blink_on(0));
+        assert!(blink_on(BLINK_HOLD_TICKS - 1));
+        assert!(!blink_on(BLINK_HOLD_TICKS));
+        assert!(!blink_on(2 * BLINK_HOLD_TICKS - 1));
+        assert!(blink_on(2 * BLINK_HOLD_TICKS));
+    }
+
+    #[test]
+    fn snake_head_visits_six_distinct_spread_positions() {
+        let heads: Vec<usize> = (0..6).map(snake_head).collect();
+        assert_eq!(heads, vec![0, 2, 3, 5, 6, 8], "6 heads spread over 9-path");
+        // Cycle repeats every 6 ticks.
+        assert_eq!(snake_head(6), snake_head(0));
+        for h in &heads {
+            assert!(*h < DOT_ORDER.len());
         }
     }
 
@@ -513,19 +556,20 @@ mod tests {
     }
 
     #[test]
-    fn ring_order_covers_all_outer_cells_exactly_once() {
-        let mut seen = std::collections::HashSet::new();
-        for cell in RING_ORDER.iter() {
-            assert!(seen.insert(*cell), "duplicate cell {:?}", cell);
-            assert!(cell.0 < 3 && cell.1 < 3, "out-of-range {:?}", cell);
+    fn quadrant_frames_each_have_three_in_range_dots_excluding_centre() {
+        for frame in QUADRANT_FRAMES.iter() {
+            let mut seen = std::collections::HashSet::new();
+            for cell in frame.iter() {
+                assert!(seen.insert(*cell), "duplicate cell {:?}", cell);
+                assert!(cell.0 < 3 && cell.1 < 3, "out-of-range {:?}", cell);
+                assert_ne!(*cell, (1, 1), "centre must stay out of quadrant frames");
+            }
+            assert_eq!(seen.len(), 3);
         }
-        assert_eq!(seen.len(), 8, "ring must have exactly 8 outer dots");
-        assert!(!seen.contains(&(1, 1)), "centre must not be in ring");
     }
 
     #[test]
     fn dot_grid_ratio_is_within_cell() {
-        // 0 ⇒ invisible; ≥1 ⇒ dots overlap into neighbouring cells.
         const {
             assert!(theme::STATUS_INDICATOR_DOT_GRID_RATIO > 0.0);
             assert!(theme::STATUS_INDICATOR_DOT_GRID_RATIO < 1.0);
@@ -534,7 +578,6 @@ mod tests {
 
     #[test]
     fn dot_grid_tail_alpha_leaves_visible_floor() {
-        // 0 ⇒ tail fully invisible (motion gap); 1 ⇒ no fade at all.
         const {
             assert!(theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN > 0.0);
             assert!(theme::STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN < 1.0);

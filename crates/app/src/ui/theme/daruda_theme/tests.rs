@@ -66,10 +66,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.modal_secondary_text, palette::TEXT_BODY);
     assert_eq!(t.modal_text_primary, palette::MODAL_TEXT_PRIMARY);
     assert_eq!(t.input_selection_bg, palette::INPUT_SELECTION_BG);
-    assert_eq!(
-        t.textarea_scrollbar_thumb,
-        palette::SCROLLBAR_THUMB
-    );
+    assert_eq!(t.textarea_scrollbar_thumb, palette::SCROLLBAR_THUMB);
     assert_eq!(t.banner_error_bg, palette::BANNER_ERROR_BG);
     assert_eq!(t.banner_error_text, palette::BANNER_ERROR_TEXT);
     assert_eq!(t.banner_warning_bg, palette::BANNER_WARNING_BG);
@@ -135,10 +132,7 @@ fn default_clones_compile_time_palette() {
     );
     assert_eq!(t.terminal_drop_target_bg, palette::TERMINAL_DROP_TARGET_BG);
     assert_eq!(t.dock_scrollbar_thumb, palette::SCROLLBAR_THUMB);
-    assert_eq!(
-        t.dock_scrollbar_thumb_hover,
-        palette::SCROLLBAR_THUMB_HOVER
-    );
+    assert_eq!(t.dock_scrollbar_thumb_hover, palette::SCROLLBAR_THUMB_HOVER);
     assert_eq!(t.pane_header_focused_bg, palette::BG_HOVER);
     assert_eq!(t.pane_header_unfocused_bg, palette::BG_PANEL);
     assert_eq!(t.pane_header_cwd_text, palette::TEXT_MUTE);

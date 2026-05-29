@@ -1119,8 +1119,6 @@ pub const SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
 /// Scrollbar thumb fill on hover.
 pub const SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 
-
-
 // ============================================================================
 // Shared layout tokens — single source of truth for dimensions/metrics
 // ============================================================================
@@ -1198,6 +1196,12 @@ pub const STATUS_INDICATOR_BADGE_SIZE: f32 = 12.0;
 /// Width of the cell that holds the indicator inside the lane row,
 /// inserted between the active-row accent bar and the body.
 pub const STATUS_INDICATOR_CELL_WIDTH: f32 = 22.0;
+/// Status-badge animation tick interval (~6 fps). One shared
+/// `StatusPulseClock` tick fires this often; every badge derives its
+/// frame from the tick rather than from a per-frame `with_animation`
+/// (which would repaint the whole window ~60×/s). 6 fps renders the
+/// 6-frame comet losslessly while cutting redraws ~10× (Pitfall #10).
+pub const STATUS_INDICATOR_TICK_MS: u64 = 167;
 /// One full Working-state animation cycle (head sweeps every dot once).
 pub const STATUS_INDICATOR_SPINNER_PERIOD_MS: u64 = 1100;
 /// One full ExecutingTool-state animation cycle (head sweeps the outer ring).

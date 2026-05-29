@@ -27,6 +27,8 @@
 //! theme / keybinding / appearance side effects fan out from
 //! `globals::register_settings_observer`.
 
+use crate::ui::StatusPulseClock;
+use crate::ui::theme;
 use crate::window_registry::WindowRegistry;
 use crate::{hooks, panels_watcher, watcher_pumps};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -36,6 +38,7 @@ use gpui::App;
 pub(crate) fn spawn_all(cx: &mut App) {
     spawn_claude_status(cx);
     spawn_needs_attention_demote(cx);
+    spawn_status_pulse(cx);
     spawn_panels_reload(cx);
 }
 
@@ -73,6 +76,34 @@ fn spawn_needs_attention_demote(cx: &mut App) {
         |cx: &mut App| {
             WindowRegistry::for_each_workspace(cx, |_ws, _window, cx| {
                 cx.notify();
+            });
+        },
+        cx,
+    );
+}
+
+/// Drive the shared status-badge animation clock. Advances one
+/// `StatusPulseClock` tick every `STATUS_INDICATOR_TICK_MS` (~6 fps) and
+/// repaints only active windows that have an animating Claude session —
+/// idle/backgrounded windows stay at zero redraws. Replaces per-badge
+/// `with_animation` (which repainted the whole window ~60×/s). See
+/// `ui::agent_status_badge` and root `CLAUDE.md` Pitfall #10.
+fn spawn_status_pulse(cx: &mut App) {
+    watcher_pumps::spawn_periodic_pump(
+        "status-pulse",
+        std::time::Duration::from_millis(theme::STATUS_INDICATOR_TICK_MS),
+        |cx: &mut App| {
+            if cx.try_global::<StatusPulseClock>().is_none() {
+                cx.set_global(StatusPulseClock::default());
+            }
+            {
+                let clock = cx.global_mut::<StatusPulseClock>();
+                clock.tick = clock.tick.wrapping_add(1);
+            }
+            WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
+                if window.is_window_active() && ws.has_animating_claude_status() {
+                    cx.notify();
+                }
             });
         },
         cx,

@@ -304,7 +304,14 @@ impl Render for Workspace {
         }
 
         // — Build dock snapshots ————————————————————————————————————————
-        let left_snap = self.prepare_left_dock_snapshot(cx);
+        // Gate the status-indicator animations on window activation. A
+        // backgrounded window keeps pumping animation frames otherwise,
+        // repainting the whole tree ~60×/s while the user is elsewhere.
+        // GPUI calls `window.refresh()` on activation change, so this
+        // re-renders (and flips back to animated) when the window
+        // regains focus — no explicit observer needed.
+        let should_animate = window.is_window_active();
+        let left_snap = self.prepare_left_dock_snapshot(should_animate, cx);
         let bottom_snap = self.prepare_bottom_dock_snapshot(cx);
         let right_snap = self.prepare_right_dock_snapshot(cx);
 

@@ -36,7 +36,7 @@ pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
 
-pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, color_for_status};
+pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
 pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,

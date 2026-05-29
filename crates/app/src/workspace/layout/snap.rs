@@ -143,6 +143,12 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// lanes list. True when status is enabled in config but
     /// hooks aren't yet installed in `~/.claude/settings.json`.
     pub claude_install_banner_visible: bool,
+    /// Gate for the per-lane status-indicator animations. Mirrors
+    /// `window.is_window_active()` at render time: when the window is
+    /// backgrounded we render static frames so the indicators stop
+    /// requesting animation frames (which would otherwise repaint the
+    /// whole window tree ~60×/s while the user is in another app).
+    pub claude_animate: bool,
     pub workspace: WeakEntity<Workspace>,
 }
 

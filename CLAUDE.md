@@ -123,6 +123,9 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 7. **Text pixel mapping**: never use `index = offset_px / glyph_advance`. Always use the shaper's reverse-mapping API.
 8. **Paint-scope state**: `window.text_style()` / `window.rem_size()` are invalid outside the paint walk. Share metrics via `cell_dimensions()`.
 9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `app/src/ui/theme.rs` is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
+10. **Render-cost containment** (`window.refresh()` ban + cache rules): GPUI has **no partial redraw** — any dirty view repaints the whole window tree, and cost scales with node count. Two rules keep that cost contained:
+    - **Never call `window.refresh()` / `cx.refresh_windows()` on a hot path.** Refresh sets `window.refreshing`, which **bypasses every `AnyView::cached`** for that frame (see gpui `view.rs` prepaint `!window.refreshing` guard). It is reserved for genuinely global invalidation (theme swap in `ui/theme.rs`). For everything else use **targeted `cx.notify(entity)`** so only that view subtree (and its ancestors) goes dirty and sibling `.cached()` views stay cached. Reference: zed PR #25009.
+    - **Caching a child view requires notify-on-change.** A view that renders from a parent-staged snapshot (e.g. `Dock::snap`) must be marked dirty (`cx.notify(child)`) when that snapshot's content changes, or `.cached()` will show stale data. Self-notifying views (TerminalView, ToastLayer) are already safe. Bare `entity.update(cx, |e, _| e.field = …)` without notify is incompatible with caching that entity.
 
 ## Error reporting
 

@@ -1119,6 +1119,34 @@ impl Workspace {
         self.active
     }
 
+    /// `true` when at least one lane has a PID-confirmed Claude session in
+    /// an animating status (anything but `Idle`). Gates the status-pulse
+    /// pump so the shared `StatusPulseClock` only repaints windows that
+    /// actually show motion — idle windows stay at zero redraws.
+    pub(crate) fn has_animating_claude_status(&self) -> bool {
+        if !self.claude.claude_status_enabled {
+            return false;
+        }
+        let live: std::collections::HashSet<&str> = self
+            .claude
+            .pty_claude_bindings
+            .values()
+            .map(|b| b.session_id.as_str())
+            .collect();
+        if live.is_empty() {
+            return false;
+        }
+        self.projects.iter().flat_map(|p| &p.lanes).any(|wt| {
+            self.claude
+                .claude_status
+                .per_session_states_for_cwd(&wt.path)
+                .into_iter()
+                .any(|(sid, s)| {
+                    live.contains(sid.as_str()) && !matches!(s, daruda_claude::SessionStatus::Idle)
+                })
+        })
+    }
+
     /// Display name of the currently active project. `None` when the
     /// workspace has no projects.
     pub(crate) fn active_project_name(&self) -> Option<String> {

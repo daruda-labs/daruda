@@ -698,6 +698,7 @@ pub(in crate::workspace) fn worktree_row(
                 d.child(claude_badges_row(
                     sessions,
                     snap.claude_active_session_id.as_deref(),
+                    snap.claude_animate,
                     cx,
                 ))
             },
@@ -852,6 +853,7 @@ pub(in crate::workspace) fn worktree_row(
                     lane: wt.id,
                 })
                 .copied(),
+            snap.claude_animate,
             cx,
         ))
         .child(body);

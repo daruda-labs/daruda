@@ -19,7 +19,11 @@ use crate::ui::{AgentStatusBadge, IndicatorSize};
 /// Fixed-width cell that holds the leading Claude-status indicator.
 /// Empty (just the spacer width) when no Claude session is associated
 /// with the lane.
-pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -> AnyElement {
+pub(super) fn claude_status_cell(
+    state: Option<SessionStatus>,
+    animate: bool,
+    cx: &gpui::App,
+) -> AnyElement {
     let cell = div()
         .flex_none()
         .w(px(theme::STATUS_INDICATOR_CELL_WIDTH))
@@ -29,7 +33,7 @@ pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -
         .justify_center();
     match state {
         Some(s) => cell
-            .child(AgentStatusBadge::for_status(s, IndicatorSize::Leading, cx))
+            .child(AgentStatusBadge::for_status(s, IndicatorSize::Leading, cx).animate(animate))
             .into_any_element(),
         None => cell.into_any_element(),
     }
@@ -48,6 +52,7 @@ pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -
 pub(super) fn claude_badges_row(
     sessions: &[(String, SessionStatus)],
     active_session_id: Option<&str>,
+    animate: bool,
     cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let count = sessions.len();
@@ -87,7 +92,8 @@ pub(super) fn claude_badges_row(
                         format!("{prefix}{}", surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS)
                     };
                     let mut indicator =
-                        AgentStatusBadge::for_status(*state, IndicatorSize::Badge, cx);
+                        AgentStatusBadge::for_status(*state, IndicatorSize::Badge, cx)
+                            .animate(animate);
                     if is_active {
                         indicator = indicator.active();
                     }
@@ -113,7 +119,7 @@ mod tests {
             // outcome here without a render harness, but we can guard
             // against shape regressions.
             let sessions = vec![("abc".to_string(), SessionStatus::Idle)];
-            let _ = claude_badges_row(&sessions, None, cx);
+            let _ = claude_badges_row(&sessions, None, true, cx);
         });
     }
 
@@ -124,8 +130,8 @@ mod tests {
             // Both populated and empty cells must reserve the same
             // horizontal space so lane rows in the list don't visually
             // shift when a session attaches.
-            let with = claude_status_cell(Some(SessionStatus::Working), cx);
-            let without = claude_status_cell(None, cx);
+            let with = claude_status_cell(Some(SessionStatus::Working), true, cx);
+            let without = claude_status_cell(None, false, cx);
             // Smoke check — each call returns an AnyElement; the actual
             // width is enforced by `STATUS_INDICATOR_CELL_WIDTH`.
             let _ = (with, without);
