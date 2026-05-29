@@ -112,6 +112,32 @@ pub const CURSOR_DOWN: &[u8] = b"\x1b[B";
 pub const CBT: &[u8] = b"\x1b[Z";
 
 // ============================================================================
+// Natural Text Editing — readline edit bytes
+// ============================================================================
+//
+// Byte sends for the macOS-native cursor/edit shortcuts (Cmd/Opt + arrow,
+// Cmd/Opt + delete). Mirrors iTerm2's "Natural Text Editing" preset: the
+// shortcut is remapped to the equivalent readline control byte / ESC
+// sequence the shell already understands. See `view::keybindings`.
+
+/// `Ctrl-A` — move to start of line (readline `beginning-of-line`).
+pub const READLINE_LINE_START: &[u8] = b"\x01";
+/// `Ctrl-E` — move to end of line (readline `end-of-line`).
+pub const READLINE_LINE_END: &[u8] = b"\x05";
+/// `Ctrl-U` — kill from cursor back to line start (readline `unix-line-discard`).
+pub const READLINE_KILL_TO_LINE_START: &[u8] = b"\x15";
+/// `Ctrl-D` — delete the character under the cursor (readline `delete-char`).
+pub const READLINE_DELETE_CHAR_FORWARD: &[u8] = b"\x04";
+/// `ESC b` — move backward one word (readline `backward-word`).
+pub const READLINE_WORD_BACK: &[u8] = b"\x1bb";
+/// `ESC f` — move forward one word (readline `forward-word`).
+pub const READLINE_WORD_FORWARD: &[u8] = b"\x1bf";
+/// `ESC DEL` — delete the word before the cursor (readline `backward-kill-word`).
+pub const READLINE_DELETE_WORD_BACK: &[u8] = b"\x1b\x7f";
+/// `ESC d` — delete the word after the cursor (readline `kill-word`).
+pub const READLINE_DELETE_WORD_FORWARD: &[u8] = b"\x1bd";
+
+// ============================================================================
 // SGR (1006) mouse reporting
 // ============================================================================
 

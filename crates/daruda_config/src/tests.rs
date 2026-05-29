@@ -404,6 +404,7 @@ fn resolve_overrides_shell_section_only() {
     let project_shell = ShellConfig {
         program: Some("/usr/local/bin/zsh".into()),
         close_pane_on_exit: false,
+        natural_text_editing: true,
     };
     let project = ProjectConfig {
         shell: Some(project_shell),

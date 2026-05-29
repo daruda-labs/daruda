@@ -806,6 +806,10 @@ impl TerminalSession {
         self.config.prompt_jump_scroll
     }
 
+    pub(crate) fn natural_text_editing(&self) -> bool {
+        self.config.natural_text_editing
+    }
+
     /// Initial font point size. Used by `TerminalView` at construction
     /// before any runtime zoom action.
     pub fn font_size(&self) -> f32 {

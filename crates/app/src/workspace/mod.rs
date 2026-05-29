@@ -746,6 +746,7 @@ impl Workspace {
                     palette: Some(pal),
                     background_alpha: config.window.opacity,
                     osc1337_max_bytes: config.clipboard.streaming_max_bytes,
+                    natural_text_editing: config.shell.natural_text_editing,
                     ..TerminalConfig::default()
                 };
                 cfg.clamp_font_settings();

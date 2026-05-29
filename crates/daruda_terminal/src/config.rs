@@ -55,6 +55,12 @@ pub struct TerminalConfig {
     /// 0 disables OSC 1337 large-payload handling (falls back to
     /// the generic limit).
     pub osc1337_max_bytes: usize,
+    /// macOS-native cursor/edit shortcuts (`Cmd/Opt + arrow/delete`).
+    /// When `true`, those keystrokes are remapped to the equivalent
+    /// readline bytes before reaching the PTY — iTerm2's "Natural Text
+    /// Editing" preset. See `view::keybindings`. Mirrors
+    /// `daruda_config::ShellConfig::natural_text_editing`.
+    pub natural_text_editing: bool,
 }
 
 /// Points. Monaco 13 on first launch — a notch above iTerm2's
@@ -104,6 +110,7 @@ impl Default for TerminalConfig {
             max_scrollback: 10_000,
             background_alpha: 1.0,
             osc1337_max_bytes: 10 * 1024 * 1024,
+            natural_text_editing: true,
         }
     }
 }

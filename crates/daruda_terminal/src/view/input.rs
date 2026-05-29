@@ -151,6 +151,31 @@ impl TerminalView {
         }
         let keystroke = raw_keystroke.with_simulated_ime();
 
+        // Natural Text Editing: remap Cmd/Opt + arrow/delete to the
+        // equivalent readline bytes before the platform early-return below
+        // swallows the Cmd shortcuts. Gated on an active PTY and the config
+        // toggle. Runs ahead of the `alt` branch so Opt+Arrow (which has no
+        // `key_char`) is caught here rather than encoded as a CSI sequence.
+        if self.input.is_some()
+            && !self.state.search_overlay
+            && self.session.natural_text_editing()
+            && let Some(bytes) = super::keybindings::natural_text_editing_bytes(
+                &keystroke.key,
+                keystroke.modifiers.shift,
+                keystroke.modifiers.control,
+                keystroke.modifiers.alt,
+                keystroke.modifiers.platform,
+            )
+        {
+            self.flush_hangul(cx);
+            self.snap_to_bottom_on_pty_input();
+            if let Some(input) = self.input.as_ref() {
+                input.send(bytes);
+            }
+            cx.stop_propagation();
+            return;
+        }
+
         if keystroke.modifiers.platform || keystroke.modifiers.function {
             // Commit any pending Hangul composition before the global
             // action system (Cmd+A / Cmd+C / Cmd+F / Cmd+T …) routes

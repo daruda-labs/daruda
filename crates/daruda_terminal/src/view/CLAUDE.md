@@ -24,6 +24,7 @@ TerminalView's GPUI rendering, input handling, and event dispatch.
 | File | Responsibility |
 |------|----------------|
 | `input.rs` | `on_key_down`, `EntityInputHandler` (IME), Hangul jamo re-composition |
+| `keybindings.rs` | GPUI-free keystroke → PTY-byte keymap (Natural Text Editing remap) |
 | `mouse.rs` | mouse click / drag / scroll, URL hover, SGR mouse reporting |
 | `actions.rs` | Copy / Paste / SelectAll / Zoom / Fullscreen + Search / PromptJump / CommandJump actions |
 | `jamo.rs` | Hangul jamo composition table + client-side re-composition |
@@ -488,7 +489,8 @@ more independent reasons to change, split it.
 
 Likely future splits:
 
-- **Adding keymap customization to `input.rs`** → `keybindings.rs`.
+- **More keymap customization** → extend `keybindings.rs` (already holds
+  the Natural Text Editing remap).
 - **More complex mouse selection** (vi-mode, block selection) →
   `selection.rs`.
 - **`jamo.rs` gaining Japanese / Chinese fallback** → `ime_fallback/`

@@ -52,6 +52,7 @@ impl Workspace {
         self.terminal_config.max_scrollback = config.scrollback.max_rows;
         self.terminal_config.background_alpha = config.window.opacity;
         self.terminal_config.osc1337_max_bytes = config.clipboard.streaming_max_bytes;
+        self.terminal_config.natural_text_editing = config.shell.natural_text_editing;
         self.font_family = config.font.family.clone();
         self.shell_program = config.shell.program.clone();
         self.syntax_theme = config.file_viewer.syntax_theme.clone();

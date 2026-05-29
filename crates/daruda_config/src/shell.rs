@@ -20,6 +20,14 @@ pub struct ShellConfig {
     /// When `false`, the pane stays open showing the final output so
     /// the user can review it.
     pub close_pane_on_exit: bool,
+
+    /// macOS-native cursor/edit shortcuts in the terminal. When `true`,
+    /// `Cmd+←/→` jump to line start/end, `Opt+←/→` move by word, and
+    /// `Cmd/Opt+Delete` perform the matching readline kills — mirroring
+    /// iTerm2's "Natural Text Editing" preset. When `false`, those keys
+    /// keep their default behaviour (`Cmd+Arrow` does nothing, `Opt+Arrow`
+    /// sends the xterm CSI sequence).
+    pub natural_text_editing: bool,
 }
 
 impl Default for ShellConfig {
@@ -27,6 +35,7 @@ impl Default for ShellConfig {
         Self {
             program: None,
             close_pane_on_exit: true,
+            natural_text_editing: true,
         }
     }
 }
@@ -52,6 +61,20 @@ mod tests {
         let cfg: ShellConfig = toml::from_str("").unwrap();
         assert!(cfg.close_pane_on_exit);
         assert!(cfg.program.is_none());
+    }
+
+    #[test]
+    fn natural_text_editing_defaults_on() {
+        assert!(ShellConfig::default().natural_text_editing);
+    }
+
+    #[test]
+    fn parses_natural_text_editing_disabled() {
+        let toml = "natural_text_editing = false";
+        let cfg: ShellConfig = toml::from_str(toml).unwrap();
+        assert!(!cfg.natural_text_editing);
+        // Other fields fall back to defaults.
+        assert!(cfg.close_pane_on_exit);
     }
 
     #[test]

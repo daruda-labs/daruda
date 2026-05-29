@@ -8,6 +8,7 @@ mod ime;
 mod input;
 mod jamo;
 pub(crate) mod jump;
+mod keybindings;
 pub mod layout;
 mod mouse;
 mod output;
