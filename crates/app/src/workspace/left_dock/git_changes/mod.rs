@@ -56,14 +56,9 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     // when this panel holds focus, so terminal panes still see those keys
     // by default.
     let panel_focus = snap.git_changes_panel_focus.clone();
-    let mut body = div()
+    let mut body = crate::workspace::left_dock::left_panel_body()
         .key_context("GitChanges")
-        .track_focus(&panel_focus)
-        .flex()
-        .flex_col()
-        .w_full()
-        .h_full()
-        .overflow_hidden();
+        .track_focus(&panel_focus);
 
     body = body.child(view_header(active_id, &branch, snap, cx));
 
@@ -1100,7 +1095,12 @@ fn loading_placeholder(
         .p(px(theme::LANE_PLACEHOLDER_PAD))
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(text_color)
-        .child(app_strings::git_loading_changes())
+        .child(
+            div()
+                .w_full()
+                .text_center()
+                .child(app_strings::git_loading_changes()),
+        )
         .child(refresh_btn)
 }
 
@@ -1112,7 +1112,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child("No changes")
+        .child(div().w_full().text_center().child("No changes"))
 }
 
 fn non_git_placeholder(
@@ -1143,7 +1143,7 @@ fn non_git_placeholder(
         .gap(px(theme::GIT_COMMIT_PAD))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(text_color)
-        .child("Not a Git repository")
+        .child(div().w_full().text_center().child("Not a Git repository"))
         .child(init_btn)
 }
 

@@ -17,12 +17,31 @@ pub(in crate::workspace) mod terminal_input;
 use crate::ui::theme;
 use daruda_store::panels::{MacroKey, TabId};
 use daruda_terminal::ux::strings as s;
-use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, Context, Div, IntoElement, div, prelude::*, px};
 
 use self::macro_edit_modal::MacroEditModal;
 use crate::ui::button_add_tile;
 use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
+
+/// Shared body for both bottom-dock content modes: a `flex_1` vertical
+/// flex column with the dock's standard padding, inter-row gap, and
+/// overflow clipping. The macro grid fills it with tile rows; the
+/// terminal-input mode adds its drag-drop handlers and single input cell
+/// on top of the identical container — the column direction and gap are
+/// inert for that single child, and the cell sits inside the padding so
+/// `overflow_hidden` never clips it. The centered empty-state
+/// `placeholder` is deliberately separate.
+pub(in crate::workspace) fn bottom_panel_body() -> Div {
+    div()
+        .flex_1()
+        .flex()
+        .flex_col()
+        .gap(px(theme::PANEL_BODY_GAP))
+        .px(px(theme::PANEL_BODY_PAD_X))
+        .py(px(theme::PANEL_BODY_PAD_Y))
+        .overflow_hidden()
+}
 
 /// Build the bottom dock body for the active tab. Active tab's widgets
 /// render in a fixed-column grid (`snap.grid_columns`, mirrored from
@@ -72,14 +91,7 @@ pub(in crate::workspace) fn render_body(
     tiles.push(add_widget_button(tab_id, snap, cx).into_any_element());
 
     let cols = snap.grid_columns.max(1) as usize;
-    let mut body = div()
-        .flex_1()
-        .flex()
-        .flex_col()
-        .gap(px(theme::PANEL_BODY_GAP))
-        .px(px(theme::PANEL_BODY_PAD_X))
-        .py(px(theme::PANEL_BODY_PAD_Y))
-        .overflow_hidden();
+    let mut body = bottom_panel_body();
 
     let mut iter = tiles.into_iter();
     loop {
@@ -145,5 +157,5 @@ fn placeholder(message: &'static str, cx: &mut Context<Dock>) -> impl IntoElemen
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(text_color)
-        .child(message)
+        .child(div().w_full().text_center().child(message))
 }

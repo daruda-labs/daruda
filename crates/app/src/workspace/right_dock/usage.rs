@@ -64,12 +64,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     // ascending order without resorting to a manual `cmp` closure.
     sessions.sort_by_key(|s| std::cmp::Reverse(s.last_updated));
 
-    let mut body = div()
-        .flex()
-        .flex_col()
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+    let mut body = crate::workspace::right_dock::right_panel_body()
         .child(header_row(snap, cx))
         .child(gauges_block(&snap.plan_limits, cx))
         .child(Divider::horizontal());
@@ -112,11 +107,15 @@ fn header_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 /// Stacked under the dropdown so the user can still switch to a
 /// wider window without leaving the tab.
 fn empty_state_inline(cx: &gpui::App) -> AnyElement {
+    // `w_full` gives the message a definite width so it wraps instead of
+    // running off as one line and getting clipped by the dock's
+    // `overflow_hidden` when the dock is narrowed; `text_center` keeps
+    // each wrapped line centered. (A flex `justify_center` would center
+    // the block but leave it single-line, so a long sentence overflows.)
     div()
-        .flex()
-        .items_center()
-        .justify_center()
+        .w_full()
         .py(px(theme::RIGHT_PANEL_PAD_Y))
+        .text_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
         .child(strings::usage_empty_state())

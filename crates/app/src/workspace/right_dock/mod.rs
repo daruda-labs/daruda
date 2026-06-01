@@ -20,6 +20,20 @@ pub(in crate::workspace) mod tools;
 pub(in crate::workspace) mod usage;
 pub(in crate::workspace) mod view_tabs;
 
+/// Shared scaffold for a right-dock tab body: a vertical flex column
+/// with the panel's standard padding and section gap. Every right-dock
+/// view (Usage / Skills / Tasks / Tools) builds its body on this so the
+/// outer padding and inter-section spacing have a single definition
+/// rather than four near-identical copies.
+pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .px(px(theme::RIGHT_PANEL_PAD_X))
+        .py(px(theme::RIGHT_PANEL_PAD_Y))
+        .gap(px(theme::RIGHT_PANEL_SECTION_GAP))
+}
+
 /// Render the body for the currently-active right-panel tab.
 ///
 /// Wraps every per-tab body in a vertical scroll container so a long

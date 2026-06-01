@@ -69,12 +69,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
 
     let header = section_header(any_git, snap, cx);
 
-    let mut body = div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .gap(px(theme::LANE_CARD_GAP))
-        .overflow_hidden();
+    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
     if snap.claude_install_banner_visible {
         body = body.child(claude_install_banner(snap, cx));
     }
@@ -210,5 +205,10 @@ fn empty_state(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(surface_strings::projects_empty_state())
+        .child(
+            div()
+                .w_full()
+                .text_center()
+                .child(surface_strings::projects_empty_state()),
+        )
 }

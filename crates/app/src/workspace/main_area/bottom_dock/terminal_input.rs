@@ -84,11 +84,7 @@ pub(in crate::workspace) fn render_body(
         cell.min_h(px(theme::INPUT_PANEL_MIN_H))
             .child(crate::ui::input_with_action(&state, submit, cx, 0_isize))
     };
-    div()
-        .flex_1()
-        .flex()
-        .px(px(theme::PANEL_BODY_PAD_X))
-        .py(px(theme::PANEL_BODY_PAD_Y))
+    super::bottom_panel_body()
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)
         })

@@ -25,6 +25,7 @@ use super::super::super::layout::Dock;
 use super::super::super::layout::RightDockSnapshot;
 use crate::agent::skills::{Skill, SkillScope, SkillsSnapshot};
 use crate::surface::strings;
+use crate::ui::Sizable as _;
 use crate::ui::{Divider, button, button_primary};
 use crate::workspace::Workspace;
 
@@ -60,12 +61,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let any_match = !project.is_empty() || !personal.is_empty() || !plugin.is_empty();
     let searching = !query.is_empty();
 
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .gap(px(theme::SKILL_SECTION_GAP))
+    let mut col = crate::workspace::right_dock::right_panel_body()
         .child(header_row(workspace.clone()))
         .child(search_row(snap, cx));
 
@@ -212,11 +208,12 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
         .flex_row()
         .items_center()
         .justify_between()
-        .gap(px(theme::SKILL_HEADER_GAP))
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
         .child(
             div()
-                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(theme::TEXT_TERTIARY)
+                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                .text_color(theme::TEXT_PRIMARY)
                 .child(strings::right_panel_tab_skills()),
         )
         .child(
@@ -239,6 +236,7 @@ fn manage_plugins_button() -> impl IntoElement {
         "plugin-manage-open-settings",
         strings::skills_manage_plugins_button(),
     )
+    .xsmall()
     .on_click(|_, window, cx| {
         window.dispatch_action(
             Box::new(OpenSettings(daruda_config::BuiltinSection::Plugin)),
@@ -248,11 +246,13 @@ fn manage_plugins_button() -> impl IntoElement {
 }
 
 fn new_skill_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    button_primary("skills-new", strings::skills_new_button()).on_click(move |_, window, cx| {
-        if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
-        }
-    })
+    button_primary("skills-new", strings::skills_new_button())
+        .xsmall()
+        .on_click(move |_, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.open_create_skill(window, cx));
+            }
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -483,7 +483,6 @@ fn skill_row(
     workspace: gpui::WeakEntity<Workspace>,
     t: &DarudaTheme,
 ) -> AnyElement {
-    use crate::ui::Sizable as _;
     use crate::ui::{button, button_bare};
 
     let dir = s.dir.clone();

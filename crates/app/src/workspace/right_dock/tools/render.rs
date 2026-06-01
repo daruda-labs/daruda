@@ -22,6 +22,7 @@ use gpui::{AnyElement, Context, IntoElement, MouseButton, SharedString, div, pre
 
 use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
 use crate::surface::strings;
+use crate::ui::Sizable as _;
 use crate::ui::{Divider, button_primary};
 use crate::workspace::Workspace;
 use crate::workspace::layout::Dock;
@@ -33,12 +34,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();
 
-    div()
-        .flex()
-        .flex_col()
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .gap(px(theme::MCP_SECTION_GAP))
+    crate::workspace::right_dock::right_panel_body()
         .child(header_row(workspace.clone()))
         .child(scope_section(
             strings::mcp_project(),
@@ -66,22 +62,25 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
         .flex_row()
         .items_center()
         .justify_between()
-        .gap(px(theme::MCP_HEADER_GAP))
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
         .child(
             div()
-                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(theme::TEXT_TERTIARY)
+                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
+                .text_color(theme::TEXT_PRIMARY)
                 .child(strings::right_panel_tab_tools()),
         )
         .child(new_server_button(workspace))
 }
 
 fn new_server_button(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
-    button_primary("mcp-new", strings::mcp_new_button()).on_click(move |_, window, cx| {
-        if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
-        }
-    })
+    button_primary("mcp-new", strings::mcp_new_button())
+        .xsmall()
+        .on_click(move |_, window, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.open_add_mcp_server(window, cx));
+            }
+        })
 }
 
 fn scope_section(

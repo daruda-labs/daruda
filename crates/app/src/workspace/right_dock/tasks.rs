@@ -63,12 +63,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let header = header_row(snap);
     let search = search_row(snap, cx);
 
-    let mut body = div()
-        .flex()
-        .flex_col()
-        .px(px(theme::RIGHT_PANEL_PAD_X))
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+    let mut body = crate::workspace::right_dock::right_panel_body()
         .child(header)
         .child(search);
 
@@ -153,7 +148,7 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
         .items_center()
         .justify_between()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_TASK_HEADER_PAD_Y))
+        .py(px(theme::RIGHT_PANEL_HEADER_PAD_Y))
         .child(filter_chip)
         .child(new_btn)
 }
@@ -231,11 +226,13 @@ fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
         TaskFilter::Running => ux_strings::RIGHT_PANEL_TASK_EMPTY_RUNNING,
         TaskFilter::Done => ux_strings::RIGHT_PANEL_TASK_EMPTY_DONE,
     };
+    // `w_full` + `text_center` so a long message wraps and stays
+    // centered instead of running off as one line and clipping when the
+    // dock is narrow (see `usage::empty_state_inline`).
     div()
-        .flex()
-        .items_center()
-        .justify_center()
+        .w_full()
         .py(px(theme::RIGHT_PANEL_PAD_Y))
+        .text_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
         .child(msg)
@@ -379,8 +376,15 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
 }
 
 fn title_cell(title: &str) -> impl IntoElement {
+    // `flex_1` claims the row's slack, but a flex item's implicit
+    // `min-width: auto` would keep it at its content width and shove
+    // the trailing fixed cells (duration / badge / status pill) past
+    // the dock edge. `min_w_0` resets that floor so the cell shrinks,
+    // and `truncate` clips the overflow with an ellipsis on one line.
     div()
         .flex_1()
+        .min_w_0()
+        .truncate()
         .text_color(theme::TEXT_SECONDARY)
         .child(SharedString::from(title.to_string()))
 }

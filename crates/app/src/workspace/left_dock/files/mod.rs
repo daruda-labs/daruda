@@ -40,13 +40,9 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     // has focus — otherwise they fall through to terminal panes.
     let panel_focus = snap.files_panel_focus.clone();
     let workspace = snap.workspace.clone();
-    let mut body = div()
+    let mut body = crate::workspace::left_dock::left_panel_body()
         .key_context("FilesPanel")
-        .track_focus(&panel_focus)
-        .size_full()
-        .flex()
-        .flex_col()
-        .overflow_hidden();
+        .track_focus(&panel_focus);
     body = body.child(view_header(active_id, snap, cx));
 
     if show_loading {
@@ -372,7 +368,7 @@ fn loading_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::files_loading())
+        .child(div().w_full().text_center().child(strings::files_loading()))
         .into_any_element()
 }
 
@@ -384,6 +380,11 @@ fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::files_empty_dir())
+        .child(
+            div()
+                .w_full()
+                .text_center()
+                .child(strings::files_empty_dir()),
+        )
         .into_any_element()
 }

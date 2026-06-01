@@ -1213,6 +1213,11 @@ pub const RIGHT_PANEL_PAD_X: f32 = PAD_LG;
 pub const RIGHT_PANEL_PAD_Y: f32 = PAD_SM;
 /// Vertical gap between two siblings inside a single right-panel row (px).
 pub const RIGHT_PANEL_ROW_GAP: f32 = GAP_LG;
+/// Vertical gap between major sections in a right-dock tab body
+/// (header, search, sections, list). Shared by all four right-dock
+/// views via `right_dock::right_panel_body()` so section spacing is
+/// uniform.
+pub const RIGHT_PANEL_SECTION_GAP: f32 = GAP_LG;
 /// Vertical padding inside a single session row in the Usage tab (px).
 pub const RIGHT_PANEL_ROW_PAD_Y: f32 = 3.0;
 /// Font size for the right-panel summary + session rows (px).
@@ -1232,8 +1237,9 @@ pub const RIGHT_PANEL_WT_MAX_W: f32 = 140.0;
 pub const RIGHT_PANEL_TASK_INDICATOR_W: f32 = 14.0;
 /// Horizontal gap between adjacent action buttons in a task row (px).
 pub const RIGHT_PANEL_TASK_BUTTON_GAP: f32 = GAP_SM;
-/// Vertical padding for the Tasks tab header (filter + [+ New]) (px).
-pub const RIGHT_PANEL_TASK_HEADER_PAD_Y: f32 = PAD_SM;
+/// Vertical padding for a right-dock tab header row (px). Shared by the
+/// Tasks / Skills / Tools headers so they sit at a uniform height.
+pub const RIGHT_PANEL_HEADER_PAD_Y: f32 = PAD_SM;
 /// Maximum number of characters of an `Error` task message echoed
 /// inline next to the row title before it's truncated with `…`.
 pub const RIGHT_PANEL_TASK_ERROR_TRUNCATE: usize = 30;
@@ -1339,7 +1345,6 @@ pub const SKILL_PLUGIN_ROW_PAD_Y: f32 = GAP_XS;
 /// header → skill hierarchy obvious without drawing rules.
 pub const SKILL_PLUGIN_INDENT: f32 = 24.0;
 pub const SKILL_HEADER_GAP: f32 = GAP_STANDARD;
-pub const SKILL_SECTION_GAP: f32 = GAP_LG;
 /// Badge / chip metrics. Shared across the four invocation badges +
 /// the aux chip so they line up at the trailing edge.
 pub const SKILL_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
@@ -1349,8 +1354,6 @@ pub const SKILL_BADGE_RADIUS: f32 = RADIUS_XS;
 /// Vertical spacing between MCP server rows. Same value as the Skills
 /// tab so the two tabs read as belonging to the same panel.
 pub const MCP_ROW_GAP: f32 = GAP_SM;
-/// Vertical gap between the section header and the first row inside it.
-pub const MCP_SECTION_GAP: f32 = GAP_LG;
 /// Horizontal gap between elements in the row's main line
 /// (indicator / transport / command-preview).
 pub const MCP_HEADER_GAP: f32 = GAP_STANDARD;
