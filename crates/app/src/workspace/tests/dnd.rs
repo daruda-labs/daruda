@@ -21,6 +21,7 @@ fn push_worktree(project: &mut crate::project::Project, id: LaneId, tab_order: u
         is_unread: false,
         last_activity: 0,
         status: daruda_store::project::LaneStatus::Idle,
+        is_main: false,
         base_ref: None,
         description: None,
     });

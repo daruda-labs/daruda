@@ -101,6 +101,68 @@ fn test_lane_removable_excludes_main_and_default(cx: &mut TestAppContext) {
     });
 }
 
+/// Regression: `path != repo_root` wrongly made a main lane removable when
+/// the user opened a subdirectory and `Lane.path` was anchored to that
+/// subdirectory. `worktree_root == repo_root` is the correct signal.
+#[gpui::test]
+fn test_lane_removable_subdir_anchored_main_not_removable(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |_ws, _| {
+        // path is anchored to a subdirectory; worktree_root stays at the
+        // git toplevel which equals repo_root — this IS the main worktree.
+        let lane = crate::lane::Lane::git(
+            0,
+            std::path::PathBuf::from("/repo/sub"), // subdir anchor
+            Some("main".into()),
+            std::path::PathBuf::from("/repo"), // repo_root
+            std::path::PathBuf::from("/repo"), // worktree_root == repo_root
+            0,
+        );
+        assert!(
+            lane.is_main,
+            "precondition: subdir-anchored main lane must have is_main=true"
+        );
+        assert!(
+            !Workspace::lane_removable(&lane),
+            "subdir-anchored main lane must NOT be removable"
+        );
+    });
+}
+
+/// Regression: `set_kind` must recompute `is_main` atomically so that a lane
+/// promoted from `Default` to `Git` (via `git init`) with `worktree_root ==
+/// repo_root` becomes non-removable immediately, without going through a
+/// constructor.
+#[gpui::test]
+fn test_set_kind_recomputes_is_main_and_blocks_removal(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |_ws, _| {
+        // Start from a Default lane — is_main is false.
+        let mut lane =
+            crate::lane::Lane::default_for_project(0, std::path::PathBuf::from("/tmp/repo"));
+        assert!(!lane.is_main, "precondition: Default lane is not main");
+        assert!(
+            !Workspace::lane_removable(&lane),
+            "precondition: Default lane is not removable either"
+        );
+
+        // Promote to Git where worktree_root == repo_root (freshly init'd repo).
+        lane.set_kind(daruda_store::project::LaneKind::Git {
+            repo_root: std::path::PathBuf::from("/tmp/repo"),
+            branch: Some("main".into()),
+            worktree_root: std::path::PathBuf::from("/tmp/repo"),
+        });
+        assert!(
+            lane.is_main,
+            "after set_kind with worktree_root == repo_root, is_main must be true"
+        );
+        assert!(
+            !Workspace::lane_removable(&lane),
+            "a freshly git-init'd main lane must NOT be removable"
+        );
+    });
+}
+
 #[gpui::test]
 fn test_git_repo_root_returns_none_for_non_git_workspace(cx: &mut TestAppContext) {
     // Non-git Default lane → git_repo_root() is the gate the

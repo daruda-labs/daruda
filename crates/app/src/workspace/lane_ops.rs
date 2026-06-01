@@ -78,7 +78,7 @@ impl Workspace {
     /// default non-git stand-in are non-removable.
     pub(in crate::workspace) fn lane_removable(wt: &crate::lane::Lane) -> bool {
         match &wt.kind {
-            daruda_store::project::LaneKind::Git { repo_root, .. } => wt.path != *repo_root,
+            daruda_store::project::LaneKind::Git { .. } => !wt.is_main,
             daruda_store::project::LaneKind::Default => false,
         }
     }

@@ -28,6 +28,11 @@ pub struct Lane {
     /// Runtime-only. Rebuilt from live PTY/agent signals on each
     /// render; never serialized.
     pub status: LaneStatus,
+    /// Runtime-only. True when this lane's `worktree_root` equals
+    /// `repo_root` — i.e. this is the main (non-linked) working tree.
+    /// Derived at construction time from a pure path comparison;
+    /// never serialized.
+    pub is_main: bool,
     /// Ref the lane was branched from (e.g. `main`,
     /// `origin/main`). `None` = current HEAD at creation. Persisted.
     pub base_ref: Option<String>,
@@ -48,6 +53,8 @@ impl Lane {
             is_unread: false,
             last_activity: now_secs(),
             status: LaneStatus::Idle,
+            // Default kind is never a git main worktree.
+            is_main: false,
             base_ref: None,
             description: None,
         }
@@ -72,6 +79,7 @@ impl Lane {
         worktree_root: PathBuf,
         tab_order: u32,
     ) -> Self {
+        let is_main = !worktree_root.as_os_str().is_empty() && worktree_root == repo_root;
         Self {
             id,
             kind: LaneKind::Git {
@@ -85,6 +93,7 @@ impl Lane {
             is_unread: false,
             last_activity: now_secs(),
             status: LaneStatus::Idle,
+            is_main,
             base_ref: None,
             description: None,
         }
@@ -182,6 +191,10 @@ impl Lane {
     pub fn from_serialized(s: &SerializedLane) -> Self {
         let mut kind = s.kind.clone();
         Self::backfill_lane_root(&mut kind, &s.path);
+        // If backfill_lane_root failed (empty worktree_root — e.g. the
+        // lane directory was deleted on disk), is_main resolves to false.
+        // That is a degenerate, harmless case: the lane is already broken.
+        let is_main = Self::is_main_kind(&kind);
         Self {
             id: s.id,
             kind,
@@ -191,9 +204,17 @@ impl Lane {
             is_unread: s.is_unread,
             last_activity: s.last_activity,
             status: LaneStatus::default(),
+            is_main,
             base_ref: s.base_ref.clone(),
             description: s.description.clone(),
         }
+    }
+
+    /// True when `kind` describes the git main working tree —
+    /// `worktree_root` is non-empty and equals `repo_root`.
+    fn is_main_kind(kind: &LaneKind) -> bool {
+        matches!(kind, LaneKind::Git { repo_root, worktree_root, .. }
+            if !worktree_root.as_os_str().is_empty() && worktree_root == repo_root)
     }
 
     /// If `kind` is a Git variant with no recorded `worktree_root`
@@ -251,6 +272,14 @@ impl Lane {
                 .unwrap_or("default")
                 .to_string(),
         }
+    }
+
+    /// Replace this lane's kind and recompute the derived `is_main`
+    /// flag. The one update site for in-place kind changes, so the
+    /// `is_main` mirror can never drift from `worktree_root == repo_root`.
+    pub(crate) fn set_kind(&mut self, kind: LaneKind) {
+        self.is_main = Self::is_main_kind(&kind);
+        self.kind = kind;
     }
 
     /// Overwrite the user-set display name. `None` clears back to the
@@ -469,6 +498,7 @@ mod tests {
             is_unread: true,
             last_activity: 12345,
             status: LaneStatus::Running,
+            is_main: false,
             base_ref: Some("origin/main".into()),
             description: Some("PR #123".into()),
         };
@@ -489,5 +519,86 @@ mod tests {
         // base_ref + description survive the round-trip.
         assert_eq!(back.base_ref, Some("origin/main".to_string()));
         assert_eq!(back.description, Some("PR #123".to_string()));
+    }
+
+    #[test]
+    fn from_serialized_recomputes_is_main_true_when_roots_match() {
+        // Verifies that `from_serialized` actually fires the is_main recomputation:
+        // a fixture where worktree_root == repo_root must round-trip to is_main=true.
+        let w = Lane {
+            id: 3,
+            kind: LaneKind::Git {
+                branch: Some("main".into()),
+                repo_root: PathBuf::from("/repo"),
+                worktree_root: PathBuf::from("/repo"),
+            },
+            path: PathBuf::from("/repo"),
+            name: None,
+            tab_order: 0,
+            is_unread: false,
+            last_activity: 99999,
+            status: LaneStatus::Running,
+            is_main: false, // intentionally wrong — from_serialized must correct it
+            base_ref: None,
+            description: None,
+        };
+        let s = w.to_serialized();
+        let back = Lane::from_serialized(&s);
+        assert!(
+            back.is_main,
+            "from_serialized must recompute is_main=true when worktree_root == repo_root"
+        );
+    }
+
+    // -- is_main derivation tests -----------------------------------------
+
+    #[test]
+    fn is_main_true_when_worktree_root_equals_repo_root() {
+        let lane = Lane::git(
+            0,
+            PathBuf::from("/repo"),
+            Some("main".into()),
+            PathBuf::from("/repo"),
+            PathBuf::from("/repo"),
+            0,
+        );
+        assert!(lane.is_main);
+    }
+
+    #[test]
+    fn is_main_false_for_linked_worktree() {
+        let lane = Lane::git(
+            1,
+            PathBuf::from("/repo-feat"),
+            Some("feat/x".into()),
+            PathBuf::from("/repo"),
+            PathBuf::from("/repo-feat"),
+            1,
+        );
+        assert!(!lane.is_main);
+    }
+
+    #[test]
+    fn is_main_false_for_default_kind() {
+        let lane = Lane::default_for_project(0, PathBuf::from("/non-git"));
+        assert!(!lane.is_main);
+    }
+
+    #[test]
+    fn is_main_true_when_path_is_subdir_but_worktree_root_equals_repo_root() {
+        // User opened a subdirectory; path is anchored to the subdir, but
+        // worktree_root stays at the true git toplevel which equals repo_root.
+        let lane = Lane::git(
+            0,
+            PathBuf::from("/repo/sub"),
+            Some("main".into()),
+            PathBuf::from("/repo"),
+            PathBuf::from("/repo"),
+            0,
+        );
+        assert!(
+            lane.is_main,
+            "subdir-anchored main lane must still be is_main"
+        );
     }
 }

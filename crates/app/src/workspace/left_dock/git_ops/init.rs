@@ -63,11 +63,11 @@ impl Workspace {
                             let worktree_root = probed_entry
                                 .map(|p| p.path.clone())
                                 .unwrap_or_else(|| wt.path.clone());
-                            wt.kind = daruda_store::project::LaneKind::Git {
+                            wt.set_kind(daruda_store::project::LaneKind::Git {
                                 repo_root: probe.repo_root,
                                 branch: probed_branch,
                                 worktree_root,
-                            };
+                            });
                         }
                         ws.refresh_git_status(target, cx);
                     }
