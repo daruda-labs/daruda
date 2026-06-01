@@ -385,6 +385,15 @@ impl Workspace {
             .collect();
         self.next_project_id = self.projects.len() as daruda_store::project::ProjectId;
 
+        // Re-detect each git project's `default_branch` from git and
+        // update the runtime project if it drifted. Backfills legacy
+        // state files (where `default_branch` is `None`) and absorbs
+        // external drift. Runs async on the background executor; the
+        // persisted value stands until detection completes. Placed
+        // before the pane-rebuild loop so it fires even when a later
+        // restore step early-returns.
+        self.reconcile_project_default_branches(cx);
+
         // Project the persisted (active_project: ProjectUuid,
         // active_lane: LaneId) onto the runtime `LaneRef`
         // by looking up the UUID → runtime `ProjectId` mapping.

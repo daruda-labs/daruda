@@ -443,10 +443,170 @@ impl Workspace {
         })
         .detach();
     }
+
+    /// Collect `(id, root)` for every project that owns at least one
+    /// git lane. Non-git projects are skipped so the reconcile pass
+    /// never spawns background git work for a directory git can't
+    /// answer for.
+    fn git_project_roots(&self) -> Vec<(ProjectId, PathBuf)> {
+        git_project_roots(&self.projects)
+    }
+
+    /// Re-detect each git project's `default_branch` from git on
+    /// restore and update the runtime project when it drifted. This
+    /// backfills legacy state files (where `default_branch` is `None`)
+    /// and absorbs external changes (e.g. the repo's `origin/HEAD`
+    /// moved while daruda was closed).
+    ///
+    /// Scope is deliberately narrow — only `default_branch` is
+    /// refreshed. No lanes are added or removed; main-lane recovery
+    /// belongs to the repo base node, not here.
+    pub(in crate::workspace) fn reconcile_project_default_branches(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        for (project_id, root) in self.git_project_roots() {
+            crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+                cx,
+                move || crate::lane::git::default_branch(&root),
+                move |ws, detected, cx| {
+                    let Some(p) = ws.projects.iter_mut().find(|p| p.id == project_id) else {
+                        return;
+                    };
+                    let Some(branch) =
+                        reconciled_default_branch(p.default_branch.as_deref(), detected)
+                    else {
+                        return;
+                    };
+                    p.default_branch = Some(branch);
+                    // Mark the workspace dirty so the cached left-dock
+                    // snapshot is re-staged with the refreshed branch
+                    // (rule 10: targeted notify, never window.refresh).
+                    cx.notify();
+                },
+            )
+            .detach();
+        }
+    }
+}
+
+/// `(id, root)` for every project that owns at least one git lane.
+/// Free function so the git/non-git filtering is unit-testable
+/// without a full `Workspace`.
+fn git_project_roots(projects: &[crate::project::Project]) -> Vec<(ProjectId, PathBuf)> {
+    projects
+        .iter()
+        .filter(|p| p.lanes.iter().any(|l| l.is_git()))
+        .map(|p| (p.id, p.root.clone()))
+        .collect()
+}
+
+/// Decide the value to store for a project's `default_branch` given
+/// the currently-held value and what git just detected. Returns the
+/// new value to store, or `None` when no update is needed (so the
+/// caller can skip the mutation and the notify).
+///
+/// - `detected == None` → keep current, no change.
+/// - detected matches current → no change.
+/// - otherwise (backfill from `None`, or drift) → store the detected
+///   value.
+fn reconciled_default_branch(current: Option<&str>, detected: Option<String>) -> Option<String> {
+    match detected {
+        Some(branch) if current != Some(branch.as_str()) => Some(branch),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use daruda_store::project::{ProjectId, ProjectUuid};
+
+    use super::{git_project_roots, reconciled_default_branch};
+    use crate::lane::Lane;
+    use crate::project::Project;
+
+    /// Build a runtime project with a single lane of the requested
+    /// git-ness, without touching the filesystem.
+    fn project_with_lane(id: ProjectId, root: &str, git: bool) -> Project {
+        let path = PathBuf::from(root);
+        let lane = if git {
+            Lane::git(
+                0,
+                path.clone(),
+                Some("main".to_string()),
+                path.clone(),
+                path.clone(),
+                0,
+            )
+        } else {
+            Lane::default_for_project(0, path.clone())
+        };
+        Project {
+            id,
+            uuid: ProjectUuid::new(),
+            root: path,
+            name: String::new(),
+            default_branch: None,
+            base_branch: None,
+            lanes: vec![lane],
+            last_active_lane_id: 0,
+            group_id: None,
+            color: None,
+            tab_order: 0,
+            is_collapsed: false,
+        }
+    }
+
+    #[test]
+    fn git_project_roots_keeps_only_git_projects() {
+        let projects = vec![
+            project_with_lane(0, "/tmp/daruda_git_a", true),
+            project_with_lane(1, "/tmp/daruda_nongit_b", false),
+            project_with_lane(2, "/tmp/daruda_git_c", true),
+        ];
+        let roots = git_project_roots(&projects);
+        assert_eq!(
+            roots,
+            vec![
+                (0, PathBuf::from("/tmp/daruda_git_a")),
+                (2, PathBuf::from("/tmp/daruda_git_c")),
+            ],
+            "only projects with a git lane are returned, paired with their id"
+        );
+    }
+
+    #[test]
+    fn reconcile_backfills_none() {
+        assert_eq!(
+            reconciled_default_branch(None, Some("main".to_string())),
+            Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn reconcile_updates_on_drift() {
+        assert_eq!(
+            reconciled_default_branch(Some("main"), Some("develop".to_string())),
+            Some("develop".to_string())
+        );
+    }
+
+    #[test]
+    fn reconcile_no_change_when_equal() {
+        assert_eq!(
+            reconciled_default_branch(Some("main"), Some("main".to_string())),
+            None
+        );
+    }
+
+    #[test]
+    fn reconcile_keeps_current_when_detection_fails() {
+        assert_eq!(reconciled_default_branch(Some("main"), None), None);
+        assert_eq!(reconciled_default_branch(None, None), None);
+    }
+
     // Behaviour for `add_project` / `toggle_project_collapse` /
     // `rename_active_project` / `close_active_project` /
     // `open_project_in_new_window` is exercised end-to-end through the
