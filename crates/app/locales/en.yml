@@ -251,6 +251,8 @@ projects:
   empty_state: "No project open"
   add_menu_project: "Add Project…"
   add_menu_group: "New Group…"
+  repo_base_with_branch: "%{name} · %{branch}"
+  repo_base_no_branch: "%{name}"
 
 # Group context menu
 group:
@@ -294,6 +296,8 @@ git:
   commit_btn: "Commit"
   push_btn: "Push"
   loading_changes: "Loading changes…"
+  no_changes: "No changes"
+  not_a_repository: "Not a Git repository"
   confirm_discard_title: "Discard changes?"
   confirm_discard_ok: "Discard"
   conflict_banner_single: "1 conflict — resolve before committing."

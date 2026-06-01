@@ -29,7 +29,9 @@ pub mod label;
 pub mod list;
 pub mod macro_key;
 pub mod menu;
+pub mod placeholder;
 pub mod radio;
+pub mod scrollbar;
 pub mod section_header;
 pub mod select;
 pub mod tab_bar;
@@ -58,6 +60,7 @@ pub use input_panel::{
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
 pub use menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder};
+pub use placeholder::placeholder_text;
 pub use radio::{Radio, radio};
 pub use section_header::SectionHeader;
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};

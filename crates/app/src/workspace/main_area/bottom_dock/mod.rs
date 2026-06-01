@@ -157,5 +157,5 @@ fn placeholder(message: &'static str, cx: &mut Context<Dock>) -> impl IntoElemen
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(text_color)
-        .child(div().w_full().text_center().child(message))
+        .child(crate::ui::placeholder_text(message))
 }

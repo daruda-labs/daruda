@@ -43,6 +43,10 @@ pub(in crate::workspace) struct ProjectSnapshot {
     #[allow(dead_code)]
     pub color: Option<gpui::SharedString>,
     pub tab_order: u32,
+    /// Mirror of the runtime project's detected default branch (e.g.
+    /// "main"). `None` for non-git projects or when detection has not
+    /// resolved yet. Drives the repo-base anchor row's label.
+    pub default_branch: Option<gpui::SharedString>,
     pub lanes: Vec<crate::lane::Lane>,
     /// Last-active lane id, mirrored from the runtime project so
     /// the dock can snap the active focus back to it when the user

@@ -164,6 +164,12 @@ fn ungrouped_project_block(
             .flex_col()
             .w_full()
             .gap(px(theme::LANE_LIST_GAP_Y));
+        // Repo-base anchor row above the worktree rows — only for git
+        // projects, so worktree-only / bare repos still show a main
+        // representation. Render-only, no interaction.
+        if project_is_git {
+            list = list.child(super::rows::repo_base_row(project));
+        }
         for wt in &project.lanes {
             let is_active = project.id == active_project && wt.id == active_lane;
             let git_badge = git_badge_for(snap, project.id, wt.id);
@@ -205,10 +211,7 @@ fn empty_state(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(
-            div()
-                .w_full()
-                .text_center()
-                .child(surface_strings::projects_empty_state()),
-        )
+        .child(crate::ui::placeholder_text(
+            surface_strings::projects_empty_state(),
+        ))
 }

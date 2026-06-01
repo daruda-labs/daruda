@@ -33,6 +33,10 @@ impl Workspace {
                             .as_ref()
                             .map(|c| gpui::SharedString::from(c.clone())),
                         tab_order: p.tab_order,
+                        default_branch: p
+                            .default_branch
+                            .as_ref()
+                            .map(|b| gpui::SharedString::from(b.clone())),
                         lanes: p.lanes.clone(),
                         last_active_lane_id: p.last_active_lane_id,
                         is_collapsed: p.is_collapsed,

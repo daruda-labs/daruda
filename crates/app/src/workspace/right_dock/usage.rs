@@ -107,18 +107,10 @@ fn header_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 /// Stacked under the dropdown so the user can still switch to a
 /// wider window without leaving the tab.
 fn empty_state_inline(cx: &gpui::App) -> AnyElement {
-    // `w_full` gives the message a definite width so it wraps instead of
-    // running off as one line and getting clipped by the dock's
-    // `overflow_hidden` when the dock is narrowed; `text_center` keeps
-    // each wrapped line centered. (A flex `justify_center` would center
-    // the block but leave it single-line, so a long sentence overflows.)
-    div()
-        .w_full()
+    crate::ui::placeholder_text(strings::usage_empty_state())
         .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .text_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(strings::usage_empty_state())
         .into_any_element()
 }
 

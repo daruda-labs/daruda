@@ -226,16 +226,10 @@ fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
         TaskFilter::Running => ux_strings::RIGHT_PANEL_TASK_EMPTY_RUNNING,
         TaskFilter::Done => ux_strings::RIGHT_PANEL_TASK_EMPTY_DONE,
     };
-    // `w_full` + `text_center` so a long message wraps and stays
-    // centered instead of running off as one line and clipping when the
-    // dock is narrow (see `usage::empty_state_inline`).
-    div()
-        .w_full()
+    crate::ui::placeholder_text(msg)
         .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .text_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(msg)
         .into_any_element()
 }
 

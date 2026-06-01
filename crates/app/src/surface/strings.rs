@@ -988,6 +988,20 @@ pub fn projects_empty_state() -> String {
     rust_i18n::t!("projects.empty_state").into_owned()
 }
 
+/// Label for the repo-base anchor row shown under a git project's
+/// header. `branch` is the project's detected default branch; when
+/// present the label reads "<repo> · <branch>", otherwise it falls
+/// back to the repo name alone (e.g. before detection resolves).
+pub fn projects_repo_base_label(name: &str, branch: Option<&str>) -> String {
+    match branch {
+        Some(branch) => {
+            rust_i18n::t!("projects.repo_base_with_branch", name => name, branch => branch)
+                .into_owned()
+        }
+        None => rust_i18n::t!("projects.repo_base_no_branch", name => name).into_owned(),
+    }
+}
+
 /// Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
 /// flat context menu instead of dispatching straight to the folder
 /// picker so the user can pick between adding a Project (existing
@@ -1146,6 +1160,15 @@ pub fn git_push_btn() -> String {
 /// still in flight (cache miss).
 pub fn git_loading_changes() -> String {
     rust_i18n::t!("git.loading_changes").into_owned()
+}
+/// Empty-state shown when the active lane is a Git repo with a clean
+/// working tree.
+pub fn git_no_changes() -> String {
+    rust_i18n::t!("git.no_changes").into_owned()
+}
+/// Placeholder shown when the active lane is not a Git repository.
+pub fn git_not_a_repository() -> String {
+    rust_i18n::t!("git.not_a_repository").into_owned()
 }
 /// Manual-refresh button label inside the loading placeholder.
 pub fn git_refresh_btn() -> String {
@@ -2318,5 +2341,18 @@ mod tests {
             fetched_at: None,
         };
         assert_eq!(service_status_label(&s), "Status unavailable");
+    }
+
+    #[test]
+    fn repo_base_label_with_branch_joins_name_and_branch() {
+        assert_eq!(
+            projects_repo_base_label("daruda", Some("main")),
+            "daruda · main"
+        );
+    }
+
+    #[test]
+    fn repo_base_label_without_branch_falls_back_to_name() {
+        assert_eq!(projects_repo_base_label("daruda", None), "daruda");
     }
 }

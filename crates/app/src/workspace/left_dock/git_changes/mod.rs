@@ -305,6 +305,7 @@ fn view_header(
         .unwrap_or((0, 0));
 
     let refresh_icon = button_bare("git-refresh")
+        .xsmall()
         .ghost()
         .icon(IconName::Refresh)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -330,6 +331,7 @@ fn view_header(
     let header_actions = header_actions.child(refresh_icon);
 
     let fetch_btn = button("git-fetch", app_strings::git_fetch_btn())
+        .xsmall()
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
@@ -339,6 +341,7 @@ fn view_header(
         }));
 
     let push_btn = button("git-push", app_strings::git_push_btn())
+        .xsmall()
         .loading(in_flight)
         .disabled(in_flight)
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
@@ -1039,32 +1042,15 @@ fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoEl
 fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<gpui::AnyElement> {
     let viewport_h = handle.bounds().size.height;
     let max_offset = handle.max_offset().height;
-    if max_offset <= px(0.) || viewport_h <= px(0.) {
-        return None;
-    }
-    let content_h = viewport_h + max_offset;
-    let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
-    let thumb_h = (viewport_h * thumb_ratio).max(px(theme::SCROLLBAR_MIN_THUMB_H));
-    let track_h = viewport_h - thumb_h;
-    let scroll_frac = ((-handle.offset().y) / max_offset).clamp(0.0_f32, 1.0_f32);
-    let thumb_top = track_h * scroll_frac;
-    let w = px(theme::SCROLLBAR_W);
-    let r = px(theme::SCROLLBAR_MARGIN_R);
     let t = theme::current(cx);
-    let thumb_bg = t.dock_scrollbar_thumb;
-    let thumb_hover_bg = t.dock_scrollbar_thumb_hover;
-    Some(
-        div()
-            .id("git-changes-scrollbar-thumb")
-            .absolute()
-            .top(thumb_top)
-            .right(r)
-            .w(w)
-            .h(thumb_h)
-            .rounded(w / 2.0)
-            .bg(thumb_bg)
-            .hover(move |d| d.bg(thumb_hover_bg))
-            .into_any_element(),
+    crate::ui::scrollbar::vertical_thumb(
+        "git-changes-scrollbar-thumb",
+        viewport_h,
+        viewport_h + max_offset,
+        handle.offset().y,
+        px(0.),
+        t.dock_scrollbar_thumb,
+        t.dock_scrollbar_thumb_hover,
     )
 }
 
@@ -1095,12 +1081,9 @@ fn loading_placeholder(
         .p(px(theme::LANE_PLACEHOLDER_PAD))
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(text_color)
-        .child(
-            div()
-                .w_full()
-                .text_center()
-                .child(app_strings::git_loading_changes()),
-        )
+        .child(crate::ui::placeholder_text(
+            app_strings::git_loading_changes(),
+        ))
         .child(refresh_btn)
 }
 
@@ -1112,7 +1095,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(div().w_full().text_center().child("No changes"))
+        .child(crate::ui::placeholder_text(app_strings::git_no_changes()))
 }
 
 fn non_git_placeholder(
@@ -1143,7 +1126,9 @@ fn non_git_placeholder(
         .gap(px(theme::GIT_COMMIT_PAD))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(text_color)
-        .child(div().w_full().text_center().child("Not a Git repository"))
+        .child(crate::ui::placeholder_text(
+            app_strings::git_not_a_repository(),
+        ))
         .child(init_btn)
 }
 

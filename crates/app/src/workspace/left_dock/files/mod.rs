@@ -131,34 +131,16 @@ fn build_files_scrollbar(
     let max_offset_h = state.base_handle.max_offset().height;
     let offset_y = state.base_handle.offset().y;
     drop(state);
-    if viewport_h <= px(0.0) || max_offset_h <= px(0.0) {
-        return None;
-    }
 
-    let content_h = viewport_h + max_offset_h;
-    let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
-    let raw_thumb_h = viewport_h * thumb_ratio;
-    let thumb_h = raw_thumb_h.max(px(theme::SCROLLBAR_MIN_THUMB_H));
-    let track_h = viewport_h - thumb_h;
-    let scroll_frac = ((-offset_y) / max_offset_h).clamp(0.0_f32, 1.0_f32);
-    let thumb_top = track_h * scroll_frac;
-    let thumb_w = px(theme::SCROLLBAR_W);
     let t = theme::current(cx);
-    let thumb_bg = t.dock_scrollbar_thumb;
-    let thumb_hover_bg = t.dock_scrollbar_thumb_hover;
-
-    Some(
-        div()
-            .id("files-scrollbar")
-            .absolute()
-            .top(thumb_top)
-            .right(px(theme::SCROLLBAR_MARGIN_R))
-            .w(thumb_w)
-            .h(thumb_h)
-            .rounded(thumb_w / 2.0)
-            .bg(thumb_bg)
-            .hover(move |d| d.bg(thumb_hover_bg))
-            .into_any_element(),
+    crate::ui::scrollbar::vertical_thumb(
+        "files-scrollbar",
+        viewport_h,
+        viewport_h + max_offset_h,
+        offset_y,
+        px(0.),
+        t.dock_scrollbar_thumb,
+        t.dock_scrollbar_thumb_hover,
     )
 }
 
@@ -368,7 +350,7 @@ fn loading_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(div().w_full().text_center().child(strings::files_loading()))
+        .child(crate::ui::placeholder_text(strings::files_loading()))
         .into_any_element()
 }
 
@@ -380,11 +362,6 @@ fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
-        .child(
-            div()
-                .w_full()
-                .text_center()
-                .child(strings::files_empty_dir()),
-        )
+        .child(crate::ui::placeholder_text(strings::files_empty_dir()))
         .into_any_element()
 }

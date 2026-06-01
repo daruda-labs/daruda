@@ -17,7 +17,7 @@ use crate::ui::{
     ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
 };
 use crate::workspace::NewGroup;
-use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
+use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
 use super::context_menu::build_context_menu_items;
@@ -924,6 +924,39 @@ pub(in crate::workspace) fn worktree_row(
     }
 
     row
+}
+
+/// Non-interactive anchor row shown under a git project's header,
+/// above its worktree rows. Displays the project's default branch
+/// as the repo's "base", so worktree-only / bare repos still show
+/// a main representation. No click / delete / merge affordance.
+pub(in crate::workspace) fn repo_base_row(project: &ProjectSnapshot) -> impl IntoElement {
+    let label = surface_strings::projects_repo_base_label(
+        project.name.as_ref(),
+        project.default_branch.as_ref().map(|b| b.as_ref()),
+    );
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .w_full()
+        .px(px(theme::LANE_ROW_PAD_X))
+        .py(px(theme::LANE_SECTION_PAD_Y))
+        .gap(px(theme::LANE_LABEL_GAP))
+        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_color(theme::TEXT_SUBTLE)
+        .child(
+            Icon::new(IconName::GalleryVerticalEnd)
+                .with_size(px(theme::LANE_SUB_FONT_SIZE))
+                .text_color(theme::TEXT_SUBTLE),
+        )
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(SharedString::from(label)),
+        )
 }
 
 pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
