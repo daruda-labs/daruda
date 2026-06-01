@@ -215,6 +215,39 @@ pub fn current_branch(path: &Path) -> Result<Option<String>, GitError> {
     }
 }
 
+/// Repo's default branch, best-effort. None on non-repo / detached.
+///
+/// Tries `origin/HEAD` first (the remote's published default), then
+/// the conventional local `main` / `master`, and finally falls back
+/// to whatever branch is checked out. Detection lives here in the
+/// app crate because `daruda_store` is git-free and only holds the
+/// persisted value.
+pub fn default_branch(repo_root: &Path) -> Option<String> {
+    if let Ok(s) = run_git(
+        repo_root,
+        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    ) && let Some(b) = s.trim().strip_prefix("origin/")
+    {
+        return Some(b.to_string());
+    }
+    for cand in ["main", "master"] {
+        if run_git(
+            repo_root,
+            [
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{cand}"),
+            ],
+        )
+        .is_ok()
+        {
+            return Some(cand.into());
+        }
+    }
+    current_branch(repo_root).ok().flatten()
+}
+
 /// `git init` at `path`. Creates the directory if missing.
 pub fn init(path: &Path) -> Result<(), GitError> {
     std::fs::create_dir_all(path).map_err(GitError::Spawn)?;

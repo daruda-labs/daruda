@@ -667,6 +667,8 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
             lanes: vec![lane],
             last_active_lane_id: 0,
             next_lane_id: 1,
+            default_branch: None,
+            base_branch: None,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -734,6 +736,8 @@ fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
             lanes: vec![lane],
             last_active_lane_id: 3,
             next_lane_id: 4,
+            default_branch: None,
+            base_branch: None,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -855,6 +859,8 @@ fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
             lanes: Vec::new(),
             last_active_lane_id: 0,
             next_lane_id: 0,
+            default_branch: None,
+            base_branch: None,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -945,6 +951,8 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
             lanes: Vec::new(),
             last_active_lane_id: 0,
             next_lane_id: 0,
+            default_branch: None,
+            base_branch: None,
         };
         let mut project_overrides = BTreeMap::new();
         project_overrides.insert(project_uuid, ProjectOverride::default());
@@ -1034,6 +1042,8 @@ fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
                 lanes: Vec::new(),
                 last_active_lane_id: 0,
                 next_lane_id: 0,
+                default_branch: None,
+                base_branch: None,
             };
             let mut project_overrides = BTreeMap::new();
             project_overrides.insert(project_uuid, ProjectOverride::default());

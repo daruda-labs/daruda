@@ -438,6 +438,8 @@ mod new_schema_fixtures {
             lanes: vec![],
             last_active_lane_id: Default::default(),
             next_lane_id: Default::default(),
+            default_branch: Some("main".into()),
+            base_branch: Some("develop".into()),
         }
     }
 
@@ -483,6 +485,38 @@ mod new_schema {
         let json = serde_json::to_string(&p).unwrap();
         let back: ProjectState = serde_json::from_str(&json).unwrap();
         assert_eq!(p, back);
+    }
+
+    #[test]
+    fn project_state_branch_fields_roundtrip() {
+        // `default_branch` / `base_branch` survive a serialize →
+        // deserialize cycle with their values intact.
+        let mut p = sample_project();
+        p.default_branch = Some("trunk".into());
+        p.base_branch = Some("release".into());
+        let json = serde_json::to_string(&p).unwrap();
+        let back: ProjectState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.default_branch.as_deref(), Some("trunk"));
+        assert_eq!(back.base_branch.as_deref(), Some("release"));
+    }
+
+    #[test]
+    fn legacy_project_state_without_branch_fields_defaults_to_none() {
+        // A pre-Task-2 state file has neither `default_branch` nor
+        // `base_branch`. `#[serde(default)]` must deserialize both to
+        // `None` so legacy files load without a schema bump.
+        let json = r#"{
+            "schema_version": 3,
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "root": "/Users/test/repo",
+            "name": "repo",
+            "worktrees": [],
+            "last_active_worktree_id": 0,
+            "next_worktree_id": 0
+        }"#;
+        let back: ProjectState = serde_json::from_str(json).unwrap();
+        assert_eq!(back.default_branch, None);
+        assert_eq!(back.base_branch, None);
     }
 
     #[test]

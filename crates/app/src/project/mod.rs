@@ -33,6 +33,14 @@ pub struct Project {
     pub uuid: ProjectUuid,
     pub root: PathBuf,
     pub name: String,
+    /// Repo's actual default branch (e.g. "main"). Detected at project
+    /// open (origin/HEAD → local main/master → current HEAD). `None`
+    /// for non-git projects or when detection fails. Display + reconcile
+    /// anchor.
+    pub default_branch: Option<String>,
+    /// User-overridable base ref new lanes branch from. `None` falls
+    /// back to `default_branch`, then current HEAD.
+    pub base_branch: Option<String>,
     pub lanes: Vec<Lane>,
     /// Lane the user last clicked inside this project. Snap target
     /// when the project header is clicked in the left dock without a
@@ -62,11 +70,16 @@ impl Project {
         let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);
         let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
+        let default_branch = crate::lane::git::is_git_repo(&root)
+            .then(|| crate::lane::git::default_branch(&root))
+            .flatten();
         Self {
             id,
             uuid: ProjectUuid::new(),
             root,
             name,
+            default_branch,
+            base_branch: None,
             lanes,
             last_active_lane_id,
             group_id: None,
@@ -86,11 +99,16 @@ impl Project {
         let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);
         let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
+        let default_branch = crate::lane::git::is_git_repo(&root)
+            .then(|| crate::lane::git::default_branch(&root))
+            .flatten();
         Self {
             id,
             uuid,
             root,
             name,
+            default_branch,
+            base_branch: None,
             lanes,
             last_active_lane_id,
             group_id: None,
@@ -126,6 +144,10 @@ impl Project {
         // disk on the next save. `snap_target()` would mask the mismatch
         // at read time, but a later session that happens to allocate the
         // same id would inherit a hint that means nothing.
+        // Note: the empty-lanes re-bootstrap branch re-discovers lanes
+        // from disk but does NOT re-detect `default_branch` — the
+        // persisted value is read verbatim here. Task 3's reconcile pass
+        // owns refreshing it against the live repo.
         let (lanes, last_active_lane_id) = if ps.lanes.is_empty() {
             let lanes = Lane::bootstrap_from_project(&ps.root);
             let head = lanes.first().map(|w| w.id).unwrap_or(0);
@@ -139,6 +161,8 @@ impl Project {
             uuid: ps.uuid,
             root: ps.root.clone(),
             name: ps.name.clone().unwrap_or_default(),
+            default_branch: ps.default_branch.clone(),
+            base_branch: ps.base_branch.clone(),
             lanes,
             last_active_lane_id,
             group_id: ov.group_id,
@@ -220,6 +244,8 @@ mod tests {
             lanes: Vec::new(),
             last_active_lane_id: 0,
             next_lane_id: 0,
+            default_branch: None,
+            base_branch: None,
         };
         let p = Project::from_disk(0, &ps, &ProjectOverride::default());
         assert!(
@@ -255,6 +281,8 @@ mod tests {
             lanes: Vec::new(),
             last_active_lane_id: 7,
             next_lane_id: 0,
+            default_branch: None,
+            base_branch: None,
         };
         let p = Project::from_disk(0, &ps, &ProjectOverride::default());
         assert_eq!(p.lanes.len(), 1);
@@ -280,6 +308,8 @@ mod tests {
             lanes: vec![stored],
             last_active_lane_id: 3,
             next_lane_id: 4,
+            default_branch: None,
+            base_branch: None,
         };
         let p = Project::from_disk(0, &ps, &ProjectOverride::default());
         assert_eq!(p.lanes.len(), 1);
@@ -287,6 +317,28 @@ mod tests {
             p.lanes[0].id, 3,
             "stored lane hydrated verbatim, not re-bootstrapped"
         );
+    }
+
+    #[test]
+    fn from_disk_reads_persisted_branch_fields() {
+        // `from_disk` reads the persisted `default_branch` / `base_branch`
+        // verbatim — no git call. Task 3's reconcile owns refreshing them.
+        let dir = std::env::temp_dir().join("daruda_project_from_disk_branches");
+        let stored = crate::lane::Lane::default_for_project(0, dir.clone()).to_serialized();
+        let ps = ProjectState {
+            schema_version: 0,
+            uuid: ProjectUuid::new(),
+            root: dir.clone(),
+            name: Some("daruda".to_string()),
+            lanes: vec![stored],
+            last_active_lane_id: 0,
+            next_lane_id: 1,
+            default_branch: Some("main".to_string()),
+            base_branch: Some("develop".to_string()),
+        };
+        let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+        assert_eq!(p.default_branch.as_deref(), Some("main"));
+        assert_eq!(p.base_branch.as_deref(), Some("develop"));
     }
 
     #[test]

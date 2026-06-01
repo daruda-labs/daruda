@@ -85,6 +85,8 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
         lanes: Vec::new(),
         last_active_lane_id: 0,
         next_lane_id: 0,
+        default_branch: None,
+        base_branch: None,
     };
 
     let mut project_overrides = BTreeMap::new();
@@ -166,6 +168,8 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         lanes: Vec::new(),
         last_active_lane_id: 0,
         next_lane_id: 0,
+        default_branch: None,
+        base_branch: None,
     };
 
     let mut project_overrides = BTreeMap::new();

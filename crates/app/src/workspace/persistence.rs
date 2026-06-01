@@ -145,6 +145,8 @@ impl Workspace {
                 lanes,
                 last_active_lane_id: project.last_active_lane_id,
                 next_lane_id,
+                default_branch: project.default_branch.clone(),
+                base_branch: project.base_branch.clone(),
             });
 
             project_ids.push(project.uuid);

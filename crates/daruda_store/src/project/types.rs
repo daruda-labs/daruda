@@ -104,6 +104,15 @@ pub struct ProjectState {
     pub last_active_lane_id: LaneId,
     #[serde(default, rename = "next_worktree_id", alias = "next_lane_id")]
     pub next_lane_id: LaneId,
+    /// Repo's actual default branch (e.g. "main"). Detected at project
+    /// open (origin/HEAD → local main/master → current HEAD). None =
+    /// detection failed or non-git project. Display + reconcile anchor.
+    #[serde(default)]
+    pub default_branch: Option<String>,
+    /// User-overridable base ref new lanes branch from. None falls
+    /// back to `default_branch`, then current HEAD.
+    #[serde(default)]
+    pub base_branch: Option<String>,
 }
 
 /// Per-workspace decoration on a project reference. Color/tab_order/

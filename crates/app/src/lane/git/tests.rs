@@ -337,6 +337,116 @@ fn current_branch_after_init_is_main_or_master() {
 }
 
 #[test]
+fn default_branch_prefers_origin_head() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_origin_head");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    // Simulate a clone whose remote default is `origin/main`: create a
+    // local `origin/main` remote-tracking ref, then point
+    // `origin/HEAD` at it the way `git clone` / `git remote set-head`
+    // would. Detection must report `main` from this symbolic ref even
+    // when the local branch carries a different name.
+    run_git(&dir, ["branch", "-m", "local-feature"]).unwrap();
+    run_git(&dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+    run_git(
+        &dir,
+        [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    )
+    .unwrap();
+    assert_eq!(default_branch(&dir).as_deref(), Some("main"));
+    teardown(&dir);
+}
+
+#[test]
+fn default_branch_falls_back_to_local_main() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_local_main");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    // No `origin/HEAD`. Ensure a local `main` exists regardless of the
+    // git version's init default, then detection should pick it.
+    let current = current_branch(&dir).unwrap().unwrap();
+    if current != "main" {
+        run_git(&dir, ["branch", "main"]).unwrap();
+    }
+    assert_eq!(default_branch(&dir).as_deref(), Some("main"));
+    teardown(&dir);
+}
+
+#[test]
+fn default_branch_falls_back_to_master_when_no_main() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_master");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    // No `origin/HEAD` and no local `main`: rename the init branch to
+    // something neutral, add `master`, and verify that detection matches
+    // `master` as the second conventional candidate when neither
+    // `origin/HEAD` nor `main` is present.
+    run_git(&dir, ["branch", "-m", "trunk"]).unwrap();
+    run_git(&dir, ["branch", "master"]).unwrap();
+    assert_eq!(default_branch(&dir).as_deref(), Some("master"));
+    teardown(&dir);
+}
+
+#[test]
+fn default_branch_falls_back_to_current_when_no_convention() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_current");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    // No `origin/HEAD`, no `main`, no `master` — only an oddly-named
+    // branch is checked out. Detection falls through to the current
+    // branch.
+    run_git(&dir, ["branch", "-m", "wip/spike"]).unwrap();
+    assert_eq!(default_branch(&dir).as_deref(), Some("wip/spike"));
+    teardown(&dir);
+}
+
+#[test]
+fn default_branch_none_on_detached_head() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_detached");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    // Detach HEAD at the current commit and rename the branch away so
+    // neither `main` nor `master` exists. With no convention to match
+    // and a detached HEAD, detection returns None.
+    run_git(&dir, ["branch", "-m", "wip/spike"]).unwrap();
+    let head = run_git(&dir, ["rev-parse", "HEAD"]).unwrap();
+    run_git(&dir, ["checkout", "--detach", head.trim()]).unwrap();
+    run_git(&dir, ["branch", "-D", "wip/spike"]).unwrap();
+    assert_eq!(default_branch(&dir), None);
+    teardown(&dir);
+}
+
+#[test]
+fn default_branch_none_on_non_repo() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("default_nonrepo");
+    // Plain directory, never `git init`-ed.
+    assert_eq!(default_branch(&dir), None);
+    teardown(&dir);
+}
+
+#[test]
 fn add_and_list_worktrees_round_trip() {
     if !require_git() {
         return;
