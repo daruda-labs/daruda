@@ -541,6 +541,34 @@ impl Workspace {
             cx.notify();
         }
     }
+
+    /// Resolve the base ref for a new lane against the active project
+    /// (lanes are created into `active_project()`, matching
+    /// `finalize_create_lane`). Single resolution point — both
+    /// `add_lane` consumers route through this so the recorded base
+    /// always matches what git actually branched from.
+    pub(in crate::workspace) fn resolve_lane_base_ref(
+        &self,
+        requested: Option<String>,
+    ) -> Option<String> {
+        let p = self.active_project();
+        resolved_lane_base_ref(
+            requested,
+            p.and_then(|p| p.base_branch.as_deref()),
+            p.and_then(|p| p.default_branch.as_deref()),
+        )
+    }
+}
+
+/// Effective base ref for a new lane: an explicit user choice wins;
+/// otherwise fall back to the project's base branch, then its
+/// detected default branch; `None` lets git use the current HEAD.
+fn resolved_lane_base_ref(
+    requested: Option<String>,
+    base_branch: Option<&str>,
+    default_branch: Option<&str>,
+) -> Option<String> {
+    requested.or_else(|| base_branch.or(default_branch).map(str::to_owned))
 }
 
 /// Minimal branch-name guard — blocks the obvious foot-guns that git
@@ -569,4 +597,37 @@ pub(in crate::workspace) fn sanitize_branch_name(raw: &str) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolved_lane_base_ref;
+
+    #[test]
+    fn explicit_request_overrides_project_branches() {
+        let out = resolved_lane_base_ref(
+            Some("origin/feat".to_string()),
+            Some("develop"),
+            Some("main"),
+        );
+        assert_eq!(out.as_deref(), Some("origin/feat"));
+    }
+
+    #[test]
+    fn falls_back_to_base_branch_when_unspecified() {
+        let out = resolved_lane_base_ref(None, Some("develop"), Some("main"));
+        assert_eq!(out.as_deref(), Some("develop"));
+    }
+
+    #[test]
+    fn falls_back_to_default_branch_when_no_base() {
+        let out = resolved_lane_base_ref(None, None, Some("main"));
+        assert_eq!(out.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn returns_none_when_nothing_known() {
+        let out = resolved_lane_base_ref(None, None, None);
+        assert_eq!(out, None);
+    }
 }

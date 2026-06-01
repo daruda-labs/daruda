@@ -157,7 +157,7 @@ impl CreateWorktreeModal {
         if self.submitting {
             return;
         }
-        let plan = match self.validate(cx) {
+        let mut plan = match self.validate(cx) {
             Ok(p) => p,
             Err(msg) => {
                 self.error = Some(msg.into());
@@ -165,6 +165,14 @@ impl CreateWorktreeModal {
                 return;
             }
         };
+        // Resolve the base ref against the active project once, so both
+        // the `add_lane` branching below and the `plan` later handed to
+        // `finalize_create_lane` agree on what git branched from.
+        if let Some(ws) = self.workspace.upgrade() {
+            plan.base_ref = ws
+                .read(cx)
+                .resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
+        }
         self.submitting = true;
         cx.notify();
 

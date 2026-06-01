@@ -65,7 +65,9 @@ impl Workspace {
     /// Resolve the branch name we should base the new lane on.
     /// Looks the path up in the workspace's lane list and returns
     /// `lane.branch.clone()` when it's a git worktree. `None`
-    /// falls through to git's "branch from current HEAD" default.
+    /// is passed to `resolve_lane_base_ref`, which falls back to
+    /// the project's `base_branch`, then `default_branch`, then
+    /// the current HEAD.
     fn branch_for_worktree_path(&self, path: &Path) -> Option<String> {
         self.active_lanes()
             .iter()
@@ -151,7 +153,7 @@ impl Workspace {
             branch: task.branch_name.clone(),
             new_path: new_path.clone(),
             repo_root: repo_root.clone(),
-            base_ref,
+            base_ref: self.resolve_lane_base_ref(base_ref),
             description: Some(format!("task: {}", task.title)),
         };
 
