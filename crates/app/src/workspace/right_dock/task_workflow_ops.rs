@@ -69,8 +69,9 @@ impl Workspace {
     /// the project's `base_branch`, then `default_branch`, then
     /// the current HEAD.
     fn branch_for_worktree_path(&self, path: &Path) -> Option<String> {
-        self.active_lanes()
+        self.projects
             .iter()
+            .flat_map(|p| &p.lanes)
             .find(|w| w.path == path)
             .and_then(|w| match &w.kind {
                 daruda_store::project::LaneKind::Git { branch, .. } => branch.clone(),
@@ -155,6 +156,7 @@ impl Workspace {
             repo_root: repo_root.clone(),
             base_ref: self.resolve_lane_base_ref(base_ref),
             description: Some(format!("task: {}", task.title)),
+            project_id: self.active_project().map(|p| p.id),
         };
 
         let task_id = task.id.clone();

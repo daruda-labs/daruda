@@ -99,6 +99,36 @@ impl Workspace {
         // consumes `&mut Window`, so the persist trigger has to land after
         // those borrows release.
         self.mutate_durable(cx, |_, _| {});
+        // Detect the new project's default branch in the background.
+        // `Project::new_with_uuid` sets `default_branch: None` to avoid
+        // blocking the UI thread; this spawn fills it in and persists.
+        if self
+            .projects
+            .iter()
+            .find(|p| p.id == new_id)
+            .map(|p| p.lanes.iter().any(|l| l.is_git()))
+            .unwrap_or(false)
+        {
+            let root = self
+                .projects
+                .iter()
+                .find(|p| p.id == new_id)
+                .map(|p| p.root.clone())
+                .expect("project was just pushed");
+            crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+                cx,
+                move || crate::lane::git::default_branch(&root),
+                move |ws, detected, cx| {
+                    if let Some(branch) = detected
+                        && let Some(p) = ws.projects.iter_mut().find(|p| p.id == new_id)
+                    {
+                        p.default_branch = Some(branch);
+                        ws.mutate_durable(cx, |_, _| {});
+                    }
+                },
+            )
+            .detach();
+        }
         target
     }
 
@@ -479,10 +509,9 @@ impl Workspace {
                         return;
                     };
                     p.default_branch = Some(branch);
-                    // Mark the workspace dirty so the cached left-dock
-                    // snapshot is re-staged with the refreshed branch
-                    // (rule 10: targeted notify, never window.refresh).
-                    cx.notify();
+                    // Persist the refreshed value and re-stage the
+                    // left-dock snapshot (rule 10: targeted notify).
+                    ws.mutate_durable(cx, |_, _| {});
                 },
             )
             .detach();

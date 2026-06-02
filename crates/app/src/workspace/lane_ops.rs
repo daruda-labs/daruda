@@ -8,7 +8,7 @@
 //! on `Workspace` (not in this file) because it has to outlive any
 //! single render cycle.
 
-use daruda_store::project::{LaneId, LaneRef};
+use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
 use super::LaneRuntime;
@@ -32,6 +32,10 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     /// Free-form description captured at creation time.
     /// Surfaced as the lane row sublabel in the left dock.
     pub description: Option<String>,
+    /// Project this lane belongs to, captured at plan-creation time
+    /// so `finalize_create_lane` is not subject to a TOCTOU race
+    /// where the active project changes during the git background op.
+    pub project_id: Option<ProjectId>,
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.
@@ -244,8 +248,11 @@ impl Workspace {
             repo_root,
             base_ref,
             description,
+            project_id,
         } = plan;
-        let Some(active_project_id) = self.active_project().map(|p| p.id) else {
+        let Some(active_project_id) = project_id
+            .or_else(|| self.active_project().map(|p| p.id))
+        else {
             return Err("No active project.".to_string());
         };
         let pane = self
@@ -265,7 +272,12 @@ impl Workspace {
             project: active_project_id,
             lane: new_id,
         };
-        let order = self.active_lanes().len() as u32;
+        let order = self
+            .projects
+            .iter()
+            .find(|p| p.id == active_project_id)
+            .map(|p| p.lanes.len())
+            .unwrap_or(0) as u32;
         // A freshly-added linked lane's toplevel is exactly
         // `new_path` — `git worktree add` writes the per-lane
         // `.git` pointer file there. No anchoring happens at this

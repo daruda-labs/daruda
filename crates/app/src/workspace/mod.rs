@@ -945,6 +945,11 @@ impl Workspace {
         // subscription wouldn't fire here because the set_global call
         // pre-dates the subscription registration above.
         ws.ensure_task_live_tick(cx);
+        // Background-detect `default_branch` for the bootstrapped project
+        // (if any). `Project::bootstrap` sets it to `None` to avoid
+        // blocking the UI thread during window creation; this fires
+        // asynchronously and persists the result when it returns.
+        ws.reconcile_project_default_branches(cx);
 
         cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {
             this.capture_window_bounds(window);

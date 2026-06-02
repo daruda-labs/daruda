@@ -70,15 +70,12 @@ impl Project {
         let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);
         let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
-        let default_branch = crate::lane::git::is_git_repo(&root)
-            .then(|| crate::lane::git::default_branch(&root))
-            .flatten();
         Self {
             id,
             uuid: ProjectUuid::new(),
             root,
             name,
-            default_branch,
+            default_branch: None,
             base_branch: None,
             lanes,
             last_active_lane_id,
@@ -99,15 +96,12 @@ impl Project {
         let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);
         let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
-        let default_branch = crate::lane::git::is_git_repo(&root)
-            .then(|| crate::lane::git::default_branch(&root))
-            .flatten();
         Self {
             id,
             uuid,
             root,
             name,
-            default_branch,
+            default_branch: None,
             base_branch: None,
             lanes,
             last_active_lane_id,

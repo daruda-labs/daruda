@@ -64,6 +64,9 @@ fn thumb_geometry(
     }
     let thumb_ratio = (viewport_h / content_h).min(1.0_f32);
     let thumb_h = (viewport_h * thumb_ratio).max(px(theme::SCROLLBAR_MIN_THUMB_H));
+    if thumb_h >= viewport_h {
+        return None;
+    }
     let track_h = viewport_h - thumb_h;
     let scrollable = content_h - viewport_h;
     let scroll_frac = ((-scroll_offset_y) / scrollable).clamp(0.0_f32, 1.0_f32);
@@ -81,6 +84,14 @@ mod tests {
         assert_eq!(thumb_geometry(px(100.), px(80.), px(0.), px(0.)), None);
         // Bounds not yet measured (zero viewport).
         assert_eq!(thumb_geometry(px(0.), px(200.), px(0.), px(0.)), None);
+    }
+
+    #[test]
+    fn tiny_viewport_where_min_thumb_exceeds_height_draws_no_thumb() {
+        // viewport_h (20) < SCROLLBAR_MIN_THUMB_H (24): after clamping the
+        // thumb would be taller than the track, producing a negative
+        // track_h. No thumb is more useful than an inverted one.
+        assert_eq!(thumb_geometry(px(20.), px(25.), px(0.), px(0.)), None);
     }
 
     #[test]

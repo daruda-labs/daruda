@@ -150,6 +150,7 @@ impl CreateWorktreeModal {
             repo_root: self.repo_root.clone(),
             base_ref,
             description,
+            project_id: None, // filled in by submit() before the async spawn
         })
     }
 
@@ -165,13 +166,14 @@ impl CreateWorktreeModal {
                 return;
             }
         };
-        // Resolve the base ref against the active project once, so both
-        // the `add_lane` branching below and the `plan` later handed to
-        // `finalize_create_lane` agree on what git branched from.
+        // Capture project_id and resolve base_ref now — both must be
+        // baked into the plan before the async git spawn so that
+        // `finalize_create_lane` uses the project that was active at
+        // submit time, not whatever is active when the spawn completes.
         if let Some(ws) = self.workspace.upgrade() {
-            plan.base_ref = ws
-                .read(cx)
-                .resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
+            let ws_ref = ws.read(cx);
+            plan.base_ref = ws_ref.resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
+            plan.project_id = ws_ref.active_project().map(|p| p.id);
         }
         self.submitting = true;
         cx.notify();
