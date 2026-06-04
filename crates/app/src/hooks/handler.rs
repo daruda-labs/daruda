@@ -27,7 +27,7 @@ use fs4::fs_std::FileExt;
 use daruda_claude::hooks::events::HookEvent;
 use daruda_claude::hooks::fsm::{self, FsmAction};
 use daruda_claude::hooks::status_file::{
-    self, Source, StatusFile, default_dir, delete, path_for, read, write_atomic,
+    self, Source, StatusFile, default_dir, delete, lock_path_for, path_for, read, write_atomic,
 };
 
 /// Run the hook handler. Always returns the exit code that `main`
@@ -115,7 +115,7 @@ struct SessionLock {
 
 impl SessionLock {
     fn acquire(dir: &Path, session_id: &str) -> std::io::Result<Self> {
-        let path = dir.join(format!("{session_id}.lock"));
+        let path = lock_path_for(dir, session_id);
         let file = OpenOptions::new()
             .create(true)
             .read(true)

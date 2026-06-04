@@ -85,8 +85,16 @@ impl Workspace {
             PtyTrackerEvent::DeadSession { session_id } => {
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     if let Ok(dir) = daruda_claude::hooks::status_file::default_dir() {
-                        let path = daruda_claude::hooks::status_file::path_for(&dir, &session_id);
-                        let _ = daruda_claude::hooks::status_file::delete(&path);
+                        use daruda_claude::hooks::status_file as sf;
+                        let _ = sf::delete(&sf::path_for(&dir, &session_id));
+                        // `claude` is gone (the tracker found no live
+                        // descendant), so no NEW hook can spawn for this
+                        // session. At most one straggler hook subprocess may
+                        // still hold the flock; POSIX unlink keeps its open
+                        // fd valid, and a single writer needs no
+                        // serialization — safe to sweep now rather than
+                        // waiting for the cold-restore TTL pass.
+                        let _ = sf::delete(&sf::lock_path_for(&dir, &session_id));
                     }
                     cx.notify();
                 }

@@ -132,6 +132,14 @@ pub fn path_for(dir: &Path, session_id: &str) -> PathBuf {
     dir.join(format!("{session_id}.json"))
 }
 
+/// Path for a single session's advisory lock file inside `dir`. The
+/// hook handler flocks this during its read-modify-write window; cold
+/// restore and dead-session pruning sweep it. Centralized here so the
+/// `.lock` suffix has a single definition.
+pub fn lock_path_for(dir: &Path, session_id: &str) -> PathBuf {
+    dir.join(format!("{session_id}.lock"))
+}
+
 /// Read a status file. Returns `Ok(None)` if the file does not exist
 /// or fails to parse — the caller treats both as "no prior state".
 pub fn read(path: &Path) -> Result<Option<StatusFile>, StatusFileError> {
@@ -233,6 +241,16 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = path_for(dir.path(), "absent");
         assert!(read(&p).unwrap().is_none());
+    }
+
+    #[test]
+    fn lock_path_is_sibling_with_lock_extension() {
+        let dir = TempDir::new().unwrap();
+        let json = path_for(dir.path(), "sess-1");
+        let lock = lock_path_for(dir.path(), "sess-1");
+        assert_eq!(lock.parent(), json.parent());
+        assert_eq!(lock.extension().unwrap(), "lock");
+        assert_eq!(lock.file_stem().unwrap(), "sess-1");
     }
 
     #[test]
