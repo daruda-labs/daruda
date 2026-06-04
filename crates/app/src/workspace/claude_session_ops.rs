@@ -656,7 +656,6 @@ mod tests {
             PtyBinding {
                 claude_pid: 0,
                 session_id: session_id.into(),
-                discovered_at: std::time::SystemTime::UNIX_EPOCH,
             },
         )
     }
