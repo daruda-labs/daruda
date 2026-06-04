@@ -290,6 +290,20 @@ impl Workspace {
             cx.notify();
         }
     }
+
+    /// Drop every trace of `pane_ids` from PTY→claude tracking: the
+    /// tracker stops walking their shell PIDs (keeping its idle guard
+    /// able to re-arm once nothing is registered) and their bindings
+    /// leave the map immediately instead of waiting for the next
+    /// poll's vanished-pane diff. Every pane-teardown path (close
+    /// pane / close tab / remove lane / close project) goes through
+    /// this single release point.
+    pub(in crate::workspace) fn release_pane_tracking(&mut self, pane_ids: &[PaneId]) {
+        for id in pane_ids {
+            self.claude.pty_tracker.unregister(*id);
+            self.claude.pty_claude_bindings.remove(id);
+        }
+    }
 }
 
 // ── Claude status pane aggregation ────────────────────────────────────

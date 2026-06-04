@@ -127,6 +127,15 @@ impl PtyTracker {
             inner.panes.remove(&pane_id);
         }
     }
+
+    /// Test-only introspection — the currently registered pane ids.
+    #[cfg(test)]
+    pub fn tracked_pane_ids(&self) -> Vec<PaneId> {
+        self.inner
+            .lock()
+            .map(|inner| inner.panes.keys().copied().collect())
+            .unwrap_or_default()
+    }
 }
 
 fn run(inner: Arc<Mutex<TrackerInner>>, tx: mpsc::Sender<PtyTrackerEvent>) {

@@ -445,6 +445,99 @@ fn finalize_remove_active_lane_keeps_main_area_filled(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&repo);
 }
 
+#[gpui::test]
+fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
+    // Dropping a lane's runtime must also release its panes from PTY
+    // tracking — otherwise the tracker's poll loop walks the dead
+    // shell PIDs forever (its idle guard never re-arms) and the
+    // panes' claude bindings linger until the next poll.
+    let config = daruda_config::Config::default();
+    let repo = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo");
+    let feature = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo-feature");
+    let _ = std::fs::create_dir_all(&repo);
+    let project = daruda_store::project::Project::from_path(&repo);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes = vec![
+                crate::lane::Lane::git(
+                    0,
+                    repo.clone(),
+                    Some("main".into()),
+                    repo.clone(),
+                    repo.clone(),
+                    0,
+                ),
+                crate::lane::Lane::git(
+                    1,
+                    feature.clone(),
+                    Some("feature".into()),
+                    repo.clone(),
+                    feature.clone(),
+                    1,
+                ),
+            ];
+        }
+    });
+    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
+    let lane1 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 1,
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.activate_lane(lane1, window, cx);
+            // Seed tracker registrations + bindings for the lane's
+            // panes the way pane spawn and the tracker pump would.
+            let pane_ids: Vec<_> = ws
+                .main_area
+                .tabs
+                .iter()
+                .flat_map(|t| t.layout.pane_ids())
+                .collect();
+            assert!(!pane_ids.is_empty(), "activated lane spawns panes");
+            for id in &pane_ids {
+                ws.claude.pty_tracker.register(*id, 4242);
+                ws.claude.pty_claude_bindings.insert(
+                    *id,
+                    crate::hooks::pty_tracker::PtyBinding {
+                        claude_pid: 4242,
+                        session_id: format!("sess-{id}"),
+                    },
+                );
+            }
+
+            ws.finalize_remove_lane(lane1, window, cx);
+
+            let tracked = ws.claude.pty_tracker.tracked_pane_ids();
+            for id in &pane_ids {
+                assert!(
+                    !ws.claude.pty_claude_bindings.contains_key(id),
+                    "removed lane's pane binding must be dropped"
+                );
+                assert!(
+                    !tracked.contains(id),
+                    "removed lane's pane must be unregistered from the tracker"
+                );
+            }
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&repo);
+}
+
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]

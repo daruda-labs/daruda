@@ -76,6 +76,61 @@ fn close_active_project_returns_false_when_last(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
+    // Closing a project must release every pane it owns — live and
+    // frozen runtimes alike — from PTY tracking, or the tracker keeps
+    // polling the dead shell PIDs for the window's lifetime.
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_close_release");
+    std::fs::create_dir_all("/tmp/daruda_close_release").unwrap();
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            let pane_ids: Vec<_> = ws
+                .main_area
+                .tabs
+                .iter()
+                .flat_map(|t| t.layout.pane_ids())
+                .collect();
+            assert!(!pane_ids.is_empty(), "tab spawns at least one pane");
+            for id in &pane_ids {
+                ws.claude.pty_tracker.register(*id, 4242);
+                ws.claude.pty_claude_bindings.insert(
+                    *id,
+                    crate::hooks::pty_tracker::PtyBinding {
+                        claude_pid: 4242,
+                        session_id: format!("sess-{id}"),
+                    },
+                );
+            }
+
+            let keep = ws.close_active_project(window, cx);
+
+            assert!(!keep, "last project should signal close-window");
+            assert!(
+                ws.claude.pty_claude_bindings.is_empty(),
+                "closed project's pane bindings must be dropped"
+            );
+            assert!(
+                ws.claude.pty_tracker.tracked_pane_ids().is_empty(),
+                "closed project's panes must be unregistered from the tracker"
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
 fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_close_keep_a");

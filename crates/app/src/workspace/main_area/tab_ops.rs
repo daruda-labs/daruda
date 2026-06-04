@@ -82,9 +82,7 @@ impl Workspace {
         {
             self.main_area.zoomed_pane_id = None;
         }
-        for id in &pane_ids {
-            self.claude.pty_tracker.unregister(*id);
-        }
+        self.release_pane_tracking(&pane_ids);
         self.main_area.panes.retain(|p| !pane_ids.contains(&p.id));
         for id in &pane_ids {
             self.main_area.activity_counter.remove(id);
@@ -350,7 +348,7 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
         }
         remove_pane_from_layout(&mut self.main_area.tabs[tab_index].layout, pane_id);
-        self.claude.pty_tracker.unregister(pane_id);
+        self.release_pane_tracking(&[pane_id]);
         self.main_area.panes.retain(|p| p.id != pane_id);
         self.main_area.activity_counter.remove(&pane_id);
 

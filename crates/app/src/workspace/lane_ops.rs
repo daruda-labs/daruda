@@ -159,6 +159,16 @@ impl Workspace {
         if let Some(fallback) = fallback_target {
             self.activate_lane(fallback, window, cx);
         }
+        // Release the removed lane's panes from PTY tracking before
+        // their runtime drops — otherwise the tracker keeps walking
+        // the dead shell PIDs for the window's lifetime.
+        let removed_pane_ids: Vec<_> = self
+            .main_area
+            .inactive_lane_runtimes
+            .get(&target)
+            .map(|runtime| runtime.panes.iter().map(|p| p.id).collect())
+            .unwrap_or_default();
+        self.release_pane_tracking(&removed_pane_ids);
         self.main_area.inactive_lane_runtimes.remove(&target);
         // W-7 per-lane state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
