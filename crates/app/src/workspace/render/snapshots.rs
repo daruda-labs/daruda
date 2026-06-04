@@ -104,12 +104,7 @@ impl Workspace {
             // indicator appears slightly later than the first hook
             // event. Acceptable for the correctness it buys.
             claude_status_per_lane: {
-                let live: std::collections::HashSet<&str> = self
-                    .claude
-                    .pty_claude_bindings
-                    .values()
-                    .map(|b| b.session_id.as_str())
-                    .collect();
+                let live = self.live_session_ids();
                 let mut map = std::collections::HashMap::new();
                 // Iterate every project's lanes, not just the
                 // active project's — the left dock renders every
@@ -118,15 +113,11 @@ impl Workspace {
                 // across projects.
                 for project in &self.projects {
                     for wt in &project.lanes {
-                        let live_sessions = self
-                            .claude
-                            .claude_status
-                            .per_session_states_for_cwd(&wt.path)
-                            .into_iter()
-                            .filter(|(sid, _)| live.contains(sid.as_str()));
-                        if let Some(state) =
-                            live_sessions.map(|(_, s)| s).max_by_key(|s| s.priority())
-                        {
+                        if let Some(state) = crate::workspace::claude_session_ops::lane_status_from(
+                            &self.claude.claude_status,
+                            &wt.path,
+                            &live,
+                        ) {
                             let key = daruda_store::project::LaneRef {
                                 project: project.id,
                                 lane: wt.id,
@@ -138,12 +129,7 @@ impl Workspace {
                 map
             },
             claude_per_session_per_lane: {
-                let live: std::collections::HashSet<&str> = self
-                    .claude
-                    .pty_claude_bindings
-                    .values()
-                    .map(|b| b.session_id.as_str())
-                    .collect();
+                let live = self.live_session_ids();
                 let mut map = std::collections::HashMap::new();
                 for project in &self.projects {
                     for wt in &project.lanes {

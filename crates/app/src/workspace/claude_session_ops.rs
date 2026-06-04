@@ -139,9 +139,20 @@ pub(in crate::workspace) struct ClaudeContext {
 // ---- Workspace methods that own the claude field ----
 
 use crate::workspace::Workspace;
+use daruda_claude::SessionStatus;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use gpui::{Context, Window};
+use std::collections::HashSet;
+use std::path::Path;
+
+// `Source` is only named by the debug-only transition logger and the
+// (always-compiled) test fixtures, so gate the import to those profiles
+// to avoid an unused-import warning in release non-test builds.
+#[cfg(any(debug_assertions, test))]
+use daruda_claude::hooks::status_file::Source;
+#[cfg(debug_assertions)]
+use daruda_store::observability::log_writer::LogWriter;
 
 impl Workspace {
     /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
@@ -169,8 +180,22 @@ impl Workspace {
                         self.claude.tool_use_failure_counts.remove(&file.session_id);
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
+                    #[cfg(debug_assertions)]
+                    let dbg_probe = self.probe_lane_status(&file.session_id, &file.cwd);
+                    #[cfg(debug_assertions)]
+                    let dbg_fields = (
+                        file.session_id.clone(),
+                        file.cwd.clone(),
+                        file.last_event.clone(),
+                        file.source,
+                    );
                     if self.claude.claude_status.update(file) {
                         cx.notify();
+                        #[cfg(debug_assertions)]
+                        {
+                            let (sid, cwd, event, source) = dbg_fields;
+                            self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
+                        }
                     }
                 }
                 Ok(None) => {
@@ -194,8 +219,22 @@ impl Workspace {
                     daruda_store::tasks::SessionEndReason::Other,
                     cx,
                 );
+                #[cfg(debug_assertions)]
+                let dbg_entry = self
+                    .claude
+                    .claude_status
+                    .get(&session_id)
+                    .map(|f| (f.cwd.clone(), f.source));
+                #[cfg(debug_assertions)]
+                let dbg_probe = dbg_entry
+                    .as_ref()
+                    .map(|(cwd, _)| self.probe_lane_status(&session_id, cwd));
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     cx.notify();
+                    #[cfg(debug_assertions)]
+                    if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
+                        self.log_lane_status_change(probe, &session_id, &cwd, "removed", source);
+                    }
                 }
             }
         }
@@ -249,5 +288,269 @@ impl Workspace {
         if visible_changed {
             cx.notify();
         }
+    }
+}
+
+// ── Claude status-change logging ──────────────────────────────────────
+//
+// `lane_status_from` is the single source of truth for the left-dock
+// leading indicator's aggregate, shared with the render snapshot
+// (`render::snapshots`'s `claude_status_per_lane`). The debug-only probe
+// / logger sit on top of it so the on-disk NDJSON log can be diffed
+// against the rendered indicator when verifying status transitions.
+
+/// Leading-indicator aggregate for `cwd`: the highest-priority status
+/// among PID-confirmed live sessions there, or `None`. Mirrors exactly
+/// what `render::snapshots` paints — both read through this one fn so
+/// the diagnostic log can never silently disagree with the indicator.
+pub(in crate::workspace) fn lane_status_from(
+    store: &daruda_claude::ClaudeStatusStore,
+    cwd: &Path,
+    live: &HashSet<&str>,
+) -> Option<SessionStatus> {
+    store
+        .per_session_states_for_cwd(cwd)
+        .into_iter()
+        .filter(|(sid, _)| live.contains(sid.as_str()))
+        .map(|(_, s)| s)
+        .max_by_key(|s| s.priority())
+}
+
+impl Workspace {
+    /// Session ids currently bound to a live PTY — the set the left-dock
+    /// indicator filters by. Shared by the render snapshot and
+    /// [`lane_status_from`].
+    pub(in crate::workspace) fn live_session_ids(&self) -> HashSet<&str> {
+        self.claude
+            .pty_claude_bindings
+            .values()
+            .map(|b| b.session_id.as_str())
+            .collect()
+    }
+}
+
+/// Pre-mutation snapshot of one lane's status, captured so a transition
+/// can be detected after the store mutates.
+#[cfg(debug_assertions)]
+pub(in crate::workspace) struct LaneStatusProbe {
+    /// The mutated session's own stored status (if present).
+    session: Option<SessionStatus>,
+    /// The lane's displayed leading-indicator aggregate.
+    aggregate: Option<SessionStatus>,
+}
+
+#[cfg(debug_assertions)]
+impl Workspace {
+    /// Capture the session's stored status and its lane aggregate.
+    pub(in crate::workspace) fn probe_lane_status(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+    ) -> LaneStatusProbe {
+        let live = self.live_session_ids();
+        LaneStatusProbe {
+            session: self.claude.claude_status.get(session_id).map(|f| f.status),
+            aggregate: lane_status_from(&self.claude.claude_status, cwd, &live),
+        }
+    }
+
+    /// Emit one Info NDJSON line per level (session / lane indicator)
+    /// that changed since `before`. Log-only — never a toast — so the
+    /// frequent tool-call transitions don't flood the UI; verify against
+    /// the rendered indicator via the on-disk log.
+    pub(in crate::workspace) fn log_lane_status_change(
+        &self,
+        before: LaneStatusProbe,
+        session_id: &str,
+        cwd: &Path,
+        last_event: &str,
+        source: Source,
+    ) {
+        let after = self.probe_lane_status(session_id, cwd);
+        if before.session != after.session {
+            LogWriter::log(session_transition_report(
+                before.session,
+                after.session,
+                session_id,
+                cwd,
+                last_event,
+                source,
+            ));
+        }
+        if before.aggregate != after.aggregate {
+            LogWriter::log(aggregate_transition_report(
+                before.aggregate,
+                after.aggregate,
+                cwd,
+            ));
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn status_label(status: Option<SessionStatus>) -> &'static str {
+    match status {
+        Some(SessionStatus::Working) => "Working",
+        Some(SessionStatus::ExecutingTool) => "ExecutingTool",
+        Some(SessionStatus::NeedsAttention) => "NeedsAttention",
+        Some(SessionStatus::Idle) => "Idle",
+        Some(SessionStatus::Connecting) => "Connecting",
+        None => "(none)",
+    }
+}
+
+#[cfg(debug_assertions)]
+fn source_label(source: Source) -> &'static str {
+    match source {
+        Source::Hook => "hook",
+        Source::Jsonl => "jsonl",
+    }
+}
+
+#[cfg(debug_assertions)]
+fn session_transition_report(
+    prev: Option<SessionStatus>,
+    next: Option<SessionStatus>,
+    session_id: &str,
+    cwd: &Path,
+    last_event: &str,
+    source: Source,
+) -> ErrorReport {
+    ErrorReport::new("Claude session status changed")
+        .severity(ErrorSeverity::Info)
+        .message(format!("{} -> {}", status_label(prev), status_label(next)))
+        .at(file!(), line!())
+        .with_context("session", session_id)
+        .with_context("cwd", redact_home(cwd))
+        .with_context("event", last_event)
+        .with_context("source", source_label(source))
+        .build()
+}
+
+#[cfg(debug_assertions)]
+fn aggregate_transition_report(
+    prev: Option<SessionStatus>,
+    next: Option<SessionStatus>,
+    cwd: &Path,
+) -> ErrorReport {
+    ErrorReport::new("Claude lane indicator changed")
+        .severity(ErrorSeverity::Info)
+        .message(format!("{} -> {}", status_label(prev), status_label(next)))
+        .at(file!(), line!())
+        .with_context("cwd", redact_home(cwd))
+        .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use daruda_claude::hooks::status_file::{SCHEMA_VERSION, StatusFile};
+    use std::path::PathBuf;
+
+    fn entry(session_id: &str, cwd: &str, status: SessionStatus) -> StatusFile {
+        StatusFile {
+            schema_version: SCHEMA_VERSION,
+            session_id: session_id.into(),
+            cwd: PathBuf::from(cwd),
+            transcript_path: None,
+            status,
+            last_event: "test".into(),
+            tool_name: None,
+            tool_input: None,
+            permission_mode: None,
+            // Timestamp is irrelevant to the priority/filter logic under
+            // test; the store no longer applies any age-based transform.
+            timestamp: chrono::Utc::now(),
+            source: Source::Hook,
+        }
+    }
+
+    fn store_with(entries: Vec<StatusFile>) -> daruda_claude::ClaudeStatusStore {
+        let mut store = daruda_claude::ClaudeStatusStore::new();
+        for e in entries {
+            store.update(e);
+        }
+        store
+    }
+
+    #[test]
+    fn lane_status_none_when_no_session() {
+        let store = daruda_claude::ClaudeStatusStore::new();
+        let live: HashSet<&str> = HashSet::new();
+        assert_eq!(lane_status_from(&store, &PathBuf::from("/wt"), &live), None);
+    }
+
+    #[test]
+    fn lane_status_excludes_non_live_session() {
+        let store = store_with(vec![entry("a", "/wt", SessionStatus::Working)]);
+        // 'a' is in the store but not PID-confirmed live → not counted.
+        let live: HashSet<&str> = HashSet::new();
+        assert_eq!(lane_status_from(&store, &PathBuf::from("/wt"), &live), None);
+    }
+
+    #[test]
+    fn lane_status_picks_highest_priority_among_live() {
+        let store = store_with(vec![
+            entry("a", "/wt", SessionStatus::Idle),
+            entry("b", "/wt", SessionStatus::Working),
+            entry("c", "/wt", SessionStatus::NeedsAttention),
+        ]);
+        let live: HashSet<&str> = ["a", "b", "c"].into_iter().collect();
+        assert_eq!(
+            lane_status_from(&store, &PathBuf::from("/wt"), &live),
+            Some(SessionStatus::NeedsAttention)
+        );
+    }
+
+    #[test]
+    fn lane_status_live_filter_changes_winner() {
+        let store = store_with(vec![
+            entry("a", "/wt", SessionStatus::NeedsAttention),
+            entry("b", "/wt", SessionStatus::Working),
+        ]);
+        // Only 'b' is live → Working wins even though 'a' outranks it.
+        let live: HashSet<&str> = ["b"].into_iter().collect();
+        assert_eq!(
+            lane_status_from(&store, &PathBuf::from("/wt"), &live),
+            Some(SessionStatus::Working)
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn session_report_is_info_with_transition_message_and_context() {
+        let report = session_transition_report(
+            Some(SessionStatus::Working),
+            Some(SessionStatus::ExecutingTool),
+            "sess-1",
+            &PathBuf::from("/tmp/wt"),
+            "PreToolUse",
+            Source::Hook,
+        );
+        assert_eq!(report.severity, ErrorSeverity::Info);
+        assert_eq!(report.title, "Claude session status changed");
+        assert_eq!(report.message, "Working -> ExecutingTool");
+        assert_eq!(
+            report.context.get("event").map(String::as_str),
+            Some("PreToolUse")
+        );
+        assert_eq!(
+            report.context.get("source").map(String::as_str),
+            Some("hook")
+        );
+        // Every transition is its own line — never merged.
+        assert!(report.dedup_key.is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn aggregate_report_renders_none_as_label() {
+        let report = aggregate_transition_report(
+            Some(SessionStatus::NeedsAttention),
+            None,
+            &PathBuf::from("/tmp/wt"),
+        );
+        assert_eq!(report.title, "Claude lane indicator changed");
+        assert_eq!(report.message, "NeedsAttention -> (none)");
     }
 }
