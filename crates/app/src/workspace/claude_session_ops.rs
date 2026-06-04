@@ -402,39 +402,62 @@ pub(in crate::workspace) struct LaneStatusProbe {
     session: Option<SessionStatus>,
     /// The lane's displayed leading-indicator aggregate.
     aggregate: Option<SessionStatus>,
+    /// The pane the session is bound to, if any — captured here so the
+    /// transition logger does not re-resolve it.
+    pane_id: Option<PaneId>,
+    /// The lane that owns the session's pane, if resolvable.
+    lane_ref: Option<daruda_store::project::LaneRef>,
 }
 
 #[cfg(debug_assertions)]
 impl Workspace {
-    /// Capture the session's stored status and its lane aggregate.
+    /// Resolve a session to the pane it is bound to and that pane's lane.
     ///
-    /// The lane is resolved from the session's pane: scan the bindings for
-    /// the pane bound to `session_id`, then locate that pane in
-    /// [`Workspace::pane_lane_index`]. The reverse scan is `O(panes)` and
-    /// debug-only / low-frequency, so it is not indexed.
-    pub(in crate::workspace) fn probe_lane_status(&self, session_id: &str) -> LaneStatusProbe {
-        let aggregate = self
+    /// Scan the bindings for the pane bound to `session_id`, then locate
+    /// that pane in `index` (the caller's [`Workspace::pane_lane_index`],
+    /// passed in so a single probe builds it once). The reverse scan is
+    /// `O(panes)` and debug-only / low-frequency, so it is not indexed.
+    /// Either component is `None` when no live binding or pane mapping
+    /// exists for the session.
+    fn session_pane_lane(
+        &self,
+        session_id: &str,
+        index: &[(PaneId, daruda_store::project::LaneRef)],
+    ) -> (Option<PaneId>, Option<daruda_store::project::LaneRef>) {
+        let pane_id = self
             .claude
             .pty_claude_bindings
             .iter()
             .find(|(_, binding)| binding.session_id == session_id)
-            .map(|(pane_id, _)| *pane_id)
-            .and_then(|pane_id| {
-                let index = self.pane_lane_index();
-                let lane_ref = index.iter().find(|(p, _)| *p == pane_id).map(|(_, l)| *l)?;
-                let (per_lane, _) = aggregate_over_panes(
-                    &index,
-                    &self.claude.pty_claude_bindings,
-                    &self.claude.claude_status,
-                );
-                // `None` when no pane in the lane has a store entry yet
-                // (e.g. a brand-new session before its first hook write) —
-                // logged as "(none)", matching the rendered indicator.
-                per_lane.get(&lane_ref).copied()
-            });
+            .map(|(pane_id, _)| *pane_id);
+        let lane_ref =
+            pane_id.and_then(|pane_id| index.iter().find(|(p, _)| *p == pane_id).map(|(_, l)| *l));
+        (pane_id, lane_ref)
+    }
+
+    /// Capture the session's stored status and its lane aggregate.
+    ///
+    /// The lane is resolved from the session's pane via
+    /// [`Workspace::session_pane_lane`].
+    pub(in crate::workspace) fn probe_lane_status(&self, session_id: &str) -> LaneStatusProbe {
+        let index = self.pane_lane_index();
+        let (pane_id, lane_ref) = self.session_pane_lane(session_id, &index);
+        let aggregate = lane_ref.and_then(|lane_ref| {
+            let (per_lane, _) = aggregate_over_panes(
+                &index,
+                &self.claude.pty_claude_bindings,
+                &self.claude.claude_status,
+            );
+            // `None` when no pane in the lane has a store entry yet
+            // (e.g. a brand-new session before its first hook write) —
+            // logged as "(none)", matching the rendered indicator.
+            per_lane.get(&lane_ref).copied()
+        });
         LaneStatusProbe {
             session: self.claude.claude_status.get(session_id).map(|f| f.status),
             aggregate,
+            pane_id,
+            lane_ref,
         }
     }
 
@@ -451,6 +474,22 @@ impl Workspace {
         source: Source,
     ) {
         let after = self.probe_lane_status(session_id);
+        // Resolve human-readable project + lane labels for the log context
+        // from the pane/lane the probe already resolved. Falls back to
+        // "(unbound)" when the session has no live pane binding, or the
+        // referenced project / lane no longer exists. A real project name
+        // paired with an "(unbound)" lane means the project exists but the
+        // lane was removed — intentional, not a resolution failure.
+        let project = after
+            .lane_ref
+            .and_then(|lr| self.projects.iter().find(|p| p.id == lr.project))
+            .map(|p| p.name.as_str())
+            .unwrap_or("(unbound)");
+        let lane = after
+            .lane_ref
+            .and_then(|lr| self.lane_for(lr))
+            .map(|l| l.display_name())
+            .unwrap_or_else(|| "(unbound)".to_string());
         if before.session != after.session {
             LogWriter::log(session_transition_report(
                 before.session,
@@ -459,6 +498,9 @@ impl Workspace {
                 cwd,
                 last_event,
                 source,
+                after.pane_id,
+                project,
+                &lane,
             ));
         }
         if before.aggregate != after.aggregate {
@@ -466,6 +508,8 @@ impl Workspace {
                 before.aggregate,
                 after.aggregate,
                 cwd,
+                project,
+                &lane,
             ));
         }
     }
@@ -492,6 +536,7 @@ fn source_label(source: Source) -> &'static str {
 }
 
 #[cfg(debug_assertions)]
+#[allow(clippy::too_many_arguments)]
 fn session_transition_report(
     prev: Option<SessionStatus>,
     next: Option<SessionStatus>,
@@ -499,8 +544,11 @@ fn session_transition_report(
     cwd: &Path,
     last_event: &str,
     source: Source,
+    pane: Option<PaneId>,
+    project: &str,
+    lane: &str,
 ) -> ErrorReport {
-    ErrorReport::new("Claude session status changed")
+    let mut report = ErrorReport::new("Claude session status changed")
         .severity(ErrorSeverity::Info)
         .message(format!("{} -> {}", status_label(prev), status_label(next)))
         .at(file!(), line!())
@@ -508,20 +556,34 @@ fn session_transition_report(
         .with_context("cwd", redact_home(cwd))
         .with_context("event", last_event)
         .with_context("source", source_label(source))
-        .build()
+        .with_context("project", project)
+        .with_context("lane", lane);
+    // Pane id is only meaningful while a live binding exists; omit the
+    // key entirely otherwise rather than logging a placeholder.
+    if let Some(pane) = pane {
+        report = report.with_context("pane", pane.to_string());
+    }
+    report.build()
 }
 
+// `cwd` here is the triggering session's own working directory, not the
+// owning lane's path — the two can differ now that attribution is by pane.
+// The `project` / `lane` keys carry the lane this indicator belongs to.
 #[cfg(debug_assertions)]
 fn aggregate_transition_report(
     prev: Option<SessionStatus>,
     next: Option<SessionStatus>,
     cwd: &Path,
+    project: &str,
+    lane: &str,
 ) -> ErrorReport {
     ErrorReport::new("Claude lane indicator changed")
         .severity(ErrorSeverity::Info)
         .message(format!("{} -> {}", status_label(prev), status_label(next)))
         .at(file!(), line!())
         .with_context("cwd", redact_home(cwd))
+        .with_context("project", project)
+        .with_context("lane", lane)
         .build()
 }
 
@@ -667,10 +729,21 @@ mod tests {
             &PathBuf::from("/tmp/wt"),
             "PreToolUse",
             Source::Hook,
+            Some(42),
+            "demo-project",
+            "feature/x",
         );
         assert_eq!(report.severity, ErrorSeverity::Info);
         assert_eq!(report.title, "Claude session status changed");
         assert_eq!(report.message, "Working -> ExecutingTool");
+        assert_eq!(
+            report.context.get("session").map(String::as_str),
+            Some("sess-1")
+        );
+        assert_eq!(
+            report.context.get("cwd").map(String::as_str),
+            Some("/tmp/wt")
+        );
         assert_eq!(
             report.context.get("event").map(String::as_str),
             Some("PreToolUse")
@@ -679,8 +752,44 @@ mod tests {
             report.context.get("source").map(String::as_str),
             Some("hook")
         );
+        // Multi-pane tracking context: pane id + human-readable lane.
+        assert_eq!(report.context.get("pane").map(String::as_str), Some("42"));
+        assert_eq!(
+            report.context.get("project").map(String::as_str),
+            Some("demo-project")
+        );
+        assert_eq!(
+            report.context.get("lane").map(String::as_str),
+            Some("feature/x")
+        );
         // Every transition is its own line — never merged.
         assert!(report.dedup_key.is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn session_report_omits_pane_and_marks_unbound_lane() {
+        let report = session_transition_report(
+            Some(SessionStatus::Working),
+            Some(SessionStatus::Idle),
+            "sess-2",
+            &PathBuf::from("/tmp/wt"),
+            "Stop",
+            Source::Jsonl,
+            None,
+            "(unbound)",
+            "(unbound)",
+        );
+        // No live pane binding → no `pane` key at all.
+        assert!(!report.context.contains_key("pane"));
+        assert_eq!(
+            report.context.get("project").map(String::as_str),
+            Some("(unbound)")
+        );
+        assert_eq!(
+            report.context.get("lane").map(String::as_str),
+            Some("(unbound)")
+        );
     }
 
     #[cfg(debug_assertions)]
@@ -690,8 +799,47 @@ mod tests {
             Some(SessionStatus::NeedsAttention),
             None,
             &PathBuf::from("/tmp/wt"),
+            "demo-project",
+            "feature/x",
         );
         assert_eq!(report.title, "Claude lane indicator changed");
         assert_eq!(report.message, "NeedsAttention -> (none)");
+        assert_eq!(
+            report.context.get("cwd").map(String::as_str),
+            Some("/tmp/wt")
+        );
+        assert_eq!(
+            report.context.get("project").map(String::as_str),
+            Some("demo-project")
+        );
+        assert_eq!(
+            report.context.get("lane").map(String::as_str),
+            Some("feature/x")
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn aggregate_report_marks_unbound_lane() {
+        let report = aggregate_transition_report(
+            None,
+            Some(SessionStatus::Working),
+            &PathBuf::from("/tmp/wt"),
+            "(unbound)",
+            "(unbound)",
+        );
+        assert_eq!(
+            report.context.get("project").map(String::as_str),
+            Some("(unbound)")
+        );
+        assert_eq!(
+            report.context.get("lane").map(String::as_str),
+            Some("(unbound)")
+        );
+        // cwd is retained even when project / lane are unresolved.
+        assert_eq!(
+            report.context.get("cwd").map(String::as_str),
+            Some("/tmp/wt")
+        );
     }
 }
