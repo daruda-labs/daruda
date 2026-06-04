@@ -80,9 +80,7 @@ impl ClaudeStatusStore {
     /// Aggregate session status for `cwd` — the highest-priority
     /// state among all sessions there. `None` if no session present.
     pub fn aggregate_for_cwd(&self, target: &Path) -> Option<SessionStatus> {
-        self.sessions_for_cwd(target)
-            .map(|s| s.status)
-            .max_by_key(|s| s.priority())
+        SessionStatus::aggregate(self.sessions_for_cwd(target).map(|s| s.status))
     }
 }
 

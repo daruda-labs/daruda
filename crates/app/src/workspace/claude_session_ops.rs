@@ -301,15 +301,14 @@ impl Workspace {
 // of it so the on-disk NDJSON log can be diffed against the rendered
 // indicator when verifying status transitions.
 
-/// One pane's resolved Claude session and its current status. The unit of
-/// per-lane sub-row rendering — a lane's panes contribute these in layout
-/// order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) struct PaneSessionStatus {
-    pub(in crate::workspace) pane_id: PaneId,
-    pub(in crate::workspace) session_id: String,
-    pub(in crate::workspace) status: SessionStatus,
-}
+/// Per-lane leading indicator — the lane's collapsed session status.
+pub(in crate::workspace) type LaneStatusMap =
+    HashMap<daruda_store::project::LaneRef, SessionStatus>;
+
+/// Per-lane `(session_id, status)` sub-rows in pane order — only lanes
+/// with ≥ 2 sessions appear.
+pub(in crate::workspace) type LaneSessionsMap =
+    HashMap<daruda_store::project::LaneRef, Vec<(String, SessionStatus)>>;
 
 /// Aggregate Claude status over panes, attributing each pane's session to
 /// the lane that owns the pane (not the session's cwd).
@@ -317,23 +316,24 @@ pub(in crate::workspace) struct PaneSessionStatus {
 /// `pane_lane` lists every pane in layout order paired with its owning
 /// lane. For each pane: a missing binding means the pane has no Claude
 /// session; a `session_id` absent from `store` is omitted entirely (it is
-/// not surfaced as `Connecting`).
+/// not surfaced as `Connecting`); a session already collected for the lane
+/// (one session bound to two panes, e.g. `claude --resume` of a running
+/// session) counts once at its first pane's position.
 ///
 /// Returns:
-/// - per-lane leading indicator: the highest-priority status among the
-///   lane's panes' sessions (only lanes with ≥ 1 such session appear).
-/// - per-lane sub-rows: the lane's `PaneSessionStatus` list in pane order,
-///   only for lanes with ≥ 2 sessions (single-session lanes are fully
-///   described by the leading indicator).
+/// - per-lane leading indicator: [`SessionStatus::aggregate`] over the
+///   lane's sessions (only lanes with ≥ 1 session appear). Equal-priority
+///   ties (`Working` vs `ExecutingTool`) resolve to the later session in
+///   pane order.
+/// - per-lane sub-rows: `(session_id, status)` in pane order, only for
+///   lanes with ≥ 2 sessions (single-session lanes are fully described by
+///   the leading indicator). Ids are cloned only for these lanes.
 pub(in crate::workspace) fn aggregate_over_panes(
     pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
     bindings: &HashMap<PaneId, PtyBinding>,
     store: &daruda_claude::ClaudeStatusStore,
-) -> (
-    HashMap<daruda_store::project::LaneRef, SessionStatus>,
-    HashMap<daruda_store::project::LaneRef, Vec<PaneSessionStatus>>,
-) {
-    let mut per_lane_sessions: HashMap<daruda_store::project::LaneRef, Vec<PaneSessionStatus>> =
+) -> (LaneStatusMap, LaneSessionsMap) {
+    let mut per_lane: HashMap<daruda_store::project::LaneRef, Vec<(&str, SessionStatus)>> =
         HashMap::new();
     for (pane_id, lane_ref) in pane_lane {
         let Some(binding) = bindings.get(pane_id) else {
@@ -342,28 +342,36 @@ pub(in crate::workspace) fn aggregate_over_panes(
         let Some(file) = store.get(&binding.session_id) else {
             continue;
         };
-        per_lane_sessions
-            .entry(*lane_ref)
-            .or_default()
-            .push(PaneSessionStatus {
-                pane_id: *pane_id,
-                session_id: binding.session_id.clone(),
-                status: file.status,
-            });
+        let sessions = per_lane.entry(*lane_ref).or_default();
+        // One session, one entry — the same session bound to a second
+        // pane (e.g. `claude --resume` of a running session) keeps its
+        // first-pane position and must not inflate the sub-row count.
+        if sessions.iter().any(|(sid, _)| *sid == binding.session_id) {
+            continue;
+        }
+        sessions.push((binding.session_id.as_str(), file.status));
     }
 
-    let per_lane_status = per_lane_sessions
+    let per_lane_status = per_lane
         .iter()
         .filter_map(|(lane_ref, sessions)| {
-            sessions
-                .iter()
-                .map(|ps| ps.status)
-                .max_by_key(|s| s.priority())
-                .map(|s| (*lane_ref, s))
+            SessionStatus::aggregate(sessions.iter().map(|(_, s)| *s)).map(|s| (*lane_ref, s))
         })
         .collect();
 
-    per_lane_sessions.retain(|_, sessions| sessions.len() >= 2);
+    let per_lane_sessions = per_lane
+        .into_iter()
+        .filter(|(_, sessions)| sessions.len() >= 2)
+        .map(|(lane_ref, sessions)| {
+            (
+                lane_ref,
+                sessions
+                    .into_iter()
+                    .map(|(sid, status)| (sid.to_string(), status))
+                    .collect(),
+            )
+        })
+        .collect();
 
     (per_lane_status, per_lane_sessions)
 }
@@ -671,10 +679,9 @@ mod tests {
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::NeedsAttention));
         let sessions = per_session.get(&lane).expect("two-pane lane has sub-rows");
-        let ids: Vec<&str> = sessions.iter().map(|ps| ps.session_id.as_str()).collect();
+        // Pane (layout) order is observable through the id order.
+        let ids: Vec<&str> = sessions.iter().map(|(sid, _)| sid.as_str()).collect();
         assert_eq!(ids, vec!["a", "b"]);
-        assert_eq!(sessions[0].pane_id, 10);
-        assert_eq!(sessions[1].pane_id, 20);
     }
 
     #[test]
@@ -736,6 +743,53 @@ mod tests {
         let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store);
         assert!(per_lane.is_empty());
         assert!(per_session.is_empty());
+    }
+
+    #[test]
+    fn aggregate_counts_a_session_once_per_lane() {
+        // The same session bound to two panes (e.g. `claude --resume`
+        // of a running session in a second pane) is one session — it
+        // must not fabricate a multi-session sub-row.
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "s"), binding(20, "s")].into_iter().collect();
+        let store = store_with(vec![entry("s", "/x", SessionStatus::Working)]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
+        assert!(
+            per_session.is_empty(),
+            "one distinct session must not produce a sub-row"
+        );
+    }
+
+    #[test]
+    fn aggregate_dedup_keeps_first_pane_position() {
+        // A duplicate binding later in layout order neither reorders
+        // nor duplicates the sub-row entry for its session.
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane), (30u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b"), binding(30, "a")]
+                .into_iter()
+                .collect();
+        let store = store_with(vec![
+            entry("a", "/x", SessionStatus::Working),
+            entry("b", "/y", SessionStatus::NeedsAttention),
+        ]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane), Some(&SessionStatus::NeedsAttention));
+        let ids: Vec<&str> = per_session
+            .get(&lane)
+            .expect("two distinct sessions keep the sub-row")
+            .iter()
+            .map(|(sid, _)| sid.as_str())
+            .collect();
+        assert_eq!(ids, vec!["a", "b"]);
     }
 
     #[test]

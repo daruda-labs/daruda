@@ -35,6 +35,15 @@ impl SessionStatus {
             Self::Connecting => 0,
         }
     }
+
+    /// Collapse N session statuses into the single highest-priority one
+    /// (`None` for an empty input). The one shared definition of the
+    /// indicator-aggregate rule — every per-lane / per-path collapse
+    /// must go through this so they can never disagree. Ties between
+    /// equal-priority statuses resolve to the last one in input order.
+    pub fn aggregate(statuses: impl IntoIterator<Item = SessionStatus>) -> Option<SessionStatus> {
+        statuses.into_iter().max_by_key(|s| s.priority())
+    }
 }
 
 #[cfg(test)]
@@ -55,21 +64,23 @@ mod tests {
 
     #[test]
     fn aggregate_picks_highest_priority() {
-        let states = [
-            SessionStatus::Idle,
-            SessionStatus::Working,
-            SessionStatus::Connecting,
-        ];
-        let max = states.iter().copied().max_by_key(|s| s.priority()).unwrap();
-        assert_eq!(max, SessionStatus::Working);
+        assert_eq!(
+            SessionStatus::aggregate([
+                SessionStatus::Idle,
+                SessionStatus::Working,
+                SessionStatus::Connecting,
+            ]),
+            Some(SessionStatus::Working)
+        );
+        assert_eq!(
+            SessionStatus::aggregate([SessionStatus::ExecutingTool, SessionStatus::Idle]),
+            Some(SessionStatus::ExecutingTool)
+        );
+    }
 
-        let states2 = [SessionStatus::ExecutingTool, SessionStatus::Idle];
-        let max2 = states2
-            .iter()
-            .copied()
-            .max_by_key(|s| s.priority())
-            .unwrap();
-        assert_eq!(max2, SessionStatus::ExecutingTool);
+    #[test]
+    fn aggregate_of_nothing_is_none() {
+        assert_eq!(SessionStatus::aggregate([]), None);
     }
 
     #[test]

@@ -28,29 +28,12 @@ impl Workspace {
         // appears slightly later than the first hook event. Acceptable for
         // the correctness it buys.
         let pane_lane = self.pane_lane_index();
-        let (claude_status_per_lane, claude_per_session_per_lane_raw) =
+        let (claude_status_per_lane, claude_per_session_per_lane) =
             crate::workspace::claude_session_ops::aggregate_over_panes(
                 &pane_lane,
                 &self.claude.pty_claude_bindings,
                 &self.claude.claude_status,
             );
-        // Project the per-pane sub-rows down to the `(session_id, status)`
-        // shape the left-dock renderer expects, preserving pane order.
-        let claude_per_session_per_lane: std::collections::HashMap<
-            daruda_store::project::LaneRef,
-            Vec<(String, daruda_claude::SessionStatus)>,
-        > = claude_per_session_per_lane_raw
-            .into_iter()
-            .map(|(lane_ref, sessions)| {
-                (
-                    lane_ref,
-                    sessions
-                        .into_iter()
-                        .map(|ps| (ps.session_id, ps.status))
-                        .collect(),
-                )
-            })
-            .collect();
         LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
             active_project_name: self
