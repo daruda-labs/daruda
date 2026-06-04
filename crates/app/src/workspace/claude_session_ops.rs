@@ -410,11 +410,13 @@ pub(in crate::workspace) fn any_pane_session_animating(
 }
 
 impl Workspace {
-    /// Every pane in the workspace paired with its owning lane, in layout
-    /// order. The active lane's panes come from the live `main_area`
-    /// tabs; every inactive lane's panes come from its frozen runtime.
-    /// Feeds [`aggregate_over_panes`] so status attribution follows pane
-    /// membership rather than session cwd.
+    /// Every pane in the workspace paired with its owning lane. The
+    /// active lane's panes come first, in tab/layout order, from the
+    /// live `main_area` tabs; then each inactive lane's panes from its
+    /// frozen runtime — layout order within a lane, cross-lane order
+    /// unspecified (HashMap iteration), so consumers must group per
+    /// lane. Feeds [`aggregate_over_panes`] so status attribution
+    /// follows pane membership rather than session cwd.
     pub(in crate::workspace) fn pane_lane_index(
         &self,
     ) -> Vec<(PaneId, daruda_store::project::LaneRef)> {
@@ -523,7 +525,7 @@ impl Workspace {
         // lane was removed — intentional, not a resolution failure.
         let project = after
             .lane_ref
-            .and_then(|lr| self.projects.iter().find(|p| p.id == lr.project))
+            .and_then(|lr| self.project_for(lr.project))
             .map(|p| p.name.as_str())
             .unwrap_or("(unbound)");
         let lane = after

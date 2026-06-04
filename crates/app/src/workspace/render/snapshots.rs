@@ -173,6 +173,12 @@ impl Workspace {
         &mut self,
         cx: &mut Context<Self>,
     ) -> RightDockSnapshot {
+        // Deliberate attribution seam: Tasks rows anchor to the task's
+        // recorded `worktree_path`, so this aggregate stays cwd-keyed
+        // while the left dock attributes by pane ownership
+        // (`aggregate_over_panes`). A session `cd`'d away from its lane
+        // path can therefore appear under different anchors in the two
+        // docks.
         let claude_status_per_path = cx
             .global::<crate::agent::tasks_global::GlobalTasks>()
             .tasks

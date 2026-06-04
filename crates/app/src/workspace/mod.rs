@@ -1087,15 +1087,20 @@ impl Workspace {
         self.active_project_mut()?.lane_mut(id)
     }
 
+    /// Resolve a `ProjectId` to its runtime project.
+    pub(in crate::workspace) fn project_for(
+        &self,
+        id: daruda_store::project::ProjectId,
+    ) -> Option<&crate::project::Project> {
+        self.projects.iter().find(|p| p.id == id)
+    }
+
     /// Resolve a `LaneRef` to its runtime lane.
     pub(in crate::workspace) fn lane_for(
         &self,
         target: daruda_store::project::LaneRef,
     ) -> Option<&crate::lane::Lane> {
-        self.projects
-            .iter()
-            .find(|p| p.id == target.project)?
-            .lane(target.lane)
+        self.project_for(target.project)?.lane(target.lane)
     }
 
     /// Borrow the active project's lane list. Empty when the
