@@ -128,6 +128,7 @@ mod tests {
             tool_name: None,
             tool_input: None,
             permission_mode: None,
+            notification: None,
             timestamp: ref_time() + CDuration::seconds(offset_secs),
             source,
         }

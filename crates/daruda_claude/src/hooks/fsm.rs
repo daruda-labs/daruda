@@ -3,7 +3,7 @@
 //! Pure function.
 
 use crate::SessionStatus;
-use crate::hooks::events::{HookEvent, NotificationType};
+use crate::hooks::events::HookEvent;
 
 /// Outcome of applying a hook event to a session's prior state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,17 +44,15 @@ pub fn apply_event(prev: Option<SessionStatus>, event: &HookEvent) -> FsmAction 
         // Explicit user-attention signal.
         E::PermissionRequest { .. } => SessionStatus::NeedsAttention,
 
-        // Only a subset of notifications block the user. Others are
-        // informational and keep the prior state (or fall back to Idle
-        // if there's nothing to keep).
-        E::Notification {
-            notification_type, ..
-        } => match notification_type {
-            NotificationType::PermissionPrompt
-            | NotificationType::IdlePrompt
-            | NotificationType::ElicitationDialog => SessionStatus::NeedsAttention,
-            _ => prev.unwrap_or(SessionStatus::Idle),
-        },
+        // Notifications never move the indicator. Blocking subtypes
+        // (permission / idle / elicitation) surface as a transient
+        // desktop push fired app-side on ingest — not a persistent
+        // `NeedsAttention` latch, which would keep blinking long after
+        // the user has seen it. Informational subtypes are inert. Either
+        // way the persisted status stays whatever the turn FSM last set.
+        // The only event that still latches `NeedsAttention` is the
+        // explicit `PermissionRequest` above.
+        E::Notification { .. } => prev.unwrap_or(SessionStatus::Idle),
 
         // Turn ended.
         E::Stop { .. } => SessionStatus::Idle,
@@ -222,23 +220,15 @@ mod tests {
     }
 
     #[test]
-    fn notification_blocking_subtypes_yield_needs_attention() {
+    fn notification_never_changes_state() {
+        // Every subtype — blocking and informational alike — leaves the
+        // persisted status untouched. Blocking ones (permission / idle /
+        // elicitation) are surfaced as a transient desktop push on the
+        // app side; none of them latch `NeedsAttention` anymore.
         for t in [
             NotificationType::PermissionPrompt,
             NotificationType::IdlePrompt,
             NotificationType::ElicitationDialog,
-        ] {
-            assert_eq!(
-                apply_event(Some(SessionStatus::Working), &notif(t)),
-                FsmAction::Update(SessionStatus::NeedsAttention),
-                "{t:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn notification_informational_subtypes_preserve_prev() {
-        for t in [
             NotificationType::AuthSuccess,
             NotificationType::ElicitationComplete,
             NotificationType::ElicitationResponse,
@@ -250,7 +240,15 @@ mod tests {
                 FsmAction::Update(SessionStatus::Working),
                 "{t:?}"
             );
-            // Prev = NeedsAttention → stays NeedsAttention (don't clear).
+            // Prev = Idle → stays Idle (no idle-prompt red latch).
+            assert_eq!(
+                apply_event(Some(SessionStatus::Idle), &notif(t)),
+                FsmAction::Update(SessionStatus::Idle),
+                "{t:?}"
+            );
+            // Prev = NeedsAttention (latched by a real PermissionRequest)
+            // → stays NeedsAttention. The paired PermissionPrompt
+            // notification Claude sends alongside must not clear it.
             assert_eq!(
                 apply_event(Some(SessionStatus::NeedsAttention), &notif(t)),
                 FsmAction::Update(SessionStatus::NeedsAttention),

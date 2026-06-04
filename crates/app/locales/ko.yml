@@ -535,6 +535,9 @@ error_modal:
 # Notifications
 notification:
   long_running_title: "명령 완료"
+  hook_permission_title: "권한 승인 필요"
+  hook_idle_title: "입력 대기 중"
+  hook_elicitation_title: "응답 대기 중"
 
 # Terminal annotations (SP-1)
 terminal:

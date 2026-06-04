@@ -125,6 +125,16 @@ pub(in crate::workspace) struct ClaudeContext {
     /// transitioned out of `Running`.
     pub(in crate::workspace) tool_use_failure_counts: HashMap<String, u32>,
 
+    /// Last blocking-notification timestamp already surfaced as a
+    /// desktop push, per session. The status-dir watcher can re-deliver
+    /// the same file (FSEvents coalescing / duplicate events) and every
+    /// hook write replaces the store entry, so neither the store nor the
+    /// `update` return value dedups for us. Fire a push only when the
+    /// incoming notification timestamp is newer than the one recorded
+    /// here. Pruned alongside the session on removal.
+    pub(in crate::workspace) last_pushed_notification:
+        HashMap<String, chrono::DateTime<chrono::Utc>>,
+
     /// Two background-poll tasks for `[usage.poll]` —
     /// `/api/oauth/usage` (plan-rate windows) and
     /// `status.claude.com` (service status). Each task re-reads the
@@ -181,6 +191,11 @@ impl Workspace {
                         self.claude.tool_use_failure_counts.remove(&file.session_id);
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
+                    // Blocking hook notifications surface as a one-shot
+                    // desktop push here rather than latching the lane
+                    // indicator (see `daruda_claude::hooks::fsm`). Called
+                    // before `update` consumes `file`.
+                    self.maybe_push_hook_notification(&file);
                     #[cfg(debug_assertions)]
                     let dbg_probe = self.probe_lane_status(&file.session_id);
                     #[cfg(debug_assertions)]
@@ -215,6 +230,7 @@ impl Workspace {
             },
             StatusEvent::Removed { session_id, .. } => {
                 self.claude.tool_use_failure_counts.remove(&session_id);
+                self.claude.last_pushed_notification.remove(&session_id);
                 self.apply_task_session_ended(
                     &session_id,
                     daruda_store::tasks::SessionEndReason::Other,
@@ -239,6 +255,76 @@ impl Workspace {
                 }
             }
         }
+    }
+
+    /// Raise a transient desktop push for a blocking Claude
+    /// `Notification` (permission prompt / idle prompt / elicitation
+    /// dialog). These no longer latch the lane indicator into a
+    /// persistent `NeedsAttention` (see `daruda_claude::hooks::fsm`), so
+    /// this one-shot push is their only surface.
+    ///
+    /// Gated by the `hook_notification_enabled` config and the shared
+    /// "skip the focused pane" rule (the user is already looking at the
+    /// TUI prompt), and deduped by timestamp so a status file the
+    /// watcher re-delivers does not double-fire.
+    fn maybe_push_hook_notification(
+        &mut self,
+        file: &daruda_claude::hooks::status_file::StatusFile,
+    ) {
+        use crate::surface::strings as s;
+        use daruda_claude::hooks::events::NotificationType;
+
+        let title = match file.notification {
+            Some(NotificationType::PermissionPrompt) => s::notification_hook_permission_title(),
+            Some(NotificationType::IdlePrompt) => s::notification_hook_idle_title(),
+            Some(NotificationType::ElicitationDialog) => s::notification_hook_elicitation_title(),
+            // Informational subtypes and non-notification events never push.
+            _ => return,
+        };
+
+        if !self.notifications.hook_notification_enabled {
+            return;
+        }
+
+        // Dedup: skip when this notification is not strictly newer than
+        // the last one already surfaced for the session.
+        if self
+            .claude
+            .last_pushed_notification
+            .get(&file.session_id)
+            .is_some_and(|&t| file.timestamp <= t)
+        {
+            return;
+        }
+        // Record before the focus-gate return below: a re-delivered file
+        // that was suppressed by focus must not fire late once focus
+        // moves away — the user already saw the TUI prompt.
+        self.claude
+            .last_pushed_notification
+            .insert(file.session_id.clone(), file.timestamp);
+
+        // Focus gate — silence when daruda is foreground and the
+        // session's own pane is focused, mirroring `handle_view_event`.
+        if self.notifications.skip_focused_pane
+            && crate::platform::attention::is_app_active()
+            && self.session_pane_is_focused(&file.session_id)
+        {
+            return;
+        }
+
+        crate::platform::notifications::show(&title, &redact_home(&file.cwd));
+    }
+
+    /// `true` when the pane bound to `session_id` is the focused pane.
+    /// Reverse-scans the bindings (debug-free, low frequency — fired
+    /// once per blocking notification). `false` when the session has no
+    /// live pane binding.
+    fn session_pane_is_focused(&self, session_id: &str) -> bool {
+        self.claude
+            .pty_claude_bindings
+            .iter()
+            .find(|(_, b)| b.session_id == session_id)
+            .is_some_and(|(pane_id, _)| *pane_id == self.main_area.focused_pane_id)
     }
 
     pub(in crate::workspace) fn set_usage_window(
@@ -647,6 +733,7 @@ mod tests {
             tool_name: None,
             tool_input: None,
             permission_mode: None,
+            notification: None,
             // Timestamp is irrelevant to the priority/filter logic under
             // test; the store no longer applies any age-based transform.
             timestamp: chrono::Utc::now(),

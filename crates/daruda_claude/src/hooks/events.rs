@@ -68,9 +68,11 @@ pub enum SessionEndReason {
     Unknown,
 }
 
-/// `Notification.notification_type` — matcher filter for "user-attention"
-/// subset. Only `PermissionPrompt` / `IdlePrompt` / `ElicitationDialog`
-/// drive the FSM into `NeedsAttention`; the others are informational.
+/// `Notification.notification_type` — subtype carried on `Notification`
+/// events. Blocking subtypes (`PermissionPrompt` / `IdlePrompt` /
+/// `ElicitationDialog`) surface as a one-shot desktop push on the app
+/// side; the others are informational. No subtype changes the persisted
+/// session status (see `hooks::fsm`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationType {

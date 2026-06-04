@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::SessionStatus;
-use crate::hooks::events::PermissionMode;
+use crate::hooks::events::{NotificationType, PermissionMode};
 
 /// Bumped only when a structural change can't be absorbed by
 /// `#[serde(default)]` on optional fields.
@@ -50,6 +50,12 @@ pub struct StatusFile {
     pub tool_input: Option<serde_json::Value>,
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
+    /// Set only on `Notification` events — carries the subtype so the
+    /// app-side ingest can decide whether to raise a transient desktop
+    /// push (blocking subtypes) without re-parsing the hook payload.
+    /// `None` for every other event.
+    #[serde(default)]
+    pub notification: Option<NotificationType>,
     pub timestamp: DateTime<Utc>,
     pub source: Source,
 }
@@ -72,6 +78,7 @@ impl StatusFile {
             tool_name: None,
             tool_input: None,
             permission_mode: None,
+            notification: None,
             timestamp: Utc::now(),
             source: Source::Hook,
         }
@@ -241,6 +248,29 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = path_for(dir.path(), "absent");
         assert!(read(&p).unwrap().is_none());
+    }
+
+    #[test]
+    fn notification_subtype_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let p = path_for(dir.path(), "notif");
+        let mut file = sample();
+        file.notification = Some(NotificationType::PermissionPrompt);
+        write_atomic(&p, &file).unwrap();
+        let back = read(&p).unwrap().unwrap();
+        assert_eq!(back.notification, Some(NotificationType::PermissionPrompt));
+    }
+
+    #[test]
+    fn notification_defaults_to_none_when_absent() {
+        // Old status files (written before the field existed) must read
+        // back with `notification: None` via serde default.
+        let dir = TempDir::new().unwrap();
+        let p = path_for(dir.path(), "legacy");
+        let raw = r#"{"schema_version":1,"session_id":"legacy","cwd":"/x","state":"Idle","last_event":"Stop","timestamp":"2026-05-01T12:00:00Z","source":"hook"}"#;
+        fs::write(&p, raw).unwrap();
+        let back = read(&p).unwrap().unwrap();
+        assert_eq!(back.notification, None);
     }
 
     #[test]

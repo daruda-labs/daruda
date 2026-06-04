@@ -85,6 +85,7 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
                 tool_name,
                 tool_input,
                 permission_mode: common.permission_mode,
+                notification: notification_type(&event),
                 timestamp: chrono::Utc::now(),
                 source: Source::Hook,
             };
@@ -132,6 +133,18 @@ impl Drop for SessionLock {
         // Best-effort unlock; release happens automatically on close
         // anyway, so an error here is informational.
         let _ = FileExt::unlock(&self.file);
+    }
+}
+
+/// The notification subtype, present only on `Notification` events.
+/// Recorded into the status file so the app-side ingest can gate a
+/// desktop push without re-reading the hook payload.
+fn notification_type(event: &HookEvent) -> Option<daruda_claude::hooks::events::NotificationType> {
+    match event {
+        HookEvent::Notification {
+            notification_type, ..
+        } => Some(*notification_type),
+        _ => None,
     }
 }
 

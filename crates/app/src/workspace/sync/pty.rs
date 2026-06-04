@@ -83,6 +83,7 @@ impl Workspace {
                 }
             }
             PtyTrackerEvent::DeadSession { session_id } => {
+                self.claude.last_pushed_notification.remove(&session_id);
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     if let Ok(dir) = daruda_claude::hooks::status_file::default_dir() {
                         use daruda_claude::hooks::status_file as sf;

@@ -1723,6 +1723,21 @@ pub fn notification_long_running_title() -> String {
     rust_i18n::t!("notification.long_running_title").into_owned()
 }
 
+/// Title for a Claude permission-prompt desktop notification.
+pub fn notification_hook_permission_title() -> String {
+    rust_i18n::t!("notification.hook_permission_title").into_owned()
+}
+
+/// Title for a Claude idle-prompt desktop notification.
+pub fn notification_hook_idle_title() -> String {
+    rust_i18n::t!("notification.hook_idle_title").into_owned()
+}
+
+/// Title for a Claude elicitation-dialog desktop notification.
+pub fn notification_hook_elicitation_title() -> String {
+    rust_i18n::t!("notification.hook_elicitation_title").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold

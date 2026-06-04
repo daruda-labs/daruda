@@ -790,6 +790,7 @@ impl Workspace {
                 _jsonl_watcher_shutdown: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
+                last_pushed_notification: HashMap::new(),
                 _limits_pumps: sync::limits::spawn(cx),
             },
             // Bootstrap projects for this workspace. When the caller

@@ -96,6 +96,7 @@ impl Workspace {
             tool_name: None,
             tool_input: None,
             permission_mode: None,
+            notification: None,
             timestamp,
             source: Source::Jsonl,
         };
