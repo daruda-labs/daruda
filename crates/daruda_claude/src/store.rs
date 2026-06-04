@@ -13,59 +13,18 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
 
 use crate::SessionStatus;
 use crate::hooks::status_file::{Source, StatusFile};
 
-/// Default age past which a `NeedsAttention` indicator decays to
-/// `Idle` in aggregate queries. Catches the case where Claude Code
-/// fired a `Notification` for a permission/idle prompt that the user
-/// dismissed in the TUI without daruda seeing the follow-up event.
-pub const DEFAULT_NEEDS_ATTENTION_STALE: Duration = Duration::from_secs(60);
-
+#[derive(Default)]
 pub struct ClaudeStatusStore {
     by_session: HashMap<String, StatusFile>,
-    /// Age past which `NeedsAttention` decays to `Idle` in aggregate
-    /// queries. Configurable via
-    /// `daruda_config::ClaudeStatusConfig::needs_attention_stale_secs`.
-    needs_attention_stale: Duration,
-}
-
-impl Default for ClaudeStatusStore {
-    fn default() -> Self {
-        Self {
-            by_session: HashMap::new(),
-            needs_attention_stale: DEFAULT_NEEDS_ATTENTION_STALE,
-        }
-    }
 }
 
 impl ClaudeStatusStore {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Override the stale threshold (default
-    /// [`DEFAULT_NEEDS_ATTENTION_STALE`] = 60s).
-    pub fn with_needs_attention_stale(mut self, threshold: Duration) -> Self {
-        self.needs_attention_stale = threshold;
-        self
-    }
-
-    /// Effective state for one entry given a reference time. Demotes
-    /// stale `NeedsAttention` (older than [`needs_attention_stale`])
-    /// to `Idle`. Pure — for testability.
-    fn effective_state(&self, file: &StatusFile, now: DateTime<Utc>) -> SessionStatus {
-        if file.status == SessionStatus::NeedsAttention {
-            let age = (now - file.timestamp).to_std().unwrap_or(Duration::ZERO);
-            if age >= self.needs_attention_stale {
-                return SessionStatus::Idle;
-            }
-        }
-        file.status
     }
 
     /// Bulk-load entries (cold restore).
@@ -119,19 +78,10 @@ impl ClaudeStatusStore {
     }
 
     /// Aggregate session status for `cwd` — the highest-priority
-    /// state among all sessions there, with stale `NeedsAttention`
-    /// demoted to `Idle`. `None` if no session present.
-    ///
-    /// Uses `Utc::now()` as the reference time. Tests should call
-    /// [`Self::aggregate_for_cwd_at`] for determinism.
+    /// state among all sessions there. `None` if no session present.
     pub fn aggregate_for_cwd(&self, target: &Path) -> Option<SessionStatus> {
-        self.aggregate_for_cwd_at(target, Utc::now())
-    }
-
-    /// Like [`Self::aggregate_for_cwd`] with an explicit reference time.
-    pub fn aggregate_for_cwd_at(&self, target: &Path, now: DateTime<Utc>) -> Option<SessionStatus> {
         self.sessions_for_cwd(target)
-            .map(|s| self.effective_state(s, now))
+            .map(|s| s.status)
             .max_by_key(|s| s.priority())
     }
 
@@ -143,23 +93,13 @@ impl ClaudeStatusStore {
         v
     }
 
-    /// `(session_id, effective_state)` pairs for `cwd`, sorted oldest
-    /// first. `effective_state` applies the same stale-NeedsAttention
-    /// demotion as [`Self::aggregate_for_cwd`] so the Phase D sub-row
-    /// stays consistent with the leading aggregate indicator.
+    /// `(session_id, status)` pairs for `cwd`, sorted oldest first —
+    /// the natural reading order for the Phase D sub-row, consistent
+    /// with the leading aggregate indicator.
     pub fn per_session_states_for_cwd(&self, target: &Path) -> Vec<(String, SessionStatus)> {
-        self.per_session_states_for_cwd_at(target, Utc::now())
-    }
-
-    /// Like [`Self::per_session_states_for_cwd`] with an explicit reference time.
-    pub fn per_session_states_for_cwd_at(
-        &self,
-        target: &Path,
-        now: DateTime<Utc>,
-    ) -> Vec<(String, SessionStatus)> {
         self.per_session_for_cwd(target)
             .into_iter()
-            .map(|s| (s.session_id.clone(), self.effective_state(s, now)))
+            .map(|s| (s.session_id.clone(), s.status))
             .collect()
     }
 }
@@ -296,21 +236,15 @@ mod tests {
             0,
         ));
 
-        // Use a fixed reference time close to the entry timestamps so
-        // NeedsAttention is not demoted by the stale-age check.
-        let now = ref_time() + CDuration::seconds(30);
         assert_eq!(
-            s.aggregate_for_cwd_at(&PathBuf::from("/wt"), now),
+            s.aggregate_for_cwd(&PathBuf::from("/wt")),
             Some(SessionStatus::NeedsAttention)
         );
         assert_eq!(
-            s.aggregate_for_cwd_at(&PathBuf::from("/other"), now),
+            s.aggregate_for_cwd(&PathBuf::from("/other")),
             Some(SessionStatus::Working)
         );
-        assert!(
-            s.aggregate_for_cwd_at(&PathBuf::from("/empty"), now)
-                .is_none()
-        );
+        assert!(s.aggregate_for_cwd(&PathBuf::from("/empty")).is_none());
     }
 
     #[test]
@@ -333,9 +267,10 @@ mod tests {
     }
 
     #[test]
-    fn stale_needs_attention_demotes_to_idle() {
-        let s = ClaudeStatusStore::new().with_needs_attention_stale(Duration::from_secs(60));
-        let mut store = s;
+    fn needs_attention_persists_regardless_of_age() {
+        let mut store = ClaudeStatusStore::new();
+        // A long-stale NeedsAttention must NOT decay — it stays until a
+        // real clearing event (PreToolUse / Stop / SessionEnd) arrives.
         store.update(entry(
             "a",
             "/wt",
@@ -344,27 +279,21 @@ mod tests {
             0,
         ));
         let path = PathBuf::from("/wt");
-
-        // Within threshold: kept.
-        let now = ref_time() + CDuration::seconds(30);
         assert_eq!(
-            store.aggregate_for_cwd_at(&path, now),
+            store.aggregate_for_cwd(&path),
             Some(SessionStatus::NeedsAttention)
         );
-
-        // Past threshold: demoted to Idle.
-        let now = ref_time() + CDuration::seconds(60);
         assert_eq!(
-            store.aggregate_for_cwd_at(&path, now),
-            Some(SessionStatus::Idle)
+            store.per_session_states_for_cwd(&path),
+            vec![("a".to_string(), SessionStatus::NeedsAttention)]
         );
     }
 
     #[test]
-    fn stale_demotion_changes_aggregate_winner() {
-        let mut store =
-            ClaudeStatusStore::new().with_needs_attention_stale(Duration::from_secs(60));
-        // Stale NeedsAttention loses to a fresh Working.
+    fn needs_attention_still_wins_aggregate_when_old() {
+        let mut store = ClaudeStatusStore::new();
+        // An old NeedsAttention outranks a fresh Working — no age-based
+        // demotion flips the winner anymore.
         store.update(entry(
             "old",
             "/wt",
@@ -379,27 +308,9 @@ mod tests {
             Source::Hook,
             80,
         ));
-        let now = ref_time() + CDuration::seconds(80);
-        let path = PathBuf::from("/wt");
-        // Without demotion, NeedsAttention would win priority. With
-        // demotion, the stale `old` entry becomes Idle and `new`
-        // (Working) wins.
         assert_eq!(
-            store.aggregate_for_cwd_at(&path, now),
-            Some(SessionStatus::Working)
-        );
-    }
-
-    #[test]
-    fn working_does_not_decay() {
-        let mut store =
-            ClaudeStatusStore::new().with_needs_attention_stale(Duration::from_secs(60));
-        store.update(entry("a", "/wt", SessionStatus::Working, Source::Hook, 0));
-        let now = ref_time() + CDuration::seconds(120);
-        let path = PathBuf::from("/wt");
-        assert_eq!(
-            store.aggregate_for_cwd_at(&path, now),
-            Some(SessionStatus::Working)
+            store.aggregate_for_cwd(&PathBuf::from("/wt")),
+            Some(SessionStatus::NeedsAttention)
         );
     }
 

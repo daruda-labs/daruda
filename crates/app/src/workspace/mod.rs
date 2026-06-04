@@ -763,14 +763,8 @@ impl Workspace {
                 claude_status: {
                     // Cold restore: load any status files that survived a
                     // previous run. TTL cleanup runs at the same time so
-                    // orphans from past crashes don't accumulate. The
-                    // stale-NeedsAttention threshold lives on the store
-                    // itself (used by aggregate queries to demote stuck
-                    // states from a TUI-dismissed Notification).
-                    let mut store = daruda_claude::ClaudeStatusStore::new()
-                        .with_needs_attention_stale(std::time::Duration::from_secs(
-                            config.claude_status.needs_attention_stale_secs,
-                        ));
+                    // orphans from past crashes don't accumulate.
+                    let mut store = daruda_claude::ClaudeStatusStore::new();
                     if config.claude_status.enable
                         && let Ok(dir) = daruda_claude::hooks::status_file::default_dir()
                     {

@@ -33,25 +33,15 @@ pub struct ClaudeStatusConfig {
     /// cold restore. Catches the case where `SessionEnd` was missed
     /// (Claude crashed, `kill -9`, power loss). Default: 7.
     pub file_ttl_days: u32,
-
-    /// Age in seconds past which a `NeedsAttention` indicator is
-    /// downgraded to `Idle` at render time. Catches the case where
-    /// Claude Code fired a `Notification` for a permission/idle prompt
-    /// that the user dismissed in the TUI without daruda seeing the
-    /// follow-up event. Default: 60.
-    pub needs_attention_stale_secs: u64,
 }
 
 const STALE_THRESHOLD_MIN: u64 = 30; // 30s — anything below this is just noise
 const STALE_THRESHOLD_MAX: u64 = 24 * 60 * 60; // 1 day — anything above defeats the point
 const FILE_TTL_MIN_DAYS: u32 = 1;
 const FILE_TTL_MAX_DAYS: u32 = 365;
-const NEEDS_ATTENTION_STALE_MIN: u64 = 10;
-const NEEDS_ATTENTION_STALE_MAX: u64 = 3600;
 
 const DEFAULT_STALE_THRESHOLD_SECS: u64 = 300;
 const DEFAULT_FILE_TTL_DAYS: u32 = 7;
-const DEFAULT_NEEDS_ATTENTION_STALE_SECS: u64 = 60;
 
 impl Default for ClaudeStatusConfig {
     fn default() -> Self {
@@ -59,7 +49,6 @@ impl Default for ClaudeStatusConfig {
             enable: true,
             stale_threshold_secs: DEFAULT_STALE_THRESHOLD_SECS,
             file_ttl_days: DEFAULT_FILE_TTL_DAYS,
-            needs_attention_stale_secs: DEFAULT_NEEDS_ATTENTION_STALE_SECS,
         }
     }
 }
@@ -72,9 +61,6 @@ impl ClaudeStatusConfig {
         self.file_ttl_days = self
             .file_ttl_days
             .clamp(FILE_TTL_MIN_DAYS, FILE_TTL_MAX_DAYS);
-        self.needs_attention_stale_secs = self
-            .needs_attention_stale_secs
-            .clamp(NEEDS_ATTENTION_STALE_MIN, NEEDS_ATTENTION_STALE_MAX);
     }
 }
 
@@ -88,7 +74,6 @@ mod tests {
         assert!(c.enable);
         assert_eq!(c.stale_threshold_secs, 300);
         assert_eq!(c.file_ttl_days, 7);
-        assert_eq!(c.needs_attention_stale_secs, 60);
     }
 
     #[test]
@@ -97,23 +82,19 @@ mod tests {
             enable: true,
             stale_threshold_secs: 1,
             file_ttl_days: 0,
-            needs_attention_stale_secs: 1,
         };
         c.clamp();
         assert_eq!(c.stale_threshold_secs, STALE_THRESHOLD_MIN);
         assert_eq!(c.file_ttl_days, FILE_TTL_MIN_DAYS);
-        assert_eq!(c.needs_attention_stale_secs, NEEDS_ATTENTION_STALE_MIN);
 
         let mut c = ClaudeStatusConfig {
             enable: true,
             stale_threshold_secs: 10_000_000,
             file_ttl_days: 9999,
-            needs_attention_stale_secs: 999_999,
         };
         c.clamp();
         assert_eq!(c.stale_threshold_secs, STALE_THRESHOLD_MAX);
         assert_eq!(c.file_ttl_days, FILE_TTL_MAX_DAYS);
-        assert_eq!(c.needs_attention_stale_secs, NEEDS_ATTENTION_STALE_MAX);
     }
 
     #[test]
