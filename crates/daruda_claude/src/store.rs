@@ -84,24 +84,6 @@ impl ClaudeStatusStore {
             .map(|s| s.status)
             .max_by_key(|s| s.priority())
     }
-
-    /// All session statuses for `cwd`, sorted oldest-first (the
-    /// natural reading order for the Phase D sub-row).
-    pub fn per_session_for_cwd<'a>(&'a self, target: &'a Path) -> Vec<&'a StatusFile> {
-        let mut v: Vec<&'a StatusFile> = self.sessions_for_cwd(target).collect();
-        v.sort_by_key(|s| s.timestamp);
-        v
-    }
-
-    /// `(session_id, status)` pairs for `cwd`, sorted oldest first —
-    /// the natural reading order for the Phase D sub-row, consistent
-    /// with the leading aggregate indicator.
-    pub fn per_session_states_for_cwd(&self, target: &Path) -> Vec<(String, SessionStatus)> {
-        self.per_session_for_cwd(target)
-            .into_iter()
-            .map(|s| (s.session_id.clone(), s.status))
-            .collect()
-    }
 }
 
 /// Race policy core — hook wins over jsonl. Pure function, exposed so the
@@ -248,25 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn per_session_sorted_by_timestamp() {
-        let mut s = ClaudeStatusStore::new();
-        s.update(entry("c", "/wt", SessionStatus::Idle, Source::Hook, 30));
-        s.update(entry("a", "/wt", SessionStatus::Working, Source::Hook, 0));
-        s.update(entry(
-            "b",
-            "/wt",
-            SessionStatus::NeedsAttention,
-            Source::Hook,
-            10,
-        ));
-
-        let path = PathBuf::from("/wt");
-        let v = s.per_session_for_cwd(&path);
-        let ids: Vec<&str> = v.iter().map(|f| f.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "b", "c"]);
-    }
-
-    #[test]
     fn needs_attention_persists_regardless_of_age() {
         let mut store = ClaudeStatusStore::new();
         // A long-stale NeedsAttention must NOT decay — it stays until a
@@ -282,10 +245,6 @@ mod tests {
         assert_eq!(
             store.aggregate_for_cwd(&path),
             Some(SessionStatus::NeedsAttention)
-        );
-        assert_eq!(
-            store.per_session_states_for_cwd(&path),
-            vec![("a".to_string(), SessionStatus::NeedsAttention)]
         );
     }
 

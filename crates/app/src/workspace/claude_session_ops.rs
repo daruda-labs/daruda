@@ -143,16 +143,17 @@ use daruda_claude::SessionStatus;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use gpui::{Context, Window};
-use std::collections::HashSet;
-use std::path::Path;
 
-// `Source` is only named by the debug-only transition logger and the
-// (always-compiled) test fixtures, so gate the import to those profiles
-// to avoid an unused-import warning in release non-test builds.
+// `Path` and `Source` are only named by the debug-only transition logger
+// (and `Source` also by the always-compiled test fixtures), so gate the
+// imports to those profiles to avoid an unused-import warning in release
+// non-test builds.
 #[cfg(any(debug_assertions, test))]
 use daruda_claude::hooks::status_file::Source;
 #[cfg(debug_assertions)]
 use daruda_store::observability::log_writer::LogWriter;
+#[cfg(debug_assertions)]
+use std::path::Path;
 
 impl Workspace {
     /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
@@ -181,7 +182,7 @@ impl Workspace {
                         self.apply_task_session_ended(&file.session_id, reason, cx);
                     }
                     #[cfg(debug_assertions)]
-                    let dbg_probe = self.probe_lane_status(&file.session_id, &file.cwd);
+                    let dbg_probe = self.probe_lane_status(&file.session_id);
                     #[cfg(debug_assertions)]
                     let dbg_fields = (
                         file.session_id.clone(),
@@ -228,7 +229,7 @@ impl Workspace {
                 #[cfg(debug_assertions)]
                 let dbg_probe = dbg_entry
                     .as_ref()
-                    .map(|(cwd, _)| self.probe_lane_status(&session_id, cwd));
+                    .map(|_| self.probe_lane_status(&session_id));
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     cx.notify();
                     #[cfg(debug_assertions)]
@@ -291,41 +292,105 @@ impl Workspace {
     }
 }
 
-// ── Claude status-change logging ──────────────────────────────────────
+// ── Claude status pane aggregation ────────────────────────────────────
 //
-// `lane_status_from` is the single source of truth for the left-dock
+// `aggregate_over_panes` is the single source of truth for the left-dock
 // leading indicator's aggregate, shared with the render snapshot
-// (`render::snapshots`'s `claude_status_per_lane`). The debug-only probe
-// / logger sit on top of it so the on-disk NDJSON log can be diffed
-// against the rendered indicator when verifying status transitions.
+// (`render::snapshots`'s `claude_status_per_lane` /
+// `claude_per_session_per_lane`). The debug-only probe / logger sit on top
+// of it so the on-disk NDJSON log can be diffed against the rendered
+// indicator when verifying status transitions.
 
-/// Leading-indicator aggregate for `cwd`: the highest-priority status
-/// among PID-confirmed live sessions there, or `None`. Mirrors exactly
-/// what `render::snapshots` paints — both read through this one fn so
-/// the diagnostic log can never silently disagree with the indicator.
-pub(in crate::workspace) fn lane_status_from(
+/// One pane's resolved Claude session and its current status. The unit of
+/// per-lane sub-row rendering — a lane's panes contribute these in layout
+/// order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct PaneSessionStatus {
+    pub(in crate::workspace) pane_id: PaneId,
+    pub(in crate::workspace) session_id: String,
+    pub(in crate::workspace) status: SessionStatus,
+}
+
+/// Aggregate Claude status over panes, attributing each pane's session to
+/// the lane that owns the pane (not the session's cwd).
+///
+/// `pane_lane` lists every pane in layout order paired with its owning
+/// lane. For each pane: a missing binding means the pane has no Claude
+/// session; a `session_id` absent from `store` is omitted entirely (it is
+/// not surfaced as `Connecting`).
+///
+/// Returns:
+/// - per-lane leading indicator: the highest-priority status among the
+///   lane's panes' sessions (only lanes with ≥ 1 such session appear).
+/// - per-lane sub-rows: the lane's `PaneSessionStatus` list in pane order,
+///   only for lanes with ≥ 2 sessions (single-session lanes are fully
+///   described by the leading indicator).
+pub(in crate::workspace) fn aggregate_over_panes(
+    pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
+    bindings: &HashMap<PaneId, PtyBinding>,
     store: &daruda_claude::ClaudeStatusStore,
-    cwd: &Path,
-    live: &HashSet<&str>,
-) -> Option<SessionStatus> {
-    store
-        .per_session_states_for_cwd(cwd)
-        .into_iter()
-        .filter(|(sid, _)| live.contains(sid.as_str()))
-        .map(|(_, s)| s)
-        .max_by_key(|s| s.priority())
+) -> (
+    HashMap<daruda_store::project::LaneRef, SessionStatus>,
+    HashMap<daruda_store::project::LaneRef, Vec<PaneSessionStatus>>,
+) {
+    let mut per_lane_sessions: HashMap<daruda_store::project::LaneRef, Vec<PaneSessionStatus>> =
+        HashMap::new();
+    for (pane_id, lane_ref) in pane_lane {
+        let Some(binding) = bindings.get(pane_id) else {
+            continue;
+        };
+        let Some(file) = store.get(&binding.session_id) else {
+            continue;
+        };
+        per_lane_sessions
+            .entry(*lane_ref)
+            .or_default()
+            .push(PaneSessionStatus {
+                pane_id: *pane_id,
+                session_id: binding.session_id.clone(),
+                status: file.status,
+            });
+    }
+
+    let per_lane_status = per_lane_sessions
+        .iter()
+        .filter_map(|(lane_ref, sessions)| {
+            sessions
+                .iter()
+                .map(|ps| ps.status)
+                .max_by_key(|s| s.priority())
+                .map(|s| (*lane_ref, s))
+        })
+        .collect();
+
+    per_lane_sessions.retain(|_, sessions| sessions.len() >= 2);
+
+    (per_lane_status, per_lane_sessions)
 }
 
 impl Workspace {
-    /// Session ids currently bound to a live PTY — the set the left-dock
-    /// indicator filters by. Shared by the render snapshot and
-    /// [`lane_status_from`].
-    pub(in crate::workspace) fn live_session_ids(&self) -> HashSet<&str> {
-        self.claude
-            .pty_claude_bindings
-            .values()
-            .map(|b| b.session_id.as_str())
-            .collect()
+    /// Every pane in the workspace paired with its owning lane, in layout
+    /// order. The active lane's panes come from the live `main_area`
+    /// tabs; every inactive lane's panes come from its frozen runtime.
+    /// Feeds [`aggregate_over_panes`] so status attribution follows pane
+    /// membership rather than session cwd.
+    pub(in crate::workspace) fn pane_lane_index(
+        &self,
+    ) -> Vec<(PaneId, daruda_store::project::LaneRef)> {
+        let mut index = Vec::new();
+        for tab in &self.main_area.tabs {
+            for pane_id in tab.layout.pane_ids() {
+                index.push((pane_id, self.active));
+            }
+        }
+        for (lane_ref, runtime) in &self.main_area.inactive_lane_runtimes {
+            for tab in &runtime.tabs {
+                for pane_id in tab.layout.pane_ids() {
+                    index.push((pane_id, *lane_ref));
+                }
+            }
+        }
+        index
     }
 }
 
@@ -342,15 +407,34 @@ pub(in crate::workspace) struct LaneStatusProbe {
 #[cfg(debug_assertions)]
 impl Workspace {
     /// Capture the session's stored status and its lane aggregate.
-    pub(in crate::workspace) fn probe_lane_status(
-        &self,
-        session_id: &str,
-        cwd: &Path,
-    ) -> LaneStatusProbe {
-        let live = self.live_session_ids();
+    ///
+    /// The lane is resolved from the session's pane: scan the bindings for
+    /// the pane bound to `session_id`, then locate that pane in
+    /// [`Workspace::pane_lane_index`]. The reverse scan is `O(panes)` and
+    /// debug-only / low-frequency, so it is not indexed.
+    pub(in crate::workspace) fn probe_lane_status(&self, session_id: &str) -> LaneStatusProbe {
+        let aggregate = self
+            .claude
+            .pty_claude_bindings
+            .iter()
+            .find(|(_, binding)| binding.session_id == session_id)
+            .map(|(pane_id, _)| *pane_id)
+            .and_then(|pane_id| {
+                let index = self.pane_lane_index();
+                let lane_ref = index.iter().find(|(p, _)| *p == pane_id).map(|(_, l)| *l)?;
+                let (per_lane, _) = aggregate_over_panes(
+                    &index,
+                    &self.claude.pty_claude_bindings,
+                    &self.claude.claude_status,
+                );
+                // `None` when no pane in the lane has a store entry yet
+                // (e.g. a brand-new session before its first hook write) —
+                // logged as "(none)", matching the rendered indicator.
+                per_lane.get(&lane_ref).copied()
+            });
         LaneStatusProbe {
             session: self.claude.claude_status.get(session_id).map(|f| f.status),
-            aggregate: lane_status_from(&self.claude.claude_status, cwd, &live),
+            aggregate,
         }
     }
 
@@ -366,7 +450,7 @@ impl Workspace {
         last_event: &str,
         source: Source,
     ) {
-        let after = self.probe_lane_status(session_id, cwd);
+        let after = self.probe_lane_status(session_id);
         if before.session != after.session {
             LogWriter::log(session_transition_report(
                 before.session,
@@ -473,47 +557,104 @@ mod tests {
         store
     }
 
+    fn lane_ref(project: u64, lane: u64) -> daruda_store::project::LaneRef {
+        daruda_store::project::LaneRef { project, lane }
+    }
+
+    fn binding(pane_id: PaneId, session_id: &str) -> (PaneId, PtyBinding) {
+        (
+            pane_id,
+            PtyBinding {
+                claude_pid: 0,
+                session_id: session_id.into(),
+                discovered_at: std::time::SystemTime::UNIX_EPOCH,
+            },
+        )
+    }
+
     #[test]
-    fn lane_status_none_when_no_session() {
+    fn aggregate_two_panes_in_one_lane_orders_by_layout_and_maxes_priority() {
+        let lane = lane_ref(1, 7);
+        // Layout order: pane 10 before pane 20.
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        // The session cwds deliberately do NOT match the lane path —
+        // attribution comes from pane membership, not cwd.
+        let store = store_with(vec![
+            entry("a", "/elsewhere", SessionStatus::Working),
+            entry("b", "/nowhere", SessionStatus::NeedsAttention),
+        ]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane), Some(&SessionStatus::NeedsAttention));
+        let sessions = per_session.get(&lane).expect("two-pane lane has sub-rows");
+        let ids: Vec<&str> = sessions.iter().map(|ps| ps.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+        assert_eq!(sessions[0].pane_id, 10);
+        assert_eq!(sessions[1].pane_id, 20);
+    }
+
+    #[test]
+    fn aggregate_does_not_mix_panes_across_lanes() {
+        let lane_a = lane_ref(1, 1);
+        let lane_b = lane_ref(2, 1);
+        let pane_lane = vec![(10u64, lane_a), (20u64, lane_b)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        let store = store_with(vec![
+            entry("a", "/x", SessionStatus::Working),
+            entry("b", "/y", SessionStatus::NeedsAttention),
+        ]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane_a), Some(&SessionStatus::Working));
+        assert_eq!(per_lane.get(&lane_b), Some(&SessionStatus::NeedsAttention));
+        // Each lane has a single pane → no sub-rows for either.
+        assert!(per_session.is_empty());
+    }
+
+    #[test]
+    fn aggregate_omits_panes_without_binding() {
+        let lane = lane_ref(1, 1);
+        // Pane 20 has no binding (no Claude session in that pane).
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "a")].into_iter().collect();
+        let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
+        // Only one bound session → not a multi-session lane.
+        assert!(per_session.is_empty());
+    }
+
+    #[test]
+    fn aggregate_omits_session_missing_from_store() {
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        // Both panes bound, but 'b' has no store entry → omitted entirely
+        // (NOT surfaced as Connecting).
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
+
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+
+        assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
+        // 'b' dropped, so only one effective session → no sub-rows.
+        assert!(per_session.is_empty());
+    }
+
+    #[test]
+    fn aggregate_empty_when_no_panes() {
         let store = daruda_claude::ClaudeStatusStore::new();
-        let live: HashSet<&str> = HashSet::new();
-        assert_eq!(lane_status_from(&store, &PathBuf::from("/wt"), &live), None);
-    }
-
-    #[test]
-    fn lane_status_excludes_non_live_session() {
-        let store = store_with(vec![entry("a", "/wt", SessionStatus::Working)]);
-        // 'a' is in the store but not PID-confirmed live → not counted.
-        let live: HashSet<&str> = HashSet::new();
-        assert_eq!(lane_status_from(&store, &PathBuf::from("/wt"), &live), None);
-    }
-
-    #[test]
-    fn lane_status_picks_highest_priority_among_live() {
-        let store = store_with(vec![
-            entry("a", "/wt", SessionStatus::Idle),
-            entry("b", "/wt", SessionStatus::Working),
-            entry("c", "/wt", SessionStatus::NeedsAttention),
-        ]);
-        let live: HashSet<&str> = ["a", "b", "c"].into_iter().collect();
-        assert_eq!(
-            lane_status_from(&store, &PathBuf::from("/wt"), &live),
-            Some(SessionStatus::NeedsAttention)
-        );
-    }
-
-    #[test]
-    fn lane_status_live_filter_changes_winner() {
-        let store = store_with(vec![
-            entry("a", "/wt", SessionStatus::NeedsAttention),
-            entry("b", "/wt", SessionStatus::Working),
-        ]);
-        // Only 'b' is live → Working wins even though 'a' outranks it.
-        let live: HashSet<&str> = ["b"].into_iter().collect();
-        assert_eq!(
-            lane_status_from(&store, &PathBuf::from("/wt"), &live),
-            Some(SessionStatus::Working)
-        );
+        let bindings: HashMap<PaneId, PtyBinding> = HashMap::new();
+        let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store);
+        assert!(per_lane.is_empty());
+        assert!(per_session.is_empty());
     }
 
     #[cfg(debug_assertions)]

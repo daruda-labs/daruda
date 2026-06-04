@@ -1121,24 +1121,24 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        let live: std::collections::HashSet<&str> = self
-            .claude
-            .pty_claude_bindings
-            .values()
-            .map(|b| b.session_id.as_str())
-            .collect();
-        if live.is_empty() {
+        if self.claude.pty_claude_bindings.is_empty() {
             return false;
         }
-        self.projects.iter().flat_map(|p| &p.lanes).any(|wt| {
-            self.claude
-                .claude_status
-                .per_session_states_for_cwd(&wt.path)
-                .into_iter()
-                .any(|(sid, s)| {
-                    live.contains(sid.as_str()) && !matches!(s, daruda_claude::SessionStatus::Idle)
-                })
-        })
+        // A lane's per-lane status is the highest-priority status among
+        // its panes' sessions (`NeedsAttention` > `Working`/`ExecutingTool`
+        // > `Idle` > `Connecting`). The pulse runs for any aggregate other
+        // than `Idle`: an active session is in motion, and a lone
+        // `Connecting` session pulses while starting up. Only an `Idle`
+        // aggregate is fully at rest.
+        let index = self.pane_lane_index();
+        let (per_lane, _) = crate::workspace::claude_session_ops::aggregate_over_panes(
+            &index,
+            &self.claude.pty_claude_bindings,
+            &self.claude.claude_status,
+        );
+        per_lane
+            .values()
+            .any(|s| !matches!(s, daruda_claude::SessionStatus::Idle))
     }
 
     /// Display name of the currently active project. `None` when the

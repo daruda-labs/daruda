@@ -14,6 +14,43 @@ impl Workspace {
         &mut self,
         cx: &mut Context<Self>,
     ) -> LeftDockSnapshot {
+        // Aggregate Claude status over every pane once per frame, keyed by
+        // the lane that owns each pane. Sessions are surfaced only once the
+        // PtyTracker has bound a live PID to a pane daruda owns — a
+        // session_id can sit in `claude_status` (hook write or jsonl tail)
+        // without belonging to any pane here (a stale status file from a
+        // crashed run, or `claude` running outside daruda). Binding-gated
+        // attribution keeps the indicator a faithful "this Workspace owns a
+        // live claude in this lane" signal.
+        //
+        // Trade-off: there's a ~3 s window after `claude` starts before
+        // PtyTracker's next poll lands the binding, so the indicator
+        // appears slightly later than the first hook event. Acceptable for
+        // the correctness it buys.
+        let pane_lane = self.pane_lane_index();
+        let (claude_status_per_lane, claude_per_session_per_lane_raw) =
+            crate::workspace::claude_session_ops::aggregate_over_panes(
+                &pane_lane,
+                &self.claude.pty_claude_bindings,
+                &self.claude.claude_status,
+            );
+        // Project the per-pane sub-rows down to the `(session_id, status)`
+        // shape the left-dock renderer expects, preserving pane order.
+        let claude_per_session_per_lane: std::collections::HashMap<
+            daruda_store::project::LaneRef,
+            Vec<(String, daruda_claude::SessionStatus)>,
+        > = claude_per_session_per_lane_raw
+            .into_iter()
+            .map(|(lane_ref, sessions)| {
+                (
+                    lane_ref,
+                    sessions
+                        .into_iter()
+                        .map(|ps| (ps.session_id, ps.status))
+                        .collect(),
+                )
+            })
+            .collect();
         LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
             active_project_name: self
@@ -89,72 +126,8 @@ impl Workspace {
                 .get(&self.active_ref())
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
-            // Sessions are only surfaced once the PtyTracker has
-            // confirmed a live PID for them. A session_id can sit in
-            // `claude_status` (hook write or jsonl tail) without
-            // belonging to any process daruda owns — e.g. a stale
-            // status file from a crashed run, or `claude` running
-            // outside daruda in another terminal. Hiding those keeps
-            // the indicator a faithful "this Workspace owns a live
-            // claude here" signal rather than a "we have a status
-            // record for this cwd somewhere on disk".
-            //
-            // Trade-off: there's a ~3 s window after `claude` starts
-            // before PtyTracker's next poll lands the binding, so the
-            // indicator appears slightly later than the first hook
-            // event. Acceptable for the correctness it buys.
-            claude_status_per_lane: {
-                let live = self.live_session_ids();
-                let mut map = std::collections::HashMap::new();
-                // Iterate every project's lanes, not just the
-                // active project's — the left dock renders every
-                // project and each project numbers lanes from 0,
-                // so keying by bare `LaneId` would alias status
-                // across projects.
-                for project in &self.projects {
-                    for wt in &project.lanes {
-                        if let Some(state) = crate::workspace::claude_session_ops::lane_status_from(
-                            &self.claude.claude_status,
-                            &wt.path,
-                            &live,
-                        ) {
-                            let key = daruda_store::project::LaneRef {
-                                project: project.id,
-                                lane: wt.id,
-                            };
-                            map.insert(key, state);
-                        }
-                    }
-                }
-                map
-            },
-            claude_per_session_per_lane: {
-                let live = self.live_session_ids();
-                let mut map = std::collections::HashMap::new();
-                for project in &self.projects {
-                    for wt in &project.lanes {
-                        let sessions: Vec<_> = self
-                            .claude
-                            .claude_status
-                            .per_session_states_for_cwd(&wt.path)
-                            .into_iter()
-                            .filter(|(sid, _)| live.contains(sid.as_str()))
-                            .collect();
-                        // Only lanes with ≥ 2 PID-confirmed
-                        // sessions get a sub-row; single-session
-                        // lanes are fully described by the leading
-                        // indicator.
-                        if sessions.len() >= 2 {
-                            let key = daruda_store::project::LaneRef {
-                                project: project.id,
-                                lane: wt.id,
-                            };
-                            map.insert(key, sessions);
-                        }
-                    }
-                }
-                map
-            },
+            claude_status_per_lane,
+            claude_per_session_per_lane,
             claude_active_session_id: self
                 .claude
                 .pty_claude_bindings

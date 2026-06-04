@@ -100,7 +100,7 @@ impl Workspace {
             source: Source::Jsonl,
         };
         #[cfg(debug_assertions)]
-        let dbg_probe = self.probe_lane_status(&file.session_id, &file.cwd);
+        let dbg_probe = self.probe_lane_status(&file.session_id);
         #[cfg(debug_assertions)]
         let dbg_fields = (
             file.session_id.clone(),
