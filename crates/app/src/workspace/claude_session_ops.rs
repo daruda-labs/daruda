@@ -368,6 +368,25 @@ pub(in crate::workspace) fn aggregate_over_panes(
     (per_lane_status, per_lane_sessions)
 }
 
+/// `true` when any pane's bound session is in a non-`Idle` status.
+/// The status-pulse gate reads this instead of the per-lane aggregate:
+/// the aggregate's max-priority collapse would hide a `Connecting`
+/// session (priority 0) behind an `Idle` sibling (priority 1) even
+/// though its sub-row badge animates. Short-circuits without
+/// allocating, so it is cheap on the pulse tick.
+pub(in crate::workspace) fn any_pane_session_animating(
+    pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
+    bindings: &HashMap<PaneId, PtyBinding>,
+    store: &daruda_claude::ClaudeStatusStore,
+) -> bool {
+    pane_lane.iter().any(|(pane_id, _)| {
+        bindings
+            .get(pane_id)
+            .and_then(|binding| store.get(&binding.session_id))
+            .is_some_and(|file| !matches!(file.status, SessionStatus::Idle))
+    })
+}
+
 impl Workspace {
     /// Every pane in the workspace paired with its owning lane, in layout
     /// order. The active lane's panes come from the live `main_area`
@@ -717,6 +736,47 @@ mod tests {
         let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store);
         assert!(per_lane.is_empty());
         assert!(per_session.is_empty());
+    }
+
+    #[test]
+    fn animating_when_a_connecting_session_hides_behind_idle_aggregate() {
+        // [Idle, Connecting] in one lane: the per-lane max-priority
+        // aggregate is Idle (1 > 0), but the Connecting badge still
+        // animates in the sub-row — the pulse gate must look at the
+        // sessions, not the collapsed aggregate.
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        let store = store_with(vec![
+            entry("a", "/x", SessionStatus::Idle),
+            entry("b", "/x", SessionStatus::Connecting),
+        ]);
+        assert!(any_pane_session_animating(&pane_lane, &bindings, &store));
+    }
+
+    #[test]
+    fn not_animating_when_every_bound_session_is_idle() {
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> =
+            [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        let store = store_with(vec![
+            entry("a", "/x", SessionStatus::Idle),
+            entry("b", "/y", SessionStatus::Idle),
+        ]);
+        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store));
+    }
+
+    #[test]
+    fn not_animating_for_unbound_panes_or_missing_store_entries() {
+        // Panes without a binding and bindings whose session has no
+        // store entry contribute no motion.
+        let lane = lane_ref(1, 1);
+        let pane_lane = vec![(10u64, lane), (20u64, lane)];
+        let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "ghost")].into_iter().collect();
+        let store = daruda_claude::ClaudeStatusStore::new();
+        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store));
     }
 
     #[cfg(debug_assertions)]

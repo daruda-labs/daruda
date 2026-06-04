@@ -1124,21 +1124,18 @@ impl Workspace {
         if self.claude.pty_claude_bindings.is_empty() {
             return false;
         }
-        // A lane's per-lane status is the highest-priority status among
-        // its panes' sessions (`NeedsAttention` > `Working`/`ExecutingTool`
-        // > `Idle` > `Connecting`). The pulse runs for any aggregate other
-        // than `Idle`: an active session is in motion, and a lone
-        // `Connecting` session pulses while starting up. Only an `Idle`
-        // aggregate is fully at rest.
+        // Per-session, not per-lane-aggregate: the aggregate's
+        // max-priority collapse would hide a `Connecting` session
+        // (priority 0) behind an `Idle` sibling (priority 1) and stop
+        // the pulse while that Connecting badge still animates in the
+        // sub-row. Only a pane set where every bound session is `Idle`
+        // is fully at rest.
         let index = self.pane_lane_index();
-        let (per_lane, _) = crate::workspace::claude_session_ops::aggregate_over_panes(
+        crate::workspace::claude_session_ops::any_pane_session_animating(
             &index,
             &self.claude.pty_claude_bindings,
             &self.claude.claude_status,
-        );
-        per_lane
-            .values()
-            .any(|s| !matches!(s, daruda_claude::SessionStatus::Idle))
+        )
     }
 
     /// Display name of the currently active project. `None` when the
