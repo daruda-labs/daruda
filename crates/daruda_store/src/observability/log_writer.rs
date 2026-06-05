@@ -116,7 +116,23 @@ pub fn log_dir() -> Option<PathBuf> {
 pub fn fresh_panic_log_path() -> Option<PathBuf> {
     let dir = log_dir()?;
     let ts = Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
-    Some(dir.join(format!("panic-{ts}.log")))
+    fresh_panic_log_path_in(&dir, &ts)
+}
+
+/// Pick a panic-log path under `dir` for timestamp `ts` that does not
+/// collide with an existing file. The timestamp has second resolution,
+/// but one crash can invoke the panic hook twice within a second (an
+/// unwinding panic that crosses a nounwind frame raises a second
+/// "panic in a function that cannot unwind") — a bare name would
+/// overwrite the first report, losing the original panic message.
+fn fresh_panic_log_path_in(dir: &Path, ts: &str) -> Option<PathBuf> {
+    let base = dir.join(format!("panic-{ts}.log"));
+    if !base.exists() {
+        return Some(base);
+    }
+    (1..100)
+        .map(|n| dir.join(format!("panic-{ts}.{n:02}.log")))
+        .find(|p| !p.exists())
 }
 
 /// Path of the day's primary daily file (ordinal 0). Independent of
@@ -282,7 +298,35 @@ pub fn scan_latest_panic_log() -> Option<PathBuf> {
             _ => best = Some((mtime, path)),
         }
     }
-    best.map(|(_, p)| p)
+    let (_, latest) = best?;
+    Some(original_panic_sibling(latest))
+}
+
+/// Map an ordinal-suffixed panic log (`panic-<ts>.NN.log`, written by a
+/// same-second follow-up hook invocation such as the "cannot unwind"
+/// secondary panic) back to its base sibling `panic-<ts>.log` when that
+/// file exists — the base file holds the ORIGINAL panic message, which
+/// is the report worth surfacing. Paths without an ordinal (or whose
+/// base sibling is missing) pass through unchanged.
+fn original_panic_sibling(path: PathBuf) -> PathBuf {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return path;
+    };
+    let Some(stem) = name
+        .strip_prefix("panic-")
+        .and_then(|s| s.strip_suffix(".log"))
+    else {
+        return path;
+    };
+    // `<ts>.NN` → `<ts>`; anything else (no dot-ordinal) passes through.
+    let Some((ts, ordinal)) = stem.rsplit_once('.') else {
+        return path;
+    };
+    if ordinal.is_empty() || !ordinal.bytes().all(|b| b.is_ascii_digit()) {
+        return path;
+    }
+    let base = path.with_file_name(format!("panic-{ts}.log"));
+    if base.exists() { base } else { path }
 }
 
 /// Drains the `rx` channel; opens / rolls daily files; prunes stale
@@ -445,6 +489,42 @@ mod tests {
             .and_then(|n| n.to_str())
             .unwrap_or("");
         assert_eq!(parent, "logs");
+    }
+
+    #[test]
+    fn fresh_panic_log_path_uniquifies_same_second_collisions() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        let ts = "2026-06-05T06-15-56";
+        let first = fresh_panic_log_path_in(dir, ts).unwrap();
+        assert_eq!(first, dir.join("panic-2026-06-05T06-15-56.log"));
+        std::fs::write(&first, "original panic").unwrap();
+        // Second hook invocation in the same second must not pick the
+        // same path (it would truncate the original report away).
+        let second = fresh_panic_log_path_in(dir, ts).unwrap();
+        assert_eq!(second, dir.join("panic-2026-06-05T06-15-56.01.log"));
+        std::fs::write(&second, "cannot-unwind follow-up").unwrap();
+        let third = fresh_panic_log_path_in(dir, ts).unwrap();
+        assert_eq!(third, dir.join("panic-2026-06-05T06-15-56.02.log"));
+        assert_eq!(
+            std::fs::read_to_string(&first).unwrap(),
+            "original panic",
+            "the first report must survive"
+        );
+    }
+
+    #[test]
+    fn original_panic_sibling_prefers_base_report() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("panic-2026-06-05T06-15-56.log");
+        let follow = tmp.path().join("panic-2026-06-05T06-15-56.01.log");
+        // Without the base on disk, the ordinal file passes through.
+        assert_eq!(original_panic_sibling(follow.clone()), follow);
+        std::fs::write(&base, "original").unwrap();
+        // With the base present, the follow-up maps back to it.
+        assert_eq!(original_panic_sibling(follow), base);
+        // A plain base path is untouched.
+        assert_eq!(original_panic_sibling(base.clone()), base);
     }
 
     #[test]
