@@ -1986,3 +1986,32 @@ fn abs_y_unchanged_after_resize() {
         "the projected row's content must match the mark's logical line across resize"
     );
 }
+
+#[test]
+fn capture_attaches_osc8_url_id_to_correct_char_after_scrollout() {
+    // A wide CJK char followed by an ASCII char that alone carries the
+    // OSC 8 link, then enough newlines to scroll the row into scrollback.
+    // The captured LineBuffer cells must carry the link on the ASCII char
+    // and not on the CJK char — the per-physical-cell id dump used to
+    // shift it onto the wrong cell (or drop it) on wide-char rows.
+    let mut s = session_with(80, 3, 1024);
+    s.feed("\u{AC00}".as_bytes()).unwrap();
+    s.feed(b"\x1b]8;;https://example.com\x07x\x1b]8;;\x07\r\n")
+        .unwrap();
+    s.feed(b"b\r\nc\r\nd\r\ne\r\n").unwrap();
+
+    let line = (0..s.line_buffer().len())
+        .map(|i| s.line_buffer().get(i).unwrap())
+        .find(|l| l.text.starts_with('\u{AC00}'))
+        .expect("the CJK+link row must be captured into scrollback");
+    assert_eq!(line.text, "\u{AC00}x");
+    assert_eq!(line.cells.len(), 2, "one cell per char");
+    assert!(
+        line.cells[0].url_id.is_none(),
+        "the CJK char must carry no link"
+    );
+    assert!(
+        line.cells[1].url_id.is_some(),
+        "the link must land on the ASCII char"
+    );
+}

@@ -858,15 +858,39 @@ fn dumpScreenRowUrlIdsInner(
     const cells = pin.cells(.all);
 
     const alloc = std.heap.c_allocator;
+
+    // Drive the id emission off the SAME `encodeUtf8` traversal that
+    // `dump_screen_row` produces text from: `cell_map` records the source
+    // cell of every emitted codepoint (skipping spacers, trimming trailing
+    // blanks, expanding graphemes). Emitting one id per cell-map entry
+    // therefore yields exactly one id per text char, aligned 1:1 — instead
+    // of one per physical cell, which over-counted wide-char spacers and
+    // trailing blanks and shifted ids onto the wrong cells.
+    var cell_map = terminal.Page.CellMap.init(alloc);
+    defer cell_map.deinit();
+    var text = std.ArrayList(u8).init(alloc);
+    defer text.deinit();
+    try handle.terminal.screen.pages.encodeUtf8(text.writer(), .{
+        .tl = pin,
+        .br = pin,
+        .unwrap = false,
+        .cell_map = &cell_map,
+    });
+
     var out = std.ArrayList(u8).init(alloc);
     errdefer out.deinit();
-    try out.ensureTotalCapacity(cells.len * @sizeOf(u16));
+    try out.ensureTotalCapacity(cell_map.items.len * @sizeOf(u16));
 
-    for (cells) |*cell| {
+    for (cell_map.items) |entry| {
         var id: u16 = 0;
-        if (cell.hyperlink) {
-            if (pin.node.data.lookupHyperlink(cell)) |link_id| {
-                id = @intCast(link_id);
+        // Single-row dump (tl == br): every entry sits on the pin's row,
+        // so the cell is `cells[entry.x]`. Guard the index defensively.
+        if (entry.x < cells.len) {
+            const cell = &cells[entry.x];
+            if (cell.hyperlink) {
+                if (pin.node.data.lookupHyperlink(cell)) |link_id| {
+                    id = @intCast(link_id);
+                }
             }
         }
         try out.appendSlice(std.mem.asBytes(&id));
