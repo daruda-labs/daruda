@@ -638,6 +638,27 @@ pub(in crate::workspace) fn resolve_images(
 /// appearance, so a dark UI renders a dark diagram (light edges/text). On a
 /// light UI the source is unchanged (mermaid's default is already light). A
 /// user-authored `%%{init ...}%%` directive is always respected.
+/// If `spans` is a single image (ignoring surrounding whitespace), return its
+/// `(alt, raster)`. Such a paragraph renders the image block-style (large);
+/// otherwise images render inline, sized to the text line.
+pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option<&RasterImage>)> {
+    let mut found: Option<(&str, Option<&RasterImage>)> = None;
+    for span in spans {
+        match span {
+            MdSpan::Image { alt, raster, .. } => {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some((alt.as_str(), raster.as_ref()));
+            }
+            MdSpan::SoftBreak | MdSpan::HardBreak => {}
+            MdSpan::Text(t) if t.trim().is_empty() => {}
+            _ => return None,
+        }
+    }
+    found
+}
+
 pub(in crate::workspace) fn mermaid_with_theme(source: &str, dark: bool) -> String {
     if !dark || source.contains("%%{init") {
         source.to_string()
@@ -800,6 +821,23 @@ mod tests {
             panic!("expected image span");
         };
         assert!(raster.is_some());
+    }
+
+    #[test]
+    fn lone_image_detects_standalone_image_paragraphs() {
+        let img = || MdSpan::Image {
+            url: "x".to_owned(),
+            alt: "a".to_owned(),
+            raster: None,
+        };
+        // single image → standalone
+        assert!(lone_image(&[img()]).is_some());
+        // image + whitespace-only text → still standalone
+        assert!(lone_image(&[img(), MdSpan::Text("   ".to_owned())]).is_some());
+        // image among real text → inline (None)
+        assert!(lone_image(&[MdSpan::Text("see ".to_owned()), img()]).is_none());
+        // two images → not a lone image
+        assert!(lone_image(&[img(), img()]).is_none());
     }
 
     #[test]

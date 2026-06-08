@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::CharSelection;
-use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan};
+use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan, lone_image};
 use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 
 /// Top-level Markdown body: a padded column of selectable blocks.
@@ -76,12 +76,21 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                 .into_any_element()
         }
 
-        MdBlock::Paragraph(spans) => div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .children(render_md_spans(spans, t))
-            .into_any_element(),
+        MdBlock::Paragraph(spans) => {
+            // A paragraph that is just an image renders it block-style (large);
+            // an image mixed with text renders inline, sized to the line.
+            if let Some((alt, raster)) = lone_image(spans) {
+                render_md_image(raster, alt, ImageLayout::Block, t)
+            } else {
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .children(render_md_spans(spans, t))
+                    .into_any_element()
+            }
+        }
 
         MdBlock::CodeBlock { rows, .. } => {
             let body_text = t.file_viewer_text;
@@ -120,7 +129,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         }
 
         MdBlock::Mermaid { source, raster } => match raster {
-            Some(raster) => render_md_image(Some(raster), "", t),
+            Some(raster) => render_md_image(Some(raster), "", ImageLayout::Block, t),
             None => {
                 // Rendering failed/pending: fall back to the raw source, styled
                 // like a code block.
@@ -421,14 +430,30 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .child(s.clone())
             .into_any_element(),
 
-        MdSpan::Image { alt, raster, .. } => render_md_image(raster.as_ref(), alt, t),
+        MdSpan::Image { alt, raster, .. } => {
+            render_md_image(raster.as_ref(), alt, ImageLayout::Inline, t)
+        }
     }
 }
 
+/// How a markdown image is sized.
+#[derive(Clone, Copy)]
+enum ImageLayout {
+    /// Standalone image / diagram: fits the pane width, height capped.
+    Block,
+    /// Image embedded in a text run: sized to the line so it flows with text.
+    Inline,
+}
+
 /// Render a resolved image bitmap, or fall back to `[alt]` text when the image
-/// was not loaded (remote/missing/decode-failed). Width fits the pane; height
-/// is capped. `object_fit` defaults to `Contain`, preserving aspect ratio.
-fn render_md_image(raster: Option<&RasterImage>, alt: &str, t: &DarudaTheme) -> AnyElement {
+/// was not loaded (remote/missing/decode-failed). `object_fit` defaults to
+/// `Contain`, preserving aspect ratio; gpui derives the unset dimension from it.
+fn render_md_image(
+    raster: Option<&RasterImage>,
+    alt: &str,
+    layout: ImageLayout,
+    t: &DarudaTheme,
+) -> AnyElement {
     let Some(raster) = raster else {
         return div()
             .text_color(t.md_footnote_color)
@@ -445,15 +470,21 @@ fn render_md_image(raster: Option<&RasterImage>, alt: &str, t: &DarudaTheme) -> 
         return div().child(format!("[{alt}]")).into_any_element();
     };
     let render_image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
-    // Display at logical (1×) size — a 2× HiDPI bitmap stays crisp but shows at
-    // its natural size. Setting width alone lets gpui derive height from the
-    // aspect ratio; `max_w_full` shrinks anything wider than the pane.
-    let (logical_w, _) = raster.logical_size();
-    img(ImageSource::Render(render_image))
-        .w(px(logical_w))
-        .max_w_full()
-        .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
-        .into_any_element()
+    let el = img(ImageSource::Render(render_image));
+    match layout {
+        // Display at logical (1×) size — a 2× HiDPI bitmap stays crisp but shows
+        // at its natural size. Setting width alone lets gpui derive height from
+        // the aspect ratio; `max_w_full` shrinks anything wider than the pane.
+        ImageLayout::Block => {
+            let (logical_w, _) = raster.logical_size();
+            el.w(px(logical_w))
+                .max_w_full()
+                .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
+        }
+        // Sized to the text line; gpui derives width from the aspect ratio.
+        ImageLayout::Inline => el.h(px(theme::MD_INLINE_IMAGE_HEIGHT)),
+    }
+    .into_any_element()
 }
 
 /// Returns true when `block_idx` falls within the char-selection row range.
