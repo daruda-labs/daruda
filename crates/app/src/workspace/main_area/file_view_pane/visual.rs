@@ -4,11 +4,6 @@
 //! GPUI-free: produces plain [`RasterImage`] data. Wrapping into a GPUI
 //! `RenderImage` happens at the render boundary, not here.
 
-// `rasterize_svg` (+ its scale/clamp consts) is consumed by the mermaid render
-// path in Phase 2; `decode_image` / `load_image_source` are already wired.
-// Remove this allow once the mermaid path lands.
-#![allow(dead_code)]
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -51,11 +46,35 @@ pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterIma
         &mut pixmap.as_mut(),
     );
 
+    let mut rgba = pixmap.data().to_vec();
+    unpremultiply(&mut rgba);
     Ok(RasterImage {
         width,
         height,
-        rgba: pixmap.data().to_vec(),
+        rgba,
     })
+}
+
+/// Convert premultiplied-alpha RGBA (tiny-skia's pixmap format) to straight
+/// alpha, matching the straight-alpha contract shared with `decode_image`.
+fn unpremultiply(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3];
+        match a {
+            0 => {
+                px[0] = 0;
+                px[1] = 0;
+                px[2] = 0;
+            }
+            255 => {}
+            a => {
+                let a = u16::from(a);
+                for c in &mut px[..3] {
+                    *c = ((u16::from(*c) * 255 + a / 2) / a).min(255) as u8;
+                }
+            }
+        }
+    }
 }
 
 /// Resolve a markdown image reference to its encoded bytes.
@@ -123,6 +142,24 @@ mod tests {
     #[test]
     fn rejects_non_svg_input() {
         assert!(rasterize_svg("this is not svg at all").is_err());
+    }
+
+    #[test]
+    fn unpremultiply_restores_straight_alpha() {
+        let mut opaque = [10u8, 20, 30, 255];
+        unpremultiply(&mut opaque);
+        assert_eq!(opaque, [10, 20, 30, 255], "opaque pixels unchanged");
+
+        let mut clear = [9u8, 9, 9, 0];
+        unpremultiply(&mut clear);
+        assert_eq!(clear, [0, 0, 0, 0], "fully transparent pixels zeroed");
+
+        let mut semi = [64u8, 0, 0, 128];
+        unpremultiply(&mut semi);
+        assert!(
+            semi[0] > 64 && semi[3] == 128,
+            "semi-transparent channel scaled up, alpha preserved: {semi:?}"
+        );
     }
 
     #[test]

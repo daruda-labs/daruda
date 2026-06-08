@@ -119,6 +119,31 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             code_col.into_any_element()
         }
 
+        MdBlock::Mermaid { source, raster } => match raster {
+            Some(raster) => render_md_image(Some(raster), "", t),
+            None => {
+                // Rendering failed/pending: fall back to the raw source, styled
+                // like a code block.
+                let body_text = t.file_viewer_text;
+                let mut col = div()
+                    .flex()
+                    .flex_col()
+                    .bg(t.md_code_block_bg)
+                    .border_1()
+                    .border_color(t.md_code_block_border)
+                    .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
+                    .px(px(theme::MD_CODE_BLOCK_PAD_X))
+                    .py(px(theme::MD_CODE_BLOCK_PAD_Y))
+                    .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                    .font(gpui::font("monospace"))
+                    .text_color(body_text);
+                for line in source.lines() {
+                    col = col.child(div().child(line.to_owned()).into_any_element());
+                }
+                col.into_any_element()
+            }
+        },
+
         MdBlock::BulletList(items) => {
             let mut list = div().flex().flex_col().gap(px(theme::MD_LIST_ITEM_GAP));
             for item in items {

@@ -108,6 +108,17 @@ fn load_raw(
                             .ok()
                     });
                 }
+                super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
+                    // selkie is a young reimplementation; guard against a panic
+                    // on malformed input so one bad diagram can't fail the load.
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        selkie::render::render_text(source)
+                            .ok()
+                            .and_then(|svg| super::visual::rasterize_svg(&svg).ok())
+                    }))
+                    .ok()
+                    .flatten()
+                });
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);

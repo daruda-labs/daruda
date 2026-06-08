@@ -94,6 +94,12 @@ pub(in crate::workspace) enum MdBlock {
     },
     /// Raw HTML block (dim monospace passthrough).
     HtmlBlock(String),
+    /// Mermaid diagram (```mermaid fence). `raster` is filled by the loader
+    /// (selkie → SVG → rasterize); `None` falls back to the raw source.
+    Mermaid {
+        source: String,
+        raster: Option<RasterImage>,
+    },
 }
 
 // ----------------------------------------------------------------
@@ -161,6 +167,15 @@ fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(
             let (text, consumed) = collect_text_until(events, pos + 1, |e| {
                 matches!(e, Event::End(TagEnd::CodeBlock))
             });
+            if lang.as_deref() == Some("mermaid") {
+                return Some((
+                    MdBlock::Mermaid {
+                        source: text,
+                        raster: None,
+                    },
+                    consumed + 2,
+                ));
+            }
             let mut rows = build_code_rows(&text);
             if let Some(ref l) = lang {
                 highlight_raw_rows(&mut rows, l, syntax_theme);
@@ -487,6 +502,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
                 .join("\n");
             format!("```{fence}\n{body}\n```")
         }
+        MdBlock::Mermaid { source, .. } => format!("```mermaid\n{source}\n```"),
         MdBlock::BulletList(items) => items
             .iter()
             .map(|item| {
@@ -610,7 +626,41 @@ pub(in crate::workspace) fn resolve_images(
                     }
                 }
             }
-            MdBlock::CodeBlock { .. } | MdBlock::Rule | MdBlock::HtmlBlock(_) => {}
+            MdBlock::CodeBlock { .. }
+            | MdBlock::Rule
+            | MdBlock::HtmlBlock(_)
+            | MdBlock::Mermaid { .. } => {}
+        }
+    }
+}
+
+/// Walk every mermaid block in `blocks` (recursing into list item children) and
+/// fill its `raster` via `resolve`. Pure traversal — the caller supplies the
+/// rendering (selkie → SVG → rasterize) as the closure.
+pub(in crate::workspace) fn resolve_mermaid(
+    blocks: &mut [MdBlock],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for block in blocks {
+        match block {
+            MdBlock::Mermaid { source, raster } => {
+                if raster.is_none() {
+                    *raster = resolve(source);
+                }
+            }
+            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+                for item in items {
+                    resolve_mermaid(&mut item.children, resolve);
+                }
+            }
+            MdBlock::Heading { .. }
+            | MdBlock::Paragraph(_)
+            | MdBlock::CodeBlock { .. }
+            | MdBlock::Blockquote(_)
+            | MdBlock::Rule
+            | MdBlock::Table { .. }
+            | MdBlock::FootnoteDefinition { .. }
+            | MdBlock::HtmlBlock(_) => {}
         }
     }
 }
@@ -735,6 +785,27 @@ mod tests {
         };
         let MdSpan::Image { raster, .. } = &spans[0] else {
             panic!("expected image span");
+        };
+        assert!(raster.is_some());
+    }
+
+    #[test]
+    fn resolve_mermaid_fills_raster() {
+        let mut blocks = vec![MdBlock::Mermaid {
+            source: "graph TD\nA-->B".to_owned(),
+            raster: None,
+        }];
+        let dummy = RasterImage {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255],
+        };
+        resolve_mermaid(&mut blocks, &mut |src| {
+            assert!(src.contains("graph"));
+            Some(dummy.clone())
+        });
+        let MdBlock::Mermaid { raster, .. } = &blocks[0] else {
+            panic!("expected mermaid block");
         };
         assert!(raster.is_some());
     }
