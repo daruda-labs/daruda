@@ -4,13 +4,14 @@
 use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
 use gpui::{
-    AnyElement, Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, div, prelude::*,
-    px,
+    AnyElement, Context, ImageSource, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    RenderImage, div, img, prelude::*, px,
 };
 
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::CharSelection;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::{MdBlock, MdSpan};
+use crate::workspace::main_area::file_view_pane::visual::RasterImage;
 
 /// Top-level Markdown body: a padded column of selectable blocks.
 pub(super) fn render_md_body(
@@ -394,7 +395,35 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .text_size(px(theme::MD_HTML_FONT_SIZE))
             .child(s.clone())
             .into_any_element(),
+
+        MdSpan::Image { alt, raster, .. } => render_md_image(raster.as_ref(), alt, t),
     }
+}
+
+/// Render a resolved image bitmap, or fall back to `[alt]` text when the image
+/// was not loaded (remote/missing/decode-failed). Width fits the pane; height
+/// is capped. `object_fit` defaults to `Contain`, preserving aspect ratio.
+fn render_md_image(raster: Option<&RasterImage>, alt: &str, t: &DarudaTheme) -> AnyElement {
+    let Some(raster) = raster else {
+        return div()
+            .text_color(t.md_footnote_color)
+            .child(format!("[{alt}]"))
+            .into_any_element();
+    };
+    // gpui's `RenderImage` is BGRA with straight alpha (matches gpui's own
+    // decoder, which only swaps channels and does not premultiply).
+    let mut bgra = raster.rgba.clone();
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let Some(buffer) = image::RgbaImage::from_raw(raster.width, raster.height, bgra) else {
+        return div().child(format!("[{alt}]")).into_any_element();
+    };
+    let render_image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+    img(ImageSource::Render(render_image))
+        .max_w_full()
+        .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
+        .into_any_element()
 }
 
 /// Returns true when `block_idx` falls within the char-selection row range.

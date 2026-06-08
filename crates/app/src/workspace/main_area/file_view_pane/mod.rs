@@ -11,6 +11,7 @@ pub(in crate::workspace) mod file_content;
 pub(in crate::workspace) mod highlighter;
 pub(in crate::workspace) mod markdown_viewer;
 pub(in crate::workspace) mod search_ops;
+pub(in crate::workspace) mod visual;
 pub(in crate::workspace) mod word_diff;
 
 pub mod render;

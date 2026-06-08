@@ -9,6 +9,7 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::highlighter::highlight_raw_rows;
+use super::visual::RasterImage;
 use super::{VisualRow, VisualRowKind};
 
 // ----------------------------------------------------------------
@@ -33,6 +34,13 @@ pub(in crate::workspace) enum MdSpan {
     Footnote(String),
     /// Inline HTML shown verbatim in dim monospace.
     Html(String),
+    /// Image reference. `raster` is filled by `resolve_images` after parsing
+    /// (local files + data URIs only); `None` falls back to the alt text.
+    Image {
+        url: String,
+        alt: String,
+        raster: Option<RasterImage>,
+    },
 }
 
 // ----------------------------------------------------------------
@@ -422,12 +430,14 @@ fn parse_inline(events: &[Event<'_>], pos: usize) -> (MdSpan, usize) {
         Event::Start(Tag::Image { dest_url, .. }) => {
             let (alt_text, consumed) =
                 collect_text_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Image)));
-            let text = if alt_text.is_empty() {
-                dest_url.to_string()
-            } else {
-                alt_text
-            };
-            (MdSpan::Text(format!("[{text}]")), consumed + 2)
+            (
+                MdSpan::Image {
+                    url: dest_url.to_string(),
+                    alt: alt_text,
+                    raster: None,
+                },
+                consumed + 2,
+            )
         }
 
         Event::InlineHtml(s) => (MdSpan::Html(s.to_string()), 1),
@@ -560,9 +570,74 @@ fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
             MdSpan::SoftBreak | MdSpan::HardBreak => out.push(' '),
             MdSpan::Footnote(label) => out.push_str(&format!("[^{label}]")),
             MdSpan::Html(s) => out.push_str(s),
+            MdSpan::Image { url, alt, .. } => {
+                let label = if alt.is_empty() { url } else { alt };
+                out.push_str(&format!("[{label}]"));
+            }
         }
     }
     out
+}
+
+/// Walk every image span in `blocks` (recursing into nested spans and list
+/// item children) and fill its `raster` via `resolve`. Pure traversal — the
+/// caller supplies the I/O (file read + decode) as the closure.
+pub(in crate::workspace) fn resolve_images(
+    blocks: &mut [MdBlock],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for block in blocks {
+        match block {
+            MdBlock::Heading { spans, .. }
+            | MdBlock::Paragraph(spans)
+            | MdBlock::Blockquote(spans)
+            | MdBlock::FootnoteDefinition { spans, .. } => {
+                resolve_images_in_spans(spans, resolve);
+            }
+            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+                for item in items {
+                    resolve_images_in_spans(&mut item.spans, resolve);
+                    resolve_images(&mut item.children, resolve);
+                }
+            }
+            MdBlock::Table { header, rows } => {
+                for cell in header {
+                    resolve_images_in_spans(cell, resolve);
+                }
+                for row in rows {
+                    for cell in row {
+                        resolve_images_in_spans(cell, resolve);
+                    }
+                }
+            }
+            MdBlock::CodeBlock { .. } | MdBlock::Rule | MdBlock::HtmlBlock(_) => {}
+        }
+    }
+}
+
+fn resolve_images_in_spans(
+    spans: &mut [MdSpan],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for span in spans {
+        match span {
+            MdSpan::Image { url, raster, .. } => {
+                if raster.is_none() {
+                    *raster = resolve(url);
+                }
+            }
+            MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
+                resolve_images_in_spans(inner, resolve);
+            }
+            MdSpan::Text(_)
+            | MdSpan::Code(_)
+            | MdSpan::Link { .. }
+            | MdSpan::SoftBreak
+            | MdSpan::HardBreak
+            | MdSpan::Footnote(_)
+            | MdSpan::Html(_) => {}
+        }
+    }
 }
 
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {
@@ -637,5 +712,47 @@ mod tests {
     fn parse_horizontal_rule() {
         let blocks = parse_markdown("---\n", "base16-ocean.dark");
         assert!(matches!(blocks[0], MdBlock::Rule));
+    }
+
+    #[test]
+    fn resolve_images_fills_raster_for_each_image() {
+        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Image {
+            url: "pic.png".to_owned(),
+            alt: "a".to_owned(),
+            raster: None,
+        }])];
+        let dummy = RasterImage {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255],
+        };
+        resolve_images(&mut blocks, &mut |url| {
+            assert_eq!(url, "pic.png");
+            Some(dummy.clone())
+        });
+        let MdBlock::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let MdSpan::Image { raster, .. } = &spans[0] else {
+            panic!("expected image span");
+        };
+        assert!(raster.is_some());
+    }
+
+    #[test]
+    fn resolve_images_recurses_into_nested_spans() {
+        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Bold(vec![
+            MdSpan::Image {
+                url: "n.png".to_owned(),
+                alt: String::new(),
+                raster: None,
+            },
+        ])])];
+        let mut count = 0;
+        resolve_images(&mut blocks, &mut |_| {
+            count += 1;
+            None
+        });
+        assert_eq!(count, 1);
     }
 }

@@ -100,7 +100,14 @@ fn load_raw(
             let ext = path.extension_str();
 
             if ext == "md" || ext == "markdown" {
-                let blocks = super::markdown_viewer::parse_markdown(&text, syntax_theme);
+                let mut blocks = super::markdown_viewer::parse_markdown(&text, syntax_theme);
+                if let Some(base_dir) = path.parent().map(std::path::Path::to_path_buf) {
+                    super::markdown_viewer::resolve_images(&mut blocks, &mut |url| {
+                        super::visual::load_image_source(url, &base_dir)
+                            .and_then(|bytes| super::visual::decode_image(&bytes))
+                            .ok()
+                    });
+                }
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);
