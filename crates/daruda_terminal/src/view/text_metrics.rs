@@ -119,19 +119,19 @@ pub(crate) fn byte_index_for_x_in_text(
 /// first `bounds_for_range` call before any paint).
 pub(crate) fn cell_left_x_for_col(
     line_layouts: &[Option<gpui::ShapedLine>],
-    viewport_lines: &[String],
     col: u16,
     row: u16,
     cell_width: f32,
     origin_left: Pixels,
 ) -> Pixels {
     let row_idx = row.saturating_sub(1) as usize;
-    if let Some(Some(line)) = line_layouts.get(row_idx)
-        && let Some(text) = viewport_lines.get(row_idx)
-    {
-        let byte = byte_index_for_column_in_line(text, col);
-        let byte = super::text_edit::clamp_to_char_boundary(line.text.as_str(), byte);
-        return origin_left + line.x_for_index(byte.min(line.text.len()));
+    // The shaped line's `text` is the row text (built from `viewport_lines`
+    // and recleared on every dirty update), so `shaped_x_for_col` derives
+    // both the byte index and the pixel from that one string — keeping the
+    // preedit anchor consistent with the cursor and correct when the cursor
+    // sits past a trailing space the row dump trimmed.
+    if let Some(Some(line)) = line_layouts.get(row_idx) {
+        return shaped_x_for_col(line, col, cell_width, origin_left);
     }
     origin_left + gpui::px(cell_width * col.saturating_sub(1) as f32)
 }
@@ -265,17 +265,69 @@ pub(crate) fn grid_right_x(origin_left: Pixels, cell_width: f32, cols: u16) -> P
     origin_left + gpui::px(cell_width * cols as f32)
 }
 
-/// Left-edge pixel x of the cursor block for a given 1-indexed VT column.
+/// Total display columns occupied by `line` — the sum of per-char widths,
+/// the same width model [`byte_index_for_column_in_line`] walks. Zero-width
+/// combining marks contribute 0.
+fn display_columns_in_line(line: &str) -> usize {
+    use unicode_width::UnicodeWidthChar as _;
+    line.chars().map(|c| c.width().unwrap_or(0)).sum()
+}
+
+/// Left-edge pixel x (from `origin_left`) of 1-indexed `col` within a shaped
+/// row, accounting for trailing grid cells the row-text dump trimmed.
 ///
-/// Uses the shaper's `x_for_index` rather than `(col-1) × cell_width`
-/// because GPUI drops `force_width` on any line containing wide/CJK glyphs,
-/// making the linear formula drift by up to 1 cell per wide character.
-/// Keeping this helper here (next to `byte_index_for_column_in_line`)
-/// ensures both the lookup and the pixel conversion stay together and are
-/// not accidentally "simplified" to the linear form in calling code.
-pub(crate) fn cursor_x_for_col(line: &gpui::ShapedLine, col: u16, origin_left: Pixels) -> Pixels {
-    let byte_index = byte_index_for_column_in_line(line.text.as_str(), col);
-    origin_left + line.x_for_index(byte_index.min(line.text.len()))
+/// For columns inside the shaped text the shaper's `x_for_index` is
+/// authoritative — GPUI drops `force_width` on wide/CJK rows, so the linear
+/// `(col-1) × cell_width` drifts by up to a cell per wide glyph.
+///
+/// But the cursor (and the IME preedit anchored to it) can legitimately sit
+/// *past* the last shaped glyph: a TUI such as Claude Code's input box
+/// advances over a just-typed trailing space without writing a `0x20`, and
+/// `encodeUtf8` trims that empty cell, so the shaped row is a column short.
+/// Clamping `x_for_index` to the text length then paints the cursor/preedit
+/// on top of the space, hiding it until a following glyph makes the space
+/// non-trailing. Extend by `cell_width` per column beyond the shaped text so
+/// the anchor lands on its true column. `col == shaped_cols + 1` is the
+/// normal end-of-line position and still routes through the shaper.
+/// Columns a 1-indexed `col` sits **past** the shaped text's last cell —
+/// i.e. how many trimmed trailing grid cells the pixel mapping must bridge
+/// with `cell_width`. `0` for any column inside the text *and* for the
+/// normal end-of-line position (`shaped_cols + 1`); both route through the
+/// shaper. This is the exact arithmetic the 6900398 CJK-cursor fix dropped,
+/// so it lives in one tested place — see `shaped_x_for_col`.
+fn cols_past_shaped_text(shaped_cols: usize, col: usize) -> usize {
+    col.saturating_sub(shaped_cols + 1)
+}
+
+fn shaped_x_for_col(
+    line: &gpui::ShapedLine,
+    col: u16,
+    cell_width: f32,
+    origin_left: Pixels,
+) -> Pixels {
+    let text = line.text.as_str();
+    let shaped_cols = display_columns_in_line(text);
+    let col = col.max(1) as usize;
+    match cols_past_shaped_text(shaped_cols, col) {
+        0 => {
+            let byte = byte_index_for_column_in_line(text, col as u16);
+            let byte = super::text_edit::clamp_to_char_boundary(text, byte);
+            origin_left + line.x_for_index(byte.min(text.len()))
+        }
+        extra => origin_left + line.x_for_index(text.len()) + gpui::px(cell_width * extra as f32),
+    }
+}
+
+/// Left-edge pixel x of the cursor block for a given 1-indexed VT column.
+/// Delegates to [`shaped_x_for_col`] so the trailing-cell handling stays in
+/// one place and is not accidentally "simplified" to the linear form.
+pub(crate) fn cursor_x_for_col(
+    line: &gpui::ShapedLine,
+    col: u16,
+    origin_left: Pixels,
+    cell_width: f32,
+) -> Pixels {
+    shaped_x_for_col(line, col, cell_width, origin_left)
 }
 
 /// Width of the cursor block in pixels for the glyph at 1-indexed `col`.
@@ -305,6 +357,38 @@ pub(crate) fn cursor_width_for_col(line: &gpui::ShapedLine, col: u16, cell_width
 mod tests {
     use super::*;
     use gpui::px;
+
+    #[test]
+    fn display_columns_counts_wide_chars_as_two() {
+        assert_eq!(display_columns_in_line(""), 0);
+        assert_eq!(display_columns_in_line("abc"), 3);
+        assert_eq!(display_columns_in_line("한"), 2);
+        // Claude Code input row: ❯ + NBSP + "한글" = 1 + 1 + 2 + 2.
+        assert_eq!(display_columns_in_line("\u{276f}\u{a0}한글"), 6);
+    }
+
+    #[test]
+    fn cols_past_shaped_text_bridges_trimmed_trailing_cells() {
+        // Regression guard for the 6900398 CJK-cursor fix: switching the
+        // cursor/preedit anchor from `cell_width × (col-1)` to the shaper's
+        // `x_for_index` clamped any column past the shaped text onto the
+        // last glyph, so a TUI cursor parked past a trimmed trailing space
+        // painted on top of the space and hid it until the next keystroke.
+        //
+        // Row "❯ 한글" shapes to 6 display columns (the trailing space the
+        // user typed is an empty cell that `encodeUtf8` trims).
+        let shaped_cols = 6;
+        // Columns inside the text and the end-of-line position route through
+        // the shaper unchanged.
+        assert_eq!(cols_past_shaped_text(shaped_cols, 1), 0);
+        assert_eq!(cols_past_shaped_text(shaped_cols, 6), 0);
+        assert_eq!(cols_past_shaped_text(shaped_cols, 7), 0);
+        // Cursor (and IME preedit) at column 8 sits one cell past the shaped
+        // text — bridge exactly one `cell_width` so it lands on its true
+        // column instead of clamping onto the space.
+        assert_eq!(cols_past_shaped_text(shaped_cols, 8), 1);
+        assert_eq!(cols_past_shaped_text(shaped_cols, 10), 3);
+    }
 
     #[test]
     fn grid_right_x_basic() {

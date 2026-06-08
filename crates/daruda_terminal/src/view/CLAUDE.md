@@ -126,6 +126,21 @@ the 13 px search bar), always call
 `cell_metrics` derives `cell_w` from the inherited size, so click-to-cursor
 mapping accumulates error as the text grows longer.
 
+### A cursor/anchor column can sit *past* the shaped text — bridge it
+
+`x_for_index` is authoritative only **inside** the shaped row. `encodeUtf8`
+trims trailing blank cells, so a TUI cursor parked past a just-typed trailing
+space (empty cell, not `0x20`) lands *beyond* the text; `x_for_index(byte.min(len))`
+then clamps onto the last glyph and the cursor/preedit paints over the space,
+hiding it until the next keystroke. Inverse of the wide-char rule above:
+linear math drifts *inside* wide rows, `x_for_index` clamps *past* the end.
+
+- Never map a cursor/anchor column with bare `x_for_index(byte.min(len))`.
+  Use `cursor_x_for_col` (cursor) / `cell_left_x_for_col` (preedit, IME
+  candidate) — both delegate to `shaped_x_for_col`, which bridges past-text
+  columns with `cell_width` (`cols_past_shaped_text`). Regression: 6900398;
+  guard test `cols_past_shaped_text_bridges_trimmed_trailing_cells`.
+
 ---
 
 ## Coordinate spaces — grid row vs viewport row vs absolute screen row
