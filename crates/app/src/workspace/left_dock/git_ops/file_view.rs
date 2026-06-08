@@ -400,6 +400,33 @@ impl Workspace {
     /// pane is identified by `(lane_id, path, staged, mode)` — if
     /// no pane still matches when the load returns (because the user
     /// switched mode or closed the tab), the result is dropped.
+    /// Re-issue the load for every open markdown preview pane. Called on a UI
+    /// theme switch so rendered diagrams (mermaid) re-theme for the new
+    /// appearance — their bitmaps are baked at load time and don't follow a
+    /// live theme change otherwise.
+    pub(in crate::workspace) fn reload_markdown_panes(&mut self, cx: &mut Context<Self>) {
+        // Collect first — `load_pane_file_content` reborrows `self`.
+        let reloads: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = self
+            .main_area
+            .panes
+            .iter()
+            .filter_map(|p| p.file_view())
+            .filter(|fv| matches!(fv.content, PaneFileContent::LoadedMarkdown { .. }))
+            .map(|fv| {
+                (
+                    fv.lane_id,
+                    fv.path.clone(),
+                    fv.staged,
+                    fv.view_mode,
+                    fv.file_status,
+                )
+            })
+            .collect();
+        for (lane_id, path, staged, mode, file_status) in reloads {
+            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
+        }
+    }
+
     fn load_pane_file_content(
         &mut self,
         lane_id: LaneId,
@@ -419,6 +446,13 @@ impl Workspace {
         let wt_path = wt.path.clone();
         let repo_root = self.git_repo_root_for(target);
         let syntax_theme = self.syntax_theme.clone();
+        // Match rendered diagrams (mermaid) to the host appearance. Computed
+        // here because the loader runs GPUI-free on a background thread.
+        // Falls back to dark (the default theme) if the global is absent.
+        let diagram_dark = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(crate::ui::theme::DarudaTheme::is_dark)
+            .unwrap_or(true);
 
         let path_bg = path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -432,6 +466,7 @@ impl Workspace {
                     mode,
                     file_status,
                     &syntax_theme,
+                    diagram_dark,
                 )
             },
             move |ws, content, cx| {

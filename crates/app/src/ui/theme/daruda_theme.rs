@@ -249,6 +249,14 @@ impl DarudaTheme {
         }
     }
 
+    /// Whether this is a dark theme, judged by the base background's
+    /// lightness. Theme-agnostic (works for custom presets), used to pick a
+    /// matching diagram theme so rendered content (e.g. mermaid) stays legible
+    /// on the current surface.
+    pub fn is_dark(&self) -> bool {
+        self.title_bar_bg.l < 0.5
+    }
+
     /// Parse a `DarudaTheme` from JSON. Missing keys fall through to
     /// the compile-time palette defaults thanks to the struct-level
     /// `#[serde(default)]` — a partial theme file is therefore valid

@@ -445,7 +445,12 @@ fn render_md_image(raster: Option<&RasterImage>, alt: &str, t: &DarudaTheme) -> 
         return div().child(format!("[{alt}]")).into_any_element();
     };
     let render_image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+    // Display at logical (1×) size — a 2× HiDPI bitmap stays crisp but shows at
+    // its natural size. Setting width alone lets gpui derive height from the
+    // aspect ratio; `max_w_full` shrinks anything wider than the pane.
+    let (logical_w, _) = raster.logical_size();
     img(ImageSource::Render(render_image))
+        .w(px(logical_w))
         .max_w_full()
         .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
         .into_any_element()

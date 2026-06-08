@@ -5,7 +5,7 @@
 //! `RenderImage` happens at the render boundary, not here.
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Render diagrams/images at 2× their intrinsic size so they stay crisp when
 /// the GPUI render layer scales them to fit the pane on HiDPI displays.
@@ -23,15 +23,30 @@ pub(in crate::workspace) struct RasterImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    /// Device-pixel scale the bitmap was rendered at: 2.0 for HiDPI-crisp SVG
+    /// raster, 1.0 for a natively-sized decoded image. The render layer divides
+    /// by this to get the logical (point) display size, so a 2× bitmap shows at
+    /// its natural size while staying crisp.
+    pub scale: f32,
+}
+
+impl RasterImage {
+    /// Logical (display) size in points = device pixels / [`scale`](Self::scale).
+    pub fn logical_size(&self) -> (f32, f32) {
+        (
+            self.width as f32 / self.scale,
+            self.height as f32 / self.scale,
+        )
+    }
 }
 
 /// Rasterize an SVG document to a [`RasterImage`] at [`RASTER_SCALE`]× its
 /// intrinsic size, so the bitmap stays crisp when painted on HiDPI displays.
 pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterImage> {
-    let mut opt = resvg::usvg::Options::default();
-    let mut fontdb = resvg::usvg::fontdb::Database::new();
-    fontdb.load_system_fonts();
-    opt.fontdb = Arc::new(fontdb);
+    let opt = resvg::usvg::Options {
+        fontdb: shared_fontdb(),
+        ..Default::default()
+    };
 
     let tree = resvg::usvg::Tree::from_str(svg, &opt)?;
     let size = tree.size();
@@ -52,7 +67,22 @@ pub(in crate::workspace) fn rasterize_svg(svg: &str) -> anyhow::Result<RasterIma
         width,
         height,
         rgba,
+        scale: RASTER_SCALE,
     })
+}
+
+/// System font database, loaded once and shared across all `rasterize_svg`
+/// calls. `load_system_fonts` scans and parses every installed face, so doing
+/// it per render would dominate the cost of drawing a diagram.
+fn shared_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
+    static FONTDB: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
+    FONTDB
+        .get_or_init(|| {
+            let mut db = resvg::usvg::fontdb::Database::new();
+            db.load_system_fonts();
+            Arc::new(db)
+        })
+        .clone()
 }
 
 /// Convert premultiplied-alpha RGBA (tiny-skia's pixmap format) to straight
@@ -112,6 +142,7 @@ pub(in crate::workspace) fn decode_image(bytes: &[u8]) -> anyhow::Result<RasterI
         width,
         height,
         rgba: img.into_raw(),
+        scale: 1.0,
     })
 }
 
@@ -142,6 +173,35 @@ mod tests {
     #[test]
     fn rejects_non_svg_input() {
         assert!(rasterize_svg("this is not svg at all").is_err());
+    }
+
+    #[test]
+    fn shared_fontdb_is_loaded_once() {
+        let a = shared_fontdb();
+        let b = shared_fontdb();
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "repeated calls must return the same cached database"
+        );
+    }
+
+    #[test]
+    fn logical_size_divides_pixels_by_scale() {
+        let hidpi = RasterImage {
+            width: 40,
+            height: 80,
+            rgba: vec![],
+            scale: 2.0,
+        };
+        assert_eq!(hidpi.logical_size(), (20.0, 40.0));
+
+        let native = RasterImage {
+            width: 30,
+            height: 30,
+            rgba: vec![],
+            scale: 1.0,
+        };
+        assert_eq!(native.logical_size(), (30.0, 30.0));
     }
 
     #[test]

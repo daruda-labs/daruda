@@ -73,6 +73,7 @@ impl Workspace {
             || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
         let icon_changed = self.mirrors.files_icon_color_mode != new_mirrors.files_icon_color_mode;
         let panels_changed = self.mirrors.panels_grid_columns != new_mirrors.panels_grid_columns;
+        let theme_changed = self.mirrors.ui_preset != new_mirrors.ui_preset;
         self.mirrors = new_mirrors;
         if filter_changed {
             let refs: Vec<_> = self.file_tree.file_trees.keys().copied().collect();
@@ -82,6 +83,12 @@ impl Workspace {
         }
         if icon_changed || panels_changed {
             cx.notify();
+        }
+        // A UI-theme switch changes the host appearance; re-render open
+        // markdown panes so their diagrams (mermaid) re-theme for the new
+        // surface — the bitmaps were baked for the previous appearance.
+        if theme_changed {
+            self.reload_markdown_panes(cx);
         }
         // Picks up `claude_status.enable` flips.
         let new_enabled = config.claude_status.enable;

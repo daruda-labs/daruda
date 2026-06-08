@@ -634,6 +634,18 @@ pub(in crate::workspace) fn resolve_images(
     }
 }
 
+/// Prepend a mermaid `%%{init}%%` theme directive matching the host
+/// appearance, so a dark UI renders a dark diagram (light edges/text). On a
+/// light UI the source is unchanged (mermaid's default is already light). A
+/// user-authored `%%{init ...}%%` directive is always respected.
+pub(in crate::workspace) fn mermaid_with_theme(source: &str, dark: bool) -> String {
+    if !dark || source.contains("%%{init") {
+        source.to_string()
+    } else {
+        format!("%%{{init: {{\"theme\":\"dark\"}}}}%%\n{source}")
+    }
+}
+
 /// Walk every mermaid block in `blocks` (recursing into list item children) and
 /// fill its `raster` via `resolve`. Pure traversal — the caller supplies the
 /// rendering (selkie → SVG → rasterize) as the closure.
@@ -775,6 +787,7 @@ mod tests {
             width: 1,
             height: 1,
             rgba: vec![0, 0, 0, 255],
+            scale: 1.0,
         };
         resolve_images(&mut blocks, &mut |url| {
             assert_eq!(url, "pic.png");
@@ -790,6 +803,24 @@ mod tests {
     }
 
     #[test]
+    fn mermaid_with_theme_injects_dark_only_when_needed() {
+        // dark UI + plain source → dark directive prepended.
+        let d = mermaid_with_theme("graph TD\nA-->B", true);
+        assert!(d.starts_with("%%{init") && d.contains("dark"));
+        assert!(d.contains("graph TD"));
+
+        // light UI → unchanged.
+        assert_eq!(
+            mermaid_with_theme("graph TD\nA-->B", false),
+            "graph TD\nA-->B"
+        );
+
+        // user-supplied directive → respected even on a dark UI.
+        let user = "%%{init: {\"theme\":\"forest\"}}%%\ngraph TD\nA-->B";
+        assert_eq!(mermaid_with_theme(user, true), user);
+    }
+
+    #[test]
     fn resolve_mermaid_fills_raster() {
         let mut blocks = vec![MdBlock::Mermaid {
             source: "graph TD\nA-->B".to_owned(),
@@ -799,6 +830,7 @@ mod tests {
             width: 1,
             height: 1,
             rgba: vec![0, 0, 0, 255],
+            scale: 1.0,
         };
         resolve_mermaid(&mut blocks, &mut |src| {
             assert!(src.contains("graph"));

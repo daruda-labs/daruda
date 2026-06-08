@@ -414,3 +414,16 @@ fn bundled_theme_schema_json_matches_generated() {
         "bundled theme.schema.json has drifted from DarudaTheme::json_schema()"
     );
 }
+
+#[test]
+fn is_dark_reflects_base_background_lightness() {
+    // The default theme is the dark palette.
+    assert!(DarudaTheme::default().is_dark());
+
+    // A light base background flips the verdict.
+    let light = DarudaTheme {
+        title_bar_bg: gpui::hsla(0.0, 0.0, 0.96, 1.0),
+        ..Default::default()
+    };
+    assert!(!light.is_dark());
+}

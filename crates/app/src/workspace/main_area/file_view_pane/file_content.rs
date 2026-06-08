@@ -18,6 +18,7 @@ use super::{
 use crate::path_ext::PathExt;
 
 /// Load file content for the pane-area file viewer. Called from a background task.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn load_file_content(
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
@@ -26,10 +27,11 @@ pub(in crate::workspace) fn load_file_content(
     mode: FileViewMode,
     file_status: Option<char>,
     syntax_theme: &str,
+    diagram_dark: bool,
 ) -> PaneFileContent {
     match mode {
         FileViewMode::Raw | FileViewMode::Preview => {
-            load_raw(wt_path, repo_root, path, staged, syntax_theme)
+            load_raw(wt_path, repo_root, path, staged, syntax_theme, diagram_dark)
         }
         FileViewMode::Changes => load_diff(repo_root, path, staged, file_status, syntax_theme),
     }
@@ -41,6 +43,7 @@ fn load_raw(
     path: &std::path::Path,
     staged: bool,
     syntax_theme: &str,
+    diagram_dark: bool,
 ) -> PaneFileContent {
     use crate::ui::theme;
 
@@ -109,10 +112,13 @@ fn load_raw(
                     });
                 }
                 super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
+                    // Match the diagram theme to the host appearance so edges
+                    // stay visible (dark UI → dark diagram).
+                    let themed = super::markdown_viewer::mermaid_with_theme(source, diagram_dark);
                     // selkie is a young reimplementation; guard against a panic
                     // on malformed input so one bad diagram can't fail the load.
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        selkie::render::render_text(source)
+                        selkie::render::render_text(&themed)
                             .ok()
                             .and_then(|svg| super::visual::rasterize_svg(&svg).ok())
                     }))
