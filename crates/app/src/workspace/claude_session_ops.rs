@@ -603,12 +603,21 @@ impl Workspace {
         source: Source,
     ) {
         let after = self.probe_lane_status(session_id);
+        // Skip sessions not bound to any pane in this workspace (claude
+        // running outside daruda, or another instance's session). They
+        // never drive a lane indicator here, so logging their transitions
+        // only floods the file with "(unbound)" noise. A `Some` lane_ref
+        // whose project/lane was later removed still logs below (a real
+        // ownership change worth recording).
+        if after.lane_ref.is_none() {
+            return;
+        }
         // Resolve human-readable project + lane labels for the log context
         // from the pane/lane the probe already resolved. Falls back to
-        // "(unbound)" when the session has no live pane binding, or the
-        // referenced project / lane no longer exists. A real project name
-        // paired with an "(unbound)" lane means the project exists but the
-        // lane was removed — intentional, not a resolution failure.
+        // "(unbound)" when the referenced project / lane no longer exists.
+        // A real project name paired with an "(unbound)" lane means the
+        // project exists but the lane was removed — intentional, not a
+        // resolution failure.
         let project = after
             .lane_ref
             .and_then(|lr| self.project_for(lr.project))
