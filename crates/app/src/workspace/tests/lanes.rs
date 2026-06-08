@@ -163,6 +163,63 @@ fn test_set_kind_recomputes_is_main_and_blocks_removal(cx: &mut TestAppContext) 
     });
 }
 
+/// Regression: an external `git checkout` is surfaced only through a
+/// `git status` refresh, which must rewrite the lane's recorded
+/// `kind.branch` (the source the left-dock label reads). Drift updates
+/// the branch and preserves the repo roots; a matching branch is a
+/// no-op.
+#[gpui::test]
+fn reconcile_lane_branch_updates_kind_on_drift(cx: &mut TestAppContext) {
+    let project = daruda_store::project::Project::from_path("/tmp/test_reconcile_branch");
+    let (_wh, ws) = build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
+    ws.update(cx, |ws, cx| {
+        let target = ws.active_ref();
+        // Seed lane 0 as a git main lane currently on branch "old".
+        ws.active_project_mut()
+            .expect("active project")
+            .lane_mut(target.lane)
+            .expect("active lane")
+            .set_kind(daruda_store::project::LaneKind::Git {
+                branch: Some("old".into()),
+                repo_root: std::path::PathBuf::from("/tmp/test_reconcile_branch"),
+                worktree_root: std::path::PathBuf::from("/tmp/test_reconcile_branch"),
+            });
+
+        // Live status reports a different branch — it must propagate.
+        ws.reconcile_lane_branch(target, Some("new"), cx);
+        let branch_after = ws.lane_for(target).and_then(|l| match &l.kind {
+            daruda_store::project::LaneKind::Git { branch, .. } => branch.clone(),
+            _ => None,
+        });
+        assert_eq!(
+            branch_after,
+            Some("new".to_string()),
+            "drifted branch must propagate into kind.branch"
+        );
+
+        // Same branch — idempotent no-op; roots stay intact.
+        ws.reconcile_lane_branch(target, Some("new"), cx);
+        match &ws.lane_for(target).expect("lane").kind {
+            daruda_store::project::LaneKind::Git {
+                branch,
+                repo_root,
+                worktree_root,
+            } => {
+                assert_eq!(branch.as_deref(), Some("new"));
+                assert_eq!(
+                    repo_root,
+                    std::path::Path::new("/tmp/test_reconcile_branch")
+                );
+                assert_eq!(
+                    worktree_root,
+                    std::path::Path::new("/tmp/test_reconcile_branch")
+                );
+            }
+            _ => panic!("expected git lane after reconcile"),
+        }
+    });
+}
+
 #[gpui::test]
 fn test_git_repo_root_returns_none_for_non_git_workspace(cx: &mut TestAppContext) {
     // Non-git Default lane → git_repo_root() is the gate the

@@ -1104,6 +1104,19 @@ impl Workspace {
         self.project_for(target.project)?.lane(target.lane)
     }
 
+    /// Resolve a `LaneRef` to its runtime lane, mutably. Mirror of
+    /// [`Self::lane_for`] for the write paths (branch reconcile, kind
+    /// updates) that mutate the lane in place.
+    pub(in crate::workspace) fn lane_for_mut(
+        &mut self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&mut crate::lane::Lane> {
+        self.projects
+            .iter_mut()
+            .find(|p| p.id == target.project)?
+            .lane_mut(target.lane)
+    }
+
     /// Borrow the active project's lane list. Empty when the
     /// workspace has no projects (Welcome state).
     pub(in crate::workspace) fn active_lanes(&self) -> &[crate::lane::Lane] {

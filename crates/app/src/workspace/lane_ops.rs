@@ -466,6 +466,11 @@ impl Workspace {
         // Commit button reflects the active lane's staged count —
         // recompute now that `active` has flipped.
         self.sync_commit_buttons(cx);
+        // Re-probe git status for the lane we just switched to so the
+        // left-dock branch label catches up to any checkout done while
+        // it was inactive — `refresh_git_status` reconciles
+        // `Lane.kind.branch` from the live `git status` result.
+        self.refresh_git_status(target, cx);
         cx.notify();
     }
 
