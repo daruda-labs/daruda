@@ -234,7 +234,7 @@ fn settings_scrollbar(
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     let viewport_h = scroll_handle.bounds().size.height;
-    let max_offset = scroll_handle.max_offset().height;
+    let max_offset = scroll_handle.max_offset().y;
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "settings-scrollbar-thumb",

@@ -17,7 +17,7 @@ use crate::ui::theme;
 /// when the content fits the viewport (or bounds are not yet measured).
 ///
 /// `content_h` is the total scrollable content height: handles backed by
-/// a `ScrollHandle` pass `viewport_h + max_offset().height`, while the
+/// a `ScrollHandle` pass `viewport_h + max_offset().y`, while the
 /// file viewer passes a precomputed height. `scroll_offset_y` is the
 /// handle's `offset().y` (negative as the content scrolls up).
 /// `top_offset` shifts the thumb down when the scroll region begins below

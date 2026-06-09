@@ -535,6 +535,9 @@ error_modal:
 # Notifications
 notification:
   long_running_title: "Command finished"
+  hook_permission_title: "Permission required"
+  hook_idle_title: "Waiting for your input"
+  hook_elicitation_title: "Waiting for your response"
 
 # Terminal annotations (SP-1)
 terminal:

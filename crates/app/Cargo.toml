@@ -10,8 +10,16 @@ description = "Loop Terminal — Dev loop accelerator for Claude Code"
 name = "daruda"
 path = "src/main.rs"
 
+[features]
+# `daruda --screenshot <path>` — render the live window to a PNG via gpui's
+# render_to_image (upstream-gated behind test-support). Off by default to keep
+# the shipping binary clean; enable for visual-verification builds:
+#   cargo build -p daruda --features screenshot
+screenshot = ["gpui/test-support", "gpui_macos/test-support"]
+
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 fs4 = "0.13"
@@ -19,11 +27,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 ghostty_vt = { path = "../ghostty_vt" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 daruda_claude = { path = "../daruda_claude" }
 daruda_store = { path = "../daruda_store" }
 daruda_config = { path = "../daruda_config" }
 daruda_terminal = { path = "../daruda_terminal" }
 gpui = { workspace = true }
+gpui_macos = { workspace = true }
 gpui_component = { workspace = true }
 gpui_component_assets = { workspace = true }
 ignore = "0.4"
@@ -32,6 +42,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAppl
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }
 portable-pty = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
+resvg = "0.45"
+selkie-rs = { version = "0.3", default-features = false }
 rust-i18n = { workspace = true }
 sys-locale = "0.3"
 schemars = { workspace = true }
@@ -45,4 +57,5 @@ unicode-segmentation = "1"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+gpui_macos = { workspace = true, features = ["test-support"] }
 serde_json = "1"

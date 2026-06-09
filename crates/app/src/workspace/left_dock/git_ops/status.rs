@@ -57,6 +57,13 @@ impl Workspace {
                 ws.git_status_in_flight.remove(&target);
                 match result {
                     Ok(data) => {
+                        // Propagate an external branch switch (a checkout
+                        // run outside daruda, or in daruda's own terminal)
+                        // into the lane's recorded branch. The left-dock
+                        // label reads `Lane.kind.branch` rather than
+                        // re-probing git on render, so this refresh is the
+                        // only path that keeps the label current.
+                        ws.reconcile_lane_branch(target, data.branch.as_deref(), cx);
                         ws.git_status_cache.insert(target, data);
                         // Trigger #6 — git status refresh updates badges.
                         ws.invalidate_visible_files_cache(target);
@@ -91,6 +98,49 @@ impl Workspace {
             },
         )
         .detach();
+    }
+
+    /// Propagate the live `git status` branch into the targeted lane's
+    /// recorded `kind.branch`. The left-dock label and tab titles read
+    /// `Lane.kind.branch` (captured once at project-add / git-init time)
+    /// rather than probing git on every render, so without this an
+    /// external `git checkout` would leave the label stale. Rewrites and
+    /// persists only when the branch actually drifted, so the
+    /// file-watcher refresh bursts don't schedule a save each time.
+    ///
+    /// Routes the in-place update through [`crate::lane::Lane::set_kind`]
+    /// so the derived `is_main` mirror can never drift, and preserves the
+    /// lane's `repo_root` / `worktree_root` unchanged.
+    pub(in crate::workspace) fn reconcile_lane_branch(
+        &mut self,
+        target: LaneRef,
+        live_branch: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(lane) = self.lane_for(target) else {
+            return;
+        };
+        let daruda_store::project::LaneKind::Git {
+            branch,
+            repo_root,
+            worktree_root,
+        } = &lane.kind
+        else {
+            return;
+        };
+        if branch.as_deref() == live_branch {
+            return;
+        }
+        let new_kind = daruda_store::project::LaneKind::Git {
+            branch: live_branch.map(str::to_owned),
+            repo_root: repo_root.clone(),
+            worktree_root: worktree_root.clone(),
+        };
+        self.mutate_durable(cx, |ws, _| {
+            if let Some(lane) = ws.lane_for_mut(target) {
+                lane.set_kind(new_kind);
+            }
+        });
     }
 
     /// Refresh git status for the merge target lane after a successful merge.

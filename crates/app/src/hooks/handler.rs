@@ -27,7 +27,7 @@ use fs4::fs_std::FileExt;
 use daruda_claude::hooks::events::HookEvent;
 use daruda_claude::hooks::fsm::{self, FsmAction};
 use daruda_claude::hooks::status_file::{
-    self, Source, StatusFile, default_dir, delete, path_for, read, write_atomic,
+    self, Source, StatusFile, default_dir, delete, lock_path_for, path_for, read, write_atomic,
 };
 
 /// Run the hook handler. Always returns the exit code that `main`
@@ -85,6 +85,7 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
                 tool_name,
                 tool_input,
                 permission_mode: common.permission_mode,
+                notification: notification_type(&event),
                 timestamp: chrono::Utc::now(),
                 source: Source::Hook,
             };
@@ -115,7 +116,7 @@ struct SessionLock {
 
 impl SessionLock {
     fn acquire(dir: &Path, session_id: &str) -> std::io::Result<Self> {
-        let path = dir.join(format!("{session_id}.lock"));
+        let path = lock_path_for(dir, session_id);
         let file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -132,6 +133,18 @@ impl Drop for SessionLock {
         // Best-effort unlock; release happens automatically on close
         // anyway, so an error here is informational.
         let _ = FileExt::unlock(&self.file);
+    }
+}
+
+/// The notification subtype, present only on `Notification` events.
+/// Recorded into the status file so the app-side ingest can gate a
+/// desktop push without re-reading the hook payload.
+fn notification_type(event: &HookEvent) -> Option<daruda_claude::hooks::events::NotificationType> {
+    match event {
+        HookEvent::Notification {
+            notification_type, ..
+        } => Some(*notification_type),
+        _ => None,
     }
 }
 

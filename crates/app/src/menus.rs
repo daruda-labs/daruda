@@ -70,6 +70,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
     vec![
         Menu {
             name: s::menu_app().into(),
+            disabled: false,
             items: vec![
                 MenuItem::separator(),
                 MenuItem::action(
@@ -85,16 +86,19 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_file().into(),
+            disabled: false,
             items: vec![
                 MenuItem::action(s::menu_new_window(), NewEmptyWindow),
                 MenuItem::action(s::menu_open(), OpenFolder),
                 MenuItem::action(s::menu_open_in_new_window(), OpenFolderInNewWindow),
                 MenuItem::submenu(Menu {
                     name: s::menu_open_recent().into(),
+                    disabled: false,
                     items: build_recent_submenu(recent, OpenMode::ReplaceCurrent),
                 }),
                 MenuItem::submenu(Menu {
                     name: s::menu_open_recent_in_new_window().into(),
+                    disabled: false,
                     items: build_recent_submenu(recent, OpenMode::NewWindow),
                 }),
                 MenuItem::separator(),
@@ -107,6 +111,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_edit().into(),
+            disabled: false,
             items: vec![
                 MenuItem::os_action(s::menu_copy(), Copy, OsAction::Copy),
                 MenuItem::os_action(s::menu_paste(), Paste, OsAction::Paste),
@@ -122,6 +127,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_view().into(),
+            disabled: false,
             items: vec![
                 MenuItem::action(s::menu_split_right(), SplitRight),
                 MenuItem::action(s::menu_split_down(), SplitDown),
@@ -149,10 +155,12 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_worktree().into(),
+            disabled: false,
             items: crate::lane_slot_table!(@menu_items),
         },
         Menu {
             name: s::menu_window().into(),
+            disabled: false,
             items: vec![
                 MenuItem::action(s::menu_minimize(), MinimizeWindow),
                 MenuItem::action(s::menu_zoom(), ZoomWindow),
@@ -162,6 +170,7 @@ pub(crate) fn build_menu_bar(recent: &[daruda_store::project::RecentEntry]) -> V
         },
         Menu {
             name: s::menu_help().into(),
+            disabled: false,
             items: vec![
                 MenuItem::action(s::menu_daruda_help(), OpenDarudaHelp),
                 MenuItem::separator(),

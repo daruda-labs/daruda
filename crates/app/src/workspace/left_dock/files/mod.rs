@@ -128,7 +128,7 @@ fn build_files_scrollbar(
     let viewport_h = state.base_handle.bounds().size.height;
     // `max_offset` returns `Size<Pixels>` in this gpui version — the
     // height component is the y-axis overflow (0 when content fits).
-    let max_offset_h = state.base_handle.max_offset().height;
+    let max_offset_h = state.base_handle.max_offset().y;
     let offset_y = state.base_handle.offset().y;
     drop(state);
 

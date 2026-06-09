@@ -170,7 +170,7 @@ impl EditSkillModal {
                     })
                     .await;
                 // SILENT-OK: modal may close during async skill edit
-                let _ = async_cx.update(|app_cx| {
+                async_cx.update(|app_cx| {
                     // SILENT-OK: modal may close during async skill edit
                     let _ = app_cx.update_window(wh, |_, window, cx| {
                         body_editor.update(cx, |inp, cx_state| {

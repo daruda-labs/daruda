@@ -96,11 +96,26 @@ impl Workspace {
             tool_name: None,
             tool_input: None,
             permission_mode: None,
+            notification: None,
             timestamp,
             source: Source::Jsonl,
         };
+        #[cfg(debug_assertions)]
+        let dbg_probe = self.probe_lane_status(&file.session_id);
+        #[cfg(debug_assertions)]
+        let dbg_fields = (
+            file.session_id.clone(),
+            file.cwd.clone(),
+            file.last_event.clone(),
+            file.source,
+        );
         if self.claude.claude_status.update(file) {
             changed = true;
+            #[cfg(debug_assertions)]
+            {
+                let (sid, cwd, event, source) = dbg_fields;
+                self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
+            }
         }
         if changed {
             cx.notify();

@@ -31,6 +31,12 @@ pub struct NotificationsConfig {
     /// when the daruda app itself is the active app — backgrounded
     /// notifications always surface regardless of which pane fired.
     pub skip_focused_pane: bool,
+    /// Raise a desktop notification when a Claude Code session emits a
+    /// blocking hook `Notification` (permission prompt, idle prompt,
+    /// elicitation dialog). These no longer latch the lane indicator
+    /// into a persistent attention state — they surface once, here.
+    /// Gated by `skip_focused_pane` like the other channels.
+    pub hook_notification_enabled: bool,
 }
 
 const LONG_RUNNING_DEFAULT_SECS: u64 = 30;
@@ -44,6 +50,7 @@ impl Default for NotificationsConfig {
             long_running_enabled: true,
             long_running_threshold_secs: LONG_RUNNING_DEFAULT_SECS,
             skip_focused_pane: true,
+            hook_notification_enabled: true,
         }
     }
 }

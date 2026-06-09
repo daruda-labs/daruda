@@ -163,14 +163,9 @@ pub fn spawn_file_watch(cx: &mut App) {
                 continue;
             }
             while handle.try_recv().is_ok() {}
-            if cx
-                .update(|cx| {
-                    cx.update_global::<SettingsStore, _>(|store, _| store.reload_user());
-                })
-                .is_err()
-            {
-                break;
-            }
+            cx.update(|cx| {
+                cx.update_global::<SettingsStore, _>(|store, _| store.reload_user());
+            });
         }
     })
     .detach();

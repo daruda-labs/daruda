@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use daruda_claude::pty_link;
 
@@ -41,15 +41,16 @@ pub type PaneId = u64;
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// One pane's currently-resolved `claude` process.
+///
+/// Equality is the binding's identity, `(claude_pid, session_id)` —
+/// the diff loop suppresses `BindingChanged` (and the window repaint
+/// it triggers) by comparing each poll's freshly-built binding against
+/// the previous one, so any per-poll metadata in this struct would
+/// re-emit the event every cycle for an unchanged binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PtyBinding {
     pub claude_pid: u32,
     pub session_id: String,
-    /// Wall-clock at which *this tracker* first saw the binding. Not
-    /// the actual process start time — sysinfo doesn't expose that
-    /// portably, and our diff loop only knows what it has observed.
-    /// Useful for "how long has this session been bound here?" UI.
-    pub discovered_at: SystemTime,
 }
 
 /// Diff event emitted by the tracker.
@@ -125,6 +126,15 @@ impl PtyTracker {
         if let Ok(mut inner) = self.inner.lock() {
             inner.panes.remove(&pane_id);
         }
+    }
+
+    /// Test-only introspection — the currently registered pane ids.
+    #[cfg(test)]
+    pub fn tracked_pane_ids(&self) -> Vec<PaneId> {
+        self.inner
+            .lock()
+            .map(|inner| inner.panes.keys().copied().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -262,7 +272,6 @@ fn find_claude_binding(
             return Some(PtyBinding {
                 claude_pid: pid,
                 session_id: meta.session_id,
-                discovered_at: SystemTime::now(),
             });
         }
         if let Some(kids) = children.get(&pid) {
@@ -296,6 +305,32 @@ fn is_claude_process(pid: u32, system: &sysinfo::System) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binding_identity_is_pid_and_session() {
+        // The diff loop's duplicate suppression compares each poll's
+        // freshly-built binding against the previous one — equality
+        // must hold across polls for an unchanged (pid, session).
+        let base = PtyBinding {
+            claude_pid: 7,
+            session_id: "sess".into(),
+        };
+        assert_eq!(base, base.clone());
+        assert_ne!(
+            base,
+            PtyBinding {
+                claude_pid: 8,
+                ..base.clone()
+            }
+        );
+        assert_ne!(
+            base,
+            PtyBinding {
+                session_id: "other".into(),
+                ..base.clone()
+            }
+        );
+    }
 
     #[test]
     fn register_and_unregister_round_trip() {

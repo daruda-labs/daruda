@@ -596,7 +596,6 @@ impl EntityInputHandler for TerminalView {
         // candidate window at the wrong spot.
         let base_x = super::text_metrics::cell_left_x_for_col(
             &self.line_layouts,
-            &self.state.viewport_lines,
             col,
             row,
             cell_width,

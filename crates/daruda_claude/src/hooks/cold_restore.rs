@@ -1,6 +1,7 @@
 //! Cold restore — daruda startup pass over `~/.daruda/status/`.
 //!
-//! Three age buckets:
+//! Age is measured from each file's recorded event `timestamp`, not its
+//! filesystem mtime (see [`run`] for why). Three age buckets:
 //!
 //! - `age <= stale_threshold` → load as-is.
 //! - `stale_threshold < age <= file_ttl` → reset state to `Connecting`,
@@ -17,6 +18,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use chrono::{DateTime, Utc};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
@@ -70,8 +72,29 @@ pub fn classify(
     }
 }
 
+/// Convert a recorded UTC event time to a `SystemTime` for age
+/// comparison. Whole-second resolution is plenty at TTL scale (minutes
+/// to days); a pre-epoch timestamp (impossible in practice) clamps to
+/// the epoch, yielding the maximum age.
+fn system_time_from_utc(ts: DateTime<Utc>) -> SystemTime {
+    let secs = ts.timestamp();
+    if secs >= 0 {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64)
+    } else {
+        SystemTime::UNIX_EPOCH
+    }
+}
+
 /// IO pass: enumerate `dir`, classify each file, perform the action,
 /// return the entries that should be loaded into the in-memory store.
+///
+/// Files are aged by their recorded `timestamp` (last-event time), not
+/// the file mtime: the `Reset` branch rewrites the file and so refreshes
+/// its mtime, which would reset an mtime-based TTL clock on every
+/// startup — a perpetually-idle session would then resurrect as
+/// `Connecting` forever and never expire. The recorded `timestamp` is
+/// immutable across resets, so it ages monotonically and the TTL sweep
+/// actually fires.
 ///
 /// Best-effort — individual file failures are skipped, not propagated,
 /// because cold restore must not block daruda startup. Returns an
@@ -89,17 +112,10 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
     let mut loaded = Vec::new();
 
     for entry in list_dir(dir)? {
-        match classify(entry.modified, now, policy) {
-            ColdRestoreAction::Load => match read(&entry.path) {
-                Ok(Some(file)) => loaded.push(file),
-                Ok(None) => {
-                    // Malformed but recent — leave the file alone in
-                    // case it's mid-write. Next event will overwrite.
-                }
-                Err(_) => continue,
-            },
-            ColdRestoreAction::Reset => match read(&entry.path) {
-                Ok(Some(mut file)) => {
+        match read(&entry.path) {
+            Ok(Some(mut file)) => match classify(system_time_from_utc(file.timestamp), now, policy) {
+                ColdRestoreAction::Load => loaded.push(file),
+                ColdRestoreAction::Reset => {
                     file.status = SessionStatus::Connecting;
                     if let Err(e) = write_atomic(&entry.path, &file) {
                         // Still load the in-memory copy so the user
@@ -116,14 +132,20 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
                     }
                     loaded.push(file);
                 }
-                Ok(None) | Err(_) => {
-                    // Malformed AND stale — treat as orphan, drop it.
+                ColdRestoreAction::Delete => {
                     let _ = delete(&entry.path);
                 }
             },
-            ColdRestoreAction::Delete => {
-                let _ = delete(&entry.path);
+            // Malformed or mid-write — no usable event timestamp, so fall
+            // back to the file mtime. A recent file is probably mid-write
+            // (leave it; the next event overwrites). Anything past the
+            // stale threshold is an orphan — drop it.
+            Ok(None) => {
+                if classify(entry.modified, now, policy) != ColdRestoreAction::Load {
+                    let _ = delete(&entry.path);
+                }
             }
+            Err(_) => continue,
         }
     }
     Ok(loaded)
@@ -165,6 +187,14 @@ mod tests {
 
     fn fresh_file(state: SessionStatus) -> StatusFile {
         StatusFile::new_hook("s1", "/tmp/x", state, "Stop")
+    }
+
+    /// A status file whose recorded event `timestamp` is `age` in the
+    /// past — what `run` now ages by, independent of the file mtime.
+    fn file_aged(state: SessionStatus, age: Duration) -> StatusFile {
+        let mut f = StatusFile::new_hook("s1", "/tmp/x", state, "Stop");
+        f.timestamp = Utc::now() - chrono::Duration::from_std(age).unwrap();
+        f
     }
 
     #[test]
@@ -256,12 +286,8 @@ mod tests {
     fn run_resets_stale_and_keeps_file() {
         let dir = tempfile::TempDir::new().unwrap();
         let p = path_for(dir.path(), "stale");
-        write_atomic(&p, &fresh_file(SessionStatus::Working)).unwrap();
-
-        let stale = SystemTime::now() - Duration::from_secs(600);
-        if !force_mtime(&p, stale) {
-            return; // platform skipped
-        }
+        // Event 10 min ago: past the stale threshold, under the TTL.
+        write_atomic(&p, &file_aged(SessionStatus::Working, Duration::from_secs(600))).unwrap();
 
         let loaded = run(dir.path(), &policy()).unwrap();
         assert_eq!(loaded.len(), 1);
@@ -275,16 +301,60 @@ mod tests {
     fn run_deletes_old_files() {
         let dir = tempfile::TempDir::new().unwrap();
         let p = path_for(dir.path(), "old");
-        write_atomic(&p, &fresh_file(SessionStatus::Idle)).unwrap();
-
-        let old = SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60);
-        if !force_mtime(&p, old) {
-            return;
-        }
+        // Event 8 days ago: past the 7-day TTL.
+        write_atomic(
+            &p,
+            &file_aged(SessionStatus::Idle, Duration::from_secs(8 * 24 * 60 * 60)),
+        )
+        .unwrap();
 
         let loaded = run(dir.path(), &policy()).unwrap();
         assert!(loaded.is_empty());
         assert!(!p.exists());
+    }
+
+    /// Regression: a perpetually-idle session repeatedly reset to
+    /// `Connecting` keeps a fresh mtime (every `Reset` rewrites it) but an
+    /// old event timestamp. It must still age out by the event timestamp,
+    /// not live forever because the rewrite touched the mtime.
+    #[test]
+    fn run_ages_by_event_timestamp_not_mtime() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = path_for(dir.path(), "immortal");
+        // 30-day-old event time, but `write_atomic` gives it a brand-new
+        // mtime — the exact shape of an accumulated stale husk.
+        write_atomic(
+            &p,
+            &file_aged(SessionStatus::Connecting, Duration::from_secs(30 * 24 * 60 * 60)),
+        )
+        .unwrap();
+
+        let loaded = run(dir.path(), &policy()).unwrap();
+        assert!(
+            loaded.is_empty(),
+            "stale-by-timestamp file must be deleted regardless of fresh mtime"
+        );
+        assert!(!p.exists());
+    }
+
+    /// The inverse: a recently-active session with an ancient mtime (e.g.
+    /// restored from a backup) is kept, proving the event timestamp — not
+    /// the mtime — is the age basis.
+    #[test]
+    fn run_keeps_recent_event_even_with_old_mtime() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = path_for(dir.path(), "recent");
+        write_atomic(&p, &file_aged(SessionStatus::Working, Duration::from_secs(60))).unwrap();
+
+        let old = SystemTime::now() - Duration::from_secs(30 * 24 * 60 * 60);
+        if !force_mtime(&p, old) {
+            return; // platform skipped
+        }
+
+        let loaded = run(dir.path(), &policy()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, SessionStatus::Working);
+        assert!(p.exists());
     }
 
     #[test]

@@ -36,6 +36,11 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// Read by the per-pane stdout poll loop to cap how often terminal
     /// output triggers a repaint; live-updates on config reload.
     pub terminal_redraw_interval: Duration,
+
+    /// Mirror of `daruda_config::ThemeConfig::ui_preset`. A change flips the
+    /// host appearance, so `apply_config` reloads open markdown panes to
+    /// re-theme their rendered diagrams (mermaid) for the new surface.
+    pub ui_preset: String,
 }
 
 impl ConfigMirrors {
@@ -47,6 +52,7 @@ impl ConfigMirrors {
             files_use_gitignore: config.left_dock.files_use_gitignore,
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
             terminal_redraw_interval: config.render.redraw_interval(),
+            ui_preset: config.theme.ui_preset.clone(),
         }
     }
 }

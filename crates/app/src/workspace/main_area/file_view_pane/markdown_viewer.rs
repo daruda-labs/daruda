@@ -9,6 +9,7 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::highlighter::highlight_raw_rows;
+use super::visual::RasterImage;
 use super::{VisualRow, VisualRowKind};
 
 // ----------------------------------------------------------------
@@ -33,6 +34,13 @@ pub(in crate::workspace) enum MdSpan {
     Footnote(String),
     /// Inline HTML shown verbatim in dim monospace.
     Html(String),
+    /// Image reference. `raster` is filled by `resolve_images` after parsing
+    /// (local files + data URIs only); `None` falls back to the alt text.
+    Image {
+        url: String,
+        alt: String,
+        raster: Option<RasterImage>,
+    },
 }
 
 // ----------------------------------------------------------------
@@ -86,6 +94,12 @@ pub(in crate::workspace) enum MdBlock {
     },
     /// Raw HTML block (dim monospace passthrough).
     HtmlBlock(String),
+    /// Mermaid diagram (```mermaid fence). `raster` is filled by the loader
+    /// (selkie → SVG → rasterize); `None` falls back to the raw source.
+    Mermaid {
+        source: String,
+        raster: Option<RasterImage>,
+    },
 }
 
 // ----------------------------------------------------------------
@@ -153,6 +167,15 @@ fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(
             let (text, consumed) = collect_text_until(events, pos + 1, |e| {
                 matches!(e, Event::End(TagEnd::CodeBlock))
             });
+            if lang.as_deref() == Some("mermaid") {
+                return Some((
+                    MdBlock::Mermaid {
+                        source: text,
+                        raster: None,
+                    },
+                    consumed + 2,
+                ));
+            }
             let mut rows = build_code_rows(&text);
             if let Some(ref l) = lang {
                 highlight_raw_rows(&mut rows, l, syntax_theme);
@@ -422,12 +445,14 @@ fn parse_inline(events: &[Event<'_>], pos: usize) -> (MdSpan, usize) {
         Event::Start(Tag::Image { dest_url, .. }) => {
             let (alt_text, consumed) =
                 collect_text_until(events, pos + 1, |e| matches!(e, Event::End(TagEnd::Image)));
-            let text = if alt_text.is_empty() {
-                dest_url.to_string()
-            } else {
-                alt_text
-            };
-            (MdSpan::Text(format!("[{text}]")), consumed + 2)
+            (
+                MdSpan::Image {
+                    url: dest_url.to_string(),
+                    alt: alt_text,
+                    raster: None,
+                },
+                consumed + 2,
+            )
         }
 
         Event::InlineHtml(s) => (MdSpan::Html(s.to_string()), 1),
@@ -477,6 +502,7 @@ pub(in crate::workspace) fn md_block_plain_text(block: &MdBlock) -> String {
                 .join("\n");
             format!("```{fence}\n{body}\n```")
         }
+        MdBlock::Mermaid { source, .. } => format!("```mermaid\n{source}\n```"),
         MdBlock::BulletList(items) => items
             .iter()
             .map(|item| {
@@ -560,9 +586,141 @@ fn flatten_spans_to_text(spans: &[MdSpan]) -> String {
             MdSpan::SoftBreak | MdSpan::HardBreak => out.push(' '),
             MdSpan::Footnote(label) => out.push_str(&format!("[^{label}]")),
             MdSpan::Html(s) => out.push_str(s),
+            MdSpan::Image { url, alt, .. } => {
+                let label = if alt.is_empty() { url } else { alt };
+                out.push_str(&format!("[{label}]"));
+            }
         }
     }
     out
+}
+
+/// Walk every image span in `blocks` (recursing into nested spans and list
+/// item children) and fill its `raster` via `resolve`. Pure traversal — the
+/// caller supplies the I/O (file read + decode) as the closure.
+pub(in crate::workspace) fn resolve_images(
+    blocks: &mut [MdBlock],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for block in blocks {
+        match block {
+            MdBlock::Heading { spans, .. }
+            | MdBlock::Paragraph(spans)
+            | MdBlock::Blockquote(spans)
+            | MdBlock::FootnoteDefinition { spans, .. } => {
+                resolve_images_in_spans(spans, resolve);
+            }
+            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+                for item in items {
+                    resolve_images_in_spans(&mut item.spans, resolve);
+                    resolve_images(&mut item.children, resolve);
+                }
+            }
+            MdBlock::Table { header, rows } => {
+                for cell in header {
+                    resolve_images_in_spans(cell, resolve);
+                }
+                for row in rows {
+                    for cell in row {
+                        resolve_images_in_spans(cell, resolve);
+                    }
+                }
+            }
+            MdBlock::CodeBlock { .. }
+            | MdBlock::Rule
+            | MdBlock::HtmlBlock(_)
+            | MdBlock::Mermaid { .. } => {}
+        }
+    }
+}
+
+/// Prepend a mermaid `%%{init}%%` theme directive matching the host
+/// appearance, so a dark UI renders a dark diagram (light edges/text). On a
+/// light UI the source is unchanged (mermaid's default is already light). A
+/// user-authored `%%{init ...}%%` directive is always respected.
+/// If `spans` is a single image (ignoring surrounding whitespace), return its
+/// `(alt, raster)`. Such a paragraph renders the image block-style (large);
+/// otherwise images render inline, sized to the text line.
+pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option<&RasterImage>)> {
+    let mut found: Option<(&str, Option<&RasterImage>)> = None;
+    for span in spans {
+        match span {
+            MdSpan::Image { alt, raster, .. } => {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some((alt.as_str(), raster.as_ref()));
+            }
+            MdSpan::SoftBreak | MdSpan::HardBreak => {}
+            MdSpan::Text(t) if t.trim().is_empty() => {}
+            _ => return None,
+        }
+    }
+    found
+}
+
+pub(in crate::workspace) fn mermaid_with_theme(source: &str, dark: bool) -> String {
+    if !dark || source.contains("%%{init") {
+        source.to_string()
+    } else {
+        format!("%%{{init: {{\"theme\":\"dark\"}}}}%%\n{source}")
+    }
+}
+
+/// Walk every mermaid block in `blocks` (recursing into list item children) and
+/// fill its `raster` via `resolve`. Pure traversal — the caller supplies the
+/// rendering (selkie → SVG → rasterize) as the closure.
+pub(in crate::workspace) fn resolve_mermaid(
+    blocks: &mut [MdBlock],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for block in blocks {
+        match block {
+            MdBlock::Mermaid { source, raster } => {
+                if raster.is_none() {
+                    *raster = resolve(source);
+                }
+            }
+            MdBlock::BulletList(items) | MdBlock::OrderedList { items, .. } => {
+                for item in items {
+                    resolve_mermaid(&mut item.children, resolve);
+                }
+            }
+            MdBlock::Heading { .. }
+            | MdBlock::Paragraph(_)
+            | MdBlock::CodeBlock { .. }
+            | MdBlock::Blockquote(_)
+            | MdBlock::Rule
+            | MdBlock::Table { .. }
+            | MdBlock::FootnoteDefinition { .. }
+            | MdBlock::HtmlBlock(_) => {}
+        }
+    }
+}
+
+fn resolve_images_in_spans(
+    spans: &mut [MdSpan],
+    resolve: &mut dyn FnMut(&str) -> Option<RasterImage>,
+) {
+    for span in spans {
+        match span {
+            MdSpan::Image { url, raster, .. } => {
+                if raster.is_none() {
+                    *raster = resolve(url);
+                }
+            }
+            MdSpan::Bold(inner) | MdSpan::Italic(inner) | MdSpan::Strikethrough(inner) => {
+                resolve_images_in_spans(inner, resolve);
+            }
+            MdSpan::Text(_)
+            | MdSpan::Code(_)
+            | MdSpan::Link { .. }
+            | MdSpan::SoftBreak
+            | MdSpan::HardBreak
+            | MdSpan::Footnote(_)
+            | MdSpan::Html(_) => {}
+        }
+    }
 }
 
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {
@@ -637,5 +795,105 @@ mod tests {
     fn parse_horizontal_rule() {
         let blocks = parse_markdown("---\n", "base16-ocean.dark");
         assert!(matches!(blocks[0], MdBlock::Rule));
+    }
+
+    #[test]
+    fn resolve_images_fills_raster_for_each_image() {
+        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Image {
+            url: "pic.png".to_owned(),
+            alt: "a".to_owned(),
+            raster: None,
+        }])];
+        let dummy = RasterImage {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255],
+            scale: 1.0,
+        };
+        resolve_images(&mut blocks, &mut |url| {
+            assert_eq!(url, "pic.png");
+            Some(dummy.clone())
+        });
+        let MdBlock::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let MdSpan::Image { raster, .. } = &spans[0] else {
+            panic!("expected image span");
+        };
+        assert!(raster.is_some());
+    }
+
+    #[test]
+    fn lone_image_detects_standalone_image_paragraphs() {
+        let img = || MdSpan::Image {
+            url: "x".to_owned(),
+            alt: "a".to_owned(),
+            raster: None,
+        };
+        // single image → standalone
+        assert!(lone_image(&[img()]).is_some());
+        // image + whitespace-only text → still standalone
+        assert!(lone_image(&[img(), MdSpan::Text("   ".to_owned())]).is_some());
+        // image among real text → inline (None)
+        assert!(lone_image(&[MdSpan::Text("see ".to_owned()), img()]).is_none());
+        // two images → not a lone image
+        assert!(lone_image(&[img(), img()]).is_none());
+    }
+
+    #[test]
+    fn mermaid_with_theme_injects_dark_only_when_needed() {
+        // dark UI + plain source → dark directive prepended.
+        let d = mermaid_with_theme("graph TD\nA-->B", true);
+        assert!(d.starts_with("%%{init") && d.contains("dark"));
+        assert!(d.contains("graph TD"));
+
+        // light UI → unchanged.
+        assert_eq!(
+            mermaid_with_theme("graph TD\nA-->B", false),
+            "graph TD\nA-->B"
+        );
+
+        // user-supplied directive → respected even on a dark UI.
+        let user = "%%{init: {\"theme\":\"forest\"}}%%\ngraph TD\nA-->B";
+        assert_eq!(mermaid_with_theme(user, true), user);
+    }
+
+    #[test]
+    fn resolve_mermaid_fills_raster() {
+        let mut blocks = vec![MdBlock::Mermaid {
+            source: "graph TD\nA-->B".to_owned(),
+            raster: None,
+        }];
+        let dummy = RasterImage {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 255],
+            scale: 1.0,
+        };
+        resolve_mermaid(&mut blocks, &mut |src| {
+            assert!(src.contains("graph"));
+            Some(dummy.clone())
+        });
+        let MdBlock::Mermaid { raster, .. } = &blocks[0] else {
+            panic!("expected mermaid block");
+        };
+        assert!(raster.is_some());
+    }
+
+    #[test]
+    fn resolve_images_recurses_into_nested_spans() {
+        let mut blocks = vec![MdBlock::Paragraph(vec![MdSpan::Bold(vec![
+            MdSpan::Image {
+                url: "n.png".to_owned(),
+                alt: String::new(),
+                raster: None,
+            },
+        ])])];
+        let mut count = 0;
+        resolve_images(&mut blocks, &mut |_| {
+            count += 1;
+            None
+        });
+        assert_eq!(count, 1);
     }
 }

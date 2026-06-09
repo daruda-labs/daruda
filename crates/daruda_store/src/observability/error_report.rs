@@ -221,12 +221,20 @@ impl ErrorReport {
         self.to_plain_text()
     }
 
-    /// One-line NDJSON record for the on-disk log. The `text` field
-    /// embeds [`to_plain_text`](Self::to_plain_text) so the log file
-    /// is greppable without `jq`.
+    /// One-line NDJSON record for the on-disk log. Surfaced
+    /// `Warning` / `Error` entries embed
+    /// [`to_plain_text`](Self::to_plain_text) in a `text` field so the
+    /// log is greppable without `jq`.
+    ///
+    /// `Info` entries omit that block — they are high-volume diagnostic
+    /// traces (e.g. Claude status transitions) whose `message` +
+    /// `context` already carry everything, and the duplicated multi-line
+    /// plain-text would otherwise dominate the file.
     pub fn to_ndjson_line(&self) -> String {
         let mut record = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
-        if let serde_json::Value::Object(map) = &mut record {
+        if self.severity != ErrorSeverity::Info
+            && let serde_json::Value::Object(map) = &mut record
+        {
             map.insert(
                 "text".to_string(),
                 serde_json::Value::String(self.to_plain_text()),
@@ -485,6 +493,35 @@ mod tests {
         assert_eq!(parsed.severity, r.severity);
         assert_eq!(parsed.message, r.message);
         assert_eq!(parsed.dedup_key, r.dedup_key);
+    }
+
+    #[test]
+    fn info_ndjson_line_omits_text_block() {
+        let r = ErrorReport::new("Claude session status changed")
+            .severity(ErrorSeverity::Info)
+            .message("ExecutingTool -> Working")
+            .with_context("cwd", "~/git/x")
+            .build();
+        let line = r.to_ndjson_line();
+        assert!(line.ends_with('\n'));
+        let value: serde_json::Value =
+            serde_json::from_str(line.trim_end_matches('\n')).expect("valid JSON");
+
+        // Structured fields stay — they carry the full signal.
+        assert_eq!(value["message"], "ExecutingTool -> Working");
+        assert_eq!(value["context"]["cwd"], "~/git/x");
+        assert_eq!(value["severity"], "info");
+        // The duplicated human-text block is dropped for Info.
+        assert!(
+            value.get("text").is_none(),
+            "Info entries must omit the text block, got: {line}"
+        );
+
+        // Still deserializes back into an ErrorReport (text was extra).
+        let parsed: ErrorReport =
+            serde_json::from_str(line.trim_end_matches('\n')).expect("ErrorReport deserializes");
+        assert_eq!(parsed.severity, ErrorSeverity::Info);
+        assert_eq!(parsed.message, "ExecutingTool -> Working");
     }
 
     #[test]

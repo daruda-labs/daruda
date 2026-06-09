@@ -246,6 +246,25 @@ impl Workspace {
         let Some(project_id) = self.active_project().map(|p| p.id) else {
             return false;
         };
+        // Release every pane the closing project owns — the live ones
+        // (the active lane belongs to this project) and those in its
+        // frozen runtimes — before they drop below. Skipping this
+        // leaves the tracker polling dead shell PIDs for the window's
+        // lifetime and stale claude bindings behind.
+        let owned_pane_ids: Vec<_> = self
+            .main_area
+            .panes
+            .iter()
+            .map(|p| p.id)
+            .chain(
+                self.main_area
+                    .inactive_lane_runtimes
+                    .iter()
+                    .filter(|(key, _)| key.project == project_id)
+                    .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id)),
+            )
+            .collect();
+        self.release_pane_tracking(&owned_pane_ids);
         // Forget every inactive runtime that belonged to the removed
         // project — the WorktreeRefs become dangling once the project
         // is gone.
@@ -425,7 +444,7 @@ impl Workspace {
             }
 
             // SILENT-OK: workspace may drop during background disk cleanup
-            let _ = async_cx.update(|app_cx| {
+            async_cx.update(|app_cx| {
                 // SILENT-OK: workspace may drop during background disk cleanup
                 let _ = app_cx.update_window(window_handle, |_, window, cx_w| {
                     let Some(ws) = _this.upgrade() else {

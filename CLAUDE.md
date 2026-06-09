@@ -55,6 +55,37 @@ scripts/lint-no-silent-update.sh
 scripts/lint-viewport-row-scroll.sh
 ```
 
+## Visual verification
+
+Render the UI offscreen to a PNG and read it back — text, layout, colors,
+images, and toasts all render, permission-free (no Screen Recording grant).
+Capture goes through gpui's `render_to_image`, gated upstream behind
+`test-support`; both paths below require it, plus `gpui_macos/font-kit`
+(without that feature glyphs don't rasterize — shapes render but **text is
+invisible**, the post-bump regression).
+
+**Whole app** — the `--screenshot` flag captures the live workspace window:
+
+```bash
+cargo build -p daruda --features screenshot
+target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures, quits
+```
+
+The opt-in `screenshot` feature enables `gpui/test-support` +
+`gpui_macos/font-kit`; it is off by default to keep the shipping binary clean.
+Entry point: `crates/app/src/screenshot.rs`.
+
+**Isolated view** — the `visual_verifier` example renders a hand-built view
+with no app state:
+
+```bash
+cargo run -p daruda --example visual_verifier   # → /tmp/daruda_verifier.png
+```
+
+Verification loop: render → PNG → an agent reads the PNG and checks the result.
+This catches both rendering bugs and runtime state (e.g. error toasts), so it
+doubles as a smoke test of the real app's startup.
+
 ## Coding Best Practices
 
 **Priority order** when trade-offs arise: Correctness > Maintainability > Performance > Brevity

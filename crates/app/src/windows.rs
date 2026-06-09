@@ -255,7 +255,7 @@ pub(crate) fn open_welcome_window(
                     {
                         let project = daruda_store::project::Project::from_path(path);
                         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-                        let _ = cx.update(|cx| {
+                        cx.update(|cx| {
                             let opts = build_window_options(&cfg2);
                             open_workspace_window(cfg2.clone(), None, Some(project), opts, cx);
                             close_welcome(cx);
@@ -365,7 +365,7 @@ pub(crate) fn prompt_and_open_folder(
     cx.spawn(async move |cx| {
         let selected = paths.await;
         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             if let Ok(Ok(Some(paths))) = selected
                 && let Some(path) = paths.first()
             {
@@ -425,7 +425,7 @@ pub(crate) fn prompt_and_open_folder_with_policy(
     cx.spawn(async move |cx| {
         let selected = paths.await;
         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             if let Ok(Ok(Some(paths))) = selected
                 && let Some(path) = paths.first()
             {
@@ -722,7 +722,7 @@ pub(crate) fn open_project_with_mode(
     // never the newcomer.
     cx.spawn(async move |cx| {
         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
             let _ = cx.update_window(handle, |_, window, _| {
                 window.remove_window();
@@ -786,7 +786,7 @@ pub(crate) fn open_settings_window(
 pub(crate) fn ensure_welcome_if_last(cx: &mut App) {
     cx.spawn(async move |cx| {
         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             if !WindowRegistry::all_handles(cx).is_empty() {
                 return;
             }
@@ -813,7 +813,7 @@ pub(crate) fn close_all_workspace_windows(cx: &mut App) {
     }
     cx.spawn(async move |cx| {
         // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             for handle in targets {
                 // SILENT-OK: window or process may exit during async picker / close-loop / registry iteration
                 let _ = cx.update_window(handle, |_, window, _| {

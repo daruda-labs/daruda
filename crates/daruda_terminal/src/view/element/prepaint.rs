@@ -238,7 +238,6 @@ impl TerminalTextElement {
                     let view = self.view.read(cx);
                     let origin_x = cell_left_x_for_col(
                         &view.line_layouts,
-                        &view.state.viewport_lines,
                         col,
                         row,
                         cell_width,
@@ -610,7 +609,7 @@ impl TerminalTextElement {
             let y = bounds.top() + line_height * (row.saturating_sub(1)) as f32;
             let row_index = row.saturating_sub(1) as usize;
             let line = shaped_lines.get(row_index)?;
-            let x = cursor_x_for_col(line, col, bounds.left());
+            let x = cursor_x_for_col(line, col, bounds.left(), cell_width_f);
             let cursor_w = cursor_width_for_col(line, col, cell_width_f);
 
             let cursor_bounds = match style_code {

@@ -763,14 +763,8 @@ impl Workspace {
                 claude_status: {
                     // Cold restore: load any status files that survived a
                     // previous run. TTL cleanup runs at the same time so
-                    // orphans from past crashes don't accumulate. The
-                    // stale-NeedsAttention threshold lives on the store
-                    // itself (used by aggregate queries to demote stuck
-                    // states from a TUI-dismissed Notification).
-                    let mut store = daruda_claude::ClaudeStatusStore::new()
-                        .with_needs_attention_stale(std::time::Duration::from_secs(
-                            config.claude_status.needs_attention_stale_secs,
-                        ));
+                    // orphans from past crashes don't accumulate.
+                    let mut store = daruda_claude::ClaudeStatusStore::new();
                     if config.claude_status.enable
                         && let Ok(dir) = daruda_claude::hooks::status_file::default_dir()
                     {
@@ -796,6 +790,7 @@ impl Workspace {
                 _jsonl_watcher_shutdown: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
+                last_pushed_notification: HashMap::new(),
                 _limits_pumps: sync::limits::spawn(cx),
             },
             // Bootstrap projects for this workspace. When the caller
@@ -1098,15 +1093,33 @@ impl Workspace {
         self.active_project_mut()?.lane_mut(id)
     }
 
+    /// Resolve a `ProjectId` to its runtime project.
+    pub(in crate::workspace) fn project_for(
+        &self,
+        id: daruda_store::project::ProjectId,
+    ) -> Option<&crate::project::Project> {
+        self.projects.iter().find(|p| p.id == id)
+    }
+
     /// Resolve a `LaneRef` to its runtime lane.
     pub(in crate::workspace) fn lane_for(
         &self,
         target: daruda_store::project::LaneRef,
     ) -> Option<&crate::lane::Lane> {
+        self.project_for(target.project)?.lane(target.lane)
+    }
+
+    /// Resolve a `LaneRef` to its runtime lane, mutably. Mirror of
+    /// [`Self::lane_for`] for the write paths (branch reconcile, kind
+    /// updates) that mutate the lane in place.
+    pub(in crate::workspace) fn lane_for_mut(
+        &mut self,
+        target: daruda_store::project::LaneRef,
+    ) -> Option<&mut crate::lane::Lane> {
         self.projects
-            .iter()
+            .iter_mut()
             .find(|p| p.id == target.project)?
-            .lane(target.lane)
+            .lane_mut(target.lane)
     }
 
     /// Borrow the active project's lane list. Empty when the
@@ -1132,24 +1145,21 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        let live: std::collections::HashSet<&str> = self
-            .claude
-            .pty_claude_bindings
-            .values()
-            .map(|b| b.session_id.as_str())
-            .collect();
-        if live.is_empty() {
+        if self.claude.pty_claude_bindings.is_empty() {
             return false;
         }
-        self.projects.iter().flat_map(|p| &p.lanes).any(|wt| {
-            self.claude
-                .claude_status
-                .per_session_states_for_cwd(&wt.path)
-                .into_iter()
-                .any(|(sid, s)| {
-                    live.contains(sid.as_str()) && !matches!(s, daruda_claude::SessionStatus::Idle)
-                })
-        })
+        // Per-session, not per-lane-aggregate: the aggregate's
+        // max-priority collapse would hide a `Connecting` session
+        // (priority 0) behind an `Idle` sibling (priority 1) and stop
+        // the pulse while that Connecting badge still animates in the
+        // sub-row. Only a pane set where every bound session is `Idle`
+        // is fully at rest.
+        let index = self.pane_lane_index();
+        crate::workspace::claude_session_ops::any_pane_session_animating(
+            &index,
+            &self.claude.pty_claude_bindings,
+            &self.claude.claude_status,
+        )
     }
 
     /// Display name of the currently active project. `None` when the

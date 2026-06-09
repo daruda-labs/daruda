@@ -1004,6 +1004,12 @@ pub const MD_BLOCK_RADIUS: f32 = RADIUS_XS;
 pub const MD_BLOCK_MARGIN_Y: f32 = PAD_XS;
 /// Horizontal padding for inline code (px).
 pub const MD_CODE_INLINE_PAD_X: f32 = 3.0;
+/// Maximum rendered height of a block image / diagram in the preview (px).
+/// Width fits the pane; height is capped so a tall image can't dominate.
+pub const MD_IMAGE_MAX_HEIGHT: f32 = 600.0;
+/// Height of an image embedded in a text line (px) — sized to the body line so
+/// inline icons/badges flow with the text instead of breaking the line.
+pub const MD_INLINE_IMAGE_HEIGHT: f32 = FILE_VIEWER_FONT_SIZE * 1.3;
 /// Minimum dimension for a divider / header lane (px) — 1 device pixel.
 /// Used as `min_w` / `min_h` inside flex layouts so the lane always
 /// has a clickable line even when its surrounding area collapses.

@@ -5,10 +5,7 @@
 //! retones every Dialog / Input / Checkbox / Notification at one site
 //! without touching widget code or the vendored crate.
 //!
-//! Called once from `main.rs` at app startup. Subsumes the explicit
-//! `Theme::change(Dark, ...)` that the migration earlier wired by hand.
-//!
-//! Dark-only for now; light-mode mapping is a Phase-10+ follow-up.
+//! Called once from `main.rs` at app startup.
 //!
 //! Sibling [`palette`] holds the app-side UI palette constants
 //! (workspace chrome, docks, status bar) that are

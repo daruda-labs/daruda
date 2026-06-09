@@ -46,7 +46,16 @@ find_gpui_checkout() {
 CHECKOUT="${1:-$(find_gpui_checkout)}"
 TARGET_FILE="$CHECKOUT/crates/gpui/src/platform/mac/window.rs"
 
+# gpui >= 1.5.x split the macOS platform into the `gpui_macos` crate and added
+# native IME-first dispatch for printable keys while a CJK input source is
+# active (`is_ime_printable_key`, opt-in via `prefers_ime_for_printable_keys`).
+# That supersedes this CJK PATH-A patch, so on the new layout we skip cleanly.
 if [ ! -f "$TARGET_FILE" ]; then
+    NEW_MAC_WINDOW="$CHECKOUT/crates/gpui_macos/src/window.rs"
+    if [ -f "$NEW_MAC_WINDOW" ] && grep -q 'is_ime_printable_key' "$NEW_MAC_WINDOW" 2>/dev/null; then
+        echo "✓ gpui_macos provides native IME-first dispatch (is_ime_printable_key); CJK PATH-A patch not needed."
+        exit 0
+    fi
     echo "ERROR: Target file not found: $TARGET_FILE" >&2
     exit 1
 fi
