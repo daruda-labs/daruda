@@ -19,6 +19,8 @@ mod panels_watcher;
 pub(crate) mod path_ext;
 mod platform;
 pub mod project;
+#[cfg(feature = "screenshot")]
+mod screenshot;
 pub mod settings_store;
 pub mod settings_window;
 pub(crate) mod shell_quote;
@@ -197,5 +199,11 @@ fn main() {
         window_startup::open_first_window(config, window_opts, cx);
 
         watchers_lifecycle::spawn_all(cx);
+
+        // `--screenshot <path>`: capture the live window to a PNG, then quit.
+        #[cfg(feature = "screenshot")]
+        if let Some(path) = screenshot::parse_screenshot_arg() {
+            screenshot::schedule_capture(path, cx);
+        }
     });
 }

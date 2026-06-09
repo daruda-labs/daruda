@@ -10,6 +10,13 @@ description = "Loop Terminal — Dev loop accelerator for Claude Code"
 name = "daruda"
 path = "src/main.rs"
 
+[features]
+# `daruda --screenshot <path>` — render the live window to a PNG via gpui's
+# render_to_image (upstream-gated behind test-support). Off by default to keep
+# the shipping binary clean; enable for visual-verification builds:
+#   cargo build -p daruda --features screenshot
+screenshot = ["gpui/test-support", "gpui_macos/test-support"]
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
