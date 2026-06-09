@@ -454,9 +454,9 @@ pub(in crate::workspace) fn project_header_row(
                             let workspace_for_modal = ws_for_add.clone();
                             ws.update(cx, |ws, cx| {
                                 // Activate this project first so
-                                // `finalize_create_lane` lands the
-                                // new lane under it (matches the
-                                // old `add_worktree_row` semantics).
+                                // `git_repo_root()` returns the right
+                                // repo when the modal reads it at open
+                                // time.
                                 let target = daruda_store::project::LaneRef {
                                     project: project_id,
                                     lane: last_active_lane_id,
@@ -472,6 +472,7 @@ pub(in crate::workspace) fn project_header_row(
                                         super::create_modal::CreateWorktreeModal::new(
                                             workspace_for_modal.clone(),
                                             repo_root,
+                                            project_id,
                                             window,
                                             cx,
                                         )

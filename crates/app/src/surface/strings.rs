@@ -2211,6 +2211,18 @@ pub fn annotation_dialog_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
 
+pub fn create_lane_err_branch_required() -> String {
+    rust_i18n::t!("create_lane.err_branch_required").into_owned()
+}
+
+pub fn create_lane_err_branch_invalid() -> String {
+    rust_i18n::t!("create_lane.err_branch_invalid").into_owned()
+}
+
+pub fn create_lane_err_no_active_project() -> String {
+    rust_i18n::t!("create_lane.err_no_active_project").into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

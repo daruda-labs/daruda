@@ -34,6 +34,19 @@ pub(in crate::workspace) fn find_existing_project_uuid_for_root(
 }
 
 impl Workspace {
+    /// Clear all main-area runtime state and reset the active ref.
+    /// Called from `close_active_project` when no project (or no usable
+    /// lane) remains.
+    fn reset_to_empty_workspace(&mut self, cx: &mut Context<Self>) {
+        self.main_area.tabs.clear();
+        self.main_area.panes.clear();
+        self.main_area.active_tab_index = 0;
+        self.main_area.tab_history.clear();
+        self.main_area.focused_pane_id = 0;
+        self.active = LaneRef::default();
+        self.mutate_durable(cx, |_, _| {});
+    }
+
     /// Add a freshly-opened project to this workspace and activate its
     /// first lane.
     ///
@@ -102,19 +115,12 @@ impl Workspace {
         // Detect the new project's default branch in the background.
         // `Project::new_with_uuid` sets `default_branch: None` to avoid
         // blocking the UI thread; this spawn fills it in and persists.
-        if self
+        if let Some(root) = self
             .projects
             .iter()
-            .find(|p| p.id == new_id)
-            .map(|p| p.lanes.iter().any(|l| l.is_git()))
-            .unwrap_or(false)
+            .find(|p| p.id == new_id && p.lanes.iter().any(|l| l.is_git()))
+            .map(|p| p.root.clone())
         {
-            let root = self
-                .projects
-                .iter()
-                .find(|p| p.id == new_id)
-                .map(|p| p.root.clone())
-                .expect("project was just pushed");
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
                 move || crate::lane::git::default_branch(&root),
@@ -311,13 +317,7 @@ impl Workspace {
         // point and the natural shutdown save can't resurrect the closed
         // project from a stale on-disk snapshot.
         if self.projects.is_empty() {
-            self.main_area.tabs.clear();
-            self.main_area.panes.clear();
-            self.main_area.active_tab_index = 0;
-            self.main_area.tab_history.clear();
-            self.main_area.focused_pane_id = 0;
-            self.active = LaneRef::default();
-            self.mutate_durable(cx, |_, _| {});
+            self.reset_to_empty_workspace(cx);
             return false;
         }
 
@@ -332,13 +332,7 @@ impl Workspace {
             // workspace — same outcome as the no-projects case above — so
             // the caller closes the window and the user lands on Welcome
             // rather than a blank viewport.
-            self.main_area.tabs.clear();
-            self.main_area.panes.clear();
-            self.main_area.active_tab_index = 0;
-            self.main_area.tab_history.clear();
-            self.main_area.focused_pane_id = 0;
-            self.active = LaneRef::default();
-            self.mutate_durable(cx, |_, _| {});
+            self.reset_to_empty_workspace(cx);
             return false;
         };
         // Reset live runtime; the removed project's panes are gone for

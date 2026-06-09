@@ -150,13 +150,16 @@ impl Workspace {
             .as_deref()
             .and_then(|p| self.branch_for_worktree_path(p));
 
+        // active_project is guaranteed by git_repo_root() succeeding above
+        let Some(project_id) = self.active_project().map(|p| p.id) else {
+            return;
+        };
         let plan = CreateWorktreePlan {
             branch: task.branch_name.clone(),
             new_path: new_path.clone(),
             repo_root: repo_root.clone(),
             base_ref: self.resolve_lane_base_ref(base_ref),
             description: Some(format!("task: {}", task.title)),
-            project_id: self.active_project().map(|p| p.id),
         };
 
         let task_id = task.id.clone();
@@ -204,7 +207,7 @@ impl Workspace {
                                     .build();
                                 ws.report_error(report, cx);
                             }
-                            Ok(()) => match ws.finalize_create_lane(plan.clone(), window, cx) {
+                            Ok(()) => match ws.finalize_create_lane(plan.clone(), project_id, window, cx) {
                                 Err(msg) => {
                                     let report = ErrorReport::new("Lane finalize failed")
                                         .severity(ErrorSeverity::Error)

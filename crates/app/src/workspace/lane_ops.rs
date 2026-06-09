@@ -32,10 +32,6 @@ pub(in crate::workspace) struct CreateWorktreePlan {
     /// Free-form description captured at creation time.
     /// Surfaced as the lane row sublabel in the left dock.
     pub description: Option<String>,
-    /// Project this lane belongs to, captured at plan-creation time
-    /// so `finalize_create_lane` is not subject to a TOCTOU race
-    /// where the active project changes during the git background op.
-    pub project_id: Option<ProjectId>,
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.
@@ -249,22 +245,20 @@ impl Workspace {
     pub(in crate::workspace) fn finalize_create_lane(
         &mut self,
         plan: CreateWorktreePlan,
+        project_id: ProjectId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, String> {
+        if self.project_for(project_id).is_none() {
+            return Err(crate::surface::strings::create_lane_err_no_active_project());
+        }
         let CreateWorktreePlan {
             branch,
             new_path,
             repo_root,
             base_ref,
             description,
-            project_id,
         } = plan;
-        let Some(active_project_id) = project_id
-            .or_else(|| self.active_project().map(|p| p.id))
-        else {
-            return Err("No active project.".to_string());
-        };
         let pane = self
             .create_pane_with_cwd(Some(new_path.clone()), window, cx)
             .map_err(|e| e.to_string())?;
@@ -277,15 +271,13 @@ impl Workspace {
             user_label: None,
         };
 
-        let new_id = self.allocate_lane_id();
+        let new_id = self.allocate_lane_id(project_id);
         let new_ref = LaneRef {
-            project: active_project_id,
+            project: project_id,
             lane: new_id,
         };
         let order = self
-            .projects
-            .iter()
-            .find(|p| p.id == active_project_id)
+            .project_for(project_id)
             .map(|p| p.lanes.len())
             .unwrap_or(0) as u32;
         // A freshly-added linked lane's toplevel is exactly
@@ -303,7 +295,7 @@ impl Workspace {
         );
         wt.base_ref = base_ref;
         wt.description = description;
-        if let Some(project) = self.projects.iter_mut().find(|p| p.id == active_project_id) {
+        if let Some(project) = self.project_for_mut(project_id) {
             project.lanes.push(wt);
         }
 
@@ -330,13 +322,17 @@ impl Workspace {
         Ok(pane_id)
     }
 
-    /// Monotonic lane id allocator scoped to the active project.
+    /// Monotonic lane id allocator scoped to `project_id`.
     /// Walks both the lane list and the stashed inactive runtimes
     /// so a phantom key from a crash mid-remove never collides with a
     /// fresh id.
-    fn allocate_lane_id(&self) -> LaneId {
-        let project_id = self.active.project;
-        let max_list = self.active_lanes().iter().map(|w| w.id).max();
+    fn allocate_lane_id(&self, project_id: ProjectId) -> LaneId {
+        let max_list = self
+            .project_for(project_id)
+            .iter()
+            .flat_map(|p| p.lanes.iter())
+            .map(|w| w.id)
+            .max();
         let max_map = self
             .main_area
             .inactive_lane_runtimes
@@ -344,12 +340,7 @@ impl Workspace {
             .filter(|r| r.project == project_id)
             .map(|r| r.lane)
             .max();
-        match (max_list, max_map) {
-            (Some(a), Some(b)) => a.max(b) + 1,
-            (Some(a), None) => a + 1,
-            (None, Some(b)) => b + 1,
-            (None, None) => 0,
-        }
+        max_list.into_iter().chain(max_map).max().map(|m| m + 1).unwrap_or(0)
     }
 
     /// Switch the visible lane. The Workspace's `tabs` / `panes`
@@ -531,6 +522,27 @@ impl Workspace {
         cx.notify();
     }
 
+    fn mutate_active_lane<F>(&mut self, id: LaneId, f: F, cx: &mut Context<Self>)
+    where
+        F: FnOnce(&mut crate::lane::Lane),
+    {
+        let mutated = {
+            let Some(project) = self.active_project_mut() else {
+                return;
+            };
+            if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
+                f(wt);
+                true
+            } else {
+                false
+            }
+        };
+        if mutated {
+            self.mutate_durable(cx, |_, _| {});
+            cx.notify();
+        }
+    }
+
     /// Update the free-form description for the active project's
     /// lane `id`. `None` clears it, reverting the left dock
     /// sublabel to the lane path.
@@ -540,14 +552,7 @@ impl Workspace {
         description: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(project) = self.active_project_mut() else {
-            return;
-        };
-        if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
-            wt.set_description(description);
-            self.mutate_durable(cx, |_, _| {});
-            cx.notify();
-        }
+        self.mutate_active_lane(id, |wt| wt.set_description(description), cx);
     }
 
     /// Update the user-visible display name for the active project's
@@ -559,14 +564,7 @@ impl Workspace {
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(project) = self.active_project_mut() else {
-            return;
-        };
-        if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
-            wt.set_name(name);
-            self.mutate_durable(cx, |_, _| {});
-            cx.notify();
-        }
+        self.mutate_active_lane(id, |wt| wt.set_name(name), cx);
     }
 
     /// Resolve the base ref for a new lane against the active project

@@ -551,3 +551,9 @@ terminal:
   annotation_err_pane_missing_message: "터미널 패널을 더 이상 사용할 수 없습니다."
   annotation_err_operation_failed_title: "주석 작업 실패"
   annotation_err_operation_failed_message: "주석을 저장할 수 없습니다."
+
+# Create lane modal validation errors
+create_lane:
+  err_branch_required: "브랜치 이름을 입력해 주세요."
+  err_branch_invalid: "잘못된 브랜치 이름입니다."
+  err_no_active_project: "활성 프로젝트가 없습니다."

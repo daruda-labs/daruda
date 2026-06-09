@@ -1101,6 +1101,13 @@ impl Workspace {
         self.projects.iter().find(|p| p.id == id)
     }
 
+    pub(in crate::workspace) fn project_for_mut(
+        &mut self,
+        id: daruda_store::project::ProjectId,
+    ) -> Option<&mut crate::project::Project> {
+        self.projects.iter_mut().find(|p| p.id == id)
+    }
+
     /// Resolve a `LaneRef` to its runtime lane.
     pub(in crate::workspace) fn lane_for(
         &self,

@@ -551,3 +551,9 @@ terminal:
   annotation_err_pane_missing_message: "The terminal pane is no longer available."
   annotation_err_operation_failed_title: "Annotation operation failed"
   annotation_err_operation_failed_message: "The annotation could not be saved."
+
+# Create lane modal validation errors
+create_lane:
+  err_branch_required: "Branch name is required."
+  err_branch_invalid: "Invalid branch name."
+  err_no_active_project: "No active project."

@@ -21,8 +21,12 @@ use gpui::{
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
+use daruda_store::project::ProjectId;
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use crate::surface::strings as s;
 use crate::workspace::lane_ops::{CreateWorktreePlan, sanitize_branch_name};
 
 pub struct CreateWorktreeModal {
@@ -52,12 +56,18 @@ pub struct CreateWorktreeModal {
     /// Captured at open time so the modal doesn't have to re-traverse
     /// the lane list to validate.
     repo_root: PathBuf,
+    /// Project this lane will be created under, captured at modal-open
+    /// time from the [+] button's row context. Immutable for the modal's
+    /// lifetime so submit always targets the intended project regardless
+    /// of which project is focused when the user clicks Create.
+    project_id: ProjectId,
 }
 
 impl CreateWorktreeModal {
     pub fn new(
         workspace: WeakEntity<Workspace>,
         repo_root: PathBuf,
+        project_id: ProjectId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -111,6 +121,7 @@ impl CreateWorktreeModal {
             submitting: false,
             workspace,
             repo_root,
+            project_id,
         }
     }
 
@@ -126,9 +137,9 @@ impl CreateWorktreeModal {
         let raw = self.branch_input.read(cx).value().to_string();
         let raw = raw.trim();
         if raw.is_empty() {
-            return Err("Branch name is required.".to_string());
+            return Err(s::create_lane_err_branch_required());
         }
-        let branch = sanitize_branch_name(raw).ok_or_else(|| "Invalid branch name.".to_string())?;
+        let branch = sanitize_branch_name(raw).ok_or_else(s::create_lane_err_branch_invalid)?;
         let repo_name = self
             .repo_root
             .file_name()
@@ -150,7 +161,6 @@ impl CreateWorktreeModal {
             repo_root: self.repo_root.clone(),
             base_ref,
             description,
-            project_id: None, // filled in by submit() before the async spawn
         })
     }
 
@@ -166,15 +176,13 @@ impl CreateWorktreeModal {
                 return;
             }
         };
-        // Capture project_id and resolve base_ref now — both must be
-        // baked into the plan before the async git spawn so that
-        // `finalize_create_lane` uses the project that was active at
-        // submit time, not whatever is active when the spawn completes.
+        // Resolve base_ref against the project at submit time. Best-effort:
+        // if the workspace is gone we proceed with the raw input and
+        // finalize_create_lane will reject if the project itself is gone.
         if let Some(ws) = self.workspace.upgrade() {
-            let ws_ref = ws.read(cx);
-            plan.base_ref = ws_ref.resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
-            plan.project_id = ws_ref.active_project().map(|p| p.id);
+            plan.base_ref = ws.read(cx).resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
         }
+        let project_id = self.project_id;
         self.submitting = true;
         cx.notify();
 
@@ -199,8 +207,7 @@ impl CreateWorktreeModal {
                     })
                     .await;
 
-                // SILENT-OK: workspace may drop after create modal closes / dialog dismiss on focus restore
-                let _ = async_cx.update(|window, app_cx| {
+                let update_result = async_cx.update(|window, app_cx| {
                     let Some(me) = me.upgrade() else { return };
                     // Nested entity.update calls must not overlap, so
                     // run the workspace finalize first and feed its
@@ -210,7 +217,7 @@ impl CreateWorktreeModal {
                         Ok(()) => match workspace.upgrade() {
                             Some(ws) => ws
                                 .update(app_cx, |ws, cx| {
-                                    ws.finalize_create_lane(plan.clone(), window, cx)
+                                    ws.finalize_create_lane(plan.clone(), project_id, window, cx)
                                 })
                                 // The left dock opener doesn't need the
                                 // newly-spawned pane id — only
@@ -230,6 +237,16 @@ impl CreateWorktreeModal {
                         }
                     });
                 });
+                if let Err(e) = update_result {
+                    LogWriter::log(
+                        ErrorReport::new("Create lane completion could not reach workspace")
+                            .severity(ErrorSeverity::Warning)
+                            .at(file!(), line!())
+                            .with_context("error", format!("{e}"))
+                            .dedup("lane.create.modal.completion")
+                            .build(),
+                    );
+                }
             })
             .detach();
     }
@@ -347,6 +364,7 @@ mod tests {
             CreateWorktreeModal::new(
                 WeakEntity::new_invalid(),
                 PathBuf::from(repo_root),
+                0, // test fixture — project_id not exercised
                 window,
                 cx,
             )

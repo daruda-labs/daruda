@@ -67,23 +67,7 @@ impl Project {
     /// [`Lane::bootstrap_from_project`]. The default `id` is `0` —
     /// `Workspace::add_project` overwrites it with the monotonic id.
     pub fn bootstrap(id: ProjectId, root: PathBuf) -> Self {
-        let name = derive_name_from_path(&root);
-        let lanes = Lane::bootstrap_from_project(&root);
-        let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
-        Self {
-            id,
-            uuid: ProjectUuid::new(),
-            root,
-            name,
-            default_branch: None,
-            base_branch: None,
-            lanes,
-            last_active_lane_id,
-            group_id: None,
-            color: None,
-            tab_order: 0,
-            is_collapsed: false,
-        }
+        Self::new_with_uuid(id, ProjectUuid::new(), root)
     }
 
     /// Build a runtime project with a caller-supplied UUID. Used by
@@ -92,6 +76,12 @@ impl Project {
     /// same root may appear in multiple workspaces, but each shares a
     /// single ProjectState identified by its UUID). Lane discovery
     /// is identical to [`Project::bootstrap`].
+    ///
+    /// The field defaults here also serve as [`Project::bootstrap`]'s
+    /// defaults — `bootstrap` delegates to this constructor. If a new
+    /// field needs different initialization for the fresh-directory case,
+    /// override it explicitly in `bootstrap` rather than relying on this
+    /// constructor's default.
     pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf) -> Self {
         let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);

@@ -109,6 +109,13 @@ impl Workspace {
             .unwrap_or(0)
     }
 
+    fn find_group_mut(
+        &mut self,
+        group_id: GroupId,
+    ) -> Option<&mut daruda_store::project::SerializedGroup> {
+        self.groups.iter_mut().find(|g| g.id == group_id)
+    }
+
     /// Rename the group with `group_id`. No-op when the id is unknown
     /// or the name is unchanged.
     pub(crate) fn rename_group(
@@ -117,7 +124,7 @@ impl Workspace {
         name: String,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(group) = self.groups.iter_mut().find(|g| g.id == group_id) else {
+        let Some(group) = self.find_group_mut(group_id) else {
             return false;
         };
         if group.name == name {
@@ -136,7 +143,7 @@ impl Workspace {
         color: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(group) = self.groups.iter_mut().find(|g| g.id == group_id) else {
+        let Some(group) = self.find_group_mut(group_id) else {
             return;
         };
         if group.color == color {
@@ -148,7 +155,7 @@ impl Workspace {
 
     /// Toggle the group's collapsed flag in the left dock.
     pub(crate) fn toggle_group_collapse(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
-        let Some(group) = self.groups.iter_mut().find(|g| g.id == group_id) else {
+        let Some(group) = self.find_group_mut(group_id) else {
             return;
         };
         group.is_collapsed = !group.is_collapsed;
