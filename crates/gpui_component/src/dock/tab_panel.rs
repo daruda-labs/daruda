@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity,
+    App, AppContext, Context, Anchor, DismissEvent, Div, DragMoveEvent, Empty, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
     Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
@@ -510,7 +510,7 @@ impl TabPanel {
                             })
                         }
                     })
-                    .anchor(Corner::TopRight),
+                    .anchor(Anchor::TopRight),
             )
     }
 

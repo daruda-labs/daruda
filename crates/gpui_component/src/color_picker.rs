@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext, Bounds, ClickEvent, Context, Corner, Div, ElementId, Entity, EventEmitter,
+    App, AppContext, Bounds, ClickEvent, Context, Anchor, Div, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
     ParentElement, Pixels, Point, Render, RenderOnce, SharedString, Stateful,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription, Window, anchored,
@@ -201,7 +201,7 @@ pub struct ColorPicker {
     label: Option<SharedString>,
     icon: Option<Icon>,
     size: Size,
-    anchor: Corner,
+    anchor: Anchor,
 }
 
 impl ColorPicker {
@@ -215,7 +215,7 @@ impl ColorPicker {
             size: Size::Medium,
             label: None,
             icon: None,
-            anchor: Corner::TopLeft,
+            anchor: Anchor::TopLeft,
         }
     }
 
@@ -247,8 +247,8 @@ impl ColorPicker {
 
     /// Set the anchor corner of the color picker.
     ///
-    /// Default is `Corner::TopLeft`.
-    pub fn anchor(mut self, anchor: Corner) -> Self {
+    /// Default is `Anchor::TopLeft`.
+    pub fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
     }
@@ -365,10 +365,10 @@ impl ColorPicker {
 
     fn resolved_corner(&self, bounds: Bounds<Pixels>) -> Point<Pixels> {
         bounds.corner(match self.anchor {
-            Corner::TopLeft => Corner::BottomLeft,
-            Corner::TopRight => Corner::BottomRight,
-            Corner::BottomLeft => Corner::TopLeft,
-            Corner::BottomRight => Corner::TopRight,
+            Anchor::TopLeft => Anchor::BottomLeft,
+            Anchor::TopRight => Anchor::BottomRight,
+            Anchor::BottomLeft => Anchor::TopLeft,
+            Anchor::BottomRight => Anchor::TopRight,
         })
     }
 }
@@ -481,8 +481,8 @@ impl RenderOnce for ColorPicker {
                                 div()
                                     .occlude()
                                     .map(|this| match self.anchor {
-                                        Corner::TopLeft | Corner::TopRight => this.mt_1p5(),
-                                        Corner::BottomLeft | Corner::BottomRight => this.mb_1p5(),
+                                        Anchor::TopLeft | Anchor::TopRight => this.mt_1p5(),
+                                        Anchor::BottomLeft | Anchor::BottomRight => this.mb_1p5(),
                                     })
                                     .w_72()
                                     .overflow_hidden()

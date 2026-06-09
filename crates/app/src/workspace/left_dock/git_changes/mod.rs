@@ -1041,7 +1041,7 @@ fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoEl
 
 fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<gpui::AnyElement> {
     let viewport_h = handle.bounds().size.height;
-    let max_offset = handle.max_offset().height;
+    let max_offset = handle.max_offset().y;
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "git-changes-scrollbar-thumb",

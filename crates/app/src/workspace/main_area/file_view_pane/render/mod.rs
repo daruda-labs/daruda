@@ -53,7 +53,7 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         && fv.view_mode == FileViewMode::Preview;
     let content_h = if is_preview_mode {
         let viewport_h = scroll_handle.bounds().size.height;
-        viewport_h + scroll_handle.max_offset().height
+        viewport_h + scroll_handle.max_offset().y
     } else {
         let total_rows = fv.visible_row_count();
         px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)

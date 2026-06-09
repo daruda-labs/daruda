@@ -76,7 +76,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 /// offset — the same approach used by `settings_window::render`.
 fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<AnyElement> {
     let viewport_h = handle.bounds().size.height;
-    let max_offset = handle.max_offset().height;
+    let max_offset = handle.max_offset().y;
     let t = theme::current(cx);
     crate::ui::scrollbar::vertical_thumb(
         "right-panel-scrollbar-thumb",

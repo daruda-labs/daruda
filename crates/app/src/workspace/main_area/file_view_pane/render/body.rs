@@ -182,7 +182,7 @@ fn render_raw_body(
                 return;
             }
             let current_y = scroll_handle_guard.offset().y;
-            let max_y = scroll_handle_guard.max_offset().height;
+            let max_y = scroll_handle_guard.max_offset().y;
             if max_y > px(0.) && (current_y + delta_y).clamp(-max_y, px(0.)) == current_y {
                 cx.stop_propagation();
             }
@@ -286,7 +286,7 @@ fn render_diff_body(
                 return;
             }
             let current_y = scroll_handle_guard.offset().y;
-            let max_y = scroll_handle_guard.max_offset().height;
+            let max_y = scroll_handle_guard.max_offset().y;
             if max_y > px(0.) && (current_y + delta_y).clamp(-max_y, px(0.)) == current_y {
                 cx.stop_propagation();
             }

@@ -414,7 +414,7 @@ impl Workspace {
             }
 
             // SILENT-OK: workspace may drop during background disk cleanup
-            let _ = async_cx.update(|app_cx| {
+            async_cx.update(|app_cx| {
                 // SILENT-OK: workspace may drop during background disk cleanup
                 let _ = app_cx.update_window(window_handle, |_, window, cx_w| {
                     let Some(ws) = _this.upgrade() else {

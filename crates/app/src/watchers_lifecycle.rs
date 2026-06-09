@@ -57,7 +57,6 @@ fn spawn_claude_status(cx: &mut App) {
         Ok(status_dir) => {
             let status_rx = hooks::watcher::spawn_status_watcher(status_dir);
             watcher_pumps::spawn_event_fanout_pump(
-                "claude-status",
                 status_rx,
                 std::time::Duration::from_millis(100),
                 |event, ws, _window, cx| {
@@ -71,7 +70,6 @@ fn spawn_claude_status(cx: &mut App) {
 
 fn spawn_needs_attention_demote(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
-        "needs-attention-demote",
         std::time::Duration::from_secs(30),
         |cx: &mut App| {
             WindowRegistry::for_each_workspace(cx, |_ws, _window, cx| {
@@ -92,7 +90,6 @@ fn spawn_needs_attention_demote(cx: &mut App) {
 /// Pitfall #10.
 fn spawn_status_pulse(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
-        "status-pulse",
         std::time::Duration::from_millis(theme::STATUS_INDICATOR_TICK_MS),
         |cx: &mut App| {
             if cx.try_global::<StatusPulseClock>().is_none() {
@@ -115,7 +112,6 @@ fn spawn_status_pulse(cx: &mut App) {
 fn spawn_panels_reload(cx: &mut App) {
     let panels_reload_rx = panels_watcher::spawn_panels_watcher();
     watcher_pumps::spawn_drain_burst_pump(
-        "panels-reload",
         panels_reload_rx,
         std::time::Duration::from_millis(250),
         |cx: &mut App| {

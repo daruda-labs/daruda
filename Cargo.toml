@@ -12,9 +12,10 @@ repository = "https://github.com/daruda-labs/daruda"
 homepage = "https://github.com/daruda-labs/daruda"
 
 [workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "cff3ac6f93f506330034652f0d2389591bfb45a0" }
-gpui_macros = { git = "https://github.com/zed-industries/zed", package = "gpui_macros", rev = "cff3ac6f93f506330034652f0d2389591bfb45a0" }
-sum_tree = { git = "https://github.com/zed-industries/zed", package = "sum_tree", rev = "cff3ac6f93f506330034652f0d2389591bfb45a0" }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54" }
+gpui_macros = { git = "https://github.com/zed-industries/zed", package = "gpui_macros", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54" }
+sum_tree = { git = "https://github.com/zed-industries/zed", package = "sum_tree", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54" }
+gpui_macos = { git = "https://github.com/zed-industries/zed", package = "gpui_macos", rev = "193b55aa3aa71accf0dcd78709ee164a8ca42d54", features = ["font-kit"] }
 
 gpui_component = { path = "crates/gpui_component" }
 gpui_component_macros = { path = "crates/gpui_component_macros" }
