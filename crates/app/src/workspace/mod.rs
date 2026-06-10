@@ -18,6 +18,7 @@ mod annotation_dialog;
 mod annotation_ops;
 mod availability_ops;
 mod claude_session_ops;
+mod claude_status_aggregate;
 pub(in crate::workspace) mod command;
 mod config_ops;
 mod config_sync;
@@ -1184,7 +1185,7 @@ impl Workspace {
         // sub-row. Only a pane set where every bound session is `Idle`
         // is fully at rest.
         let index = self.pane_lane_index();
-        crate::workspace::claude_session_ops::any_pane_session_animating(
+        crate::workspace::claude_status_aggregate::any_pane_session_animating(
             &index,
             &self.claude.pty_claude_bindings,
             &self.claude.claude_status,

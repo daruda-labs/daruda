@@ -29,7 +29,7 @@ impl Workspace {
         // the correctness it buys.
         let pane_lane = self.pane_lane_index();
         let (claude_status_per_lane, claude_per_session_per_lane) =
-            crate::workspace::claude_session_ops::aggregate_over_panes(
+            crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
                 &self.claude.pty_claude_bindings,
                 &self.claude.claude_status,
