@@ -252,10 +252,9 @@ bottom_dock:
 projects:
   section_header: "프로젝트"
   empty_state: "열린 프로젝트 없음"
+  empty_state_cta: "프로젝트 추가"
   add_menu_project: "프로젝트 추가…"
   add_menu_group: "새 그룹…"
-  repo_base_with_branch: "%{name} · %{branch}"
-  repo_base_no_branch: "%{name}"
   directory_missing: "디렉터리 없음"
   permission_denied: "접근 거부됨"
   empty_missing_title: "디렉터리 없음"
@@ -524,6 +523,7 @@ usage:
   limit_5h_label: "5시간"
   limit_7d_label: "7일"
   limit_unavailable: "사용 불가"
+  limits_section_label: "플랜 사용량"
 
 # Service status pill
 status:

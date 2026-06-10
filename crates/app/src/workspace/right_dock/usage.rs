@@ -40,6 +40,7 @@ use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use crate::surface::strings;
 use crate::ui::Divider;
+use crate::ui::SectionHeader;
 
 use crate::ui::Badge;
 
@@ -310,6 +311,7 @@ fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
         .flex()
         .flex_col()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(SectionHeader::new(strings::usage_limits_section_label()))
         .child(gauge_row(
             strings::usage_limit_5h_label(),
             limits.five_hour.as_ref(),

@@ -35,8 +35,18 @@ impl<'a> TopRow<'a> {
 
 /// Render the Lanes view body.
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
+    // `_any_git` is unused inside `section_header` — pass `false` unconditionally.
+    let header = section_header(false, snap, cx);
+
+    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
+    if snap.claude_install_banner_visible {
+        body = body.child(claude_install_banner(snap, cx));
+    }
+    body = body.child(header);
+
     if snap.projects.is_empty() {
-        return empty_state(cx).into_any_element();
+        body = body.child(empty_state(cx));
+        return body.into_any_element();
     }
 
     let any_git = snap
@@ -44,6 +54,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .iter()
         .flat_map(|p| &p.lanes)
         .any(|w| w.is_git());
+
     let active_project = snap.active.project;
     let active_lane = snap.active.lane;
 
@@ -66,14 +77,6 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         }
     }
     top_rows.sort_by_key(|r| r.tab_order());
-
-    let header = section_header(any_git, snap, cx);
-
-    let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
-    if snap.claude_install_banner_visible {
-        body = body.child(claude_install_banner(snap, cx));
-    }
-    body = body.child(header);
 
     for row in &top_rows {
         match row {
@@ -155,6 +158,7 @@ fn ungrouped_project_block(
             is_collapsed: project.is_collapsed,
             last_active_lane_id: project.last_active_lane_id,
             availability: project.availability,
+            default_branch: project.default_branch.clone(),
         },
         snap,
         cx,
@@ -164,13 +168,8 @@ fn ungrouped_project_block(
             .flex()
             .flex_col()
             .w_full()
+            .pl(px(theme::LANE_INDENT_STEP))
             .gap(px(theme::LANE_LIST_GAP_Y));
-        // Repo-base anchor row above the worktree rows — only for git
-        // projects, so worktree-only / bare repos still show a main
-        // representation. Render-only, no interaction.
-        if project_is_git {
-            list = list.child(super::rows::repo_base_row(project, cx));
-        }
         for wt in &project.lanes {
             let is_active = project.id == active_project && wt.id == active_lane;
             let git_badge = git_badge_for(snap, project.id, wt.id);
@@ -181,9 +180,9 @@ fn ungrouped_project_block(
     block
 }
 
-/// Member project block inside an expanded group card. Layout is the
-/// same as the ungrouped variant — the wrapping card supplies the
-/// padding that used to come from a left indent.
+/// Member project block inside an expanded group card. Delegates to
+/// `ungrouped_project_block`, which applies the stepped lane indent
+/// internally; the group card wraps both the header and lane rows.
 fn grouped_project_block(
     project: &ProjectSnapshot,
     active_project: daruda_store::project::ProjectId,
@@ -204,15 +203,28 @@ fn grouped_project_block(
         ))
 }
 
-fn empty_state(cx: &gpui::App) -> impl IntoElement {
+fn empty_state(cx: &mut Context<Dock>) -> impl IntoElement {
+    let cta = crate::ui::button_primary(
+        "projects-empty-add",
+        surface_strings::projects_empty_state_cta(),
+    )
+    .on_click(cx.listener(|_dock, _: &gpui::ClickEvent, _window, app_cx| {
+        // prompt_and_open_folder_with_policy takes only &mut App — _window unused.
+        let config = crate::settings_store::SettingsStore::global(app_cx).user_arc();
+        crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
+    }));
+
     div()
         .flex_1()
         .flex()
+        .flex_col()
         .items_center()
         .justify_center()
+        .gap(px(theme::MAIN_EMPTY_STATE_GAP))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
         .text_color(theme::current(cx).dock_placeholder_text)
         .child(crate::ui::placeholder_text(
             surface_strings::projects_empty_state(),
         ))
+        .child(cta)
 }

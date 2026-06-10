@@ -18,7 +18,7 @@ use crate::ui::{
     ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
 };
 use crate::workspace::NewGroup;
-use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
+use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
 
 use super::claude_badges::{claude_badges_row, claude_status_cell};
 use super::context_menu::build_context_menu_items;
@@ -115,6 +115,33 @@ fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> 
                 .text_color(theme::WARNING),
         )
         .child(SharedString::from(label))
+}
+
+/// Right-aligned chip on the project header showing the default branch name
+/// (e.g. `⎇ main`). Uses `GalleryVerticalEnd` as the branch glyph — the
+/// closest available icon to the standard branch symbol; no dedicated
+/// `GitBranch` variant exists in the current icon set.
+fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_none() // must not stretch: sits right-aligned after the flex_1 name and keeps its intrinsic width
+        .flex_row()
+        .items_center()
+        .gap(px(theme::LANE_LABEL_GAP))
+        .px(px(theme::LANE_BRANCH_CHIP_PAD_X))
+        .py(px(theme::LANE_BRANCH_CHIP_PAD_Y))
+        .rounded(px(theme::LANE_BRANCH_CHIP_RADIUS))
+        .border(px(theme::LANE_BRANCH_CHIP_BORDER_W))
+        .border_color(theme::BORDER)
+        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_color(label_color)
+        .bg(theme::SURFACE_3)
+        .child(
+            Icon::new(IconName::GalleryVerticalEnd)
+                .with_size(px(theme::LANE_SUB_FONT_SIZE))
+                .text_color(label_color),
+        )
+        .child(branch)
 }
 
 /// Single-row group header that opens / closes the accordion for the
@@ -303,6 +330,10 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
     /// Read-availability of the project root. Non-`Present` greys the
     /// header label and appends a state chip; the row stays clickable.
     pub availability: LaneAvailability,
+    /// Detected default branch (e.g. `"main"`). When `Some`, a small
+    /// branch chip is rendered right-aligned on the header. `None` for
+    /// non-git projects or before detection resolves.
+    pub default_branch: Option<SharedString>,
 }
 
 /// Single-row project header above the lanes list for one
@@ -336,6 +367,7 @@ pub(in crate::workspace) fn project_header_row(
         is_collapsed,
         last_active_lane_id,
         availability,
+        default_branch,
     } = args;
     let t = theme::current(cx);
     // Inaccessible project roots always render muted, even when active —
@@ -385,6 +417,7 @@ pub(in crate::workspace) fn project_header_row(
         .when(!show_active_bg, move |d| {
             d.hover(move |d| d.bg(row_hover_bg))
         })
+        // Accent left border is lane-only (C2); the header carries the active fill only.
         .when(show_active_bg, move |d| d.bg(row_active_bg))
         // Header click snaps the workspace focus to this project's
         // last-active lane (§5.5). No-op when the click lands on
@@ -487,6 +520,13 @@ pub(in crate::workspace) fn project_header_row(
                 .whitespace_nowrap()
                 .child(name),
         )
+        // Branch chip sits right of the project name: small icon + branch
+        // text, muted color, hairline-bordered pill. Only rendered when the
+        // default branch is known and the project is not in an error state so
+        // it doesn't compete visually with the availability chip.
+        .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {
+            row.child(branch_chip(branch, chip_color))
+        })
         .when_some(avail_badge, |row, (icon, state_label)| {
             row.child(availability_chip(icon, state_label, chip_color))
         })
@@ -679,7 +719,7 @@ pub(in crate::workspace) fn worktree_row(
     let badge_arrow_text = theme::TEXT_TERTIARY;
     let sublabel_color = t.faint_text;
     let row_hover_bg = t.lane_row_hover_bg;
-    let row_active_bg = theme::OVERLAY_ACTIVE;
+    let row_active_bg = t.lane_card_active_bg;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
 
@@ -844,8 +884,16 @@ pub(in crate::workspace) fn worktree_row(
         .gap(px(theme::LANE_ROW_GAP))
         .rounded(px(theme::LANE_ROW_RADIUS))
         .cursor_pointer()
+        // Reserve a same-width transparent left border on inactive rows so
+        // the label x-position stays stable when the active border appears.
+        .border_l(px(theme::LANE_ACTIVE_BORDER_W))
+        .border_color(theme::TRANSPARENT)
         .when(!is_active, move |d| d.hover(move |d| d.bg(row_hover_bg)))
-        .when(is_active, move |d| d.bg(row_active_bg))
+        .when(is_active, move |d| {
+            d.rounded_l_none()
+                .bg(row_active_bg)
+                .border_color(theme::PRIMARY)
+        })
         // on_click fires only when the mousedown + mouseup happen at the
         // same position (no drag movement), so it coexists safely with
         // on_drag without a hysteresis guard.
@@ -956,62 +1004,6 @@ pub(in crate::workspace) fn worktree_row(
     }
 
     row
-}
-
-/// Non-interactive anchor row shown under a git project's header,
-/// above its worktree rows. Displays the project's default branch
-/// as the repo's "base", so worktree-only / bare repos still show
-/// a main representation. No click / delete / merge affordance.
-///
-/// When the project root is inaccessible the row mirrors the header's
-/// treatment — muted text plus the same availability chip — so the
-/// "Main" anchor reads as unavailable too, instead of looking live
-/// under a greyed-out header.
-pub(in crate::workspace) fn repo_base_row(
-    project: &ProjectSnapshot,
-    cx: &gpui::App,
-) -> impl IntoElement {
-    let label = surface_strings::projects_repo_base_label(
-        project.name.as_ref(),
-        project.default_branch.as_ref().map(|b| b.as_ref()),
-    );
-    let avail_badge = availability_badge(project.availability);
-    let is_unavailable = avail_badge.is_some();
-    // Already-subtle row; when unavailable, drop it one further step to
-    // the faint tier so it tracks the header's muted state.
-    let t = theme::current(cx);
-    let label_color = if is_unavailable {
-        t.faint_text
-    } else {
-        theme::TEXT_SUBTLE
-    };
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .w_full()
-        .px(px(theme::LANE_ROW_PAD_X))
-        .py(px(theme::LANE_SECTION_PAD_Y))
-        .gap(px(theme::LANE_LABEL_GAP))
-        .text_size(px(theme::LANE_SUB_FONT_SIZE))
-        .text_color(label_color)
-        .child(
-            Icon::new(IconName::GalleryVerticalEnd)
-                .with_size(px(theme::LANE_SUB_FONT_SIZE))
-                .text_color(label_color),
-        )
-        .child(
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(SharedString::from(label)),
-        )
-        // Same `⚠ <state>` chip the header renders, so the anchor row
-        // carries the availability cue too.
-        .when_some(avail_badge, |row, (icon, state_label)| {
-            row.child(availability_chip(icon, state_label, t.faint_text))
-        })
 }
 
 pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {

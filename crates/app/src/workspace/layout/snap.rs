@@ -45,7 +45,7 @@ pub(in crate::workspace) struct ProjectSnapshot {
     pub tab_order: u32,
     /// Mirror of the runtime project's detected default branch (e.g.
     /// "main"). `None` for non-git projects or when detection has not
-    /// resolved yet. Drives the repo-base anchor row's label.
+    /// resolved yet. Drives the branch chip rendered on the project header row.
     pub default_branch: Option<gpui::SharedString>,
     pub lanes: Vec<crate::lane::Lane>,
     /// Last-active lane id, mirrored from the runtime project so

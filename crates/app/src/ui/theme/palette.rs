@@ -313,10 +313,32 @@ pub const LANE_CARD_MARGIN_X: f32 = PAD_STANDARD;
 /// Lanes list — vertical gap between adjacent lane rows inside
 /// a project block so consecutive rows don't read as a single block.
 pub const LANE_LIST_GAP_Y: f32 = 3.0;
+/// Lanes list — horizontal indent step (px). Each hierarchy level is
+/// one step deeper than its parent: project header sits at the group
+/// rank, lane rows sit one step (8 px) to the right of their project
+/// header. Applied to the lane list container, not per-row.
+pub const LANE_INDENT_STEP: f32 = 8.0;
 /// Lanes card — border width (px).
 pub const LANE_CARD_BORDER_W: f32 = 1.0;
+/// Active lane row — left accent border width (px). Renders as the primary
+/// selection signal on the active lane row; inactive rows reserve the same
+/// space with a transparent border so label x-position stays stable.
+pub const LANE_ACTIVE_BORDER_W: f32 = 2.0;
 /// Group label font size (px) — uppercase eyebrow.
 pub const LANE_GROUP_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
+
+/// Project header — branch chip horizontal padding (px). Matches the git
+/// badge pill padding so chips on the same row have consistent weight.
+pub const LANE_BRANCH_CHIP_PAD_X: f32 = PAD_XS;
+/// Project header — branch chip vertical padding (px). Zero keeps the chip
+/// flush with the row's line-height, same as the git badge pill.
+pub const LANE_BRANCH_CHIP_PAD_Y: f32 = 0.0;
+/// Project header — branch chip corner radius (px). Matches `RADIUS_SM` for
+/// consistency with other pill-shaped chips in the lanes list.
+pub const LANE_BRANCH_CHIP_RADIUS: f32 = RADIUS_SM;
+/// Project header — branch chip border width (px). 1 px hairline, same as
+/// card borders across the lanes list.
+pub const LANE_BRANCH_CHIP_BORDER_W: f32 = LANE_CARD_BORDER_W;
 
 // ============================================================================
 // Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)

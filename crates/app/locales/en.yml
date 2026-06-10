@@ -252,10 +252,9 @@ bottom_dock:
 projects:
   section_header: "PROJECTS"
   empty_state: "No project open"
+  empty_state_cta: "Add Project"
   add_menu_project: "Add Project…"
   add_menu_group: "New Group…"
-  repo_base_with_branch: "%{name} · %{branch}"
-  repo_base_no_branch: "%{name}"
   directory_missing: "Directory missing"
   permission_denied: "Permission denied"
   empty_missing_title: "Directory missing"
@@ -524,6 +523,7 @@ usage:
   limit_5h_label: "5h"
   limit_7d_label: "7d"
   limit_unavailable: "Unavailable"
+  limits_section_label: "PLAN USAGE"
 
 # Service status pill
 status:
