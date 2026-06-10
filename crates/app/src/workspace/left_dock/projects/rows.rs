@@ -215,15 +215,12 @@ pub(in crate::workspace) fn group_header_row(
         )
         .child(
             // Chevron uses `button_bare` so its chrome (ghost padding /
-            // hover / hit area) matches every `[+]` button on the row.
-            // Hidden until row hover; collapsed groups keep it visible
-            // as an expand affordance.
+            // hit area) matches every `[+]` button on the row. Always
+            // visible (DESIGN.md GroupHeader ▶ / ▼); `caret_icon` flips
+            // by collapse state.
             button_bare(("group-chevron", group_id as usize))
                 .ghost()
                 .icon(caret_icon)
-                .invisible()
-                .group_hover(row_group_key.clone(), |this| this.visible())
-                .when(group_is_collapsed, |b| b.visible())
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     cx.stop_propagation();
                     if let Some(ws) = ws_for_chevron.upgrade() {
@@ -497,15 +494,12 @@ pub(in crate::workspace) fn project_header_row(
                 IconName::ChevronDown
             };
             // Same `button_bare` chrome as the group chevron + `[+]`
-            // button on this row. Hidden until row hover; collapsed
-            // projects keep it visible as an expand affordance.
-            let row_group_for_chev = row_group.clone();
+            // button on this row. Always visible (matches the group
+            // chevron + DESIGN.md GroupHeader spec); `chevron_icon`
+            // flips ChevronRight/ChevronDown by collapse state.
             button_bare(("project-chevron", project_id as usize))
                 .ghost()
                 .icon(chevron_icon)
-                .invisible()
-                .group_hover(row_group_for_chev, |this| this.visible())
-                .when(is_collapsed, |b| b.visible())
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     cx.stop_propagation();
                     if let Some(ws) = ws_for_chevron.upgrade() {

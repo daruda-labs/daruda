@@ -112,6 +112,11 @@ candidate source:
 - **Filesystem-driven** ⇒ watch the watched dir's mtimes over a few seconds; a
   write storm fans out to repaints.
 
+**Don't stop at one contributor.** A steady baseline and periodic bursts can
+coexist (e.g. a fixed-rate repaint plus a scan every few seconds); one short
+sample may reveal only one. Sample long enough and repeat so a periodic burst
+isn't missed, and reconcile the baseline %CPU separately from the spikes.
+
 A profiler with a timeline (Step 3) shows *which* background timer fires right
 before each repaint — `sample` aggregates and loses that ordering.
 
