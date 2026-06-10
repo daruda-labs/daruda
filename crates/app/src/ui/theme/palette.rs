@@ -1099,6 +1099,15 @@ pub const RADIUS_SM: f32 = 4.0;
 pub const RADIUS_XS: f32 = 2.0;
 pub const RADIUS_MD: f32 = 6.0;
 pub const RADIUS_LG: f32 = 8.0;
+
+// Main-area empty-state shown when the active lane/project root is
+// inaccessible (Missing / AccessDenied). Centered icon + title + body
+// + Remove button stack.
+pub const MAIN_EMPTY_STATE_ICON_SIZE: f32 = 36.0;
+pub const MAIN_EMPTY_STATE_TITLE_FONT_SIZE: f32 = FONT_SIZE_LG;
+pub const MAIN_EMPTY_STATE_BODY_FONT_SIZE: f32 = FONT_SIZE_MD;
+pub const MAIN_EMPTY_STATE_GAP: f32 = 12.0;
+pub const MAIN_EMPTY_STATE_BODY_MAX_W: f32 = 360.0;
 /// Container corner radius (px).
 pub const KEYSTROKE_INPUT_RADIUS: f32 = RADIUS_MD;
 /// Horizontal padding inside the container (px).

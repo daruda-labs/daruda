@@ -7,28 +7,61 @@
 use gpui::{App, MouseDownEvent, SharedString, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::project::LaneId;
+use daruda_store::project::{LaneId, LaneRef, ProjectId};
 
+use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::ContextMenuItem;
 
+/// Inputs for [`build_context_menu_items`]. Grouped into a struct so
+/// the lane-row call site stays readable as per-lane flags accumulate
+/// (mirrors `rows::ProjectHeaderArgs`). Every field is owned so the
+/// resulting `ContextMenuItem` closures are `'static`.
+pub(in crate::workspace) struct CtxMenuArgs {
+    pub project_id: ProjectId,
+    pub wt_id: LaneId,
+    pub path_str: String,
+    pub current_description: Option<String>,
+    pub current_name: Option<String>,
+    pub workspace: gpui::WeakEntity<crate::workspace::Workspace>,
+    pub is_git: bool,
+    pub is_detached: bool,
+    pub is_dirty: bool,
+    pub source_branch: Option<String>,
+    pub base_ref: Option<String>,
+    pub source_path: std::path::PathBuf,
+    pub source_repo_root: Option<std::path::PathBuf>,
+    /// Read-availability of the lane root. Non-`Present` hides git-only
+    /// actions and surfaces a Remove affordance (plus a permission hint
+    /// for `AccessDenied`).
+    pub availability: LaneAvailability,
+    /// Whether the lane is removable as a git worktree
+    /// ([`crate::workspace::Workspace::lane_removable`]). Non-removable
+    /// (main / default) lanes route Remove through the project-delete
+    /// flow instead.
+    pub removable: bool,
+}
+
 /// Build the context menu item list for a lane row right-click.
 /// Captures path / id by value so the closures are `'static`.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::workspace) fn build_context_menu_items(
-    wt_id: LaneId,
-    path_str: String,
-    current_description: Option<String>,
-    current_name: Option<String>,
-    workspace: gpui::WeakEntity<crate::workspace::Workspace>,
-    is_git: bool,
-    is_detached: bool,
-    is_dirty: bool,
-    source_branch: Option<String>,
-    base_ref: Option<String>,
-    source_path: std::path::PathBuf,
-    source_repo_root: Option<std::path::PathBuf>,
-) -> Vec<ContextMenuItem> {
+pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<ContextMenuItem> {
+    let CtxMenuArgs {
+        project_id,
+        wt_id,
+        path_str,
+        current_description,
+        current_name,
+        workspace,
+        is_git,
+        is_detached,
+        is_dirty,
+        source_branch,
+        base_ref,
+        source_path,
+        source_repo_root,
+        availability,
+        removable,
+    } = args;
     let workspace_for_reveal = workspace.clone();
     let path_for_reveal = path_str.clone();
     let reveal_item = ContextMenuItem::new(
@@ -116,6 +149,52 @@ pub(in crate::workspace) fn build_context_menu_items(
 
     let mut items = vec![reveal_item, copy_item, edit_description_item, rename_item];
 
+    // Inaccessible lane (Missing / AccessDenied): git-only actions
+    // (Merge into…) are meaningless on a root that can't be read, so
+    // hide them and offer Remove instead. AccessDenied additionally
+    // surfaces a non-actionable hint pointing at the macOS permission
+    // grant — we do NOT force-suggest delete there, because the
+    // directory still exists and the user may just need to grant access.
+    if availability != LaneAvailability::Present {
+        let target = LaneRef {
+            project: project_id,
+            lane: wt_id,
+        };
+        let workspace_for_remove = workspace.clone();
+        items.push(ContextMenuItem::separator());
+        if availability == LaneAvailability::AccessDenied {
+            // Disabled, informational only — no handler.
+            items.push(
+                ContextMenuItem::new(surface_strings::ctx_grant_full_disk_access(), |_, _, _| {})
+                    .disabled(true),
+            );
+        }
+        items.push(ContextMenuItem::new(
+            surface_strings::ctx_remove(),
+            move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
+                let Some(ws) = workspace_for_remove.upgrade() else {
+                    return;
+                };
+                ws.update(app_cx, |ws, cx| {
+                    ws.close_context_menu(cx);
+                    if removable {
+                        ws.open_remove_lane_modal(target, window, cx);
+                    } else {
+                        // Main / default lane stands in for the whole
+                        // project. Route Remove through the project-delete
+                        // chooser targeted by id — do NOT force focus onto
+                        // this (inaccessible) lane, or cancelling would
+                        // strand the user on a dead lane. Activation, if
+                        // any, happens only once the user confirms inside
+                        // the modal.
+                        ws.open_delete_project_modal(project_id, window, cx);
+                    }
+                });
+            },
+        ));
+        return items;
+    }
+
     // "Merge into…" — only for git-backed lanes.
     if is_git {
         let merge_item = if is_detached {
@@ -202,4 +281,92 @@ pub(in crate::workspace) fn build_context_menu_items(
     }
 
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn labels(items: &[ContextMenuItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                ContextMenuItem::Item { label, .. } => Some(label.to_string()),
+                ContextMenuItem::Separator => None,
+            })
+            .collect()
+    }
+
+    fn disabled_labels(items: &[ContextMenuItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                ContextMenuItem::Item {
+                    label,
+                    disabled: true,
+                    ..
+                } => Some(label.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // The closures only *store* the weak workspace ref; they never
+    // upgrade it at build time, so an invalid handle is safe here.
+    fn build(
+        availability: LaneAvailability,
+        is_git: bool,
+        removable: bool,
+    ) -> Vec<ContextMenuItem> {
+        build_context_menu_items(CtxMenuArgs {
+            project_id: 0,
+            wt_id: 1,
+            path_str: "/tmp/repo-feat".to_string(),
+            current_description: None,
+            current_name: None,
+            workspace: gpui::WeakEntity::new_invalid(),
+            is_git,
+            is_detached: false,
+            is_dirty: false,
+            source_branch: Some("feat/x".to_string()),
+            base_ref: None,
+            source_path: std::path::PathBuf::from("/tmp/repo-feat"),
+            source_repo_root: Some(std::path::PathBuf::from("/tmp/repo")),
+            availability,
+            removable,
+        })
+    }
+
+    #[test]
+    fn present_git_lane_shows_merge_and_no_remove() {
+        let items = build(LaneAvailability::Present, true, true);
+        let labels = labels(&items);
+        assert!(labels.contains(&surface_strings::ctx_merge_into()));
+        assert!(!labels.contains(&surface_strings::ctx_remove()));
+    }
+
+    #[test]
+    fn missing_lane_hides_merge_and_shows_remove() {
+        let items = build(LaneAvailability::Missing, true, true);
+        let labels = labels(&items);
+        assert!(
+            !labels.contains(&surface_strings::ctx_merge_into()),
+            "git-only Merge must be hidden for a missing lane"
+        );
+        assert!(labels.contains(&surface_strings::ctx_remove()));
+        // Missing offers no permission hint (only AccessDenied does).
+        assert!(!labels.contains(&surface_strings::ctx_grant_full_disk_access()));
+    }
+
+    #[test]
+    fn access_denied_lane_adds_disabled_permission_hint() {
+        let items = build(LaneAvailability::AccessDenied, true, true);
+        let labels = labels(&items);
+        assert!(!labels.contains(&surface_strings::ctx_merge_into()));
+        assert!(labels.contains(&surface_strings::ctx_remove()));
+        assert!(
+            disabled_labels(&items).contains(&surface_strings::ctx_grant_full_disk_access()),
+            "AccessDenied must surface a disabled Full-Disk-Access hint"
+        );
+    }
 }

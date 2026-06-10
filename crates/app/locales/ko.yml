@@ -195,6 +195,8 @@ ctx:
   merge_into: "병합…"
   merge_disabled_dirty: "먼저 변경 사항을 커밋하세요"
   merge_disabled_detached: "브랜치 없음 (분리된 HEAD)"
+  remove: "제거…"
+  grant_full_disk_access: "시스템 설정에서 전체 디스크 접근 권한을 허용하세요"
   panel_tab_delete: "삭제…"
   macro_edit: "편집…"
   macro_delete: "삭제…"
@@ -217,6 +219,7 @@ modal:
   edit_description_placeholder: "설명 (예: PR #123 리뷰)"
   rename_worktree_title: "Worktree 이름 바꾸기"
   rename_placeholder: "표시 이름"
+  remove_lane_title: "Worktree 제거"
   merge_branch_label: "대상 브랜치:"
   merge_no_targets: "병합할 다른 Worktree를 추가하세요"
   merge_merging: "병합 중…"
@@ -253,6 +256,12 @@ projects:
   add_menu_group: "새 그룹…"
   repo_base_with_branch: "%{name} · %{branch}"
   repo_base_no_branch: "%{name}"
+  directory_missing: "디렉터리 없음"
+  permission_denied: "접근 거부됨"
+  empty_missing_title: "디렉터리 없음"
+  empty_missing_body: "이 워크트리의 디렉터리를 디스크에서 찾을 수 없습니다. 이동되었거나 삭제되었을 수 있습니다."
+  empty_denied_title: "접근 거부됨"
+  empty_denied_body: "이 워크트리의 디렉터리는 존재하지만 daruda가 읽을 수 없습니다. 시스템 설정에서 전체 디스크 접근 권한을 허용한 뒤 다시 여세요."
 
 # Group context menu
 group:

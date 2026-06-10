@@ -30,6 +30,7 @@ use crate::files::gitignore::GitignoreSet;
 use crate::files::load::load_dir;
 use crate::files::tree::{EntryId, EntryKind, FileTree, FileTreeError, LoadedEntry};
 use crate::files::watcher::{DebouncedEvent, FileTreeWatcher};
+use crate::lane::availability::{LaneAvailability, classify_dir};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::FileViewMode;
 
@@ -92,6 +93,16 @@ impl Workspace {
         };
         let root = wt.path.clone();
 
+        // An unavailable lane root (deleted / unreadable) cannot be
+        // scanned — `read_dir` would fail every tick and spam the toast.
+        // Skip the root load, watcher spawn, and gitignore build, and
+        // tear down any file-tree state built while the directory was
+        // still present (see `teardown_unavailable_lane_state`).
+        if wt.availability != LaneAvailability::Present {
+            self.teardown_unavailable_lane_state(wt_ref);
+            return;
+        }
+
         let needs_load = match self.file_tree.file_trees.get(&wt_ref) {
             Some(tree) => tree
                 .entry(tree.root_id)
@@ -127,6 +138,29 @@ impl Workspace {
         if !self.file_tree.files_gitignore_index.contains_key(&wt_ref) {
             self.kick_gitignore_build(wt_ref, root.clone(), cx);
         }
+    }
+
+    /// Tear down the file-tree state built while a lane's root was still
+    /// present, once that root has flipped to non-`Present` (deleted or
+    /// unreadable). Removes the watcher (so it stops firing reload
+    /// events against the missing path), the stale tree, the visible
+    /// cache, the gitignore matcher, and the pending reload queue.
+    /// Per-lane git and cursor state are left untouched — they are reset
+    /// by the lane-removal path, not by a transient availability flip.
+    ///
+    /// Called from two sites: `ensure_file_tree` (the lazy-create path,
+    /// which only runs when no tree exists yet — so it catches a lane
+    /// that went missing between sessions) and `apply_dir_load_result`
+    /// (the watcher-driven path, which catches an *active* lane whose
+    /// tree already exists and goes missing mid-session — the case
+    /// `ensure_file_tree` never reaches, since render skips it once a
+    /// tree is present).
+    pub(in crate::workspace) fn teardown_unavailable_lane_state(&mut self, wt_ref: LaneRef) {
+        self.file_tree.file_watchers.remove(&wt_ref);
+        self.file_tree.file_trees.remove(&wt_ref);
+        self.file_tree.files_reload_queues.remove(&wt_ref);
+        self.file_tree.files_gitignore_index.remove(&wt_ref);
+        self.invalidate_visible_files_cache(wt_ref);
     }
 
     pub(in crate::workspace) fn toggle_files_expand(
@@ -605,30 +639,99 @@ impl Workspace {
                 {
                     entry.kind = EntryKind::UnloadedDir;
                 }
-                // Watcher-driven NotFound on a child directory is
-                // expected — the directory was deleted between the
-                // change event and the read. The fs watcher will send
-                // a parent-reload event next and the stale entry drops
-                // out naturally. Root NotFound is critical (the
-                // lane itself is gone) — escalate to Error so the
-                // user sees the toast.
-                let severity = if is_root {
-                    ErrorSeverity::Error
-                } else {
-                    ErrorSeverity::Warning
-                };
-                let dedup_key = if is_root {
-                    "files.dir_read.root"
-                } else {
-                    "files.dir_read"
-                };
-                if !is_root
-                    && matches!(source, DirLoadSource::WatcherReload)
+                if is_root {
+                    // The lane root failed to read. Classify the failure:
+                    // only a genuine "gone / unusable" kind (NotFound /
+                    // PermissionDenied / NotADir) flips the lane to
+                    // non-Present and takes the silent teardown path — the
+                    // feature's intended suppression of the per-tick toast
+                    // spam. A transient/unknown I/O error maps to `Present`
+                    // (`From<&FileTreeError>` yields `Present` for `Io`):
+                    // the directory likely still exists, so we must NOT
+                    // tear down. Surfacing it as a normal Error toast keeps
+                    // a real I/O failure visible instead of silently
+                    // swallowing it (the no-op `set_*(Present)` otherwise
+                    // would).
+                    let classified: LaneAvailability = (&e).into();
+                    if classified == LaneAvailability::Present {
+                        // Transient/unknown failure on a root that is
+                        // still (probably) present — keep the lane as-is
+                        // and report it like any other dir-read error.
+                        Some((
+                            format!("Cannot read directory: {e}"),
+                            ErrorSeverity::Error,
+                            "files.dir_read.root",
+                        ))
+                    } else {
+                        // The root is genuinely gone / unreadable. This is
+                        // a detection site: flip the lane's availability so
+                        // the file-tree scan / watcher / PTY spawn all
+                        // short-circuit, instead of escalating to a
+                        // repeating Error toast (the spam this feature
+                        // fixes).
+                        self.set_lane_availability(wt_ref, classified);
+                        // Tear down the watcher + tree immediately.
+                        // `ensure_file_tree`'s teardown only runs on the
+                        // lazy-create path (no tree yet); for an *active*
+                        // lane whose tree already exists and vanishes
+                        // mid-session, render never re-calls
+                        // `ensure_file_tree`, so without this the watcher
+                        // keeps firing bulk reloads → repeated
+                        // `apply_dir_load_result` → repaint loop. Safe
+                        // ordering: the `tree.entry_mut` borrow above has
+                        // ended; the only tree access left
+                        // (`invalidate_visible_files_cache` + `cx.notify()`
+                        // below) tolerates a removed tree.
+                        // The setter wrote non-Present, so this guard is
+                        // true whenever the lane still exists; it also
+                        // covers the
+                        // lane-removed-between-schedule-and-apply case
+                        // (`None != Some(Present)` → teardown is a no-op on
+                        // already-absent keys).
+                        if self.lane_for(wt_ref).map(|l| l.availability)
+                            != Some(LaneAvailability::Present)
+                        {
+                            self.teardown_unavailable_lane_state(wt_ref);
+                            // Reconcile the owning project's availability
+                            // too: a root that died takes the project
+                            // header's live `[+]` with it. Collect the root
+                            // path before the `&mut self` setter to avoid a
+                            // borrow conflict.
+                            if let Some(root) =
+                                self.project_for(wt_ref.project).map(|p| p.root.clone())
+                            {
+                                let a = classify_dir(&root);
+                                self.set_project_availability(wt_ref.project, a);
+                            }
+                        }
+                        None
+                    }
+                } else if matches!(source, DirLoadSource::WatcherReload)
                     && matches!(e, FileTreeError::NotFound)
                 {
+                    // Watcher-driven NotFound on a child directory is
+                    // expected — the directory was deleted between the
+                    // change event and the read. The fs watcher will send
+                    // a parent-reload event next and the stale entry drops
+                    // out naturally.
+                    None
+                } else if self.lane_for(wt_ref).map(|l| l.availability)
+                    != Some(LaneAvailability::Present)
+                {
+                    // The lane is already non-Present (its root flipped on
+                    // an earlier load failure and the tree was torn down).
+                    // A child load that was in flight before teardown can
+                    // still land here — suppress its Warning toast, since
+                    // the empty-state already tells the user the lane is
+                    // gone. A genuinely-Present lane with a transient child
+                    // error still falls through to the Warning below.
                     None
                 } else {
-                    Some((format!("Cannot read directory: {e}"), severity, dedup_key))
+                    Some((
+                        format!("Cannot read directory: {e}"),
+                        ErrorSeverity::Warning,
+                        "files.dir_read",
+                    ))
                 }
             }
         };

@@ -60,6 +60,7 @@ impl Workspace {
                         lanes: p.lanes.clone(),
                         last_active_lane_id: p.last_active_lane_id,
                         is_collapsed: p.is_collapsed,
+                        availability: p.availability,
                     })
                     .collect();
                 projects.sort_by_key(|p| p.tab_order);

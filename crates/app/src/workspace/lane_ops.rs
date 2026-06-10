@@ -13,6 +13,7 @@ use gpui::{Context, Window};
 
 use super::LaneRuntime;
 use super::Workspace;
+use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -340,7 +341,12 @@ impl Workspace {
             .filter(|r| r.project == project_id)
             .map(|r| r.lane)
             .max();
-        max_list.into_iter().chain(max_map).max().map(|m| m + 1).unwrap_or(0)
+        max_list
+            .into_iter()
+            .chain(max_map)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0)
     }
 
     /// Switch the visible lane. The Workspace's `tabs` / `panes`
@@ -359,14 +365,18 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.active == target {
-            // Same-lane click is a no-op — the lane is already
-            // active and its tabs (including any file viewer panes)
-            // stay in place.
+            self.reactivate_active_lane(window, cx);
             return;
         }
         if self.lane_for(target).is_none() {
             return;
         }
+        // Re-classify the incoming lane's root against the live
+        // filesystem before any path-dependent work runs below. A lane
+        // whose directory vanished while inactive must flip to
+        // non-`Present` here so the lazy-seed (PTY spawn) and the
+        // path-dependent tail are skipped.
+        self.recompute_availability_for(target);
         // Trigger #5 — active lane change. Both the previous and the
         // incoming visible lists become stale (selection moves with the
         // active id).
@@ -412,35 +422,36 @@ impl Workspace {
         // the `LaneRuntime` swap above, so each lane retains
         // its own open files across activations.
 
+        // An unavailable lane (root deleted / unreadable) becomes the
+        // active lane — the runtime freeze/swap above must still run so
+        // the previous lane's panes are frozen and the live fields hold
+        // this lane's (possibly empty) runtime — but the path-spawning
+        // work is skipped: lazy-seed would root a PTY at the dead path,
+        // and `refresh_git_status` would shell out `git status` against it
+        // and spam an error toast. The right-dock reconcile + persist
+        // below are filesystem-tolerant (skills/mcp scan a missing dir as
+        // empty; the commit button reads in-memory cache) so they still
+        // run — otherwise the panels would keep showing the *previous*
+        // lane's data after the swap.
+        if self
+            .lane_for(target)
+            .map(|l| l.availability != LaneAvailability::Present)
+            .unwrap_or(false)
+        {
+            self.reconcile_right_dock_for_inaccessible_lane(window, cx);
+            // Persist the active-ref change (`self.active = target`) so a
+            // quit right after selecting a missing lane keeps the
+            // selection. The Present path persists via the tail below.
+            self.mutate_durable(cx, |_, _| {});
+            cx.notify();
+            return;
+        }
+
         // 3. Lazy seed: a lane loaded from `git worktree list` on
         //    startup has metadata but no runtime tabs. First-time
         //    activation spawns one pane rooted at the lane path so
-        //    the user lands in the right shell immediately. On PTY
-        //    failure the error surfaces in the status bar and the
-        //    viewport stays empty — still better than a silent black
-        //    pane.
-        if self.main_area.tabs.is_empty() {
-            let cwd = self.lane_for(target).map(|w| w.path.clone());
-            match self.create_pane_with_cwd(cwd, window, cx) {
-                Ok(pane) => {
-                    let pane_id = pane.id;
-                    self.main_area.panes.push(pane);
-                    let tab_id = self.alloc_id();
-                    self.main_area.tabs.push(TabEntry {
-                        id: tab_id,
-                        layout: PaneLayout::Pane(pane_id),
-                        last_focused_pane: pane_id,
-                        user_label: None,
-                    });
-                    self.main_area.active_tab_index = 0;
-                    self.main_area.focused_pane_id = pane_id;
-                    self.bump_activity(pane_id);
-                }
-                Err(e) => {
-                    self.report_pane_error("activate lane", e, cx);
-                }
-            }
-        }
+        //    the user lands in the right shell immediately.
+        self.seed_initial_tab(target, window, cx);
 
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
@@ -475,6 +486,120 @@ impl Workspace {
         // `Lane.kind.branch` from the live `git status` result.
         self.refresh_git_status(target, cx);
         cx.notify();
+    }
+
+    /// Same-lane click handler (the `self.active == target` fast path of
+    /// [`Self::activate_lane`]). A healthy already-active lane is the
+    /// common case and stays cheap: re-probe, see it's still `Present`
+    /// with tabs, fall through to `notify`.
+    ///
+    /// The case that matters is self-healing: if the active lane was
+    /// `Missing` / `AccessDenied` (root deleted, or Full Disk Access not
+    /// yet granted) and the user has since recreated the directory or
+    /// granted access, clicking the same row must re-probe and recover.
+    /// `activate_lane`'s cross-lane `recompute_availability_for` never
+    /// runs for a same-lane click, so without this re-probe the lane
+    /// stays stuck non-`Present` until the user switches away and back.
+    ///
+    /// On recovery to `Present` with no tabs (the empty-state never
+    /// seeded one) we run the same lazy-seed as a fresh activation so the
+    /// user lands in a shell. Still non-`Present` → re-point the right
+    /// dock (it may have nothing reflected yet) and stay put.
+    fn reactivate_active_lane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active = self.active;
+        let was_present = self
+            .lane_for(active)
+            .map(|l| l.availability == LaneAvailability::Present)
+            .unwrap_or(false);
+        // Healthy lane that already has tabs: nothing a same-lane click
+        // should act on — keep the fast path cheap (never re-probe or
+        // disturb live terminals). A `Present` lane with *no* tabs (user
+        // closed them all, or it was never seeded) deliberately falls
+        // through so the re-probe + seed below give the user a shell.
+        if was_present && !self.main_area.tabs.is_empty() {
+            return;
+        }
+        self.recompute_availability_for(active);
+        let now_present = self
+            .lane_for(active)
+            .map(|l| l.availability == LaneAvailability::Present)
+            .unwrap_or(false);
+        if now_present {
+            // Recovered (or was already present but never seeded a tab) —
+            // seed one so the user lands in a shell, then run the
+            // path-dependent reconcile the empty-state had skipped.
+            self.seed_initial_tab(active, window, cx);
+            if self.has_focused_pane() {
+                self.focus_pane(self.main_area.focused_pane_id, window, cx);
+            }
+            self.main_area.pending_resize = true;
+            // The seeded tab is persisted runtime state.
+            self.mutate_durable(cx, |_, _| {});
+            // Deliberately omits `activate_lane`'s `load_pending_file_panes`
+            // + `replay_files_dirty`: a lane reaching here was either Missing
+            // all session (blank runtime — no Loading file panes, no dirty
+            // backlog) or a Present lane whose tabs were all closed (likewise
+            // nothing pending). Add them only if a future path can leave
+            // stale file-view panes on a recovered lane.
+            self.refresh_skills_watcher(cx);
+            self.refresh_mcp_watcher(window, cx);
+            self.sync_commit_buttons(cx);
+            self.refresh_git_status(active, cx);
+        } else {
+            // Still inaccessible — re-point the right dock so it shows the
+            // empty (inaccessible) lane rather than stale data.
+            self.reconcile_right_dock_for_inaccessible_lane(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Spawn one pane rooted at `target`'s path when the live runtime has
+    /// no tabs. A lane loaded from `git worktree list` on startup carries
+    /// metadata but no serialized tabs; first activation seeds a shell so
+    /// the viewport is never empty. On PTY failure the error surfaces in
+    /// the status bar and the viewport stays empty — still better than a
+    /// silent black pane. No-op when tabs already exist.
+    fn seed_initial_tab(&mut self, target: LaneRef, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.main_area.tabs.is_empty() {
+            return;
+        }
+        let cwd = self.lane_for(target).map(|w| w.path.clone());
+        match self.create_pane_with_cwd(cwd, window, cx) {
+            Ok(pane) => {
+                let pane_id = pane.id;
+                self.main_area.panes.push(pane);
+                let tab_id = self.alloc_id();
+                self.main_area.tabs.push(TabEntry {
+                    id: tab_id,
+                    layout: PaneLayout::Pane(pane_id),
+                    last_focused_pane: pane_id,
+                    user_label: None,
+                });
+                self.main_area.active_tab_index = 0;
+                self.main_area.focused_pane_id = pane_id;
+                self.bump_activity(pane_id);
+            }
+            Err(e) => {
+                self.report_pane_error("activate lane", e, cx);
+            }
+        }
+    }
+
+    /// Re-point the right dock (Skills / Tools panels + commit button) at
+    /// the now-active lane when that lane is inaccessible. Deliberately
+    /// excludes `refresh_git_status` — it shells out `git status` against
+    /// the dead path and would spam an error toast. The skills / mcp
+    /// watchers scan a missing directory as empty and the commit button
+    /// reads the in-memory cache (absent → disabled), so all three show
+    /// an empty panel instead of the previous lane's data.
+    fn reconcile_right_dock_for_inaccessible_lane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.refresh_skills_watcher(cx);
+        self.refresh_mcp_watcher(window, cx);
+        self.sync_commit_buttons(cx);
     }
 
     /// Move `from` immediately before `to` in the lanes list of
@@ -565,6 +690,99 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_active_lane(id, |wt| wt.set_name(name), cx);
+    }
+
+    /// Open the Remove-lane confirmation modal for `target`. Single
+    /// entry point shared by the left-dock row `×` button and the
+    /// main-area inaccessible empty-state, so both spawn the identical
+    /// validated modal instead of copying the build sequence. No-op
+    /// when the lane is gone or non-removable (main / default kinds —
+    /// those route through the project-delete flow instead).
+    pub(in crate::workspace) fn open_remove_lane_modal(
+        &mut self,
+        target: LaneRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(wt) = self.lane_for(target) else {
+            return;
+        };
+        if !Self::lane_removable(wt) {
+            return;
+        }
+        let target_id = wt.id;
+        let label = gpui::SharedString::from(wt.display_name());
+        let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
+        let plan = match self.validate_remove_lane(target) {
+            Ok(p) => p,
+            Err(msg) => {
+                let report = daruda_store::observability::error_report::ErrorReport::new(
+                    "Cannot remove worktree",
+                )
+                .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+                .message(msg)
+                .at(file!(), line!())
+                .dedup("lane.open_remove_modal.validate")
+                .build();
+                self.report_error(report, cx);
+                return;
+            }
+        };
+        // Pull the branch name so the modal can offer "Also delete
+        // branch X" — None for default / detached lanes (modal hides
+        // the checkbox).
+        let branch = self.lane_for(target).and_then(|w| match &w.kind {
+            daruda_store::project::LaneKind::Git {
+                branch: Some(b), ..
+            } => Some(b.clone()),
+            _ => None,
+        });
+        let ws_for_modal = cx.weak_entity();
+        crate::workspace::dialog_helpers::open_form_modal(
+            crate::surface::strings::remove_lane_modal_title(),
+            None,
+            move |window, cx| {
+                super::left_dock::projects::remove_modal::RemoveWorktreeModal::new(
+                    ws_for_modal.clone(),
+                    target_id,
+                    label,
+                    path,
+                    plan,
+                    window,
+                    cx,
+                )
+                .with_branch(branch)
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Remove the currently active lane/project when its root directory
+    /// is inaccessible (missing / access-denied). Routes by kind:
+    /// removable git worktrees open the Remove-lane modal; a main or
+    /// default lane stands in for the whole project, so it opens the
+    /// delete-project chooser instead (there is no `git worktree
+    /// remove` for the main checkout). No-op when the active lane is
+    /// `Present` or absent — the affordance is only offered for the
+    /// inaccessible empty-state.
+    pub(in crate::workspace) fn request_remove_inaccessible_active(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active) = self.active_lane() else {
+            return;
+        };
+        if active.availability == LaneAvailability::Present {
+            return;
+        }
+        let target = self.active;
+        if Self::lane_removable(active) {
+            self.open_remove_lane_modal(target, window, cx);
+        } else {
+            self.open_delete_active_project_modal(window, cx);
+        }
     }
 
     /// Resolve the base ref for a new lane against the active project

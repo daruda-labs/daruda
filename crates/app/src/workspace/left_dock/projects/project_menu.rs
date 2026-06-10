@@ -77,16 +77,10 @@ pub(in crate::workspace) fn build_project_menu_items(
     // because the action is dispatched from a key event, where the
     // focus chain is what routes it.
     //
-    // The on-submit branch defers `close_active_project` via
-    // `app_cx.defer`. The dialog `submit` calls
-    // `window.close_dialog(cx)` immediately before invoking
-    // on_submit, so running `close_active_project` synchronously
-    // would mutate `main_area.tabs` while the modal entity is still
-    // mid-teardown — the workspace re-renders with the tab swap only
-    // partially observable and the center pane comes back empty.
-    // `app_cx.defer` postpones until the current event cycle drains,
-    // by which point the modal is fully gone and the workspace
-    // update sees a clean slate.
+    // The deferred-close dance lives in
+    // `open_delete_active_project_modal` (shared with the main-area
+    // inaccessible empty-state); the menu just snaps focus to the
+    // right-clicked project first so the op targets it (§5.5).
     let ws_delete = ws.clone();
     items.push(ContextMenuItem::new(
         s::project_menu_delete(),
@@ -94,48 +88,9 @@ pub(in crate::workspace) fn build_project_menu_items(
             let Some(workspace) = ws_delete.upgrade() else {
                 return;
             };
-            let window_handle = window.window_handle();
-            let ws_for_submit = ws_delete.clone();
             workspace.update(app_cx, |ws, cx| {
                 ws.activate_lane(snap_target, window, cx);
-                let Some(project_name) = ws.active_project_name() else {
-                    return;
-                };
-                crate::workspace::delete_project_modal::open_delete_project_modal(
-                    project_name,
-                    move |choice, _window, app_cx| {
-                        use crate::workspace::delete_project_modal::DeleteProjectChoice;
-                        let ws_weak = ws_for_submit.clone();
-                        app_cx.defer(move |app_cx| {
-                            let Some(ws) = ws_weak.upgrade() else {
-                                return;
-                            };
-                            crate::windows::try_update_workspace_window(
-                                window_handle,
-                                app_cx,
-                                "project_menu.delete",
-                                move |window, cx_w| match choice {
-                                    DeleteProjectChoice::KeepOnDisk => {
-                                        let keep = ws.update(cx_w, |ws, cx| {
-                                            ws.close_active_project(window, cx)
-                                        });
-                                        if !keep {
-                                            window.remove_window();
-                                            crate::windows::ensure_welcome_if_last(cx_w);
-                                        }
-                                    }
-                                    DeleteProjectChoice::DeleteOnDisk => {
-                                        ws.update(cx_w, |ws, cx| {
-                                            ws.delete_active_project_on_disk(window, cx);
-                                        });
-                                    }
-                                },
-                            );
-                        });
-                    },
-                    window,
-                    cx,
-                );
+                ws.open_delete_active_project_modal(window, cx);
             });
         },
     ));

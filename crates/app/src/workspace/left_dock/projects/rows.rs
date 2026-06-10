@@ -12,6 +12,7 @@ use gpui::{
 use daruda_store::project::{LaneId, ProjectId};
 
 use crate::lane::Lane;
+use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::{
     ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
@@ -73,6 +74,47 @@ pub(in crate::workspace) fn git_badge_for(
         ahead: status.ahead,
         behind: status.behind,
     })
+}
+
+/// Icon + short label for an inaccessible lane / project state. Only
+/// the non-`Present` variants are meaningful here; `Present` returns
+/// `None` so callers render the normal row. The icon doubles as the
+/// color cue — both states paint it in `theme::WARNING`.
+fn availability_badge(availability: LaneAvailability) -> Option<(IconName, String)> {
+    match availability {
+        LaneAvailability::Present => None,
+        // No `Lock` glyph in the icon set — `TriangleAlert` reads as
+        // "something is wrong with this directory" for the missing
+        // case; `EyeOff` reads as "present but unreadable" for the
+        // permission-denied case.
+        LaneAvailability::Missing => Some((
+            IconName::TriangleAlert,
+            surface_strings::projects_directory_missing(),
+        )),
+        LaneAvailability::AccessDenied => Some((
+            IconName::EyeOff,
+            surface_strings::projects_permission_denied(),
+        )),
+    }
+}
+
+/// Inline `⚠ <label>` chip rendered in place of the normal sublabel /
+/// git badge for an inaccessible lane or project. Icon carries the
+/// warning color; the label is muted.
+fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::LANE_LABEL_GAP))
+        .text_size(px(theme::LANE_SUB_FONT_SIZE))
+        .text_color(label_color)
+        .child(
+            Icon::new(icon)
+                .with_size(px(theme::LANE_SUB_FONT_SIZE))
+                .text_color(theme::WARNING),
+        )
+        .child(SharedString::from(label))
 }
 
 /// Single-row group header that opens / closes the accordion for the
@@ -258,6 +300,9 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
     pub is_git: bool,
     pub is_collapsed: bool,
     pub last_active_lane_id: LaneId,
+    /// Read-availability of the project root. Non-`Present` greys the
+    /// header label and appends a state chip; the row stays clickable.
+    pub availability: LaneAvailability,
 }
 
 /// Single-row project header above the lanes list for one
@@ -290,13 +335,19 @@ pub(in crate::workspace) fn project_header_row(
         is_git,
         is_collapsed,
         last_active_lane_id,
+        availability,
     } = args;
     let t = theme::current(cx);
-    let label_color = if is_active {
+    // Inaccessible project roots always render muted, even when active —
+    // the header reads as "this project can't be opened right now".
+    let avail_badge = availability_badge(availability);
+    let is_unavailable = avail_badge.is_some();
+    let label_color = if is_active && !is_unavailable {
         theme::TEXT_PRIMARY
     } else {
         t.muted_text
     };
+    let chip_color = t.faint_text;
     let row_hover_bg = t.lane_row_hover_bg;
     let row_active_bg = t.lane_card_active_bg;
     let drop_target_bg = t.lane_drop_target_bg;
@@ -436,7 +487,12 @@ pub(in crate::workspace) fn project_header_row(
                 .whitespace_nowrap()
                 .child(name),
         )
-        .when(is_git, |row| {
+        .when_some(avail_badge, |row, (icon, state_label)| {
+            row.child(availability_chip(icon, state_label, chip_color))
+        })
+        // The create-lane `[+]` is meaningless for an inaccessible
+        // project root, so hide it alongside the state chip.
+        .when(is_git && !is_unavailable, |row| {
             let ws_for_add = snap.workspace.clone();
             let row_group_for_btn = row_group.clone();
             row.child(
@@ -634,6 +690,14 @@ pub(in crate::workspace) fn worktree_row(
         .clone()
         .unwrap_or_else(|| wt.path.to_str().map(|s| s.to_string()).unwrap_or_default());
 
+    // Inaccessible lanes (Missing / AccessDenied) render muted: the
+    // label greys out, the unread dot + git badge are suppressed (a
+    // dead root has no meaningful git state), and the path sublabel is
+    // replaced by the state chip. The row stays clickable so the user
+    // can select it and Remove.
+    let avail_badge = availability_badge(wt.availability);
+    let is_unavailable = avail_badge.is_some();
+
     // Unread marker sits to the right of the label.
     let unread_dot = div()
         .flex_none()
@@ -655,7 +719,7 @@ pub(in crate::workspace) fn worktree_row(
                 .items_center()
                 .gap(px(theme::LANE_LABEL_GAP))
                 .text_size(px(theme::LANE_LABEL_FONT_SIZE))
-                .text_color(if is_active {
+                .text_color(if is_active && !is_unavailable {
                     label_active
                 } else {
                     label_inactive
@@ -667,8 +731,8 @@ pub(in crate::workspace) fn worktree_row(
                         .whitespace_nowrap()
                         .child(label.clone()),
                 )
-                .when(wt.is_unread, |d| d.child(unread_dot))
-                .when_some(git_badge, |d, badge| {
+                .when(wt.is_unread && !is_unavailable, |d| d.child(unread_dot))
+                .when_some(git_badge.filter(|_| !is_unavailable), |d, badge| {
                     d.child(git_badge_view(
                         badge,
                         badge_arrow_text,
@@ -677,8 +741,11 @@ pub(in crate::workspace) fn worktree_row(
                     ))
                 }),
         )
-        .child(
-            div()
+        .child(match avail_badge {
+            Some((icon, state_label)) => {
+                availability_chip(icon, state_label, sublabel_color).into_any_element()
+            }
+            None => div()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -687,8 +754,9 @@ pub(in crate::workspace) fn worktree_row(
                 .text_color(sublabel_color)
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(sublabel),
-        )
+                .child(sublabel)
+                .into_any_element(),
+        })
         .when_some(
             snap.claude_per_session_per_lane
                 .get(&daruda_store::project::LaneRef {
@@ -710,6 +778,7 @@ pub(in crate::workspace) fn worktree_row(
     let wt_description_current: Option<String> = wt.description.clone();
     let wt_name_current: Option<String> = wt.name.clone();
     let removable = crate::workspace::Workspace::lane_removable(wt);
+    let wt_availability = wt.availability;
 
     // Merge context menu state — captured before closures so all
     // values are 'static (no borrow of `wt` or `snap` inside closures).
@@ -828,20 +897,23 @@ pub(in crate::workspace) fn worktree_row(
                 let position: Point<Pixels> = ev.position;
                 let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
                 if let Some(ws) = ws_for_rclick.upgrade() {
-                    let items = build_context_menu_items(
+                    let items = build_context_menu_items(super::context_menu::CtxMenuArgs {
+                        project_id,
                         wt_id,
                         path_str,
-                        wt_description_current.clone(),
-                        wt_name_current.clone(),
-                        ws_for_rclick.clone(),
-                        wt_is_git,
-                        wt_is_detached,
-                        wt_is_dirty,
-                        wt_source_branch.clone(),
-                        wt_base_ref.clone(),
-                        wt_path.clone(),
-                        wt_source_repo_root.clone(),
-                    );
+                        current_description: wt_description_current.clone(),
+                        current_name: wt_name_current.clone(),
+                        workspace: ws_for_rclick.clone(),
+                        is_git: wt_is_git,
+                        is_detached: wt_is_detached,
+                        is_dirty: wt_is_dirty,
+                        source_branch: wt_source_branch.clone(),
+                        base_ref: wt_base_ref.clone(),
+                        source_path: wt_path.clone(),
+                        source_repo_root: wt_source_repo_root.clone(),
+                        availability: wt_availability,
+                        removable,
+                    });
                     ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
                 }
             }),
@@ -873,52 +945,11 @@ pub(in crate::workspace) fn worktree_row(
             // lane we're about to remove.
             cx.stop_propagation();
             if let Some(ws) = ws_for_close.upgrade() {
-                let ws_for_modal = ws_for_close.clone();
-                ws.update(cx, |ws, cx| {
-                    let target = daruda_store::project::LaneRef {
-                        project: project_id,
-                        lane: wt_id,
-                    };
-                    let Some(wt) = ws.lane_for(target) else {
-                        return;
-                    };
-                    if !crate::workspace::Workspace::lane_removable(wt) {
-                        return;
-                    }
-                    let label = gpui::SharedString::from(wt.display_name());
-                    let path = gpui::SharedString::from(wt.path.to_string_lossy().into_owned());
-                    let plan = match ws.validate_remove_lane(target) {
-                        Ok(p) => p,
-                        Err(_) => return,
-                    };
-                    // Pull the branch name so the modal can offer "Also
-                    // delete branch X" — None for default / detached
-                    // lanes (modal hides the checkbox).
-                    let branch = ws.lane_for(target).and_then(|w| match &w.kind {
-                        daruda_store::project::LaneKind::Git {
-                            branch: Some(b), ..
-                        } => Some(b.clone()),
-                        _ => None,
-                    });
-                    crate::workspace::dialog_helpers::open_form_modal(
-                        "Remove Lane",
-                        None,
-                        move |window, cx| {
-                            super::remove_modal::RemoveWorktreeModal::new(
-                                ws_for_modal.clone(),
-                                wt_id,
-                                label,
-                                path,
-                                plan,
-                                window,
-                                cx,
-                            )
-                            .with_branch(branch)
-                        },
-                        window,
-                        cx,
-                    );
-                });
+                let target = daruda_store::project::LaneRef {
+                    project: project_id,
+                    lane: wt_id,
+                };
+                ws.update(cx, |ws, cx| ws.open_remove_lane_modal(target, window, cx));
             }
         }));
         row = row.child(close);
@@ -931,11 +962,29 @@ pub(in crate::workspace) fn worktree_row(
 /// above its worktree rows. Displays the project's default branch
 /// as the repo's "base", so worktree-only / bare repos still show
 /// a main representation. No click / delete / merge affordance.
-pub(in crate::workspace) fn repo_base_row(project: &ProjectSnapshot) -> impl IntoElement {
+///
+/// When the project root is inaccessible the row mirrors the header's
+/// treatment — muted text plus the same availability chip — so the
+/// "Main" anchor reads as unavailable too, instead of looking live
+/// under a greyed-out header.
+pub(in crate::workspace) fn repo_base_row(
+    project: &ProjectSnapshot,
+    cx: &gpui::App,
+) -> impl IntoElement {
     let label = surface_strings::projects_repo_base_label(
         project.name.as_ref(),
         project.default_branch.as_ref().map(|b| b.as_ref()),
     );
+    let avail_badge = availability_badge(project.availability);
+    let is_unavailable = avail_badge.is_some();
+    // Already-subtle row; when unavailable, drop it one further step to
+    // the faint tier so it tracks the header's muted state.
+    let t = theme::current(cx);
+    let label_color = if is_unavailable {
+        t.faint_text
+    } else {
+        theme::TEXT_SUBTLE
+    };
     div()
         .flex()
         .flex_row()
@@ -945,11 +994,11 @@ pub(in crate::workspace) fn repo_base_row(project: &ProjectSnapshot) -> impl Int
         .py(px(theme::LANE_SECTION_PAD_Y))
         .gap(px(theme::LANE_LABEL_GAP))
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
-        .text_color(theme::TEXT_SUBTLE)
+        .text_color(label_color)
         .child(
             Icon::new(IconName::GalleryVerticalEnd)
                 .with_size(px(theme::LANE_SUB_FONT_SIZE))
-                .text_color(theme::TEXT_SUBTLE),
+                .text_color(label_color),
         )
         .child(
             div()
@@ -958,6 +1007,11 @@ pub(in crate::workspace) fn repo_base_row(project: &ProjectSnapshot) -> impl Int
                 .whitespace_nowrap()
                 .child(SharedString::from(label)),
         )
+        // Same `⚠ <state>` chip the header renders, so the anchor row
+        // carries the availability cue too.
+        .when_some(avail_badge, |row, (icon, state_label)| {
+            row.child(availability_chip(icon, state_label, t.faint_text))
+        })
 }
 
 pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
@@ -978,4 +1032,30 @@ pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElem
                 .text_color(init_color)
                 .child(strings::LANE_GIT_INIT_LABEL),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn availability_badge_present_is_none() {
+        assert!(availability_badge(LaneAvailability::Present).is_none());
+    }
+
+    #[test]
+    fn availability_badge_missing_uses_triangle_alert() {
+        let (icon, label) =
+            availability_badge(LaneAvailability::Missing).expect("missing yields a badge");
+        assert!(matches!(icon, IconName::TriangleAlert));
+        assert_eq!(label, surface_strings::projects_directory_missing());
+    }
+
+    #[test]
+    fn availability_badge_denied_uses_eye_off() {
+        let (icon, label) =
+            availability_badge(LaneAvailability::AccessDenied).expect("denied yields a badge");
+        assert!(matches!(icon, IconName::EyeOff));
+        assert_eq!(label, surface_strings::projects_permission_denied());
+    }
 }

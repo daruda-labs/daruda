@@ -530,6 +530,118 @@ impl Workspace {
             .detach();
         }
     }
+
+    /// Open the delete-project chooser for the active project, wiring
+    /// its submit branch to `close_active_project` (keep on disk) or
+    /// `delete_active_project_on_disk` (remove from disk). Single entry
+    /// point shared by the left-dock project context menu and the
+    /// main-area inaccessible empty-state, so both reuse the same
+    /// deferred-close dance (the dialog tears the modal entity down on
+    /// submit, so the workspace mutation must run after the current
+    /// event cycle drains — see `app_cx.defer` below).
+    pub(in crate::workspace) fn open_delete_active_project_modal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_id) = self.active_project().map(|p| p.id) else {
+            return;
+        };
+        self.open_delete_project_modal(project_id, window, cx);
+    }
+
+    /// Open the delete-project chooser for `project_id` without forcing
+    /// the workspace focus onto it. Used by the left-dock context menu's
+    /// Remove action on a non-removable (main / default) lane whose root
+    /// is inaccessible: the lane stands in for the whole project, but
+    /// snapping focus to a dead lane just to target the modal would
+    /// strand the user there if they cancel.
+    ///
+    /// The deletion machinery (`close_active_project` /
+    /// `delete_active_project_on_disk`) targets `self.active`, so the
+    /// submit branches activate the target project's snap lane *first* —
+    /// but only once the user has confirmed. Cancel / Esc dismisses
+    /// without touching focus. Shares the same deferred-close dance as
+    /// [`Self::open_delete_active_project_modal`].
+    pub(in crate::workspace) fn open_delete_project_modal(
+        &mut self,
+        project_id: ProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_name) = self.project_for(project_id).map(|p| p.name.clone()) else {
+            return;
+        };
+        let window_handle = window.window_handle();
+        let ws_for_submit = cx.weak_entity();
+        crate::workspace::delete_project_modal::open_delete_project_modal(
+            project_name,
+            move |choice, _window, app_cx| {
+                use crate::workspace::delete_project_modal::DeleteProjectChoice;
+                let ws_weak = ws_for_submit.clone();
+                app_cx.defer(move |app_cx| {
+                    let Some(ws) = ws_weak.upgrade() else {
+                        return;
+                    };
+                    crate::windows::try_update_workspace_window(
+                        window_handle,
+                        app_cx,
+                        "project.delete_by_id",
+                        move |window, cx_w| match choice {
+                            DeleteProjectChoice::KeepOnDisk => {
+                                let keep = ws.update(cx_w, |ws, cx| {
+                                    // Bail if the target vanished between
+                                    // open and confirm — never delete a
+                                    // different, still-active project.
+                                    if !ws.activate_target_project(project_id, window, cx) {
+                                        return true;
+                                    }
+                                    ws.close_active_project(window, cx)
+                                });
+                                if !keep {
+                                    window.remove_window();
+                                    crate::windows::ensure_welcome_if_last(cx_w);
+                                }
+                            }
+                            DeleteProjectChoice::DeleteOnDisk => {
+                                ws.update(cx_w, |ws, cx| {
+                                    if !ws.activate_target_project(project_id, window, cx) {
+                                        return;
+                                    }
+                                    ws.delete_active_project_on_disk(window, cx);
+                                });
+                            }
+                        },
+                    );
+                });
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Snap the active focus onto `project_id`'s snap-target lane so the
+    /// active-project-keyed delete path operates on it. Returns `true`
+    /// when `self.active` now points at `project_id` (already-active or
+    /// just-snapped), `false` when the project vanished from the workspace
+    /// between modal-open and confirm — in which case the caller must NOT
+    /// run the delete, or it would operate on the wrong (still-active)
+    /// project.
+    fn activate_target_project(
+        &mut self,
+        project_id: ProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active.project == project_id {
+            return true;
+        }
+        let Some(target) = self.project_for(project_id).and_then(|p| p.snap_target()) else {
+            return false;
+        };
+        self.activate_lane(target, window, cx);
+        true
+    }
 }
 
 /// `(id, root)` for every project that owns at least one git lane.
@@ -598,6 +710,7 @@ mod tests {
             color: None,
             tab_order: 0,
             is_collapsed: false,
+            availability: crate::lane::availability::LaneAvailability::Present,
         }
     }
 

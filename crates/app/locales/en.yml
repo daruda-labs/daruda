@@ -195,6 +195,8 @@ ctx:
   merge_into: "Merge into…"
   merge_disabled_dirty: "Commit your changes first"
   merge_disabled_detached: "No branch (Detached HEAD)"
+  remove: "Remove…"
+  grant_full_disk_access: "Grant Full Disk Access in System Settings"
   panel_tab_delete: "Delete…"
   macro_edit: "Edit…"
   macro_delete: "Delete…"
@@ -217,6 +219,7 @@ modal:
   edit_description_placeholder: "Description (e.g. PR #123 review)"
   rename_worktree_title: "Rename Worktree"
   rename_placeholder: "Display name"
+  remove_lane_title: "Remove Worktree"
   merge_branch_label: "Target branch:"
   merge_no_targets: "Add another worktree to merge into"
   merge_merging: "Merging…"
@@ -253,6 +256,12 @@ projects:
   add_menu_group: "New Group…"
   repo_base_with_branch: "%{name} · %{branch}"
   repo_base_no_branch: "%{name}"
+  directory_missing: "Directory missing"
+  permission_denied: "Permission denied"
+  empty_missing_title: "Directory missing"
+  empty_missing_body: "This worktree's directory could not be found on disk. It may have been moved or deleted."
+  empty_denied_title: "Permission denied"
+  empty_denied_body: "This worktree's directory exists but daruda can't read it. Grant Full Disk Access in System Settings, then reopen."
 
 # Group context menu
 group:

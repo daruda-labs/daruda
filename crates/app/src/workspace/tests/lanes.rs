@@ -323,7 +323,14 @@ fn test_validate_remove_lane_rejects_default(cx: &mut TestAppContext) {
 #[gpui::test]
 fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_wt_swap");
+    // Both lane roots must exist on disk so activation classifies them
+    // as `Present` and the lazy-seed spawns a pane — the behavior under
+    // test. A missing root would (correctly) skip the seed.
+    let root_a = std::path::PathBuf::from("/tmp/test_wt_swap");
+    let root_b = std::path::PathBuf::from("/tmp/test_wt_swap_b");
+    let _ = std::fs::create_dir_all(&root_a);
+    let _ = std::fs::create_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project_for_test_full(
             &config,
@@ -338,10 +345,8 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
     // Seed a second lane with empty runtime so we can swap into it.
     ws.update(cx, |ws, _cx| {
         if let Some(p) = ws.active_project_mut() {
-            p.lanes.push(crate::lane::Lane::default_for_project(
-                1,
-                std::path::PathBuf::from("/tmp/test_wt_swap_b"),
-            ));
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
         }
     });
 
@@ -512,6 +517,9 @@ fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
     let repo = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo");
     let feature = std::path::PathBuf::from("/tmp/daruda_release_tracking_repo-feature");
     let _ = std::fs::create_dir_all(&repo);
+    // The feature lane root must exist so activation classifies it as
+    // `Present` and the lazy-seed spawns the panes this test removes.
+    let _ = std::fs::create_dir_all(&feature);
     let project = daruda_store::project::Project::from_path(&repo);
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project_for_test_full(
@@ -593,6 +601,7 @@ fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
     .unwrap();
 
     let _ = std::fs::remove_dir_all(&repo);
+    let _ = std::fs::remove_dir_all(&feature);
 }
 
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
@@ -778,6 +787,11 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
     use std::collections::BTreeMap;
 
     let config = daruda_config::Config::default();
+    // The lane root must exist on disk: restore classifies a missing
+    // root as inaccessible and skips its pane/tab rebuild (the active
+    // lane then renders the inaccessible empty-state with zero tabs).
+    // This test exercises the healthy "rebuild the persisted tab" path.
+    std::fs::create_dir_all("/tmp/test_restore_wt_tabs").unwrap();
     let project = daruda_store::project::Project::from_path("/tmp/test_restore_wt_tabs");
     let wh = cx.add_window(|window, cx| {
         let mut ws = Workspace::new_with_project_for_test_full(
@@ -851,6 +865,109 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
         assert_eq!(ws.main_area.tabs.len(), 1);
         assert_eq!(ws.active_lanes().len(), 1);
         assert_eq!(ws.active.lane, 0);
+    });
+}
+
+#[gpui::test]
+fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) {
+    // When the active lane's root is missing on disk, restore must not
+    // seed a stray $HOME terminal tab — the main area renders the
+    // inaccessible empty-state instead, which requires zero tabs so the
+    // empty-tab branch in `render` is reached (Task 2 guard).
+    use daruda_store::project::{
+        DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
+        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
+        WorkspaceUuid,
+    };
+    use std::collections::BTreeMap;
+
+    let config = daruda_config::Config::default();
+    // Intentionally a path that does not exist → classified Missing.
+    let missing_root = std::env::temp_dir().join(format!(
+        "daruda_restore_missing_{}_{}",
+        std::process::id(),
+        "nope"
+    ));
+    let _ = std::fs::remove_dir_all(&missing_root);
+    let project = daruda_store::project::Project::from_path(&missing_root);
+    let wh = cx.add_window(|window, cx| {
+        let mut ws = Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        );
+        let lane = daruda_store::project::SerializedLane {
+            id: 0,
+            kind: daruda_store::project::LaneKind::Default,
+            path: missing_root.clone(),
+            name: None,
+            tab_order: 0,
+            is_unread: false,
+            last_activity: 0,
+            tabs: vec![daruda_store::project::SerializedTab {
+                layout: daruda_store::project::SerializedLayout::Leaf {
+                    pane_id: 1,
+                    cwd: Some(missing_root.clone()),
+                    file: None,
+                },
+                last_focused_pane: 1,
+                user_label: None,
+            }],
+            active_tab_index: 0,
+            base_ref: None,
+            description: None,
+        };
+        let project_uuid = ProjectUuid::new();
+        let project_state = ProjectState {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
+            uuid: project_uuid,
+            root: missing_root.clone(),
+            name: None,
+            lanes: vec![lane],
+            last_active_lane_id: 0,
+            next_lane_id: 1,
+            default_branch: None,
+            base_branch: None,
+        };
+        let mut project_overrides = BTreeMap::new();
+        project_overrides.insert(project_uuid, ProjectOverride::default());
+        let workspace_state = WorkspaceState {
+            schema_version: WORKSPACE_SCHEMA_VERSION,
+            uuid: WorkspaceUuid::new(),
+            project_ids: vec![project_uuid],
+            project_overrides,
+            groups: Vec::new(),
+            active_project: Some(project_uuid),
+            active_lane: Some(0),
+            docks: DockStates::default(),
+            window: WindowState::default(),
+            font_size: 13.0,
+            vertical_spacing: 1.0,
+            horizontal_spacing: 1.0,
+            focused_pane_id: 1,
+            active_dock_view: LeftDockView::default(),
+            active_right_panel_view: RightDockView::default(),
+            active_usage_window: UsageWindow::default(),
+            window_open_policy: WindowOpenPolicy::default(),
+            next_group_id: 0,
+            project_tabs: BTreeMap::new(),
+        };
+        ws.restore_from_disk(&workspace_state, &[project_state], window, cx);
+        ws
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.main_area.tabs.len(),
+            0,
+            "inaccessible active lane must not seed a fallback tab"
+        );
+        assert_eq!(
+            ws.active_lane().map(|l| l.availability),
+            Some(crate::lane::availability::LaneAvailability::Missing),
+        );
     });
 }
 
@@ -1246,4 +1363,182 @@ fn test_workspace_renders_with_docks_open(cx: &mut TestAppContext) {
         assert!(ws.bottom_dock.read(cx).is_open);
         assert!(ws.right_dock.read(cx).is_open);
     });
+}
+
+// ---- Inaccessible active lane: action guards + self-healing ----
+
+/// Build a workspace whose single bootstrapped lane is forced to
+/// `Missing` with an empty runtime (no tabs / panes / focused pane) —
+/// the inaccessible empty-state. Returns the live window handle + entity.
+fn workspace_with_inaccessible_active_lane(
+    cx: &mut TestAppContext,
+    root: &str,
+) -> (gpui::WindowHandle<Workspace>, gpui::Entity<Workspace>) {
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.update(cx, |ws, _| {
+        let r = ws.active_ref();
+        ws.set_lane_availability(r, crate::lane::availability::LaneAvailability::Missing);
+        // Drop the bootstrapped runtime so the lane is paneless — mirrors
+        // the restored inaccessible-lane empty-state.
+        ws.main_area.tabs.clear();
+        ws.main_area.panes.clear();
+        ws.main_area.active_tab_index = 0;
+        ws.main_area.focused_pane_id = u64::default();
+        ws.main_area.zoomed_pane_id = None;
+    });
+    (wh, ws)
+}
+
+#[gpui::test]
+fn add_tab_noop_on_inaccessible_active_lane(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, "/tmp/daruda_add_tab_inaccessible");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            assert_eq!(
+                ws.main_area.tabs.len(),
+                0,
+                "add_tab on a non-Present lane must not spawn a tab/PTY"
+            );
+            assert_eq!(ws.main_area.panes.len(), 0);
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn split_noop_on_inaccessible_active_lane(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, "/tmp/daruda_split_inaccessible");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            assert_eq!(
+                ws.main_area.panes.len(),
+                0,
+                "split on a non-Present / paneless lane must not push an orphan PTY"
+            );
+            assert_eq!(ws.main_area.tabs.len(), 0);
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn zoom_noop_on_inaccessible_active_lane(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, "/tmp/daruda_zoom_inaccessible");
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.on_toggle_zoom_pane(&ToggleZoomPane, window, cx);
+            assert_eq!(
+                ws.main_area.zoomed_pane_id, None,
+                "zoom must stay None when focused_pane_id matches no real pane"
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn activate_inaccessible_lane_persists_active_ref(cx: &mut TestAppContext) {
+    // Two lanes: lane 0 present (the live process cwd), lane 1 pointing at
+    // a directory that does not exist. Activating lane 1 must flip
+    // `self.active` (the persisted selection) and reach the early-return's
+    // `mutate_durable`, without seeding a tab on the dead path.
+    let config = daruda_config::Config::default();
+    let root_a = std::env::current_dir().unwrap();
+    let root_b = std::path::PathBuf::from("/tmp/daruda_activate_inaccessible_missing_dir");
+    let _ = std::fs::remove_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
+        }
+    });
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let proj = ws.active_ref().project;
+            ws.activate_lane(
+                daruda_store::project::LaneRef {
+                    project: proj,
+                    lane: 1,
+                },
+                window,
+                cx,
+            );
+            // active-ref flipped (this is the value mutate_durable persists)
+            assert_eq!(ws.active.lane, 1);
+            assert_eq!(
+                ws.active_lane().map(|l| l.availability),
+                Some(crate::lane::availability::LaneAvailability::Missing),
+            );
+            // No tab seeded on the dead path.
+            assert_eq!(
+                ws.main_area.tabs.len(),
+                0,
+                "inaccessible lane must not seed a fallback tab"
+            );
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn same_lane_reactivate_self_heals_and_seeds_tab(cx: &mut TestAppContext) {
+    // Active lane starts Missing with an empty runtime. The directory is
+    // then (re)created and a same-lane activate re-probes it: availability
+    // recovers to Present and a tab is seeded so the user lands in a shell.
+    let root = "/tmp/daruda_same_lane_self_heal";
+    let _ = std::fs::remove_dir_all(root);
+    let (wh, ws) = workspace_with_inaccessible_active_lane(cx, root);
+    // Sanity: starts Missing + paneless.
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active_lane().map(|l| l.availability),
+            Some(crate::lane::availability::LaneAvailability::Missing),
+        );
+        assert_eq!(ws.main_area.tabs.len(), 0);
+    });
+    // The user recreates the directory (or grants access).
+    std::fs::create_dir_all(root).unwrap();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let active = ws.active;
+            ws.activate_lane(active, window, cx);
+            assert_eq!(
+                ws.active_lane().map(|l| l.availability),
+                Some(crate::lane::availability::LaneAvailability::Present),
+                "same-lane click must re-probe and recover a recreated dir"
+            );
+            assert_eq!(
+                ws.main_area.tabs.len(),
+                1,
+                "recovered lane with empty tabs must seed a shell tab"
+            );
+            assert_eq!(ws.main_area.panes.len(), 1);
+        });
+    })
+    .unwrap();
+    let _ = std::fs::remove_dir_all(root);
 }

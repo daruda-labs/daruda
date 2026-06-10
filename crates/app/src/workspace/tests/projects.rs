@@ -237,6 +237,50 @@ fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mu
 }
 
 #[gpui::test]
+fn open_delete_project_modal_by_id_does_not_change_active(cx: &mut TestAppContext) {
+    // Root-wrapped window so `open_form_modal`'s `window.open_dialog`
+    // can walk the gpui_component::Root layer.
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path("/tmp/daruda_delete_byid_a");
+    std::fs::create_dir_all("/tmp/daruda_delete_byid_a").unwrap();
+    std::fs::create_dir_all("/tmp/daruda_delete_byid_b").unwrap();
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+
+    // Add project B; `add_project` makes the new project (id 1) active,
+    // leaving project 0 as the non-active target for this test.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_project(
+                std::path::PathBuf::from("/tmp/daruda_delete_byid_b"),
+                window,
+                cx,
+            )
+        })
+    })
+    .ok();
+    let active_before = ws.read_with(cx, |ws, _| ws.active);
+    assert_eq!(active_before.project, 1, "added project becomes active");
+
+    // Opening the delete chooser for the *non-active* project (id 0)
+    // must NOT force activation onto it — activation only happens once
+    // the user confirms inside the modal, so cancel leaves focus put.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.open_delete_project_modal(0, window, cx));
+    })
+    .ok();
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.active, active_before,
+            "merely opening the delete modal for another project must not \
+             change the active focus"
+        );
+        assert_eq!(ws.projects.len(), 2, "both projects still present");
+    });
+}
+
+#[gpui::test]
 fn window_open_policy_round_trips_through_state(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_policy_round");

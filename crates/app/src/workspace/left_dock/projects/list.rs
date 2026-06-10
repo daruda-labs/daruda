@@ -154,6 +154,7 @@ fn ungrouped_project_block(
             is_git: project_is_git,
             is_collapsed: project.is_collapsed,
             last_active_lane_id: project.last_active_lane_id,
+            availability: project.availability,
         },
         snap,
         cx,
@@ -168,7 +169,7 @@ fn ungrouped_project_block(
         // projects, so worktree-only / bare repos still show a main
         // representation. Render-only, no interaction.
         if project_is_git {
-            list = list.child(super::rows::repo_base_row(project));
+            list = list.child(super::rows::repo_base_row(project, cx));
         }
         for wt in &project.lanes {
             let is_active = project.id == active_project && wt.id == active_lane;

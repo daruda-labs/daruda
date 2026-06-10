@@ -7,6 +7,7 @@
 //! its single top-level tab list and this struct carries only
 //! metadata.
 
+pub mod availability;
 pub mod git;
 pub mod paths;
 
@@ -14,6 +15,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use daruda_store::project::{LaneId, LaneKind, LaneStatus, SerializedLane};
+
+use self::availability::LaneAvailability;
 
 #[derive(Clone, Debug)]
 pub struct Lane {
@@ -38,6 +41,10 @@ pub struct Lane {
     pub base_ref: Option<String>,
     /// Free-form description shown as the dock row sublabel.
     pub description: Option<String>,
+    /// Runtime-only. Whether this lane's root directory can be read on
+    /// disk. Recomputed from the live filesystem on restore / activate /
+    /// failed load; never serialized. Defaults to `Present`.
+    pub availability: LaneAvailability,
 }
 
 impl Lane {
@@ -57,6 +64,7 @@ impl Lane {
             is_main: false,
             base_ref: None,
             description: None,
+            availability: LaneAvailability::Present,
         }
     }
 
@@ -96,6 +104,7 @@ impl Lane {
             is_main,
             base_ref: None,
             description: None,
+            availability: LaneAvailability::Present,
         }
     }
 
@@ -207,6 +216,9 @@ impl Lane {
             is_main,
             base_ref: s.base_ref.clone(),
             description: s.description.clone(),
+            // Recomputed from disk by the workspace restore path; the
+            // serialized form carries no availability.
+            availability: LaneAvailability::Present,
         }
     }
 
@@ -501,6 +513,9 @@ mod tests {
             is_main: false,
             base_ref: Some("origin/main".into()),
             description: Some("PR #123".into()),
+            // Runtime-only — must not survive the round-trip; the
+            // assertion below proves it resets to the default.
+            availability: LaneAvailability::Missing,
         };
         let s = w.to_serialized();
         let back = Lane::from_serialized(&s);
@@ -513,6 +528,9 @@ mod tests {
         assert_eq!(back.last_activity, 12345);
         // Status is runtime-only and always resets to Idle.
         assert_eq!(back.status, LaneStatus::Idle);
+        // Availability is runtime-only and never serialized — it must
+        // load as the default `Present` regardless of the source value.
+        assert_eq!(back.availability, LaneAvailability::Present);
         // Serialized form carries no tabs yet (W-3 wires them).
         assert!(s.tabs.is_empty());
         assert_eq!(s.active_tab_index, 0);
@@ -541,6 +559,7 @@ mod tests {
             is_main: false, // intentionally wrong — from_serialized must correct it
             base_ref: None,
             description: None,
+            availability: LaneAvailability::Present,
         };
         let s = w.to_serialized();
         let back = Lane::from_serialized(&s);

@@ -19,9 +19,8 @@ use daruda_store::project::{
 };
 use gpui::{App, Context, Window};
 
-use crate::path_ext::PathExt;
-
 use super::Workspace;
+use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
@@ -385,6 +384,14 @@ impl Workspace {
             .collect();
         self.next_project_id = self.projects.len() as daruda_store::project::ProjectId;
 
+        // Classify every project / lane root against the live filesystem
+        // before the pane-rebuild loop runs. The persisted set may
+        // reference directories that no longer exist (lane deleted, repo
+        // moved); stamping the runtime `availability` flag here lets the
+        // skip below and the read side (file-tree scan, watcher, PTY
+        // spawn) short-circuit instead of spamming directory-read errors.
+        self.recompute_availability();
+
         // Re-detect each git project's `default_branch` from git and
         // update the runtime project if it drifted. Backfills legacy
         // state files (where `default_branch` is `None`) and absorbs
@@ -434,7 +441,17 @@ impl Workspace {
                     project: runtime_project_id,
                     lane: swt.id,
                 };
-                if !swt.path.is_accessible_dir() {
+                // `recompute_availability` above already classified this
+                // lane's root. A non-`Present` lane cannot host a usable
+                // PTY/file-tree, so skip its pane/tab rebuild entirely —
+                // including the active lane, so a missing active root does
+                // not spawn a shell into a dead cwd. The Warning toast
+                // still fires (it carries the path the user lost).
+                let unavailable = self
+                    .lane_for(wt_ref)
+                    .map(|l| l.availability != LaneAvailability::Present)
+                    .unwrap_or(false);
+                if unavailable {
                     let report = ErrorReport::new("Lane path not found")
                         .severity(ErrorSeverity::Warning)
                         .at(file!(), line!())
@@ -442,9 +459,7 @@ impl Workspace {
                         .dedup("lane.restore.missing_path")
                         .build();
                     self.report_error(report, cx);
-                    if wt_ref != self.active {
-                        continue;
-                    }
+                    continue;
                 }
 
                 let panes_start = self.main_area.panes.len();
@@ -532,7 +547,20 @@ impl Workspace {
         }
 
         if self.main_area.tabs.is_empty() {
-            self.add_tab(window, cx);
+            // Seed a fresh tab only for a legitimately-empty *Present*
+            // active lane. When the active lane is inaccessible the
+            // restore loop above deliberately skipped its pane rebuild
+            // (Task 1), so seeding a tab here would spawn a stray $HOME
+            // terminal that contradicts the inaccessible empty-state the
+            // main area renders. Leave `tabs` empty so `render` shows the
+            // empty-state instead.
+            let active_present = self
+                .active_lane()
+                .map(|l| l.availability == LaneAvailability::Present)
+                .unwrap_or(true);
+            if active_present {
+                self.add_tab(window, cx);
+            }
             return;
         }
 

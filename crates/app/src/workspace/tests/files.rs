@@ -1191,3 +1191,289 @@ fn activate_lane_by_index_out_of_range_is_noop(cx: &mut TestAppContext) {
         );
     });
 }
+
+// ---------------- Inaccessible lane directory (availability) ----------------
+
+#[gpui::test]
+async fn ensure_file_tree_skips_unavailable_lane(cx: &mut TestAppContext) {
+    use crate::lane::availability::LaneAvailability;
+
+    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    // Mark the active lane's root as missing, then request the tree.
+    ws.update(cx, |ws, cx| {
+        ws.set_lane_availability(id, LaneAvailability::Missing);
+        ws.ensure_file_tree(id, cx);
+    });
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            !ws.file_tree.file_trees.contains_key(&id),
+            "unavailable lane must not get a file tree"
+        );
+        assert!(
+            !ws.file_tree.file_watchers.contains_key(&id),
+            "unavailable lane must not get a watcher"
+        );
+    });
+}
+
+#[gpui::test]
+async fn ensure_file_tree_tears_down_watcher_when_lane_goes_missing(cx: &mut TestAppContext) {
+    use crate::lane::availability::LaneAvailability;
+
+    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    // First ensure on a present lane spawns the watcher.
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.file_tree.file_watchers.contains_key(&id),
+            "present lane gets a watcher"
+        );
+    });
+
+    // The lane root vanishes; re-ensuring must remove the watcher.
+    ws.update(cx, |ws, cx| {
+        ws.set_lane_availability(id, LaneAvailability::Missing);
+        ws.ensure_file_tree(id, cx);
+    });
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            !ws.file_tree.file_watchers.contains_key(&id),
+            "watcher torn down once the lane root is missing"
+        );
+    });
+}
+
+#[gpui::test]
+async fn root_load_error_flips_availability_without_error_toast(cx: &mut TestAppContext) {
+    use crate::files::tree::{EntryId, FileTree, FileTreeError};
+    use crate::lane::availability::LaneAvailability;
+    use crate::workspace::left_dock::file_tree_ops::DirLoadSource;
+    use daruda_store::observability::error_report::ErrorSeverity;
+
+    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    ws.update(cx, |ws, cx| {
+        // Seed a tree so `apply_dir_load_result` resolves `is_root`.
+        let root = ws.lane_for(id).unwrap().path.clone();
+        ws.file_tree.file_trees.insert(id, FileTree::new(root));
+        // A root load that comes back NotFound is the detection site.
+        // `EntryId(0)` is the `root_id` `FileTree::new` assigns to the
+        // root node, so passing it here marks this as a root load.
+        ws.apply_dir_load_result(
+            id,
+            EntryId(0),
+            Err(FileTreeError::NotFound),
+            DirLoadSource::UserExpand,
+            cx,
+        );
+
+        assert_eq!(
+            ws.lane_for(id).unwrap().availability,
+            LaneAvailability::Missing,
+            "root NotFound must flip availability to Missing"
+        );
+        let has_error_toast = ws
+            .error_toasts(cx)
+            .iter()
+            .any(|t| t.report.severity == ErrorSeverity::Error);
+        assert!(
+            !has_error_toast,
+            "root read failure must no longer emit an Error toast"
+        );
+    });
+}
+
+#[gpui::test]
+async fn root_load_transient_io_stays_present_and_emits_error_toast(cx: &mut TestAppContext) {
+    use crate::files::tree::{EntryId, FileTree, FileTreeError};
+    use crate::lane::availability::LaneAvailability;
+    use crate::workspace::left_dock::file_tree_ops::DirLoadSource;
+    use daruda_store::observability::error_report::ErrorSeverity;
+
+    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    ws.update(cx, |ws, cx| {
+        // Seed a tree so `apply_dir_load_result` resolves `is_root`.
+        let root = ws.lane_for(id).unwrap().path.clone();
+        ws.file_tree.file_trees.insert(id, FileTree::new(root));
+        // A transient/unknown I/O failure on the root must NOT flip the
+        // lane (the directory likely still exists) — instead it surfaces
+        // as a normal Error toast so a real I/O failure is not swallowed.
+        ws.apply_dir_load_result(
+            id,
+            EntryId(0),
+            Err(FileTreeError::Io(std::io::Error::other("boom"))),
+            DirLoadSource::UserExpand,
+            cx,
+        );
+
+        assert_eq!(
+            ws.lane_for(id).unwrap().availability,
+            LaneAvailability::Present,
+            "a transient root I/O error must keep the lane Present (no teardown)"
+        );
+        assert!(
+            ws.file_tree.file_trees.contains_key(&id),
+            "a Present lane keeps its tree — no teardown on a transient error"
+        );
+        let has_error_toast = ws
+            .error_toasts(cx)
+            .iter()
+            .any(|t| t.report.severity == ErrorSeverity::Error);
+        assert!(
+            has_error_toast,
+            "a genuine root I/O failure must surface as an Error toast"
+        );
+    });
+}
+
+#[gpui::test]
+async fn mid_session_root_vanish_tears_down_tree_and_reconciles_project(cx: &mut TestAppContext) {
+    use crate::files::tree::{EntryId, FileTreeError};
+    use crate::lane::availability::LaneAvailability;
+    use crate::workspace::left_dock::file_tree_ops::DirLoadSource;
+
+    let (_wh, ws, temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    // An active, Present lane with a live tree + watcher (the case
+    // `ensure_file_tree`'s teardown never reaches once a tree exists).
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.file_tree.file_trees.contains_key(&id), "tree exists");
+        assert!(
+            ws.file_tree.file_watchers.contains_key(&id),
+            "watcher exists"
+        );
+        assert_eq!(
+            ws.lane_for(id).unwrap().availability,
+            LaneAvailability::Present
+        );
+        assert_eq!(
+            ws.project_for(id.project).unwrap().availability,
+            LaneAvailability::Present
+        );
+    });
+
+    // The lane root (== project root for the default lane) vanishes;
+    // the watcher's next bulk reload comes back NotFound on the root.
+    drop(temp);
+    ws.update(cx, |ws, cx| {
+        ws.apply_dir_load_result(
+            id,
+            EntryId(0),
+            Err(FileTreeError::NotFound),
+            DirLoadSource::WatcherReload,
+            cx,
+        );
+    });
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.lane_for(id).unwrap().availability,
+            LaneAvailability::Missing,
+            "root NotFound flips the lane non-Present"
+        );
+        assert!(
+            !ws.file_tree.file_trees.contains_key(&id),
+            "teardown removes the stale tree"
+        );
+        assert!(
+            !ws.file_tree.file_watchers.contains_key(&id),
+            "teardown removes the watcher so it stops firing reload spam"
+        );
+        assert_eq!(
+            ws.project_for(id.project).unwrap().availability,
+            LaneAvailability::Missing,
+            "owning project availability is reconciled off the dead root"
+        );
+    });
+}
+
+#[gpui::test]
+async fn reactivated_missing_lane_with_tabs_selects_empty_state(cx: &mut TestAppContext) {
+    use crate::lane::availability::LaneAvailability;
+
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    // A reactivated lane whose runtime was frozen with tabs still
+    // populated, but whose root is now Missing. The render gate keys
+    // off availability FIRST, so it must pick the empty-state even
+    // though `tabs` is non-empty. Assert the gating predicate on
+    // Workspace state (a direct render assertion is impractical here).
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx); // simulate the frozen, still-open tab
+            ws.set_lane_availability(id, LaneAvailability::Missing);
+        });
+    })
+    .unwrap();
+
+    // Assert the two post-conditions that together force the
+    // empty-state branch — non-Present availability AND non-empty tabs
+    // (the frozen-runtime case) — rather than re-deriving the render
+    // gate's predicate, so the test survives a predicate refactor.
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            !ws.main_area.tabs.is_empty(),
+            "active lane still has frozen tabs"
+        );
+        assert_eq!(
+            ws.active_lane().map(|l| l.availability),
+            Some(LaneAvailability::Missing),
+            "active lane is non-Present, so the render gate selects the \
+             empty-state regardless of the stale tabs above"
+        );
+    });
+}
+
+#[gpui::test]
+async fn child_load_error_on_already_missing_lane_emits_no_warning(cx: &mut TestAppContext) {
+    use crate::files::tree::{EntryId, FileTree, FileTreeError};
+    use crate::lane::availability::LaneAvailability;
+    use crate::workspace::left_dock::file_tree_ops::DirLoadSource;
+    use daruda_store::observability::error_report::ErrorSeverity;
+
+    let (_wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+
+    ws.update(cx, |ws, cx| {
+        // Lane is already Missing (its root flipped earlier). Seed a
+        // tree whose root_id is EntryId(0) so a non-root parent_id
+        // makes this a *child* load, exercising the late-arrival path.
+        let root = ws.lane_for(id).unwrap().path.clone();
+        ws.file_tree.file_trees.insert(id, FileTree::new(root));
+        ws.set_lane_availability(id, LaneAvailability::Missing);
+
+        // A child load (parent_id != root_id) that lands after the lane
+        // went missing — an in-flight read arriving post-teardown.
+        ws.apply_dir_load_result(
+            id,
+            EntryId(999),
+            Err(FileTreeError::Io(std::io::Error::other("boom"))),
+            DirLoadSource::UserExpand,
+            cx,
+        );
+
+        let has_warning = ws
+            .error_toasts(cx)
+            .iter()
+            .any(|t| t.report.severity == ErrorSeverity::Warning);
+        assert!(
+            !has_warning,
+            "a late child load on an already-missing lane must not toast"
+        );
+    });
+}

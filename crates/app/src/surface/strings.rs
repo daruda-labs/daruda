@@ -867,6 +867,11 @@ pub fn edit_description_placeholder() -> String {
 pub fn rename_modal_title() -> String {
     rust_i18n::t!("modal.rename_worktree_title").into_owned()
 }
+/// Title for the Remove-lane confirmation modal opened from the
+/// left-dock row `×` button and the inaccessible empty-state.
+pub fn remove_lane_modal_title() -> String {
+    rust_i18n::t!("modal.remove_lane_title").into_owned()
+}
 pub fn rename_placeholder() -> String {
     rust_i18n::t!("modal.rename_placeholder").into_owned()
 }
@@ -880,6 +885,49 @@ pub fn ctx_merge_disabled_dirty() -> String {
 }
 pub fn ctx_merge_disabled_detached() -> String {
     rust_i18n::t!("ctx.merge_disabled_detached").into_owned()
+}
+
+// ----------------------------------------------------------------
+// Inaccessible lane / project state (Task 2)
+// ----------------------------------------------------------------
+
+/// Context-menu "Remove…" item for an inaccessible lane or project.
+pub fn ctx_remove() -> String {
+    rust_i18n::t!("ctx.remove").into_owned()
+}
+/// Informational (disabled) context-menu hint shown for an
+/// access-denied lane — points the user at the macOS permission grant.
+pub fn ctx_grant_full_disk_access() -> String {
+    rust_i18n::t!("ctx.grant_full_disk_access").into_owned()
+}
+/// Short inline row label for a lane/project whose directory is gone.
+pub fn projects_directory_missing() -> String {
+    rust_i18n::t!("projects.directory_missing").into_owned()
+}
+/// Short inline row label for a lane/project whose directory is
+/// present but unreadable (permission denied).
+pub fn projects_permission_denied() -> String {
+    rust_i18n::t!("projects.permission_denied").into_owned()
+}
+/// Main-area empty-state heading shown when the active lane's
+/// directory is missing.
+pub fn projects_empty_missing_title() -> String {
+    rust_i18n::t!("projects.empty_missing_title").into_owned()
+}
+/// Main-area empty-state body shown when the active lane's directory
+/// is missing.
+pub fn projects_empty_missing_body() -> String {
+    rust_i18n::t!("projects.empty_missing_body").into_owned()
+}
+/// Main-area empty-state heading shown when the active lane's
+/// directory is access-denied.
+pub fn projects_empty_denied_title() -> String {
+    rust_i18n::t!("projects.empty_denied_title").into_owned()
+}
+/// Main-area empty-state body shown when the active lane's directory
+/// is access-denied.
+pub fn projects_empty_denied_body() -> String {
+    rust_i18n::t!("projects.empty_denied_body").into_owned()
 }
 pub fn merge_modal_branch_label() -> String {
     rust_i18n::t!("modal.merge_branch_label").into_owned()

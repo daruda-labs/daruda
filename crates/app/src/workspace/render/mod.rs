@@ -182,6 +182,80 @@ fn backdrop() -> gpui::Div {
     div().absolute().size_full().top_0().left_0()
 }
 
+/// Centered main-area placeholder shown when the active lane's root
+/// directory is inaccessible (Missing / AccessDenied). The render gate
+/// in `center_content` keys off `availability` before any tab lookup,
+/// so this is shown whenever the active lane is non-`Present` — whether
+/// its pane spawn was suppressed (empty `tabs`) or a frozen runtime with
+/// stale tabs was swapped back in on reactivate. It fills the center
+/// with the state message and a Remove affordance. The Remove button is
+/// a one-line dispatch into `request_remove_inaccessible_active`
+/// (one-way data flow).
+fn inaccessible_empty_state(
+    availability: crate::lane::availability::LaneAvailability,
+    cx: &mut Context<Workspace>,
+) -> gpui::AnyElement {
+    use crate::lane::availability::LaneAvailability;
+    use crate::surface::strings as s;
+    use crate::ui::{Icon, IconName, Sizable as _, button_danger};
+
+    let t = theme::current(cx);
+    let (icon, title, body) = match availability {
+        // The caller filters `Present` before reaching here. Render
+        // nothing rather than panic if that invariant ever slips — an
+        // explicit arm keeps the match exhaustive so a future variant
+        // is a compile error, not a silent fall-through.
+        LaneAvailability::Present => return div().into_any_element(),
+        LaneAvailability::Missing => (
+            IconName::TriangleAlert,
+            s::projects_empty_missing_title(),
+            s::projects_empty_missing_body(),
+        ),
+        LaneAvailability::AccessDenied => (
+            IconName::EyeOff,
+            s::projects_empty_denied_title(),
+            s::projects_empty_denied_body(),
+        ),
+    };
+
+    div()
+        .flex_1()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(theme::MAIN_EMPTY_STATE_GAP))
+        .bg(theme::CANVAS)
+        .child(
+            Icon::new(icon)
+                .with_size(px(theme::MAIN_EMPTY_STATE_ICON_SIZE))
+                .text_color(theme::WARNING),
+        )
+        .child(
+            div()
+                .text_size(px(theme::MAIN_EMPTY_STATE_TITLE_FONT_SIZE))
+                .text_color(theme::TEXT_PRIMARY)
+                .child(SharedString::from(title)),
+        )
+        .child(
+            div()
+                .max_w(px(theme::MAIN_EMPTY_STATE_BODY_MAX_W))
+                .text_size(px(theme::MAIN_EMPTY_STATE_BODY_FONT_SIZE))
+                .text_color(t.muted_text)
+                .text_center()
+                .child(SharedString::from(body)),
+        )
+        .child(
+            button_danger("inaccessible-remove", s::ctx_remove()).on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.request_remove_inaccessible_active(window, cx);
+                },
+            )),
+        )
+        .into_any_element()
+}
+
 /// Default alpha for the dim overlay drawn on top of inactive panes.
 /// Runtime value lives on `Workspace::dim_alpha` so future theme/config
 /// loading can override it without touching render code.
@@ -683,34 +757,35 @@ impl Render for Workspace {
         // user access to the right-click Unzoom menu. The dim overlay
         // is suppressed (dim_alpha = 0.0) because is_focused is always
         // true for the sole zoomed leaf.
-        let center_content =
-            if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
-                let actual_has_splits = tab.layout.leaf_count() > 1;
-                if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
-                    if tab.layout.pane_ids().contains(&zoomed_id) {
-                        let leaf = PaneLayout::Pane(zoomed_id);
-                        render_layout(
-                            &leaf,
-                            &self.main_area.panes,
-                            zoomed_id,
-                            true,
-                            0.0,
-                            SharedString::from(self.font_family.clone()),
-                            None,
-                            cx,
-                        )
-                    } else {
-                        render_layout(
-                            &tab.layout,
-                            &self.main_area.panes,
-                            self.main_area.focused_pane_id,
-                            actual_has_splits,
-                            self.dim_alpha,
-                            SharedString::from(self.font_family.clone()),
-                            self.main_area.zoomed_pane_id,
-                            cx,
-                        )
-                    }
+        let center_content = if let Some(availability) = self
+            .active_lane()
+            .map(|l| l.availability)
+            .filter(|a| *a != crate::lane::availability::LaneAvailability::Present)
+        {
+            // Availability gate runs FIRST, before any tab lookup. An
+            // inaccessible active lane must show the empty-state even
+            // when `tabs` is non-empty — a frozen runtime swapped in on
+            // reactivate, or a mid-session vanish that never cleared
+            // tabs, would otherwise render a stale terminal against a
+            // dead cwd. `availability` is precomputed (recompute on
+            // restore / activate / load-failure); reading it here keeps
+            // `render()` pure.
+            inaccessible_empty_state(availability, cx)
+        } else if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
+            let actual_has_splits = tab.layout.leaf_count() > 1;
+            if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
+                if tab.layout.pane_ids().contains(&zoomed_id) {
+                    let leaf = PaneLayout::Pane(zoomed_id);
+                    render_layout(
+                        &leaf,
+                        &self.main_area.panes,
+                        zoomed_id,
+                        true,
+                        0.0,
+                        SharedString::from(self.font_family.clone()),
+                        None,
+                        cx,
+                    )
                 } else {
                     render_layout(
                         &tab.layout,
@@ -719,13 +794,31 @@ impl Render for Workspace {
                         actual_has_splits,
                         self.dim_alpha,
                         SharedString::from(self.font_family.clone()),
-                        None,
+                        self.main_area.zoomed_pane_id,
                         cx,
                     )
                 }
             } else {
-                div().flex_1().w_full().into_any_element()
-            };
+                render_layout(
+                    &tab.layout,
+                    &self.main_area.panes,
+                    self.main_area.focused_pane_id,
+                    actual_has_splits,
+                    self.dim_alpha,
+                    SharedString::from(self.font_family.clone()),
+                    None,
+                    cx,
+                )
+            }
+        } else {
+            // No tab for the active lane, and the lane is `Present`
+            // (the inaccessible case is handled by the availability
+            // gate above). The legitimate "Present lane with no tabs"
+            // case is healed by the restore fallback / `add_tab`; a
+            // truly empty workspace (no projects, no active lane) also
+            // lands here. Either way, fall through to a blank element.
+            div().flex_1().w_full().into_any_element()
+        };
 
         // BodyLayout: [LeftDock] [MainArea] [RightDock]
         // Resize handles are absolutely positioned overlays centered

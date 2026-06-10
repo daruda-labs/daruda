@@ -16,6 +16,7 @@
 mod actions;
 mod annotation_dialog;
 mod annotation_ops;
+mod availability_ops;
 mod claude_session_ops;
 pub(in crate::workspace) mod command;
 mod config_ops;
@@ -1091,6 +1092,27 @@ impl Workspace {
     pub(in crate::workspace) fn active_lane_mut(&mut self) -> Option<&mut crate::lane::Lane> {
         let id = self.active.lane;
         self.active_project_mut()?.lane_mut(id)
+    }
+
+    /// `true` when the active lane exists *and* its `LaneAvailability` is
+    /// not `Present` (i.e. `Missing` or `AccessDenied`). Such a lane renders
+    /// the empty-state and must reject pane-spawning actions (new tab /
+    /// split) that would root a PTY at the dead path. `false` when there is
+    /// no active lane at all (no project / welcome window) — that
+    /// legitimately allows tabs.
+    pub(in crate::workspace) fn active_lane_is_inaccessible(&self) -> bool {
+        self.active_lane()
+            .is_some_and(|l| l.availability != crate::lane::availability::LaneAvailability::Present)
+    }
+
+    /// `true` when `focused_pane_id` points at a real pane in the active
+    /// lane's runtime. Tests pane membership (not equality to a sentinel):
+    /// the first real pane gets id 0, the same value as the default, so a
+    /// paneless lane (the inaccessible empty-state) is detected only because
+    /// `panes` is empty — not by comparing against a magic id.
+    pub(in crate::workspace) fn has_focused_pane(&self) -> bool {
+        let focused = self.main_area.focused_pane_id;
+        self.main_area.panes.iter().any(|p| p.id == focused)
     }
 
     /// Resolve a `ProjectId` to its runtime project.

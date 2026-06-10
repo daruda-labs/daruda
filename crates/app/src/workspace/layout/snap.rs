@@ -55,6 +55,11 @@ pub(in crate::workspace) struct ProjectSnapshot {
     /// Whether the project's lane list is hidden under its header.
     /// Toggled by the project header chevron click.
     pub is_collapsed: bool,
+    /// Runtime read-availability of the project root directory.
+    /// Drives the muted-header + state-icon treatment when the root
+    /// is missing or access-denied. Mirrored from
+    /// [`crate::project::Project::availability`]; never serialized.
+    pub availability: crate::lane::availability::LaneAvailability,
 }
 
 /// Plain-data snapshot of one group for the left-dock tree.

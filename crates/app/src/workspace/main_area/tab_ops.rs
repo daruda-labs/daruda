@@ -24,6 +24,15 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn add_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // An inaccessible active lane renders the empty-state; spawning a
+        // tab here would root a PTY at the dead lane path (falling back to
+        // `$HOME`) and escape that empty-state. No-op — the empty-state's
+        // Remove is the only action offered for such a lane. (A workspace
+        // with no project at all is not affected — that path still allows
+        // tabs.)
+        if self.active_lane_is_inaccessible() {
+            return;
+        }
         let pane = match self.create_pane(window, cx) {
             Ok(p) => p,
             Err(e) => {
@@ -279,6 +288,13 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
+        // Zoom is meaningless without a real pane. A 0-pane lane (e.g. the
+        // inaccessible empty-state) has `focused_pane_id` at its default,
+        // which matches no pane — guard so we never stamp
+        // `zoomed_pane_id = Some(<bogus id>)` and zoom an empty viewport.
+        if !self.main_area.panes.iter().any(|p| p.id == pane_id) {
+            return;
+        }
         if self.main_area.zoomed_pane_id == Some(pane_id) {
             self.main_area.zoomed_pane_id = None;
         } else {
@@ -295,6 +311,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Reject when the active lane is inaccessible OR there is no real
+        // focused pane (e.g. the empty-state of an inaccessible lane).
+        // Without a focused pane the `insert_split_at` loop below would
+        // match no tab, leaving the new PTY orphaned in `panes` with no
+        // `TabEntry` referencing it.
+        if self.active_lane_is_inaccessible() || !self.has_focused_pane() {
+            return;
+        }
         let new_pane = match self.create_pane(window, cx) {
             Ok(p) => p,
             Err(e) => {

@@ -20,6 +20,7 @@ use daruda_store::project::{
 };
 
 use crate::lane::Lane;
+use crate::lane::availability::LaneAvailability;
 
 /// Runtime project entry. Contains the runtime lanes plus the
 /// metadata needed to render the left-dock tree (color, tab order,
@@ -58,6 +59,10 @@ pub struct Project {
     /// left dock. The lane list is hidden when collapsed; click on
     /// the project chevron toggles. Persisted across sessions.
     pub is_collapsed: bool,
+    /// Runtime-only. Whether this project's root directory can be read
+    /// on disk. Recomputed from the live filesystem on restore /
+    /// activate; never serialized. Defaults to `Present`.
+    pub availability: LaneAvailability,
 }
 
 impl Project {
@@ -99,6 +104,7 @@ impl Project {
             color: None,
             tab_order: 0,
             is_collapsed: false,
+            availability: LaneAvailability::Present,
         }
     }
 
@@ -158,6 +164,8 @@ impl Project {
             // bounded by project count.
             tab_order: ov.tab_order as u32,
             is_collapsed: ov.is_collapsed,
+            // Recomputed from disk by the workspace restore path.
+            availability: LaneAvailability::Present,
         }
     }
 
