@@ -361,9 +361,14 @@ fn ensure_object<'a>(value: &'a mut Value, key: &str) -> &'a mut serde_json::Map
 /// Filter Notification events to only the subtypes that mean the
 /// user is actually being asked something. Other events use `""`
 /// (match-all).
+///
+/// `idle_prompt` is deliberately excluded: upstream Claude Code fires
+/// it after essentially every response rather than only on a genuine
+/// idle wait (anthropics/claude-code#12048, #8320), so subscribing to
+/// it turns the desktop push into a per-turn-per-session stream.
 fn notification_matcher_for(event: &str) -> &'static str {
     if event == "Notification" {
-        "permission_prompt|idle_prompt|elicitation_dialog"
+        "permission_prompt|elicitation_dialog"
     } else {
         ""
     }
@@ -435,7 +440,7 @@ mod tests {
         let m = settings["hooks"]["Notification"][0]["matcher"]
             .as_str()
             .unwrap();
-        assert_eq!(m, "permission_prompt|idle_prompt|elicitation_dialog");
+        assert_eq!(m, "permission_prompt|elicitation_dialog");
         // Stop has no matcher (fires always).
         let m = settings["hooks"]["Stop"][0]["matcher"].as_str().unwrap();
         assert_eq!(m, "");
