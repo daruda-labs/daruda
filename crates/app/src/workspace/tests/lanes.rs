@@ -1451,12 +1451,20 @@ fn zoom_noop_on_inaccessible_active_lane(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn activate_inaccessible_lane_persists_active_ref(cx: &mut TestAppContext) {
-    // Two lanes: lane 0 present (the live process cwd), lane 1 pointing at
+    // Two lanes: lane 0 present (a hermetic tempdir), lane 1 pointing at
     // a directory that does not exist. Activating lane 1 must flip
     // `self.active` (the persisted selection) and reach the early-return's
     // `mutate_durable`, without seeding a tab on the dead path.
+    //
+    // `root_a` must be a non-git directory so `bootstrap_from_project`
+    // discovers exactly one lane (id 0). Using the live process cwd here is
+    // a trap: when daruda's own checkout has git worktrees, bootstrap
+    // assigns them lane ids 1.., colliding with the manually-pushed id-1
+    // lane below — `lane_for(1)` would then resolve to a real, present
+    // worktree and the inaccessible-lane assertion would never hold.
     let config = daruda_config::Config::default();
-    let root_a = std::env::current_dir().unwrap();
+    let _root_a_dir = tempfile::tempdir().unwrap();
+    let root_a = _root_a_dir.path().to_path_buf();
     let root_b = std::path::PathBuf::from("/tmp/daruda_activate_inaccessible_missing_dir");
     let _ = std::fs::remove_dir_all(&root_b);
     let project = daruda_store::project::Project::from_path(&root_a);
