@@ -1312,8 +1312,11 @@ impl Workspace {
     /// the cache shows stale data (root CLAUDE.md Pitfall #10). Embedded
     /// input entities (the search boxes, the usage dropdown) self-notify
     /// and dirty this dock as an ancestor, so they need no explicit call.
+    /// Lease-free (`App::notify`) — dock event listeners run inside a
+    /// `Context<Dock>` lease, so leasing the dock here would double-lease.
     pub(crate) fn notify_right_dock(&self, cx: &mut Context<Self>) {
-        self.right_dock.update(cx, |_, cx| cx.notify());
+        let dock_id = self.right_dock.entity_id();
+        gpui::App::notify(cx, dock_id);
     }
 
     /// Invalidate the left dock's `.cached()` element so it re-renders
@@ -1325,8 +1328,11 @@ impl Workspace {
     /// the cache shows stale data (root CLAUDE.md Pitfall #10).
     /// Embedded input entities (`git_commit_input`) self-notify and
     /// dirty this dock as an ancestor, so they need no explicit call.
+    /// Lease-free (`App::notify`) — dock event listeners run inside a
+    /// `Context<Dock>` lease, so leasing the dock here would double-lease.
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
-        self.left_dock.update(cx, |_, cx| cx.notify());
+        let dock_id = self.left_dock.entity_id();
+        gpui::App::notify(cx, dock_id);
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

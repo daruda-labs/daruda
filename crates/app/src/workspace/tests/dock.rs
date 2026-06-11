@@ -210,3 +210,34 @@ fn test_dock_drag_right_and_bottom_track_their_own_sizes(cx: &mut TestAppContext
         ws.end_dock_drag(cx);
     });
 }
+
+// ---- Dock notify reentrancy ----
+//
+// Left/right dock event listeners are registered via `cx.listener` on
+// `Context<Dock>`, so they run while the Dock entity is leased. Any
+// Workspace op they dispatch may end in `notify_left_dock` /
+// `notify_right_dock`; the notify must therefore be lease-free or it
+// double-leases the dock and aborts the app (panic across the objc
+// event boundary cannot unwind).
+
+#[gpui::test]
+fn test_notify_left_dock_safe_while_dock_is_leased(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    let dock = ws.read_with(cx, |ws, _| ws.left_dock.clone());
+    dock.update(cx, |_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
+        });
+    });
+}
+
+#[gpui::test]
+fn test_notify_right_dock_safe_while_dock_is_leased(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    let dock = ws.read_with(cx, |ws, _| ws.right_dock.clone());
+    dock.update(cx, |_, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_right_dock_view(daruda_store::project::RightDockView::Skills, cx);
+        });
+    });
+}
