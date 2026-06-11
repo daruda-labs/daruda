@@ -257,17 +257,7 @@ pub(in crate::workspace) fn render_layout(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
-                        if this.main_area.focused_pane_id != id {
-                            this.main_area.focused_pane_id = id;
-                            if let Some(tab) =
-                                this.main_area.tabs.get_mut(this.main_area.active_tab_index)
-                            {
-                                tab.last_focused_pane = id;
-                            }
-                            this.bump_activity(id);
-                            this.focus_pane(id, window, cx);
-                            cx.notify();
-                        }
+                        this.focus_pane_on_click(id, window, cx)
                     }),
                 );
 

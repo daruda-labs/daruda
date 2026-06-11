@@ -23,6 +23,39 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Focus-change chokepoint for `main_area.focused_pane_id`. The left
+    /// dock derives `focused_file_selection` and `claude_active_session_id`
+    /// from the focused pane and is `.cached()`, so every focus change must
+    /// dirty it (Pitfall #10). Bulk context swaps (lane activation,
+    /// project close) carry their own left-dock notify via `mutate_durable`.
+    /// `restore_from_disk` writes the field directly during initial
+    /// construction (`cx.new`) — no prior cache exists at that point, so
+    /// no explicit notify is needed.
+    pub(in crate::workspace) fn set_focused_pane(&mut self, id: PaneId, cx: &mut Context<Self>) {
+        self.main_area.focused_pane_id = id;
+        self.notify_left_dock(cx);
+    }
+
+    /// Click-to-focus body for the pane root's mouse-down listener
+    /// (`render_layout` dispatches here one-line, per the MVU rules).
+    pub(in crate::workspace) fn focus_pane_on_click(
+        &mut self,
+        id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.main_area.focused_pane_id == id {
+            return;
+        }
+        self.set_focused_pane(id, cx);
+        if let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
+            tab.last_focused_pane = id;
+        }
+        self.bump_activity(id);
+        self.focus_pane(id, window, cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn add_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // An inaccessible active lane renders the empty-state; spawning a
         // tab here would root a PTY at the dead lane path (falling back to
@@ -55,7 +88,7 @@ impl Workspace {
             .tab_history
             .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
-        self.main_area.focused_pane_id = pane_id;
+        self.set_focused_pane(pane_id, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
@@ -91,7 +124,7 @@ impl Workspace {
         {
             self.main_area.zoomed_pane_id = None;
         }
-        self.release_pane_tracking(&pane_ids);
+        self.release_pane_tracking(&pane_ids, cx);
         self.main_area.panes.retain(|p| !pane_ids.contains(&p.id));
         for id in &pane_ids {
             self.main_area.activity_counter.remove(id);
@@ -128,10 +161,15 @@ impl Workspace {
         };
         self.main_area.active_tab_index = new_active;
 
-        if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
-            self.main_area.focused_pane_id = tab.last_focused_pane;
-            self.bump_activity(self.main_area.focused_pane_id);
-            self.focus_pane(self.main_area.focused_pane_id, window, cx);
+        if let Some(focused) = self
+            .main_area
+            .tabs
+            .get(self.main_area.active_tab_index)
+            .map(|tab| tab.last_focused_pane)
+        {
+            self.set_focused_pane(focused, cx);
+            self.bump_activity(focused);
+            self.focus_pane(focused, window, cx);
         }
         cx.notify();
     }
@@ -217,12 +255,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let focused = self.main_area.focused_pane_id;
         let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) else {
             return;
         };
-        if let Some(next) = tab.layout.next_pane(self.main_area.focused_pane_id) {
-            self.main_area.focused_pane_id = next;
+        if let Some(next) = tab.layout.next_pane(focused) {
             tab.last_focused_pane = next;
+            self.set_focused_pane(next, cx);
             self.focus_pane(next, window, cx);
             cx.notify();
         }
@@ -233,12 +272,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let focused = self.main_area.focused_pane_id;
         let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) else {
             return;
         };
-        if let Some(prev) = tab.layout.prev_pane(self.main_area.focused_pane_id) {
-            self.main_area.focused_pane_id = prev;
+        if let Some(prev) = tab.layout.prev_pane(focused) {
             tab.last_focused_pane = prev;
+            self.set_focused_pane(prev, cx);
             self.focus_pane(prev, window, cx);
             cx.notify();
         }
@@ -262,7 +302,7 @@ impl Workspace {
             dir,
             &self.main_area.activity_counter,
         ) {
-            self.main_area.focused_pane_id = target;
+            self.set_focused_pane(target, cx);
             if let Some(t) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
                 t.last_focused_pane = target;
             }
@@ -337,7 +377,7 @@ impl Workspace {
             }
         }
 
-        self.main_area.focused_pane_id = new_pane_id;
+        self.set_focused_pane(new_pane_id, cx);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
@@ -372,12 +412,12 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
         }
         remove_pane_from_layout(&mut self.main_area.tabs[tab_index].layout, pane_id);
-        self.release_pane_tracking(&[pane_id]);
+        self.release_pane_tracking(&[pane_id], cx);
         self.main_area.panes.retain(|p| p.id != pane_id);
         self.main_area.activity_counter.remove(&pane_id);
 
         if tab_index == self.main_area.active_tab_index {
-            self.main_area.focused_pane_id = next_focus;
+            self.set_focused_pane(next_focus, cx);
             self.bump_activity(next_focus);
             self.focus_pane(next_focus, window, cx);
         }

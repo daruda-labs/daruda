@@ -874,7 +874,25 @@ impl Render for Workspace {
             .flex_row()
             .relative()
             .overflow_hidden()
-            .when(left_dock_open, |el| el.child(self.left_dock.clone()))
+            // `.cached()`: the left dock re-renders only when one of its
+            // sources notifies it (`Workspace::notify_left_dock` — wired
+            // at `mark_dirty_and_save` (covers all project/group/lane/dnd
+            // CRUD), `set_left_dock_view`, git ops, file-tree ops, claude
+            // status, and the status + task-live pulses). On unrelated
+            // parent repaints (terminal output) the cached layout + paint
+            // is recycled instead of rebuilding the entire Worktrees /
+            // Git-changes / Files tree. Embedded `git_commit_input` and
+            // focus/scroll handles self-notify and dirty the dock as an
+            // ancestor (Pitfall #10).
+            .when(left_dock_open, |el| {
+                el.child(
+                    gpui::AnyView::from(self.left_dock.clone()).cached(
+                        gpui::StyleRefinement::default()
+                            .h_full()
+                            .w(gpui::px(left_dock_size)),
+                    ),
+                )
+            })
             .child(main_area)
             // `.cached()`: the right dock re-renders only when one of its
             // sources notifies it (`Workspace::notify_right_dock` — wired

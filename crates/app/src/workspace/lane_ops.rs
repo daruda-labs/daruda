@@ -225,7 +225,7 @@ impl Workspace {
             .get(&target)
             .map(|runtime| runtime.panes.iter().map(|p| p.id).collect())
             .unwrap_or_default();
-        self.release_pane_tracking(&removed_pane_ids);
+        self.release_pane_tracking(&removed_pane_ids, cx);
         self.main_area.inactive_lane_runtimes.remove(&target);
         // W-7 per-lane state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
@@ -607,6 +607,13 @@ impl Workspace {
             self.reconcile_right_dock_for_inaccessible_lane(window, cx);
         }
         cx.notify();
+        // `recompute_availability_for` changed `lane.availability` /
+        // `project.availability`; both appear in `LeftDockSnapshot` through
+        // `ProjectSnapshot`. Left dock is `.cached()`, so dirty it here for
+        // both branches (the `now_present` branch covered by `mutate_durable`
+        // above, but the else branch has no `mutate_durable` — call here
+        // covers both safely) (Pitfall #10).
+        self.notify_left_dock(cx);
     }
 
     /// Spawn one pane rooted at `target`'s path when the live runtime has

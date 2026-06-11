@@ -111,7 +111,7 @@ impl Workspace {
             .tab_history
             .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
-        self.main_area.focused_pane_id = pane_id;
+        self.set_focused_pane(pane_id, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         cx.notify();

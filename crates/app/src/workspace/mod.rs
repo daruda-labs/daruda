@@ -1034,6 +1034,11 @@ impl Workspace {
         // Keep notify here so every call site (group/project CRUD,
         // lane DnD, policy updates) gets a render for free.
         cx.notify();
+        // Left dock is `.cached()` and renders the project/group/lane
+        // tree from Workspace fields. Durable mutations always change
+        // that tree, so dirty the dock entity here to invalidate the
+        // cache for every call site (Pitfall #10).
+        self.notify_left_dock(cx);
     }
 
     fn alloc_id(&mut self) -> u64 {
@@ -1058,6 +1063,7 @@ impl Workspace {
             self.refresh_git_status(target, cx);
         }
         cx.notify();
+        self.notify_left_dock(cx);
     }
 
     /// Human-readable name for this workspace in the recent list.
@@ -1308,6 +1314,19 @@ impl Workspace {
     /// and dirty this dock as an ancestor, so they need no explicit call.
     pub(crate) fn notify_right_dock(&self, cx: &mut Context<Self>) {
         self.right_dock.update(cx, |_, cx| cx.notify());
+    }
+
+    /// Invalidate the left dock's `.cached()` element so it re-renders
+    /// from the freshly staged snapshot. The left dock renders the
+    /// Worktrees/Git-changes/Files views from `Workspace` fields
+    /// (projects, groups, lanes, git status, file tree, claude status)
+    /// and never self-notifies for Workspace-owned state, so every
+    /// mutation site of a left-dock source must call this — otherwise
+    /// the cache shows stale data (root CLAUDE.md Pitfall #10).
+    /// Embedded input entities (`git_commit_input`) self-notify and
+    /// dirty this dock as an ancestor, so they need no explicit call.
+    pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
+        self.left_dock.update(cx, |_, cx| cx.notify());
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

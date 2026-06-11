@@ -83,6 +83,13 @@ impl Workspace {
         }
         if icon_changed || panels_changed {
             cx.notify();
+            // `panels_grid_columns` is a BottomDockSnapshot source — no left-dock notify needed.
+        }
+        if filter_changed || icon_changed {
+            // `files_show_hidden` / `files_use_gitignore` / `files_icon_color_mode`
+            // are `LeftDockSnapshot` sources; left dock is `.cached()` and won't
+            // re-render on `cx.notify()` alone (Pitfall #10).
+            self.notify_left_dock(cx);
         }
         // A UI-theme switch changes the host appearance; re-render open
         // markdown panes so their diagrams (mermaid) re-theme for the new
@@ -95,6 +102,8 @@ impl Workspace {
         if new_enabled != self.claude.claude_status_enabled {
             self.claude.claude_status_enabled = new_enabled;
             self.refresh_jsonl_watcher(cx);
+            // `claude_status_enabled` gates the left-dock install banner (Pitfall #10).
+            self.notify_left_dock(cx);
         }
         // Refresh locale-dependent widget strings. `apply_locale_str` in
         // `globals::register_settings_observer` runs before this method, so

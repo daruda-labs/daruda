@@ -83,6 +83,7 @@ impl Workspace {
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
+        self.notify_left_dock(cx);
 
         let message_bg = message.clone();
         let repo_for_report = repo_root.clone();
@@ -190,6 +191,7 @@ impl Workspace {
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
+        self.notify_left_dock(cx);
 
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -280,6 +282,7 @@ impl Workspace {
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
+        self.notify_left_dock(cx);
 
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -289,6 +292,7 @@ impl Workspace {
                 ws.git_op_in_flight = false;
                 ws.sync_commit_buttons(cx);
                 cx.notify();
+                ws.notify_left_dock(cx);
                 if let Err(e) = result {
                     let report = ErrorReport::new("git push failed")
                         .severity(ErrorSeverity::Error)
@@ -315,6 +319,7 @@ impl Workspace {
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
+        self.notify_left_dock(cx);
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -333,6 +338,7 @@ impl Workspace {
                     ws.report_error(report, cx);
                 }
                 cx.notify();
+                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -350,6 +356,7 @@ impl Workspace {
         self.git_op_in_flight = true;
         self.sync_commit_buttons(cx);
         cx.notify();
+        self.notify_left_dock(cx);
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -373,6 +380,7 @@ impl Workspace {
                     }
                 }
                 cx.notify();
+                ws.notify_left_dock(cx);
             },
         )
         .detach();

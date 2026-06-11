@@ -613,6 +613,10 @@ impl Workspace {
             }
         }
         cx.notify();
+        // `claude_hooks_installed` feeds the left-dock install banner;
+        // the dock is `.cached()` and won't re-render on `cx.notify()`
+        // alone (Pitfall #10).
+        self.notify_left_dock(cx);
     }
 
     pub(in crate::workspace) fn on_uninstall_claude_hooks(
@@ -643,6 +647,8 @@ impl Workspace {
             }
         }
         cx.notify();
+        // `claude_hooks_installed` feeds the left-dock install banner (Pitfall #10).
+        self.notify_left_dock(cx);
     }
 
     // ---- Tab context-menu operations ----

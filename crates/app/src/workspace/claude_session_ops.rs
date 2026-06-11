@@ -196,6 +196,7 @@ impl Workspace {
                     if self.claude.claude_status.update(file) {
                         cx.notify();
                         self.notify_right_dock(cx);
+                        self.notify_left_dock(cx);
                         #[cfg(debug_assertions)]
                         {
                             let (sid, cwd, event, source) = dbg_fields;
@@ -238,6 +239,7 @@ impl Workspace {
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     cx.notify();
                     self.notify_right_dock(cx);
+                    self.notify_left_dock(cx);
                     #[cfg(debug_assertions)]
                     if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
                         self.log_lane_status_change(probe, &session_id, &cwd, "removed", source);
@@ -377,10 +379,17 @@ impl Workspace {
     /// poll's vanished-pane diff. Every pane-teardown path (close
     /// pane / close tab / remove lane / close project) goes through
     /// this single release point.
-    pub(in crate::workspace) fn release_pane_tracking(&mut self, pane_ids: &[PaneId]) {
+    pub(in crate::workspace) fn release_pane_tracking(
+        &mut self,
+        pane_ids: &[PaneId],
+        cx: &mut Context<Self>,
+    ) {
         for id in pane_ids {
             self.claude.pty_tracker.unregister(*id);
             self.claude.pty_claude_bindings.remove(id);
         }
+        // Dropped bindings feed the left-dock per-lane Claude badges and
+        // `claude_active_session_id`; the dock is `.cached()` (Pitfall #10).
+        self.notify_left_dock(cx);
     }
 }

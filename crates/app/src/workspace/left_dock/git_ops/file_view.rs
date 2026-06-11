@@ -134,6 +134,7 @@ impl Workspace {
                 lane: lane_id,
             });
             cx.notify();
+            self.notify_left_dock(cx);
             self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
             return;
         }
@@ -173,6 +174,7 @@ impl Workspace {
             lane: lane_id,
         });
         cx.notify();
+        self.notify_left_dock(cx);
 
         self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
     }
@@ -256,6 +258,7 @@ impl Workspace {
             lane: lane_id,
         });
         cx.notify();
+        self.notify_left_dock(cx);
 
         self.load_pane_file_content(lane_id, path, false, effective_mode, None, cx);
     }

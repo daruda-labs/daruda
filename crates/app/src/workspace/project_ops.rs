@@ -270,7 +270,7 @@ impl Workspace {
                     .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id)),
             )
             .collect();
-        self.release_pane_tracking(&owned_pane_ids);
+        self.release_pane_tracking(&owned_pane_ids, cx);
         // Forget every inactive runtime that belonged to the removed
         // project — the WorktreeRefs become dangling once the project
         // is gone.
