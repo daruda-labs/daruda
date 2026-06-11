@@ -276,9 +276,9 @@ impl McpState {
     /// Carrying it by value keeps the panel render closure off the
     /// Global (no re-entrancy hazard).
     pub fn snapshot_for(&self, lane: Option<&Path>) -> McpSnapshot {
-        let (project, project_raw) = match lane.and_then(|w| self.project.get(w)) {
-            Some(p) => (p.servers.clone(), p.raw.clone()),
-            None => (Vec::new(), serde_json::Value::Object(Default::default())),
+        let project = match lane.and_then(|w| self.project.get(w)) {
+            Some(p) => p.servers.clone(),
+            None => Vec::new(),
         };
         McpSnapshot {
             project,
@@ -286,16 +286,17 @@ impl McpState {
             project_root: lane.map(Path::to_path_buf),
             project_mcp_path: lane.map(parse::project_mcp_path),
             personal_settings_path: parse::personal_settings_path(),
-            project_raw,
-            personal_raw: self.personal_raw.clone(),
             last_scanned: self.last_scanned,
         }
     }
 }
 
 /// Owned per-lane projection of [`McpState`] consumed by the
-/// renderer and CRUD modals. Carries the project Vec / raw tree for
-/// *one* lane along with the user-global personal vectors.
+/// renderer and CRUD modals. Carries the project server Vec for
+/// *one* lane along with the user-global personal vector. The raw
+/// JSON trees stay on [`McpState`] (read directly by the persist
+/// layer) and are deliberately absent here — the renderer never
+/// reads them, so cloning them per frame would be pure waste.
 #[derive(Clone, Debug, Default)]
 pub struct McpSnapshot {
     pub project: Vec<McpServer>,
@@ -307,8 +308,6 @@ pub struct McpSnapshot {
     pub project_mcp_path: Option<PathBuf>,
     /// Cached `~/.claude/settings.json` resolution.
     pub personal_settings_path: PathBuf,
-    pub project_raw: serde_json::Value,
-    pub personal_raw: serde_json::Value,
     pub last_scanned: Option<SystemTime>,
 }
 
