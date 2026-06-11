@@ -1,14 +1,13 @@
 //! PTY-tracker event pump — bridges the GPUI-free
 //! `hooks::pty_tracker` channel into the GPUI Workspace entity.
 //!
-//! The tracker thread polls sysinfo every 3 s and emits diff events
-//! (`BindingChanged` / `DeadSession`) through an `mpsc::Receiver`.
-//! GPUI tasks can't `recv()` directly because that would block the
-//! background executor, so we poll with a 100 ms timer and drain
-//! every queued event per tick — `tab close` fans out one
-//! `BindingChanged` per pane plus several potential `DeadSession`
-//! events, and a single read-per-tick would lag noticeably on
-//! bursts.
+//! The tracker emits diff events (`BindingChanged` / `DeadSession`)
+//! through an `mpsc::Receiver` whenever an FSEvents change in the
+//! sessions directory or a pane register/unregister re-resolves
+//! bindings. GPUI tasks can't `recv()` on a std channel without
+//! blocking the background executor, so we drain it with a 100 ms timer
+//! — `tab close` fans out one `BindingChanged` per pane plus several
+//! `DeadSession` events, and a single read-per-tick would lag on bursts.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
@@ -18,19 +17,17 @@ use gpui::{Context, Task};
 use crate::hooks::pty_tracker::PtyTrackerEvent;
 use crate::workspace::Workspace;
 
-/// 100 ms strikes a balance: short enough that visible state
-/// (sub-row badges, active outline) snaps without perceptible lag,
-/// long enough that the background executor isn't woken up
-/// gratuitously when nothing has changed.
+/// 100 ms strikes a balance: short enough that visible state (sub-row
+/// badges, active outline) snaps without perceptible lag, long enough
+/// that the background executor isn't woken up gratuitously.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawn the long-lived task that pulls events from `pty_rx` and
 /// applies them to the Workspace via [`Workspace::apply_pty_tracker_event`].
 ///
 /// The returned task is held by Workspace as `_pty_event_pump`;
-/// dropping it (Workspace teardown) closes the receiver, which causes
-/// the tracker thread's next `tx.send` to fail, ending the polling
-/// thread cleanly without an explicit shutdown signal.
+/// dropping it (Workspace teardown) drops the receiver, so the tracker
+/// thread's next `send` fails and it shuts down cleanly.
 pub(in crate::workspace) fn spawn(
     pty_rx: Receiver<PtyTrackerEvent>,
     cx: &mut Context<Workspace>,
@@ -44,9 +41,6 @@ pub(in crate::workspace) fn spawn(
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => break 'outer,
                 };
-                if matches!(ev, PtyTrackerEvent::__HeartbeatProbe) {
-                    continue;
-                }
                 if this
                     .update(cx, |ws, cx| ws.apply_pty_tracker_event(ev, cx))
                     .is_err()
@@ -98,9 +92,9 @@ impl Workspace {
                         let _ = sf::delete(&sf::lock_path_for(&dir, &session_id));
                     }
                     cx.notify();
+                    self.notify_right_dock(cx);
                 }
             }
-            PtyTrackerEvent::__HeartbeatProbe => {}
         }
     }
 }

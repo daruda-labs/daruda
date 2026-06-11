@@ -861,6 +861,7 @@ impl Workspace {
             _tasks_global_subscription: cx
                 .observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
                     ws.ensure_task_live_tick(cx);
+                    ws.notify_right_dock(cx);
                     cx.notify();
                 }),
             _task_live_tick: None,
@@ -890,12 +891,18 @@ impl Workspace {
             },
             _skills_watcher: None,
             _skills_event_pump: None,
-            _skills_global_subscription: cx
-                .observe_global::<crate::agent::skills::SkillsState>(|_, cx| cx.notify()),
+            _skills_global_subscription: cx.observe_global::<crate::agent::skills::SkillsState>(
+                |ws, cx| {
+                    ws.notify_right_dock(cx);
+                    cx.notify();
+                },
+            ),
             _mcp_watcher: None,
             _mcp_event_pump: None,
-            _mcp_global_subscription: cx
-                .observe_global::<crate::agent::mcp::McpState>(|_, cx| cx.notify()),
+            _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(|ws, cx| {
+                ws.notify_right_dock(cx);
+                cx.notify();
+            }),
             // Re-resolve the user layer with this workspace's project
             // overlay and reapply whenever `SettingsStore` changes —
             // both the FS watch tick and the Settings-window save
@@ -1274,6 +1281,19 @@ impl Workspace {
         &self.projects
     }
 
+    /// Invalidate the right dock's `.cached()` element so it re-renders
+    /// from the freshly staged snapshot. The right dock renders only from
+    /// `Workspace::render`'s staged snapshot and never self-notifies for
+    /// Workspace-owned state (usage, claude status, the MCP/skills/tasks
+    /// globals, tab/filter setters, the status + task-live pulses), so
+    /// every mutation of a right-dock source must call this — otherwise
+    /// the cache shows stale data (root CLAUDE.md Pitfall #10). Embedded
+    /// input entities (the search boxes, the usage dropdown) self-notify
+    /// and dirty this dock as an ancestor, so they need no explicit call.
+    pub(crate) fn notify_right_dock(&self, cx: &mut Context<Self>) {
+        self.right_dock.update(cx, |_, cx| cx.notify());
+    }
+
     pub(in crate::workspace) fn set_right_dock_view(
         &mut self,
         view: daruda_store::project::RightDockView,
@@ -1286,6 +1306,7 @@ impl Workspace {
             ws.right_dock_view = view;
         });
         cx.notify();
+        self.notify_right_dock(cx);
     }
 
     /// Execute the currently focused palette action and close.

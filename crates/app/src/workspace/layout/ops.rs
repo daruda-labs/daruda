@@ -68,7 +68,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable(cx, |ws, cx| {
-            ws.bottom_dock.update(cx, |d, _| d.toggle());
+            // Notify the Dock entity, not just the Workspace: the bottom
+            // dock is rendered through `.cached()`, so a Workspace-only
+            // notify would leave the cached (closed) view on screen.
+            // Per root CLAUDE.md Pitfall #10.
+            ws.bottom_dock.update(cx, |d, cx| {
+                d.toggle();
+                cx.notify();
+            });
             ws.main_area.pending_resize = true;
         });
         cx.notify();
@@ -195,7 +202,13 @@ impl Workspace {
         match drag.position {
             DockPosition::Left => self.left_dock.update(cx, |d, _| d.resize(new_size)),
             DockPosition::Right => self.right_dock.update(cx, |d, _| d.resize(new_size)),
-            DockPosition::Bottom => self.bottom_dock.update(cx, |d, _| d.resize(new_size)),
+            // Bottom dock renders through `.cached()`, so notify its
+            // entity directly (Pitfall #10) — a Workspace-only notify
+            // wouldn't repaint the cached view at the new height.
+            DockPosition::Bottom => self.bottom_dock.update(cx, |d, cx| {
+                d.resize(new_size);
+                cx.notify();
+            }),
         };
         self.resize_all_tabs(window, cx);
         cx.notify();
@@ -222,7 +235,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            ws.bottom_dock.update(cx, |d, _| d.resize(new_size));
+            // Cached bottom dock — notify its entity (Pitfall #10).
+            ws.bottom_dock.update(cx, |d, cx| {
+                d.resize(new_size);
+                cx.notify();
+            });
             ws.resize_all_tabs(window, cx);
         });
         cx.notify();

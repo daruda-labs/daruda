@@ -760,13 +760,14 @@ pub(in crate::workspace) fn spawn_task_live_tick(cx: &mut Context<Workspace>) ->
         loop {
             cx.background_executor().timer(interval).await;
             let still_alive = this
-                .update(cx, |_ws, cx| {
+                .update(cx, |ws, cx| {
                     let running_exists =
                         cx.global::<GlobalTasks>().0.tasks.iter().any(|t| {
                             matches!(t.state, daruda_store::tasks::TaskState::Running { .. })
                         });
                     if running_exists {
                         cx.notify();
+                        ws.notify_right_dock(cx);
                     }
                     running_exists
                 })

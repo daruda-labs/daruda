@@ -119,6 +119,7 @@ impl Workspace {
         }
         if changed {
             cx.notify();
+            self.notify_right_dock(cx);
         }
     }
 

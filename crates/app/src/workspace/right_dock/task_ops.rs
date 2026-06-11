@@ -36,6 +36,7 @@ impl Workspace {
             daruda_store::tasks::TaskFilter::Done => daruda_store::tasks::TaskFilter::All,
         };
         cx.notify();
+        self.notify_right_dock(cx);
     }
 
     /// Set the Tasks-tab filter directly. Called by future `Select`
@@ -49,6 +50,7 @@ impl Workspace {
         if self.task_filter != filter {
             self.task_filter = filter;
             cx.notify();
+            self.notify_right_dock(cx);
         }
     }
 

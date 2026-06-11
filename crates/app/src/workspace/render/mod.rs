@@ -385,8 +385,19 @@ impl Render for Workspace {
         // — Publish snapshots to docks ————————————————————————————————
         self.left_dock
             .update(cx, |d, _| d.snap = DockSnapshot::Left(Box::new(left_snap)));
-        self.bottom_dock
-            .update(cx, |d, _| d.snap = DockSnapshot::Bottom(bottom_snap));
+        // Bottom dock is wrapped in `.cached()` (see `body`/`main_area`
+        // below), so it must be marked dirty only when its snapshot
+        // content actually changes — otherwise the cached view shows
+        // stale data, and an unconditional notify would defeat the cache
+        // by repainting on every 250 ms status-pulse tick (which leaves
+        // this snapshot identical). Per root CLAUDE.md Pitfall #10.
+        self.bottom_dock.update(cx, |d, cx| {
+            let unchanged = matches!(&d.snap, DockSnapshot::Bottom(old) if *old == bottom_snap);
+            if !unchanged {
+                d.snap = DockSnapshot::Bottom(bottom_snap);
+                cx.notify();
+            }
+        });
         self.right_dock.update(cx, |d, _| {
             d.snap = DockSnapshot::Right(Box::new(right_snap))
         });
@@ -833,7 +844,21 @@ impl Render for Workspace {
             .overflow_hidden()
             .child(tab_bar)
             .child(pane_area)
-            .when(bottom_dock_open, |el| el.child(self.bottom_dock.clone()))
+            // `.cached()`: when the bottom dock isn't notified (its
+            // snapshot was staged unchanged above), GPUI recycles its
+            // previous layout + paint instead of re-rendering the macro
+            // grid / terminal input on every parent repaint. The
+            // self-notifying terminal input entity inside still repaints
+            // on its own edits (Pitfall #10).
+            .when(bottom_dock_open, |el| {
+                el.child(
+                    gpui::AnyView::from(self.bottom_dock.clone()).cached(
+                        gpui::StyleRefinement::default()
+                            .w_full()
+                            .h(gpui::px(bottom_dock_size)),
+                    ),
+                )
+            })
             .when(bottom_dock_open, |el| {
                 el.child(dock_resize_handle(
                     DockPosition::Bottom,
@@ -850,7 +875,23 @@ impl Render for Workspace {
             .overflow_hidden()
             .when(left_dock_open, |el| el.child(self.left_dock.clone()))
             .child(main_area)
-            .when(right_dock_open, |el| el.child(self.right_dock.clone()))
+            // `.cached()`: the right dock re-renders only when one of its
+            // sources notifies it (`Workspace::notify_right_dock` — wired
+            // at every MCP/skills/tasks global, usage/limits, claude
+            // status, tab/filter setter, and the status + task-live
+            // pulses). On unrelated parent repaints (terminal output) the
+            // cached layout + paint is recycled instead of rebuilding the
+            // Usage/Skills/Tasks/Tools view. Embedded search/dropdown
+            // entities self-notify and dirty this dock as an ancestor.
+            .when(right_dock_open, |el| {
+                el.child(
+                    gpui::AnyView::from(self.right_dock.clone()).cached(
+                        gpui::StyleRefinement::default()
+                            .h_full()
+                            .w(gpui::px(right_dock_size)),
+                    ),
+                )
+            })
             .when(left_dock_open, |el| {
                 el.child(dock_resize_handle(DockPosition::Left, left_dock_size, cx))
             })

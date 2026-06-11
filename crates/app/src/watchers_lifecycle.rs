@@ -102,6 +102,11 @@ fn spawn_status_pulse(cx: &mut App) {
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 if ws.has_animating_claude_status() {
                     cx.notify();
+                    // Right dock is `.cached()`; the Tasks tab's animated
+                    // status badges + Running-duration text live inside it,
+                    // so the pulse must dirty the dock entity too or they
+                    // freeze (Pitfall #10).
+                    ws.notify_right_dock(cx);
                 }
             });
         },

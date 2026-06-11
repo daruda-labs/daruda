@@ -161,6 +161,14 @@ pub(in crate::workspace) struct LeftDockSnapshot {
 
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
+///
+/// `PartialEq` drives the bottom dock's `.cached()` coherence: the
+/// render staging compares each frame's snapshot against the last and
+/// only fires `cx.notify(bottom_dock)` when content actually changed,
+/// so the 250 ms status pulse (which leaves this snapshot identical)
+/// doesn't repaint the dock. `Entity`/`WeakEntity` handles compare by
+/// stable id, so they never spuriously trip the diff.
+#[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
     pub terminal_input_visible: bool,
     pub active_tab_id: Option<daruda_store::panels::TabId>,
