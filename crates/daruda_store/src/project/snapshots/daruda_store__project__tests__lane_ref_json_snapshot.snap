@@ -1,0 +1,8 @@
+---
+source: crates/daruda_store/src/project/tests.rs
+expression: "serde_json::to_string_pretty(&r).unwrap()"
+---
+{
+  "project": 7,
+  "worktree": 3
+}

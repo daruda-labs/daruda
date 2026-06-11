@@ -92,6 +92,11 @@ pub const SHORTCUT_TOGGLE_RIGHT_DOCK: &str = "cmd-shift-b";
 // ============================================================================
 pub const SHORTCUT_COMMAND_PALETTE: &str = "cmd-shift-p";
 
+/// Lane switcher — fuzzy quick-switch across every project's lanes.
+/// `cmd-p` pairs with the `cmd-shift-p` command palette (VS Code's
+/// quick-open convention).
+pub const SHORTCUT_LANE_SWITCHER: &str = "cmd-p";
+
 // ============================================================================
 // File viewer
 // ============================================================================

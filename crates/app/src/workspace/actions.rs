@@ -568,10 +568,10 @@ impl Workspace {
             return;
         }
 
-        // macOS-only — daruda is macOS-only per project README, so
-        // `open` is the right launcher. Stdin/stdout/stderr inherit
-        // from daruda; the spawned `open` process detaches.
-        if let Err(e) = std::process::Command::new("open").arg(&path).spawn() {
+        // macOS-only — daruda is macOS-only per project README. The
+        // `open` crate launches the system default handler and detaches
+        // without waiting for it to exit.
+        if let Err(e) = open::that_detached(&path) {
             let report = ErrorReport::new("Failed to open project config")
                 .severity(ErrorSeverity::Warning)
                 .from_error(&e)

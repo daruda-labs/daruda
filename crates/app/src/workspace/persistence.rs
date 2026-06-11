@@ -400,6 +400,11 @@ impl Workspace {
         // before the pane-rebuild loop so it fires even when a later
         // restore step early-returns.
         self.reconcile_project_default_branches(cx);
+        // Heal any project persisted while its lanes were still the
+        // construction placeholder (single `Default` lane for a git
+        // root — e.g. the app died before the async discovery
+        // returned). Same async upgrade pass as fresh-open.
+        self.reconcile_bootstrapped_lanes(cx);
 
         // Project the persisted (active_project: ProjectUuid,
         // active_lane: LaneId) onto the runtime `LaneRef`

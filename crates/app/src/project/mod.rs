@@ -75,6 +75,17 @@ impl Project {
         Self::new_with_uuid(id, ProjectUuid::new(), root)
     }
 
+    /// Build a runtime project without touching git — a single
+    /// `Default` placeholder lane that
+    /// `Workspace::reconcile_bootstrapped_lanes` upgrades to the
+    /// git-discovered list asynchronously after window creation.
+    /// Keeps the window-construction path free of blocking git CLI
+    /// calls ([`Lane::bootstrap_from_project`] spawns up to four).
+    pub fn bootstrap_placeholder(id: ProjectId, root: PathBuf) -> Self {
+        let lanes = vec![Lane::default_for_project(0, root.clone())];
+        Self::from_parts(id, ProjectUuid::new(), root, lanes)
+    }
+
     /// Build a runtime project with a caller-supplied UUID. Used by
     /// code paths that need to attach this runtime entry to an existing
     /// on-disk [`daruda_store::project::ProjectState`] (policy B: the
@@ -88,8 +99,15 @@ impl Project {
     /// override it explicitly in `bootstrap` rather than relying on this
     /// constructor's default.
     pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf) -> Self {
-        let name = derive_name_from_path(&root);
         let lanes = Lane::bootstrap_from_project(&root);
+        Self::from_parts(id, uuid, root, lanes)
+    }
+
+    /// Shared constructor tail — the field defaults every fresh-project
+    /// path uses. Callers differ only in how `lanes` was produced
+    /// (git discovery vs. pure placeholder).
+    fn from_parts(id: ProjectId, uuid: ProjectUuid, root: PathBuf, lanes: Vec<Lane>) -> Self {
+        let name = derive_name_from_path(&root);
         let last_active_lane_id = lanes.first().map(|w| w.id).unwrap_or(0);
         Self {
             id,
@@ -218,6 +236,20 @@ mod tests {
         assert_eq!(p.last_active_lane_id, p.lanes[0].id);
         assert!(p.group_id.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bootstrap_placeholder_skips_git_discovery() {
+        // current_dir is a git repo in CI/dev runs — the placeholder
+        // must still yield the single pure `Default` lane, proving no
+        // git probe ran during construction.
+        let root = std::env::current_dir().unwrap();
+        let p = Project::bootstrap_placeholder(3, root.clone());
+        assert_eq!(p.lanes.len(), 1);
+        assert!(!p.lanes[0].is_git());
+        assert_eq!(p.lanes[0].path, root);
+        assert_eq!(p.last_active_lane_id, 0);
+        assert_eq!(p.id, 3);
     }
 
     #[test]

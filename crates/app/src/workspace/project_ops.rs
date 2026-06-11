@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use daruda_store::project::{LaneRef, ProjectId, ProjectUuid, WindowOpenPolicy};
+use daruda_store::project::{LaneKind, LaneRef, ProjectId, ProjectUuid, WindowOpenPolicy};
 use gpui::{AppContext as _, Context, Window};
 
 use super::Workspace;
@@ -531,6 +531,91 @@ impl Workspace {
         }
     }
 
+    /// Upgrade construction-placeholder lane lists to git-discovered
+    /// ones off the UI thread. Window creation seeds each fresh
+    /// project with a single `Default` placeholder lane
+    /// ([`crate::project::Project::bootstrap_placeholder`]) so it never
+    /// blocks on git CLI; this pass re-runs the discovery on the
+    /// background executor and swaps the result in. It also heals a
+    /// state file persisted during the placeholder window (e.g. the
+    /// app died before discovery returned): restore re-enters here and
+    /// the same probe upgrades the persisted placeholder.
+    ///
+    /// Genuinely non-git projects share the single-`Default` shape;
+    /// for them discovery returns the same shape and the upgrade is a
+    /// no-op.
+    pub(in crate::workspace) fn reconcile_bootstrapped_lanes(&mut self, cx: &mut Context<Self>) {
+        let targets: Vec<(ProjectId, PathBuf)> = self
+            .projects
+            .iter()
+            .filter(|p| has_placeholder_lanes(p))
+            .map(|p| (p.id, p.root.clone()))
+            .collect();
+        for (project_id, root) in targets {
+            crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+                cx,
+                move || crate::lane::Lane::bootstrap_from_project(&root),
+                move |ws, lanes, cx| ws.apply_discovered_lanes(project_id, lanes, cx),
+            )
+            .detach();
+        }
+    }
+
+    /// Foreground half of [`Self::reconcile_bootstrapped_lanes`] —
+    /// swap `lanes` into the project and repair everything addressed
+    /// by the placeholder ref. Split out (and workspace-visible) so
+    /// tests can drive the swap synchronously.
+    pub(in crate::workspace) fn apply_discovered_lanes(
+        &mut self,
+        project_id: ProjectId,
+        lanes: Vec<crate::lane::Lane>,
+        cx: &mut Context<Self>,
+    ) {
+        // Discovery returned the same single-Default shape — the root
+        // genuinely isn't a git repo and the placeholder is already
+        // correct.
+        if lanes.len() == 1 && !lanes[0].kind.is_git() {
+            return;
+        }
+        let Some(p) = self.projects.iter_mut().find(|p| p.id == project_id) else {
+            return; // project closed while discovery ran
+        };
+        // Swap only while the placeholder is still in place — any real
+        // lane list that appeared meanwhile wins.
+        if !has_placeholder_lanes(p) {
+            return;
+        }
+        let old_ref = LaneRef {
+            project: project_id,
+            lane: p.lanes[0].id,
+        };
+        let new_active_id = lanes.first().map(|l| l.id).unwrap_or(0);
+        p.lanes = lanes;
+        p.last_active_lane_id = new_active_id;
+        let new_ref = LaneRef {
+            project: project_id,
+            lane: new_active_id,
+        };
+        if old_ref != new_ref {
+            // Discovery assigns ids before sorting the project-root
+            // lane first, so the active lane's id may differ from the
+            // placeholder's `0` — re-key everything addressed by the
+            // placeholder ref.
+            if self.active == old_ref {
+                self.active = new_ref;
+            } else if let Some(rt) = self.main_area.inactive_lane_runtimes.remove(&old_ref) {
+                self.main_area.inactive_lane_runtimes.insert(new_ref, rt);
+            }
+            self.invalidate_visible_files_cache(old_ref);
+            self.invalidate_visible_files_cache(new_ref);
+        }
+        // The placeholder carried no git lane, so the startup
+        // default-branch pass skipped this project — run it now that
+        // git lanes exist.
+        self.reconcile_project_default_branches(cx);
+        self.mutate_durable(cx, |_, _| {});
+    }
+
     /// Open the delete-project chooser for the active project, wiring
     /// its submit branch to `close_active_project` (keep on disk) or
     /// `delete_active_project_on_disk` (remove from disk). Single entry
@@ -642,6 +727,14 @@ impl Workspace {
         self.activate_lane(target, window, cx);
         true
     }
+}
+
+/// True when `p` still carries only the construction placeholder — a
+/// single `Default` lane ([`crate::project::Project::bootstrap_placeholder`]'s
+/// shape). Genuinely non-git projects share this shape; callers treat
+/// them identically (probe → same shape back → no-op).
+fn has_placeholder_lanes(p: &crate::project::Project) -> bool {
+    p.lanes.len() == 1 && matches!(p.lanes[0].kind, LaneKind::Default)
 }
 
 /// `(id, root)` for every project that owns at least one git lane.

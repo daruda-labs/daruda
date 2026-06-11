@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "serde_json::from_reader", reason = "buffer parsing is slower than reading into a Vec/String first; use serde_json::from_slice" },
+    { path = "smol::Timer::after", reason = "introduces non-determinism in tests; use gpui::BackgroundExecutor::timer" },
+]

@@ -12,7 +12,7 @@ use crate::workspace::{
     OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject, ShowLeftDockFiles,
     ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelSkills,
     SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
-    ToggleCommandPalette, ToggleLeftDock, ToggleRightDock,
+    ToggleCommandPalette, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
@@ -84,6 +84,7 @@ pub fn apply_keybinding_overrides(
             "toggle_bottom_dock" => ToggleBottomDock,
             "toggle_right_dock" => ToggleRightDock,
             "toggle_command_palette" => ToggleCommandPalette,
+            "toggle_lane_switcher" => ToggleLaneSwitcher,
             "show_left_dock_lanes" => ShowLeftDockLanes,
             "show_left_dock_git" => ShowLeftDockGit,
             "show_left_dock_files" => ShowLeftDockFiles,
@@ -155,6 +156,7 @@ fn known_actions() -> Vec<&'static str> {
         "toggle_bottom_dock",
         "toggle_right_dock",
         "toggle_command_palette",
+        "toggle_lane_switcher",
         "show_left_dock_lanes",
         "show_left_dock_git",
         "show_left_dock_files",

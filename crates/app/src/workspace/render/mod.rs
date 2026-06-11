@@ -17,6 +17,7 @@ use gpui::{
 
 use gpui::KeyDownEvent;
 
+use super::command::lane_switcher;
 use super::command::palette as command_palette;
 use super::layout::DockPosition;
 use super::layout::DockSnapshot;
@@ -1076,6 +1077,49 @@ impl Render for Workspace {
                     }
                 }))
             })
+            // Intercept key events when the Lane switcher is open.
+            .when(self.lane_switcher.is_open, |el| {
+                el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                    if !this.lane_switcher.is_open {
+                        return;
+                    }
+                    let key = ev.keystroke.key.as_str();
+                    match key {
+                        "escape" => {
+                            this.lane_switcher.close();
+                            cx.notify();
+                        }
+                        "enter" => {
+                            this.execute_lane_switcher_selection(window, cx);
+                        }
+                        "up" => {
+                            this.lane_switcher.move_up();
+                            cx.notify();
+                        }
+                        "down" => {
+                            let max = this.lane_switcher.filtered().len();
+                            this.lane_switcher.move_down(max);
+                            cx.notify();
+                        }
+                        "backspace" => {
+                            this.lane_switcher.backspace();
+                            cx.notify();
+                        }
+                        _ => {
+                            if let Some(ch) = ev
+                                .keystroke
+                                .key_char
+                                .as_deref()
+                                .and_then(|s| s.chars().next())
+                                && (ch.is_ascii_graphic() || ch == ' ')
+                            {
+                                this.lane_switcher.append(ch);
+                                cx.notify();
+                            }
+                        }
+                    }
+                }))
+            })
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
                 if let Some(drag) = this.dock_drag {
                     let cursor_px: f32 = match drag.position {
@@ -1130,6 +1174,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_bottom_dock))
             .on_action(cx.listener(Self::on_toggle_right_dock))
             .on_action(cx.listener(Self::on_toggle_command_palette))
+            .on_action(cx.listener(Self::on_toggle_lane_switcher))
             .on_action(cx.listener(Self::on_show_left_dock_worktrees))
             .on_action(cx.listener(Self::on_show_left_dock_git))
             .on_action(cx.listener(Self::on_show_left_dock_files))
@@ -1190,6 +1235,13 @@ impl Render for Workspace {
                 self.command_palette.clone(),
                 cx.listener(|this, _, _, cx| {
                     this.command_palette.close();
+                    cx.notify();
+                }),
+            ))
+            .child(lane_switcher::LaneSwitcherOverlay::new(
+                self.lane_switcher.clone(),
+                cx.listener(|this, _, _, cx| {
+                    this.lane_switcher.close();
                     cx.notify();
                 }),
             ))

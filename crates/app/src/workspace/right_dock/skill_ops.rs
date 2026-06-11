@@ -126,11 +126,11 @@ impl Workspace {
         );
     }
 
-    /// Open the skill directory in macOS Finder via `/usr/bin/open`.
+    /// Open the skill directory in macOS Finder via the `open` crate.
     /// Lives on `Workspace` so the modal render path stays free of
-    /// `std::process` (G2 / `render.rs` responsibility fence).
+    /// process-launch concerns (G2 / `render.rs` responsibility fence).
     pub fn open_skill_dir_in_finder(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
-        if let Err(e) = std::process::Command::new("open").arg(dir).spawn() {
+        if let Err(e) = open::that_detached(dir) {
             let report = ErrorReport::new("Open in Finder failed")
                 .severity(ErrorSeverity::Warning)
                 .from_error(&e)

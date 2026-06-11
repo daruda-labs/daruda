@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
@@ -516,13 +518,28 @@ impl Workspace {
             return;
         };
         let full_path = wt.path.join(&path);
-        cx.spawn(async move |_this, cx| {
-            cx.background_executor()
-                .spawn(async move {
-                    let _ = std::process::Command::new("open").arg(&full_path).status();
-                })
-                .await;
-        })
+        // `open::that_detached` launches the default handler without
+        // blocking on it — the prior `.status()` waited for the child
+        // process to exit.
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || {
+                let result = open::that_detached(&full_path);
+                (full_path, result)
+            },
+            |ws, (full_path, result), cx| {
+                if let Err(e) = result {
+                    let report = ErrorReport::new("Failed to open file externally")
+                        .severity(ErrorSeverity::Warning)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("path", redact_home(&full_path))
+                        .dedup("files.open_external")
+                        .build();
+                    ws.report_error(report, cx);
+                }
+            },
+        )
         .detach();
     }
 }

@@ -2271,6 +2271,51 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    /// Recursively collect dotted key paths for every scalar leaf in a
+    /// YAML mapping tree (e.g. `common.btn_cancel`).
+    fn collect_locale_keys(
+        value: &serde_yaml::Value,
+        prefix: &str,
+        out: &mut std::collections::BTreeSet<String>,
+    ) {
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (k, v) in map {
+                let key = k.as_str().unwrap_or("<non-string-key>");
+                let path = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collect_locale_keys(v, &path, out);
+            }
+        } else {
+            out.insert(prefix.to_string());
+        }
+    }
+
+    /// Every i18n key in `en.yml` must have a counterpart in `ko.yml`
+    /// and vice versa. A missing translation silently renders the raw
+    /// key string at runtime, so key drift must fail the build.
+    #[test]
+    fn locale_en_ko_key_parity() {
+        let en: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../../locales/en.yml")).unwrap();
+        let ko: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../../locales/ko.yml")).unwrap();
+
+        let mut en_keys = std::collections::BTreeSet::new();
+        let mut ko_keys = std::collections::BTreeSet::new();
+        collect_locale_keys(&en, "", &mut en_keys);
+        collect_locale_keys(&ko, "", &mut ko_keys);
+
+        let missing_in_ko: Vec<_> = en_keys.difference(&ko_keys).collect();
+        let missing_in_en: Vec<_> = ko_keys.difference(&en_keys).collect();
+        assert!(
+            missing_in_ko.is_empty() && missing_in_en.is_empty(),
+            "i18n key drift between en.yml and ko.yml:\n  missing in ko.yml: {missing_in_ko:?}\n  missing in en.yml: {missing_in_en:?}"
+        );
+    }
+
     #[test]
     fn duration_below_minute_renders_seconds() {
         assert_eq!(format_duration_compact(Duration::from_secs(0)), "0s");

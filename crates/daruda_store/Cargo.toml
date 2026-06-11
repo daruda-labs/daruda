@@ -6,6 +6,9 @@ publish = false
 license.workspace = true
 description = "Domain data models and persistence for daruda — panels, project state, tasks (GPUI-free)"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 dirs = "6"
@@ -17,4 +20,5 @@ ulid = { version = "1", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 
 [dev-dependencies]
+insta = "1"
 tempfile = "3"

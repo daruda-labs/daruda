@@ -29,6 +29,11 @@ pub(in crate::workspace) struct PaletteEntry {
 /// default page (General) so an empty-arg keybinding still works.
 pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
+        id: "toggle_lane_switcher",
+        label: "Switch Lane…",
+        shortcut: "Cmd+P",
+    },
+    PaletteEntry {
         id: "open_settings",
         label: "Settings…",
         shortcut: "Cmd+,",

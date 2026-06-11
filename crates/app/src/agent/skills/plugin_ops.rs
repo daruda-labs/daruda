@@ -57,6 +57,8 @@ impl PluginScope {
 /// Errors surfaced from the spawn-and-wait path.
 #[derive(Debug)]
 pub enum PluginOpError {
+    /// `claude` is not installed or not on `PATH` (pre-spawn `which` probe).
+    NotFound,
     /// `claude` couldn't be launched — typically "not on PATH".
     Spawn(std::io::Error),
     /// The CLI ran but exited non-zero.
@@ -69,6 +71,7 @@ pub enum PluginOpError {
 impl std::fmt::Display for PluginOpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PluginOpError::NotFound => write!(f, "claude CLI not found on PATH"),
             PluginOpError::Spawn(e) => write!(f, "spawn claude: {e}"),
             PluginOpError::Exit {
                 code: Some(c),
@@ -95,6 +98,9 @@ pub fn run_plugin_action(
     plugin_id: &str,
     scope: PluginScope,
 ) -> Result<String, PluginOpError> {
+    // Pre-spawn guard: a clear "claude not found" error instead of an
+    // opaque spawn failure when the CLI isn't installed.
+    which::which("claude").map_err(|_| PluginOpError::NotFound)?;
     let mut cmd = Command::new("claude");
     cmd.arg("plugin")
         .arg(action.verb())

@@ -12,7 +12,9 @@ use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
 use super::LaneRuntime;
+use super::ToggleLaneSwitcher;
 use super::Workspace;
+use super::command::lane_switcher::LaneCandidate;
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
@@ -71,6 +73,60 @@ impl Workspace {
                 window,
                 cx,
             );
+        }
+    }
+
+    // ---- Lane switcher (Cmd+P) ----
+
+    /// Toggle the fuzzy Lane switcher. On open, snapshot one candidate
+    /// per lane across every project so the overlay render reads a
+    /// frozen list (MVU: render never reaches into live project state).
+    pub(in crate::workspace) fn on_toggle_lane_switcher(
+        &mut self,
+        _: &ToggleLaneSwitcher,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.lane_switcher.is_open {
+            self.lane_switcher.close();
+        } else {
+            let candidates = self.lane_switcher_candidates();
+            self.lane_switcher.open(candidates);
+        }
+        cx.notify();
+    }
+
+    /// One [`LaneCandidate`] per lane across every project, labelled
+    /// `"<project> / <lane>"`.
+    fn lane_switcher_candidates(&self) -> Vec<LaneCandidate> {
+        self.projects
+            .iter()
+            .flat_map(|project| {
+                let project_id = project.id;
+                let project_name = project.name.clone();
+                project.lanes.iter().map(move |lane| LaneCandidate {
+                    lane_ref: LaneRef {
+                        project: project_id,
+                        lane: lane.id,
+                    },
+                    label: format!("{} / {}", project_name, lane.display_name()),
+                })
+            })
+            .collect()
+    }
+
+    /// Activate the focused lane and close the switcher. Mirrors
+    /// `execute_palette_action`'s shape.
+    pub(in crate::workspace) fn execute_lane_switcher_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self.lane_switcher.focused_lane_ref();
+        self.lane_switcher.close();
+        cx.notify();
+        if let Some(target) = target {
+            self.activate_lane(target, window, cx);
         }
     }
 

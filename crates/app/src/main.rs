@@ -11,6 +11,7 @@ mod bind_keys;
 mod bootstrap;
 mod config_watcher;
 pub mod files;
+mod fuzzy;
 mod globals;
 mod hooks;
 pub mod lane;

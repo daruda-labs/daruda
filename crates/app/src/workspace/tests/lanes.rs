@@ -1550,3 +1550,98 @@ fn same_lane_reactivate_self_heals_and_seeds_tab(cx: &mut TestAppContext) {
     .unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[gpui::test]
+fn apply_discovered_lanes_rekeys_active_ref_and_snap_target(cx: &mut TestAppContext) {
+    // Construction now seeds a pure placeholder (single Default lane,
+    // id 0). Discovery assigns ids before sorting the project-root
+    // lane first, so the incoming active lane may carry a non-zero id;
+    // the swap must repair `self.active` and the snap target.
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_apply_discovered");
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Precondition: the construction placeholder.
+            assert_eq!(ws.active_lanes().len(), 1);
+            assert!(!ws.active_lanes()[0].is_git());
+            assert_eq!(ws.active, daruda_store::project::LaneRef::default());
+
+            let repo_root = std::path::PathBuf::from("/tmp/test_apply_discovered_repo");
+            let discovered = vec![
+                // Sorted-first (target) lane with a non-zero id.
+                crate::lane::Lane::git(
+                    2,
+                    root.clone(),
+                    Some("feat".into()),
+                    repo_root.clone(),
+                    root.clone(),
+                    0,
+                ),
+                crate::lane::Lane::git(
+                    0,
+                    repo_root.clone(),
+                    Some("main".into()),
+                    repo_root.clone(),
+                    repo_root.clone(),
+                    1,
+                ),
+            ];
+            ws.apply_discovered_lanes(0, discovered, cx);
+
+            let p = ws.active_project().expect("project survives the swap");
+            assert_eq!(p.lanes.len(), 2);
+            assert!(p.lanes[0].is_git());
+            assert_eq!(
+                ws.active,
+                daruda_store::project::LaneRef {
+                    project: 0,
+                    lane: 2
+                },
+                "active ref must follow the placeholder onto the sorted-first lane id"
+            );
+            assert_eq!(p.last_active_lane_id, 2);
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn apply_discovered_lanes_non_git_is_noop(cx: &mut TestAppContext) {
+    // A genuinely non-git root probes back the same single-Default
+    // shape — the placeholder must stay untouched (no churn, no
+    // active-ref movement).
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_apply_discovered_nongit");
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            let discovered = vec![crate::lane::Lane::default_for_project(0, root.clone())];
+            ws.apply_discovered_lanes(0, discovered, cx);
+            assert_eq!(ws.active_lanes().len(), 1);
+            assert!(!ws.active_lanes()[0].is_git());
+            assert_eq!(ws.active, daruda_store::project::LaneRef::default());
+        });
+    })
+    .unwrap();
+}

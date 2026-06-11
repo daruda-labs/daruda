@@ -689,3 +689,48 @@ mod new_schema_persistence {
         assert_eq!(loaded_b.project_ids, vec![proj.uuid]);
     }
 }
+
+// ---- insta snapshots: persisted on-disk schema ----
+//
+// Lock the serde JSON shape of the persistence types most prone to
+// silent drift — the `worktree`-renamed `LaneRef` field and the
+// `type`-tagged `LaneKind`. A field rename or tag change surfaces as a
+// snapshot diff; `cargo insta review` approves intentional changes.
+
+#[test]
+fn serialized_lane_git_json_snapshot() {
+    let lane = SerializedLane {
+        id: 2,
+        kind: LaneKind::Git {
+            branch: Some("feat/sidebar".into()),
+            repo_root: PathBuf::from("/repo"),
+            worktree_root: PathBuf::from("/repo-feat-sidebar"),
+        },
+        path: PathBuf::from("/repo-feat-sidebar"),
+        name: Some("Sidebar".into()),
+        tab_order: 1,
+        is_unread: true,
+        last_activity: 1_700_000_000,
+        tabs: Vec::new(),
+        active_tab_index: 0,
+        base_ref: Some("main".into()),
+        description: Some("PR #123 review".into()),
+    };
+    insta::assert_snapshot!(serde_json::to_string_pretty(&lane).unwrap());
+}
+
+#[test]
+fn serialized_lane_default_json_snapshot() {
+    let lane = SerializedLane::default_for_path(0, PathBuf::from("/plain/dir"));
+    insta::assert_snapshot!(serde_json::to_string_pretty(&lane).unwrap());
+}
+
+#[test]
+fn lane_ref_json_snapshot() {
+    // The `lane` field serializes as `worktree` (back-compat alias).
+    let r = LaneRef {
+        project: 7,
+        lane: 3,
+    };
+    insta::assert_snapshot!(serde_json::to_string_pretty(&r).unwrap());
+}

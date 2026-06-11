@@ -24,7 +24,7 @@ use crate::workspace::{
     GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
     PrevTab, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFullScreen, ToggleLeftDock, ToggleRightDock,
+    ToggleCommandPalette, ToggleFullScreen, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -70,6 +70,8 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         KeyBinding::new(k::SHORTCUT_TOGGLE_RIGHT_DOCK, ToggleRightDock, None),
         // Command palette
         KeyBinding::new(k::SHORTCUT_COMMAND_PALETTE, ToggleCommandPalette, None),
+        // Lane switcher (Cmd+P) — fuzzy quick-switch across lanes.
+        KeyBinding::new(k::SHORTCUT_LANE_SWITCHER, ToggleLaneSwitcher, None),
         // Skills shortcuts
         KeyBinding::new(k::SHORTCUT_FOCUS_SKILL_SEARCH, FocusSkillSearch, None),
         KeyBinding::new(k::SHORTCUT_INVOKE_SKILL_PALETTE, InvokeSkillPalette, None),

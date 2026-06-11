@@ -36,6 +36,8 @@ pub struct GitWorktreeInfo {
 
 #[derive(Debug)]
 pub enum GitError {
+    /// `git` is not installed or not on `PATH` (pre-spawn `which` probe).
+    NotFound,
     /// Couldn't launch `git` at all (not installed, permission, etc.).
     Spawn(std::io::Error),
     /// `git` ran but exited non-zero.
@@ -54,6 +56,7 @@ pub enum GitError {
 impl std::fmt::Display for GitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            GitError::NotFound => write!(f, "git is not installed or not on PATH"),
             GitError::Spawn(e) => write!(f, "spawn git: {e}"),
             GitError::Exit {
                 code: Some(c),
@@ -106,6 +109,10 @@ where
 {
     use std::io::Read as _;
     use std::thread;
+
+    // Pre-spawn guard: surface a clear "git not on PATH" error instead
+    // of an opaque spawn failure when git isn't installed.
+    which::which("git").map_err(|_| GitError::NotFound)?;
 
     let mut child = Command::new("git")
         .current_dir(cwd)

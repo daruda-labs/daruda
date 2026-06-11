@@ -1,0 +1,19 @@
+---
+source: crates/daruda_store/src/project/tests.rs
+expression: "serde_json::to_string_pretty(&lane).unwrap()"
+---
+{
+  "id": 0,
+  "kind": {
+    "type": "default"
+  },
+  "path": "/plain/dir",
+  "name": null,
+  "tab_order": 0,
+  "is_unread": false,
+  "last_activity": 0,
+  "tabs": [],
+  "active_tab_index": 0,
+  "base_ref": null,
+  "description": null
+}

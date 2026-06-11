@@ -40,3 +40,41 @@ serde_repr = "0.1"
 smol = "2"
 tracing = "0.1.41"
 rust-embed = "8"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+# Activates the clippy.toml `disallowed-methods` entries; without this the
+# disallowed_methods lint stays allow-by-default and those entries never fire.
+disallowed_methods = "deny"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+incremental = true
+codegen-units = 16
+debug = "limited"
+
+[profile.dev.package]
+# proc-macro and build-time-heavy crates compile at opt-level 3 even in dev.
+gpui_macros = { opt-level = 3 }
+proc-macro2 = { opt-level = 3 }
+quote = { opt-level = 3 }
+syn = { opt-level = 3 }
+tree-sitter = { opt-level = 3 }
+taffy = { opt-level = 3 }
+resvg = { opt-level = 3 }
+
+[profile.release]
+debug = "limited"
+lto = "thin"
+codegen-units = 1
+
+[profile.release.package]
+daruda = { codegen-units = 16 }
+
+# Fast iteration / perf harness: release optimizations without the slow link.
+[profile.release-fast]
+inherits = "release"
+debug = "full"
+lto = false
+codegen-units = 16

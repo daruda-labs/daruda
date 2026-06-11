@@ -7,6 +7,7 @@
 use gpui::{App, MouseDownEvent, SharedString, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 
 use crate::lane::availability::LaneAvailability;
@@ -69,17 +70,36 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
         move |_ev: &MouseDownEvent, _window, app_cx: &mut App| {
             let path = path_for_reveal.clone();
             let workspace = workspace_for_reveal.clone();
+            // `open -R` reveals (selects) the path in Finder rather than
+            // opening it, so this stays a direct `open` invocation — the
+            // `open` crate only launches the default handler.
             app_cx
-                .background_executor()
-                .spawn(async move {
-                    std::process::Command::new("open")
-                        .args(["-R", &path])
-                        .spawn()
-                        .ok();
+                .spawn(async move |cx| {
+                    let reveal_path = path.clone();
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move {
+                            std::process::Command::new("open")
+                                .args(["-R", &reveal_path])
+                                .spawn()
+                                .map(|_| ())
+                        })
+                        .await;
+                    if let Err(e) = result {
+                        let report = ErrorReport::new("Reveal in Finder failed")
+                            .severity(ErrorSeverity::Warning)
+                            .from_error(&e)
+                            .at(file!(), line!())
+                            .with_context("path", redact_home(&path))
+                            .dedup("files.reveal")
+                            .build();
+                        // SILENT-OK: workspace may drop before the reveal returns
+                        let _ = workspace.update(cx, |ws, cx| ws.report_error(report, cx));
+                    }
                 })
                 .detach();
             // Close the context menu.
-            if let Some(ws) = workspace.upgrade() {
+            if let Some(ws) = workspace_for_reveal.upgrade() {
                 ws.update(app_cx, |ws, cx| ws.close_context_menu(cx));
             }
         },

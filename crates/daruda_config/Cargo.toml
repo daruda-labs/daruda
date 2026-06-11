@@ -6,6 +6,9 @@ publish = false
 license.workspace = true
 description = "TOML configuration loader for daruda"
 
+[lints]
+workspace = true
+
 [dependencies]
 dirs = "6"
 serde = { version = "1", features = ["derive"] }

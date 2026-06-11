@@ -136,6 +136,7 @@ actions!(
         ToggleBottomDock,
         ToggleRightDock,
         ToggleCommandPalette,
+        ToggleLaneSwitcher,
         ActivateLane1,
         ActivateLane2,
         ActivateLane3,
@@ -302,6 +303,9 @@ pub struct Workspace {
     pub(in crate::workspace) right_dock: gpui::Entity<layout::Dock>,
     /// Command palette state (Cmd+Shift+P).
     pub(in crate::workspace) command_palette: command::palette::CommandPaletteState,
+    /// Lane switcher state (Cmd+P) — fuzzy quick-switch across every
+    /// project's lanes.
+    pub(in crate::workspace) lane_switcher: command::lane_switcher::LaneSwitcherState,
     /// Cached git status per (project, lane). Refreshed when the
     /// Git Changes view is activated or after a commit. Only entries
     /// that have been fetched at least once are present; missing =
@@ -797,12 +801,19 @@ impl Workspace {
             },
             // Bootstrap projects for this workspace. When the caller
             // supplies a project root, wrap it in a single runtime
-            // `Project` (id `0`) with its lanes discovered from
-            // disk. Otherwise the workspace starts with no projects
-            // (Welcome path).
+            // `Project` (id `0`) carrying a pure placeholder lane —
+            // git discovery is deferred to
+            // `reconcile_bootstrapped_lanes` below so window creation
+            // never blocks on git CLI. Otherwise the workspace starts
+            // with no projects (Welcome path).
             projects: project
                 .as_ref()
-                .map(|p| vec![crate::project::Project::bootstrap(0, p.root.clone())])
+                .map(|p| {
+                    vec![crate::project::Project::bootstrap_placeholder(
+                        0,
+                        p.root.clone(),
+                    )]
+                })
                 .unwrap_or_default(),
             active: daruda_store::project::LaneRef::default(),
             groups: Vec::new(),
@@ -818,6 +829,7 @@ impl Workspace {
                 })
             },
             command_palette: command::palette::CommandPaletteState::default(),
+            lane_switcher: command::lane_switcher::LaneSwitcherState::default(),
             git_status_cache: HashMap::new(),
             file_tree: left_dock::file_tree_context::FileTreeContext {
                 file_trees: HashMap::new(),
@@ -954,6 +966,10 @@ impl Workspace {
         // blocking the UI thread during window creation; this fires
         // asynchronously and persists the result when it returns.
         ws.reconcile_project_default_branches(cx);
+        // Upgrade the construction placeholder lane to the
+        // git-discovered list off the UI thread (see
+        // `Project::bootstrap_placeholder`).
+        ws.reconcile_bootstrapped_lanes(cx);
 
         cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {
             this.capture_window_bounds(window);
@@ -1356,6 +1372,9 @@ impl Workspace {
                 "toggle_right_dock" => self.on_toggle_right_dock(&ToggleRightDock, window, cx),
                 "toggle_command_palette" => {
                     self.on_toggle_command_palette(&ToggleCommandPalette, window, cx);
+                }
+                "toggle_lane_switcher" => {
+                    self.on_toggle_lane_switcher(&ToggleLaneSwitcher, window, cx);
                 }
                 "focus_next_pane" => self.on_focus_next_pane(&FocusNextPane, window, cx),
                 "focus_prev_pane" => self.on_focus_prev_pane(&FocusPrevPane, window, cx),

@@ -1,0 +1,22 @@
+---
+source: crates/daruda_store/src/project/tests.rs
+expression: "serde_json::to_string_pretty(&lane).unwrap()"
+---
+{
+  "id": 2,
+  "kind": {
+    "type": "git",
+    "branch": "feat/sidebar",
+    "repo_root": "/repo",
+    "worktree_root": "/repo-feat-sidebar"
+  },
+  "path": "/repo-feat-sidebar",
+  "name": "Sidebar",
+  "tab_order": 1,
+  "is_unread": true,
+  "last_activity": 1700000000,
+  "tabs": [],
+  "active_tab_index": 0,
+  "base_ref": "main",
+  "description": "PR #123 review"
+}

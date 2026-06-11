@@ -6,6 +6,9 @@ rust-version = "1.86"
 publish = false
 license.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 test-support = []
 
