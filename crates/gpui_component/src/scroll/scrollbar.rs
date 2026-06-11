@@ -8,11 +8,11 @@ use std::{
 
 use crate::{ActiveTheme, AxisExt};
 use gpui::{
-    App, Axis, BorderStyle, Bounds, ContentMask, Anchor, CursorStyle, Edges, Element, ElementId,
+    Anchor, App, Axis, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element, ElementId,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, IsZero,
     LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
-    fill, point, px, relative, size,
+    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window, fill,
+    point, px, relative, size,
 };
 
 /// Build `Bounds` from an anchor corner, anchor point, and size — replacement for

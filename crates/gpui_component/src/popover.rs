@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Bounds, Context, Anchor, DismissEvent, ElementId, EventEmitter, FocusHandle,
+    Anchor, AnyElement, App, Bounds, Context, DismissEvent, ElementId, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement,
     Pixels, Point, Render, RenderOnce, StyleRefinement, Styled, Subscription, Window, anchored,
     canvas, deferred, div, prelude::FluentBuilder as _, px,

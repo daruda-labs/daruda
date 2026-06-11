@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    Context, Anchor, DismissEvent, ElementId, Entity, Focusable, InteractiveElement, IntoElement,
+    Anchor, Context, DismissEvent, ElementId, Entity, Focusable, InteractiveElement, IntoElement,
     RenderOnce, SharedString, StyleRefinement, Styled, Window,
 };
 

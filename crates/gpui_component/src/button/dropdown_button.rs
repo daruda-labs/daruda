@@ -1,5 +1,5 @@
 use gpui::{
-    App, Context, Anchor, Corners, Edges, ElementId, InteractiveElement as _, IntoElement,
+    Anchor, App, Context, Corners, Edges, ElementId, InteractiveElement as _, IntoElement,
     ParentElement, RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 

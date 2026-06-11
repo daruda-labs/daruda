@@ -113,7 +113,8 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
 
     for entry in list_dir(dir)? {
         match read(&entry.path) {
-            Ok(Some(mut file)) => match classify(system_time_from_utc(file.timestamp), now, policy) {
+            Ok(Some(mut file)) => match classify(system_time_from_utc(file.timestamp), now, policy)
+            {
                 ColdRestoreAction::Load => loaded.push(file),
                 ColdRestoreAction::Reset => {
                     file.status = SessionStatus::Connecting;
@@ -287,7 +288,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let p = path_for(dir.path(), "stale");
         // Event 10 min ago: past the stale threshold, under the TTL.
-        write_atomic(&p, &file_aged(SessionStatus::Working, Duration::from_secs(600))).unwrap();
+        write_atomic(
+            &p,
+            &file_aged(SessionStatus::Working, Duration::from_secs(600)),
+        )
+        .unwrap();
 
         let loaded = run(dir.path(), &policy()).unwrap();
         assert_eq!(loaded.len(), 1);
@@ -325,7 +330,10 @@ mod tests {
         // mtime — the exact shape of an accumulated stale husk.
         write_atomic(
             &p,
-            &file_aged(SessionStatus::Connecting, Duration::from_secs(30 * 24 * 60 * 60)),
+            &file_aged(
+                SessionStatus::Connecting,
+                Duration::from_secs(30 * 24 * 60 * 60),
+            ),
         )
         .unwrap();
 
@@ -344,7 +352,11 @@ mod tests {
     fn run_keeps_recent_event_even_with_old_mtime() {
         let dir = tempfile::TempDir::new().unwrap();
         let p = path_for(dir.path(), "recent");
-        write_atomic(&p, &file_aged(SessionStatus::Working, Duration::from_secs(60))).unwrap();
+        write_atomic(
+            &p,
+            &file_aged(SessionStatus::Working, Duration::from_secs(60)),
+        )
+        .unwrap();
 
         let old = SystemTime::now() - Duration::from_secs(30 * 24 * 60 * 60);
         if !force_mtime(&p, old) {

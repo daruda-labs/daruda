@@ -207,26 +207,29 @@ impl Workspace {
                                     .build();
                                 ws.report_error(report, cx);
                             }
-                            Ok(()) => match ws.finalize_create_lane(plan.clone(), project_id, window, cx) {
-                                Err(msg) => {
-                                    let report = ErrorReport::new("Lane finalize failed")
-                                        .severity(ErrorSeverity::Error)
-                                        .at(file!(), line!())
-                                        .with_context("detail", msg)
-                                        .dedup("lane.create")
-                                        .build();
-                                    ws.report_error(report, cx);
+                            Ok(()) => {
+                                match ws.finalize_create_lane(plan.clone(), project_id, window, cx)
+                                {
+                                    Err(msg) => {
+                                        let report = ErrorReport::new("Lane finalize failed")
+                                            .severity(ErrorSeverity::Error)
+                                            .at(file!(), line!())
+                                            .with_context("detail", msg)
+                                            .dedup("lane.create")
+                                            .build();
+                                        ws.report_error(report, cx);
+                                    }
+                                    Ok(pane_id) => {
+                                        ws.dispatch_claude_for_task(
+                                            &task_id,
+                                            &plan.new_path,
+                                            pane_id,
+                                            window,
+                                            cx,
+                                        );
+                                    }
                                 }
-                                Ok(pane_id) => {
-                                    ws.dispatch_claude_for_task(
-                                        &task_id,
-                                        &plan.new_path,
-                                        pane_id,
-                                        window,
-                                        cx,
-                                    );
-                                }
-                            },
+                            }
                         }
                     });
                 });

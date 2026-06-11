@@ -18,16 +18,16 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
+use crate::surface::strings as s;
 use crate::ui::Disableable as _;
 use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
+use crate::workspace::ModalView;
+use crate::workspace::Workspace;
+use crate::workspace::lane_ops::{CreateWorktreePlan, sanitize_branch_name};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::ProjectId;
-use crate::workspace::ModalView;
-use crate::workspace::Workspace;
-use crate::surface::strings as s;
-use crate::workspace::lane_ops::{CreateWorktreePlan, sanitize_branch_name};
 
 pub struct CreateWorktreeModal {
     /// Panel focus handle — `.track_focus` target for the modal root
@@ -180,7 +180,9 @@ impl CreateWorktreeModal {
         // if the workspace is gone we proceed with the raw input and
         // finalize_create_lane will reject if the project itself is gone.
         if let Some(ws) = self.workspace.upgrade() {
-            plan.base_ref = ws.read(cx).resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
+            plan.base_ref = ws
+                .read(cx)
+                .resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
         }
         let project_id = self.project_id;
         self.submitting = true;
