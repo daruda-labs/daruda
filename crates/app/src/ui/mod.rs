@@ -17,6 +17,7 @@ pub mod agent_status_badge;
 pub mod alert;
 pub mod badge;
 pub mod button;
+pub mod chart;
 pub mod checkbox;
 pub mod code_editor;
 pub mod context_menu;
@@ -46,6 +47,7 @@ pub use button::{
     Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
     button_header_action, button_primary, button_toggle,
 };
+pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_editor::{
     file_viewer_editor, make_markdown_prose_state, make_markdown_state, markdown_editor,

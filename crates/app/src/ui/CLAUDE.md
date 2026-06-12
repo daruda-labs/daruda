@@ -51,6 +51,7 @@ ui/
 ├── alert.rs        # error/warning/info/success(id, msg) factories
 ├── badge.rs        # Badge::new(label).monospace()/.bg_color()/... over Tag::custom
 ├── button.rs       # button / button_primary / button_danger / button_bare
+├── chart.rs        # BarChart re-export over gpui_component::chart (Plot-backed; caller wraps in a fixed-height container)
 ├── checkbox.rs     # checkbox(id, label)
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
 ├── group_box.rs    # group_box() factory over gpui_component::GroupBox (.outline()/.fill()/title)
@@ -308,6 +309,7 @@ rev bump if the re-vendor trims them again):
 |---|---|---|
 | `progress` | `src/lib.rs` | `crate::ui::progress` → Usage tab gauge bars |
 | `group_box` | `src/lib.rs` | `crate::ui::group_box` → Usage tab gauge cards (`.outline()`) + totals (`.normal()`) |
+| `chart` + `plot` | `src/lib.rs` | `crate::ui::chart::BarChart` — chart widgets. `chart` pulls in `plot` (axis/grid/scale/shape) as its rendering backend. |
 
 The patches live directly in the vendored tree (not in
 `patches/<name>.patch`) because `crates/gpui_component/` is an
