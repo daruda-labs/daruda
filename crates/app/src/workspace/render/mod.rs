@@ -1139,6 +1139,19 @@ impl Render for Workspace {
                 }))
             })
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
+                // A mouse-up released outside the window never reaches the
+                // bubble-phase on_mouse_up below — it fails the root div's
+                // hit-test — so any drag begun inside stays "live". The first
+                // re-entry move carries pressed_button: None: treat that as
+                // the missed release and settle every live drag (dock/divider
+                // resize + file-view text/block selection) instead of
+                // continuing it. The root move handler spans the whole window,
+                // so it catches the release wherever the cursor re-enters.
+                if !ev.dragging() {
+                    this.end_stale_resize_drags(cx);
+                    this.end_file_selection_drag(cx);
+                    return;
+                }
                 if let Some(drag) = this.dock_drag {
                     let cursor_px: f32 = match drag.position {
                         DockPosition::Left | DockPosition::Right => ev.position.x.into(),
@@ -1161,11 +1174,7 @@ impl Render for Workspace {
                 cx.listener(|this, _: &MouseUpEvent, _window, cx| {
                     this.end_divider_drag(cx);
                     this.end_dock_drag(cx);
-                    if let Some(fv) = this.focused_file_view_mut()
-                        && fv.end_selection_drag()
-                    {
-                        cx.notify();
-                    }
+                    this.end_file_selection_drag(cx);
                 }),
             )
             .on_action(cx.listener(Self::on_new_tab))

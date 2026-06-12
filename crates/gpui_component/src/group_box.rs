@@ -155,8 +155,12 @@ impl RenderOnce for GroupBox {
                     .when_some(bg, |this, bg| this.bg(bg))
                     .when_some(border, |this, border| this.border_color(border).border_1())
                     .text_color(cx.theme().group_box_foreground)
-                    .when(has_paddings, |this| this.p_4())
-                    .gap_4()
+                    // daruda patch: p_4→p_2 (16→8px) padding and gap_4→gap_1
+                    // (16→4px) child spacing so GroupBox cards stay compact
+                    // in the narrow right dock (gauge bar + 3-up stat grid).
+                    // See app/src/ui/CLAUDE.md.
+                    .when(has_paddings, |this| this.p_2())
+                    .gap_1()
                     .rounded(cx.theme().radius)
                     .refine_style(&self.content_style)
                     .children(self.children),

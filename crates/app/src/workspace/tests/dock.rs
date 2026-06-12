@@ -211,6 +211,24 @@ fn test_dock_drag_right_and_bottom_track_their_own_sizes(cx: &mut TestAppContext
     });
 }
 
+#[gpui::test]
+fn test_end_stale_resize_drags_clears_live_drag(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        // Simulates the missed release: a drag is live but the button-up
+        // landed outside the window, so the next in-window move (button no
+        // longer held) routes here instead of continuing to resize.
+        ws.left_dock.update(cx, |d, _| d.is_open = true);
+        ws.begin_dock_drag(layout::DockPosition::Left, 100.0, cx);
+        assert!(ws.dock_drag.is_some());
+        ws.end_stale_resize_drags(cx);
+        assert!(ws.dock_drag.is_none());
+        // Idempotent — no live drag is a no-op, never panics.
+        ws.end_stale_resize_drags(cx);
+        assert!(ws.dock_drag.is_none());
+    });
+}
+
 // ---- Dock notify reentrancy ----
 //
 // Left/right dock event listeners are registered via `cx.listener` on

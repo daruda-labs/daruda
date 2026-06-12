@@ -514,72 +514,14 @@ pub fn task_subtask_manual_label() -> String {
 // Right panel — Usage tab labels
 // ============================================================================
 
-/// Heading shown above the per-session list — the row that aggregates
-/// every active session's tokens + estimated cost.
-pub fn usage_total_label() -> String {
-    rust_i18n::t!("usage.total_label").into_owned()
-}
-
-/// Inline label for inbound (user → Claude) tokens.
-pub fn usage_in_label() -> String {
-    rust_i18n::t!("usage.in_label").into_owned()
-}
-
-/// Inline label for outbound (Claude → user) tokens.
-pub fn usage_out_label() -> String {
-    rust_i18n::t!("usage.out_label").into_owned()
-}
-
-/// Inline label for prompt-cache tokens (read + creation combined).
-pub fn usage_cache_label() -> String {
-    rust_i18n::t!("usage.cache_label").into_owned()
-}
-
-/// Body shown when no Claude Code session has produced any usage
-/// data yet. Intentionally instructional rather than a bare "no
-/// data" — first-launch users may not realise daruda needs an
-/// active Claude session to populate this view.
-pub fn usage_empty_state() -> String {
-    rust_i18n::t!("usage.empty_state").into_owned()
-}
-
-/// Fallback lane label when a session's `worktree_path` has no
-/// resolvable file-name component (e.g. root path).
-pub const USAGE_UNKNOWN_WORKTREE: &str = "?";
-
-/// Time-window dropdown labels. The data-layer
-/// (`daruda_store::project::UsageWindow`) is intentionally free of
-/// user-facing strings; lookups go through [`usage_window_label`]
-/// so a single source of truth for the picker's option list lives
-/// here in the surface module.
-pub fn usage_window_lifetime() -> String {
-    rust_i18n::t!("usage.window_lifetime").into_owned()
-}
-pub fn usage_window_last_5h() -> String {
-    rust_i18n::t!("usage.window_last_5h").into_owned()
-}
-pub fn usage_window_last_24h() -> String {
-    rust_i18n::t!("usage.window_last_24h").into_owned()
-}
-pub fn usage_window_last_7d() -> String {
-    rust_i18n::t!("usage.window_last_7d").into_owned()
-}
-
-/// Resolve a `UsageWindow` variant to its dropdown / summary label.
-pub fn usage_window_label(window: daruda_store::project::UsageWindow) -> String {
-    use daruda_store::project::UsageWindow;
-    match window {
-        UsageWindow::All => usage_window_lifetime(),
-        UsageWindow::Last5h => usage_window_last_5h(),
-        UsageWindow::Last24h => usage_window_last_24h(),
-        UsageWindow::Last7d => usage_window_last_7d(),
-    }
-}
-
 // ----------------------------------------------------------------
 // Plan-limit gauges (R-4)
 // ----------------------------------------------------------------
 
+/// Header title for the Usage tab (product brand — same in all locales).
+pub fn usage_brand_title() -> String {
+    rust_i18n::t!("usage.brand_title").into_owned()
+}
 /// Section heading rendered above the plan-limit gauge block.
 pub fn usage_limits_section_label() -> String {
     rust_i18n::t!("usage.limits_section_label").into_owned()
@@ -593,11 +535,97 @@ pub fn usage_limit_5h_label() -> String {
 pub fn usage_limit_7d_label() -> String {
     rust_i18n::t!("usage.limit_7d_label").into_owned()
 }
+/// Label for the 7-day Opus-scoped window gauge. Only rendered when
+/// the plan meters Opus separately (`seven_day_opus` is present).
+pub fn usage_limit_opus_label() -> String {
+    rust_i18n::t!("usage.limit_opus_label").into_owned()
+}
 /// Placeholder label for either gauge when the OAuth token is
 /// unavailable, the API call failed, or the window is missing from
 /// the response.
 pub fn usage_limit_unavailable() -> String {
     rust_i18n::t!("usage.limit_unavailable").into_owned()
+}
+
+// ----------------------------------------------------------------
+// Activity dashboard (today's stats + 7-day chart + totals)
+// ----------------------------------------------------------------
+
+/// Section heading above the three "today's activity" stat cards.
+pub fn usage_section_today() -> String {
+    rust_i18n::t!("usage.section_today").into_owned()
+}
+/// Section heading above the 7-day bar chart.
+pub fn usage_section_7day() -> String {
+    rust_i18n::t!("usage.section_7day").into_owned()
+}
+/// Section heading above the all-time totals row.
+pub fn usage_section_total() -> String {
+    rust_i18n::t!("usage.section_total").into_owned()
+}
+/// "Messages" stat-card label.
+pub fn usage_stat_messages() -> String {
+    rust_i18n::t!("usage.stat_messages").into_owned()
+}
+/// "Sessions" stat-card label.
+pub fn usage_stat_sessions() -> String {
+    rust_i18n::t!("usage.stat_sessions").into_owned()
+}
+/// "Tool Calls" stat-card label.
+pub fn usage_stat_tool_calls() -> String {
+    rust_i18n::t!("usage.stat_tool_calls").into_owned()
+}
+/// "Total Messages" totals-row label.
+pub fn usage_total_messages() -> String {
+    rust_i18n::t!("usage.total_messages").into_owned()
+}
+/// "Total Sessions" totals-row label.
+pub fn usage_total_sessions() -> String {
+    rust_i18n::t!("usage.total_sessions").into_owned()
+}
+/// "Active Days" totals-row label.
+pub fn usage_total_active_days() -> String {
+    rust_i18n::t!("usage.total_active_days").into_owned()
+}
+/// Refresh-badge label before any fetch has landed (no cache age to
+/// show yet). Carries its own `↻` glyph.
+pub fn usage_refresh() -> String {
+    rust_i18n::t!("usage.refresh").into_owned()
+}
+/// Refresh-badge label while a manual refresh is in flight.
+pub fn usage_refreshing() -> String {
+    rust_i18n::t!("usage.refreshing").into_owned()
+}
+/// Cache-age badge for a refresh less than a minute ago.
+pub fn usage_cache_just_now() -> String {
+    rust_i18n::t!("usage.cache_just_now").into_owned()
+}
+/// Cache-age badge, `n` whole minutes since the last refresh.
+pub fn usage_cache_minutes(n: u64) -> String {
+    rust_i18n::t!("usage.cache_minutes", n => n).into_owned()
+}
+/// Cache-age badge, `n` whole hours since the last refresh.
+pub fn usage_cache_hours(n: u64) -> String {
+    rust_i18n::t!("usage.cache_hours", n => n).into_owned()
+}
+/// Cache-age badge, `n` whole days since the last refresh.
+pub fn usage_cache_days(n: u64) -> String {
+    rust_i18n::t!("usage.cache_days", n => n).into_owned()
+}
+/// Weekday abbreviation for a chart bar. `idx` is 0=Sunday .. 6=Saturday
+/// (matching `chrono::Weekday::num_days_from_sunday`). Out-of-range
+/// values fall back to an empty label rather than panicking.
+pub fn usage_weekday_label(idx: u8) -> String {
+    match idx {
+        0 => rust_i18n::t!("usage.weekday_sun").into_owned(),
+        1 => rust_i18n::t!("usage.weekday_mon").into_owned(),
+        2 => rust_i18n::t!("usage.weekday_tue").into_owned(),
+        3 => rust_i18n::t!("usage.weekday_wed").into_owned(),
+        4 => rust_i18n::t!("usage.weekday_thu").into_owned(),
+        5 => rust_i18n::t!("usage.weekday_fri").into_owned(),
+        6 => rust_i18n::t!("usage.weekday_sat").into_owned(),
+        _ => String::new(),
+    }
 }
 
 /// Format a "resets in …" countdown for the gauge subtitle. Lives

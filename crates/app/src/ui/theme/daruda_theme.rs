@@ -97,7 +97,7 @@ daruda_theme_fields! {
     lane_drop_target_rejected_bg => LANE_DROP_TARGET_REJECTED_BG,
     lane_card_bg => BG_PANEL,
     lane_card_hover_bg => BG_HOVER,
-    lane_card_active_bg => BG_HOVER,
+    lane_card_active_bg => BG_ACTIVE,
     modal_panel_bg => BG_RAISED,
     modal_panel_border => BORDER,
     modal_input_bg => BG_BASE,

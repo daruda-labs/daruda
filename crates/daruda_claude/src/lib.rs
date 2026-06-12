@@ -14,6 +14,7 @@
 //! Both channels feed the same [`SessionStatus`] enum; the consumer
 //! (`app/src/hooks/store.rs`) merges them with hook-wins-on-tie semantics.
 
+pub mod activity;
 pub mod hooks;
 mod http;
 pub mod jsonl;
@@ -22,10 +23,10 @@ pub mod pty_link;
 pub mod service_status;
 pub mod status;
 pub mod store;
-pub mod usage;
 
+pub use activity::{ActivityError, ActivityStats, DayActivity};
 pub use http::FetchError;
-pub use limits::{LimitSeverity, LimitWindow, PlanLimits};
+pub use limits::{LimitSeverity, LimitWindow, PlanInfo, PlanLimits};
 pub use service_status::{ServiceStatus, StatusIndicator};
 pub use status::SessionStatus;
 pub use store::ClaudeStatusStore;

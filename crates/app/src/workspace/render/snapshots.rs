@@ -219,12 +219,10 @@ impl Workspace {
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
-            usage: self.claude.usage.clone(),
-            usage_pricing: self.claude.usage_pricing.clone(),
             plan_limits: self.claude.plan_limits.clone(),
             service_status: self.claude.service_status.clone(),
-            usage_window: self.claude.usage_window,
-            usage_select: self.claude.usage_select.clone(),
+            activity: self.claude.activity.clone(),
+            usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()
                 .snapshot_for(self.active_lane_root().as_deref()),

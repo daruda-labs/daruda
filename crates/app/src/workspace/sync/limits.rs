@@ -1,11 +1,11 @@
-//! Background-poll tasks for the Anthropic plan-rate API and the
-//! public service-status page. Two independent loops, one per
-//! endpoint, so:
+//! Background-poll tasks for the Anthropic plan-rate API, the public
+//! service-status page, and the local JSONL activity aggregation.
+//! Three independent loops, one per endpoint, so:
 //!
 //! - the cadence can differ (`[usage.poll].limits_secs` vs.
-//!   `status_secs`),
-//! - a hung fetch on one endpoint never blocks the other,
-//! - either can be disabled (`= 0`) without affecting the other.
+//!   `status_secs`; `Activity` shares `limits_secs`),
+//! - a hung fetch on one endpoint never blocks the others,
+//! - each can be disabled (`= 0`) without affecting the others.
 //!
 //! Each loop:
 //! 1. snapshots the current poll cadence from `Workspace::usage_poll`
@@ -38,9 +38,10 @@
 //! exists without a Workspace, so the pump owner has to outlive
 //! Workspace lifetime.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
-use daruda_claude::{PlanLimits, ServiceStatus, limits, service_status};
+use daruda_claude::{ActivityStats, PlanLimits, ServiceStatus, activity, limits, service_status};
 use daruda_config::PollConfig;
 use gpui::{Context, Task, WeakEntity};
 
@@ -54,13 +55,14 @@ use crate::workspace::Workspace;
 /// cadence" knobs in one place.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 
-/// Spawn both endpoint pumps. Returns the two `Task<()>` handles
-/// so the caller (Workspace constructor) can keep them alive in a
-/// field — dropping either task cancels its loop.
-pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Task<()>) {
+/// Spawn the endpoint pumps. Returns the `Task<()>` handles so the
+/// caller (Workspace constructor) can keep them alive in a field —
+/// dropping any task cancels its loop.
+pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Task<()>, Task<()>) {
     (
         spawn_loop(cx, Endpoint::Limits),
         spawn_loop(cx, Endpoint::Status),
+        spawn_loop(cx, Endpoint::Activity),
     )
 }
 
@@ -68,6 +70,11 @@ pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Tas
 enum Endpoint {
     Limits,
     Status,
+    /// Local JSONL aggregation (no network). Shares the `limits_secs`
+    /// cadence — it is the other half of the Usage tab's data and there
+    /// is no reason to refresh it on a different schedule, so it adds no
+    /// config knob.
+    Activity,
 }
 
 fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
@@ -77,7 +84,7 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    `Err(_)` once the entity is gone — that's our
             //    cue to exit the loop.
             let interval = match this.read_with(cx, |ws, _| match kind {
-                Endpoint::Limits => ws.claude.usage_poll.limits_interval(),
+                Endpoint::Limits | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
                 Endpoint::Status => ws.claude.usage_poll.status_interval(),
             }) {
                 Ok(opt) => opt,
@@ -111,7 +118,15 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                         break;
                     }
                 }
-                Fetched::Limits(Err(_)) | Fetched::Status(Err(_)) => {
+                Fetched::Activity(Some(a)) => {
+                    if this
+                        .update(cx, |ws, cx| ws.set_activity_stats(a, cx))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Fetched::Limits(Err(_)) | Fetched::Status(Err(_)) | Fetched::Activity(None) => {
                     // Silent fallback — the renderer treats a
                     // never-updated `Default::default()` snapshot
                     // as "data unavailable" and shows placeholder
@@ -127,17 +142,45 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
     })
 }
 
-/// Result envelope so both endpoints can share a single
+/// Result envelope so every endpoint can share a single
 /// `background_executor().spawn(...)` call site without dispatch
-/// branching across thread boundaries.
+/// branching across thread boundaries. `Activity` carries an `Option`
+/// rather than a `Result` because its failures (no home dir, an
+/// unreadable projects root) are all handled by the same silent
+/// fallback — there is nothing the loop does differently per error.
 enum Fetched {
     Limits(Result<PlanLimits, daruda_claude::FetchError>),
     Status(Result<ServiceStatus, daruda_claude::FetchError>),
+    Activity(Option<ActivityStats>),
 }
 
 fn fetch(kind: Endpoint) -> Fetched {
     match kind {
         Endpoint::Limits => Fetched::Limits(limits::fetch_plan_limits()),
         Endpoint::Status => Fetched::Status(service_status::fetch_service_status()),
+        Endpoint::Activity => Fetched::Activity(fetch_activity()),
     }
+}
+
+/// Resolve the activity source + cache paths and run one incremental
+/// aggregation. Returns `None` when the home directory is unavailable
+/// or the aggregation errors (an unreadable projects root, an I/O
+/// failure mid-read) — the caller keeps the previous snapshot.
+///
+/// Blocking (disk I/O over `~/.claude/projects/*/*.jsonl`); only call
+/// from the background executor. Shared by the pump and the Usage tab's
+/// manual-refresh button (`Workspace::refresh_usage_now`).
+pub(in crate::workspace) fn fetch_activity() -> Option<ActivityStats> {
+    let (projects_root, cache_path) = activity_paths()?;
+    activity::update_activity(&projects_root, &cache_path).ok()
+}
+
+/// `(~/.claude/projects, ~/.daruda/cache/activity.json)`. The cache is
+/// a pure derivative of the account-wide JSONL logs, so it is not
+/// profile-scoped (unlike the per-profile log dir).
+fn activity_paths() -> Option<(PathBuf, PathBuf)> {
+    let home = dirs::home_dir()?;
+    let projects_root = home.join(".claude").join("projects");
+    let cache_path = home.join(".daruda").join("cache").join("activity.json");
+    Some((projects_root, cache_path))
 }

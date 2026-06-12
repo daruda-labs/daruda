@@ -9,6 +9,9 @@ use daruda_store::tasks::TaskId;
 use daruda_terminal::ux::strings as term_strings;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
+use futures::StreamExt as _;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::future::Either;
 use gpui::{
     App, Context, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task, Window,
     prelude::*,
@@ -82,6 +85,11 @@ pub(in crate::workspace) struct TerminalContent {
     /// keystrokes, e.g. to dispatch a `claude --dangerously-skip-permissions
     /// "$(cat …)"` command line at task start. `None` for stub panes.
     pub(in crate::workspace) pty_input_tx: Option<mpsc::Sender<Vec<u8>>>,
+    /// Wakes the stdout poll out of its idle backoff (see
+    /// `stdout_poll_interval`) so output following a PTY write is
+    /// drained at the fast interval. Poked by the keyboard path
+    /// (`TerminalInput` closure) and by `Pane::send_input`.
+    pub(in crate::workspace) poke_tx: UnboundedSender<()>,
 }
 
 /// File-viewer content. Each open file lives in its own `Pane`, owning
@@ -378,7 +386,15 @@ impl Pane {
     pub(in crate::workspace) fn send_input(&self, bytes: &[u8]) -> bool {
         match &self.content {
             PaneContent::Terminal(t) => match &t.pty_input_tx {
-                Some(tx) => tx.send(bytes.to_vec()).is_ok(),
+                Some(tx) => {
+                    let sent = tx.send(bytes.to_vec()).is_ok();
+                    if sent {
+                        // Wake the stdout poll so the write's output is
+                        // drained at the fast interval.
+                        let _ = t.poke_tx.unbounded_send(());
+                    }
+                    sent
+                }
                 None => false,
             },
             PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
@@ -788,11 +804,19 @@ impl Workspace {
 
         let pane_id = self.alloc_id();
 
+        // Wakes the stdout poll out of its idle backoff the instant
+        // bytes head for the PTY, so the echo is drained at the fast
+        // interval — typing latency stays at IDLE_POLL even after a
+        // long quiet period.
+        let (poke_tx, poke_rx) = futures::channel::mpsc::unbounded::<()>();
+        let input_poke_tx = poke_tx.clone();
+
         let font_family = self.font_family.clone();
         let view = cx.new(|cx| {
             let focus_handle = cx.focus_handle();
             let input = TerminalInput::new(move |bytes| {
                 let _ = stdin_tx.send(bytes.to_vec());
+                let _ = input_poke_tx.unbounded_send(());
             });
             let mut tv = TerminalView::new_with_input(session, focus_handle, input);
             tv.set_font(daruda_terminal::terminal_font_with_family(&font_family));
@@ -805,6 +829,7 @@ impl Workspace {
             stdout_rx,
             exit_rx,
             error_rx,
+            poke_rx,
             workspace_entity,
             pane_id,
             window,
@@ -845,6 +870,7 @@ impl Workspace {
                 _stdout_task: stdout_task,
                 _view_event_subscription: view_event_sub,
                 pty_input_tx: Some(pty_input_tx),
+                poke_tx,
             }),
         })
     }
@@ -855,34 +881,43 @@ impl Workspace {
         stdout_rx: mpsc::Receiver<Vec<u8>>,
         exit_rx: mpsc::Receiver<()>,
         error_rx: mpsc::Receiver<daruda_store::observability::error_report::ErrorReport>,
+        mut poke_rx: UnboundedReceiver<()>,
         workspace: Entity<Workspace>,
         pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<()> {
         window.spawn(cx, async move |cx| {
-            // Responsive idle poll so first output after a quiet period
-            // appears promptly; the cap interval only kicks in once output
-            // is sustained (see `streaming_ticks` below).
-            const IDLE_POLL: Duration = Duration::from_millis(16);
-            // Consecutive non-empty drains before backing off to the cap.
-            const STREAM_ENTER_TICKS: u32 = 3;
             let mut streaming_ticks: u32 = 0;
+            let mut idle_ticks: u32 = 0;
+            // `false` once every poke sender is gone (pane teardown) —
+            // plain timer sleeps from then on avoid a busy select loop.
+            let mut poke_open = true;
+            // Cached redraw cap (`1000 / render.max_fps` ms, mirrored on
+            // Workspace; 30 fps default). Refreshed from the mirror only
+            // on active ticks so a deep-idle pane performs no entity
+            // reads; a config reload is picked up on the next activity.
+            let mut cap = cx
+                .update(|_, app| workspace.read(app).mirrors.terminal_redraw_interval)
+                .unwrap_or(CAP_FALLBACK);
             loop {
-                // Cap interval = `1000 / render.max_fps` ms, mirrored on
-                // Workspace (live-updates on config reload; 30 fps default).
-                // While interactive/idle, poll at the faster of cap/IDLE_POLL
-                // so a single keystroke echo isn't held for a full cap frame;
-                // sustained output backs off to the cap to halve redraws.
-                let cap = cx
-                    .update(|_, app| workspace.read(app).mirrors.terminal_redraw_interval)
-                    .unwrap_or_else(|_| Duration::from_millis(33));
-                let interval = if streaming_ticks >= STREAM_ENTER_TICKS {
-                    cap
+                let interval = stdout_poll_interval(cap, streaming_ticks, idle_ticks);
+                let mut poked = false;
+                if poke_open {
+                    let timer = cx.background_executor().timer(interval);
+                    match futures::future::select(timer, poke_rx.next()).await {
+                        Either::Left(((), _)) => {}
+                        Either::Right((Some(()), _)) => {
+                            poked = true;
+                            // Collapse a poke burst (typed word, pasted
+                            // block) into a single fast tick.
+                            while poke_rx.try_recv().is_ok() {}
+                        }
+                        Either::Right((None, _)) => poke_open = false,
+                    }
                 } else {
-                    cap.min(IDLE_POLL)
-                };
-                cx.background_executor().timer(interval).await;
+                    cx.background_executor().timer(interval).await;
+                }
 
                 let mut batch = Vec::new();
                 while let Ok(chunk) = stdout_rx.try_recv() {
@@ -890,8 +925,20 @@ impl Workspace {
                 }
                 if batch.is_empty() {
                     streaming_ticks = 0;
+                    idle_ticks = if poked {
+                        0
+                    } else {
+                        idle_ticks.saturating_add(1)
+                    };
                 } else {
                     streaming_ticks = streaming_ticks.saturating_add(1);
+                    idle_ticks = 0;
+                }
+                if idle_ticks == 0
+                    && let Ok(v) =
+                        cx.update(|_, app| workspace.read(app).mirrors.terminal_redraw_interval)
+                {
+                    cap = v;
                 }
 
                 // Drain PTY thread errors (writer/reader death) on
@@ -1027,5 +1074,98 @@ impl Workspace {
             let handle = pane.focus_handle(cx);
             handle.focus(window, cx);
         }
+    }
+}
+
+/// Responsive idle poll so first output after a quiet period appears
+/// promptly; the cap interval only kicks in once output is sustained.
+const IDLE_POLL: Duration = Duration::from_millis(16);
+/// Consecutive non-empty drains before backing off to the cap.
+const STREAM_ENTER_TICKS: u32 = 3;
+/// Consecutive empty drains tolerated at the fast interval before the
+/// idle backoff starts (~128 ms of fast polling after the last byte).
+const IDLE_GRACE_TICKS: u32 = 8;
+/// Ceiling for the idle backoff. Also bounds how late a shell exit or
+/// an un-poked first byte (background process output) is noticed.
+const IDLE_BACKOFF_MAX: Duration = Duration::from_millis(250);
+/// 16 ms × 2⁴ = 256 ms ≥ `IDLE_BACKOFF_MAX` — further doublings are moot.
+const IDLE_BACKOFF_MAX_DOUBLINGS: u32 = 4;
+/// Redraw-cap fallback when the workspace mirror is unreachable
+/// (30 fps default, matching `render.max_fps`).
+const CAP_FALLBACK: Duration = Duration::from_millis(33);
+
+/// Poll interval for the stdout drain loop, from the redraw cap and the
+/// two drain counters.
+///
+/// Regimes: sustained output (≥ [`STREAM_ENTER_TICKS`] non-empty drains)
+/// polls at the redraw cap; recent activity (output or an input poke
+/// within [`IDLE_GRACE_TICKS`] drains) polls fast so a keystroke echo is
+/// never held longer than [`IDLE_POLL`]; past the grace window the
+/// interval doubles per empty drain up to [`IDLE_BACKOFF_MAX`] so a
+/// quiet pane costs ~4 wakes/s instead of ~60.
+fn stdout_poll_interval(cap: Duration, streaming_ticks: u32, idle_ticks: u32) -> Duration {
+    if streaming_ticks >= STREAM_ENTER_TICKS {
+        return cap;
+    }
+    let fast = cap.min(IDLE_POLL);
+    if idle_ticks <= IDLE_GRACE_TICKS {
+        return fast;
+    }
+    let doublings = (idle_ticks - IDLE_GRACE_TICKS).min(IDLE_BACKOFF_MAX_DOUBLINGS);
+    (fast * (1u32 << doublings)).min(IDLE_BACKOFF_MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CAP_30FPS: Duration = Duration::from_millis(33);
+
+    #[test]
+    fn streaming_polls_at_cap() {
+        assert_eq!(
+            stdout_poll_interval(CAP_30FPS, STREAM_ENTER_TICKS, 0),
+            CAP_30FPS
+        );
+        // Streaming wins regardless of a stale idle counter.
+        assert_eq!(
+            stdout_poll_interval(CAP_30FPS, STREAM_ENTER_TICKS + 5, 99),
+            CAP_30FPS
+        );
+    }
+
+    #[test]
+    fn active_and_grace_window_poll_fast() {
+        assert_eq!(stdout_poll_interval(CAP_30FPS, 0, 0), IDLE_POLL);
+        assert_eq!(
+            stdout_poll_interval(CAP_30FPS, STREAM_ENTER_TICKS - 1, 0),
+            IDLE_POLL
+        );
+        assert_eq!(
+            stdout_poll_interval(CAP_30FPS, 0, IDLE_GRACE_TICKS),
+            IDLE_POLL
+        );
+    }
+
+    #[test]
+    fn idle_backoff_doubles_up_to_max() {
+        let at = |idle| stdout_poll_interval(CAP_30FPS, 0, idle);
+        assert_eq!(at(IDLE_GRACE_TICKS + 1), Duration::from_millis(32));
+        assert_eq!(at(IDLE_GRACE_TICKS + 2), Duration::from_millis(64));
+        assert_eq!(at(IDLE_GRACE_TICKS + 3), Duration::from_millis(128));
+        assert_eq!(at(IDLE_GRACE_TICKS + 4), IDLE_BACKOFF_MAX);
+        assert_eq!(at(u32::MAX), IDLE_BACKOFF_MAX);
+    }
+
+    #[test]
+    fn high_fps_cap_bounds_the_fast_interval() {
+        let cap = Duration::from_millis(8); // 120 fps
+        assert_eq!(stdout_poll_interval(cap, 0, 0), cap);
+        assert_eq!(stdout_poll_interval(cap, STREAM_ENTER_TICKS, 0), cap);
+        // Backoff doubles from the bounded fast interval.
+        assert_eq!(
+            stdout_poll_interval(cap, 0, IDLE_GRACE_TICKS + 1),
+            Duration::from_millis(16)
+        );
     }
 }

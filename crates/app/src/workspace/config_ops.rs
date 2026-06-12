@@ -47,7 +47,6 @@ impl Workspace {
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.notifications = config.notifications.clone();
         self.clipboard = config.clipboard.clone();
-        self.claude.usage_pricing = usage_pricing_from_config(&config.usage.pricing);
         self.claude.usage_poll = config.usage.poll.clone();
 
         // Patch all existing pane views: font + colors + opacity.
@@ -97,6 +96,9 @@ impl Workspace {
         if theme_changed {
             self.reload_markdown_panes(cx);
         }
+        // Mirrors `claude_status.stale_threshold_secs` for the
+        // notification-push freshness gate.
+        self.claude.stale_threshold_secs = config.claude_status.stale_threshold_secs;
         // Picks up `claude_status.enable` flips.
         let new_enabled = config.claude_status.enable;
         if new_enabled != self.claude.claude_status_enabled {
@@ -112,35 +114,24 @@ impl Workspace {
         self.refresh_locale_strings(cx);
 
         cx.notify();
-        // usage pricing / poll cadence feed the Usage tab; the right dock
+        // The poll cadence feeds the Usage tab's gauges; the right dock
         // is `.cached()`, so a config reload must dirty it explicitly.
         self.notify_right_dock(cx);
     }
 
     /// Re-apply translated strings to all widgets whose labels are captured
-    /// at construction time (InputState placeholders, SelectState option
-    /// labels, InputPanel button labels). Called from `apply_config` so
-    /// every language switch refreshes them in one place.
+    /// at construction time (InputState placeholders, InputPanel button
+    /// labels). Called from `apply_config` so every language switch
+    /// refreshes them in one place.
     ///
     /// Uses `try_update_workspace_window` to obtain a live `&mut Window`
     /// because `apply_config` is called from `observe_global` which has no
-    /// window in scope, yet `InputState::set_placeholder` and
-    /// `SelectState::set_selected_value` require one.
+    /// window in scope, yet `InputState::set_placeholder` requires one.
     fn refresh_locale_strings(&mut self, cx: &mut Context<Self>) {
-        use crate::ui::select;
-        use daruda_store::project::UsageWindow;
-
         let git_commit_input = self.git_commit_input.clone();
         let skill_search_input = self.skill_search_input.clone();
         let task_search_input = self.task_search_input.clone();
-        let usage_select = self.claude.usage_select.clone();
         let handle = self.window_handle;
-
-        let new_opts: Vec<select::SelectOption> = UsageWindow::ALL
-            .iter()
-            .map(|w| select::SelectOption::new(w.slug(), s::usage_window_label(*w)))
-            .collect();
-        let selected = self.claude.usage_select.read(cx).selected_value().cloned();
 
         crate::windows::try_update_workspace_window(
             handle,
@@ -165,16 +156,6 @@ impl Workspace {
                 task_search_input.update(cx, |input, cx| {
                     input.set_placeholder(s::task_search_placeholder(), window, cx);
                 });
-
-                // Usage window select — option labels (value slugs stay unchanged).
-                usage_select.update(cx, |state, cx| {
-                    state.set_items(new_opts, window, cx);
-                });
-                if let Some(val) = selected {
-                    usage_select.update(cx, |state, cx| {
-                        state.set_selected_value(&val, window, cx);
-                    });
-                }
             },
         );
     }
@@ -232,19 +213,6 @@ pub(in crate::workspace) fn terminal_config_from(
     };
     c.clamp_font_settings();
     c
-}
-
-/// Translate `[usage.pricing]` (TOML-facing) into the data-layer
-/// [`daruda_claude::usage::UsagePricing`].
-pub(in crate::workspace) fn usage_pricing_from_config(
-    p: &daruda_config::PricingConfig,
-) -> daruda_claude::usage::UsagePricing {
-    daruda_claude::usage::UsagePricing {
-        input_per_mtok: p.input_per_mtok,
-        output_per_mtok: p.output_per_mtok,
-        cache_read_per_mtok: p.cache_read_per_mtok,
-        cache_write_per_mtok: p.cache_write_per_mtok,
-    }
 }
 
 #[cfg(test)]

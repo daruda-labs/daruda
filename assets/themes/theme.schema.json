@@ -159,9 +159,9 @@
       "default": "#141516ff"
     },
     "lane_card_active_bg": {
-      "description": "Maps to `palette::BG_HOVER`.",
+      "description": "Maps to `palette::BG_ACTIVE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#141516ff"
+      "default": "#18191aff"
     },
     "modal_panel_bg": {
       "description": "Maps to `palette::BG_RAISED`.",

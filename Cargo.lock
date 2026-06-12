@@ -1226,6 +1226,7 @@ dependencies = [
  "daruda_terminal",
  "dirs",
  "fs4",
+ "futures",
  "ghostty_vt",
  "gpui",
  "gpui_component",

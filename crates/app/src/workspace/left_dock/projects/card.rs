@@ -6,17 +6,15 @@
 
 use crate::ui::theme;
 use crate::workspace::layout::Dock;
-use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, px};
 
 /// Wrap a group header + its member projects in a Premium Card surface.
-/// The card itself is non-interactive aside from the background lift —
-/// every click target stays in `header` / `body`.
+/// The card itself is non-interactive — every click target stays in
+/// `header` / `body`, and the card carries no hover fill of its own so
+/// the inner row hover (which sits on top of the card) stays visible.
 ///
 /// `is_active` flips the surface to the "selected group" treatment when
-/// the focused project lives inside this group. The active fill replaces
-/// the hover lift so the highlight stays stable while the cursor moves
-/// across the card (hover would otherwise stack on top and read as a
-/// brighter, distracting wash).
+/// the focused project lives inside this group.
 pub(in crate::workspace::left_dock::projects) fn group_card(
     header: AnyElement,
     body: AnyElement,
@@ -24,7 +22,6 @@ pub(in crate::workspace::left_dock::projects) fn group_card(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let hover_bg = t.lane_card_hover_bg;
     let bg = if is_active {
         t.lane_card_active_bg
     } else {
@@ -40,7 +37,6 @@ pub(in crate::workspace::left_dock::projects) fn group_card(
         .bg(bg)
         .border(px(theme::LANE_CARD_BORDER_W))
         .border_color(theme::OVERLAY_ACTIVE)
-        .when(!is_active, move |d| d.hover(move |d| d.bg(hover_bg)))
         .child(header)
         .child(body)
 }

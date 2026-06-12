@@ -282,7 +282,7 @@ pub const LANE_LABEL_GAP: f32 = GAP_STANDARD;
 /// Gap between elements in the sub-label row (px).
 pub const LANE_SUBLABEL_GAP: f32 = GAP_STANDARD;
 /// Gap between the body and the × remove button within a row (px).
-pub const LANE_ROW_GAP: f32 = GAP_LG;
+pub const LANE_ROW_GAP: f32 = GAP_SM;
 /// Top margin of the "git init" affordance inside the non-git placeholder (px).
 pub const LANE_PLACEHOLDER_GIT_INIT_MT: f32 = PAD_XS;
 /// Gap between lines inside the non-git info placeholder (px).
@@ -301,7 +301,7 @@ pub const LANE_CARD_RADIUS: f32 = 10.0;
 /// Lanes card — vertical gap between adjacent cards (px).
 pub const LANE_CARD_GAP: f32 = GAP_STANDARD;
 /// Lanes card — inner horizontal padding (px).
-pub const LANE_CARD_PAD_X: f32 = PAD_LG;
+pub const LANE_CARD_PAD_X: f32 = PAD_SM;
 /// Lanes card — inner vertical padding (px).
 pub const LANE_CARD_PAD_Y: f32 = PAD_SM;
 /// Lanes row — corner radius applied to hover/active background fills
@@ -800,15 +800,15 @@ pub const AGENT_TASK_PAD_Y: f32 = PAD_XS;
 /// Agent task list container padding Y (px).
 pub const AGENT_TASK_LIST_PAD_Y: f32 = PAD_XS;
 /// Left dock default width (px).
-pub const DOCK_LEFT_DEFAULT_W: f32 = 220.0;
+pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 /// Left dock minimum width (px).
-pub const DOCK_LEFT_MIN_W: f32 = 150.0;
+pub const DOCK_LEFT_MIN_W: f32 = 220.0;
 /// Left dock maximum width (px).
 pub const DOCK_LEFT_MAX_W: f32 = 400.0;
 /// Right dock default width (px).
 pub const DOCK_RIGHT_DEFAULT_W: f32 = 250.0;
 /// Right dock minimum width (px).
-pub const DOCK_RIGHT_MIN_W: f32 = 150.0;
+pub const DOCK_RIGHT_MIN_W: f32 = 220.0;
 /// Right dock maximum width (px).
 pub const DOCK_RIGHT_MAX_W: f32 = 500.0;
 /// Bottom dock default height (px). Sized to the single-row macro
@@ -1116,6 +1116,9 @@ pub const GAP_XS: f32 = 2.0;
 pub const FONT_SIZE_SM: f32 = 11.0;
 pub const FONT_SIZE_MD: f32 = 12.0;
 pub const FONT_SIZE_XS: f32 = 10.0;
+/// Smallest caption size — for dense labels that must fit a narrow
+/// column (e.g. Usage tab stat / totals labels in the 220px dock).
+pub const FONT_SIZE_XXS: f32 = 8.0;
 pub const FONT_SIZE_LG: f32 = 13.0;
 pub const RADIUS_SM: f32 = 4.0;
 pub const RADIUS_XS: f32 = 2.0;
@@ -1255,20 +1258,14 @@ pub const RIGHT_PANEL_ROW_GAP: f32 = GAP_LG;
 /// views via `right_dock::right_panel_body()` so section spacing is
 /// uniform.
 pub const RIGHT_PANEL_SECTION_GAP: f32 = GAP_LG;
-/// Vertical padding inside a single session row in the Usage tab (px).
+/// Vertical padding inside a single right-panel body row (px).
 pub const RIGHT_PANEL_ROW_PAD_Y: f32 = 3.0;
-/// Font size for the right-panel summary + session rows (px).
+/// Font size for the right-panel body rows (px).
 /// Matches `AGENT_CHAT_MSG_FONT_SIZE` so the four right-panel tabs feel
 /// part of the same typographic family as the original chat panel.
 pub const RIGHT_PANEL_BODY_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Font size for inline section labels ("Total", "in", "out", "cache").
+/// Font size for inline labels (gauge rows, percent / reset text).
 pub const RIGHT_PANEL_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;
-/// Maximum displayed width of the lane-label cell in a session
-/// row before it truncates with `…` (px). The cell's hard cap keeps
-/// a long branch name from pushing the token + cost cells off-screen
-/// when the right dock is narrow; below this width the metrics group
-/// wraps onto a second line via `flex_wrap` instead.
-pub const RIGHT_PANEL_WT_MAX_W: f32 = 140.0;
 /// Fixed width allocated to the leading state-indicator glyph so titles
 /// across rows align on a single column (px).
 pub const RIGHT_PANEL_TASK_INDICATOR_W: f32 = 14.0;
@@ -1367,6 +1364,80 @@ pub const STATUS_PILL_PAD_Y: f32 = PAD_XS;
 pub const STATUS_PILL_DOT_SIZE: f32 = 8.0;
 /// Gap (px) between the dot and the label inside the status row.
 pub const STATUS_PILL_GAP: f32 = GAP_STANDARD;
+
+// ---- Usage tab dashboard (widget-style cards) ----
+// Modelled on the Übersicht `claude-usage` widget. All sizes here
+// (G4-exempt is NOT in play — these are the designated theme home).
+/// Gap between the header title and the plan badge.
+pub const USAGE_HEADER_GAP: f32 = GAP_LG;
+/// Title ("Claude Code") font size (px).
+pub const USAGE_TITLE_FONT_SIZE: f32 = FONT_SIZE_LG;
+/// Plan-badge font size (px).
+pub const USAGE_PLAN_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
+/// Plan-badge horizontal padding (px).
+pub const USAGE_PLAN_BADGE_PAD_X: f32 = PAD_SM;
+/// Plan-badge vertical padding (px).
+pub const USAGE_PLAN_BADGE_PAD_Y: f32 = GAP_XS;
+/// Plan-badge corner radius (px) — reads as a pill.
+pub const USAGE_PLAN_BADGE_RADIUS: f32 = RADIUS_LG;
+/// Logo-chip / plan-badge background tint.
+pub const USAGE_ACCENT_CHIP_BG: Hsla = ACCENT;
+/// Logo-chip / plan-badge foreground.
+pub const USAGE_ACCENT_CHIP_FG: Hsla = ACCENT_FG;
+/// Background for gauge / stat cards — raised one step above the panel.
+pub const USAGE_CARD_BG: Hsla = SURFACE_2;
+/// Hairline border around a card.
+pub const USAGE_CARD_BORDER: Hsla = HAIRLINE;
+/// Card border width (px).
+pub const USAGE_CARD_BORDER_W: f32 = 1.0;
+/// Card corner radius (px).
+pub const USAGE_CARD_RADIUS: f32 = RADIUS_LG;
+/// Gauge-card inner horizontal padding (px).
+pub const USAGE_CARD_PAD_X: f32 = PAD_XL;
+/// Gauge-card inner vertical padding (px).
+pub const USAGE_CARD_PAD_Y: f32 = PAD_LG;
+/// Vertical gap between stacked gauge cards (px).
+pub const USAGE_CARD_GAP: f32 = GAP_LG;
+/// Big utilization-percent font size on a gauge card (px).
+pub const USAGE_GAUGE_PERCENT_FONT_SIZE: f32 = 18.0;
+/// Vertical gap between a gauge card's header row, bar, and reset text (px).
+pub const USAGE_GAUGE_INNER_GAP: f32 = GAP_LG;
+/// Gap between the three "today" stat cards (px).
+pub const USAGE_STAT_GRID_GAP: f32 = GAP_LG;
+/// Stat-card horizontal inner padding (px).
+pub const USAGE_STAT_CARD_PAD_X: f32 = PAD_SM;
+/// Stat-card vertical inner padding (px).
+pub const USAGE_STAT_CARD_PAD_Y: f32 = PAD_LG;
+/// Stat-card big-value font size (px).
+pub const USAGE_STAT_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
+/// Stat-card label font size (px).
+pub const USAGE_STAT_LABEL_FONT_SIZE: f32 = FONT_SIZE_XXS;
+/// Gap between a stat card's value and its label (px).
+pub const USAGE_STAT_CARD_GAP: f32 = GAP_XS;
+/// 7-day chart: bar height (px) the busiest day maps to.
+pub const USAGE_CHART_BAR_MAX_HEIGHT: f32 = 40.0;
+/// 7-day chart: minimum bar height (px) so a zero/low day still shows.
+pub const USAGE_CHART_BAR_MIN_HEIGHT: f32 = 3.0;
+/// 7-day chart: gap between adjacent bars (px).
+pub const USAGE_CHART_BAR_GAP: f32 = GAP_SM;
+/// 7-day chart: bar corner radius (px).
+pub const USAGE_CHART_BAR_RADIUS: f32 = RADIUS_SM;
+/// 7-day chart: gap between a bar and its weekday label (px).
+pub const USAGE_CHART_LABEL_GAP: f32 = GAP_XS;
+/// 7-day chart: weekday-label font size (px).
+pub const USAGE_CHART_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;
+/// Today's bar fill color in the 7-day chart.
+pub const USAGE_CHART_BAR_TODAY: Hsla = ACCENT;
+/// Non-today bar fill color in the 7-day chart.
+pub const USAGE_CHART_BAR_OTHER: Hsla = ACCENT_MUTED;
+/// Totals-row value font size (px).
+pub const USAGE_TOTAL_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
+/// Totals-row label font size (px).
+pub const USAGE_TOTAL_LABEL_FONT_SIZE: f32 = FONT_SIZE_XXS;
+/// Totals-row vertical padding (px).
+pub const USAGE_TOTAL_PAD_Y: f32 = PAD_SM;
+/// Refresh / cache-age badge font size (px).
+pub const USAGE_REFRESH_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
 /// "📎 N" chip background — surfaces auxiliary file presence.
 pub const SKILL_AUX_CHIP_BG: Hsla = hsla(0.0, 0.0, 0.20, 0.85);
 pub const SKILL_ROW_RADIUS: f32 = RADIUS_SM;

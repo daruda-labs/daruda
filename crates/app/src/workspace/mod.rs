@@ -689,39 +689,6 @@ impl Workspace {
             },
         );
 
-        // Right-panel Usage tab time-window dropdown. Owned by
-        // Workspace (not the Dock entity) so the selection survives
-        // dock teardown and the workspace's persistence layer can
-        // sync the picker after `restore_state` reapplies the saved
-        // `active_usage_window`.
-        let usage_default_slug =
-            gpui::SharedString::from(daruda_store::project::UsageWindow::default().slug());
-        let usage_select = cx.new(|cx_inner| {
-            let opts: Vec<crate::ui::select::SelectOption> =
-                daruda_store::project::UsageWindow::ALL
-                    .iter()
-                    .map(|w| {
-                        crate::ui::select::SelectOption::new(
-                            w.slug(),
-                            crate::surface::strings::usage_window_label(*w),
-                        )
-                    })
-                    .collect();
-            crate::ui::select::state_with_options(opts, Some(&usage_default_slug), window, cx_inner)
-        });
-        let usage_select_sub = cx.subscribe_in(
-            &usage_select,
-            window,
-            |this, _entity, ev: &crate::ui::select::ConfirmEvent, window, cx| {
-                let crate::ui::select::SelectEvent::Confirm(Some(value)) = ev else {
-                    return;
-                };
-                if let Some(w) = daruda_store::project::UsageWindow::from_slug(value.as_ref()) {
-                    this.set_usage_window(w, window, cx);
-                }
-            },
-        );
-
         // PTY tracker — single thread polls sysinfo every 3 s for
         // claude descendants of registered panes. The tracker handle
         // is shared with the Workspace (for register/unregister) and
@@ -758,14 +725,11 @@ impl Workspace {
             left_dock_view: daruda_store::project::LeftDockView::default(),
             right_dock_view: daruda_store::project::RightDockView::default(),
             claude: claude_session_ops::ClaudeContext {
-                usage: daruda_claude::usage::UsageState::default(),
-                usage_pricing: config_ops::usage_pricing_from_config(&config.usage.pricing),
                 usage_poll: config.usage.poll.clone(),
                 plan_limits: daruda_claude::PlanLimits::default(),
                 service_status: daruda_claude::ServiceStatus::default(),
-                usage_window: daruda_store::project::UsageWindow::default(),
-                usage_select,
-                _usage_select_subscription: usage_select_sub,
+                activity: daruda_claude::ActivityStats::default(),
+                usage_refresh_in_flight: false,
                 claude_status: {
                     // Cold restore: load any status files that survived a
                     // previous run. TTL cleanup runs at the same time so
@@ -787,6 +751,7 @@ impl Workspace {
                     store
                 },
                 claude_status_enabled: config.claude_status.enable,
+                stale_threshold_secs: config.claude_status.stale_threshold_secs,
                 claude_hooks_installed: crate::hooks::installer::InstallerPaths::from_env()
                     .map(|p| crate::hooks::installer::is_installed(&p))
                     .unwrap_or(false),

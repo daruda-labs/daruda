@@ -83,6 +83,18 @@ impl StatusFile {
             source: Source::Hook,
         }
     }
+
+    /// `true` when the recorded event time is at least `max_age` in the
+    /// past. Push gate for blocking notifications: an entry re-delivered
+    /// long after it fired (cold-restore rewrite, watcher replay) is no
+    /// longer actionable and must not raise a desktop push. The boundary
+    /// matches `cold_restore::classify` (`>=` counts as expired); a
+    /// future timestamp (clock skew) is never expired.
+    pub fn event_expired(&self, now: DateTime<Utc>, max_age: std::time::Duration) -> bool {
+        (now - self.timestamp)
+            .to_std()
+            .is_ok_and(|age| age >= max_age)
+    }
 }
 
 /// Errors from status file IO.
@@ -228,6 +240,40 @@ mod tests {
 
     fn sample() -> StatusFile {
         StatusFile::new_hook("sess-1", "/tmp/cwd", SessionStatus::Working, "PreToolUse")
+    }
+
+    #[test]
+    fn event_within_max_age_is_not_expired() {
+        let mut f = sample();
+        f.timestamp = Utc::now() - chrono::Duration::seconds(60);
+        assert!(!f.event_expired(Utc::now(), std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn event_past_max_age_is_expired() {
+        let mut f = sample();
+        f.timestamp = Utc::now() - chrono::Duration::seconds(600);
+        assert!(f.event_expired(Utc::now(), std::time::Duration::from_secs(300)));
+    }
+
+    /// Boundary matches `cold_restore::classify`: exactly at the
+    /// threshold counts as expired.
+    #[test]
+    fn event_exactly_at_max_age_is_expired() {
+        let now = Utc::now();
+        let mut f = sample();
+        f.timestamp = now - chrono::Duration::seconds(300);
+        assert!(f.event_expired(now, std::time::Duration::from_secs(300)));
+    }
+
+    /// A clock-skewed future timestamp must not underflow — it is
+    /// simply "not expired".
+    #[test]
+    fn event_in_future_is_not_expired() {
+        let now = Utc::now();
+        let mut f = sample();
+        f.timestamp = now + chrono::Duration::seconds(60);
+        assert!(!f.event_expired(now, std::time::Duration::from_secs(300)));
     }
 
     #[test]

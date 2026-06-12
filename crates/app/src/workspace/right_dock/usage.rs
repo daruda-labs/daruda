@@ -1,476 +1,502 @@
-//! Usage tab body — renders aggregated token + cost telemetry pulled
-//! from `daruda_claude::usage::UsageState`, plus the 5h/7d plan-rate
-//! gauges and the public service-status pill (R-4 / R-5).
+//! Usage tab body — a widget-style dashboard modelled on the Übersicht
+//! `claude-usage` widget. Top to bottom:
 //!
-//! Layout (top to bottom):
 //! ```text
 //! ┌─ Usage ──────────────────────────────────────────────────────┐
-//! │  ● Operational                          [Last 7d ▼]          │ ← header
-//! │  5h  ████████░░░░  68%   Resets in 2h 14m                    │ ← gauge
-//! │  7d  ███░░░░░░░░░  31%   Resets in 3d 7h                     │ ← gauge
-//! │  ──────────────────────────────────────────────────────────  │ ← Divider
-//! │  Total  in: 142k  out: 28k  cache: 98k  ~$0.32              │ ← summary
-//! │  ──────────────────────────────────────────────────────────  │ ← Divider
-//! │  [abc12345]  daruda          in: 87k  out: 18k  cache: 60k   │
+//! │  [C] Claude Code                           [TEAM 5x]          │ ← header
+//! │  ● Operational                                                │ ← status pill
+//! │  PLAN USAGE                              ↻ 3m ago             │ ← section + refresh
+//! │  ┌ 5h ───────────────────────── 12% ┐                        │ ← gauge card
+//! │  │ ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │                        │
+//! │  │ Resets in 4h 43m                  │                        │
+//! │  └───────────────────────────────────┘                       │
+//! │  TODAY                                                         │
+//! │  [5.0K Messages][21 Sessions][1.3K Tool Calls]               │ ← stat cards
+//! │  LAST 7 DAYS                                                   │
+//! │  ▃ █ ▂ ▄ ▅ ▃ ▆   (weekday labels, today highlighted)         │ ← bar chart
+//! │  248.2K Total Messages  843 Total Sessions  78 Active Days   │ ← totals
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! Per-session rows are sorted with the most recently updated session
-//! at the top; cost is computed off the workspace-wide pricing
-//! resolved from `[usage.pricing]` and snapshotted into
-//! `RightDockSnapshot::usage_pricing` each frame. Gauges and the status
-//! pill draw their data from `RightDockSnapshot::plan_limits` /
-//! `service_status`, refreshed by `limits_pump` every
-//! `[usage.poll]` interval.
+//! Plan limits come from `RightDockSnapshot::plan_limits` (refreshed by
+//! the limits pump); activity from `RightDockSnapshot::activity` (the
+//! local JSONL aggregation pump). The ↻ badge dispatches
+//! `Workspace::refresh_usage_now`.
 //!
-//! All static text comes from `surface::strings::USAGE_*`; all pixel
-//! and color values from `daruda_terminal::ux::theme`. Direct
-//! `hsla(...)` / `px(N)` literals are caught by
-//! `scripts/lint-inline-literals.sh`.
+//! All static text comes from `surface::strings::usage_*`; all pixel
+//! and color values from `crate::ui::theme`. Direct `hsla(...)` /
+//! `px(N)` literals are caught by `scripts/lint-inline-literals.sh`.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::ui::theme;
-use daruda_claude::limits::{LimitSeverity, LimitWindow, PlanLimits};
+use daruda_claude::activity::ActivityStats;
+use daruda_claude::limits::{LimitSeverity, LimitWindow, PlanInfo, PlanLimits};
 use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
-use daruda_claude::usage::{SessionUsage, UsagePricing};
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
 use crate::surface::strings;
-use crate::ui::Divider;
-use crate::ui::SectionHeader;
-
-use crate::ui::Badge;
+use crate::ui::{
+    ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
+    button, group_box,
+};
 
 /// Render the Usage tab body.
-///
-/// Layout (top to bottom):
-/// 1. Header row with the time-window dropdown (right-aligned).
-/// 2. Summary row aggregating sessions inside the window.
-/// 3. Divider.
-/// 4. Per-session rows, most-recently-updated first.
-///
-/// When the window filter excludes every session the body falls
-/// back to an empty-state message but still shows the dropdown so
-/// the user can switch to `Lifetime` and see their data.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    let usage = &snap.usage;
-    let cutoff = snap.usage_window.cutoff(SystemTime::now());
-    let pricing = &snap.usage_pricing;
-    let total = usage.filtered_total(cutoff);
-    let mut sessions: Vec<&SessionUsage> = usage.filtered_sessions(cutoff).collect();
-    // Most recently updated first — `Reverse` flips the natural
-    // ascending order without resorting to a manual `cmp` closure.
-    sessions.sort_by_key(|s| std::cmp::Reverse(s.last_updated));
-
-    let mut body = crate::workspace::right_dock::right_panel_body()
-        .child(header_row(snap, cx))
-        .child(gauges_block(&snap.plan_limits, cx))
-        .child(Divider::horizontal());
-
-    if sessions.is_empty() {
-        body = body.child(empty_state_inline(cx));
-    } else {
-        body = body
-            .child(summary_row(snap.usage_window, &total, pricing, cx))
-            .child(Divider::horizontal())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-                    .children(sessions.into_iter().map(|s| session_row(s, pricing, cx))),
-            );
-    }
-
-    body.into_any_element()
-}
-
-/// Top of the panel: full-width service-status row above the
-/// time-window dropdown. Stacking vertically lets the status row
-/// span the dock width while keeping the dropdown reachable on a
-/// dedicated line.
-fn header_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+    crate::workspace::right_dock::right_panel_body()
+        .child(header(snap.plan_limits.plan.as_ref(), cx))
         .child(status_pill(&snap.service_status, cx))
-        // Single dropdown — slot it at tab_index 0 so keyboard
-        // users can change the time window without reaching for
-        // the mouse.
-        .child(crate::ui::select::select(&snap.usage_select, cx, 0))
-}
-
-/// Body shown when no session passes the time-window filter.
-/// Stacked under the dropdown so the user can still switch to a
-/// wider window without leaving the tab.
-fn empty_state_inline(cx: &gpui::App) -> AnyElement {
-    crate::ui::placeholder_text(strings::usage_empty_state())
-        .py(px(theme::RIGHT_PANEL_PAD_Y))
-        .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
-        .into_any_element()
-}
-
-/// One-line aggregate of sessions inside the active window.
-///
-/// Layout: a leading window-aware label ("Last 7d", "Lifetime", …)
-/// plus a metrics group ([in][out][cache][~$]). Both groups are
-/// `flex_none` and the parent uses `flex_wrap`, so a narrow dock
-/// pushes the metrics group onto a second line instead of
-/// truncating cell contents.
-fn summary_row(
-    window: daruda_store::project::UsageWindow,
-    total: &SessionUsage,
-    pricing: &UsagePricing,
-    cx: &gpui::App,
-) -> AnyElement {
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .items_baseline()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
-        .child(label_pill(strings::usage_window_label(window), cx))
-        .child(metrics_group(
-            total.input_tokens,
-            total.output_tokens,
-            total.cache_read_tokens + total.cache_creation_tokens,
-            total.estimated_cost(pricing),
-            cx,
+        .child(usage_section_header(
+            snap.plan_limits.fetched_at,
+            snap.usage_refresh_in_flight,
+            &snap.workspace,
         ))
+        .child(gauges_block(&snap.plan_limits, cx))
+        .child(today_block(&snap.activity, cx))
+        .child(chart_block(&snap.activity, cx))
+        .child(totals_block(&snap.activity, cx))
         .into_any_element()
 }
 
-/// One row per Claude session.
-///
-/// Layout mirrors [`summary_row`]: identity group ([badge][lane])
-/// on the left, metrics group on the right; `flex_wrap` on the
-/// parent puts metrics on a second line when the row is narrower
-/// than ~identity_group_width + metrics_group_width.
-fn session_row(s: &SessionUsage, pricing: &UsagePricing, cx: &gpui::App) -> AnyElement {
-    let id_prefix = short_session_id(&s.session_id);
-    let wt_label = worktree_label(s);
+// ----------------------------------------------------------------
+// Header (logo + title + plan badge)
+// ----------------------------------------------------------------
 
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .items_baseline()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .py(px(theme::RIGHT_PANEL_ROW_PAD_Y))
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
-        .child(identity_group(id_prefix, wt_label, cx))
-        .child(metrics_group(
-            s.input_tokens,
-            s.output_tokens,
-            s.cache_read_tokens + s.cache_creation_tokens,
-            s.estimated_cost(pricing),
-            cx,
-        ))
-        .into_any_element()
-}
-
-/// Left group of a session row: short id badge + lane label.
-/// `flex_none` so the entire group wraps as a unit; the inner
-/// lane cell caps at [`theme::RIGHT_PANEL_WT_MAX_W`] and
-/// truncates on overflow.
-fn identity_group(
-    id_prefix: SharedString,
-    wt_label: SharedString,
-    cx: &gpui::App,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_baseline()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(Badge::new(id_prefix).monospace())
-        .child(worktree_label_el(wt_label, cx))
-}
-
-/// Right group of summary + session rows: in / out / cache / cost.
-/// `flex_none` so wrap behaviour treats this as one block —
-/// individual metrics never split across lines.
-fn metrics_group(
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_tokens: u64,
-    cost: f64,
-    cx: &gpui::App,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_baseline()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(token_count(strings::usage_in_label(), input_tokens, cx))
-        .child(token_count(strings::usage_out_label(), output_tokens, cx))
-        .child(token_count(strings::usage_cache_label(), cache_tokens, cx))
-        .child(cost_label(cost))
-}
-
-/// First 8 characters of the session id (or the whole id if it's
-/// shorter). UUIDs from Claude Code's project directory naming are
-/// always longer than 8, but defensive truncation keeps this
-/// resistant to corrupted JSONL data.
-fn short_session_id(session_id: &str) -> SharedString {
-    let len = session_id.len().min(8);
-    SharedString::from(session_id[..len].to_string())
-}
-
-/// Display name for a session's lane — basename of `worktree_path`,
-/// or the configured fallback when the path has no name component.
-fn worktree_label(s: &SessionUsage) -> SharedString {
-    s.worktree_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| SharedString::from(n.to_string()))
-        .unwrap_or_else(|| SharedString::from(strings::USAGE_UNKNOWN_WORKTREE))
-}
-
-/// Compact summary "label" pill that doesn't carry data — used to
-/// open the summary row with the literal "Total" so that row reads
-/// the same as session rows from the eye's perspective.
-fn label_pill(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).faint_text)
-        .child(text.into())
-}
-
-/// "label: 142k" pair. Label is rendered dim, count in body color so
-/// the eye scans the numbers first.
-fn token_count(label: impl Into<gpui::SharedString>, n: u64, cx: &gpui::App) -> impl IntoElement {
+/// `[C] Claude Code            [TEAM 5x]` — logo chip, product title,
+/// and the plan badge pushed to the trailing edge. The badge is
+/// omitted when no plan metadata is available (Keychain miss / before
+/// the first fetch).
+fn header(plan: Option<&PlanInfo>, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
-    let label_color = t.faint_text;
-    let value_color = t.muted_text;
-    div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_baseline()
-        .gap(px(theme::RIGHT_PANEL_ROW_PAD_Y))
-        .child(
-            div()
-                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(label_color)
-                .child(label.into()),
-        )
-        .child(
-            div()
-                .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(value_color)
-                .child(SharedString::from(fmt_tokens(n))),
-        )
-}
-
-/// "$0.32"-style price with two decimal places. The `~` prefix hints
-/// to the user that this is an estimate based on default pricing —
-/// real billing depends on the user's Anthropic plan.
-fn cost_label(cost: f64) -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::WARNING)
-        .child(SharedString::from(format!("~${cost:.2}")))
-}
-
-/// Renderable lane label inside [`identity_group`]. Capped at
-/// [`theme::RIGHT_PANEL_WT_MAX_W`] so a long branch name never
-/// pushes the metrics group off-screen — instead the metrics group
-/// wraps onto a second line via the row's `flex_wrap`.
-fn worktree_label_el(label: SharedString, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex_none()
-        .max_w(px(theme::RIGHT_PANEL_WT_MAX_W))
-        .overflow_hidden()
-        .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
-        .child(label)
-}
-
-// ----------------------------------------------------------------
-// Plan-limit gauges (R-4)
-// ----------------------------------------------------------------
-
-/// Stack of two gauges (5h above 7d). Always renders both rows so
-/// the layout is stable even before the first `limits_pump` tick —
-/// missing windows fall back to the placeholder treatment.
-fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(strings::usage_limits_section_label()))
-        .child(gauge_row(
-            strings::usage_limit_5h_label(),
-            limits.five_hour.as_ref(),
-            cx,
-        ))
-        .child(gauge_row(
-            strings::usage_limit_7d_label(),
-            limits.seven_day.as_ref(),
-            cx,
-        ))
-}
-
-/// One gauge: `[ "5h"  ━━━━━░░░░░  68%   Resets in 2h 14m ]`.
-/// `None` window → placeholder (dim track + "Unavailable").
-fn gauge_row(
-    label: impl Into<gpui::SharedString>,
-    window: Option<&LimitWindow>,
-    cx: &gpui::App,
-) -> AnyElement {
-    let label: gpui::SharedString = label.into();
-    let Some(win) = window else {
-        return placeholder_gauge(label, cx);
-    };
-    let pct = win.utilization;
-    let color = severity_color(LimitSeverity::from_utilization(pct));
-    let reset_text = win
-        .resets_at
-        .and_then(|t| t.duration_since(SystemTime::now()).ok())
-        .map(strings::format_reset_countdown);
-
-    let theme_t = theme::current(cx);
-    let row_label_text = theme_t.faint_text;
-    let percent_text = theme_t.muted_text;
-    let reset_text_color = theme_t.faint_text;
-
     let mut row = div()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(row_label_text)
-        .child(gauge_label(label, cx))
-        .child(gauge_bar(pct, color, cx))
-        .child(gauge_percent(pct, percent_text));
+        .w_full()
+        .gap(px(theme::USAGE_HEADER_GAP))
+        .child(
+            div()
+                .flex_grow()
+                .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
+                .text_color(t.muted_text)
+                .child(SharedString::from(strings::usage_brand_title())),
+        );
 
-    if let Some(t) = reset_text {
-        row = row.child(gauge_reset_text(t, reset_text_color));
+    if let Some(label) = plan_badge_label(plan) {
+        row = row.child(plan_badge(label));
     }
-    row.into_any_element()
+    row
 }
 
-/// Dimmed placeholder used when the OAuth token is unavailable, the
-/// `/api/oauth/usage` request failed, or Anthropic omitted this
-/// window from the response. Renders the same shape as a real
-/// gauge so the layout doesn't shift when data arrives.
-fn placeholder_gauge(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> AnyElement {
-    let track_bg = theme::current(cx).gauge_track_bg;
+/// Trailing plan badge ("TEAM 5x").
+fn plan_badge(label: String) -> impl IntoElement {
+    div()
+        .flex_none()
+        .px(px(theme::USAGE_PLAN_BADGE_PAD_X))
+        .py(px(theme::USAGE_PLAN_BADGE_PAD_Y))
+        .rounded(px(theme::USAGE_PLAN_BADGE_RADIUS))
+        .bg(theme::USAGE_ACCENT_CHIP_BG)
+        .text_size(px(theme::USAGE_PLAN_BADGE_FONT_SIZE))
+        .text_color(theme::USAGE_ACCENT_CHIP_FG)
+        .child(SharedString::from(label))
+}
+
+// ----------------------------------------------------------------
+// Section header + refresh badge
+// ----------------------------------------------------------------
+
+/// "PLAN USAGE" heading with a trailing clickable cache-age / refresh
+/// badge. Clicking dispatches `Workspace::refresh_usage_now`.
+fn usage_section_header(
+    fetched_at: Option<SystemTime>,
+    in_flight: bool,
+    workspace: &gpui::WeakEntity<crate::workspace::Workspace>,
+) -> impl IntoElement {
+    let label = refresh_badge_label(fetched_at, in_flight);
+    let workspace = workspace.clone();
+
     div()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(gauge_label(label, cx))
-        .child(gauge_bar(0.0, track_bg, cx))
-        .child(placeholder_unavailable_text())
-        .into_any_element()
-}
-
-/// "Unavailable" trailing label rendered next to a placeholder
-/// gauge bar. Carries its own `text_size` because GPUI does not
-/// cascade `text_size` from parent divs through nested div
-/// children — only direct text content on the same div inherits.
-/// Without this the text fell back to a near-zero default and
-/// looked invisible.
-fn placeholder_unavailable_text() -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::TEXT_TERTIARY)
-        .child(strings::usage_limit_unavailable())
-}
-
-/// "5h" / "7d" leading label. Fixed width so the bars align across
-/// the two rows.
-fn gauge_label(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).faint_text)
-        .child(text.into())
-}
-
-/// Filled bar — outer track with a percentage-width fill. `pct` is
-/// expected in the 0–100 range (the parser already clamps); we
-/// clamp again as a defensive belt-and-braces.
-fn gauge_bar(pct: f32, color: Hsla, cx: &gpui::App) -> impl IntoElement {
-    let pct = pct.clamp(0.0, 100.0);
-    let track_bg = theme::current(cx).gauge_track_bg;
-    div()
-        .flex_grow()
-        .h(px(theme::GAUGE_BAR_HEIGHT))
-        .rounded(px(theme::GAUGE_BAR_RADIUS))
-        .bg(track_bg)
+        .justify_between()
+        .w_full()
+        .child(SectionHeader::new(strings::usage_limits_section_label()))
         .child(
-            div()
-                .h(px(theme::GAUGE_BAR_HEIGHT))
-                .w(gpui::relative(pct / 100.0))
-                .rounded(px(theme::GAUGE_BAR_RADIUS))
-                .bg(color),
+            // Ghost button: subtle text affordance with hover/press
+            // feedback. Disabled while a refresh is in flight so a
+            // double-click can't fan out a second fetch.
+            button("usage-refresh-badge", label)
+                .ghost()
+                .xsmall()
+                .disabled(in_flight)
+                .on_click(move |_, _window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.refresh_usage_now(cx));
+                    }
+                }),
         )
 }
 
-/// "68%" label trailing the bar. Integer rounded — fractional
-/// percentages are noise at this resolution.
-fn gauge_percent(pct: f32, text_color: Hsla) -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(text_color)
-        .child(SharedString::from(format!("{:.0}%", pct)))
-}
-
-/// "Resets in 2h 14m" sub-label. Hidden when `resets_at` was
-/// missing from the API response.
-fn gauge_reset_text(text: String, color: Hsla) -> impl IntoElement {
-    div()
-        .flex_none()
-        .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(color)
-        .child(SharedString::from(text))
-}
-
-/// Map a severity bucket to its bar color. Kept as a free function
-/// (rather than a method on `LimitSeverity` in `daruda_claude`)
-/// because the data layer is GPUI-free — `Hsla` lives in
-/// `daruda_terminal::ux::theme`.
-fn severity_color(severity: LimitSeverity) -> Hsla {
-    match severity {
-        LimitSeverity::Low => theme::SIGNAL_GREEN,
-        LimitSeverity::Medium => theme::SIGNAL_YELLOW,
-        LimitSeverity::High => theme::SIGNAL_RED,
+/// Resolve the refresh-badge label: the in-flight spinner wins; then a
+/// never-fetched state shows the plain "Refresh"; otherwise the cache
+/// age bucket.
+fn refresh_badge_label(fetched_at: Option<SystemTime>, in_flight: bool) -> String {
+    if in_flight {
+        return strings::usage_refreshing();
+    }
+    let age = fetched_at.and_then(|t| SystemTime::now().duration_since(t).ok());
+    match cache_age_bucket(age) {
+        CacheAge::Never => strings::usage_refresh(),
+        CacheAge::JustNow => strings::usage_cache_just_now(),
+        CacheAge::Minutes(n) => strings::usage_cache_minutes(n),
+        CacheAge::Hours(n) => strings::usage_cache_hours(n),
+        CacheAge::Days(n) => strings::usage_cache_days(n),
     }
 }
 
 // ----------------------------------------------------------------
-// Service-status pill (R-5)
+// Plan-limit gauge cards
 // ----------------------------------------------------------------
 
-/// Top-of-panel status row: a colored dot plus the upstream status
-/// label, spanning the full dock width. Color and label both flow
-/// from the indicator — the description is only used for
-/// non-operational indicators (matching the Übersicht widget's
-/// behavior). No pill chrome (bg / border / rounded) — the row
-/// sits flush with the surrounding panel padding.
+/// Stack of gauge cards: 5h above 7d, plus the Opus card only when the
+/// plan meters Opus separately. 5h/7d always render (placeholder before
+/// the first fetch) so the layout is stable.
+fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
+    let mut col = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::USAGE_CARD_GAP))
+        .child(gauge_card(strings::usage_limit_5h_label(), limits.five_hour.as_ref(), cx))
+        .child(gauge_card(strings::usage_limit_7d_label(), limits.seven_day.as_ref(), cx));
+
+    if let Some(opus) = limits.seven_day_opus.as_ref() {
+        col = col.child(gauge_card(strings::usage_limit_opus_label(), Some(opus), cx));
+    }
+    col
+}
+
+/// One gauge card: header row (label + big %), bar, optional reset text.
+/// `None` window → placeholder (dim bar + "Unavailable", no %).
+fn gauge_card(
+    label: impl Into<SharedString>,
+    window: Option<&LimitWindow>,
+    cx: &gpui::App,
+) -> AnyElement {
+    let t = theme::current(cx);
+    let label: SharedString = label.into();
+
+    // Border-only card (no fill), `theme.radius` corners — see B5.
+    let card = group_box().outline();
+
+    let Some(win) = window else {
+        // Placeholder: label + dim bar + "Unavailable".
+        return card
+            .child(
+                gauge_header_row(label, None, t.muted_text, t.faint_text),
+            )
+            .child(gauge_bar(0.0, t.gauge_track_bg))
+            .into_any_element();
+    };
+
+    let pct = win.utilization;
+    let color = severity_color(LimitSeverity::from_utilization(pct));
+    let reset_text = win
+        .resets_at
+        .and_then(|at| at.duration_since(SystemTime::now()).ok())
+        .map(strings::format_reset_countdown);
+
+    let mut card = card
+        .child(gauge_header_row(label, Some(pct), t.faint_text, t.muted_text))
+        .child(gauge_bar(pct, color));
+    if let Some(reset) = reset_text {
+        card = card.child(
+            div()
+                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                .text_color(t.faint_text)
+                .child(SharedString::from(reset)),
+        );
+    }
+    card.into_any_element()
+}
+
+/// The label + percentage row at the top of a gauge card. `pct == None`
+/// renders the "Unavailable" placeholder in place of the big number.
+fn gauge_header_row(
+    label: SharedString,
+    pct: Option<f32>,
+    label_color: Hsla,
+    pct_color: Hsla,
+) -> impl IntoElement {
+    let value: SharedString = match pct {
+        Some(p) => format!("{:.0}%", p.clamp(0.0, 100.0)).into(),
+        None => strings::usage_limit_unavailable().into(),
+    };
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .w_full()
+        .child(
+            div()
+                .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
+                .text_color(label_color)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(theme::USAGE_GAUGE_PERCENT_FONT_SIZE))
+                .text_color(pct_color)
+                .child(value),
+        )
+}
+
+/// Filled bar via `gpui_component::Progress`. `color` is the fill; the
+/// widget renders the track as that color at 20% opacity. The widget
+/// clamps `pct` to `0..=100`.
+fn gauge_bar(pct: f32, color: Hsla) -> impl IntoElement {
+    crate::ui::progress(pct)
+        .bg(color)
+        .h(px(theme::GAUGE_BAR_HEIGHT))
+        .rounded(px(theme::GAUGE_BAR_RADIUS))
+}
+
+// ----------------------------------------------------------------
+// Today's activity (3 stat cards)
+// ----------------------------------------------------------------
+
+/// "TODAY" heading + a 3-up grid of stat cards. Counts come from the
+/// `DayActivity` whose date matches the local calendar day; if none is
+/// present (no activity yet today) the cards show zeros.
+fn today_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
+    let today_str = local_today();
+    let today = activity.daily.iter().find(|d| d.date == today_str);
+    let (messages, sessions, tool_calls) = today
+        .map(|d| (d.messages, d.sessions, d.tool_calls))
+        .unwrap_or((0, 0, 0));
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(SectionHeader::new(strings::usage_section_today()))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .w_full()
+                .gap(px(theme::USAGE_STAT_GRID_GAP))
+                .child(stat_card(fmt_count(messages), strings::usage_stat_messages(), cx))
+                .child(stat_card(fmt_count(sessions), strings::usage_stat_sessions(), cx))
+                .child(stat_card(
+                    fmt_count(tool_calls),
+                    strings::usage_stat_tool_calls(),
+                    cx,
+                )),
+        )
+}
+
+/// One stat card: a big value over a muted label, centered.
+fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
+    let t = theme::current(cx);
+    // `flex_1` lives on a wrapper div, not the GroupBox: GroupBox forces
+    // `w_full` internally, so the wrapper owns the 1/3 grid width and the
+    // GroupBox fills it (putting flex_1 on the GroupBox makes all three
+    // claim full width and overflow the dock). GroupBox content is
+    // left-aligned, so a full-width `items_center` child re-centers the
+    // value over its label.
+    div().flex_1().min_w_0().child(
+        group_box().outline().child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .w_full()
+                .gap(px(theme::USAGE_STAT_CARD_GAP))
+                .child(
+                    div()
+                        .text_size(px(theme::USAGE_STAT_VALUE_FONT_SIZE))
+                        .text_color(t.muted_text)
+                        .child(SharedString::from(value)),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::USAGE_STAT_LABEL_FONT_SIZE))
+                        .text_color(t.faint_text)
+                        .child(SharedString::from(label)),
+                ),
+        ),
+    )
+}
+
+// ----------------------------------------------------------------
+// 7-day activity chart
+// ----------------------------------------------------------------
+
+/// "LAST 7 DAYS" heading + a bar chart over the seven calendar days
+/// ending today, weekday-labeled, with today highlighted. Days with no
+/// activity show a floor-height bar (the aggregator omits zero days, so
+/// the chart is built from the calendar — not `daily` — to keep the
+/// window contiguous and today always the trailing bar). Heights
+/// normalize to the busiest day in the window.
+fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
+    let today = chrono::Local::now().date_naive();
+    let days = last_7_days(today);
+    let messages: Vec<u64> = days
+        .iter()
+        .map(|d| {
+            let key = d.format("%Y-%m-%d").to_string();
+            activity
+                .daily
+                .iter()
+                .find(|a| a.date == key)
+                .map_or(0, |a| a.messages)
+        })
+        .collect();
+    let heights = chart_heights(
+        &messages,
+        theme::USAGE_CHART_BAR_MAX_HEIGHT,
+        theme::USAGE_CHART_BAR_MIN_HEIGHT,
+    );
+
+    let mut row = div()
+        .flex()
+        .flex_row()
+        .items_end()
+        .w_full()
+        .gap(px(theme::USAGE_CHART_BAR_GAP));
+    for (i, date) in days.iter().enumerate() {
+        row = row.child(chart_bar(*date, heights[i], *date == today, cx));
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(SectionHeader::new(strings::usage_section_7day()))
+        .child(row)
+}
+
+/// One chart column: the bar (bottom-aligned) over its weekday label.
+fn chart_bar(date: chrono::NaiveDate, height: f32, is_today: bool, cx: &gpui::App) -> impl IntoElement {
+    use chrono::Datelike as _;
+    let fill = if is_today {
+        theme::USAGE_CHART_BAR_TODAY
+    } else {
+        theme::USAGE_CHART_BAR_OTHER
+    };
+    let label = strings::usage_weekday_label(date.weekday().num_days_from_sunday() as u8);
+    let label_color = theme::current(cx).faint_text;
+
+    div()
+        .flex_1()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_end()
+        .gap(px(theme::USAGE_CHART_LABEL_GAP))
+        .child(
+            div()
+                .w_full()
+                .h(px(height))
+                .rounded(px(theme::USAGE_CHART_BAR_RADIUS))
+                .bg(fill),
+        )
+        .child(
+            div()
+                .text_size(px(theme::USAGE_CHART_LABEL_FONT_SIZE))
+                .text_color(label_color)
+                .child(SharedString::from(label)),
+        )
+}
+
+// ----------------------------------------------------------------
+// Totals row
+// ----------------------------------------------------------------
+
+/// All-time totals: a "TOTAL" section header over a 3-up row of
+/// value-over-label cells (matching the "today" section). The
+/// per-cell labels drop their "Total"/"Active" prefix since the
+/// section header carries that context. Borderless GroupBox
+/// (`.normal()`) so the footer reads as a summary, not a card.
+fn totals_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(SectionHeader::new(strings::usage_section_total()))
+        .child(totals_row(activity, cx))
+}
+
+/// The 3-up totals cells row.
+fn totals_row(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .w_full()
+        .gap(px(theme::USAGE_STAT_GRID_GAP))
+        .child(total_item(
+            fmt_count(activity.total_messages),
+            strings::usage_total_messages(),
+            cx,
+        ))
+        .child(total_item(
+            fmt_count(activity.total_sessions),
+            strings::usage_total_sessions(),
+            cx,
+        ))
+        .child(total_item(
+            fmt_count(activity.active_days),
+            strings::usage_total_active_days(),
+            cx,
+        ))
+}
+
+/// One totals cell: a borderless GroupBox holding a value over its
+/// label, centered (GroupBox content is left-aligned, so a full-width
+/// `items_center` child re-centers it). `flex_1` on the wrapper, not
+/// the GroupBox, since GroupBox forces `w_full`.
+fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
+    let t = theme::current(cx);
+    div().flex_1().min_w_0().child(
+        group_box().normal().child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .w_full()
+                .gap(px(theme::USAGE_STAT_CARD_GAP))
+                .child(
+                    div()
+                        .text_size(px(theme::USAGE_TOTAL_VALUE_FONT_SIZE))
+                        .text_color(t.muted_text)
+                        .child(SharedString::from(value)),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::USAGE_TOTAL_LABEL_FONT_SIZE))
+                        .text_color(t.faint_text)
+                        .child(SharedString::from(label)),
+                ),
+        ),
+    )
+}
+
+// ----------------------------------------------------------------
+// Service-status pill (tinted)
+// ----------------------------------------------------------------
+
+/// Status row: a colored dot plus the upstream status label on a faint
+/// tint of the indicator color.
 fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
     let color = indicator_color(status.indicator);
     let label = strings::service_status_label(status);
     let muted_text = theme::current(cx).muted_text;
+    let mut tint = color;
+    tint.a = theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA;
 
     div()
         .flex()
@@ -478,14 +504,17 @@ fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
         .w_full()
         .items_center()
         .gap(px(theme::STATUS_PILL_GAP))
+        .px(px(theme::RIGHT_PANEL_STATUS_PILL_PADDING_X_PX))
         .py(px(theme::STATUS_PILL_PAD_Y))
+        .rounded(px(theme::RIGHT_PANEL_STATUS_PILL_RADIUS_PX))
+        .bg(tint)
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
         .text_color(muted_text)
         .child(status_dot(color))
         .child(SharedString::from(label))
 }
 
-/// Colored dot inside the status pill. Sized via `STATUS_PILL_DOT_SIZE`.
+/// Colored dot inside the status pill.
 fn status_dot(color: Hsla) -> impl IntoElement {
     div()
         .flex_none()
@@ -495,8 +524,22 @@ fn status_dot(color: Hsla) -> impl IntoElement {
         .bg(color)
 }
 
-/// Map an indicator to its pill color. `Unknown` uses the dim
-/// placeholder color so a parse miss doesn't look like green.
+// ----------------------------------------------------------------
+// Shared helpers
+// ----------------------------------------------------------------
+
+/// Map a severity bucket to its bar color. Free function (not a method
+/// on `LimitSeverity`) because the data layer is GPUI-free — `Hsla`
+/// lives in the theme module.
+fn severity_color(severity: LimitSeverity) -> Hsla {
+    match severity {
+        LimitSeverity::Low => theme::SIGNAL_GREEN,
+        LimitSeverity::Medium => theme::SIGNAL_YELLOW,
+        LimitSeverity::High => theme::SIGNAL_RED,
+    }
+}
+
+/// Map a service-status indicator to its pill color.
 fn indicator_color(indicator: StatusIndicator) -> Hsla {
     match indicator {
         StatusIndicator::None => theme::SIGNAL_GREEN,
@@ -507,94 +550,236 @@ fn indicator_color(indicator: StatusIndicator) -> Hsla {
     }
 }
 
-/// Format a raw token count into a compact human-readable string.
-///
-/// - `>= 1_000_000`: one decimal place + `M` (e.g. `1.2M`).
-/// - `>= 1_000`: integer + `k` (e.g. `142k`).
-/// - `< 1_000`: bare integer (e.g. `532`).
-///
-/// Boundaries are exclusive on the upper side so `1_000_000`
-/// displays as `1.0M` and `1_000` as `1k`. The `M` formatter rounds
-/// to the nearest tenth via `f64`'s default formatter, which
-/// matches `format!("{:.1}", ...)`.
-fn fmt_tokens(n: u64) -> String {
+/// Local calendar day as `"YYYY-MM-DD"`, matching the date keys the
+/// activity aggregator writes.
+fn local_today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+// ---- Pure display logic (GPUI-free, unit-tested) ----
+
+/// Cache-age bucket for the refresh badge. Pure so the bucket
+/// boundaries are tested without touching i18n or the clock.
+#[derive(Debug, PartialEq, Eq)]
+enum CacheAge {
+    /// No successful fetch yet.
+    Never,
+    /// Under a minute since the last refresh.
+    JustNow,
+    Minutes(u64),
+    Hours(u64),
+    Days(u64),
+}
+
+/// Bucket a "time since last fetch" into the badge's display unit.
+/// `None` (never fetched) maps to [`CacheAge::Never`].
+fn cache_age_bucket(age: Option<Duration>) -> CacheAge {
+    let Some(age) = age else {
+        return CacheAge::Never;
+    };
+    let secs = age.as_secs();
+    if secs < 60 {
+        CacheAge::JustNow
+    } else if secs < 3_600 {
+        CacheAge::Minutes(secs / 60)
+    } else if secs < 86_400 {
+        CacheAge::Hours(secs / 3_600)
+    } else {
+        CacheAge::Days(secs / 86_400)
+    }
+}
+
+/// Compact count format matching the widget's `formatNumber`: ≥ 1M →
+/// `"<x>.<y>M"`, ≥ 1000 → `"<x>.<y>K"`, otherwise the plain integer.
+fn fmt_count(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
-        format!("{}k", n / 1_000)
+        format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
     }
 }
 
+/// Normalize message counts to pixel bar heights. The busiest day in
+/// the window maps to `max_px`; every bar is floored at `min_px` so a
+/// zero/low day still reads as a bar. An all-zero window uses a divisor
+/// of 1 (every bar at `min_px`), mirroring the widget's `Math.max(…, 1)`.
+fn chart_heights(messages: &[u64], max_px: f32, min_px: f32) -> Vec<f32> {
+    let peak = messages.iter().copied().max().unwrap_or(0).max(1) as f32;
+    messages
+        .iter()
+        .map(|&m| ((m as f32 / peak) * max_px).max(min_px))
+        .collect()
+}
+
+/// Build the plan badge label from the Keychain plan metadata, mirroring
+/// the widget's `getPlanBadge`: a 5x/20x multiplier suffix is shown only
+/// for `max`/`team` tiers; known subscription types map to a fixed
+/// uppercase name, others fall back to the uppercased raw value.
+/// Returns `None` when there is no plan metadata at all (no badge).
+fn plan_badge_label(plan: Option<&PlanInfo>) -> Option<String> {
+    let plan = plan?;
+    let sub = plan.subscription_type.as_deref().unwrap_or("").to_lowercase();
+    let tier = plan.rate_limit_tier.as_deref().unwrap_or("").to_lowercase();
+
+    let base = match sub.as_str() {
+        "team" => "TEAM",
+        "enterprise" => "ENTERPRISE",
+        "max" => "MAX",
+        "pro" => "PRO",
+        "free" => "FREE",
+        "" => "CLAUDE",
+        other => return Some(plan_badge_with_mult(&other.to_uppercase(), &sub, &tier)),
+    };
+    Some(plan_badge_with_mult(base, &sub, &tier))
+}
+
+/// Append the ` 5x` / ` 20x` multiplier to `base`, but only for
+/// `max`/`team` subscriptions (where the rate-limit tier is meaningful).
+fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
+    let mult = if tier.contains("20x") {
+        " 20x"
+    } else if tier.contains("5x") {
+        " 5x"
+    } else {
+        ""
+    };
+    if sub == "max" || sub == "team" {
+        format!("{base}{mult}")
+    } else {
+        base.to_string()
+    }
+}
+
+/// The seven calendar dates ending at `today`, ascending (so `today`
+/// is the trailing element). Built from the calendar rather than the
+/// activity log so the chart window stays contiguous and today is
+/// always present even on a zero-activity day.
+fn last_7_days(today: chrono::NaiveDate) -> Vec<chrono::NaiveDate> {
+    (0..7)
+        .rev()
+        .filter_map(|back| today.checked_sub_days(chrono::Days::new(back)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
-    fn fmt_tokens_under_1k_is_bare_integer() {
-        assert_eq!(fmt_tokens(0), "0");
-        assert_eq!(fmt_tokens(1), "1");
-        assert_eq!(fmt_tokens(532), "532");
-        assert_eq!(fmt_tokens(999), "999");
+    fn fmt_count_matches_widget() {
+        assert_eq!(fmt_count(0), "0");
+        assert_eq!(fmt_count(21), "21");
+        assert_eq!(fmt_count(999), "999");
+        assert_eq!(fmt_count(1_000), "1.0K");
+        assert_eq!(fmt_count(5_012), "5.0K");
+        assert_eq!(fmt_count(1_300), "1.3K");
+        assert_eq!(fmt_count(248_200), "248.2K");
+        assert_eq!(fmt_count(1_500_000), "1.5M");
     }
 
     #[test]
-    fn fmt_tokens_thousands_use_k_suffix() {
-        assert_eq!(fmt_tokens(1_000), "1k");
-        assert_eq!(fmt_tokens(1_500), "1k");
-        assert_eq!(fmt_tokens(142_310), "142k");
-        assert_eq!(fmt_tokens(999_999), "999k");
+    fn chart_heights_normalize_to_max() {
+        let h = chart_heights(&[10, 20, 0, 5], 44.0, 3.0);
+        assert_eq!(h, vec![22.0, 44.0, 3.0, 11.0]);
     }
 
     #[test]
-    fn fmt_tokens_millions_use_m_suffix_with_one_decimal() {
-        assert_eq!(fmt_tokens(1_000_000), "1.0M");
-        assert_eq!(fmt_tokens(1_200_000), "1.2M");
-        assert_eq!(fmt_tokens(2_500_000), "2.5M");
-        assert_eq!(fmt_tokens(15_700_000), "15.7M");
+    fn chart_heights_all_zero_floor_to_min() {
+        let h = chart_heights(&[0, 0, 0], 44.0, 3.0);
+        assert_eq!(h, vec![3.0, 3.0, 3.0]);
     }
 
     #[test]
-    fn fmt_tokens_handles_u64_max_without_overflow() {
-        // Sanity: huge inputs (won't happen in practice) still
-        // produce a string rather than panicking on cast.
-        let s = fmt_tokens(u64::MAX);
-        assert!(s.ends_with('M'), "got {s}");
+    fn chart_heights_empty_is_empty() {
+        assert!(chart_heights(&[], 44.0, 3.0).is_empty());
+    }
+
+    fn plan(sub: Option<&str>, tier: Option<&str>) -> PlanInfo {
+        PlanInfo {
+            subscription_type: sub.map(str::to_string),
+            rate_limit_tier: tier.map(str::to_string),
+        }
     }
 
     #[test]
-    fn short_session_id_truncates_to_eight_chars() {
-        assert_eq!(short_session_id("abc1234567890def"), "abc12345");
-    }
-
-    #[test]
-    fn short_session_id_passes_through_when_already_short() {
-        assert_eq!(short_session_id("abc"), "abc");
-        assert_eq!(short_session_id(""), "");
-    }
-
-    #[test]
-    fn worktree_label_uses_path_basename() {
-        let s = SessionUsage {
-            worktree_path: PathBuf::from("/Users/me/git/daruda"),
-            ..Default::default()
-        };
-        assert_eq!(worktree_label(&s), SharedString::from("daruda"));
-    }
-
-    #[test]
-    fn worktree_label_falls_back_when_basename_missing() {
-        let s = SessionUsage {
-            // Root path has no file_name component on Unix.
-            worktree_path: PathBuf::from("/"),
-            ..Default::default()
-        };
+    fn plan_badge_label_maps_tier() {
         assert_eq!(
-            worktree_label(&s),
-            SharedString::from(strings::USAGE_UNKNOWN_WORKTREE)
+            plan_badge_label(Some(&plan(Some("team"), Some("default_claude_ai_5x")))),
+            Some("TEAM 5x".to_string())
         );
+        assert_eq!(
+            plan_badge_label(Some(&plan(Some("max"), Some("claude_20x")))),
+            Some("MAX 20x".to_string())
+        );
+        // Multiplier is suppressed for non-max/team tiers.
+        assert_eq!(
+            plan_badge_label(Some(&plan(Some("pro"), Some("claude_5x")))),
+            Some("PRO".to_string())
+        );
+        // team with no tier → no multiplier.
+        assert_eq!(
+            plan_badge_label(Some(&plan(Some("team"), None))),
+            Some("TEAM".to_string())
+        );
+        // Unknown subscription falls back to uppercase.
+        assert_eq!(
+            plan_badge_label(Some(&plan(Some("scale"), None))),
+            Some("SCALE".to_string())
+        );
+        // Empty subscription → generic brand.
+        assert_eq!(
+            plan_badge_label(Some(&plan(None, None))),
+            Some("CLAUDE".to_string())
+        );
+        // No plan metadata → no badge.
+        assert_eq!(plan_badge_label(None), None);
+    }
+
+    #[test]
+    fn cache_age_bucket_boundaries() {
+        assert_eq!(cache_age_bucket(None), CacheAge::Never);
+        assert_eq!(cache_age_bucket(Some(Duration::from_secs(0))), CacheAge::JustNow);
+        assert_eq!(cache_age_bucket(Some(Duration::from_secs(59))), CacheAge::JustNow);
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(60))),
+            CacheAge::Minutes(1)
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(59 * 60))),
+            CacheAge::Minutes(59)
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(3_600))),
+            CacheAge::Hours(1)
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(23 * 3_600))),
+            CacheAge::Hours(23)
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(86_400))),
+            CacheAge::Days(1)
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(3 * 86_400))),
+            CacheAge::Days(3)
+        );
+    }
+
+    #[test]
+    fn last_7_days_is_contiguous_window_ending_today() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+        let days = last_7_days(today);
+        assert_eq!(days.len(), 7);
+        // Trailing element is today; leading is six days earlier.
+        assert_eq!(days[6], today);
+        assert_eq!(days[0], chrono::NaiveDate::from_ymd_opt(2026, 6, 6).unwrap());
+        // Strictly ascending and contiguous (no gaps).
+        for w in days.windows(2) {
+            assert_eq!(w[1], w[0].succ_opt().unwrap());
+        }
     }
 
     #[gpui::test]
@@ -612,22 +797,10 @@ mod tests {
         crate::test_support::init_gpui_component(cx);
         cx.update(|_cx| {
             assert_eq!(indicator_color(StatusIndicator::None), theme::SIGNAL_GREEN);
-            assert_eq!(
-                indicator_color(StatusIndicator::Minor),
-                theme::SIGNAL_YELLOW
-            );
-            assert_eq!(
-                indicator_color(StatusIndicator::Major),
-                theme::SIGNAL_ORANGE
-            );
-            assert_eq!(
-                indicator_color(StatusIndicator::Critical),
-                theme::SIGNAL_RED
-            );
-            assert_eq!(
-                indicator_color(StatusIndicator::Unknown),
-                theme::TEXT_TERTIARY
-            );
+            assert_eq!(indicator_color(StatusIndicator::Minor), theme::SIGNAL_YELLOW);
+            assert_eq!(indicator_color(StatusIndicator::Major), theme::SIGNAL_ORANGE);
+            assert_eq!(indicator_color(StatusIndicator::Critical), theme::SIGNAL_RED);
+            assert_eq!(indicator_color(StatusIndicator::Unknown), theme::TEXT_TERTIARY);
         });
     }
 }

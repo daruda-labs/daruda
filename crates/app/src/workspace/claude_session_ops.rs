@@ -1,15 +1,16 @@
 //! Claude Code integration state owned by [`super::Workspace`].
 //! Workspace methods that mutate or read `self.claude` live here.
 //!
-//! Groups the 18 fields that together drive the right-panel Usage tab,
-//! the per-lane session-status indicator, the JSONL fallback
-//! watcher, the PTY tracker, and the plan-limits / service-status
-//! polls. Workspace owns this struct directly (not as an `Entity`) so
-//! the existing access patterns (`self.claude.usage`, etc.) compile
-//! without subscription / re-render plumbing changes — the goal at
-//! this stage is **field grouping**, not actor isolation. A future
-//! refactor can promote `ClaudeContext` to its own GPUI Entity once
-//! the call graph is mapped.
+//! Groups the fields that together drive the right-panel Usage tab's
+//! gauges + status pill, the per-lane session-status indicator, the
+//! JSONL fallback watcher, the PTY tracker, and the plan-limits /
+//! service-status polls. Workspace owns this struct directly (not as
+//! an `Entity`) so the existing access patterns
+//! (`self.claude.plan_limits`, etc.) compile without subscription /
+//! re-render plumbing changes — the goal at this stage is **field
+//! grouping**, not actor isolation. A future refactor can promote
+//! `ClaudeContext` to its own GPUI Entity once the call graph is
+//! mapped.
 //!
 //! The `_*` prefixed fields are RAII guards: dropping the struct
 //! cancels the matching pump tasks / shuts down the JSONL fallback
@@ -18,27 +19,12 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use gpui::{Entity, Subscription, Task};
+use gpui::Task;
 
 use crate::hooks::pty_tracker::{PtyBinding, PtyTracker};
-use crate::ui::select::SelectState;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 pub(in crate::workspace) struct ClaudeContext {
-    /// Token-usage accumulator for the right dock's Usage tab. Folded
-    /// per-session by `apply_claude_jsonl_event` whenever the JSONL
-    /// watcher surfaces new assistant entries with a `usage` block.
-    /// Not persisted — the watcher's first fire after each launch
-    /// re-emits the entire session history, providing automatic cold
-    /// restore.
-    pub(in crate::workspace) usage: daruda_claude::usage::UsageState,
-
-    /// Per-million-token pricing applied when rendering the Usage
-    /// tab's cost columns. Derived from `[usage.pricing]` at construct
-    /// time and refreshed by `apply_config` so live config edits flow
-    /// to the next frame without re-reading TOML in the render path.
-    pub(in crate::workspace) usage_pricing: daruda_claude::usage::UsagePricing,
-
     /// Background-poll cadences for the OAuth `/api/oauth/usage` and
     /// public `status.claude.com` endpoints. Stored as a snapshot of
     /// `[usage.poll]` so `limits_pump` can read it under
@@ -56,22 +42,19 @@ pub(in crate::workspace) struct ClaudeContext {
     /// `set_service_status` updates and bumps `cx.notify()`.
     pub(in crate::workspace) service_status: daruda_claude::ServiceStatus,
 
-    /// Time window applied when rendering the Usage tab — sessions
-    /// older than the window are hidden and the Total summary
-    /// aggregates only sessions inside it. Persisted via
-    /// `ProjectState::active_usage_window` (default = `Last7d`).
-    pub(in crate::workspace) usage_window: daruda_store::project::UsageWindow,
+    /// Locally aggregated Claude Code activity (today's counts + the
+    /// 7-day chart + totals), refreshed off the same `limits_secs`
+    /// cadence by the `Activity` pump. Default-constructed (empty) until
+    /// the first aggregation lands, in which case the Usage tab renders
+    /// its activity cards as zeros. `set_activity_stats` updates and
+    /// bumps `cx.notify()`.
+    pub(in crate::workspace) activity: daruda_claude::ActivityStats,
 
-    /// Picker rendered at the top of the Usage tab. Workspace owns
-    /// the entity so selection survives dock teardown and
-    /// `restore_state` can resync the picker after the saved
-    /// `usage_window` is reapplied.
-    pub(in crate::workspace) usage_select: Entity<SelectState>,
-
-    /// Keeps the `usage_select` subscription alive for the lifetime
-    /// of the Workspace; dropping `Self` cancels the closure.
-    #[allow(dead_code)]
-    pub(in crate::workspace) _usage_select_subscription: Subscription,
+    /// Guards `refresh_usage_now` against overlapping manual refreshes —
+    /// the button's one-shot fetch sets this on entry and clears it when
+    /// the background fetch resolves, so a double-click can't fan out
+    /// two concurrent `/api/oauth/usage` round-trips.
+    pub(in crate::workspace) usage_refresh_in_flight: bool,
 
     /// Claude Code session-status mirror — driven by the hook channel
     /// (and Phase B jsonl fallback). Read by the left dock to render the
@@ -81,6 +64,12 @@ pub(in crate::workspace) struct ClaudeContext {
     /// Whether the Claude status feature is enabled in `[claude_status]`
     /// config. False suppresses both the indicator and the install banner.
     pub(in crate::workspace) claude_status_enabled: bool,
+
+    /// `[claude_status] stale_threshold_secs` mirror — the same age past
+    /// which cold restore resets a session also expires its blocking
+    /// notification for the desktop-push gate (see
+    /// `maybe_push_hook_notification`). Updated in `apply_config`.
+    pub(in crate::workspace) stale_threshold_secs: u64,
 
     /// Whether daruda's hook entries are present in
     /// `~/.claude/settings.json`. Cached: refreshed at startup and after
@@ -135,15 +124,15 @@ pub(in crate::workspace) struct ClaudeContext {
     pub(in crate::workspace) last_pushed_notification:
         HashMap<String, chrono::DateTime<chrono::Utc>>,
 
-    /// Two background-poll tasks for `[usage.poll]` —
-    /// `/api/oauth/usage` (plan-rate windows) and
-    /// `status.claude.com` (service status). Each task re-reads the
-    /// workspace's poll cadence every tick so live config edits flow
-    /// without restart. Dropping the tasks (when Workspace is
-    /// dropped) cancels the loops; held in a tuple so a single field
-    /// owns both.
+    /// Three background-poll tasks driving the Usage tab —
+    /// `/api/oauth/usage` (plan-rate windows), `status.claude.com`
+    /// (service status), and the local JSONL activity aggregation.
+    /// Each task re-reads the workspace's poll cadence every tick so
+    /// live config edits flow without restart. Dropping the tasks
+    /// (when Workspace is dropped) cancels the loops; held in a tuple
+    /// so a single field owns all three.
     #[allow(dead_code)]
-    pub(in crate::workspace) _limits_pumps: (Task<()>, Task<()>),
+    pub(in crate::workspace) _limits_pumps: (Task<()>, Task<()>, Task<()>),
 }
 
 // ---- Workspace methods that own the claude field ----
@@ -151,7 +140,7 @@ pub(in crate::workspace) struct ClaudeContext {
 use crate::workspace::Workspace;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
-use gpui::{Context, Window};
+use gpui::Context;
 
 impl Workspace {
     /// Apply one filesystem event from `~/.daruda/status/`. Pumped by
@@ -278,6 +267,17 @@ impl Workspace {
             return;
         }
 
+        // Freshness gate — a notification re-delivered past the stale
+        // threshold (cold-restore rewrite by another instance, watcher
+        // replay of an old file) is no longer actionable; pushing it
+        // would tell the user to answer a prompt that is long gone.
+        if file.event_expired(
+            chrono::Utc::now(),
+            std::time::Duration::from_secs(self.claude.stale_threshold_secs),
+        ) {
+            return;
+        }
+
         // Dedup: skip when this notification is not strictly newer than
         // the last one already surfaced for the session.
         if self
@@ -319,26 +319,6 @@ impl Workspace {
             .is_some_and(|(pane_id, _)| *pane_id == self.main_area.focused_pane_id)
     }
 
-    pub(in crate::workspace) fn set_usage_window(
-        &mut self,
-        value: daruda_store::project::UsageWindow,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.claude.usage_window == value {
-            return;
-        }
-        self.mutate_durable_in(window, cx, |ws, window, cx| {
-            ws.claude.usage_window = value;
-            let slug = gpui::SharedString::from(value.slug());
-            ws.claude.usage_select.update(cx, |s, cx_inner| {
-                s.set_selected_value(&slug, window, cx_inner)
-            });
-        });
-        cx.notify();
-        self.notify_right_dock(cx);
-    }
-
     /// Replace the cached plan-rate snapshot. Called by `limits_pump`
     /// after a successful `/api/oauth/usage` fetch. Skips `cx.notify()`
     /// when only `fetched_at` moved.
@@ -370,6 +350,71 @@ impl Workspace {
             cx.notify();
             self.notify_right_dock(cx);
         }
+    }
+
+    /// Replace the cached activity aggregate. Called by the `Activity`
+    /// pump and by `refresh_usage_now` after `update_activity` lands.
+    /// Skips the redraw when the stats are byte-for-byte unchanged (a
+    /// quiet tick that found no new JSONL lines) so an idle pane doesn't
+    /// repaint the whole window tree (Pitfall #10).
+    pub(in crate::workspace) fn set_activity_stats(
+        &mut self,
+        activity: daruda_claude::ActivityStats,
+        cx: &mut Context<Self>,
+    ) {
+        if self.claude.activity == activity {
+            return;
+        }
+        self.claude.activity = activity;
+        cx.notify();
+        self.notify_right_dock(cx);
+    }
+
+    /// Manual-refresh backend for the Usage tab's ⟳ button. Re-fetches
+    /// all three usage sources (plan limits, service status, local
+    /// activity) once off the GPUI thread and forwards each into its
+    /// existing setter. The `usage_refresh_in_flight` guard collapses
+    /// rapid clicks into a single in-flight round-trip; it is cleared
+    /// when the fetch resolves (or with the workspace if it is gone).
+    pub(in crate::workspace) fn refresh_usage_now(&mut self, cx: &mut Context<Self>) {
+        if self.claude.usage_refresh_in_flight {
+            return;
+        }
+        self.claude.usage_refresh_in_flight = true;
+        cx.notify();
+        self.notify_right_dock(cx);
+
+        cx.spawn(async move |this, cx| {
+            let (limits, status, activity) = cx
+                .background_executor()
+                .spawn(async move {
+                    (
+                        daruda_claude::limits::fetch_plan_limits(),
+                        daruda_claude::service_status::fetch_service_status(),
+                        crate::workspace::sync::limits::fetch_activity(),
+                    )
+                })
+                .await;
+
+            // The workspace can close mid-refresh; nothing to update or
+            // unset then, so the dropped guard dies with the entity.
+            // SILENT-OK: workspace gone mid-refresh — no state to clear.
+            let _ = this.update(cx, |ws, cx| {
+                if let Ok(l) = limits {
+                    ws.set_plan_limits(l, cx);
+                }
+                if let Ok(s) = status {
+                    ws.set_service_status(s, cx);
+                }
+                if let Some(a) = activity {
+                    ws.set_activity_stats(a, cx);
+                }
+                ws.claude.usage_refresh_in_flight = false;
+                cx.notify();
+                ws.notify_right_dock(cx);
+            });
+        })
+        .detach();
     }
 
     /// Drop every trace of `pane_ids` from PTY→claude tracking: the

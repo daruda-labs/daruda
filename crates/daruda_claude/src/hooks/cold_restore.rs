@@ -118,6 +118,11 @@ pub fn run(dir: &Path, policy: &ColdRestorePolicy) -> Result<Vec<StatusFile>, St
                 ColdRestoreAction::Load => loaded.push(file),
                 ColdRestoreAction::Reset => {
                     file.status = SessionStatus::Connecting;
+                    // A blocking prompt recorded by a now-stale session is
+                    // no longer actionable. Dropping the subtype keeps the
+                    // rewrite (seen as a watcher `Changed` event by every
+                    // running instance) from re-raising its desktop push.
+                    file.notification = None;
                     if let Err(e) = write_atomic(&entry.path, &file) {
                         // Still load the in-memory copy so the user
                         // sees status; the disk lag is tolerable.
@@ -300,6 +305,26 @@ mod tests {
         // Reset writes the reset version back to disk.
         let on_disk = read(&p).unwrap().unwrap();
         assert_eq!(on_disk.status, SessionStatus::Connecting);
+    }
+
+    /// Regression: a stale file that recorded a blocking notification
+    /// subtype (e.g. `idle_prompt`) must not carry it through `Reset`.
+    /// The rewrite fires the status watcher in every running daruda
+    /// instance, and a preserved subtype re-raises a desktop push for
+    /// a prompt that is long gone.
+    #[test]
+    fn run_reset_clears_stale_notification() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = path_for(dir.path(), "stale-notif");
+        let mut f = file_aged(SessionStatus::Idle, Duration::from_secs(600));
+        f.notification = Some(crate::hooks::events::NotificationType::IdlePrompt);
+        write_atomic(&p, &f).unwrap();
+
+        let loaded = run(dir.path(), &policy()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].notification, None);
+        let on_disk = read(&p).unwrap().unwrap();
+        assert_eq!(on_disk.notification, None);
     }
 
     #[test]

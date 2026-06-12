@@ -65,8 +65,7 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
     // and — on project close — the main area.
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -108,7 +107,6 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
         focused_pane_id: 0,
         active_dock_view: LeftDockView::default(),
         active_right_panel_view: RightDockView::default(),
-        active_usage_window: UsageWindow::default(),
         window_open_policy: WindowOpenPolicy::default(),
         next_group_id: 0,
         project_tabs: BTreeMap::new(),
@@ -148,8 +146,7 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
 fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -206,7 +203,6 @@ fn restore_into_empty_workspace_applies_dock_state(cx: &mut TestAppContext) {
         focused_pane_id: 0,
         active_dock_view: LeftDockView::default(),
         active_right_panel_view: RightDockView::default(),
-        active_usage_window: UsageWindow::default(),
         window_open_policy: WindowOpenPolicy::default(),
         next_group_id: 0,
         project_tabs: BTreeMap::new(),

@@ -64,7 +64,6 @@ fn test_restore_state_applies_dock_sizes(cx: &mut TestAppContext) {
             active_lane_id: 0,
             active_dock_view: daruda_store::project::LeftDockView::default(),
             active_right_panel_view: daruda_store::project::RightDockView::default(),
-            active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: vec![],
             active_tab_index: 0,
             focused_pane_id: 0,
@@ -174,7 +173,6 @@ fn test_restore_state_rebuilds_horizontal_split(cx: &mut TestAppContext) {
         active_lane_id: 0,
         active_dock_view: daruda_store::project::LeftDockView::default(),
         active_right_panel_view: daruda_store::project::RightDockView::default(),
-        active_usage_window: daruda_store::project::UsageWindow::default(),
         tabs: Vec::new(),
         active_tab_index: 0,
         focused_pane_id: 11,
@@ -264,7 +262,6 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
         active_lane_id: 0,
         active_dock_view: daruda_store::project::LeftDockView::default(),
         active_right_panel_view: daruda_store::project::RightDockView::default(),
-        active_usage_window: daruda_store::project::UsageWindow::default(),
         tabs: Vec::new(),
         active_tab_index: 0,
         focused_pane_id: 3,
@@ -312,7 +309,6 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
         active_lane_id: 0,
         active_dock_view: daruda_store::project::LeftDockView::default(),
         active_right_panel_view: daruda_store::project::RightDockView::default(),
-        active_usage_window: daruda_store::project::UsageWindow::default(),
         tabs: vec![SerializedTab {
             layout: SerializedLayout::Leaf {
                 pane_id: 1,

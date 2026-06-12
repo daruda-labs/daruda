@@ -1,15 +1,8 @@
-//! Right-panel Usage tab configuration: token-pricing constants and
-//! API poll cadence.
+//! Right-panel Usage tab configuration: API poll cadence.
 //!
 //! Sample `config.toml`:
 //!
 //! ```toml
-//! [usage.pricing]
-//! input_per_mtok       = 3.0
-//! output_per_mtok      = 15.0
-//! cache_read_per_mtok  = 0.30
-//! cache_write_per_mtok = 3.75
-//!
 //! [usage.poll]
 //! limits_secs = 300   # 5 min — Anthropic OAuth /api/oauth/usage
 //! status_secs = 300   # 5 min — status.claude.com service indicator
@@ -28,36 +21,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct UsageConfig {
-    pub pricing: PricingConfig,
     pub poll: PollConfig,
-}
-
-/// Per-million-token prices in USD. Defaults match Sonnet-4.6 list
-/// pricing as of 2026-05. Users override when Anthropic publishes a
-/// new rate sheet or when their plan has contracted rates.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(default)]
-pub struct PricingConfig {
-    pub input_per_mtok: f64,
-    pub output_per_mtok: f64,
-    pub cache_read_per_mtok: f64,
-    pub cache_write_per_mtok: f64,
-}
-
-const DEFAULT_INPUT_PRICE: f64 = 3.0;
-const DEFAULT_OUTPUT_PRICE: f64 = 15.0;
-const DEFAULT_CACHE_READ_PRICE: f64 = 0.30;
-const DEFAULT_CACHE_WRITE_PRICE: f64 = 3.75;
-
-impl Default for PricingConfig {
-    fn default() -> Self {
-        Self {
-            input_per_mtok: DEFAULT_INPUT_PRICE,
-            output_per_mtok: DEFAULT_OUTPUT_PRICE,
-            cache_read_per_mtok: DEFAULT_CACHE_READ_PRICE,
-            cache_write_per_mtok: DEFAULT_CACHE_WRITE_PRICE,
-        }
-    }
 }
 
 /// Background-poll cadence for the two endpoints feeding the Usage
@@ -115,15 +79,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pricing_defaults_match_sonnet_4_6_list_prices() {
-        let p = PricingConfig::default();
-        assert_eq!(p.input_per_mtok, 3.0);
-        assert_eq!(p.output_per_mtok, 15.0);
-        assert_eq!(p.cache_read_per_mtok, 0.30);
-        assert_eq!(p.cache_write_per_mtok, 3.75);
-    }
-
-    #[test]
     fn poll_defaults_are_five_minutes() {
         let p = PollConfig::default();
         assert_eq!(p.limits_secs, 300);
@@ -173,18 +128,6 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_partial_pricing_keeps_other_defaults() {
-        let toml = r#"
-            [pricing]
-            input_per_mtok = 5.0
-        "#;
-        let c: UsageConfig = toml::from_str(toml).unwrap();
-        assert_eq!(c.pricing.input_per_mtok, 5.0);
-        assert_eq!(c.pricing.output_per_mtok, DEFAULT_OUTPUT_PRICE);
-        assert_eq!(c.poll, PollConfig::default());
-    }
-
-    #[test]
     fn deserializes_partial_poll_keeps_other_defaults() {
         let toml = r#"
             [poll]
@@ -193,18 +136,11 @@ mod tests {
         let c: UsageConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.poll.limits_secs, 0);
         assert_eq!(c.poll.status_secs, DEFAULT_STATUS_SECS);
-        assert_eq!(c.pricing, PricingConfig::default());
     }
 
     #[test]
     fn round_trips_through_toml() {
         let original = UsageConfig {
-            pricing: PricingConfig {
-                input_per_mtok: 2.5,
-                output_per_mtok: 10.0,
-                cache_read_per_mtok: 0.25,
-                cache_write_per_mtok: 3.0,
-            },
             poll: PollConfig {
                 limits_secs: 600,
                 status_secs: 0,

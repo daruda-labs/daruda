@@ -710,7 +710,6 @@ fn test_restore_state_rebuilds_all_lanes(cx: &mut TestAppContext) {
             active_lane_id: 5,
             active_dock_view: daruda_store::project::LeftDockView::default(),
             active_right_panel_view: daruda_store::project::RightDockView::default(),
-            active_usage_window: daruda_store::project::UsageWindow::default(),
             tabs: Vec::new(),
             active_tab_index: 0,
             focused_pane_id: 201,
@@ -781,8 +780,7 @@ fn test_save_state_captures_bootstrapped_lane(cx: &mut TestAppContext) {
 fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -852,7 +850,6 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
             focused_pane_id: 1,
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::default(),
-            active_usage_window: UsageWindow::default(),
             window_open_policy: WindowOpenPolicy::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
@@ -876,8 +873,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
     // empty-tab branch in `render` is reached (Task 2 guard).
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -949,7 +945,6 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             focused_pane_id: 1,
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::default(),
-            active_usage_window: UsageWindow::default(),
             window_open_policy: WindowOpenPolicy::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
@@ -975,8 +970,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
 fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -1024,7 +1018,6 @@ fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
             focused_pane_id: 0,
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::default(),
-            active_usage_window: UsageWindow::default(),
             window_open_policy: WindowOpenPolicy::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
@@ -1102,8 +1095,7 @@ fn test_save_state_captures_active_dock_view(cx: &mut TestAppContext) {
 fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -1147,7 +1139,6 @@ fn test_restore_state_applies_active_dock_view(cx: &mut TestAppContext) {
             focused_pane_id: 0,
             active_dock_view: LeftDockView::GitChanges,
             active_right_panel_view: RightDockView::default(),
-            active_usage_window: UsageWindow::default(),
             window_open_policy: WindowOpenPolicy::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
@@ -1194,8 +1185,7 @@ fn test_save_state_captures_active_right_panel_view(cx: &mut TestAppContext) {
 fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
+        WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
     };
     use std::collections::BTreeMap;
 
@@ -1239,7 +1229,6 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
             focused_pane_id: 0,
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::Tasks,
-            active_usage_window: UsageWindow::default(),
             window_open_policy: WindowOpenPolicy::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
@@ -1252,102 +1241,6 @@ fn test_restore_state_applies_active_right_panel_view(cx: &mut TestAppContext) {
         assert_eq!(
             ws.right_dock_view,
             daruda_store::project::RightDockView::Tasks
-        );
-    });
-}
-
-#[gpui::test]
-fn test_save_state_captures_active_usage_window(cx: &mut TestAppContext) {
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_save_usage_window");
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
-    let _ = wh.update(cx, |_root, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.set_usage_window(daruda_store::project::UsageWindow::Last5h, window, cx);
-        });
-    });
-    let (workspace_state, _) = ws
-        .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
-        .expect("snapshot_for_disk");
-    assert_eq!(
-        workspace_state.active_usage_window,
-        daruda_store::project::UsageWindow::Last5h
-    );
-    // `set_usage_window` must also keep the dropdown in sync — any
-    // future caller that bypasses the Confirm event path (action
-    // handler, keyboard shortcut, programmatic restore, …) needs the
-    // visible UI to follow `Workspace::usage_window`.
-    ws.read_with(cx, |ws, cx_inner| {
-        let v = ws.claude.usage_select.read(cx_inner).selected_value();
-        assert_eq!(
-            v.map(|s| s.as_ref()),
-            Some(daruda_store::project::UsageWindow::Last5h.slug())
-        );
-    });
-}
-
-#[gpui::test]
-fn test_restore_state_applies_active_usage_window(cx: &mut TestAppContext) {
-    use daruda_store::project::{
-        DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
-        UsageWindow, WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState,
-        WorkspaceUuid,
-    };
-    use std::collections::BTreeMap;
-
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path("/tmp/test_restore_usage_window");
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
-    let _ = wh.update(cx, |_root, window, cx| {
-        ws.update(cx, |ws, cx| {
-            let project_uuid = ProjectUuid::new();
-            let project_state = ProjectState {
-                schema_version: WORKSPACE_SCHEMA_VERSION,
-                uuid: project_uuid,
-                root: std::path::PathBuf::from("/tmp/test_restore_usage_window"),
-                name: None,
-                lanes: Vec::new(),
-                last_active_lane_id: 0,
-                next_lane_id: 0,
-                default_branch: None,
-                base_branch: None,
-            };
-            let mut project_overrides = BTreeMap::new();
-            project_overrides.insert(project_uuid, ProjectOverride::default());
-            let workspace_state = WorkspaceState {
-                schema_version: WORKSPACE_SCHEMA_VERSION,
-                uuid: WorkspaceUuid::new(),
-                project_ids: vec![project_uuid],
-                project_overrides,
-                groups: Vec::new(),
-                active_project: Some(project_uuid),
-                active_lane: None,
-                docks: DockStates::default(),
-                window: WindowState::default(),
-                font_size: 13.0,
-                vertical_spacing: 1.0,
-                horizontal_spacing: 1.0,
-                focused_pane_id: 0,
-                active_dock_view: LeftDockView::default(),
-                active_right_panel_view: RightDockView::default(),
-                active_usage_window: UsageWindow::Last24h,
-                window_open_policy: WindowOpenPolicy::default(),
-                next_group_id: 0,
-                project_tabs: BTreeMap::new(),
-            };
-            ws.restore_from_disk(&workspace_state, &[project_state], window, cx);
-        });
-    });
-    ws.read_with(cx, |ws, cx_inner| {
-        assert_eq!(
-            ws.claude.usage_window,
-            daruda_store::project::UsageWindow::Last24h
-        );
-        // Picker selection follows the restored state.
-        let v = ws.claude.usage_select.read(cx_inner).selected_value();
-        assert_eq!(
-            v.map(|s| s.as_ref()),
-            Some(daruda_store::project::UsageWindow::Last24h.slug())
         );
     });
 }

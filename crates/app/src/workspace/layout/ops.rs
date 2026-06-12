@@ -223,6 +223,16 @@ impl Workspace {
         }
     }
 
+    /// End any live dock/divider resize drag. Called when a move event
+    /// arrives with the primary button no longer held — the release that
+    /// should have ended the drag happened outside the window, where the
+    /// bubble-phase `on_mouse_up` never fires (it fails the root hit-test).
+    /// Without this, the stale drag keeps resizing on the next in-window move.
+    pub(in crate::workspace) fn end_stale_resize_drags(&mut self, cx: &mut Context<Self>) {
+        self.end_dock_drag(cx);
+        self.end_divider_drag(cx);
+    }
+
     /// Resize the bottom dock to a preset height matching N rows of
     /// macro tiles. Wires through the same path as a drag-release:
     /// `Dock::resize` (clamps to min/max), `resize_all_tabs` so PTYs

@@ -205,14 +205,6 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
     /// `set_right_dock_view` without re-entering the dock context.
     pub workspace: WeakEntity<Workspace>,
-    /// Snapshot of `Workspace::usage` for the Usage tab renderer.
-    /// Carried in the snap so the per-tab body can read it without
-    /// re-entering the workspace entity.
-    pub usage: daruda_claude::usage::UsageState,
-    /// Per-million-token pricing applied when rendering the Usage
-    /// tab's cost columns. Sourced from `Workspace::usage_pricing` so
-    /// the render pass never reaches into the workspace entity.
-    pub usage_pricing: daruda_claude::usage::UsagePricing,
     /// Latest 5h / 7d plan-rate snapshot. Default-constructed (both
     /// windows `None`) before the first successful `/api/oauth/usage`
     /// fetch, in which case the renderer draws placeholder gauges.
@@ -220,14 +212,13 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Latest service-status snapshot. Default is `Unknown`, which
     /// the renderer maps to a dimmed pill.
     pub service_status: daruda_claude::ServiceStatus,
-    /// Active time window for the Usage tab. The renderer uses this
-    /// to compute the cutoff and pick the dropdown's selected option
-    /// without dipping back into the workspace.
-    pub usage_window: daruda_store::project::UsageWindow,
-    /// Entity handle for the Usage tab's time-window dropdown.
-    /// Cloned cheaply each frame; the workspace is the source of
-    /// truth for selection state.
-    pub usage_select: gpui::Entity<crate::ui::select::SelectState>,
+    /// Locally aggregated activity (today + 7-day chart + totals).
+    /// Default-constructed (empty) before the first aggregation, in
+    /// which case the renderer draws zeroed activity cards.
+    pub activity: daruda_claude::ActivityStats,
+    /// Whether a manual usage refresh is in flight, so the ⟳ button can
+    /// render a disabled / spinning state.
+    pub usage_refresh_in_flight: bool,
     /// Per-lane projection of the app-wide `SkillsState` Global
     /// for the Skills tab renderer. Carried by-value so the panel
     /// renderer never re-enters the workspace entity (G2 / pitfall §4)

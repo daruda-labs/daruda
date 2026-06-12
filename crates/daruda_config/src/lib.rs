@@ -51,7 +51,7 @@ pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
 pub use theme_presets::{PRESETS as THEME_PRESETS, ThemePreset};
 pub use ui_theme_presets::{PRESETS as UI_THEME_PRESETS, UiThemePreset};
-pub use usage::{PollConfig, PricingConfig, UsageConfig};
+pub use usage::{PollConfig, UsageConfig};
 pub use window::WindowConfig;
 
 /// Which built-in presets to use for the two independent theme axes

@@ -12,3 +12,4 @@ target/
 
 # Patch backup files
 **/*.orig
+.superpowers

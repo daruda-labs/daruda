@@ -17,7 +17,6 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 use daruda_claude::hooks::status_file::{Source, StatusFile};
-use daruda_claude::usage::UsageDelta;
 use gpui::{Context, Task};
 
 use crate::hooks::jsonl_watcher::{self, JsonlEvent, JsonlWatcherHandle};
@@ -61,9 +60,6 @@ pub(in crate::workspace) fn spawn(
 impl Workspace {
     /// Convert one `JsonlEvent` into a `StatusFile(source = Jsonl)`
     /// and feed it to the store, applying the hook-wins race policy.
-    /// Also folds the event's optional `usage` delta into the
-    /// workspace's `UsageState` so the right-dock Usage tab tracks
-    /// token totals from the same channel.
     /// Notifies only when something changed.
     pub fn apply_claude_jsonl_event(&mut self, event: JsonlEvent, cx: &mut Context<Self>) {
         let JsonlEvent {
@@ -72,19 +68,7 @@ impl Workspace {
             jsonl_path,
             status,
             timestamp,
-            usage,
         } = event;
-
-        let mut changed = false;
-        if let Some(delta) = usage.filter(|d| !d.is_empty()) {
-            // The event's `timestamp` is `last_meaningful_timestamp`
-            // from the parsed entries — the JSONL's own clock.
-            // Forwarding it (instead of `SystemTime::now()`) is what
-            // lets the Usage tab apply a meaningful time-window
-            // filter even on cold-restored historical sessions.
-            self.update_usage(session_id.clone(), cwd.clone(), &delta, timestamp.into());
-            changed = true;
-        }
 
         let file = StatusFile {
             schema_version: daruda_claude::hooks::status_file::SCHEMA_VERSION,
@@ -110,33 +94,15 @@ impl Workspace {
             file.source,
         );
         if self.claude.claude_status.update(file) {
-            changed = true;
             #[cfg(debug_assertions)]
             {
                 let (sid, cwd, event, source) = dbg_fields;
                 self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
             }
-        }
-        if changed {
             cx.notify();
             self.notify_right_dock(cx);
             self.notify_left_dock(cx);
         }
-    }
-
-    /// Fold one usage delta into the in-memory `UsageState`.
-    /// Caller is responsible for `cx.notify()` since this is invoked
-    /// alongside other workspace updates that batch a single notify.
-    pub(in crate::workspace) fn update_usage(
-        &mut self,
-        session_id: String,
-        worktree_path: PathBuf,
-        delta: &UsageDelta,
-        when: std::time::SystemTime,
-    ) {
-        self.claude
-            .usage
-            .apply(&session_id, worktree_path, delta, when);
     }
 }
 
@@ -173,14 +139,6 @@ impl Workspace {
         // duplicate events during the overlap window.
         self.claude._jsonl_watcher_shutdown = None;
         self.claude._jsonl_event_pump = None;
-
-        // The old watcher's per-session uuid tracker is gone with
-        // the worker thread, and the new watcher's cold-restore
-        // walks every jsonl file from scratch — emitting historical
-        // assistant entries again. Without this reset, those re-emits
-        // would `apply` on top of the existing UsageState and
-        // double-count every prior session's tokens.
-        self.claude.usage = daruda_claude::usage::UsageState::default();
 
         let should_run = self.claude.claude_status_enabled;
         if !should_run {

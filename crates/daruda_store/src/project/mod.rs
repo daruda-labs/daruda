@@ -17,9 +17,7 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-pub use lane::{
-    LaneId, LaneKind, LaneStatus, LeftDockView, RightDockView, SerializedLane, UsageWindow,
-};
+pub use lane::{LaneId, LaneKind, LaneStatus, LeftDockView, RightDockView, SerializedLane};
 pub use persistence::{
     RECENT_MAX, delete_project_state_in, delete_workspace_state_in, for_each_project_state_in,
     for_each_workspace_state_in, is_uuid_filename_stem, load_project_state_in, load_recent_in,

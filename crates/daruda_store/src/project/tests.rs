@@ -302,62 +302,6 @@ fn right_panel_view_round_trips_as_snake_case() {
     }
 }
 
-#[test]
-fn usage_window_round_trips_as_snake_case() {
-    for (v, expect) in [
-        (UsageWindow::All, "\"all\""),
-        (UsageWindow::Last5h, "\"last_5h\""),
-        (UsageWindow::Last24h, "\"last_24h\""),
-        (UsageWindow::Last7d, "\"last_7d\""),
-    ] {
-        let json = serde_json::to_string(&v).unwrap();
-        assert_eq!(json, expect);
-        let back: UsageWindow = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, v);
-    }
-}
-
-#[test]
-fn usage_window_slug_matches_serde_value() {
-    for variant in UsageWindow::ALL {
-        let slug = variant.slug();
-        let from_slug = UsageWindow::from_slug(slug).unwrap();
-        assert_eq!(from_slug, *variant);
-        let json = serde_json::to_string(variant).unwrap();
-        assert_eq!(json, format!("\"{slug}\""));
-    }
-}
-
-#[test]
-fn usage_window_from_slug_returns_none_for_unknown() {
-    assert!(UsageWindow::from_slug("definitely-not-a-window").is_none());
-}
-
-#[test]
-fn usage_window_duration_is_some_for_bounded_variants() {
-    use std::time::Duration;
-    assert_eq!(UsageWindow::All.duration(), None);
-    assert_eq!(
-        UsageWindow::Last5h.duration(),
-        Some(Duration::from_secs(5 * 3600))
-    );
-    assert_eq!(
-        UsageWindow::Last7d.duration(),
-        Some(Duration::from_secs(7 * 24 * 3600))
-    );
-}
-
-#[test]
-fn usage_window_cutoff_subtracts_duration_from_now() {
-    use std::time::{Duration, SystemTime};
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    assert_eq!(UsageWindow::All.cutoff(now), None);
-    assert_eq!(
-        UsageWindow::Last5h.cutoff(now),
-        Some(now - Duration::from_secs(5 * 3600))
-    );
-}
-
 // ---- SerializedTab (low-level) round-trips ----
 
 #[test]
@@ -465,7 +409,6 @@ mod new_schema_fixtures {
             focused_pane_id: Default::default(),
             active_dock_view: LeftDockView::default(),
             active_right_panel_view: RightDockView::default(),
-            active_usage_window: Default::default(),
             window_open_policy: Default::default(),
             next_group_id: Default::default(),
             project_tabs: BTreeMap::new(),

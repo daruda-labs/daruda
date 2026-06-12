@@ -295,6 +295,24 @@ impl Workspace {
         }
     }
 
+    /// Settle a live file-view selection drag (char or markdown block).
+    /// Shared by the workspace mouse-up and the missed-release branch of
+    /// the root `on_mouse_move`: a button released outside the window
+    /// never reaches the bubble-phase mouse-up, and a markdown block's own
+    /// bubble handler only fires when the cursor re-enters over that very
+    /// block — re-entering over the body padding or another region would
+    /// otherwise leave the selection stuck `InProgress`. The root move
+    /// handler spans the whole window, so routing the settle through here
+    /// catches the release wherever the cursor lands. No-op when no drag
+    /// is in progress (`end_selection_drag` is idempotent).
+    pub(in crate::workspace) fn end_file_selection_drag(&mut self, cx: &mut Context<Self>) {
+        if let Some(fv) = self.focused_file_view_mut()
+            && fv.end_selection_drag()
+        {
+            cx.notify();
+        }
+    }
+
     /// Surface a pane-spawn failure on both the pinned status bar and
     /// the transient toast queue. Shared by `add_tab` and
     /// `split_focused_pane` to report failures with the same wording.

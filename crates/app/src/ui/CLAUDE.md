@@ -53,9 +53,11 @@ ui/
 ├── button.rs       # button / button_primary / button_danger / button_bare
 ├── checkbox.rs     # checkbox(id, label)
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
+├── group_box.rs    # group_box() factory over gpui_component::GroupBox (.outline()/.fill()/title)
 ├── divider.rs      # Divider re-export
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
 ├── menu.rs         # ContextMenuExt / DropdownMenu / PopupMenu / PopupMenuItem re-exports
+├── progress.rs     # progress(value) factory over gpui_component::Progress (Styled fill bar)
 ├── select.rs       # SelectOption + state_with_options + select(&state)
 ├── tab_bar.rs      # tab_bar(id) + tab(label) factories over gpui_component (Small + underline; tab() bakes 10px x-padding)
 └── tooltip.rs      # tooltip::text(content) closure helper
@@ -275,7 +277,7 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor patches in `crates/gpui_component/`
 
-Nine small patches over upstream `longbridge/gpui-component` v0.5.1
+Ten small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
 gap / height control working. Re-apply on rev bump:
 
@@ -290,9 +292,22 @@ gap / height control working. Re-apply on rev bump:
 | Small Underline tab height 30 → 28 | `src/tab/tab.rs` (`TabVariant::height(Size::Small)`) | drop the Small + Underline tab box height from 30px to 28px so the left/right dock `tab_bar()` strip matches daruda's terminal tab bar height (`palette::TAB_BAR_HEIGHT = 28`). Inner metrics (inner_height 22, inner_margins top 2 / bottom 3) unchanged — `items_center` re-centers the inner h_flex inside the 28px box. |
 | Button hover text color | `src/button/button.rs` (`RenderOnce::render`) | replace `text_color(crate::red_400())` with `text_color(hover_style.fg)` in the `.hover(...)` closure — upstream accidentally left a debug red literal instead of the theme foreground color, making all button text turn red on hover. |
 | PopupMenu small size | `src/menu/popup_menu.rs` (`PopupMenu::small` + `render_menu_item`) | change `pub(crate)` to `pub`; also wire `Size::Small` into the font — `text_xs` for small, `text_sm` otherwise (upstream only shrank item height to 20 px but left font at `text_sm`). |
+| GroupBox compact padding + gap | `src/group_box.rs` (`RenderOnce::render`) | content padding `p_4`→`p_2` (16→8px) and child spacing `gap_4`→`gap_1` (16→4px) so `.fill()`/`.outline()`/`.normal()` cards stay compact in the narrow right dock (Usage tab gauge bars + 3-up stat grid). Upstream's 16px overflows the 3-column stat row and over-spaces the gauge bar. |
 
 Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).
+
+### Enabled upstream modules
+
+daruda's vendored copy trims `src/lib.rs` to the modules in use; some
+upstream widget modules ship as files but aren't `pub mod`-declared.
+These are enabled on demand by adding the `pub mod` line (re-add on a
+rev bump if the re-vendor trims them again):
+
+| Module | `pub mod` added | Consumed by |
+|---|---|---|
+| `progress` | `src/lib.rs` | `crate::ui::progress` → Usage tab gauge bars |
+| `group_box` | `src/lib.rs` | `crate::ui::group_box` → Usage tab gauge cards (`.outline()`) + totals (`.normal()`) |
 
 The patches live directly in the vendored tree (not in
 `patches/<name>.patch`) because `crates/gpui_component/` is an

@@ -193,7 +193,6 @@ impl Workspace {
             focused_pane_id: self.main_area.focused_pane_id,
             active_dock_view: self.left_dock_view,
             active_right_panel_view: self.right_dock_view,
-            active_usage_window: self.claude.usage_window,
             window_open_policy: self.window_open_policy,
             next_group_id: self.next_group_id,
             project_tabs,
@@ -315,12 +314,6 @@ impl Workspace {
         });
         self.left_dock_view = workspace.active_dock_view;
         self.right_dock_view = workspace.active_right_panel_view;
-        self.claude.usage_window = workspace.active_usage_window;
-        let restored_window = workspace.active_usage_window;
-        let slug = gpui::SharedString::from(restored_window.slug());
-        self.claude.usage_select.update(cx, |s, cx_inner| {
-            s.set_selected_value(&slug, window, cx_inner);
-        });
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
         self.bottom_dock.update(cx, |d, _| {
