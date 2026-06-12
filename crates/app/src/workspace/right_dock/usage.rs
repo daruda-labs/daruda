@@ -169,11 +169,23 @@ fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
         .flex()
         .flex_col()
         .gap(px(theme::USAGE_CARD_GAP))
-        .child(gauge_card(strings::usage_limit_5h_label(), limits.five_hour.as_ref(), cx))
-        .child(gauge_card(strings::usage_limit_7d_label(), limits.seven_day.as_ref(), cx));
+        .child(gauge_card(
+            strings::usage_limit_5h_label(),
+            limits.five_hour.as_ref(),
+            cx,
+        ))
+        .child(gauge_card(
+            strings::usage_limit_7d_label(),
+            limits.seven_day.as_ref(),
+            cx,
+        ));
 
     if let Some(opus) = limits.seven_day_opus.as_ref() {
-        col = col.child(gauge_card(strings::usage_limit_opus_label(), Some(opus), cx));
+        col = col.child(gauge_card(
+            strings::usage_limit_opus_label(),
+            Some(opus),
+            cx,
+        ));
     }
     col
 }
@@ -194,9 +206,7 @@ fn gauge_card(
     let Some(win) = window else {
         // Placeholder: label + dim bar + "Unavailable".
         return card
-            .child(
-                gauge_header_row(label, None, t.muted_text, t.faint_text),
-            )
+            .child(gauge_header_row(label, None, t.muted_text, t.faint_text))
             .child(gauge_bar(0.0, t.gauge_track_bg))
             .into_any_element();
     };
@@ -209,7 +219,12 @@ fn gauge_card(
         .map(strings::format_reset_countdown);
 
     let mut card = card
-        .child(gauge_header_row(label, Some(pct), t.faint_text, t.muted_text))
+        .child(gauge_header_row(
+            label,
+            Some(pct),
+            t.faint_text,
+            t.muted_text,
+        ))
         .child(gauge_bar(pct, color));
     if let Some(reset) = reset_text {
         card = card.child(
@@ -289,8 +304,16 @@ fn today_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
                 .flex_row()
                 .w_full()
                 .gap(px(theme::USAGE_STAT_GRID_GAP))
-                .child(stat_card(fmt_count(messages), strings::usage_stat_messages(), cx))
-                .child(stat_card(fmt_count(sessions), strings::usage_stat_sessions(), cx))
+                .child(stat_card(
+                    fmt_count(messages),
+                    strings::usage_stat_messages(),
+                    cx,
+                ))
+                .child(stat_card(
+                    fmt_count(sessions),
+                    strings::usage_stat_sessions(),
+                    cx,
+                ))
                 .child(stat_card(
                     fmt_count(tool_calls),
                     strings::usage_stat_tool_calls(),
@@ -383,7 +406,12 @@ fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> AnyElement {
 /// One chart column: the bar (bottom-aligned) over its weekday label.
 /// `date` is the aggregator's `%Y-%m-%d` key; an unparseable date falls
 /// back to a blank label and "not today".
-fn chart_bar(date: &str, today: chrono::NaiveDate, height: f32, cx: &gpui::App) -> impl IntoElement {
+fn chart_bar(
+    date: &str,
+    today: chrono::NaiveDate,
+    height: f32,
+    cx: &gpui::App,
+) -> impl IntoElement {
     use chrono::Datelike as _;
     let parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
     let is_today = parsed == Some(today);
@@ -626,7 +654,11 @@ fn chart_heights(messages: &[u64], max_px: f32, min_px: f32) -> Vec<f32> {
 /// Returns `None` when there is no plan metadata at all (no badge).
 fn plan_badge_label(plan: Option<&PlanInfo>) -> Option<String> {
     let plan = plan?;
-    let sub = plan.subscription_type.as_deref().unwrap_or("").to_lowercase();
+    let sub = plan
+        .subscription_type
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
     let tier = plan.rate_limit_tier.as_deref().unwrap_or("").to_lowercase();
 
     let base = match sub.as_str() {
@@ -735,8 +767,14 @@ mod tests {
     #[test]
     fn cache_age_bucket_boundaries() {
         assert_eq!(cache_age_bucket(None), CacheAge::Never);
-        assert_eq!(cache_age_bucket(Some(Duration::from_secs(0))), CacheAge::JustNow);
-        assert_eq!(cache_age_bucket(Some(Duration::from_secs(59))), CacheAge::JustNow);
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(0))),
+            CacheAge::JustNow
+        );
+        assert_eq!(
+            cache_age_bucket(Some(Duration::from_secs(59))),
+            CacheAge::JustNow
+        );
         assert_eq!(
             cache_age_bucket(Some(Duration::from_secs(60))),
             CacheAge::Minutes(1)
@@ -778,10 +816,22 @@ mod tests {
         crate::test_support::init_gpui_component(cx);
         cx.update(|_cx| {
             assert_eq!(indicator_color(StatusIndicator::None), theme::SIGNAL_GREEN);
-            assert_eq!(indicator_color(StatusIndicator::Minor), theme::SIGNAL_YELLOW);
-            assert_eq!(indicator_color(StatusIndicator::Major), theme::SIGNAL_ORANGE);
-            assert_eq!(indicator_color(StatusIndicator::Critical), theme::SIGNAL_RED);
-            assert_eq!(indicator_color(StatusIndicator::Unknown), theme::TEXT_TERTIARY);
+            assert_eq!(
+                indicator_color(StatusIndicator::Minor),
+                theme::SIGNAL_YELLOW
+            );
+            assert_eq!(
+                indicator_color(StatusIndicator::Major),
+                theme::SIGNAL_ORANGE
+            );
+            assert_eq!(
+                indicator_color(StatusIndicator::Critical),
+                theme::SIGNAL_RED
+            );
+            assert_eq!(
+                indicator_color(StatusIndicator::Unknown),
+                theme::TEXT_TERTIARY
+            );
         });
     }
 }

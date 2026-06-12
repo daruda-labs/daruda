@@ -8,6 +8,7 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
 
 impl Workspace {
@@ -474,7 +475,7 @@ impl Workspace {
                     diagram_dark,
                 )
             },
-            move |ws, content, cx| {
+            move |ws, outcome, cx| {
                 // Apply only if a file pane still matches the load
                 // criteria — the user may have switched modes or
                 // closed the tab while the load was in flight.
@@ -486,12 +487,41 @@ impl Workspace {
                             && fv.view_mode == mode
                     })
                 });
-                if let Some(pane) = pane_match
-                    && let Some(fv) = pane.file_view_mut()
-                {
-                    fv.content = content;
-                    cx.notify();
+                let Some(pane) = pane_match else { return };
+                let Some(fc) = pane.file_content_mut() else {
+                    return;
+                };
+                match outcome {
+                    LoadOutcome::Plain(content) => {
+                        fc.view.content = content;
+                    }
+                    LoadOutcome::Raw { text } => {
+                        // The editor entity owns the raw text from here on;
+                        // feed it exactly once. `set_value` needs a live
+                        // `&mut Window`, so re-enter the owning window.
+                        fc.saved_text = text.clone();
+                        fc.view.content = PaneFileContent::LoadedRaw;
+                        let editor = fc.editor_state.clone();
+                        let entity_id = cx.entity_id();
+                        if let Some(wh) =
+                            crate::window_registry::WindowRegistry::handle_for_workspace(
+                                entity_id, cx,
+                            )
+                        {
+                            crate::windows::try_update_workspace_window(
+                                wh,
+                                cx,
+                                "file_view.load_raw_editor",
+                                |window, cx_w| {
+                                    editor.update(cx_w, |state, cx_s| {
+                                        state.set_value(text, window, cx_s);
+                                    });
+                                },
+                            );
+                        }
+                    }
                 }
+                cx.notify();
             },
         )
         .detach();

@@ -1,5 +1,6 @@
 mod annotation_ops_tests;
 mod config_mirror;
+mod diag_scroll;
 mod dnd;
 mod dock;
 mod durable;

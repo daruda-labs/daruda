@@ -1,0 +1,23 @@
+--- a/crates/gpui/src/view.rs
++++ b/crates/gpui/src/view.rs
+@@ -174,9 +174,19 @@
+                     let refreshing = mem::replace(&mut window.refreshing, true);
+                     let prepaint_start = window.prepaint_index();
+-                    let (mut element, accessed_entities) = cx.detect_accessed_entities(|cx| {
++                    let (mut element, mut accessed_entities) = cx.detect_accessed_entities(|cx| {
+                         let mut element = (self.render)(self, window, cx);
+                         element.layout_as_root(bounds.size.into(), window, cx);
+                         element.prepaint_at(bounds.origin, window, cx);
+                         element
+                     });
++                    // Ensure the cached view always tracks itself in
++                    // `accessed_entities`, even when an out-of-element read
++                    // (e.g. resize_all_tabs during a lane swap) registered
++                    // this entity before `detect_accessed_entities` took its
++                    // "before" snapshot.  Without this, the set-difference
++                    // excludes `self` and gpui's tracked_entities loses this
++                    // view, so `cx.notify()` is silently dropped — frozen
++                    // screen.
++                    accessed_entities.insert(self.entity_id());
+ 
+                     let prepaint_end = window.prepaint_index();

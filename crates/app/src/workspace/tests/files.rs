@@ -1477,3 +1477,46 @@ async fn child_load_error_on_already_missing_lane_emits_no_warning(cx: &mut Test
         );
     });
 }
+
+#[gpui::test]
+async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
+    // Regression: the LaneId/LaneRef merge (73de52a) dropped the
+    // load-completion `set_value` into the raw editor, so every
+    // non-markdown file opened as an empty editor. The editor must
+    // hold the file text (and the saved-text baseline must match,
+    // so a freshly opened file is not dirty).
+    let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
+    // The test constructor skips WindowRegistry registration; the
+    // load-completion handler needs it to find the owning window.
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
+    });
+    let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
+    cx.run_until_parked();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.open_files_entry(id, std::path::PathBuf::from("a.txt"), window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, cx| {
+        let fc = ws.focused_file_content().expect("viewer open");
+        assert!(
+            matches!(
+                fc.view.content,
+                crate::workspace::main_area::file_view_pane::PaneFileContent::LoadedRaw
+            ),
+            "content should settle to LoadedRaw"
+        );
+        assert_eq!(
+            fc.editor_state.read(cx).text().to_string(),
+            "hello",
+            "editor must hold the file text after load"
+        );
+        assert_eq!(fc.saved_text, "hello", "saved baseline matches disk");
+    });
+}

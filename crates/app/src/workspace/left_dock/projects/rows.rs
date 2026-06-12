@@ -864,6 +864,8 @@ pub(in crate::workspace) fn worktree_row(
     let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
     let mut row = div()
         .id(SharedString::from(format!("lane-row-{project_id}-{wt_id}")))
+        // Expose to test debug_bounds so gpui::test can find this row.
+        .debug_selector(|| format!("lane-row-{project_id}-{wt_id}"))
         .group(row_group.clone())
         .flex()
         .flex_row()

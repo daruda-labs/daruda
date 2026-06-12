@@ -2015,3 +2015,23 @@ fn capture_attaches_osc8_url_id_to_correct_char_after_scrollout() {
         "the link must land on the ASCII char"
     );
 }
+
+#[test]
+fn diag_scroll_after_same_size_resize() {
+    let mut s = session_with(80, 3, 1024);
+    s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").unwrap();
+    assert!(s.line_buffer().wrapped_row_count(80) > 0);
+    // lane-switch tail: pending_resize fires resize with identical dims
+    s.resize(80, 3).unwrap();
+    // next output tick after activation
+    s.feed(b"").unwrap();
+    let max_scroll = s.line_buffer().wrapped_row_count(80);
+    assert!(max_scroll > 0, "scrollback wiped by same-size resize");
+    let before = s.viewport_row_offset();
+    s.scroll_viewport(-1).unwrap();
+    assert_ne!(
+        s.viewport_row_offset(),
+        before,
+        "scroll dead after same-size resize"
+    );
+}

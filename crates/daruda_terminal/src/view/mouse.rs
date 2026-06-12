@@ -851,6 +851,7 @@ impl TerminalView {
 
         let offset_before = self.session.viewport_row_offset();
         let _ = self.session.scroll_viewport(delta_lines);
+
         if self.session.viewport_row_offset() != offset_before {
             self.sync_viewport_scroll_tracking();
             self.apply_side_effects(cx);

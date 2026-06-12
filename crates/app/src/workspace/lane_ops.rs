@@ -541,6 +541,7 @@ impl Workspace {
         // it was inactive — `refresh_git_status` reconciles
         // `Lane.kind.branch` from the live `git status` result.
         self.refresh_git_status(target, cx);
+
         cx.notify();
     }
 
