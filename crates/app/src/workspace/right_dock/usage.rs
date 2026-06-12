@@ -336,26 +336,31 @@ fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
 // 7-day activity chart
 // ----------------------------------------------------------------
 
-/// "LAST 7 DAYS" heading + a bar chart over the seven calendar days
-/// ending today, weekday-labeled, with today highlighted. Days with no
-/// activity show a floor-height bar (the aggregator omits zero days, so
-/// the chart is built from the calendar — not `daily` — to keep the
-/// window contiguous and today always the trailing bar). Heights
-/// normalize to the busiest day in the window.
-fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
+/// "LAST 7 DAYS" heading + a bar chart over the most recent ≤7 days
+/// that have activity, weekday-labeled, with today highlighted. The
+/// aggregator stores only days with activity (ascending by date), so the
+/// trailing entries are the most recent active days — zero days are
+/// dropped, not padded. Today is matched by date (not position), so a
+/// zero-activity today simply isn't highlighted rather than
+/// mis-highlighting the last active day. Heights normalize to the
+/// busiest day in the window.
+fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> AnyElement {
     let today = chrono::Local::now().date_naive();
-    let days = last_7_days(today);
-    let messages: Vec<u64> = days
-        .iter()
-        .map(|d| {
-            let key = d.format("%Y-%m-%d").to_string();
-            activity
-                .daily
-                .iter()
-                .find(|a| a.date == key)
-                .map_or(0, |a| a.messages)
-        })
-        .collect();
+    let n = activity.daily.len();
+    let recent = &activity.daily[n.saturating_sub(7)..];
+
+    let block = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(SectionHeader::new(strings::usage_section_7day()));
+
+    // Nothing aggregated yet — just the heading, no empty chart frame.
+    if recent.is_empty() {
+        return block.into_any_element();
+    }
+
+    let messages: Vec<u64> = recent.iter().map(|d| d.messages).collect();
     let heights = chart_heights(
         &messages,
         theme::USAGE_CHART_BAR_MAX_HEIGHT,
@@ -368,27 +373,28 @@ fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
         .items_end()
         .w_full()
         .gap(px(theme::USAGE_CHART_BAR_GAP));
-    for (i, date) in days.iter().enumerate() {
-        row = row.child(chart_bar(*date, heights[i], *date == today, cx));
+    for (i, day) in recent.iter().enumerate() {
+        row = row.child(chart_bar(&day.date, today, heights[i], cx));
     }
 
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(strings::usage_section_7day()))
-        .child(row)
+    block.child(row).into_any_element()
 }
 
 /// One chart column: the bar (bottom-aligned) over its weekday label.
-fn chart_bar(date: chrono::NaiveDate, height: f32, is_today: bool, cx: &gpui::App) -> impl IntoElement {
+/// `date` is the aggregator's `%Y-%m-%d` key; an unparseable date falls
+/// back to a blank label and "not today".
+fn chart_bar(date: &str, today: chrono::NaiveDate, height: f32, cx: &gpui::App) -> impl IntoElement {
     use chrono::Datelike as _;
+    let parsed = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
+    let is_today = parsed == Some(today);
     let fill = if is_today {
         theme::USAGE_CHART_BAR_TODAY
     } else {
         theme::USAGE_CHART_BAR_OTHER
     };
-    let label = strings::usage_weekday_label(date.weekday().num_days_from_sunday() as u8);
+    let label = parsed
+        .map(|d| strings::usage_weekday_label(d.weekday().num_days_from_sunday() as u8))
+        .unwrap_or_default();
     let label_color = theme::current(cx).faint_text;
 
     div()
@@ -652,17 +658,6 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
     }
 }
 
-/// The seven calendar dates ending at `today`, ascending (so `today`
-/// is the trailing element). Built from the calendar rather than the
-/// activity log so the chart window stays contiguous and today is
-/// always present even on a zero-activity day.
-fn last_7_days(today: chrono::NaiveDate) -> Vec<chrono::NaiveDate> {
-    (0..7)
-        .rev()
-        .filter_map(|back| today.checked_sub_days(chrono::Days::new(back)))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,20 +761,6 @@ mod tests {
             cache_age_bucket(Some(Duration::from_secs(3 * 86_400))),
             CacheAge::Days(3)
         );
-    }
-
-    #[test]
-    fn last_7_days_is_contiguous_window_ending_today() {
-        let today = chrono::NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
-        let days = last_7_days(today);
-        assert_eq!(days.len(), 7);
-        // Trailing element is today; leading is six days earlier.
-        assert_eq!(days[6], today);
-        assert_eq!(days[0], chrono::NaiveDate::from_ymd_opt(2026, 6, 6).unwrap());
-        // Strictly ascending and contiguous (no gaps).
-        for w in days.windows(2) {
-            assert_eq!(w[1], w[0].succ_opt().unwrap());
-        }
     }
 
     #[gpui::test]
