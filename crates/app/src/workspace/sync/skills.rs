@@ -65,6 +65,10 @@ impl Workspace {
         let personal = scan::skills_personal_dir();
         cx.update_global::<SkillsState, _>(|state, _| {
             state.reload_scope(scope, lane.as_deref(), &personal);
+            if scope == SkillScope::Personal {
+                // ~/.claude/skills also sources @skills-dir plugins → refresh Plugin too.
+                state.reload_scope(SkillScope::Plugin, None, &personal);
+            }
         });
         cx.notify();
     }

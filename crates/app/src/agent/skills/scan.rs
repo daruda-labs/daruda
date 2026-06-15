@@ -47,6 +47,14 @@ pub fn skills_personal_dir() -> PathBuf {
 /// `SKILL.md`. Errors per entry are swallowed (the scanner must keep
 /// going if one skill fails to read) — caller relies on the `Vec`
 /// being non-fatal.
+///
+/// In the Personal scope, directories that contain a
+/// `.claude-plugin/plugin.json` are skipped: they are `@skills-dir` plugins
+/// (picked up by [`scan_skills_dir_plugins`]), not one-level personal skills,
+/// so skipping avoids double-listing. The skip is Personal-only because
+/// `scan_skills_dir_plugins` only recovers them from the personal root — in
+/// other scopes there is no recovery, so a plugin-manifest dir there is left
+/// to its own `SKILL.md` (if any) rather than silently dropped.
 pub fn scan_scope(scope_root: &Path, scope: SkillScope) -> Vec<Skill> {
     let read_dir = match std::fs::read_dir(scope_root) {
         Ok(rd) => rd,
@@ -57,6 +65,12 @@ pub fn scan_scope(scope_root: &Path, scope: SkillScope) -> Vec<Skill> {
     for entry in read_dir.flatten() {
         let path = entry.path();
         if !path.is_dir() {
+            continue;
+        }
+        // Personal-only: these become @skills-dir plugins via
+        // scan_skills_dir_plugins, so skip here to avoid double-listing.
+        if scope == SkillScope::Personal && path.join(".claude-plugin").join("plugin.json").exists()
+        {
             continue;
         }
         let Some(skill) = read_skill_dir(&path, scope, None) else {
@@ -137,12 +151,54 @@ pub fn scan_plugins() -> Vec<Skill> {
         }
     }
 
+    // Pass 3 — skills-directory plugins: a `.claude-plugin/plugin.json`
+    // inside a `~/.claude/skills/<name>/` directory makes `<name>` a
+    // plugin (`<name>@skills-dir`) whose skills live in
+    // `<name>/skills/<skill>/SKILL.md`. Installed/marketplace ids win
+    // the de-dup because they were inserted in Passes 1 and 2.
+    scan_skills_dir_plugins(&skills_personal_dir(), &mut seen_ids, &mut out);
+
     out.sort_by(|a, b| {
         a.name
             .to_ascii_lowercase()
             .cmp(&b.name.to_ascii_lowercase())
     });
     out
+}
+
+/// Discover `@skills-dir` plugins under `personal_root`.
+///
+/// A subdirectory `<personal_root>/<name>/` that contains
+/// `.claude-plugin/plugin.json` is treated as a plugin named
+/// `<name>@skills-dir`. Its skills live at
+/// `<personal_root>/<name>/skills/<skill>/SKILL.md` and are namespaced
+/// as `<name>:<skill>` — matching Claude Code's official invocation form.
+pub(super) fn scan_skills_dir_plugins(
+    personal_root: &std::path::Path,
+    seen_ids: &mut std::collections::HashSet<String>,
+    out: &mut Vec<Skill>,
+) {
+    let read_dir = match std::fs::read_dir(personal_root) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for entry in read_dir.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        if !dir.join(".claude-plugin").join("plugin.json").exists() {
+            continue;
+        }
+        let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let id = format!("{name}@skills-dir");
+        if !seen_ids.insert(id.clone()) {
+            continue;
+        }
+        scan_plugin_skills_dir(&dir, &id, name, PluginAvailability::Installed, out);
+    }
 }
 
 /// Helper for `scan_plugins` — read `<plugin_root>/skills/` and push

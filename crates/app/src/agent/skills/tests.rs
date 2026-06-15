@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 use std::fs;
 
 use super::frontmatter::{
     SkillFrontmatter, parse_frontmatter, render_skill_md, serialize_frontmatter, split_frontmatter,
 };
 use super::persist::{SkillDraft, delete_skill, rename_skill, write_skill};
+use super::plugins::PluginAvailability;
+use super::scan::scan_skills_dir_plugins;
 use super::{
     NameError, SkillInvocation, SkillScope, SkillsState, body_preview, scan_scope, validate_name,
 };
@@ -358,4 +361,108 @@ fn render_skill_md_composes_frontmatter_and_body() {
     assert!(rendered.starts_with("---\n"));
     assert!(rendered.contains("name: alpha"));
     assert!(rendered.contains("Body goes here."));
+}
+
+#[test]
+fn skills_dir_plugin_namespaced_under_plugin_scope() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Create the plugin manifest directory.
+    fs::create_dir_all(root.join("daruda").join(".claude-plugin")).unwrap();
+    fs::write(
+        root.join("daruda")
+            .join(".claude-plugin")
+            .join("plugin.json"),
+        "{}",
+    )
+    .unwrap();
+
+    // Create a skill inside the plugin.
+    fs::create_dir_all(root.join("daruda").join("skills").join("sd")).unwrap();
+    fs::write(
+        root.join("daruda")
+            .join("skills")
+            .join("sd")
+            .join("SKILL.md"),
+        "---\nname: sd\ndescription: x\n---\nbody\n",
+    )
+    .unwrap();
+
+    let mut out = Vec::new();
+    scan_skills_dir_plugins(root, &mut HashSet::new(), &mut out);
+
+    assert_eq!(out.len(), 1, "expected exactly one skill");
+    let skill = &out[0];
+    assert_eq!(skill.name, "daruda:sd");
+    assert_eq!(skill.scope, SkillScope::Plugin);
+    assert_eq!(skill.plugin_id.as_deref(), Some("daruda@skills-dir"));
+    assert_eq!(
+        skill.plugin_availability,
+        Some(PluginAvailability::Installed)
+    );
+}
+
+#[test]
+fn skills_dir_requires_plugin_manifest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // No `.claude-plugin/plugin.json` — directory is a plain folder.
+    fs::create_dir_all(root.join("plain").join("skills").join("x")).unwrap();
+    fs::write(
+        root.join("plain").join("skills").join("x").join("SKILL.md"),
+        "---\nname: x\n---\nbody\n",
+    )
+    .unwrap();
+
+    let mut out = Vec::new();
+    scan_skills_dir_plugins(root, &mut HashSet::new(), &mut out);
+
+    assert!(out.is_empty(), "expected no skills without plugin manifest");
+}
+
+#[test]
+fn personal_scan_skips_skills_dir_plugin_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Plugin directory with both a plugin manifest and a top-level SKILL.md.
+    fs::create_dir_all(root.join("p").join(".claude-plugin")).unwrap();
+    fs::write(
+        root.join("p").join(".claude-plugin").join("plugin.json"),
+        "{}",
+    )
+    .unwrap();
+    fs::write(root.join("p").join("SKILL.md"), "---\nname: p\n---\nbody\n").unwrap();
+
+    let skills = scan_scope(root, SkillScope::Personal);
+    let has_p = skills.iter().any(|s| s.name == "p");
+    assert!(
+        !has_p,
+        "scan_scope must not include @skills-dir plugin folders"
+    );
+}
+
+#[test]
+fn project_scan_keeps_plugin_manifest_folder() {
+    // The @skills-dir skip is Personal-only (Pass 3 recovers them only from
+    // the personal root). Other scopes have no recovery, so a plugin-manifest
+    // folder must NOT be dropped — its own SKILL.md still shows.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    fs::create_dir_all(root.join("p").join(".claude-plugin")).unwrap();
+    fs::write(
+        root.join("p").join(".claude-plugin").join("plugin.json"),
+        "{}",
+    )
+    .unwrap();
+    fs::write(root.join("p").join("SKILL.md"), "---\nname: p\n---\nbody\n").unwrap();
+
+    let skills = scan_scope(root, SkillScope::Project);
+    assert!(
+        skills.iter().any(|s| s.name == "p"),
+        "project scope must not drop a plugin-manifest folder (no recovery there)"
+    );
 }
