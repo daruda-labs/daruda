@@ -35,6 +35,23 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::App;
 
+/// App-global watchers (status, panels, …) never stop, so their RAII
+/// [`crate::dir_watch::DirWatcher`] handles are parked here for the process
+/// lifetime instead of being dropped (dropping would end the watch). Populated
+/// once at launch from `spawn_all`; never cleared.
+static APP_WATCHERS: std::sync::OnceLock<std::sync::Mutex<Vec<crate::dir_watch::DirWatcher>>> =
+    std::sync::OnceLock::new();
+
+/// Park an app-global watcher handle for the process lifetime.
+fn retain_app_watcher(watcher: crate::dir_watch::DirWatcher) {
+    if let Ok(mut v) = APP_WATCHERS
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+    {
+        v.push(watcher);
+    }
+}
+
 pub(crate) fn spawn_all(cx: &mut App) {
     spawn_claude_status(cx);
     spawn_needs_attention_demote(cx);
@@ -55,7 +72,8 @@ fn spawn_claude_status(cx: &mut App) {
             );
         }
         Ok(status_dir) => {
-            let status_rx = hooks::watcher::spawn_status_watcher(status_dir);
+            let (status_rx, watcher) = hooks::watcher::spawn_status_watcher(status_dir);
+            retain_app_watcher(watcher);
             watcher_pumps::spawn_event_fanout_pump(
                 status_rx,
                 std::time::Duration::from_millis(100),
@@ -117,7 +135,8 @@ fn spawn_status_pulse(cx: &mut App) {
 }
 
 fn spawn_panels_reload(cx: &mut App) {
-    let panels_reload_rx = panels_watcher::spawn_panels_watcher();
+    let (panels_reload_rx, watcher) = panels_watcher::spawn_panels_watcher();
+    retain_app_watcher(watcher);
     watcher_pumps::spawn_drain_burst_pump(
         panels_reload_rx,
         std::time::Duration::from_millis(250),

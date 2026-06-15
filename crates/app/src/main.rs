@@ -10,6 +10,7 @@ mod assets;
 mod bind_keys;
 mod bootstrap;
 mod config_watcher;
+mod dir_watch;
 pub mod files;
 mod fuzzy;
 mod globals;
