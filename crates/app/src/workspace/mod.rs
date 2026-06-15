@@ -763,7 +763,7 @@ impl Workspace {
                 pty_tracker,
                 pty_claude_bindings: HashMap::new(),
                 _pty_event_pump: pty_event_pump,
-                _jsonl_watcher_shutdown: None,
+                _jsonl_watcher: None,
                 _jsonl_event_pump: None,
                 tool_use_failure_counts: HashMap::new(),
                 last_pushed_notification: HashMap::new(),

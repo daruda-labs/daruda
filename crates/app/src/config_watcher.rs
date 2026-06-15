@@ -26,34 +26,23 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::observability::system_info::redact_home;
-
 /// Minimum interval between successive reloads. File-save events
 /// often arrive in bursts (write + rename + chmod); debouncing
 /// prevents flicker from partial writes.
 pub(crate) const DEBOUNCE: Duration = Duration::from_millis(200);
 
-/// RAII handle returned by [`spawn_config_watcher`]. Owns the live
-/// `notify::Watcher` so the kernel-side subscription stays attached
-/// for the handle's lifetime — dropping the handle ends the watch
-/// and lets the debounce thread exit cleanly via channel close.
-///
-/// The handle dereferences to the debounced `Receiver<()>` so most
-/// call sites read like the previous bare-receiver API:
-/// `if handle.try_recv().is_err() { ... }`.
+/// RAII handle returned by [`spawn_config_watcher`]. Owns the
+/// [`crate::dir_watch::DirWatcher`] so the kernel-side subscription stays
+/// attached for the handle's lifetime — dropping the handle ends the watch,
+/// which disconnects the raw channel and lets the debounce thread exit
+/// cleanly.
 pub struct ConfigWatcherHandle {
     debounced_rx: mpsc::Receiver<()>,
-    /// `Option` so [`Drop`] can take ownership and drop the watcher
-    /// before the receiver — guarantees the FS callback's send-side
-    /// closes first, which then ends the debounce thread's
-    /// `rx.recv()` loop on the next event.
-    ///
-    /// `Box<dyn>` because `notify::recommended_watcher` returns a
-    /// platform-specific concrete type that we don't want to leak
-    /// into the public signature.
-    _watcher: Option<Box<dyn notify::Watcher + Send>>,
+    /// Dropping this stops the watch; the debounce thread then sees its raw
+    /// `Receiver` disconnect and exits. Declared after `debounced_rx` so it is
+    /// dropped first, but ordering is not load-bearing — either drop ends the
+    /// thread.
+    _watcher: crate::dir_watch::DirWatcher,
 }
 
 impl ConfigWatcherHandle {
@@ -63,109 +52,44 @@ impl ConfigWatcherHandle {
     }
 }
 
-impl Drop for ConfigWatcherHandle {
-    fn drop(&mut self) {
-        // Explicit drop order: watcher first, then the receiver via
-        // `Self`'s normal drop. Dropping the watcher closes its
-        // callback's `Sender`, which lets the debounce thread's
-        // `rx.recv()` return `Err` and exit cleanly.
-        let _ = self._watcher.take();
-    }
-}
-
 /// Start watching the config file. Returns a [`ConfigWatcherHandle`]
 /// the caller must keep alive for as long as it wants reload
 /// notifications. Dropping the handle ends the kernel-side watch +
-/// the debounce thread.
+/// the debounce thread. On an FSEvents drop (sleep/wake) one reload signal is
+/// emitted so the layered config is re-read.
 pub fn spawn_config_watcher() -> ConfigWatcherHandle {
-    use notify::{RecursiveMode, Watcher};
+    use notify::RecursiveMode;
 
     let config_path = daruda_config::config_path();
     let watch_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let file_name = config_path.file_name().map(|n| n.to_os_string());
 
-    // `tx` is moved into the FS callback; dropping the watcher drops
-    // the callback, which drops `tx`, which closes `rx`. That signal
-    // is what shuts the debounce thread down cleanly at handle-drop
-    // time.
-    let (tx, rx) = mpsc::channel();
-    let mut watcher: Box<dyn Watcher + Send> =
-        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res {
-                // Only trigger on the config file itself.
-                let is_relevant = file_name.as_ref().is_none_or(|target| {
-                    event
-                        .paths
-                        .iter()
-                        .any(|p| p.file_name() == Some(target.as_os_str()))
-                });
-                if is_relevant {
-                    let _ = tx.send(());
-                }
-            }
-        }) {
-            Ok(w) => Box::new(w),
-            Err(e) => {
-                LogWriter::log(
-                    ErrorReport::new("Config watcher disabled — FS watcher init failed")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .dedup("config.watcher.init")
-                        .build(),
-                );
-                // Inert handle: an empty receiver makes the pump's
-                // `try_recv` always return `Empty`, so config-watch
-                // is silently disabled.
-                let (_dead_tx, dead_rx) = mpsc::channel();
-                return ConfigWatcherHandle {
-                    debounced_rx: dead_rx,
-                    _watcher: None,
-                };
-            }
-        };
-
+    let classify = move |event: &notify::Event| {
+        // Only trigger on a `config.toml`, ignoring sibling state files.
+        let relevant = file_name.as_ref().is_none_or(|target| {
+            event
+                .paths
+                .iter()
+                .any(|p| p.file_name() == Some(target.as_os_str()))
+        });
+        if relevant { vec![()] } else { vec![] }
+    };
     // Recursive so the same watcher picks up
-    // `<config_dir>/daruda/projects/<...>/config.toml` writes
-    // alongside the user-global file. The filename filter above
-    // gates which events actually fire reloads.
-    if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::Recursive) {
-        LogWriter::log(
-            ErrorReport::new("Config watcher disabled — could not attach to directory")
-                .severity(ErrorSeverity::Warning)
-                .from_error(&e)
-                .at(file!(), line!())
-                .with_context("path", redact_home(&watch_dir))
-                .dedup("config.watcher.attach")
-                .build(),
-        );
-        let (_dead_tx, dead_rx) = mpsc::channel();
-        return ConfigWatcherHandle {
-            debounced_rx: dead_rx,
-            _watcher: None,
-        };
-    }
+    // `<config_dir>/daruda/projects/<...>/config.toml` writes alongside the
+    // user-global file. `classify`'s filename filter gates which events fire.
+    let anchors = [watch_dir];
+    let (raw_rx, watcher) =
+        crate::dir_watch::spawn_dir_watcher(&anchors, RecursiveMode::Recursive, classify, || {
+            vec![()]
+        });
 
-    // Debounce thread: collapse a burst into one signal. Exits when
-    // `rx.recv()` returns `Err`, which happens after the watcher is
-    // dropped and its callback's `Sender` goes out of scope.
-    let (debounced_tx, debounced_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        loop {
-            if rx.recv().is_err() {
-                break;
-            }
-            std::thread::sleep(DEBOUNCE);
-            while rx.try_recv().is_ok() {}
-            if debounced_tx.send(()).is_err() {
-                break;
-            }
-        }
-    });
+    // Collapse a burst into one signal (shared helper; the thread exits when
+    // the watcher is dropped and `raw_rx` disconnects).
+    let debounced_rx = crate::dir_watch::debounce(raw_rx, DEBOUNCE);
 
     ConfigWatcherHandle {
         debounced_rx,
-        _watcher: Some(watcher),
+        _watcher: watcher,
     }
 }
 

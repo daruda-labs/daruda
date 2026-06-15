@@ -17,7 +17,6 @@
 //! watcher.
 
 use std::collections::HashMap;
-use std::sync::mpsc;
 
 use gpui::Task;
 
@@ -98,12 +97,11 @@ pub(in crate::workspace) struct ClaudeContext {
     /// the user has not installed the hook integration. The watcher
     /// thread reads `~/.claude/projects/<encoded(cwd)>/` per lane
     /// and feeds `JsonlEvent`s through the same store as hooks (with
-    /// `Source::Jsonl`). `None` when hooks are installed (or the
-    /// claude_status feature is disabled). Dropping this sender
-    /// shuts the watcher thread down via its shutdown channel;
-    /// `refresh_jsonl_watcher` reassigns this when install state or
-    /// the lane set changes.
-    pub(in crate::workspace) _jsonl_watcher_shutdown: Option<mpsc::Sender<()>>,
+    /// `Source::Jsonl`). `None` when the claude_status feature is
+    /// disabled or no lane is active. Dropping this handle stops the
+    /// watcher (FSEvents unregisters); `refresh_jsonl_watcher`
+    /// reassigns it when install state or the lane set changes.
+    pub(in crate::workspace) _jsonl_watcher: Option<crate::dir_watch::DirWatcher>,
     pub(in crate::workspace) _jsonl_event_pump: Option<Task<()>>,
 
     /// Running count of `PostToolUseFailure` hook events per Claude

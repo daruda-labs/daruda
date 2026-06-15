@@ -11,13 +11,11 @@
 //! every non-alphanumeric char becomes `-`. Confirmed by the
 //! `transcript_path` field in real hook payloads.
 //!
-//! Lifecycle is shutdown-receiver based: the spawn function returns
-//! `(shutdown_tx, event_rx)`; dropping `shutdown_tx` (typically when
-//! a Workspace re-spawns the watcher after a lane change, or on
-//! Workspace teardown) wakes the watcher thread out of its blocking
-//! `recv` and lets the `notify::Watcher` drop, unregistering FSEvents
-//! cleanly. There is no `loop { park() }` — that pattern would leak
-//! one thread per re-spawn.
+//! Lifecycle: [`spawn`] returns a [`JsonlWatcherHandle`] holding the event
+//! receiver plus a [`crate::dir_watch::DirWatcher`]. Dropping the handle
+//! (typically when a Workspace re-spawns the watcher after a lane change, or
+//! on teardown) drops the `DirWatcher` — unregistering FSEvents — which
+//! disconnects the raw channel and ends the forward thread.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
@@ -62,15 +60,14 @@ pub fn project_dir_for(home: &Path, worktree_path: &Path) -> PathBuf {
     home.join(".claude").join("projects").join(encoded)
 }
 
-/// Handle that keeps the jsonl watcher thread alive. Dropping the
-/// `shutdown_tx` half closes the worker thread cleanly:
-/// `recv()` on its shutdown receiver returns `Err(Disconnected)` →
-/// the `notify::Watcher` is dropped → FSEvents subscriptions are
-/// unregistered. Hold the sender for the lifetime you want the
-/// watcher to keep running; drop it to refresh or tear down.
+/// Handle that keeps the jsonl watcher alive. Dropping `watcher` stops the
+/// [`crate::dir_watch::DirWatcher`] (FSEvents subscriptions unregister), which
+/// disconnects the raw channel and ends the forward/cold-restore thread. Hold
+/// it for the lifetime you want the watcher running; drop it to refresh or
+/// tear down.
 pub struct JsonlWatcherHandle {
-    pub shutdown_tx: mpsc::Sender<()>,
     pub events: mpsc::Receiver<JsonlEvent>,
+    pub watcher: crate::dir_watch::DirWatcher,
 }
 
 /// Spawn the jsonl watcher across `lane_dirs`. Each entry pairs a
@@ -81,99 +78,112 @@ pub struct JsonlWatcherHandle {
 /// startup; live permission changes are not reflected until restart
 /// (acceptable for the fallback path; the hook channel is real-time
 /// for active permission events anyway).
+/// Raw item from the watcher: a per-file event (already read, cheap Tail) or a
+/// rescan signal whose heavy full re-read is deferred to the forward thread.
+enum JsonlRaw {
+    Event(JsonlEvent),
+    Rescan,
+}
+
 pub fn spawn(lane_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
-    use notify::{EventKind, RecursiveMode, Watcher};
+    use notify::{EventKind, RecursiveMode};
 
-    let (tx, rx) = mpsc::channel();
-    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+    // `Arc` so the classify closure and the forward thread (cold-restore +
+    // rescan re-reads) can share one `PermissionChecker`.
+    let permissions = Arc::new(PermissionChecker::from_settings_file());
+    let (events_tx, events_rx) = mpsc::channel::<JsonlEvent>();
 
-    std::thread::spawn(move || {
-        // Wrap `PermissionChecker` in `Arc` so both the FSEvent
-        // callback (a `Fn` closure that captures by move) and the
-        // cold-restore loop (running here in the worker thread
-        // *after* the closure has captured) can share it.
-        let permissions = Arc::new(PermissionChecker::from_settings_file());
-        // Map watched dir → owning lane cwd. `notify::Event`
-        // gives us absolute file paths; the closure looks up the
-        // parent dir here to attach the right cwd to the emitted event.
-        let lookup: Vec<(PathBuf, PathBuf)> = lane_dirs.clone();
+    // Watch each lane's `~/.claude/projects/<encoded>/` dir; mkdir first so
+    // notify can attach on a fresh install.
+    let mut anchors: Vec<PathBuf> = Vec::new();
+    for (_cwd, dir) in &lane_dirs {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            LogWriter::log(
+                ErrorReport::new("jsonl watcher mkdir failed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .with_context("path", redact_home(dir))
+                    .dedup("jsonl.watcher.mkdir")
+                    .build(),
+            );
+        }
+        anchors.push(dir.clone());
+    }
 
-        let tx_inner = tx.clone();
-        let permissions_inner = permissions.clone();
-        let mut watcher =
-            match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                let Ok(event) = res else {
-                    return;
-                };
-                if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                    return;
-                }
-                for path in &event.paths {
-                    let Some(parent) = path.parent() else {
-                        continue;
-                    };
-                    let Some((cwd, _)) = lookup.iter().find(|(_, dir)| dir == parent) else {
-                        continue;
-                    };
-                    if let Some(ev) = process_jsonl_file(
-                        path,
-                        cwd,
-                        &permissions_inner,
-                        ReadStrategy::Tail(TAIL_ENTRIES),
-                    ) {
-                        let _ = tx_inner.send(ev);
-                    }
-                }
-            }) {
-                Ok(w) => w,
-                Err(_) => return,
+    // `notify::Event` gives absolute file paths; the closure looks up the
+    // parent dir to attach the right cwd. A live fire reads only the tail
+    // (cheap) — fine to run on notify's callback thread. A rescan, by
+    // contrast, would re-read every file in full; emit a cheap `Rescan`
+    // signal here and do that heavy walk on the forward thread instead, so
+    // sleep/wake recovery never blocks notify's event dispatch.
+    let lookup = lane_dirs.clone();
+    let permissions_classify = permissions.clone();
+    let classify = move |event: &notify::Event| {
+        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for path in &event.paths {
+            let Some(parent) = path.parent() else {
+                continue;
             };
-
-        // Subscribe before the cold-restore walk so any modify events
-        // that happen during cold-restore are still picked up — the
-        // store's race policy orders duplicate status updates.
-        for (_cwd, dir) in &lane_dirs {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                LogWriter::log(
-                    ErrorReport::new("jsonl watcher mkdir failed")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(dir))
-                        .dedup("jsonl.watcher.mkdir")
-                        .build(),
-                );
-            }
-            if let Err(e) = watcher.watch(dir, RecursiveMode::NonRecursive) {
-                LogWriter::log(
-                    ErrorReport::new("jsonl watcher subscribe failed")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("path", redact_home(dir))
-                        .dedup("jsonl.watcher.subscribe")
-                        .build(),
-                );
+            let Some((cwd, _)) = lookup.iter().find(|(_, dir)| dir == parent) else {
+                continue;
+            };
+            if let Some(ev) = process_jsonl_file(
+                path,
+                cwd,
+                &permissions_classify,
+                ReadStrategy::Tail(TAIL_ENTRIES),
+            ) {
+                out.push(JsonlRaw::Event(ev));
             }
         }
+        out
+    };
+    let rescan = || vec![JsonlRaw::Rescan];
 
-        // Cold-restore: emit one synthetic JsonlEvent per existing
-        // jsonl file so per-lane session indicators populate
-        // immediately on launch + after every refresh_jsonl_watcher
-        // restart, instead of staying empty until the next FSEvent
-        // fires.
-        cold_restore(&lane_dirs, &permissions, &tx);
+    let (raw_rx, watcher) = crate::dir_watch::spawn_dir_watcher(
+        &anchors,
+        RecursiveMode::NonRecursive,
+        classify,
+        rescan,
+    );
 
-        // Block until the caller drops `shutdown_tx`. `recv()` on a
-        // disconnected channel returns immediately, so this sleeps
-        // for the watcher's full lifetime without a poll loop.
-        let _ = shutdown_rx.recv();
-        // `watcher` drops here — notify backend unregisters watches.
+    // Forward thread, off notify's callback thread: first the startup
+    // cold-restore walk (so the caller isn't blocked), then forward live
+    // events and service rescan signals with the full re-read. The
+    // subscription is already live, so events arriving during the walk buffer
+    // in `raw_rx` and are forwarded after; the store's race policy orders any
+    // duplicates.
+    std::thread::spawn(move || {
+        for ev in enumerate_jsonl(&lane_dirs, &permissions) {
+            if events_tx.send(ev).is_err() {
+                return;
+            }
+        }
+        while let Ok(raw) = raw_rx.recv() {
+            match raw {
+                JsonlRaw::Event(ev) => {
+                    if events_tx.send(ev).is_err() {
+                        break;
+                    }
+                }
+                JsonlRaw::Rescan => {
+                    for ev in enumerate_jsonl(&lane_dirs, &permissions) {
+                        if events_tx.send(ev).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
     });
 
     JsonlWatcherHandle {
-        shutdown_tx,
-        events: rx,
+        events: events_rx,
+        watcher,
     }
 }
 
@@ -254,18 +264,17 @@ fn process_jsonl_file(
     })
 }
 
-/// Walk every watched directory once and emit a `JsonlEvent` for
-/// each existing jsonl file. Run after `watcher.watch(...)` so any
-/// fs activity during the walk is also captured by FSEvents. Uses
-/// [`ReadStrategy::Full`] so non-ASCII history isn't silently
-/// dropped by the byte-seek tail reader. Errors on individual
-/// files (read failures, malformed JSONL) are swallowed so one bad
-/// session doesn't block the rest of the cold restore.
-fn cold_restore(
+/// Walk every watched directory once and return a `JsonlEvent` for each
+/// existing jsonl file. Used for the startup cold-restore (so per-lane
+/// indicators populate immediately) and for FSEvents-drop rescan recovery.
+/// Uses [`ReadStrategy::Full`] so non-ASCII history isn't silently dropped by
+/// the byte-seek tail reader. Errors on individual files (read failures,
+/// malformed JSONL) are swallowed so one bad session doesn't block the rest.
+fn enumerate_jsonl(
     lane_dirs: &[(PathBuf, PathBuf)],
     permissions: &PermissionChecker,
-    tx: &mpsc::Sender<JsonlEvent>,
-) {
+) -> Vec<JsonlEvent> {
+    let mut out = Vec::new();
     for (cwd, dir) in lane_dirs {
         let read_dir = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
@@ -274,10 +283,11 @@ fn cold_restore(
         for entry in read_dir.flatten() {
             let path = entry.path();
             if let Some(ev) = process_jsonl_file(&path, cwd, permissions, ReadStrategy::Full) {
-                let _ = tx.send(ev);
+                out.push(ev);
             }
         }
     }
+    out
 }
 
 #[cfg(test)]

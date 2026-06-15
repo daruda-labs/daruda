@@ -30,9 +30,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Spawn the long-lived task that pulls `JsonlEvent`s from `events`
 /// and applies them to the Workspace via
 /// [`Workspace::apply_claude_jsonl_event`]. The returned `Task<()>`
-/// is held by Workspace as `_jsonl_pump`; dropping it closes the
-/// receiver, which lets the watcher thread (held alive by
-/// `_jsonl_shutdown`) exit when its shutdown sender drops.
+/// is held by Workspace as `_jsonl_event_pump`. The watcher itself is held
+/// by `_jsonl_watcher` (a `DirWatcher`); dropping that stops the watch, which
+/// disconnects the forward thread and then `events`, unwinding the pipeline.
 pub(in crate::workspace) fn spawn(
     events: Receiver<JsonlEvent>,
     cx: &mut Context<Workspace>,
@@ -133,11 +133,11 @@ impl Workspace {
     /// initial construction, lane create / remove, and
     /// `apply_config` when `claude_status.enable` flips.
     pub fn refresh_jsonl_watcher(&mut self, cx: &mut Context<Self>) {
-        // Drop any existing shutdown sender + pump first so the old
-        // watcher thread exits before the new one starts subscribing
-        // to the same FSEvents paths. Otherwise both would emit
-        // duplicate events during the overlap window.
-        self.claude._jsonl_watcher_shutdown = None;
+        // Drop any existing watcher handle + pump first so the old
+        // watcher exits before the new one starts subscribing to the
+        // same FSEvents paths. Otherwise both would emit duplicate
+        // events during the overlap window.
+        self.claude._jsonl_watcher = None;
         self.claude._jsonl_event_pump = None;
 
         let should_run = self.claude.claude_status_enabled;
@@ -161,12 +161,9 @@ impl Workspace {
             return;
         }
 
-        let JsonlWatcherHandle {
-            shutdown_tx,
-            events,
-        } = jsonl_watcher::spawn(pairs);
+        let JsonlWatcherHandle { events, watcher } = jsonl_watcher::spawn(pairs);
         let pump = spawn(events, cx);
-        self.claude._jsonl_watcher_shutdown = Some(shutdown_tx);
+        self.claude._jsonl_watcher = Some(watcher);
         self.claude._jsonl_event_pump = Some(pump);
     }
 }

@@ -52,11 +52,12 @@ pub enum SkillsEvent {
     Reloaded(SkillScope),
 }
 
-/// Caller-side handle. Dropping this closes both watcher threads.
+/// Caller-side handle. Dropping it drops the [`crate::dir_watch::DirWatcher`]
+/// (stops the watch), which disconnects the raw channel and ends the debounce
+/// thread. Re-spawned on lane changes — dropping the old handle releases the
+/// old watcher, so re-anchoring never leaks.
 pub struct SkillsWatcherHandle {
-    /// Holding the sender keeps the FSEvent thread alive; dropping it
-    /// triggers a coordinated shutdown of both worker threads.
-    pub(super) _shutdown_tx: mpsc::Sender<()>,
+    pub(super) _watcher: crate::dir_watch::DirWatcher,
 }
 
 /// Spawn the watcher. `project_dir` is `None` when no lane is
@@ -71,18 +72,15 @@ pub fn spawn(
     personal_dir: PathBuf,
     plugin_cache_dir: PathBuf,
 ) -> (mpsc::Receiver<SkillsEvent>, SkillsWatcherHandle) {
-    use notify::{RecursiveMode, Watcher};
+    use notify::RecursiveMode;
 
-    let (raw_tx, raw_rx) = mpsc::channel::<SkillScope>();
     let (event_tx, event_rx) = mpsc::channel::<SkillsEvent>();
-    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
-    // Resolve canonical forms so the FSEvent callback's `starts_with`
-    // checks line up with what FSEvents reports. When the target
-    // doesn't exist yet, we still need to derive a canonical match
-    // path from whatever ancestor *does* exist — otherwise the raw
-    // target path won't match the canonicalised event paths macOS
-    // reports through its `/var → /private/var` redirect. See
+    // Resolve canonical forms so the `starts_with` checks line up with what
+    // FSEvents reports. When the target doesn't exist yet, we still derive a
+    // canonical match path from whatever ancestor *does* exist — otherwise the
+    // raw target path won't match the canonicalised event paths macOS reports
+    // through its `/var → /private/var` redirect. See
     // `canonical_match_for_target` for the derivation.
     let project_anchor = project_dir
         .as_deref()
@@ -100,73 +98,68 @@ pub fn spawn(
     let personal_match = canonical_match_for_target(&personal_dir, personal_anchor.as_deref());
     let plugin_match = canonical_match_for_target(&plugin_cache_dir, plugin_anchor.as_deref());
 
-    std::thread::spawn(move || {
-        let raw_tx_inner = raw_tx.clone();
-        let project_match_clone = project_match.clone();
-        let personal_match_clone = personal_match.clone();
-        let plugin_match_clone = plugin_match.clone();
+    // Subscribe to the closest existing ancestor when the target skill
+    // directory itself doesn't exist yet; the `classify` `starts_with` filter
+    // ignores events outside the target subtree. Plugin and personal anchors
+    // often coincide (`~/.claude`) — de-dup to avoid double FSEvents
+    // bookkeeping.
+    let mut anchors: Vec<PathBuf> = Vec::new();
+    if let Some(a) = &project_anchor {
+        anchors.push(a.clone());
+    }
+    if let Some(a) = &personal_anchor {
+        anchors.push(a.clone());
+    }
+    if let Some(a) = &plugin_anchor {
+        let already_covered = personal_anchor
+            .as_deref()
+            .is_some_and(|p| a.starts_with(p) || p.starts_with(a));
+        if !already_covered {
+            anchors.push(a.clone());
+        }
+    }
 
-        let mut watcher =
-            match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                let Ok(event) = res else {
-                    return;
-                };
-                for path in &event.paths {
-                    let scope = if let Some(proj) = &project_match_clone
-                        && path.starts_with(proj)
-                    {
-                        SkillScope::Project
-                    } else if path.starts_with(&plugin_match_clone) {
-                        // Plugin cache lives under `~/.claude`, so
-                        // its prefix overlaps with personal_match.
-                        // Test it first so plugin events don't get
-                        // mis-routed to the personal scope.
-                        SkillScope::Plugin
-                    } else if path.starts_with(&personal_match_clone) {
-                        SkillScope::Personal
-                    } else {
-                        continue;
-                    };
-                    let _ = raw_tx_inner.send(scope);
-                }
-            }) {
-                Ok(w) => w,
-                Err(_) => return,
+    let has_project = project_match.is_some();
+    let classify = move |event: &notify::Event| {
+        let mut out = Vec::new();
+        for path in &event.paths {
+            let scope = if let Some(proj) = &project_match
+                && path.starts_with(proj)
+            {
+                SkillScope::Project
+            } else if path.starts_with(&plugin_match) {
+                // Plugin cache lives under `~/.claude`, so its prefix overlaps
+                // with personal_match. Test it first so plugin events don't get
+                // mis-routed to the personal scope.
+                SkillScope::Plugin
+            } else if path.starts_with(&personal_match) {
+                SkillScope::Personal
+            } else {
+                continue;
             };
+            out.push(scope);
+        }
+        out
+    };
+    // An FSEvents drop (sleep/wake) can't say which scope changed, so reload
+    // every scope `classify` can route. This MUST stay in lockstep with
+    // classify: a missing scope here silently breaks recovery for it.
+    // Plugin and Personal are listed unconditionally on purpose — their dirs
+    // overlap (plugin cache lives under `~/.claude`), so gating on a single
+    // anchor could under-emit a scope still reachable via the other's watch.
+    // Over-emitting an absent scope is a harmless no-op reload; under-emitting
+    // is the dangerous case. Project is the only scope truly absent with no
+    // active lane.
+    let rescan = move || {
+        let mut out = vec![SkillScope::Plugin, SkillScope::Personal];
+        if has_project {
+            out.push(SkillScope::Project);
+        }
+        out
+    };
 
-        // Subscribe to the closest existing ancestor when the target
-        // skill directory itself doesn't exist yet. Same fallback for
-        // every scope: parent watch + callback `starts_with` filter
-        // ignores events outside the target subtree.
-        if let Some(anchor) = project_anchor.as_deref() {
-            let _ = watcher.watch(anchor, RecursiveMode::Recursive);
-        }
-        if let Some(anchor) = personal_anchor.as_deref() {
-            let _ = watcher.watch(anchor, RecursiveMode::Recursive);
-        }
-        if let Some(anchor) = plugin_anchor.as_deref() {
-            // Plugin and personal anchors often coincide
-            // (`~/.claude`). `notify` is happy to attach the same
-            // path twice on macOS, but we de-dup to avoid double
-            // FSEvents bookkeeping when the user has both directories
-            // resolved to the same parent.
-            let already_covered = personal_anchor
-                .as_deref()
-                .is_some_and(|p| anchor.starts_with(p) || p.starts_with(anchor));
-            if !already_covered {
-                let _ = watcher.watch(anchor, RecursiveMode::Recursive);
-            }
-        }
-
-        // Block until the caller drops the handle. `recv()` on a
-        // disconnected channel returns immediately, so this sleeps
-        // without a poll loop.
-        let _ = shutdown_rx.recv();
-        // `watcher` drops here; FSEvents subscriptions unregister and
-        // the closure-owned `raw_tx_inner` drops with it. The debounce
-        // thread then sees `raw_rx` disconnect and exits.
-        drop(raw_tx);
-    });
+    let (raw_rx, watcher) =
+        crate::dir_watch::spawn_dir_watcher(&anchors, RecursiveMode::Recursive, classify, rescan);
 
     // Debounce thread: drain raw events per DEBOUNCE window, emit one
     // event per scope that fired during the window. Exits when the
@@ -197,12 +190,7 @@ pub fn spawn(
         }
     });
 
-    (
-        event_rx,
-        SkillsWatcherHandle {
-            _shutdown_tx: shutdown_tx,
-        },
-    )
+    (event_rx, SkillsWatcherHandle { _watcher: watcher })
 }
 
 /// Per-scope pending bits used by the debounce thread. Adding a

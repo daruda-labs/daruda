@@ -2,10 +2,10 @@
 //! directories of `~/.claude.json` (User + Local scopes) and
 //! `<lane>/.mcp.json` (Project scope).
 //!
-//! Mirrors `hooks::skills_watcher`'s 2-thread layout:
-//! 1. **FSEvent thread** — owns the `notify::Watcher`, blocks on the
-//!    shutdown channel, drops the watcher when the caller releases the
-//!    handle.
+//! Layout:
+//! 1. **`dir_watch`** — owns the `notify::Watcher` (via the [`McpWatcherHandle`]'s
+//!    [`crate::dir_watch::DirWatcher`]); classifies events to a [`WatchedFile`]
+//!    and recovers FSEvents drops (sleep/wake) by reloading every scope.
 //! 2. **Debounce thread** — collapses event bursts (atomic-rename
 //!    saves emit ≥3 events per file) into one [`McpEvent`] per scope
 //!    per [`DEBOUNCE`] window.
@@ -42,9 +42,12 @@ enum WatchedFile {
     Project,
 }
 
-/// Caller-side handle. Dropping this closes both watcher threads.
+/// Caller-side handle. Dropping it drops the [`crate::dir_watch::DirWatcher`]
+/// (stops the watch), which disconnects the raw channel and ends the debounce
+/// thread. Re-spawned on lane / cwd changes — dropping the old handle releases
+/// the old watcher, so re-anchoring never leaks.
 pub struct McpWatcherHandle {
-    pub(super) _shutdown_tx: mpsc::Sender<()>,
+    pub(super) _watcher: crate::dir_watch::DirWatcher,
 }
 
 /// Spawn the watcher.
@@ -65,16 +68,14 @@ pub fn spawn(
     project_paths: Vec<PathBuf>,
     claude_json_path: PathBuf,
 ) -> (mpsc::Receiver<McpEvent>, McpWatcherHandle) {
-    use notify::{RecursiveMode, Watcher};
+    use notify::RecursiveMode;
 
-    let (raw_tx, raw_rx) = mpsc::channel::<WatchedFile>();
     let (event_tx, event_rx) = mpsc::channel::<McpEvent>();
-    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
-    // Resolve canonical anchors for `starts_with` comparisons. We watch
-    // the parent directory so we still see file *creation* events. The
-    // Project scope can have two `.mcp.json` targets (lane root + the
-    // focused terminal's cwd), so anchors/matches are sets.
+    // Resolve canonical anchors for `==` comparisons. We watch the parent
+    // directory so we still see file *creation* events. The Project scope can
+    // have two `.mcp.json` targets (lane root + the focused terminal's cwd),
+    // so anchors/matches are sets.
     let mut project_anchors: Vec<PathBuf> = Vec::new();
     let mut project_matches: Vec<PathBuf> = Vec::new();
     for p in &project_paths {
@@ -89,49 +90,51 @@ pub fn spawn(
     let claude_json_anchor = nearest_existing_ancestor_for_file(&claude_json_path, 2);
     let claude_json_match =
         canonical_match_for_target(&claude_json_path, claude_json_anchor.as_deref());
+    let has_claude_json = claude_json_anchor.is_some();
 
-    std::thread::spawn(move || {
-        let raw_tx_inner = raw_tx.clone();
-        let project_matches_clone = project_matches.clone();
-        let claude_json_match_clone = claude_json_match.clone();
+    // Watch the *parent* directory of each target so create events for
+    // not-yet-existing files are seen. NonRecursive: every relevant event
+    // lands directly in the parent.
+    let mut anchors = project_anchors;
+    if let Some(a) = claude_json_anchor
+        && !anchors.contains(&a)
+    {
+        anchors.push(a);
+    }
 
-        let mut watcher =
-            match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                let Ok(event) = res else {
-                    return;
-                };
-                for path in &event.paths {
-                    let which = if project_matches_clone.iter().any(|m| m == path) {
-                        WatchedFile::Project
-                    } else if path == &claude_json_match_clone {
-                        WatchedFile::ClaudeJson
-                    } else {
-                        continue;
-                    };
-                    let _ = raw_tx_inner.send(which);
-                }
-            }) {
-                Ok(w) => w,
-                Err(_) => return,
-            };
-
-        // Watch the *parent* directory of each target path so we see
-        // create events for files that didn't exist at spawn time.
-        // RecursiveMode::NonRecursive is enough — every relevant event
-        // lands directly in the parent directory.
-        for anchor in &project_anchors {
-            let _ = watcher.watch(anchor, RecursiveMode::NonRecursive);
-        }
-        if let Some(anchor) = claude_json_anchor.as_deref() {
-            let already_covered = project_anchors.iter().any(|p| p == anchor);
-            if !already_covered {
-                let _ = watcher.watch(anchor, RecursiveMode::NonRecursive);
+    let has_project = !project_matches.is_empty();
+    let classify = move |event: &notify::Event| {
+        let mut out = Vec::new();
+        for path in &event.paths {
+            if project_matches.iter().any(|m| m == path) {
+                out.push(WatchedFile::Project);
+            } else if *path == claude_json_match {
+                out.push(WatchedFile::ClaudeJson);
             }
         }
+        out
+    };
+    // The scopes this watcher actually covers — the single source for the
+    // rescan fan-out, derived from the same anchors that gate watching (so a
+    // scope whose target dir doesn't exist isn't spuriously reloaded). An
+    // FSEvents drop (sleep/wake) can't say which file changed, so reload every
+    // covered scope. Keep in lockstep with `classify`: any scope it can emit
+    // must be reloadable here.
+    let mut watched = Vec::new();
+    if has_claude_json {
+        watched.push(WatchedFile::ClaudeJson);
+    }
+    if has_project {
+        watched.push(WatchedFile::Project);
+    }
+    let rescan = move || watched.clone();
 
-        let _ = shutdown_rx.recv();
-        drop(raw_tx);
-    });
+    let (raw_rx, watcher) = crate::dir_watch::spawn_dir_watcher(
+        &anchors,
+        RecursiveMode::NonRecursive,
+        classify,
+        rescan,
+    );
 
     // Debounce thread.
     std::thread::spawn(move || {
@@ -160,12 +163,7 @@ pub fn spawn(
         }
     });
 
-    (
-        event_rx,
-        McpWatcherHandle {
-            _shutdown_tx: shutdown_tx,
-        },
-    )
+    (event_rx, McpWatcherHandle { _watcher: watcher })
 }
 
 #[derive(Clone, Copy, Default)]
