@@ -53,6 +53,12 @@ find_gpui_checkout() {
 CHECKOUT="${1:-$(find_gpui_checkout)}"
 cd "$CHECKOUT"
 
+# Tracks whether any patch was freshly (re)applied this run. Cargo treats git
+# checkouts as immutable and never re-fingerprints their source files, so an
+# in-place patch only takes effect once we delete the compiled artifacts to
+# force a recompile (see the cleanup block at the end).
+CHANGED=0
+
 # ---- gpui-ime-cjk-path-a.patch ----
 IME_TARGET="$CHECKOUT/crates/gpui/src/platform/mac/window.rs"
 
@@ -65,6 +71,7 @@ if [ -f "$IME_TARGET" ]; then
         echo "Applying GPUI IME patch…"
         if git apply --check "$IME_PATCH" 2>/dev/null; then
             git apply "$IME_PATCH"
+            CHANGED=1
             echo "✓ GPUI IME patch applied successfully."
         else
             # Fallback: direct sed-based patching for when git apply fails
@@ -83,6 +90,7 @@ if [ -f "$IME_TARGET" ]; then
     s/if is_composing$/if is_composing\n                || has_non_ascii_key_char/
 }' "$IME_TARGET"; then
                 rm -f "${IME_TARGET}.bak"
+                CHANGED=1
                 echo "✓ GPUI IME patch applied (direct)."
             else
                 echo "ERROR: Failed to apply IME patch." >&2
@@ -109,6 +117,7 @@ else
     echo "Applying GPUI notify-lost-wakeup patch…"
     if git apply --check "$NOTIFY_PATCH" 2>/dev/null; then
         git apply "$NOTIFY_PATCH"
+        CHANGED=1
         echo "✓ GPUI notify-lost-wakeup patch applied successfully."
     else
         echo "ERROR: Failed to apply notify-lost-wakeup patch." >&2
@@ -116,8 +125,20 @@ else
     fi
 fi
 
-# Force cargo to recompile gpui
-echo "Cleaning gpui build artifacts…"
-find "$REPO_DIR/target/debug" -name "libgpui-*" -type f -delete 2>/dev/null || true
-find "$REPO_DIR/target/debug" -name "gpui-*" -type f -delete 2>/dev/null || true
-echo "✓ Done. Run 'cargo build -p daruda' to rebuild."
+# Force cargo to recompile gpui. Cargo will not notice the in-place source
+# edit on its own (git checkouts are treated as immutable), so we delete the
+# compiled artifacts across EVERY profile — not just debug. Missing release
+# artifacts are the reason a `build-app.sh` (release) build kept linking the
+# stale, unpatched gpui even after the patch was applied. Skip when nothing
+# changed so repeated runs (e.g. from build-app.sh) stay cheap.
+if [ "$CHANGED" -eq 1 ]; then
+    echo "Cleaning gpui build artifacts (all profiles)…"
+    for profile_dir in "$REPO_DIR"/target/debug "$REPO_DIR"/target/release; do
+        [ -d "$profile_dir" ] || continue
+        find "$profile_dir" -name "libgpui-*" -type f -delete 2>/dev/null || true
+        find "$profile_dir" -name "gpui-*" -type f -delete 2>/dev/null || true
+    done
+    echo "✓ Done. Run 'cargo build -p daruda' to rebuild."
+else
+    echo "✓ All patches already applied; build artifacts untouched."
+fi
