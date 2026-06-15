@@ -414,7 +414,8 @@ impl Render for EditMcpServerModal {
 fn scope_label(scope: McpScope) -> String {
     match scope {
         McpScope::Project => strings::mcp_scope_project(),
-        McpScope::Personal => strings::mcp_scope_personal(),
+        McpScope::Local => strings::mcp_scope_local(),
+        McpScope::User => strings::mcp_scope_user(),
     }
 }
 
@@ -429,7 +430,7 @@ pub fn open_edit_mcp_server_modal(
     let lane = ws.active_lane_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(lane.as_deref());
+        .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
     let Some(initial) = EditMcpInitial::from_state(&snapshot, scope, &name) else {
         return;
     };

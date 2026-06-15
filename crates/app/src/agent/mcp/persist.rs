@@ -4,11 +4,12 @@
 //! caller's raw tree) and writes the whole file via
 //! `tempfile::NamedTempFile` + `persist`. macOS rename(2) is atomic
 //! at the inode level so partial reads can't observe a torn file —
-//! crucial because Claude Code itself watches `~/.claude/settings.json`.
+//! crucial because Claude Code itself reads + rewrites `~/.claude.json`.
 //!
-//! Non-`mcpServers` keys (permissions, hooks, top-level project
-//! settings) are preserved by definition: we only touch the
-//! `mcpServers[name]` sub-tree.
+//! Every key outside the targeted `mcpServers` map is preserved by
+//! definition: we only touch the `mcpServers[name]` sub-tree at the
+//! requested [`McpLocation`] (top-level for `.mcp.json` / User scope,
+//! `projects[<dir>]` for the Local scope inside `~/.claude.json`).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -17,7 +18,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 use tempfile::NamedTempFile;
 
-use super::{McpScope, McpServer, McpTransport};
+use super::{McpLocation, McpScope, McpServer, McpTransport};
 
 /// Errors callers expect — split from `io::Error` so the modal can
 /// route the "name already exists" case to the validation banner
@@ -72,6 +73,15 @@ impl From<io::Error> for McpPersistError {
 impl From<serde_json::Error> for McpPersistError {
     fn from(e: serde_json::Error) -> Self {
         McpPersistError::Json(e)
+    }
+}
+
+impl From<super::parse::ParseError> for McpPersistError {
+    fn from(e: super::parse::ParseError) -> Self {
+        match e {
+            super::parse::ParseError::Io(e) => McpPersistError::Io(e),
+            super::parse::ParseError::Json { source, .. } => McpPersistError::Json(source),
+        }
     }
 }
 
@@ -169,12 +179,13 @@ pub fn set_disabled(
     raw: &mut Value,
     path: &Path,
     scope: McpScope,
+    location: &McpLocation,
     name: &str,
     disabled: bool,
 ) -> Result<(), McpPersistError> {
     let mut staged = raw.clone();
     {
-        let servers = ensure_mcp_servers_map(&mut staged)?;
+        let servers = ensure_mcp_servers_map_at(&mut staged, location)?;
         let entry = servers
             .get_mut(name)
             .and_then(Value::as_object_mut)
@@ -200,11 +211,12 @@ pub fn write_server(
     raw: &mut Value,
     path: &Path,
     scope: McpScope,
+    location: &McpLocation,
     draft: &McpServerDraft,
 ) -> Result<(), McpPersistError> {
     let mut staged = raw.clone();
     {
-        let servers = ensure_mcp_servers_map(&mut staged)?;
+        let servers = ensure_mcp_servers_map_at(&mut staged, location)?;
         if servers.contains_key(&draft.name) {
             return Err(McpPersistError::DuplicateName {
                 scope,
@@ -225,11 +237,12 @@ pub fn update_server(
     raw: &mut Value,
     path: &Path,
     scope: McpScope,
+    location: &McpLocation,
     draft: &McpServerDraft,
 ) -> Result<(), McpPersistError> {
     let mut staged = raw.clone();
     {
-        let servers = ensure_mcp_servers_map(&mut staged)?;
+        let servers = ensure_mcp_servers_map_at(&mut staged, location)?;
         if !servers.contains_key(&draft.name) {
             return Err(McpPersistError::NotFound {
                 scope,
@@ -250,11 +263,12 @@ pub fn delete_server(
     raw: &mut Value,
     path: &Path,
     scope: McpScope,
+    location: &McpLocation,
     name: &str,
 ) -> Result<(), McpPersistError> {
     let mut staged = raw.clone();
     {
-        let servers = ensure_mcp_servers_map(&mut staged)?;
+        let servers = ensure_mcp_servers_map_at(&mut staged, location)?;
         if servers.remove(name).is_none() {
             return Err(McpPersistError::NotFound {
                 scope,
@@ -267,33 +281,48 @@ pub fn delete_server(
     Ok(())
 }
 
-/// Ensure the top-level value is an object and that `mcpServers`
-/// resolves to an object. Returns a mutable view of the inner map for
-/// further patching.
+/// Ensure the document has an object at `location`'s `mcpServers` map,
+/// creating intermediate containers (`projects`, `projects[<dir>]`) as
+/// needed, and return a mutable view for patching.
 ///
 /// Refuses to overwrite a non-object value (e.g. a corrupt
 /// `"mcpServers": []`) — bubbling an `InvalidData` error so the modal
 /// banner surfaces the malformed file instead of silently destroying
 /// it. The renderer's empty-state still applies because
-/// [`extract_servers`](super::parse::extract_servers) reads the same
-/// value via `as_object()` which returns `None` for non-objects.
-fn ensure_mcp_servers_map(root: &mut Value) -> Result<&mut Map<String, Value>, McpPersistError> {
+/// [`extract_servers_at`](super::parse::extract_servers_at) reads the
+/// same value via `as_object()` which returns `None` for non-objects.
+fn ensure_mcp_servers_map_at<'a>(
+    root: &'a mut Value,
+    location: &McpLocation,
+) -> Result<&'a mut Map<String, Value>, McpPersistError> {
     let Some(top) = root.as_object_mut() else {
-        return Err(McpPersistError::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "settings file root is not a JSON object",
-        )));
+        return Err(invalid("config file root is not a JSON object"));
     };
-    let entry = top
+    let container: &mut Map<String, Value> = match location {
+        McpLocation::TopLevel => top,
+        McpLocation::ProjectChild(dir) => {
+            let projects = top
+                .entry("projects".to_string())
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| invalid("`projects` is not a JSON object"))?;
+            projects
+                .entry(dir.clone())
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| invalid("`projects[<dir>]` is not a JSON object"))?
+        }
+    };
+    let entry = container
         .entry("mcpServers".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
-    let Some(map) = entry.as_object_mut() else {
-        return Err(McpPersistError::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "`mcpServers` is not a JSON object",
-        )));
-    };
-    Ok(map)
+    entry
+        .as_object_mut()
+        .ok_or_else(|| invalid("`mcpServers` is not a JSON object"))
+}
+
+fn invalid(msg: &'static str) -> McpPersistError {
+    McpPersistError::Io(io::Error::new(io::ErrorKind::InvalidData, msg))
 }
 
 /// Pretty-print + atomic rename. Parent directory is created if
@@ -319,6 +348,9 @@ mod persist_tests {
     use super::*;
     use serde_json::json;
 
+    /// Shorthand for the top-level location used by most tests.
+    const TL: McpLocation = McpLocation::TopLevel;
+
     fn fresh_root_with_perms() -> Value {
         json!({
             "permissions": { "allow": ["Read", "Write"] },
@@ -336,7 +368,7 @@ mod persist_tests {
         let mut root = fresh_root_with_perms();
         write_atomic(&path, &root).unwrap();
 
-        set_disabled(&mut root, &path, McpScope::Personal, "alpha", true).unwrap();
+        set_disabled(&mut root, &path, McpScope::User, &TL, "alpha", true).unwrap();
         let on_disk: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
@@ -347,14 +379,14 @@ mod persist_tests {
         assert!(on_disk.get("permissions").is_some());
         assert!(on_disk.get("hooks").is_some());
 
-        set_disabled(&mut root, &path, McpScope::Personal, "alpha", false).unwrap();
+        set_disabled(&mut root, &path, McpScope::User, &TL, "alpha", false).unwrap();
         let on_disk: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(on_disk["mcpServers"]["alpha"].get("disabled").is_none());
 
         // Failed set_disabled (NotFound) must leave raw untouched.
         let snapshot = root.clone();
-        let err = set_disabled(&mut root, &path, McpScope::Personal, "missing", true);
+        let err = set_disabled(&mut root, &path, McpScope::User, &TL, "missing", true);
         assert!(matches!(err, Err(McpPersistError::NotFound { .. })));
         assert_eq!(root, snapshot, "failed write must leave raw untouched");
     }
@@ -370,7 +402,8 @@ mod persist_tests {
         let err = write_server(
             &mut root,
             &path,
-            McpScope::Personal,
+            McpScope::User,
+            &TL,
             &McpServerDraft {
                 name: "x".into(),
                 transport: McpTransport::Stdio,
@@ -406,8 +439,71 @@ mod persist_tests {
             disabled: false,
             extra: BTreeMap::new(),
         };
-        let err = write_server(&mut root, &path, McpScope::Personal, &draft).unwrap_err();
+        let err = write_server(&mut root, &path, McpScope::User, &TL, &draft).unwrap_err();
         assert!(matches!(err, McpPersistError::DuplicateName { .. }));
+    }
+
+    #[test]
+    fn local_scope_writes_under_projects_child() {
+        // Local scope nests servers under `projects[<dir>].mcpServers`
+        // and must not disturb the top-level `mcpServers` (User scope)
+        // or any other project entry in the shared `~/.claude.json`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        let mut root = json!({
+            "mcpServers": { "user_server": { "type": "stdio", "command": "u" } },
+            "projects": {
+                "/repo/other": { "mcpServers": { "keep": { "command": "k" } }, "history": [1, 2] }
+            }
+        });
+        write_atomic(&path, &root).unwrap();
+
+        let loc = McpLocation::ProjectChild("/repo/a".into());
+        let draft = McpServerDraft {
+            name: "local_a".into(),
+            transport: McpTransport::Stdio,
+            command: Some("node".into()),
+            args: vec![],
+            url: None,
+            env: BTreeMap::new(),
+            headers: BTreeMap::new(),
+            disabled: false,
+            extra: BTreeMap::new(),
+        };
+        write_server(&mut root, &path, McpScope::Local, &loc, &draft).unwrap();
+
+        let on_disk: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        // New Local server landed under projects[/repo/a].
+        assert_eq!(
+            on_disk["projects"]["/repo/a"]["mcpServers"]["local_a"]["command"],
+            Value::String("node".into())
+        );
+        // User scope + other project entries untouched.
+        assert!(on_disk["mcpServers"].get("user_server").is_some());
+        assert!(
+            on_disk["projects"]["/repo/other"]["mcpServers"]
+                .get("keep")
+                .is_some()
+        );
+        assert_eq!(on_disk["projects"]["/repo/other"]["history"], json!([1, 2]));
+
+        // Toggle + delete round-trip at the same location.
+        set_disabled(&mut root, &path, McpScope::Local, &loc, "local_a", true).unwrap();
+        let on_disk: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            on_disk["projects"]["/repo/a"]["mcpServers"]["local_a"]["disabled"],
+            Value::Bool(true)
+        );
+        delete_server(&mut root, &path, McpScope::Local, &loc, "local_a").unwrap();
+        let on_disk: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            on_disk["projects"]["/repo/a"]["mcpServers"]
+                .get("local_a")
+                .is_none()
+        );
     }
 
     #[test]
@@ -423,7 +519,7 @@ mod persist_tests {
         });
         write_atomic(&path, &root).unwrap();
 
-        delete_server(&mut root, &path, McpScope::Personal, "alpha").unwrap();
+        delete_server(&mut root, &path, McpScope::User, &TL, "alpha").unwrap();
         let on_disk: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(on_disk["mcpServers"].get("alpha").is_none());
@@ -470,7 +566,7 @@ mod persist_tests {
     #[test]
     fn ensure_servers_map_creates_empty_when_missing() {
         let mut root = json!({"permissions": {"allow": []}});
-        let _ = ensure_mcp_servers_map(&mut root);
+        let _ = ensure_mcp_servers_map_at(&mut root, &TL);
         assert!(root["mcpServers"].is_object());
         assert!(root["permissions"].is_object());
     }

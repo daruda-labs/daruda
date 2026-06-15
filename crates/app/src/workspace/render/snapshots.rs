@@ -243,7 +243,7 @@ impl Workspace {
             right_panel_scroll_handle: self.right_panel_scroll_handle.clone(),
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
-                .snapshot_for(self.active_lane_root().as_deref()),
+                .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
         }
     }
 }

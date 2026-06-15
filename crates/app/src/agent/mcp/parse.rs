@@ -1,29 +1,29 @@
-//! JSON parsers for the two MCP server scopes.
+//! JSON parsers for the three MCP server scopes.
 //!
-//! Personal: `~/.claude/settings.json` `mcpServers` (along with every
-//! sibling key Claude Code uses — `permissions`, `hooks`,
-//! `enableAllProjectMcpServers`, etc., all of which we round-trip).
-//!
+//! User: `~/.claude.json` top-level `mcpServers`.
+//! Local: `~/.claude.json` `projects[<lane>].mcpServers`.
 //! Project: `<lane>/.mcp.json` (usually contains only `mcpServers`,
 //! but the spec doesn't forbid sibling keys).
 //!
-//! Both parsers return `(Vec<McpServer>, serde_json::Value)`. The raw
-//! `Value` is what `persist::*` patches on save so non-`mcpServers`
-//! keys survive every write-back.
+//! User and Local share one file (`~/.claude.json`); callers read it
+//! once via [`read_json_or_empty`] and pull each scope's servers out
+//! with [`extract_servers_at`]. The raw `Value` is what `persist::*`
+//! patches on save so every key outside the patched `mcpServers` map
+//! survives the write-back.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use super::{McpScope, McpServer, McpTransport};
+use super::{McpLocation, McpScope, McpServer, McpTransport};
 
 /// Filename used at every active lane root for project-scope MCP.
 pub const PROJECT_MCP_FILE: &str = ".mcp.json";
 
-/// Filename of the personal Claude Code settings file (relative to
-/// `~/.claude/`).
-pub const PERSONAL_SETTINGS_FILE: &str = "settings.json";
+/// Filename of the Claude Code config file (relative to `~/`) that holds
+/// the User and Local scopes.
+pub const CLAUDE_JSON_FILE: &str = ".claude.json";
 
 /// Errors surfaced by the parsers. `read_to_string` failures other
 /// than NotFound bubble out as `Io`. Parse failures keep the bytes that
@@ -56,14 +56,14 @@ impl From<std::io::Error> for ParseError {
     }
 }
 
-/// Resolve the personal settings path (`~/.claude/settings.json`).
-/// `dirs::home_dir()` returning `None` (no `HOME` env) falls back to a
-/// relative `.claude/settings.json` so daruda still functions in
-/// constrained environments — the watcher's parent-walk handles the
-/// missing-directory case from there.
-pub fn personal_settings_path() -> PathBuf {
+/// Resolve the Claude Code config path (`~/.claude.json`) that holds
+/// the User and Local scopes. `dirs::home_dir()` returning `None` (no
+/// `HOME` env) falls back to a relative `.claude.json` so daruda still
+/// functions in constrained environments — the watcher's parent-walk
+/// handles the missing-file case from there.
+pub fn claude_json_path() -> PathBuf {
     let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join(".claude").join(PERSONAL_SETTINGS_FILE)
+    base.join(CLAUDE_JSON_FILE)
 }
 
 /// Resolve the project-scope `.mcp.json` path for a lane root.
@@ -71,50 +71,74 @@ pub fn project_mcp_path(worktree_root: &Path) -> PathBuf {
     worktree_root.join(PROJECT_MCP_FILE)
 }
 
-/// Read + parse `~/.claude/settings.json`. NotFound is treated as
-/// "empty mcpServers" so a fresh install doesn't bubble an error up to
-/// `Workspace::new`. Missing files round-trip through an empty
-/// `serde_json::Object` so the first save lays down a well-formed
-/// `{ "mcpServers": {} }` document instead of overwriting siblings we
-/// haven't seen yet.
-pub fn parse_personal_settings(path: &Path) -> Result<(Vec<McpServer>, Value), ParseError> {
-    parse_settings_like(path, McpScope::Personal)
+/// Read a config file's raw bytes. NotFound is treated as empty content
+/// (an empty document downstream) so a fresh install doesn't error.
+pub fn read_bytes_or_empty(path: &Path) -> Result<Vec<u8>, ParseError> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(ParseError::Io(e)),
+    }
 }
 
-/// Read + parse `<lane>/.mcp.json`. Same NotFound semantics as
-/// `parse_personal_settings`.
+/// Parse raw bytes into a JSON `Value`. Empty / whitespace-only content
+/// yields an empty object so the first save lays down a well-formed
+/// document instead of overwriting keys we haven't seen.
+pub fn parse_value(bytes: &[u8], path: &Path) -> Result<Value, ParseError> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Value::Object(Map::new()));
+    }
+    serde_json::from_slice(bytes).map_err(|e| ParseError::Json {
+        path: path.to_path_buf(),
+        source: e,
+    })
+}
+
+/// Stable 64-bit content hash. Used to skip re-parsing an unchanged
+/// (often multi-megabyte) `~/.claude.json` when the watcher fires on a
+/// write that left the bytes identical (self-write echoes, coalesced
+/// FSEvents). Reading the bytes is unavoidable; this only avoids the
+/// far costlier `serde_json` parse + `Value` tree build + clone. Takes
+/// `&[u8]` (not a path) so the caller reads the file once and reuses
+/// the same bytes for `parse_value` on a cache miss.
+pub fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+/// Read + parse a JSON config file into a `serde_json::Value` (NotFound
+/// → empty object). Convenience for callers that don't need the
+/// hash gate (small files like `.mcp.json`).
+pub fn read_json_or_empty(path: &Path) -> Result<Value, ParseError> {
+    parse_value(&read_bytes_or_empty(path)?, path)
+}
+
+/// Read + parse `<lane>/.mcp.json` into `(servers, raw)`. Project scope
+/// always reads the top-level `mcpServers` map.
 pub fn parse_project_mcp(path: &Path) -> Result<(Vec<McpServer>, Value), ParseError> {
-    parse_settings_like(path, McpScope::Project)
-}
-
-fn parse_settings_like(
-    path: &Path,
-    scope: McpScope,
-) -> Result<(Vec<McpServer>, Value), ParseError> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((Vec::new(), Value::Object(Map::new())));
-        }
-        Err(e) => return Err(ParseError::Io(e)),
-    };
-    let value: Value = if raw.trim().is_empty() {
-        Value::Object(Map::new())
-    } else {
-        serde_json::from_str(&raw).map_err(|e| ParseError::Json {
-            path: path.to_path_buf(),
-            source: e,
-        })?
-    };
-    let servers = extract_servers(&value, scope);
+    let value = read_json_or_empty(path)?;
+    let servers = extract_servers_at(&value, &McpLocation::TopLevel, McpScope::Project);
     Ok((servers, value))
 }
 
-/// Extract the `mcpServers` map from a parsed top-level document and
-/// turn it into typed [`McpServer`]s. Anything daruda doesn't model
-/// is preserved in `extra` for round-trip.
-pub fn extract_servers(top: &Value, scope: McpScope) -> Vec<McpServer> {
-    let Some(map) = top.get("mcpServers").and_then(Value::as_object) else {
+/// Extract the `mcpServers` map at `location` from a parsed document
+/// and turn it into typed [`McpServer`]s. Anything daruda doesn't model
+/// is preserved in `extra` for round-trip. Returns empty when the
+/// location (or its `mcpServers` map) is absent.
+pub fn extract_servers_at(top: &Value, location: &McpLocation, scope: McpScope) -> Vec<McpServer> {
+    let map = match location {
+        McpLocation::TopLevel => top.get("mcpServers").and_then(Value::as_object),
+        McpLocation::ProjectChild(dir) => top
+            .get("projects")
+            .and_then(Value::as_object)
+            .and_then(|projects| projects.get(dir))
+            .and_then(Value::as_object)
+            .and_then(|proj| proj.get("mcpServers"))
+            .and_then(Value::as_object),
+    };
+    let Some(map) = map else {
         return Vec::new();
     };
     let mut out: Vec<McpServer> = map
@@ -225,6 +249,10 @@ fn collect_extra(obj: &Map<String, Value>) -> BTreeMap<String, Value> {
 mod parse_tests {
     use super::*;
 
+    fn top() -> McpLocation {
+        McpLocation::TopLevel
+    }
+
     #[test]
     fn extract_servers_sorts_alphabetically() {
         let raw = serde_json::json!({
@@ -233,7 +261,7 @@ mod parse_tests {
                 "alpha": { "command": "node", "args": [] },
             }
         });
-        let servers = extract_servers(&raw, McpScope::Personal);
+        let servers = extract_servers_at(&raw, &top(), McpScope::User);
         assert_eq!(servers.len(), 2);
         assert_eq!(servers[0].name, "alpha");
         assert_eq!(servers[1].name, "zulip");
@@ -248,7 +276,7 @@ mod parse_tests {
                 "empty":     {}
             }
         });
-        let s = extract_servers(&raw, McpScope::Personal);
+        let s = extract_servers_at(&raw, &top(), McpScope::User);
         assert_eq!(
             s.iter().find(|s| s.name == "stdio_one").unwrap().transport,
             McpTransport::Stdio
@@ -274,7 +302,7 @@ mod parse_tests {
                 }
             }
         });
-        let s = extract_servers(&raw, McpScope::Personal);
+        let s = extract_servers_at(&raw, &top(), McpScope::User);
         let one = &s[0];
         assert!(one.extra.contains_key("experimentalFlag"));
         assert!(one.extra.contains_key("policy"));
@@ -289,7 +317,7 @@ mod parse_tests {
                 "y": { "command": "node", "disabled": true }
             }
         });
-        let s = extract_servers(&raw, McpScope::Personal);
+        let s = extract_servers_at(&raw, &top(), McpScope::User);
         assert!(!s.iter().find(|s| s.name == "x").unwrap().disabled);
         assert!(s.iter().find(|s| s.name == "y").unwrap().disabled);
     }
@@ -297,16 +325,62 @@ mod parse_tests {
     #[test]
     fn missing_top_level_mcp_servers_returns_empty() {
         let raw = serde_json::json!({"permissions": {"allow": []}});
-        let s = extract_servers(&raw, McpScope::Personal);
+        let s = extract_servers_at(&raw, &top(), McpScope::User);
         assert!(s.is_empty());
+    }
+
+    #[test]
+    fn local_scope_reads_projects_child_map() {
+        // Local scope lives under `projects[<dir>].mcpServers`.
+        let raw = serde_json::json!({
+            "mcpServers": { "user_server": { "command": "u" } },
+            "projects": {
+                "/repo/a": { "mcpServers": { "local_a": { "command": "a" } } },
+                "/repo/b": { "mcpServers": { "local_b": { "command": "b" } } }
+            }
+        });
+        let a = extract_servers_at(
+            &raw,
+            &McpLocation::ProjectChild("/repo/a".into()),
+            McpScope::Local,
+        );
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].name, "local_a");
+        // A project without an entry yields no Local servers.
+        let none = extract_servers_at(
+            &raw,
+            &McpLocation::ProjectChild("/repo/missing".into()),
+            McpScope::Local,
+        );
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn content_hash_stable_and_sensitive() {
+        // Same bytes → same hash (gate stays closed on unchanged files).
+        assert_eq!(content_hash(b"{}"), content_hash(b"{}"));
+        // One byte different → different hash (gate opens on real edits).
+        assert_ne!(content_hash(b"{}"), content_hash(b"{ }"));
+    }
+
+    #[test]
+    fn parse_value_empty_and_whitespace_yield_empty_object() {
+        let p = Path::new("x");
+        assert_eq!(parse_value(b"", p).unwrap(), Value::Object(Map::new()));
+        assert_eq!(
+            parse_value(b"  \n\t", p).unwrap(),
+            Value::Object(Map::new())
+        );
+        // Malformed content still errors (not silently empty).
+        assert!(parse_value(b"{bad", p).is_err());
     }
 
     #[test]
     fn empty_file_path_returns_empty_object_value() {
         // Sanity check that callers can build a state from an absent
-        // file. parse_settings_like uses NotFound branch internally;
+        // file. `read_json_or_empty` returns an empty object on NotFound;
         // here we simulate the post-condition.
         let value = Value::Object(Map::new());
-        assert!(extract_servers(&value, McpScope::Personal).is_empty());
+        assert!(extract_servers_at(&value, &top(), McpScope::User).is_empty());
     }
 }

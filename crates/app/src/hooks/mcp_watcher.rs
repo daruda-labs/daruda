@@ -1,6 +1,6 @@
-//! MCP filesystem watcher — recursive `notify` subscriptions on the
-//! parent directories of `~/.claude/settings.json` (personal scope)
-//! and `<lane>/.mcp.json` (project scope).
+//! MCP filesystem watcher — `notify` subscriptions on the parent
+//! directories of `~/.claude.json` (User + Local scopes) and
+//! `<lane>/.mcp.json` (Project scope).
 //!
 //! Mirrors `hooks::skills_watcher`'s 2-thread layout:
 //! 1. **FSEvent thread** — owns the `notify::Watcher`, blocks on the
@@ -20,16 +20,26 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use crate::agent::mcp::McpScope;
-
 /// Coalescing window. Same value as Skills — atomic-rename bursts
 /// finish within this much, the panel still reads as live.
 const DEBOUNCE: Duration = Duration::from_millis(100);
 
-/// One coalesced reload signal per scope.
+/// One coalesced reload signal per physical config file. User and
+/// Local scopes share `~/.claude.json`, so a single
+/// [`McpEvent::ClaudeJsonReloaded`] reloads both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpEvent {
-    Reloaded(McpScope),
+    /// `~/.claude.json` changed — reload User + Local scopes.
+    ClaudeJsonReloaded,
+    /// `<lane>/.mcp.json` changed — reload the Project scope.
+    ProjectReloaded,
+}
+
+/// Which physical file a raw watcher event maps to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WatchedFile {
+    ClaudeJson,
+    Project,
 }
 
 /// Caller-side handle. Dropping this closes both watcher threads.
@@ -39,39 +49,51 @@ pub struct McpWatcherHandle {
 
 /// Spawn the watcher.
 ///
-/// `project_path` is the active lane's `.mcp.json`. `None` when no
-/// lane is active (welcome-style window) — only the personal scope
+/// `project_paths` are the active lane's `.mcp.json` candidates — the
+/// lane root and the focused terminal's cwd (when it differs). Empty
+/// when no lane is active (welcome-style window) — only `~/.claude.json`
 /// then has a subscription.
+///
+/// `claude_json_path` is `~/.claude.json` (User + Local scopes). Its
+/// parent is the home directory, which is busy — the per-event exact
+/// path filter rejects every change that isn't `~/.claude.json` itself.
 ///
 /// Returns `(events, handle)`: the pump task takes ownership of
 /// `events`, while the handle stays on `Workspace` so dropping it
 /// stops the worker threads.
 pub fn spawn(
-    project_path: Option<PathBuf>,
-    personal_path: PathBuf,
+    project_paths: Vec<PathBuf>,
+    claude_json_path: PathBuf,
 ) -> (mpsc::Receiver<McpEvent>, McpWatcherHandle) {
     use notify::{RecursiveMode, Watcher};
 
-    let (raw_tx, raw_rx) = mpsc::channel::<McpScope>();
+    let (raw_tx, raw_rx) = mpsc::channel::<WatchedFile>();
     let (event_tx, event_rx) = mpsc::channel::<McpEvent>();
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
     // Resolve canonical anchors for `starts_with` comparisons. We watch
-    // the parent directory so we still see file *creation* events.
-    let project_anchor = project_path
-        .as_deref()
-        .and_then(|p| nearest_existing_ancestor_for_file(p, 2));
-    let personal_anchor = nearest_existing_ancestor_for_file(&personal_path, 2);
-
-    let project_match = project_path
-        .as_deref()
-        .map(|p| canonical_match_for_target(p, project_anchor.as_deref()));
-    let personal_match = canonical_match_for_target(&personal_path, personal_anchor.as_deref());
+    // the parent directory so we still see file *creation* events. The
+    // Project scope can have two `.mcp.json` targets (lane root + the
+    // focused terminal's cwd), so anchors/matches are sets.
+    let mut project_anchors: Vec<PathBuf> = Vec::new();
+    let mut project_matches: Vec<PathBuf> = Vec::new();
+    for p in &project_paths {
+        let anchor = nearest_existing_ancestor_for_file(p, 2);
+        project_matches.push(canonical_match_for_target(p, anchor.as_deref()));
+        if let Some(a) = anchor
+            && !project_anchors.contains(&a)
+        {
+            project_anchors.push(a);
+        }
+    }
+    let claude_json_anchor = nearest_existing_ancestor_for_file(&claude_json_path, 2);
+    let claude_json_match =
+        canonical_match_for_target(&claude_json_path, claude_json_anchor.as_deref());
 
     std::thread::spawn(move || {
         let raw_tx_inner = raw_tx.clone();
-        let project_match_clone = project_match.clone();
-        let personal_match_clone = personal_match.clone();
+        let project_matches_clone = project_matches.clone();
+        let claude_json_match_clone = claude_json_match.clone();
 
         let mut watcher =
             match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
@@ -79,18 +101,14 @@ pub fn spawn(
                     return;
                 };
                 for path in &event.paths {
-                    let scope = if let Some(proj) = &project_match_clone
-                        && path == proj
-                    {
-                        // Project file is a single path — exact match
-                        // (or the parent directory, which we ignore).
-                        McpScope::Project
-                    } else if path == &personal_match_clone {
-                        McpScope::Personal
+                    let which = if project_matches_clone.iter().any(|m| m == path) {
+                        WatchedFile::Project
+                    } else if path == &claude_json_match_clone {
+                        WatchedFile::ClaudeJson
                     } else {
                         continue;
                     };
-                    let _ = raw_tx_inner.send(scope);
+                    let _ = raw_tx_inner.send(which);
                 }
             }) {
                 Ok(w) => w,
@@ -101,11 +119,11 @@ pub fn spawn(
         // create events for files that didn't exist at spawn time.
         // RecursiveMode::NonRecursive is enough — every relevant event
         // lands directly in the parent directory.
-        if let Some(anchor) = project_anchor.as_deref() {
+        for anchor in &project_anchors {
             let _ = watcher.watch(anchor, RecursiveMode::NonRecursive);
         }
-        if let Some(anchor) = personal_anchor.as_deref() {
-            let already_covered = project_anchor.as_deref().is_some_and(|p| anchor == p);
+        if let Some(anchor) = claude_json_anchor.as_deref() {
+            let already_covered = project_anchors.iter().any(|p| p == anchor);
             if !already_covered {
                 let _ = watcher.watch(anchor, RecursiveMode::NonRecursive);
             }
@@ -117,9 +135,9 @@ pub fn spawn(
 
     // Debounce thread.
     std::thread::spawn(move || {
-        while let Ok(first_scope) = raw_rx.recv() {
-            let mut pending = ScopeFlags::default();
-            pending.set(first_scope);
+        while let Ok(first) = raw_rx.recv() {
+            let mut pending = FileFlags::default();
+            pending.set(first);
 
             let deadline = std::time::Instant::now() + DEBOUNCE;
             loop {
@@ -128,7 +146,7 @@ pub fn spawn(
                     break;
                 }
                 match raw_rx.recv_timeout(deadline - now) {
-                    Ok(scope) => pending.set(scope),
+                    Ok(which) => pending.set(which),
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => {
                         flush(&pending, &event_tx);
@@ -151,25 +169,25 @@ pub fn spawn(
 }
 
 #[derive(Clone, Copy, Default)]
-struct ScopeFlags {
+struct FileFlags {
     project: bool,
-    personal: bool,
+    claude_json: bool,
 }
 
-impl ScopeFlags {
-    fn set(&mut self, scope: McpScope) {
-        match scope {
-            McpScope::Project => self.project = true,
-            McpScope::Personal => self.personal = true,
+impl FileFlags {
+    fn set(&mut self, which: WatchedFile) {
+        match which {
+            WatchedFile::Project => self.project = true,
+            WatchedFile::ClaudeJson => self.claude_json = true,
         }
     }
 }
 
-fn flush(pending: &ScopeFlags, tx: &mpsc::Sender<McpEvent>) -> bool {
-    if pending.project && tx.send(McpEvent::Reloaded(McpScope::Project)).is_err() {
+fn flush(pending: &FileFlags, tx: &mpsc::Sender<McpEvent>) -> bool {
+    if pending.project && tx.send(McpEvent::ProjectReloaded).is_err() {
         return false;
     }
-    if pending.personal && tx.send(McpEvent::Reloaded(McpScope::Personal)).is_err() {
+    if pending.claude_json && tx.send(McpEvent::ClaudeJsonReloaded).is_err() {
         return false;
     }
     true
@@ -184,13 +202,14 @@ fn canonicalize_or_self(path: &Path) -> PathBuf {
 /// file itself and start from its parent, then ascend further until
 /// something exists.
 ///
-/// Fresh-install caveat: when `~/.claude/` doesn't exist yet, the
-/// personal anchor walks up to `~`. The watcher then receives events
-/// for every file change in `~`, but the per-event `path == match`
-/// filter accepts only the exact target path, so noise is rejected.
-/// `refresh_mcp_watcher` is called on every lane swap — once a
-/// save has created `~/.claude/settings.json`, the next refresh
-/// re-anchors the watcher onto the now-existing parent directory.
+/// `~/.claude.json`'s parent is the home directory, which always
+/// exists, so its anchor is `~` directly. The watcher then receives
+/// events for every direct child of `~`, but the per-event
+/// `path == match` filter accepts only the exact target path, so noise
+/// is rejected. For a project `.mcp.json` whose parent doesn't exist
+/// yet (fresh worktree), the walk ascends until something exists;
+/// `refresh_mcp_watcher` re-anchors on the next lane swap once the
+/// directory is created.
 fn nearest_existing_ancestor_for_file(target: &Path, max_ascend: usize) -> Option<PathBuf> {
     let mut current = target.parent()?.to_path_buf();
     let mut hops = 0usize;
@@ -232,23 +251,24 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// Smoke test — write to the personal file and confirm a Reload
-    /// event lands in the receiver. Skipped on non-macOS for brevity.
+    /// Smoke test — write to `~/.claude.json` and confirm a
+    /// `ClaudeJsonReloaded` event lands in the receiver. Skipped on
+    /// non-macOS for brevity.
     #[test]
     #[ignore = "FSEvents-dependent — run via `cargo test --ignored`"]
-    fn personal_change_triggers_reload() {
+    fn claude_json_change_triggers_reload() {
         let _g = crate::hooks::tests_common::fsevent_serial();
         let dir = tempfile::tempdir().unwrap();
-        let personal = dir.path().join("settings.json");
-        std::fs::write(&personal, b"{}\n").unwrap();
+        let claude_json = dir.path().join(".claude.json");
+        std::fs::write(&claude_json, b"{}\n").unwrap();
 
-        let (rx, _handle) = spawn(None, personal.clone());
+        let (rx, _handle) = spawn(Vec::new(), claude_json.clone());
 
         // FSEvent attach + canonicalize takes a beat on macOS.
         std::thread::sleep(Duration::from_millis(150));
-        std::fs::write(&personal, b"{\"mcpServers\":{}}\n").unwrap();
+        std::fs::write(&claude_json, b"{\"mcpServers\":{}}\n").unwrap();
 
         let evt = rx.recv_timeout(Duration::from_secs(2));
-        assert!(evt.is_ok(), "expected Reload event, got {evt:?}");
+        assert_eq!(evt, Ok(McpEvent::ClaudeJsonReloaded));
     }
 }

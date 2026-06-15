@@ -503,6 +503,11 @@ pub struct Workspace {
     /// `agent::mcp::global::init`).
     _mcp_watcher: Option<crate::hooks::mcp_watcher::McpWatcherHandle>,
     _mcp_event_pump: Option<gpui::Task<()>>,
+    /// Cached Project-scope `.mcp.json` directories (lane root + the
+    /// focused cwd, each walked up to its git repo root). Recomputed
+    /// only inside `respawn_mcp_watcher` — the render snapshot reads
+    /// this field instead of stat-walking the filesystem every frame.
+    mcp_project_dirs: Vec<std::path::PathBuf>,
     /// Subscription that calls `cx.notify()` whenever the `McpState`
     /// Global changes — so panels in this workspace re-render after a
     /// mutation triggered by another workspace's watcher or by a
@@ -876,6 +881,7 @@ impl Workspace {
             ),
             _mcp_watcher: None,
             _mcp_event_pump: None,
+            mcp_project_dirs: Vec::new(),
             _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(|ws, cx| {
                 ws.notify_right_dock(cx);
                 cx.notify();

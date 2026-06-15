@@ -21,7 +21,7 @@ pub fn open_delete_mcp_server_confirm(
     let lane = ws.active_lane_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(lane.as_deref());
+        .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
     let Some(path) = snapshot.path_for(scope).map(std::path::Path::to_path_buf) else {
         return;
     };

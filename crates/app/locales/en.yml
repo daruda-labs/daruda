@@ -15,6 +15,8 @@ common:
   refresh: "Refresh"
   section_project: "Project"
   section_personal: "Personal"
+  section_user: "User"
+  section_local: "Local"
   field_name: "Name"
   field_scope: "Scope"
   name_required: "Name is required."
@@ -481,8 +483,9 @@ skills:
 mcp:
   new_button: "+ Add server"
   empty_project: "No project MCP servers — `+ Add server` to create `.mcp.json`."
-  no_project_hint: "Project MCP servers require an active worktree. Open a project to enable this scope."
-  empty_personal: "No personal MCP servers configured."
+  no_project_hint: "Project and Local MCP servers require an active worktree. Open a project to enable these scopes."
+  empty_user: "No user MCP servers configured."
+  empty_local: "No local MCP servers for this project."
   status_enabled: "enabled"
   status_disabled: "disabled"
   status_malformed: "malformed"
@@ -507,7 +510,8 @@ mcp:
   url_invalid: "URL must start with http:// or https://."
   env_invalid: "Each env line must be KEY=VALUE."
   scope_project: "Project (.mcp.json)"
-  scope_personal: "Personal (~/.claude/settings.json)"
+  scope_user: "User (~/.claude.json)"
+  scope_local: "Local (~/.claude.json · this project)"
 
 # Usage tab
 usage:

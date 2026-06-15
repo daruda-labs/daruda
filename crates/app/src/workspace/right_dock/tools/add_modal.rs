@@ -105,15 +105,17 @@ impl AddMcpServerModal {
                 .placeholder("Authorization=Bearer ...")
         });
 
+        // Project + Local require an active lane root; User is always
+        // available. Order mirrors the Tools-tab section order.
         let scope_options: Vec<McpScope> = if initial.project_root.is_some() {
-            vec![McpScope::Project, McpScope::Personal]
+            vec![McpScope::Project, McpScope::Local, McpScope::User]
         } else {
-            vec![McpScope::Personal]
+            vec![McpScope::User]
         };
         let scope = if scope_options.contains(&initial.default_scope) {
             initial.default_scope
         } else {
-            McpScope::Personal
+            McpScope::User
         };
 
         let subs = vec![
@@ -455,9 +457,9 @@ pub fn open_add_mcp_server_modal(
     let lane = ws.active_lane_root();
     let snapshot = cx
         .global::<crate::agent::mcp::McpState>()
-        .snapshot_for(lane.as_deref());
+        .snapshot_for(lane.as_deref(), &ws.mcp_project_dirs);
     let initial = AddMcpInitial {
-        default_scope: prefill_scope.unwrap_or(McpScope::Personal),
+        default_scope: prefill_scope.unwrap_or(McpScope::User),
         project_root: snapshot.project_root.clone(),
         existing_names: snapshot.all_names(),
     };

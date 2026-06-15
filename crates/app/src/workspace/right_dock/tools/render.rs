@@ -34,6 +34,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let workspace = snap.workspace.clone();
     let t = theme::current(cx).clone();
 
+    let has_lane = mcp.project_root.is_some();
     crate::workspace::right_dock::right_panel_body()
         .child(header_row(workspace.clone()))
         .child(scope_section(
@@ -41,13 +42,22 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             McpScope::Project,
             mcp,
             workspace.clone(),
-            mcp.project_root.is_some(),
+            has_lane,
             &t,
         ))
         .child(Divider::horizontal())
         .child(scope_section(
-            strings::mcp_personal(),
-            McpScope::Personal,
+            strings::mcp_local(),
+            McpScope::Local,
+            mcp,
+            workspace.clone(),
+            has_lane,
+            &t,
+        ))
+        .child(Divider::horizontal())
+        .child(scope_section(
+            strings::mcp_user(),
+            McpScope::User,
             mcp,
             workspace,
             true,
@@ -117,7 +127,8 @@ fn scope_section(
     if servers.is_empty() {
         let msg = match scope {
             McpScope::Project => strings::mcp_empty_project(),
-            McpScope::Personal => strings::mcp_empty_personal(),
+            McpScope::Local => strings::mcp_empty_local(),
+            McpScope::User => strings::mcp_empty_user(),
         };
         col = col.child(
             div()

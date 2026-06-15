@@ -2014,9 +2014,15 @@ pub fn skills_no_project_hint() -> String {
 pub fn mcp_project() -> String {
     rust_i18n::t!("common.section_project").into_owned()
 }
-/// Section heading for personal-scope MCP servers (`~/.claude/settings.json`).
-pub fn mcp_personal() -> String {
-    rust_i18n::t!("common.section_personal").into_owned()
+/// Section heading for user-scope MCP servers (`~/.claude.json`
+/// top-level `mcpServers`).
+pub fn mcp_user() -> String {
+    rust_i18n::t!("common.section_user").into_owned()
+}
+/// Section heading for local-scope MCP servers (`~/.claude.json`
+/// `projects[<lane>].mcpServers`).
+pub fn mcp_local() -> String {
+    rust_i18n::t!("common.section_local").into_owned()
 }
 /// Header button — opens AddMcpServerModal.
 pub fn mcp_new_button() -> String {
@@ -2030,9 +2036,14 @@ pub fn mcp_empty_project() -> String {
 pub fn mcp_no_project_hint() -> String {
     rust_i18n::t!("mcp.no_project_hint").into_owned()
 }
-/// Body when personal scope is empty.
-pub fn mcp_empty_personal() -> String {
-    rust_i18n::t!("mcp.empty_personal").into_owned()
+/// Body when user scope is empty.
+pub fn mcp_empty_user() -> String {
+    rust_i18n::t!("mcp.empty_user").into_owned()
+}
+/// Body when local scope is empty (active lane, no `projects[<lane>]`
+/// servers in `~/.claude.json`).
+pub fn mcp_empty_local() -> String {
+    rust_i18n::t!("mcp.empty_local").into_owned()
 }
 /// Row status label — server is configured and not disabled.
 pub fn mcp_status_enabled() -> String {
@@ -2153,8 +2164,11 @@ pub const MCP_TRANSPORT_HTTP: &str = "http";
 pub fn mcp_scope_project() -> String {
     rust_i18n::t!("mcp.scope_project").into_owned()
 }
-pub fn mcp_scope_personal() -> String {
-    rust_i18n::t!("mcp.scope_personal").into_owned()
+pub fn mcp_scope_user() -> String {
+    rust_i18n::t!("mcp.scope_user").into_owned()
+}
+pub fn mcp_scope_local() -> String {
+    rust_i18n::t!("mcp.scope_local").into_owned()
 }
 
 // ============================================================================

@@ -27,7 +27,8 @@ pub(super) fn transport_options() -> Vec<(McpTransport, &'static str)> {
 pub(super) fn scope_options() -> Vec<(McpScope, String)> {
     vec![
         (McpScope::Project, strings::mcp_scope_project()),
-        (McpScope::Personal, strings::mcp_scope_personal()),
+        (McpScope::Local, strings::mcp_scope_local()),
+        (McpScope::User, strings::mcp_scope_user()),
     ]
 }
 

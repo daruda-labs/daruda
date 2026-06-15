@@ -16,9 +16,10 @@
 //! background task if a slow filesystem ever surfaces.
 //!
 //! There is no self-write suppression: every save we perform fires a
-//! filesystem event that loops back as `McpEvent::Reloaded`. That's
+//! filesystem event that loops back as an `McpEvent`. That's
 //! deliberate — the reload re-parses the same disk content we just
-//! wrote, so the in-memory state converges to itself with no visible
+//! wrote, and the change-gated `apply_mcp_event` notices nothing
+//! changed, so the in-memory state converges to itself with no visible
 //! flicker. Keeping the path simple is worth the negligible duplicate
 //! work.
 
@@ -30,8 +31,8 @@ use serde_json::Value;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 
 use crate::agent::mcp::{
-    McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp, delete_server,
-    parse, set_disabled, update_server, write_server,
+    McpLocation, McpPersistError, McpScope, McpServer, McpServerDraft, McpState, ProjectMcp,
+    delete_server, parse, set_disabled, update_server, write_server,
 };
 
 use crate::workspace::Workspace;
@@ -55,33 +56,62 @@ fn make_server_from_draft(scope: McpScope, draft: &McpServerDraft) -> McpServer 
     }
 }
 
-/// Resolve the on-disk path for `scope`. `None` for `Project` when
-/// `lane` is absent. Free helper so callers can compute the path
-/// without holding a `&McpState`.
-fn path_for(scope: McpScope, lane: Option<&Path>) -> Option<PathBuf> {
+/// Resolve `(write path, JSON location)` for `scope`. `None` when a
+/// lane root is required (`Project` / `Local`) but absent. Free helper
+/// so callers can compute the target without holding a `&McpState`.
+fn target_meta(scope: McpScope, lane: Option<&Path>) -> Option<(PathBuf, McpLocation)> {
     match scope {
-        McpScope::Project => lane.map(parse::project_mcp_path),
-        McpScope::Personal => Some(parse::personal_settings_path()),
+        McpScope::User => Some((parse::claude_json_path(), McpLocation::TopLevel)),
+        McpScope::Local => lane.map(|w| (parse::claude_json_path(), McpLocation::project(w))),
+        McpScope::Project => lane.map(|w| (parse::project_mcp_path(w), McpLocation::TopLevel)),
     }
 }
 
 /// Mutable handle to one scope's `(servers, raw)` inside the Global.
-/// Returns `None` for `Project` when `lane` is absent — no scoped
-/// entry to mutate. For `Personal`, always returns `Some`.
+/// Returns `None` for `Project` / `Local` when `lane` is absent — no
+/// scoped entry to mutate. For `User`, always returns `Some`.
+///
+/// User and Local both write into the shared `claude_json_raw` tree;
+/// only the in-memory server vector differs (top-level vs per-lane).
 fn scope_slot_mut<'a>(
     state: &'a mut McpState,
     scope: McpScope,
     lane: Option<&Path>,
 ) -> Option<(&'a mut Vec<McpServer>, &'a mut Value)> {
     match scope {
+        McpScope::User => Some((&mut state.user, &mut state.claude_json_raw)),
+        McpScope::Local => {
+            let w = lane?;
+            // Disjoint fields — borrow the shared raw tree and the
+            // per-lane Local vector simultaneously.
+            let raw = &mut state.claude_json_raw;
+            let servers = state.local.entry(w.to_path_buf()).or_default();
+            Some((servers, raw))
+        }
         McpScope::Project => {
             let w = lane?;
             let entry = state.project.entry(w.to_path_buf()).or_default();
             let ProjectMcp { servers, raw } = entry;
             Some((servers, raw))
         }
-        McpScope::Personal => Some((&mut state.personal, &mut state.personal_raw)),
     }
+}
+
+/// Re-read `~/.claude.json` from disk into the Global before patching a
+/// User / Local server. `~/.claude.json` holds the user's entire Claude
+/// Code state and Claude Code rewrites it constantly; refreshing right
+/// before our whole-file atomic rewrite shrinks the lost-update window
+/// against a concurrent write. No-op for the Project scope, whose
+/// `.mcp.json` is daruda-owned and low-collision.
+fn refresh_before_write(
+    state: &mut McpState,
+    scope: McpScope,
+    lane: Option<&Path>,
+) -> Result<(), McpPersistError> {
+    if scope.in_claude_json() {
+        state.reload_claude_json(lane)?;
+    }
+    Ok(())
 }
 
 impl Workspace {
@@ -93,10 +123,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let lane = self.active_lane_root();
-        let Some(path) = path_for(scope, lane.as_deref()) else {
+        let Some((path, location)) = target_meta(scope, lane.as_deref()) else {
             return;
         };
         let result = cx.update_global::<McpState, _>(|state, _| {
+            refresh_before_write(state, scope, lane.as_deref())?;
             let Some((servers, raw)) = scope_slot_mut(state, scope, lane.as_deref()) else {
                 return Ok::<_, McpPersistError>(false);
             };
@@ -104,7 +135,7 @@ impl Workspace {
                 return Ok(false);
             };
             let new_disabled = !current;
-            set_disabled(raw, &path, scope, name, new_disabled)?;
+            set_disabled(raw, &path, scope, &location, name, new_disabled)?;
             if let Some(s) = servers.iter_mut().find(|s| s.name == name) {
                 s.disabled = new_disabled;
             }
@@ -136,11 +167,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
         let lane = self.active_lane_root();
-        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let (path, location) =
+            target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
+            refresh_before_write(state, scope, lane.as_deref())?;
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
-            write_server(raw, &path, scope, &draft)?;
+            write_server(raw, &path, scope, &location, &draft)?;
             let server = make_server_from_draft(scope, &draft);
             servers.push(server);
             servers.sort_by(|a, b| a.name.cmp(&b.name));
@@ -158,11 +191,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
         let lane = self.active_lane_root();
-        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let (path, location) =
+            target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
+            refresh_before_write(state, scope, lane.as_deref())?;
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
-            update_server(raw, &path, scope, &draft)?;
+            update_server(raw, &path, scope, &location, &draft)?;
             let new_server = make_server_from_draft(scope, &draft);
             if let Some(slot) = servers.iter_mut().find(|s| s.name == draft.name) {
                 *slot = new_server;
@@ -185,11 +220,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<(), McpPersistError> {
         let lane = self.active_lane_root();
-        let path = path_for(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
+        let (path, location) =
+            target_meta(scope, lane.as_deref()).ok_or(McpPersistError::NoProjectRoot)?;
         let result = cx.update_global::<McpState, _>(|state, _| {
+            refresh_before_write(state, scope, lane.as_deref())?;
             let (servers, raw) = scope_slot_mut(state, scope, lane.as_deref())
                 .ok_or(McpPersistError::NoProjectRoot)?;
-            delete_server(raw, &path, scope, name)?;
+            delete_server(raw, &path, scope, &location, name)?;
             servers.retain(|s| s.name != name);
             Ok(())
         });

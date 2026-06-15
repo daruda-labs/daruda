@@ -1019,11 +1019,37 @@ impl Workspace {
                         let title = v.terminal_title().to_string();
                         let cwd = v.terminal_cwd().map(PathBuf::from);
                         workspace.update(cx, |ws, cx| {
-                            if let Some(pane) =
-                                ws.main_area.panes.iter_mut().find(|p| p.id == pane_id)
-                                && pane.update_cached_terminal(title, cwd)
-                            {
+                            let is_focused = ws.main_area.focused_pane_id == pane_id;
+                            // Capture the focused pane's cwd before the
+                            // update so a change can re-target the MCP
+                            // watcher (the Project scope reads the
+                            // focused terminal's cwd `.mcp.json`).
+                            let prev_cwd = ws
+                                .main_area
+                                .panes
+                                .iter()
+                                .find(|p| p.id == pane_id)
+                                .and_then(|p| p.cwd().map(std::path::Path::to_path_buf));
+                            let updated = ws
+                                .main_area
+                                .panes
+                                .iter_mut()
+                                .find(|p| p.id == pane_id)
+                                .map(|p| p.update_cached_terminal(title, cwd))
+                                .unwrap_or(false);
+                            if updated {
                                 cx.notify();
+                                if is_focused {
+                                    let new_cwd = ws
+                                        .main_area
+                                        .panes
+                                        .iter()
+                                        .find(|p| p.id == pane_id)
+                                        .and_then(|p| p.cwd().map(std::path::Path::to_path_buf));
+                                    if new_cwd != prev_cwd {
+                                        ws.refresh_mcp_on_cwd_change(cx);
+                                    }
+                                }
                             }
                         });
                     });

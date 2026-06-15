@@ -15,6 +15,8 @@ common:
   refresh: "새로 고침"
   section_project: "프로젝트"
   section_personal: "개인"
+  section_user: "사용자"
+  section_local: "로컬"
   field_name: "이름"
   field_scope: "범위"
   name_required: "이름은 필수입니다."
@@ -481,8 +483,9 @@ skills:
 mcp:
   new_button: "+ 서버 추가"
   empty_project: "프로젝트 MCP 서버 없음 — `+ 서버 추가`로 `.mcp.json`을 생성하세요."
-  no_project_hint: "프로젝트 MCP 서버는 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
-  empty_personal: "설정된 개인 MCP 서버가 없습니다."
+  no_project_hint: "프로젝트 및 로컬 MCP 서버는 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
+  empty_user: "설정된 사용자 MCP 서버가 없습니다."
+  empty_local: "이 프로젝트의 로컬 MCP 서버가 없습니다."
   status_enabled: "활성화됨"
   status_disabled: "비활성화됨"
   status_malformed: "형식 오류"
@@ -507,7 +510,8 @@ mcp:
   url_invalid: "URL은 http:// 또는 https://로 시작해야 합니다."
   env_invalid: "각 환경 변수 줄은 KEY=VALUE 형식이어야 합니다."
   scope_project: "프로젝트 (.mcp.json)"
-  scope_personal: "개인 (~/.claude/settings.json)"
+  scope_user: "사용자 (~/.claude.json)"
+  scope_local: "로컬 (~/.claude.json · 이 프로젝트)"
 
 # Usage tab
 usage:

@@ -1,19 +1,26 @@
 //! MCP server data model — GPUI-free types describing the on-disk
-//! layout of the two MCP server scopes Claude Code reads:
+//! layout of the three MCP server scopes Claude Code reads (matching
+//! the official scope table at <https://code.claude.com/docs/en/mcp>):
 //!
-//! - **Project** — `<lane>/.mcp.json`
-//! - **Personal** — `~/.claude/settings.json` `mcpServers`
+//! - **User** — `~/.claude.json` top-level `mcpServers` (available
+//!   across every project).
+//! - **Local** — `~/.claude.json` `projects[<lane>].mcpServers` (private
+//!   to the current project).
+//! - **Project** — `<lane>/.mcp.json` (team-shared, committable).
 //!
-//! Both files round-trip losslessly: known keys land in typed fields,
-//! unknown keys are preserved via `extra` (per server) and via the raw
-//! `serde_json::Value` tree (top-level non-`mcpServers` keys like
-//! `permissions`, `hooks`, `enableAllProjectMcpServers`). This is
-//! mandatory — the personal settings file is shared with Claude Code
-//! itself, and silently dropping a `permissions.allow` entry on toggle
+//! Precedence (highest first, per the docs): Local > Project > User.
+//!
+//! User and Local share one physical file (`~/.claude.json`); Project
+//! lives in its own `.mcp.json`. Both files round-trip losslessly: known
+//! keys land in typed fields, unknown keys are preserved via `extra`
+//! (per server) and via the raw `serde_json::Value` tree (every key
+//! outside the patched `mcpServers` map). This is mandatory —
+//! `~/.claude.json` holds the user's entire Claude Code state (history,
+//! per-project data, auth), and silently dropping any of it on a toggle
 //! would be catastrophic.
 //!
 //! No GPUI imports here — `app/src/CLAUDE.md` G2 / G7 forbid them.
-//! This module is consumed by the renderer (`workspace/right_panel/tools/`),
+//! This module is consumed by the renderer (`workspace/right_dock/tools/`),
 //! the watcher (`hooks/mcp_watcher.rs`), and the CRUD modals.
 
 pub mod global;
@@ -28,36 +35,64 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub use parse::{
-    PERSONAL_SETTINGS_FILE, PROJECT_MCP_FILE, parse_personal_settings, parse_project_mcp,
-    personal_settings_path, project_mcp_path,
+    CLAUDE_JSON_FILE, PROJECT_MCP_FILE, claude_json_path, extract_servers_at, parse_project_mcp,
+    project_mcp_path, read_json_or_empty,
 };
 pub use persist::{
     McpPersistError, McpServerDraft, delete_server, set_disabled, update_server, write_server,
 };
 
-/// On-disk scope for an MCP server.
+/// On-disk scope for an MCP server, matching Claude Code's three
+/// installation scopes.
 ///
-/// - `Project` — `<lane>/.mcp.json` (team-shared, committable; only
-///   loaded by Claude Code when `enableAllProjectMcpServers=true` in
-///   personal settings).
-/// - `Personal` — `~/.claude/settings.json` `mcpServers` (always loaded).
+/// - `User` — `~/.claude.json` top-level `mcpServers` (cross-project).
+/// - `Project` — `<lane>/.mcp.json` (team-shared, committable).
+/// - `Local` — `~/.claude.json` `projects[<lane>].mcpServers` (private
+///   to the current project).
 ///
-/// Same name in both scopes → daruda surfaces `(overrides personal)` on
-/// the project row, mirroring the Skills tab's project-overrides-personal
-/// UX.
+/// Precedence (highest first): Local > Project > User.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum McpScope {
+    User,
     Project,
-    Personal,
+    Local,
 }
 
 impl McpScope {
     /// Stable kebab slug for serialization / logging.
     pub fn slug(self) -> &'static str {
         match self {
+            McpScope::User => "user",
             McpScope::Project => "project",
-            McpScope::Personal => "personal",
+            McpScope::Local => "local",
         }
+    }
+
+    /// True for the scopes stored in `~/.claude.json` (User + Local).
+    /// The Project scope lives in a separate `.mcp.json`.
+    pub fn in_claude_json(self) -> bool {
+        matches!(self, McpScope::User | McpScope::Local)
+    }
+}
+
+/// Where inside a parsed JSON document the `mcpServers` map lives.
+///
+/// `.mcp.json` and the User scope use [`McpLocation::TopLevel`]; the
+/// Local scope nests under `projects[<dir>]` inside `~/.claude.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpLocation {
+    /// Top-level `mcpServers`.
+    TopLevel,
+    /// `projects[<dir>].mcpServers`, where `<dir>` is the project
+    /// directory path as Claude Code keys it in `~/.claude.json`.
+    ProjectChild(String),
+}
+
+impl McpLocation {
+    /// Build the Local-scope location for a lane root, matching the
+    /// path-string key Claude Code writes under `projects`.
+    pub fn project(root: &Path) -> Self {
+        McpLocation::ProjectChild(root.to_string_lossy().into_owned())
     }
 }
 
@@ -89,8 +124,10 @@ impl McpTransport {
     }
 }
 
-/// One MCP server entry from disk. Built by the parsers.
-#[derive(Clone, Debug)]
+/// One MCP server entry from disk. Built by the parsers. `PartialEq`
+/// backs the reload change-detection that suppresses re-renders when a
+/// `~/.claude.json` write didn't touch any MCP server.
+#[derive(Clone, Debug, PartialEq)]
 pub struct McpServer {
     pub name: String,
     pub scope: McpScope,
@@ -205,87 +242,180 @@ pub struct ProjectMcp {
 }
 
 /// App-wide MCP server state. Lives as a GPUI Global registered at
-/// bootstrap (`global::init`). User-scope vectors (`personal`,
-/// `personal_raw`) are shared across every Workspace; project-scope
+/// bootstrap (`global::init`). The User-scope vector and the shared
+/// `~/.claude.json` raw tree are global; Local- and Project-scope
 /// state is partitioned by lane root path so multiple Workspace
-/// windows observing different lanes never collide on a single
-/// `project_root` field. Renderers and modals consume a per-lane
-/// [`McpSnapshot`] via [`McpState::snapshot_for`].
+/// windows observing different lanes never collide. Renderers and
+/// modals consume a per-lane [`McpSnapshot`] via
+/// [`McpState::snapshot_for`].
 ///
 /// Mirrors Zed's `SettingsStore::local_settings` pattern (a single
-/// Global with a `BTreeMap` keyed by lane-relative location).
+/// Global with `BTreeMap`s keyed by lane-relative location).
 ///
-/// `*_raw` carries the entire parsed JSON tree so non-`mcpServers`
-/// keys (permissions, hooks, top-level project settings, etc.) survive
-/// every write-back unchanged. This is mandatory — the personal
-/// settings file is shared with Claude Code itself, and silently
-/// dropping a `permissions.allow` entry on toggle would be catastrophic.
+/// `claude_json_raw` carries the entire parsed `~/.claude.json` tree so
+/// every key outside the patched `mcpServers` map survives every
+/// write-back unchanged. This is mandatory — `~/.claude.json` holds the
+/// user's complete Claude Code state, and silently dropping any of it
+/// on a toggle would be catastrophic.
 #[derive(Clone, Debug, Default)]
 pub struct McpState {
-    pub personal: Vec<McpServer>,
-    /// Whole `~/.claude/settings.json` parsed tree.
-    pub personal_raw: serde_json::Value,
-    /// Per-lane project-scope state, keyed by the lane's
-    /// absolute root path (what `Workspace::active_lane_root`
-    /// returns). An entry exists for every lane that has been
-    /// scanned at least once; opening a different lane adds a new
-    /// key without disturbing the others.
+    /// User scope — `~/.claude.json` top-level `mcpServers`. Shared
+    /// across every lane.
+    pub user: Vec<McpServer>,
+    /// Local scope — `~/.claude.json` `projects[<root>].mcpServers`,
+    /// keyed by the lane's absolute root path.
+    pub local: BTreeMap<PathBuf, Vec<McpServer>>,
+    /// Project scope — `<root>/.mcp.json`, keyed by the lane's
+    /// absolute root path. An entry exists for every lane scanned at
+    /// least once; opening a different lane adds a new key without
+    /// disturbing the others.
     pub project: BTreeMap<PathBuf, ProjectMcp>,
+    /// Whole `~/.claude.json` parsed tree. User and Local scopes are
+    /// both derived from — and persisted into — this single tree.
+    pub claude_json_raw: serde_json::Value,
+    /// Content hash of `~/.claude.json` as last parsed into
+    /// `claude_json_raw`. `reload_claude_json` skips the expensive
+    /// re-parse when a fresh read hashes to the same value.
+    pub claude_json_hash: Option<u64>,
     /// Last successful scan timestamp across any scope. `None` until
     /// the first load lands.
     pub last_scanned: Option<SystemTime>,
 }
 
 impl McpState {
-    /// Reload one scope from disk. `lane` is required for
-    /// `McpScope::Project` and ignored otherwise. Project entries are
-    /// inserted into the `project` map at the lane's path.
-    pub fn reload_scope(
-        &mut self,
-        scope: McpScope,
-        lane: Option<&Path>,
-    ) -> Result<(), parse::ParseError> {
-        match scope {
-            McpScope::Project => {
-                if let Some(w) = lane {
-                    let path = parse::project_mcp_path(w);
-                    let (servers, raw) = parse_project_mcp(&path)?;
-                    self.project
-                        .insert(w.to_path_buf(), ProjectMcp { servers, raw });
-                }
-            }
-            McpScope::Personal => {
-                let path = parse::personal_settings_path();
-                let (servers, raw) = parse_personal_settings(&path)?;
-                self.personal = servers;
-                self.personal_raw = raw;
-            }
-        }
-        self.last_scanned = Some(SystemTime::now());
-        Ok(())
+    /// Reload `~/.claude.json` (User + Local scopes). The whole file is
+    /// re-parsed into `claude_json_raw`; User comes from the top-level
+    /// `mcpServers`, Local from `projects[<lane>].mcpServers` for the
+    /// given lane (other lanes' Local caches are left untouched).
+    ///
+    /// Returns `true` when the MCP-relevant content (User servers, or
+    /// the given lane's Local servers) actually changed — callers use
+    /// this to suppress re-renders when an unrelated `~/.claude.json`
+    /// write (history append, etc.) fired the watcher. `~/.claude.json`
+    /// can be multi-megabyte and Claude Code rewrites it constantly, so
+    /// this guard matters.
+    ///
+    /// Hash gate: the raw bytes are read and hashed every call, but the
+    /// `serde_json` parse + `Value` tree build is skipped when the
+    /// content is byte-identical to the last parse. On a cache hit only
+    /// the requested lane's Local view is (re)derived from the cached
+    /// tree, which is cheap.
+    pub fn reload_claude_json(&mut self, lane: Option<&Path>) -> Result<bool, parse::ParseError> {
+        let path = parse::claude_json_path();
+        self.reload_claude_json_at(&path, lane)
     }
 
-    /// Drop a lane's project entry. Call when a lane is
-    /// closed so the `BTreeMap` doesn't grow unbounded across the
+    /// Path-injectable core of [`reload_claude_json`] — tests point it
+    /// at a temp file instead of the real `~/.claude.json`.
+    fn reload_claude_json_at(
+        &mut self,
+        path: &Path,
+        lane: Option<&Path>,
+    ) -> Result<bool, parse::ParseError> {
+        let bytes = parse::read_bytes_or_empty(path)?;
+        let hash = parse::content_hash(&bytes);
+        if self.claude_json_hash == Some(hash) {
+            // Content unchanged since the last parse — reuse the cached
+            // tree. The only thing that can differ is the requested
+            // lane's Local view (e.g. a lane we haven't projected yet).
+            self.last_scanned = Some(SystemTime::now());
+            return Ok(self.refresh_local_from_cache(lane));
+        }
+        let raw = parse::parse_value(&bytes, path)?;
+        let new_user = parse::extract_servers_at(&raw, &McpLocation::TopLevel, McpScope::User);
+        let mut changed = new_user != self.user;
+        self.user = new_user;
+        if let Some(root) = lane {
+            let new_local =
+                parse::extract_servers_at(&raw, &McpLocation::project(root), McpScope::Local);
+            changed |= self.local.get(root) != Some(&new_local);
+            self.local.insert(root.to_path_buf(), new_local);
+        }
+        self.claude_json_raw = raw;
+        self.claude_json_hash = Some(hash);
+        self.last_scanned = Some(SystemTime::now());
+        Ok(changed)
+    }
+
+    /// Re-derive one lane's Local servers from the already-parsed
+    /// `claude_json_raw` without touching disk. Returns whether that
+    /// lane's Local view changed. Used on a hash-gate cache hit.
+    fn refresh_local_from_cache(&mut self, lane: Option<&Path>) -> bool {
+        let Some(root) = lane else {
+            return false;
+        };
+        let new_local = parse::extract_servers_at(
+            &self.claude_json_raw,
+            &McpLocation::project(root),
+            McpScope::Local,
+        );
+        let changed = self.local.get(root) != Some(&new_local);
+        self.local.insert(root.to_path_buf(), new_local);
+        changed
+    }
+
+    /// Reload the Project scope (`<lane>/.mcp.json`) for one lane.
+    /// Returns `true` when the lane's project servers changed.
+    pub fn reload_project(&mut self, lane: Option<&Path>) -> Result<bool, parse::ParseError> {
+        let mut changed = false;
+        if let Some(w) = lane {
+            let path = parse::project_mcp_path(w);
+            let (servers, raw) = parse_project_mcp(&path)?;
+            changed = self.project.get(w).map(|p| &p.servers) != Some(&servers);
+            self.project
+                .insert(w.to_path_buf(), ProjectMcp { servers, raw });
+        }
+        self.last_scanned = Some(SystemTime::now());
+        Ok(changed)
+    }
+
+    /// Drop a lane's Local + Project entries. Call when a lane is
+    /// closed so the `BTreeMap`s don't grow unbounded across the
     /// session.
     pub fn forget_lane(&mut self, root: &Path) {
+        self.local.remove(root);
         self.project.remove(root);
     }
 
     /// Build an owned per-lane view for the renderer / modals.
     /// Carrying it by value keeps the panel render closure off the
     /// Global (no re-entrancy hazard).
-    pub fn snapshot_for(&self, lane: Option<&Path>) -> McpSnapshot {
-        let project = match lane.and_then(|w| self.project.get(w)) {
-            Some(p) => p.servers.clone(),
-            None => Vec::new(),
-        };
+    ///
+    /// Project scope merges every `.mcp.json` in `project_dirs`,
+    /// matching how Claude Code discovers project config by searching
+    /// upward from its cwd. Callers pass the lane root, its ancestors up
+    /// to the git repo root, and the focused terminal's cwd chain — so a
+    /// repo-root `.mcp.json` shows even when the lane is a subdirectory,
+    /// without the user having to `cd`.
+    ///
+    /// `project_dirs` is consulted in order; on a same-name collision
+    /// the earlier (nearest-to-lane) entry wins. `lane` itself drives
+    /// the Local scope and the write target (`path_for(Project)` →
+    /// `lane/.mcp.json`), so it must be the first element.
+    pub fn snapshot_for(&self, lane: Option<&Path>, project_dirs: &[PathBuf]) -> McpSnapshot {
+        let mut project: Vec<McpServer> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for dir in project_dirs {
+            if let Some(p) = self.project.get(dir) {
+                for s in &p.servers {
+                    if seen.insert(s.name.clone()) {
+                        project.push(s.clone());
+                    }
+                }
+            }
+        }
+        project.sort_by(|a, b| a.name.cmp(&b.name));
+        let local = lane
+            .and_then(|w| self.local.get(w))
+            .cloned()
+            .unwrap_or_default();
         McpSnapshot {
+            user: self.user.clone(),
+            local,
             project,
-            personal: self.personal.clone(),
             project_root: lane.map(Path::to_path_buf),
             project_mcp_path: lane.map(parse::project_mcp_path),
-            personal_settings_path: parse::personal_settings_path(),
+            claude_json_path: parse::claude_json_path(),
             last_scanned: self.last_scanned,
         }
     }
@@ -299,23 +429,29 @@ impl McpState {
 /// reads them, so cloning them per frame would be pure waste.
 #[derive(Clone, Debug, Default)]
 pub struct McpSnapshot {
+    /// User scope (`~/.claude.json` top-level).
+    pub user: Vec<McpServer>,
+    /// Local scope for the active lane (`~/.claude.json`
+    /// `projects[<root>]`).
+    pub local: Vec<McpServer>,
+    /// Project scope for the active lane (`<root>/.mcp.json`).
     pub project: Vec<McpServer>,
-    pub personal: Vec<McpServer>,
-    /// Lane root whose project servers are carried in `project`.
+    /// Lane root whose Project + Local servers are carried here.
     /// `None` when the workspace has no active lane.
     pub project_root: Option<PathBuf>,
     /// `<project_root>/.mcp.json`. `None` when `project_root` is `None`.
     pub project_mcp_path: Option<PathBuf>,
-    /// Cached `~/.claude/settings.json` resolution.
-    pub personal_settings_path: PathBuf,
+    /// Cached `~/.claude.json` resolution (User + Local target).
+    pub claude_json_path: PathBuf,
     pub last_scanned: Option<SystemTime>,
 }
 
 impl McpSnapshot {
     pub fn servers(&self, scope: McpScope) -> &[McpServer] {
         match scope {
+            McpScope::User => &self.user,
             McpScope::Project => &self.project,
-            McpScope::Personal => &self.personal,
+            McpScope::Local => &self.local,
         }
     }
 
@@ -323,36 +459,36 @@ impl McpSnapshot {
         self.servers(scope).iter().find(|s| s.name == name)
     }
 
-    /// Duplicate-name check against the captured Project / Personal
-    /// vectors.
+    /// Duplicate-name check against the captured scope vector.
     pub fn name_exists(&self, scope: McpScope, name: &str) -> bool {
         self.servers(scope).iter().any(|s| s.name == name)
     }
 
-    /// True when a project server has the same name as a personal
-    /// server.
-    pub fn project_overrides_personal(&self, project_name: &str) -> bool {
-        self.personal.iter().any(|s| s.name == project_name)
-    }
-
-    /// Path the given scope writes to. `None` for `Project` when
-    /// there is no active project root.
+    /// Path the given scope writes to. `None` for `Project` / `Local`
+    /// when there is no active project root (those need a lane).
     pub fn path_for(&self, scope: McpScope) -> Option<&Path> {
         match scope {
+            McpScope::User => Some(self.claude_json_path.as_path()),
+            McpScope::Local => self
+                .project_root
+                .as_ref()
+                .map(|_| self.claude_json_path.as_path()),
             McpScope::Project => self.project_mcp_path.as_deref(),
-            McpScope::Personal => Some(self.personal_settings_path.as_path()),
         }
     }
 
-    /// `(scope, name)` pairs across both scopes — used for duplicate
+    /// `(scope, name)` pairs across every scope — used for duplicate
     /// validation in the AddModal.
     pub fn all_names(&self) -> Vec<(McpScope, String)> {
-        let mut out = Vec::with_capacity(self.project.len() + self.personal.len());
+        let mut out = Vec::with_capacity(self.user.len() + self.project.len() + self.local.len());
+        for s in &self.user {
+            out.push((McpScope::User, s.name.clone()));
+        }
         for s in &self.project {
             out.push((McpScope::Project, s.name.clone()));
         }
-        for s in &self.personal {
-            out.push((McpScope::Personal, s.name.clone()));
+        for s in &self.local {
+            out.push((McpScope::Local, s.name.clone()));
         }
         out
     }
