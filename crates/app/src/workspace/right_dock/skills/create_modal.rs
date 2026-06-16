@@ -341,13 +341,10 @@ impl Render for CreateSkillModal {
                     .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
                     .text_color(text_color)
                     .child(label)
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(move |this, _, _w, cx| {
-                            this.scope = scope;
-                            cx.notify();
-                        }),
-                    );
+                    .on_click(cx.listener(move |this, _, _w, cx| {
+                        this.scope = scope;
+                        cx.notify();
+                    }));
                 row = row.child(chip);
             }
             row

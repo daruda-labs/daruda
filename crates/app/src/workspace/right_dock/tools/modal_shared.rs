@@ -1,7 +1,7 @@
 //! Helpers shared by the AddMcpServerModal / EditMcpServerModal.
 
 use crate::ui::theme;
-use gpui::{IntoElement, MouseButton, SharedString, div, prelude::*, px};
+use gpui::{IntoElement, SharedString, div, prelude::*, px};
 
 use crate::agent::mcp::{FieldError, McpScope, McpTransport};
 use crate::surface::strings;
@@ -70,9 +70,7 @@ where
         .text_size(px(theme::MCP_BADGE_FONT_SIZE))
         .text_color(text_color)
         .child(label.into())
-        .on_mouse_down(MouseButton::Left, move |_, w, cx| {
-            on_click(&gpui::ClickEvent::default(), w, cx);
-        })
+        .on_click(move |e, w, cx| on_click(e, w, cx))
 }
 
 /// Map a typed [`FieldError`] back to its localised banner string.

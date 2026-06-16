@@ -204,14 +204,13 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 /// every state bucket. Text-only — the in-field `✕` already provides
 /// one-click recovery so a second affordance here would be redundant.
 fn search_empty_hint(query: String) -> impl IntoElement {
-    let display_query = SharedString::from(format!("\"{}\"", query.trim()));
     div()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
         .text_color(theme::TEXT_DISABLED)
         .child(SharedString::from(format!(
-            "{}{}.",
+            "{}\"{}\".",
             strings::task_search_empty_prefix(),
-            display_query
+            query.trim()
         )))
 }
 

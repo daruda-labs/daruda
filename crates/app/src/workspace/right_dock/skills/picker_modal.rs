@@ -19,6 +19,7 @@ use gpui::{
 };
 
 use crate::agent::skills::Skill;
+use crate::surface::strings;
 use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
 use crate::workspace::ModalView;
@@ -91,9 +92,7 @@ impl SkillPickerModal {
         cx: &mut Context<Self>,
     ) -> Self {
         let empty_hint = if items.is_empty() {
-            Some(SharedString::from(
-                "No skills to invoke from this group.".to_string(),
-            ))
+            Some(SharedString::from(strings::skills_empty_plugin_picker()))
         } else {
             None
         };

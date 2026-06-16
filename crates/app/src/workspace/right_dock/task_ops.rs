@@ -39,6 +39,20 @@ impl Workspace {
         self.notify_right_dock(cx);
     }
 
+    /// Clear the Tasks tab search input (the in-field `✕` overlay).
+    /// Extracted so the View closure can dispatch in one line.
+    pub(in crate::workspace) fn clear_task_search(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = self.task_search_input.clone();
+        input.update(cx, |inp, cx_state| {
+            inp.set_value("".to_string(), window, cx_state);
+        });
+        cx.notify();
+    }
+
     /// Set the Tasks-tab filter directly. Called by future `Select`
     /// widget subscriptions once it replaces the cycle chip.
     #[allow(dead_code)]
@@ -402,17 +416,14 @@ impl Workspace {
             let Some(task) = g.get(task_id) else {
                 return;
             };
-            format!(
-                "Delete task \"{}\"? The associated lane (if any) is preserved.",
-                task.title
-            )
+            crate::surface::strings::task_confirm_delete_body(&task.title)
         };
         let weak = cx.weak_entity();
         let id = task_id.to_string();
         crate::workspace::dialog_helpers::open_confirm_dialog(
-            "Delete Task",
+            crate::surface::strings::task_picker_title_delete(),
             body,
-            "Delete",
+            crate::surface::strings::task_action_delete(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
                 if let Some(ws) = weak.upgrade() {

@@ -175,6 +175,7 @@ task:
   subtask_draft_hint: "Save the task to add subtasks."
   subtask_auto_label: "auto"
   subtask_manual_label: "manual"
+  confirm_delete_body: "Delete task “%{title}”? The associated lane (if any) is preserved."
 
 # File viewer
 file_viewer:
@@ -497,6 +498,8 @@ skills:
   name_duplicate: "A skill with this name already exists in this scope."
   description_too_long_hint: "Description over 1536 characters — Claude Code may truncate it."
   no_project_hint: "Project skills require an active worktree. Open a project to enable this scope."
+  invoke_title: "Run skill"
+  empty_plugin_picker: "No skills to invoke from this group."
 
 # MCP / Tools tab
 mcp:

@@ -390,6 +390,12 @@ pub fn task_picker_title_edit() -> String {
     rust_i18n::t!("task.picker_title_edit").into_owned()
 }
 
+/// Body of the delete-task confirmation dialog. `title` is the task's
+/// display title, interpolated inside curly quotes.
+pub fn task_confirm_delete_body(title: &str) -> String {
+    rust_i18n::t!("task.confirm_delete_body", title => title).into_owned()
+}
+
 // Task picker modal — empty-state messages shown when no task is
 // eligible for the chosen action.
 pub fn task_picker_empty_start() -> String {
@@ -1905,6 +1911,10 @@ pub fn skills_manage_plugins_button() -> String {
 // Skill invocation modal — clicking a row opens this, Submit writes
 // `/<skill> <input>\n` into the focused terminal pane.
 // ----------------------------------------------------------------
+/// Title of the skill-invocation modal (`open_form_modal`).
+pub fn skills_invoke_title() -> String {
+    rust_i18n::t!("skills.invoke_title").into_owned()
+}
 pub fn skills_invoke_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
@@ -1931,6 +1941,11 @@ pub fn skills_invoke_placeholder_default() -> String {
 }
 pub fn skills_invoke_no_terminal() -> String {
     rust_i18n::t!("skills.invoke_no_terminal").into_owned()
+}
+/// Empty-state hint in the skill picker when a plugin group exposes no
+/// invocable skills (the picker chains into the invocation modal).
+pub fn skills_empty_plugin_picker() -> String {
+    rust_i18n::t!("skills.empty_plugin_picker").into_owned()
 }
 
 // Create / edit skill modal — input placeholders. Shared between the

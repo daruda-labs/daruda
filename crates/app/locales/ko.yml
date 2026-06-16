@@ -175,6 +175,7 @@ task:
   subtask_draft_hint: "하위 작업을 추가하려면 작업을 먼저 저장하세요."
   subtask_auto_label: "자동"
   subtask_manual_label: "수동"
+  confirm_delete_body: "작업 “%{title}”을(를) 삭제할까요? 연결된 레인(있는 경우)은 유지됩니다."
 
 # File viewer
 file_viewer:
@@ -497,6 +498,8 @@ skills:
   name_duplicate: "이 범위에 동일한 이름의 스킬이 이미 존재합니다."
   description_too_long_hint: "설명이 1536자를 초과합니다 — Claude Code에서 잘릴 수 있습니다."
   no_project_hint: "프로젝트 스킬은 활성 Worktree가 필요합니다. 프로젝트를 열어 이 범위를 활성화하세요."
+  invoke_title: "스킬 실행"
+  empty_plugin_picker: "이 그룹에서 실행할 스킬이 없습니다."
 
 # MCP / Tools tab
 mcp:

@@ -9,6 +9,7 @@
 
 use gpui::{Context, Window};
 
+use crate::surface::strings;
 use crate::workspace::Workspace;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
@@ -90,7 +91,7 @@ impl Workspace {
 
         let workspace = cx.weak_entity();
         crate::workspace::dialog_helpers::open_form_modal(
-            "Run skill",
+            strings::skills_invoke_title(),
             Some(gpui::px(crate::ui::theme::FORM_MODAL_WIDE)),
             move |window, cx| {
                 SkillInvocationModal::new(workspace.clone(), label.clone(), window, cx)
