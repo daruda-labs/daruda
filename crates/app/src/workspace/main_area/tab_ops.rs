@@ -34,6 +34,51 @@ impl Workspace {
     pub(in crate::workspace) fn set_focused_pane(&mut self, id: PaneId, cx: &mut Context<Self>) {
         self.main_area.focused_pane_id = id;
         self.notify_left_dock(cx);
+        // Re-evaluate inactive-pane dim: the focused pane drops to full
+        // color and its former-focused sibling dims (or, after a split /
+        // close, the whole tab's dim state is recomputed).
+        self.refresh_pane_dimming(cx);
+    }
+
+    /// Push per-pane dim onto the active tab's terminal views: inactive
+    /// panes blend toward gray (iTerm2-style), the focused pane stays
+    /// full color. Only dims when the active tab is actually split
+    /// (`leaf_count() > 1`) and no pane is zoomed; a lone pane (or a
+    /// zoomed leaf) is never dimmed. Single update site for
+    /// `TerminalView::set_dim_amount` — the MVU one-way-data-flow rule.
+    /// Notifies only the views whose amount changed (Pitfall #10: the
+    /// `.cached()` terminal must be dirtied for the new dim to paint).
+    pub(in crate::workspace) fn refresh_pane_dimming(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) else {
+            return;
+        };
+        let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane_id.is_none();
+        let focused = self.main_area.focused_pane_id;
+        let pane_ids = tab.layout.pane_ids();
+
+        for pane_id in pane_ids {
+            let target = if split && pane_id != focused {
+                crate::workspace::render::INACTIVE_PANE_DIM_AMOUNT
+            } else {
+                0.0
+            };
+            let Some(view) = self
+                .main_area
+                .panes
+                .iter()
+                .find(|p| p.id == pane_id)
+                .and_then(|p| p.terminal_view())
+            else {
+                continue;
+            };
+            let view = view.clone();
+            if (view.read(cx).dim_amount() - target).abs() > f32::EPSILON {
+                view.update(cx, |v, cx| {
+                    v.set_dim_amount(target);
+                    cx.notify();
+                });
+            }
+        }
     }
 
     /// Click-to-focus body for the pane root's mouse-down listener
@@ -182,6 +227,9 @@ impl Workspace {
     ) {
         if index < self.main_area.tabs.len() && index != self.main_area.active_tab_index {
             self.main_area.zoomed_pane_id = None;
+            // Drop any in-flight drag hover so a stale half-fill overlay does
+            // not linger on the newly-activated tab. The notify below covers it.
+            self.main_area.pane_drop_hover = None;
             // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
             if self.main_area.tab_history.last() != Some(&self.main_area.active_tab_index) {
                 self.main_area
@@ -198,6 +246,10 @@ impl Workspace {
             self.main_area.active_tab_index = index;
             let focused = self.main_area.tabs[index].last_focused_pane;
             self.main_area.focused_pane_id = focused;
+            // New active tab may have a different split structure — recompute
+            // dim across its panes (the previous tab's views keep their dim;
+            // they are not visible).
+            self.refresh_pane_dimming(cx);
             self.mutate_durable_in(window, cx, |ws, window, cx| {
                 ws.bump_activity(focused);
                 ws.focus_pane(focused, window, cx);
@@ -340,6 +392,13 @@ impl Workspace {
         } else {
             self.main_area.zoomed_pane_id = Some(pane_id);
         }
+        // A zoom change swaps the layout out from under any in-flight drag
+        // hover; drop it so a stale half-fill overlay does not linger.
+        self.main_area.pane_drop_hover = None;
+        // Zoom toggles whether the tab counts as "split" for dimming: a
+        // zoomed leaf is rendered alone and must show full color; on
+        // unzoom the inactive siblings dim again.
+        self.refresh_pane_dimming(cx);
         cx.notify();
     }
 
@@ -371,7 +430,7 @@ impl Workspace {
 
         let focused = self.main_area.focused_pane_id;
         for tab in &mut self.main_area.tabs {
-            if insert_split_at(&mut tab.layout, focused, direction, new_pane_id) {
+            if insert_split_at(&mut tab.layout, focused, direction, new_pane_id, false) {
                 tab.last_focused_pane = new_pane_id;
                 break;
             }
@@ -411,6 +470,8 @@ impl Workspace {
         if self.main_area.zoomed_pane_id == Some(pane_id) {
             self.main_area.zoomed_pane_id = None;
         }
+        // A pane removal invalidates any in-flight drop-hover target.
+        self.main_area.pane_drop_hover = None;
         remove_pane_from_layout(&mut self.main_area.tabs[tab_index].layout, pane_id);
         self.release_pane_tracking(&[pane_id], cx);
         self.main_area.panes.retain(|p| p.id != pane_id);

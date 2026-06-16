@@ -111,6 +111,15 @@ pub(crate) struct TerminalViewState {
     /// through when the OS window is `Transparent` / `Blurred`.
     pub(crate) background_alpha: f32,
 
+    /// Inactive-pane dim amount (0.0 = none). When `> 0` every color
+    /// the element produces is blended toward mid-gray by this amount
+    /// with its alpha preserved, matching iTerm2's
+    /// `colorDimmedBy:towardsGrayLevel:0.5`. The Workspace pushes this
+    /// per pane based on focus (active pane = 0); a transparent
+    /// background stays equally transparent, just duller. See
+    /// `style::dim_toward_gray`.
+    pub(crate) dim_amount: f32,
+
     // ---- Search ----
     /// Active search state (query, matches, focused index, regex
     /// cache). `query.is_empty()` means inactive. Both the
@@ -287,6 +296,7 @@ impl TerminalViewState {
             vertical_spacing,
             horizontal_spacing,
             background_alpha,
+            dim_amount: 0.0,
             search: super::SearchState::default(),
             search_overlay: false,
             selection: None,
@@ -365,6 +375,7 @@ mod tests {
         assert!(s.focused_command.is_none());
         assert!(s.flash.bell.is_none());
         assert!(s.flash.prompt_jump.is_none());
+        assert_eq!(s.dim_amount, 0.0);
     }
 
     #[test]

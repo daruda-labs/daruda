@@ -22,6 +22,7 @@ use super::command::palette as command_palette;
 use super::layout::DockPosition;
 use super::layout::DockSnapshot;
 use super::main_area::pane::PaneContent;
+use super::main_area::pane_drag_ops::PaneHeaderDrag;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::status_bar::{self, StatusBarData};
 use super::{
@@ -257,10 +258,11 @@ fn inaccessible_empty_state(
         .into_any_element()
 }
 
-/// Default alpha for the dim overlay drawn on top of inactive panes.
-/// Runtime value lives on `Workspace::dim_alpha` so future theme/config
-/// loading can override it without touching render code.
-pub(super) const DEFAULT_INACTIVE_PANE_DIM_ALPHA: f32 = 0.35;
+/// Amount each inactive split pane's terminal colors blend toward
+/// mid-gray (iTerm2's default dim, `colorDimmedBy:0.4`). Pushed onto the
+/// pane's `TerminalView` by `refresh_pane_dimming`; alpha is preserved so
+/// a transparent background stays equally transparent, just duller.
+pub(in crate::workspace) const INACTIVE_PANE_DIM_AMOUNT: f32 = 0.4;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -766,9 +768,9 @@ impl Render for Workspace {
         //
         // When a pane is zoomed, render only that leaf at full size.
         // has_splits = true so the pane header is visible, giving the
-        // user access to the right-click Unzoom menu. The dim overlay
-        // is suppressed (dim_alpha = 0.0) because is_focused is always
-        // true for the sole zoomed leaf.
+        // user access to the right-click Unzoom menu. Inactive-pane dim
+        // is driven separately by `refresh_pane_dimming`, which skips
+        // dimming entirely while a pane is zoomed.
         let center_content = if let Some(availability) = self
             .active_lane()
             .map(|l| l.availability)
@@ -793,9 +795,9 @@ impl Render for Workspace {
                         &self.main_area.panes,
                         zoomed_id,
                         true,
-                        0.0,
                         SharedString::from(self.font_family.clone()),
                         None,
+                        self.main_area.pane_drop_hover,
                         cx,
                     )
                 } else {
@@ -804,9 +806,9 @@ impl Render for Workspace {
                         &self.main_area.panes,
                         self.main_area.focused_pane_id,
                         actual_has_splits,
-                        self.dim_alpha,
                         SharedString::from(self.font_family.clone()),
                         self.main_area.zoomed_pane_id,
+                        self.main_area.pane_drop_hover,
                         cx,
                     )
                 }
@@ -816,9 +818,9 @@ impl Render for Workspace {
                     &self.main_area.panes,
                     self.main_area.focused_pane_id,
                     actual_has_splits,
-                    self.dim_alpha,
                     SharedString::from(self.font_family.clone()),
                     None,
+                    self.main_area.pane_drop_hover,
                     cx,
                 )
             }
@@ -836,7 +838,12 @@ impl Render for Workspace {
         // Resize handles are absolutely positioned overlays centered
         // on each dock's border (see `dock_resize_handle`) — they don't
         // consume flex space, so toggling docks doesn't reflow layout.
-        let pane_area = div().flex_1().w_full().flex().child(center_content);
+        let pane_area = div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .on_drag_move::<PaneHeaderDrag>(cx.listener(Self::update_pane_drag_from_move))
+            .child(center_content);
         let main_area = div()
             .flex_1()
             .flex()
@@ -1150,6 +1157,7 @@ impl Render for Workspace {
                 if !ev.dragging() {
                     this.end_stale_resize_drags(cx);
                     this.end_file_selection_drag(cx);
+                    this.clear_pane_drop_hover(cx);
                     return;
                 }
                 if let Some(drag) = this.dock_drag {

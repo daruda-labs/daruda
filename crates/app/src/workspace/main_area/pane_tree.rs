@@ -24,6 +24,58 @@ pub(in crate::workspace) enum SplitDirection {
     Vertical,   // stacked (children laid out along Y)
 }
 
+/// Quadrant of a pane that a header-drag targets. The drop-split UI that
+/// consumes this is wired separately; the pure geometry/transform lives here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum DropHalf {
+    West,
+    East,
+    North,
+    South,
+}
+
+impl DropHalf {
+    pub(in crate::workspace) fn direction(self) -> SplitDirection {
+        match self {
+            // West/East = panes side-by-side (children along X) = Horizontal
+            DropHalf::West | DropHalf::East => SplitDirection::Horizontal,
+            // North/South = panes stacked (children along Y) = Vertical
+            DropHalf::North | DropHalf::South => SplitDirection::Vertical,
+        }
+    }
+
+    /// New pane is inserted BEFORE the target when dropped on its left/top half.
+    pub(in crate::workspace) fn before(self) -> bool {
+        matches!(self, DropHalf::West | DropHalf::North)
+    }
+}
+
+/// Score threshold = active strip width from each edge (40% of the axis).
+/// Leaves a central (1 - 2×0.4) = 20%×20% rectangle as a dead-zone (None).
+/// Matches iTerm2's SplitSelectionView.
+pub(in crate::workspace) const DROP_DEAD_ZONE: f32 = 0.4;
+
+/// `(x, y)` is the cursor position local to a pane of size `(w, h)`.
+/// Precondition: 0.0 <= x <= w and 0.0 <= y <= h (caller bounds-checks).
+pub(in crate::workspace) fn compute_drop_half(x: f32, y: f32, w: f32, h: f32) -> Option<DropHalf> {
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let (hx, hh) = if x < w / 2.0 {
+        (x / w, DropHalf::West)
+    } else {
+        ((w - x) / w, DropHalf::East)
+    };
+    let (vy, vh) = if y < h / 2.0 {
+        (y / h, DropHalf::North)
+    } else {
+        ((h - y) / h, DropHalf::South)
+    };
+    // On an exact diagonal tie (hx == vy) the vertical half (North/South) wins, matching iTerm2.
+    let (score, half) = if hx < vy { (hx, hh) } else { (vy, vh) };
+    (score < DROP_DEAD_ZONE).then_some(half)
+}
+
 pub(in crate::workspace) enum PaneLayout {
     Pane(PaneId),
     Split {
@@ -48,7 +100,6 @@ impl PaneLayout {
         }
     }
 
-    #[cfg(test)]
     pub(in crate::workspace) fn contains(&self, target: PaneId) -> bool {
         match self {
             PaneLayout::Pane(id) => *id == target,
@@ -106,24 +157,32 @@ impl PaneLayout {
 ///
 /// Mirrors `PTYTab.m -splitVertically:newSession:before:targetSession:`:
 ///
-/// - **Case C (root leaf):** replace root with a 2-child Split.
-/// - **Case A (same direction parent):** insert `new_id` immediately after
-///   `target` in the parent's children; redistribute ratios so the new pane
-///   takes half of `target`'s share.
+/// - **Case C (root leaf):** replace root with a 2-child Split. `before`
+///   orders the new pane ahead of the original.
+/// - **Case A (same direction parent):** splice `new_id` next to `target` in
+///   the parent's children; redistribute ratios so the new pane takes half of
+///   `target`'s share. `before` inserts on `target`'s left/top side.
 /// - **Case B (opposite direction parent):** replace the target leaf with a
-///   new Split whose children are `[target, new]` in the requested direction.
+///   new Split whose children are `[target, new]` (or `[new, target]` when
+///   `before`) in the requested direction.
 pub(in crate::workspace) fn insert_split_at(
     layout: &mut PaneLayout,
     target: PaneId,
     direction: SplitDirection,
     new_id: PaneId,
+    before: bool,
 ) -> bool {
     // Case C: root is the target leaf.
     if let PaneLayout::Pane(id) = layout
         && *id == target
     {
         let original = PaneLayout::Pane(*id);
-        *layout = PaneLayout::new_split(direction, vec![original, PaneLayout::Pane(new_id)]);
+        let children = if before {
+            vec![PaneLayout::Pane(new_id), original]
+        } else {
+            vec![original, PaneLayout::Pane(new_id)]
+        };
+        *layout = PaneLayout::new_split(direction, children);
         return true;
     }
 
@@ -142,15 +201,18 @@ pub(in crate::workspace) fn insert_split_at(
                     // Case A: splice next to target, halve its ratio.
                     let share = ratios[i] / 2.0;
                     ratios[i] = share;
-                    ratios.insert(i + 1, share);
-                    children.insert(i + 1, PaneLayout::Pane(new_id));
+                    let slot = if before { i } else { i + 1 };
+                    ratios.insert(slot, share);
+                    children.insert(slot, PaneLayout::Pane(new_id));
                 } else {
                     // Case B: wrap target in a new Split.
                     let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(0));
-                    children[i] = PaneLayout::new_split(
-                        direction,
-                        vec![target_leaf, PaneLayout::Pane(new_id)],
-                    );
+                    let inner = if before {
+                        vec![PaneLayout::Pane(new_id), target_leaf]
+                    } else {
+                        vec![target_leaf, PaneLayout::Pane(new_id)]
+                    };
+                    children[i] = PaneLayout::new_split(direction, inner);
                 }
                 return true;
             }
@@ -160,13 +222,38 @@ pub(in crate::workspace) fn insert_split_at(
         // is in same direction as the requested split AND target is a direct
         // leaf of *this* level, it was already handled above. Otherwise recurse.
         for child in children.iter_mut() {
-            if insert_split_at(child, target, direction, new_id) {
+            if insert_split_at(child, target, direction, new_id, before) {
                 return true;
             }
         }
     }
 
     false
+}
+
+/// Move an existing leaf `dragged` to become a split sibling of `target`
+/// in the half indicated by `half`. Pure tree transform: remove then
+/// re-insert. Returns false on no-op (dragged == target) or if either id
+/// is absent. Does NOT create/destroy panes — only edits the layout.
+pub(in crate::workspace) fn rearrange_pane(
+    layout: &mut PaneLayout,
+    dragged: PaneId,
+    target: PaneId,
+    half: DropHalf,
+) -> bool {
+    if dragged == target {
+        return false;
+    }
+    // Verify target exists before removing dragged, so a missing target is a
+    // true no-op. After removal, target (a different id) still exists, so the
+    // insert below cannot fail.
+    if !layout.contains(target) {
+        return false;
+    }
+    if !remove_pane_from_layout(layout, dragged) {
+        return false;
+    }
+    insert_split_at(layout, target, half.direction(), dragged, half.before())
 }
 
 /// Remove `target` and renormalize the tree so there are no stray
@@ -494,4 +581,304 @@ pub(in crate::workspace) fn adjust_divider(
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaf(id: PaneId) -> PaneLayout {
+        PaneLayout::Pane(id)
+    }
+
+    fn assert_ratios_sum_to_one(layout: &PaneLayout) {
+        if let PaneLayout::Split {
+            ratios, children, ..
+        } = layout
+        {
+            let sum: f32 = ratios.iter().sum();
+            assert!(
+                (sum - 1.0).abs() < 1e-4,
+                "ratios sum to {sum}, expected 1.0"
+            );
+            for child in children {
+                assert_ratios_sum_to_one(child);
+            }
+        }
+    }
+
+    fn child_ids(layout: &PaneLayout) -> Vec<PaneId> {
+        match layout {
+            PaneLayout::Split { children, .. } => children.iter().map(|c| c.first_leaf()).collect(),
+            PaneLayout::Pane(id) => vec![*id],
+        }
+    }
+
+    #[test]
+    fn compute_drop_half_returns_each_quadrant_edge() {
+        let (w, h) = (100.0, 100.0);
+        // Near the left edge, vertically centered → West.
+        assert_eq!(compute_drop_half(5.0, 50.0, w, h), Some(DropHalf::West));
+        // Near the right edge → East.
+        assert_eq!(compute_drop_half(95.0, 50.0, w, h), Some(DropHalf::East));
+        // Near the top edge (small y) → North.
+        assert_eq!(compute_drop_half(50.0, 5.0, w, h), Some(DropHalf::North));
+        // Near the bottom edge → South.
+        assert_eq!(compute_drop_half(50.0, 95.0, w, h), Some(DropHalf::South));
+    }
+
+    #[test]
+    fn compute_drop_half_center_is_dead_zone() {
+        let (w, h) = (100.0, 100.0);
+        // Exact center: both scores are 0.5 → outside the active region.
+        assert_eq!(compute_drop_half(50.0, 50.0, w, h), None);
+    }
+
+    #[test]
+    fn compute_drop_half_dead_zone_boundary() {
+        let (w, h) = (100.0, 100.0);
+        // x = 45 → score 0.45 (≥ 0.4) along X, y centered → no split.
+        assert_eq!(compute_drop_half(45.0, 50.0, w, h), None);
+        // x = 35 → score 0.35 (< 0.4) → West.
+        assert_eq!(compute_drop_half(35.0, 50.0, w, h), Some(DropHalf::West));
+    }
+
+    #[test]
+    fn compute_drop_half_rejects_zero_size() {
+        assert_eq!(compute_drop_half(0.0, 0.0, 0.0, 100.0), None);
+        assert_eq!(compute_drop_half(0.0, 0.0, 100.0, 0.0), None);
+    }
+
+    #[test]
+    fn insert_split_at_before_case_c() {
+        // Root leaf A, insert B before → [B, A].
+        let mut layout = leaf(1);
+        assert!(insert_split_at(
+            &mut layout,
+            1,
+            SplitDirection::Horizontal,
+            2,
+            true
+        ));
+        assert_eq!(child_ids(&layout), vec![2, 1]);
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_split_at_after_case_c() {
+        // Regression: before=false still inserts after → [A, B].
+        let mut layout = leaf(1);
+        assert!(insert_split_at(
+            &mut layout,
+            1,
+            SplitDirection::Horizontal,
+            2,
+            false
+        ));
+        assert_eq!(child_ids(&layout), vec![1, 2]);
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_split_at_before_case_a() {
+        // [A | B] horizontal, split B horizontally before → [A | C | B].
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        assert!(insert_split_at(
+            &mut layout,
+            2,
+            SplitDirection::Horizontal,
+            3,
+            true
+        ));
+        assert_eq!(child_ids(&layout), vec![1, 3, 2]);
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_split_at_after_case_a() {
+        // Regression: [A | B], split B after → [A | B | C].
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        assert!(insert_split_at(
+            &mut layout,
+            2,
+            SplitDirection::Horizontal,
+            3,
+            false
+        ));
+        assert_eq!(child_ids(&layout), vec![1, 2, 3]);
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_split_at_before_case_b() {
+        // [A | B] horizontal, split B vertically before → [A | [C / B]].
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        assert!(insert_split_at(
+            &mut layout,
+            2,
+            SplitDirection::Vertical,
+            3,
+            true
+        ));
+        if let PaneLayout::Split { children, .. } = &layout {
+            assert_eq!(children.len(), 2);
+            // Second child is the new vertical split with [C, B] order.
+            if let PaneLayout::Split {
+                direction,
+                children: inner,
+                ..
+            } = &children[1]
+            {
+                assert_eq!(*direction, SplitDirection::Vertical);
+                let ids: Vec<PaneId> = inner.iter().map(|c| c.first_leaf()).collect();
+                assert_eq!(ids, vec![3, 2]);
+            } else {
+                panic!("expected nested vertical split");
+            }
+        } else {
+            panic!("expected Split");
+        }
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_split_at_after_case_b() {
+        // [A | B] horizontal, split B vertically after → [A | [B / C]].
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        assert!(insert_split_at(
+            &mut layout,
+            2,
+            SplitDirection::Vertical,
+            3,
+            false
+        ));
+        if let PaneLayout::Split { children, .. } = &layout {
+            assert_eq!(children.len(), 2);
+            // Second child is the new vertical split with [B, C] order.
+            if let PaneLayout::Split {
+                direction,
+                children: inner,
+                ..
+            } = &children[1]
+            {
+                assert_eq!(*direction, SplitDirection::Vertical);
+                let ids: Vec<PaneId> = inner.iter().map(|c| c.first_leaf()).collect();
+                assert_eq!(ids, vec![2, 3]);
+            } else {
+                panic!("expected nested vertical split");
+            }
+        } else {
+            panic!("expected Split");
+        }
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn rearrange_pane_absent_target_is_noop() {
+        // target id 99 is not in the layout: returns false and leaves the
+        // layout untouched (dragged must not be lost).
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        let before_ids = layout.pane_ids();
+        let before_structure = child_ids(&layout);
+        assert!(!rearrange_pane(&mut layout, 1, 99, DropHalf::West));
+        assert_eq!(layout.pane_ids(), before_ids);
+        assert_eq!(child_ids(&layout), before_structure);
+    }
+
+    #[test]
+    fn rearrange_pane_absent_dragged_is_noop() {
+        // target id 1 is present but dragged id 99 is not in the layout:
+        // returns false and leaves the layout untouched.
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        let before_ids = layout.pane_ids();
+        assert!(!rearrange_pane(&mut layout, 99, 1, DropHalf::West));
+        assert_eq!(layout.pane_ids(), before_ids);
+    }
+
+    #[test]
+    fn rearrange_pane_noop_same_id() {
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        let before_ids = layout.pane_ids();
+        assert!(!rearrange_pane(&mut layout, 1, 1, DropHalf::West));
+        assert_eq!(layout.pane_ids(), before_ids);
+    }
+
+    #[test]
+    fn rearrange_pane_collapses_then_resplits() {
+        // [A | B] horizontal; move B to A's South half.
+        // Removing B collapses the root to leaf A, then insert_split_at
+        // re-splits A vertically with B after → Vertical [A / B].
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        assert!(rearrange_pane(&mut layout, 2, 1, DropHalf::South));
+        if let PaneLayout::Split {
+            direction,
+            children,
+            ..
+        } = &layout
+        {
+            assert_eq!(*direction, SplitDirection::Vertical);
+            let ids: Vec<PaneId> = children.iter().map(|c| c.first_leaf()).collect();
+            assert_eq!(ids, vec![1, 2]);
+        } else {
+            panic!("expected Vertical split");
+        }
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    fn ratios_of(layout: &PaneLayout) -> Vec<f32> {
+        match layout {
+            PaneLayout::Split { ratios, .. } => ratios.clone(),
+            PaneLayout::Pane(_) => vec![],
+        }
+    }
+
+    #[test]
+    fn rearrange_pane_to_adjacent_position_keeps_order_resets_ratios() {
+        // [A | B | C] horizontal with skewed ratios; drop B onto A's East
+        // half. East = same direction (Horizontal) + after A, so B lands
+        // right back between A and C: leaf order is unchanged at [A, B, C].
+        //
+        // Ratios are NOT preserved: removing B redistributes [A, C] to
+        // proportional shares, then the Case-A reinsert halves A's share and
+        // hands the other half to B. So the rearranged pair (A, B) end up
+        // equal to each other while C keeps its (renormalized) proportion.
+        // This documents that an adjacent rearrange reshuffles ratios — it
+        // is expected, not a bug.
+        let mut layout =
+            PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2), leaf(3)]);
+        if let PaneLayout::Split { ratios, .. } = &mut layout {
+            *ratios = vec![0.6, 0.3, 0.1];
+        }
+
+        assert!(rearrange_pane(&mut layout, 2, 1, DropHalf::East));
+
+        // Leaf order is preserved.
+        assert_eq!(child_ids(&layout), vec![1, 2, 3]);
+        assert_ratios_sum_to_one(&layout);
+
+        // A and B (the rearranged pair) split their combined share equally.
+        let ratios = ratios_of(&layout);
+        assert_eq!(ratios.len(), 3);
+        assert!(
+            (ratios[0] - ratios[1]).abs() < 1e-4,
+            "A and B should be equal, got {ratios:?}"
+        );
+        // C is distinct from the pair (the input was skewed), so this is not
+        // a uniform three-way reset.
+        assert!(
+            (ratios[2] - ratios[0]).abs() > 1e-4,
+            "C should differ from the rearranged pair, got {ratios:?}"
+        );
+    }
+
+    #[test]
+    fn rearrange_pane_three_pane_west_of_a() {
+        // [A | B | C] horizontal; move C to A's West half → [C | A | B].
+        let mut layout =
+            PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2), leaf(3)]);
+        assert!(rearrange_pane(&mut layout, 3, 1, DropHalf::West));
+        assert_eq!(child_ids(&layout), vec![3, 1, 2]);
+        assert!(layout.contains(2) && layout.contains(3));
+        assert_ratios_sum_to_one(&layout);
+    }
 }

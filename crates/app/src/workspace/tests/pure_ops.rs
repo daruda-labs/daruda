@@ -55,7 +55,8 @@ fn test_insert_split_at_root_leaf() {
         &mut layout,
         1,
         SplitDirection::Horizontal,
-        2
+        2,
+        false
     ));
     assert_eq!(layout.pane_ids(), vec![1, 2]);
     assert!(matches!(
@@ -75,7 +76,8 @@ fn test_insert_split_same_direction_splices_into_parent() {
         &mut layout,
         2,
         SplitDirection::Horizontal,
-        3
+        3,
+        false
     ));
     assert_eq!(layout.pane_ids(), vec![1, 2, 3]);
     if let PaneLayout::Split { children, .. } = &layout {
@@ -89,7 +91,13 @@ fn test_insert_split_same_direction_splices_into_parent() {
 fn test_insert_split_opposite_direction_creates_nested() {
     // [1 | 2] horizontal, split 2 vertically → [1 | [2 / 3]]
     let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    assert!(insert_split_at(&mut layout, 2, SplitDirection::Vertical, 3));
+    assert!(insert_split_at(
+        &mut layout,
+        2,
+        SplitDirection::Vertical,
+        3,
+        false
+    ));
     assert_eq!(layout.pane_ids(), vec![1, 2, 3]);
     if let PaneLayout::Split {
         direction,

@@ -467,6 +467,9 @@ impl Workspace {
         self.main_area.active_tab_index = next.active_tab_index;
         self.main_area.tab_history = next.tab_history;
         self.main_area.focused_pane_id = next.focused_pane_id;
+        // Drop any in-flight drag hover so a stale half-fill overlay does not
+        // linger on the newly-activated lane. The notify paths below cover it.
+        self.main_area.pane_drop_hover = None;
         self.active = target;
         // Update the project's last-active-lane hint so clicking
         // the project header in the left dock snaps to the same
@@ -519,6 +522,9 @@ impl Workspace {
         {
             self.focus_pane(self.main_area.focused_pane_id, window, cx);
         }
+        // The incoming lane's runtime carries its own panes/split state;
+        // recompute inactive-pane dim against the now-live focused pane.
+        self.refresh_pane_dimming(cx);
         self.main_area.pending_resize = true;
         // Any File panes that arrived in the live `panes` vec via the
         // runtime swap above may still have `Loading` content (if they

@@ -242,9 +242,6 @@ pub struct Workspace {
     /// right edge of the left dock, the left edge of the right dock,
     /// or the top edge of the bottom dock.
     pub(in crate::workspace) dock_drag: Option<layout::ops::DockDrag>,
-    /// Overlay alpha for inactive panes when split (0.0 = no dim).
-    /// Tunable knob — first step toward a `Theme` struct (config Phase).
-    pub(in crate::workspace) dim_alpha: f32,
     /// When true, new tabs/panes spawn with the focused pane's cwd
     /// (iTerm2 "Reuse previous session's directory"). Future config knob.
     pub(in crate::workspace) inherit_cwd: bool,
@@ -708,7 +705,6 @@ impl Workspace {
             next_id: 0,
             focus_handle,
             dock_drag: None,
-            dim_alpha: render::DEFAULT_INACTIVE_PANE_DIM_ALPHA,
             inherit_cwd: true,
             terminal_config: config_ops::terminal_config_from(config),
             font_family: config.font.family.clone(),

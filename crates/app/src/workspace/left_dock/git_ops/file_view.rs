@@ -236,6 +236,7 @@ impl Workspace {
                 anchor,
                 crate::workspace::main_area::pane_tree::SplitDirection::Horizontal,
                 new_pane_id,
+                false,
             ) {
                 tab.last_focused_pane = new_pane_id;
                 inserted_tab = Some(idx);

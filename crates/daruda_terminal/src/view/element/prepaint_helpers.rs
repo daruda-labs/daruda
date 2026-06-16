@@ -12,12 +12,31 @@
 //! shaping) for the rationale.
 
 use ghostty_vt::Rgb;
-use gpui::{App, Bounds, PaintQuad, Pixels, fill, point, px, rgba, size};
+use gpui::{App, Bounds, PaintQuad, Pixels, fill, point, px, size};
 
 use super::super::overlay::screen_row_to_visible;
+use super::super::style::dim_toward_gray;
 use super::super::text_metrics::shaped_pixel_range_for_cols;
 use super::TerminalTextElement;
 use crate::ux::theme;
+
+/// Pack an `Rgb` plus an 8-bit alpha into a GPUI `Rgba`, blending the
+/// color toward mid-gray by `dim_amount` first. Alpha is carried through
+/// untouched so a transparent (sub-`0xFF`) background stays equally
+/// transparent — only the RGB is dulled (iTerm2-style dim).
+fn dimmed_bg_color(bg: Rgb, alpha_u8: u8, dim_amount: f32) -> gpui::Rgba {
+    let color = dim_toward_gray(
+        gpui::Rgba {
+            r: f32::from(bg.r) / 255.0,
+            g: f32::from(bg.g) / 255.0,
+            b: f32::from(bg.b) / 255.0,
+            a: f32::from(alpha_u8) / 255.0,
+        }
+        .into(),
+        dim_amount,
+    );
+    color.into()
+}
 
 impl TerminalTextElement {
     pub(super) fn build_background_quads(
@@ -26,6 +45,7 @@ impl TerminalTextElement {
         line_height: Pixels,
         cell_width: f32,
         default_bg: Rgb,
+        dim_amount: f32,
         cx: &mut App,
     ) -> Vec<PaintQuad> {
         let origin = bounds.origin;
@@ -43,12 +63,7 @@ impl TerminalTextElement {
         let alpha_u8 = (view.state.background_alpha * 255.0)
             .round()
             .clamp(0.0, 255.0) as u8;
-        let base_color = rgba(
-            (u32::from(default_bg.r) << 24)
-                | (u32::from(default_bg.g) << 16)
-                | (u32::from(default_bg.b) << 8)
-                | u32::from(alpha_u8),
-        );
+        let base_color = dimmed_bg_color(default_bg, alpha_u8, dim_amount);
         quads.push(fill(
             Bounds::from_corners(
                 point(origin.x, bounds.top()),
@@ -66,12 +81,7 @@ impl TerminalTextElement {
                     bg_pixel_range(shaped, line_text, span.start_col, span.end_col, cell_width);
                 let x = origin.x + x_start;
                 let w = x_end - x_start;
-                let color = rgba(
-                    (u32::from(span.bg.r) << 24)
-                        | (u32::from(span.bg.g) << 16)
-                        | (u32::from(span.bg.b) << 8)
-                        | 0xFF,
-                );
+                let color = dimmed_bg_color(span.bg, 0xFF, dim_amount);
                 quads.push(fill(Bounds::new(point(x, y), size(w, line_height)), color));
             }
         }

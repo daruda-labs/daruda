@@ -91,4 +91,21 @@ impl TerminalView {
     pub fn set_background_alpha(&mut self, alpha: f32) {
         self.state.background_alpha = alpha.clamp(0.0, 1.0);
     }
+
+    /// Inactive-pane dim amount (0.0–1.0, clamped). `0.0` paints the
+    /// terminal at full color; `> 0` blends every color toward mid-gray
+    /// by this amount, alpha preserved (iTerm2-style). Set by the
+    /// Workspace from per-pane focus. Does not `cx.notify()` — the
+    /// caller (single update site) decides when the view repaints; the
+    /// shape cache invalidates automatically since `dim_amount` is part
+    /// of the line-layout key.
+    pub fn set_dim_amount(&mut self, amount: f32) {
+        self.state.dim_amount = amount.clamp(0.0, 1.0);
+    }
+
+    /// Current inactive-pane dim amount. The Workspace reads this to
+    /// skip redundant updates (notify only on change).
+    pub fn dim_amount(&self) -> f32 {
+        self.state.dim_amount
+    }
 }

@@ -12,6 +12,7 @@ pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod pane;
+pub(in crate::workspace) mod pane_drag_ops;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
@@ -33,7 +34,8 @@ use crate::workspace::path_drag::PathDrag;
 
 use self::file_view_pane::render::render_pane_file_viewer;
 use self::pane::Pane;
-use self::pane_tree::{DIVIDER_PX, PaneId, PaneLayout, SplitDirection};
+use self::pane_drag_ops::{PaneHeaderDrag, PaneHeaderDragGhost};
+use self::pane_tree::{DIVIDER_PX, DropHalf, PaneId, PaneLayout, SplitDirection};
 use super::Workspace;
 
 /// Flex child cell wrapping a pane or nested split in a Split layout.
@@ -50,9 +52,18 @@ fn split_cell(is_horizontal: bool, ratio: f32, child_el: AnyElement) -> gpui::Di
     .child(child_el)
 }
 
-/// Dim overlay drawn on top of inactive panes in split mode.
-fn dim_overlay(alpha: f32) -> impl IntoElement {
-    div().absolute().inset_0().bg(gpui::black().opacity(alpha))
+/// Half-fill drop-target hint drawn over the pane the cursor hovers while a
+/// Pane header is dragged. The filled half indicates where the dragged pane
+/// will land (West/East = side-by-side, North/South = stacked).
+fn drop_target_overlay(half: DropHalf, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let bg = theme::current(cx).terminal_drop_target_bg;
+    let base = div().absolute().bg(bg);
+    match half {
+        DropHalf::North => base.top_0().left_0().right_0().h(gpui::relative(0.5)),
+        DropHalf::South => base.bottom_0().left_0().right_0().h(gpui::relative(0.5)),
+        DropHalf::West => base.top_0().bottom_0().left_0().w(gpui::relative(0.5)),
+        DropHalf::East => base.top_0().bottom_0().right_0().w(gpui::relative(0.5)),
+    }
 }
 
 /// 1px visible divider + absolute hit-zone overlay between split siblings.
@@ -150,6 +161,18 @@ fn pane_header(
         .px(px(theme::PANE_HEADER_PAD_X))
         .gap(px(theme::PANE_HEADER_GAP))
         .text_size(px(theme::PANE_HEADER_FONT_SIZE))
+        .on_drag(
+            PaneHeaderDrag {
+                dragged: pane_id,
+                title: title.clone(),
+            },
+            |d, offset, _window, cx| {
+                cx.new(|_| PaneHeaderDragGhost {
+                    title: d.title.clone(),
+                    offset,
+                })
+            },
+        )
         .when(is_focused, |d| d.bg(focused_bg).text_color(focused_text))
         .when(!is_focused, |d| {
             d.bg(unfocused_bg).text_color(unfocused_text)
@@ -237,9 +260,9 @@ pub(in crate::workspace) fn render_layout(
     panes: &[Pane],
     focused_pane_id: PaneId,
     has_splits: bool,
-    dim_alpha: f32,
     font_family: SharedString,
     zoomed_pane_id: Option<PaneId>,
+    drop_target: Option<(PaneId, DropHalf)>,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
@@ -251,6 +274,7 @@ pub(in crate::workspace) fn render_layout(
             let is_focused = has_splits && id == focused_pane_id;
             let mut root = div()
                 .id(("pane", id as usize))
+                .relative()
                 .size_full()
                 .flex()
                 .flex_col()
@@ -259,7 +283,12 @@ pub(in crate::workspace) fn render_layout(
                     cx.listener(move |this, _, window, cx| {
                         this.focus_pane_on_click(id, window, cx)
                     }),
-                );
+                )
+                .on_drop::<PaneHeaderDrag>(cx.listener(
+                    move |this, d: &PaneHeaderDrag, window, cx| {
+                        this.drop_pane_onto(d.dragged, window, cx)
+                    },
+                ));
 
             if has_splits {
                 let basename = pane.display_cwd();
@@ -301,7 +330,11 @@ pub(in crate::workspace) fn render_layout(
                 self::pane::PaneContent::Terminal(t) => {
                     let view_for_path_drag = t.view.clone();
                     let view_for_external = t.view.clone();
-                    let mut terminal_area = div()
+                    // Inactive-pane dim is applied to the terminal's own
+                    // colors via `TerminalView::set_dim_amount`
+                    // (driven by `refresh_pane_dimming`), not a black
+                    // overlay — that preserves a transparent background.
+                    div()
                         .flex_1()
                         .flex()
                         .min_h(px(theme::RENDER_MIN_DIM))
@@ -352,14 +385,20 @@ pub(in crate::workspace) fn render_layout(
                         .child(
                             AnyView::from(t.view.clone())
                                 .cached(StyleRefinement::default().size_full().flex()),
-                        );
-                    if has_splits && !is_focused && dim_alpha > 0.0 {
-                        terminal_area = terminal_area.child(dim_overlay(dim_alpha));
-                    }
-                    terminal_area
+                        )
                 }
             };
-            root.child(content).into_any_element()
+            root = root.child(content);
+            // Drop-target overlay: a half-fill hint drawn as a SIBLING of
+            // the `.cached()` terminal view (so it doesn't break caching),
+            // positioned by the hovered half. Renders from the
+            // `pane_drop_hover` snapshot only — no state transition here.
+            if let Some((target_id, half)) = drop_target
+                && target_id == id
+            {
+                root = root.child(drop_target_overlay(half, cx));
+            }
+            root.into_any_element()
         }
         PaneLayout::Split {
             direction,
@@ -382,9 +421,9 @@ pub(in crate::workspace) fn render_layout(
                     panes,
                     focused_pane_id,
                     has_splits,
-                    dim_alpha,
                     font_family.clone(),
                     zoomed_pane_id,
+                    drop_target,
                     cx,
                 );
                 let ratio = ratios[i];

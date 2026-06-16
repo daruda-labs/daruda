@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use daruda_store::project::LaneRef;
 
 use super::pane::{Pane, TabEntry};
-use super::pane_tree::PaneId;
+use super::pane_tree::{DropHalf, PaneId};
 use crate::workspace::LaneRuntime;
 use crate::workspace::layout::ops::{ContextMenuAnchor, DividerDrag};
 
@@ -39,4 +39,8 @@ pub(in crate::workspace) struct MainAreaContext {
     /// lane's runtime lives in the fields above; `activate_lane`
     /// swaps those with the entry in this map.
     pub inactive_lane_runtimes: HashMap<LaneRef, LaneRuntime>,
+    /// Transient hover target while a Pane header is being dragged:
+    /// the pane under the cursor and which half it would split. Single
+    /// source of truth for the drop-overlay; `None` = no active hover.
+    pub pane_drop_hover: Option<(PaneId, DropHalf)>,
 }

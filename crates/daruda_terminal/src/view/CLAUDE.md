@@ -90,7 +90,8 @@ Cmd+F        → actions.rs → search_bar.rs (render_search_bar / recompute_mat
 - External crates (app) use the `pub` methods only:
   `new`, `new_with_input`, `feed_output_bytes`, `queue_output_bytes`,
   `resize_terminal`, `set_search_query`, `search_step`, `clear_search`,
-  `jump_to_prompt`, `jump_to_command`, `search_state`.
+  `jump_to_prompt`, `jump_to_command`, `search_state`,
+  `set_dim_amount` / `dim_amount` (inactive-pane dim; see `layout.rs`).
 
 ---
 
@@ -292,7 +293,8 @@ that matches their domain.
 | `TextRunKey { fg, flags }` | cache key for grouping glyphs by identical style |
 | `hsla_from_rgb` | RGB → Hsla |
 | `cursor_color_for_background` | cursor color contrasted against the background (light / dark auto) |
-| `font_for_flags`, `color_for_key`, `text_run_for_key` | TextRun construction |
+| `dim_toward_gray` | blend an Hsla toward mid-gray by `amount`, alpha preserved (iTerm2 inactive-pane dim) |
+| `font_for_flags`, `color_for_key`, `text_run_for_key` | TextRun construction (latter two take `dim_amount`) |
 
 ### `box_drawing.rs` — Unicode box-drawing glyphs
 

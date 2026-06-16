@@ -10,7 +10,7 @@ use super::super::state::MouseDragState;
 use super::super::style::{
     CELL_STYLE_FLAG_BOLD, CELL_STYLE_FLAG_FAINT, CELL_STYLE_FLAG_ITALIC,
     CELL_STYLE_FLAG_STRIKETHROUGH, CELL_STYLE_FLAG_UNDERLINE, TextRunKey, color_for_key,
-    cursor_color_for_background, hsla_from_rgb, text_run_for_key,
+    cursor_color_for_background, dim_toward_gray, hsla_from_rgb, text_run_for_key,
 };
 use super::super::text_metrics::{
     byte_index_for_column_in_line, cell_left_x_for_col, cursor_width_for_col, cursor_x_for_col,
@@ -30,7 +30,7 @@ impl TerminalTextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> TerminalPrepaintState {
-        let (font, font_size_pt, h_spacing, v_spacing, default_fg, layout) = {
+        let (font, font_size_pt, h_spacing, v_spacing, default_fg, dim_amount, layout) = {
             let v = self.view.read(cx);
             let layout = v.cell_layout(window);
             (
@@ -39,6 +39,7 @@ impl TerminalTextElement {
                 v.state.horizontal_spacing,
                 v.state.vertical_spacing,
                 v.session.default_foreground(),
+                v.state.dim_amount,
                 layout,
             )
         };
@@ -49,7 +50,10 @@ impl TerminalTextElement {
         style.font_features = crate::default_terminal_font_features();
         style.font_fallbacks = font.fallbacks.clone();
         style.font_size = font_size.into();
-        style.color = hsla_from_rgb(default_fg);
+        // Dim the default foreground here so every fallback TextRun (gaps
+        // between style runs, blank lines) and overlay derived from
+        // `run_color` (preedit, hover underline) inherits the dim.
+        style.color = dim_toward_gray(hsla_from_rgb(default_fg), dim_amount);
 
         let run_font = style.font();
         let run_color = style.color;
@@ -69,11 +73,14 @@ impl TerminalTextElement {
                 return;
             }
 
+            // Fold `dim_amount` into the font-hash axis: shaped lines bake
+            // their text color, so a dim change must invalidate the cache
+            // (otherwise `.cached()` would show stale full-color glyphs).
             let cache_key = (
                 font_size,
                 line_height,
                 px(cell_width_f),
-                super::super::font_hash(&font),
+                super::super::font_hash(&font) ^ u64::from(dim_amount.to_bits()),
             );
             if view.line_layout_key != Some(cache_key)
                 || view.line_layouts.len() != view.state.viewport_lines.len()
@@ -132,7 +139,12 @@ impl TerminalTextElement {
                         }
 
                         if end > start {
-                            runs.push(text_run_for_key(&run_font, key, end.saturating_sub(start)));
+                            runs.push(text_run_for_key(
+                                &run_font,
+                                key,
+                                end.saturating_sub(start),
+                                dim_amount,
+                            ));
                             byte_pos = end;
                         }
                     }
@@ -205,8 +217,14 @@ impl TerminalTextElement {
             )
         };
 
-        let background_quads =
-            self.build_background_quads(bounds, line_height, cell_width_f, default_bg, cx);
+        let background_quads = self.build_background_quads(
+            bounds,
+            line_height,
+            cell_width_f,
+            default_bg,
+            dim_amount,
+            cx,
+        );
 
         let (marked_text, marked_text_background, preedit_post_shift) = marked_text
             .and_then(|text| {
@@ -536,7 +554,7 @@ impl TerminalTextElement {
                                             | CELL_STYLE_FLAG_UNDERLINE
                                             | CELL_STYLE_FLAG_STRIKETHROUGH),
                                 };
-                                color_for_key(key)
+                                color_for_key(key, dim_amount)
                             })
                             .unwrap_or(default_fg);
 
@@ -605,7 +623,7 @@ impl TerminalTextElement {
                 vp_rows,
             )?;
             let row = (visible_row as u16).saturating_add(1);
-            let cursor_color = cursor_color_for_background(background);
+            let cursor_color = dim_toward_gray(cursor_color_for_background(background), dim_amount);
             let y = bounds.top() + line_height * (row.saturating_sub(1)) as f32;
             let row_index = row.saturating_sub(1) as usize;
             let line = shaped_lines.get(row_index)?;
