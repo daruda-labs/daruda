@@ -451,22 +451,22 @@
     "file_diff_add_bg": {
       "description": "Maps to `palette::FILE_DIFF_ADD_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#17361fff"
+      "default": "#4aaf781f"
     },
     "file_diff_del_bg": {
       "description": "Maps to `palette::FILE_DIFF_DEL_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#371515ff"
+      "default": "#e060601f"
     },
     "file_diff_add_text": {
       "description": "Maps to `palette::FILE_DIFF_ADD_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#85e09cff"
+      "default": "#4aaf78ff"
     },
     "file_diff_del_text": {
       "description": "Maps to `palette::FILE_DIFF_DEL_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#e08585ff"
+      "default": "#e06060ff"
     },
     "file_diff_hunk_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -476,7 +476,7 @@
     "file_diff_hunk_text": {
       "description": "Maps to `palette::FILE_DIFF_HUNK_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#708bc2ff"
+      "default": "#62666dff"
     },
     "file_diff_hunk_border": {
       "description": "Maps to `palette::BORDER`.",
@@ -511,22 +511,22 @@
     "file_diff_stat_add": {
       "description": "Maps to `palette::FILE_DIFF_STAT_ADD`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#47d165ff"
+      "default": "#4aaf78ff"
     },
     "file_diff_stat_del": {
       "description": "Maps to `palette::FILE_DIFF_STAT_DEL`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#d14747ff"
+      "default": "#e06060ff"
     },
     "file_diff_word_add_bg": {
       "description": "Maps to `palette::FILE_DIFF_WORD_ADD_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#1c6e30ff"
+      "default": "#4aaf784d"
     },
     "file_diff_word_del_bg": {
       "description": "Maps to `palette::FILE_DIFF_WORD_DEL_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#6e1c1cff"
+      "default": "#e060604d"
     },
     "file_viewer_search_text": {
       "description": "Maps to `palette::TEXT_BODY`.",

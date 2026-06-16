@@ -2165,6 +2165,28 @@ pub fn mcp_field_headers() -> String {
     rust_i18n::t!("mcp.field_headers").into_owned()
 }
 
+// Add-server modal — input placeholders. Format examples that hint the
+// expected shape of each field; not shown on the edit modal (which
+// pre-fills the existing values instead).
+pub fn mcp_placeholder_name() -> String {
+    rust_i18n::t!("mcp.placeholder_name").into_owned()
+}
+pub fn mcp_placeholder_command() -> String {
+    rust_i18n::t!("mcp.placeholder_command").into_owned()
+}
+pub fn mcp_placeholder_args() -> String {
+    rust_i18n::t!("mcp.placeholder_args").into_owned()
+}
+pub fn mcp_placeholder_url() -> String {
+    rust_i18n::t!("mcp.placeholder_url").into_owned()
+}
+pub fn mcp_placeholder_env() -> String {
+    rust_i18n::t!("mcp.placeholder_env").into_owned()
+}
+pub fn mcp_placeholder_headers() -> String {
+    rust_i18n::t!("mcp.placeholder_headers").into_owned()
+}
+
 /// Buttons shared across CRUD modals + row hover actions.
 pub fn mcp_button_add() -> String {
     rust_i18n::t!("common.btn_add").into_owned()

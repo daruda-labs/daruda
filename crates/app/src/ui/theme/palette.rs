@@ -95,7 +95,7 @@ pub const HAIRLINE_SOFT: Hsla = hsla(0.0, 0.0, 1.0, 0.06);
 /// Hovered accent elements (#828fff).
 pub const ACCENT_HOVER: Hsla = hsla(233.8, 1.0, 0.755, 1.0);
 /// Low-opacity accent fill — badge background (#1e2050).
-pub const ACCENT_MUTED: Hsla = hsla(237.6, 0.345, 0.216, 1.0);
+pub const ACCENT_MUTED: Hsla = hsla(237.6, 0.45, 0.216, 1.0);
 /// Text/icon on solid accent background (#ffffff).
 pub const ACCENT_FG: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 
@@ -296,8 +296,9 @@ pub const LANE_GROUP_COLOR_DOT_RADIUS: f32 = RADIUS_SM;
 // Premium Card surface tokens (Lanes redesign)
 // ----------------------------------------------------------------------------
 
-/// Lanes card — outer corner radius (px).
-pub const LANE_CARD_RADIUS: f32 = 10.0;
+/// Lanes card — outer corner radius (px). Capped at `lg` (8px) per
+/// DESIGN §Border Radius ("no radius exceeds 8px in application chrome").
+pub const LANE_CARD_RADIUS: f32 = RADIUS_LG;
 /// Lanes card — vertical gap between adjacent cards (px).
 pub const LANE_CARD_GAP: f32 = GAP_STANDARD;
 /// Lanes card — inner horizontal padding (px).
@@ -898,16 +899,19 @@ pub const FILE_VIEWER_TAB_PAD_X: f32 = PAD_STANDARD;
 pub const FILE_VIEWER_TAB_PAD_Y: f32 = 3.0;
 /// Mode tab corner radius (px).
 pub const FILE_VIEWER_TAB_RADIUS: f32 = RADIUS_SM;
-/// Diff added-line background.
-pub const FILE_DIFF_ADD_BG: Hsla = hsla(135.0, 0.40, 0.15, 1.0);
-/// Diff removed-line background.
-pub const FILE_DIFF_DEL_BG: Hsla = hsla(0.0, 0.45, 0.15, 1.0);
-/// Diff added-line text color.
-pub const FILE_DIFF_ADD_TEXT: Hsla = hsla(135.0, 0.60, 0.70, 1.0);
-/// Diff removed-line text color.
-pub const FILE_DIFF_DEL_TEXT: Hsla = hsla(0.0, 0.60, 0.70, 1.0);
-/// Diff hunk-header text color.
-pub const FILE_DIFF_HUNK_TEXT: Hsla = hsla(220.0, 0.40, 0.60, 1.0);
+// Diff line colors track the canonical DESIGN §Git&Diff tokens
+// (`DIFF_*`) so the file-viewer and git-changes diffs read identically
+// to the spec instead of carrying a parallel green/red palette.
+/// Diff added-line background (DESIGN diff-add-bg = success @ 12%).
+pub const FILE_DIFF_ADD_BG: Hsla = DIFF_ADD_BG;
+/// Diff removed-line background (DESIGN diff-del-bg = error @ 12%).
+pub const FILE_DIFF_DEL_BG: Hsla = DIFF_DEL_BG;
+/// Diff added-line text color (DESIGN diff-add-fg).
+pub const FILE_DIFF_ADD_TEXT: Hsla = DIFF_ADD_FG;
+/// Diff removed-line text color (DESIGN diff-del-fg).
+pub const FILE_DIFF_DEL_TEXT: Hsla = DIFF_DEL_FG;
+/// Diff hunk-header text color (DESIGN diff-hunk = subtle).
+pub const FILE_DIFF_HUNK_TEXT: Hsla = DIFF_HUNK;
 /// Vertical padding added above and below the hunk-header content (px).
 pub const FILE_DIFF_HUNK_PADDING_Y: f32 = 5.0;
 /// Line number right padding in the raw file view (px).
@@ -924,16 +928,17 @@ pub const FILE_VIEWER_SYNTAX_THEME: &str = "base16-ocean.dark";
 pub const FILE_DIFF_HUNK_CTX_GAP_X: f32 = GAP_LG;
 /// Gap between `+N` and `-N` in the diff stat badge (px).
 pub const FILE_DIFF_STAT_GAP: f32 = GAP_SM;
-/// Diff stat added-lines count color (+N).
-pub const FILE_DIFF_STAT_ADD: Hsla = hsla(133.0, 0.60, 0.55, 1.0);
-/// Diff stat removed-lines count color (-N).
-pub const FILE_DIFF_STAT_DEL: Hsla = hsla(0.0, 0.60, 0.55, 1.0);
+/// Diff stat added-lines count color (+N) — same green as the `+` marker.
+pub const FILE_DIFF_STAT_ADD: Hsla = DIFF_ADD_FG;
+/// Diff stat removed-lines count color (-N) — same red as the `-` marker.
+pub const FILE_DIFF_STAT_DEL: Hsla = DIFF_DEL_FG;
 /// Diff stat and file-status badge font size (px).
 pub const FILE_DIFF_STAT_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Word-level diff insertion highlight background (stronger than line bg).
-pub const FILE_DIFF_WORD_ADD_BG: Hsla = hsla(135.0, 0.60, 0.27, 1.0);
-/// Word-level diff deletion highlight background (stronger than line bg).
-pub const FILE_DIFF_WORD_DEL_BG: Hsla = hsla(0.0, 0.60, 0.27, 1.0);
+/// Word-level diff insertion highlight — the line bg tint at higher
+/// alpha so the intra-line span reads stronger while staying in-palette.
+pub const FILE_DIFF_WORD_ADD_BG: Hsla = with_alpha(SUCCESS, 0.30);
+/// Word-level diff deletion highlight — the line bg tint at higher alpha.
+pub const FILE_DIFF_WORD_DEL_BG: Hsla = with_alpha(ERROR, 0.30);
 /// Search panel height (px).
 pub const FILE_VIEWER_SEARCH_PANEL_H: f32 = 36.0;
 /// Search panel horizontal padding (px).
@@ -972,12 +977,12 @@ pub const FILE_VIEWER_SEARCH_BTN_PAD_X: f32 = PAD_SM;
 pub const FILE_VIEWER_SEARCH_BTN_ML: f32 = PAD_XS;
 /// Horizontal scroll origin for file viewer scroll-to-match (always 0, px).
 pub const FILE_VIEWER_SCROLL_ORIGIN_X: f32 = 0.0;
-/// H1 heading font size (px).
-pub const MD_H1_FONT_SIZE: f32 = 22.0;
-/// H2 heading font size (px).
-pub const MD_H2_FONT_SIZE: f32 = 18.0;
-/// H3 heading font size (px).
-pub const MD_H3_FONT_SIZE: f32 = 15.0;
+/// H1 heading font size (px) — DESIGN §Markdown Viewer.
+pub const MD_H1_FONT_SIZE: f32 = 18.0;
+/// H2 heading font size (px) — DESIGN §Markdown Viewer.
+pub const MD_H2_FONT_SIZE: f32 = 15.0;
+/// H3 heading font size (px) — DESIGN §Markdown Viewer.
+pub const MD_H3_FONT_SIZE: f32 = 13.0;
 /// H4–H6 heading font size (same as body).
 pub const MD_H4_FONT_SIZE: f32 = FILE_VIEWER_FONT_SIZE;
 /// H2 heading text color.

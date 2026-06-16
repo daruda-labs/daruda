@@ -85,24 +85,27 @@ impl AddMcpServerModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let name_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("filesystem"));
-        let command_input = cx.new(|cx_state| InputState::new(window, cx_state).placeholder("npx"));
+        let name_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::mcp_placeholder_name())
+        });
+        let command_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::mcp_placeholder_command())
+        });
         let args_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("-y @modelcontextprotocol/server-x")
+            InputState::new(window, cx_state).placeholder(strings::mcp_placeholder_args())
         });
         let url_input = cx.new(|cx_state| {
-            InputState::new(window, cx_state).placeholder("https://localhost:8080/mcp")
+            InputState::new(window, cx_state).placeholder(strings::mcp_placeholder_url())
         });
         let env_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .auto_grow(2, 6)
-                .placeholder("FOO=bar")
+                .placeholder(strings::mcp_placeholder_env())
         });
         let headers_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .auto_grow(2, 6)
-                .placeholder("Authorization=Bearer ...")
+                .placeholder(strings::mcp_placeholder_headers())
         });
 
         // Project + Local require an active lane root; User is always
