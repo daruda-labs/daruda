@@ -83,23 +83,31 @@ impl CreateSkillModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let name_input = cx.new(|cx_state| InputState::new(window, cx_state).placeholder("name"));
-        let description_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("short description"));
-        let when_to_use_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("optional"));
-        let argument_hint_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("optional"));
-        let allowed_tools_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("optional"));
-        let paths_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("optional"));
-        let model_input =
-            cx.new(|cx_state| InputState::new(window, cx_state).placeholder("optional"));
+        let name_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_name())
+        });
+        let description_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_description())
+        });
+        let when_to_use_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_when_to_use())
+        });
+        let argument_hint_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+        });
+        let allowed_tools_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+        });
+        let paths_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+        });
+        let model_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state).placeholder(strings::skills_placeholder_optional())
+        });
         let body_editor = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .multi_line(true)
-                .placeholder("# Skill body in markdown")
+                .placeholder(strings::skills_placeholder_body())
         });
 
         let scope_options: Vec<SkillScope> = if project_root.is_some() {
@@ -410,7 +418,11 @@ impl Render for CreateSkillModal {
             .child(left)
             .child(right);
 
-        let save_label = if submitting { "Saving…" } else { "Save" };
+        let save_label = if submitting {
+            strings::skills_saving_label()
+        } else {
+            strings::skills_button_save()
+        };
         let footer = div()
             .flex()
             .flex_row()
@@ -418,7 +430,7 @@ impl Render for CreateSkillModal {
             .gap(px(theme::MODAL_FOOTER_GAP))
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(
-                button("create-skill-cancel", "Cancel")
+                button("create-skill-cancel", strings::skills_button_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(

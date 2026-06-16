@@ -18,7 +18,7 @@
 
 use crate::ui::theme;
 use crate::ui::theme::DarudaTheme;
-use gpui::{AnyElement, Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::agent::mcp::{McpScope, McpServer, McpSnapshot, McpTransport};
 use crate::surface::strings;
@@ -159,8 +159,13 @@ fn server_row(
     let name_for_edit = name.clone();
     let name_for_delete = name.clone();
 
-    let row_hover_bg = theme::OVERLAY_HOVER;
-    let actions_bg = theme::OVERLAY_HOVER;
+    // Opaque hover surface (one step up the ladder, matching the Skills
+    // tab). The actions overlay reuses it as its background so the
+    // revealed Edit / Delete fully mask the status text behind them —
+    // a translucent fill let that text bleed through and collide with
+    // the buttons.
+    let row_hover_bg = theme::BG_HOVER;
+    let actions_bg = theme::BG_HOVER;
 
     let indicator_color = if s.disabled {
         theme::TEXT_DISABLED
@@ -170,12 +175,16 @@ fn server_row(
         theme::SIGNAL_GREEN
     };
 
-    let (status_label, status_color) = if s.disabled {
-        (strings::mcp_status_disabled(), theme::TEXT_DISABLED)
+    // Only the noteworthy states carry a text label — the enabled
+    // (default) state is conveyed by the green indicator dot and the
+    // full-brightness name alone, so a redundant "enabled" word is
+    // omitted.
+    let status: Option<(String, gpui::Hsla)> = if s.disabled {
+        Some((strings::mcp_status_disabled(), theme::TEXT_DISABLED))
     } else if s.is_malformed() {
-        (strings::mcp_status_malformed(), t.mcp_malformed_badge_text)
+        Some((strings::mcp_status_malformed(), t.mcp_malformed_badge_text))
     } else {
-        (strings::mcp_status_enabled(), theme::TEXT_SECONDARY)
+        None
     };
 
     let server_name = SharedString::from(s.name.clone());
@@ -200,13 +209,14 @@ fn server_row(
         .hover(move |d| d.bg(row_hover_bg))
         .child(
             div()
+                .id(SharedString::from(format!("mcp-toggle-{}", s.name)))
                 .flex_none()
                 .w(px(theme::MCP_INDICATOR_SIZE))
                 .h(px(theme::MCP_INDICATOR_SIZE))
                 .rounded_full()
                 .bg(indicator_color)
                 .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                .on_click(move |_: &gpui::ClickEvent, _window, cx| {
                     if let Some(ws) = workspace_toggle.upgrade() {
                         let n = name_for_toggle.clone();
                         ws.update(cx, |ws, cx| ws.toggle_mcp_server(scope, &n, cx));
@@ -226,14 +236,16 @@ fn server_row(
         )
         .child(transport_chip(transport_label))
         .child(
+            // Always present as the flex spacer that fills the row and
+            // backs the hover-action overlay; carries text only for the
+            // disabled / malformed states.
             div()
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(status_color)
-                .child(status_label),
+                .when_some(status, |d, (label, color)| d.text_color(color).child(label)),
         )
         .child(
             div()
@@ -275,6 +287,7 @@ fn row_actions(
         .child(text_action_button(
             "edit",
             strings::mcp_button_edit(),
+            theme::TEXT_PRIMARY,
             move |window, cx| {
                 if let Some(ws) = workspace_edit.upgrade() {
                     let n = name_for_edit.clone();
@@ -285,6 +298,7 @@ fn row_actions(
         .child(text_action_button(
             "del",
             strings::mcp_button_delete(),
+            theme::ERROR,
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
                     let n = name_for_delete.clone();
@@ -309,20 +323,20 @@ fn transport_chip(label: &'static str) -> impl IntoElement {
 }
 
 /// Hover-only text action button. Visually distinct from the Skills
-/// tab's chip-shaped `[Edit]` (which has a tinted background) — Tools
-/// rows have an indicator dot already, so a flat text affordance keeps
-/// the row line-height tight. Different shape on purpose, hence not
-/// shared with `skills::render::text_action_button`.
+/// tab's chip-shaped `[Edit]` / `[×]` (built from `crate::ui::button`):
+/// Tools rows already carry a status indicator dot, so a flat text
+/// affordance keeps the row line-height tight. The different shape is
+/// deliberate, so this stays a local helper instead of a shared one.
 fn text_action_button<F>(
     id: impl Into<gpui::ElementId>,
     label: impl Into<gpui::SharedString>,
+    hover_color: gpui::Hsla,
     on_click: F,
 ) -> impl IntoElement
 where
     F: Fn(&mut gpui::Window, &mut gpui::App) + 'static,
 {
     let idle_color = theme::TEXT_SECONDARY;
-    let hover_color = theme::TEXT_PRIMARY;
     div()
         .id(id)
         .flex_none()
@@ -331,7 +345,7 @@ where
         .cursor_pointer()
         .hover(move |s| s.text_color(hover_color))
         .child(label.into())
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+        .on_click(move |_: &gpui::ClickEvent, window, cx| {
             on_click(window, cx);
         })
 }

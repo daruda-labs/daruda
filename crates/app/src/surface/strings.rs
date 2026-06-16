@@ -368,6 +368,49 @@ pub fn task_error_dialog_close() -> String {
     rust_i18n::t!("common.btn_close").into_owned()
 }
 
+// Task picker modal — command-palette dispatch titles. Read as
+// "Start Task", "Cancel Task", … so the user knows which action they
+// are committing to before picking a target.
+pub fn task_picker_title_start() -> String {
+    rust_i18n::t!("task.picker_title_start").into_owned()
+}
+pub fn task_picker_title_cancel() -> String {
+    rust_i18n::t!("task.picker_title_cancel").into_owned()
+}
+pub fn task_picker_title_reopen() -> String {
+    rust_i18n::t!("task.picker_title_reopen").into_owned()
+}
+pub fn task_picker_title_retry() -> String {
+    rust_i18n::t!("task.picker_title_retry").into_owned()
+}
+pub fn task_picker_title_delete() -> String {
+    rust_i18n::t!("task.picker_title_delete").into_owned()
+}
+pub fn task_picker_title_edit() -> String {
+    rust_i18n::t!("task.picker_title_edit").into_owned()
+}
+
+// Task picker modal — empty-state messages shown when no task is
+// eligible for the chosen action.
+pub fn task_picker_empty_start() -> String {
+    rust_i18n::t!("task.picker_empty_start").into_owned()
+}
+pub fn task_picker_empty_cancel() -> String {
+    rust_i18n::t!("task.picker_empty_cancel").into_owned()
+}
+pub fn task_picker_empty_edit() -> String {
+    rust_i18n::t!("task.picker_empty_edit").into_owned()
+}
+pub fn task_picker_empty_reopen() -> String {
+    rust_i18n::t!("task.picker_empty_reopen").into_owned()
+}
+pub fn task_picker_empty_retry() -> String {
+    rust_i18n::t!("task.picker_empty_retry").into_owned()
+}
+pub fn task_picker_empty_delete() -> String {
+    rust_i18n::t!("task.picker_empty_delete").into_owned()
+}
+
 /// `[📄 Open file]` button shown next to the Prompt section header in
 /// the TaskEdit pane (R-20 follow-up). Click opens
 /// `<wt>/.daruda/task-<branch>.md` in a fresh file viewer tab when
@@ -1871,11 +1914,46 @@ pub fn skills_invoke_submit() -> String {
 pub fn skills_invoke_submitting() -> String {
     rust_i18n::t!("skills.invoke_submitting").into_owned()
 }
+/// Primary-button label on the create / edit skill modals.
+pub fn skills_button_save() -> String {
+    rust_i18n::t!("common.btn_save").into_owned()
+}
+/// Cancel-button label on the create / edit skill modals.
+pub fn skills_button_cancel() -> String {
+    rust_i18n::t!("common.btn_cancel").into_owned()
+}
+/// Primary-button label while a create / edit skill save is in flight.
+pub fn skills_saving_label() -> String {
+    rust_i18n::t!("skills.saving_label").into_owned()
+}
 pub fn skills_invoke_placeholder_default() -> String {
     rust_i18n::t!("skills.invoke_placeholder_default").into_owned()
 }
 pub fn skills_invoke_no_terminal() -> String {
     rust_i18n::t!("skills.invoke_no_terminal").into_owned()
+}
+
+// Create / edit skill modal — input placeholders. Shared between the
+// two modals so the same field reads identically in both.
+pub fn skills_placeholder_name() -> String {
+    rust_i18n::t!("skills.placeholder_name").into_owned()
+}
+pub fn skills_placeholder_description() -> String {
+    rust_i18n::t!("skills.placeholder_description").into_owned()
+}
+pub fn skills_placeholder_when_to_use() -> String {
+    rust_i18n::t!("skills.placeholder_when_to_use").into_owned()
+}
+pub fn skills_placeholder_optional() -> String {
+    rust_i18n::t!("skills.placeholder_optional").into_owned()
+}
+pub fn skills_placeholder_body() -> String {
+    rust_i18n::t!("skills.placeholder_body").into_owned()
+}
+/// Body editor placeholder shown while the existing skill's markdown is
+/// still loading from disk in the edit modal.
+pub fn skills_placeholder_body_loading() -> String {
+    rust_i18n::t!("skills.placeholder_body_loading").into_owned()
 }
 
 // ----------------------------------------------------------------
@@ -1975,10 +2053,6 @@ pub fn skills_button_view() -> String {
 pub fn skills_button_edit() -> String {
     rust_i18n::t!("common.btn_edit").into_owned()
 }
-/// Single-glyph `×` delete affordance on the skill row overlay.
-/// Lives as a constant so the glyph stays consistent across rows and
-/// is easy to swap if a future revision uses an icon.
-pub const SKILLS_BUTTON_DELETE_ICON: &str = "×";
 pub fn skills_delete_body_prefix() -> String {
     rust_i18n::t!("skills.delete_body_prefix").into_owned()
 }
@@ -2044,10 +2118,6 @@ pub fn mcp_empty_user() -> String {
 /// servers in `~/.claude.json`).
 pub fn mcp_empty_local() -> String {
     rust_i18n::t!("mcp.empty_local").into_owned()
-}
-/// Row status label — server is configured and not disabled.
-pub fn mcp_status_enabled() -> String {
-    rust_i18n::t!("mcp.status_enabled").into_owned()
 }
 /// Row status label — server has `"disabled": true` in config.
 pub fn mcp_status_disabled() -> String {

@@ -86,6 +86,25 @@ pub fn button_close(
         .group_hover(group_name, |d| d.visible())
 }
 
+/// Destructive `×` glyph for hover-revealed row actions — muted at
+/// rest, fills with the `ERROR` token on direct hover so the
+/// destructive action reads clearly only when the pointer is on it.
+/// Unlike [`button_close`] it bakes no visibility gating or fixed
+/// pane-header sizing: the caller's own hover-reveal container
+/// controls when it appears, and `xsmall` keeps it compact next to
+/// other row-action chips.
+pub fn button_delete_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
+    let t = theme::current(cx);
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.muted_text)
+        .hover(theme::ERROR);
+    Button::new(id)
+        .xsmall()
+        .tab_stop(false)
+        .custom(variant)
+        .label("\u{00d7}")
+}
+
 /// Section-header action glyph (`+`, `⟳`, `▾`, ...) — muted text on
 /// transparent bg with a soft hover-fill, no border. Use for inline
 /// header affordances and small dismiss buttons.

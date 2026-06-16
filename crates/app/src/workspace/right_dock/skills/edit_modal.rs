@@ -95,14 +95,16 @@ impl EditSkillModal {
         let body_text = String::new();
 
         let description_input = cx.new(|cx_state| {
-            let mut s = InputState::new(window, cx_state).placeholder("description");
+            let mut s = InputState::new(window, cx_state)
+                .placeholder(strings::skills_placeholder_description());
             if let Some(v) = frontmatter.description.as_deref() {
                 s = s.default_value(v.to_string());
             }
             s
         });
         let when_to_use_input = cx.new(|cx_state| {
-            let mut s = InputState::new(window, cx_state).placeholder("when to use");
+            let mut s = InputState::new(window, cx_state)
+                .placeholder(strings::skills_placeholder_when_to_use());
             if let Some(v) = frontmatter.when_to_use.as_deref() {
                 s = s.default_value(v.to_string());
             }
@@ -139,7 +141,7 @@ impl EditSkillModal {
         let body_editor = cx.new(|cx_state| {
             let mut s = InputState::new(window, cx_state)
                 .multi_line(true)
-                .placeholder("Loading body…");
+                .placeholder(strings::skills_placeholder_body_loading());
             if !body_text.is_empty() {
                 s = s.default_value(body_text);
             }
@@ -456,13 +458,17 @@ impl Render for EditSkillModal {
                 ),
             )
             .child(
-                button("edit-skill-cancel", "Cancel")
+                button("edit-skill-cancel", strings::skills_button_cancel())
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.dismiss(w, cx))),
             )
             .child(
                 button_primary(
                     "edit-skill-save",
-                    if self.submitting { "Saving…" } else { "Save" },
+                    if self.submitting {
+                        strings::skills_saving_label()
+                    } else {
+                        strings::skills_button_save()
+                    },
                 )
                 .disabled(self.submitting)
                 .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.submit(w, cx))),

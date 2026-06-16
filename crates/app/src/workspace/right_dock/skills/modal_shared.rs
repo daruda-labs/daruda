@@ -12,6 +12,6 @@ use gpui::{IntoElement, SharedString, div, prelude::*, px};
 pub(super) fn field_label(text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::TEXT_SECONDARY)
+        .text_color(theme::TEXT_TERTIARY)
         .child(text.into())
 }

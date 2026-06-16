@@ -96,12 +96,12 @@ impl AddMcpServerModal {
         });
         let env_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(2, 6)
                 .placeholder("FOO=bar")
         });
         let headers_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(2, 6)
                 .placeholder("Authorization=Bearer ...")
         });
 

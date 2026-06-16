@@ -114,12 +114,12 @@ impl EditMcpServerModal {
             cx.new(|cx_state| InputState::new(window, cx_state).default_value(initial.url.clone()));
         let env_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(2, 6)
                 .default_value(initial.env_text.clone())
         });
         let headers_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(2, 6)
                 .default_value(initial.headers_text.clone())
         });
 
@@ -290,7 +290,14 @@ fn forward_multi_input(
 
 impl Focusable for EditMcpServerModal {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
-        self.command_input.focus_handle(cx)
+        // Land focus on the first input the active transport actually
+        // renders — Stdio shows command, remote shows url. Returning
+        // command unconditionally would focus an off-screen field when
+        // editing an SSE / HTTP server.
+        match self.transport {
+            McpTransport::Stdio => self.command_input.focus_handle(cx),
+            McpTransport::Sse | McpTransport::Http => self.url_input.focus_handle(cx),
+        }
     }
 }
 
@@ -359,15 +366,19 @@ impl Render for EditMcpServerModal {
                     .child(field_label(strings::mcp_field_url()))
                     .child(input(&self.url_input, cx, 0))
                     .child(field_label(strings::mcp_field_headers()))
-                    .child(input(&self.headers_input, cx, 3));
+                    .child(input(&self.headers_input, cx, 1));
             }
         }
 
+        // Env sits one past the last transport-specific input and the
+        // disabled checkbox one past env, so the cycle ends at the
+        // checkbox regardless of transport. Name is read-only here, so
+        // indices start at 0 (both branches use 0,1 for their inputs).
         body = body
             .child(field_label(strings::mcp_field_env()))
-            .child(input(&self.env_input, cx, 4))
+            .child(input(&self.env_input, cx, 2))
             .child(
-                checkbox("mcp-edit-disabled", strings::mcp_field_disabled(), 5)
+                checkbox("mcp-edit-disabled", strings::mcp_field_disabled(), 3)
                     .checked(self.disabled)
                     .on_click(cx.listener(|this, checked: &bool, _w, cx| {
                         this.disabled = *checked;

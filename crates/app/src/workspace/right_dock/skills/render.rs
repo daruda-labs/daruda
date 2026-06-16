@@ -86,6 +86,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         plugin_expanded,
         searching,
         &t,
+        cx,
     );
     let personal_section = scope_section(
         strings::skills_personal(),
@@ -97,6 +98,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         plugin_expanded,
         searching,
         &t,
+        cx,
     );
     let plugin_section = scope_section(
         strings::skills_plugin(),
@@ -108,6 +110,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         plugin_expanded,
         searching,
         &t,
+        cx,
     );
 
     col.when_some(project_section, |c, sec| c.child(sec))
@@ -266,6 +269,7 @@ fn scope_section(
     plugin_expanded: &std::collections::HashSet<String>,
     searching: bool,
     t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> Option<AnyElement> {
     // While searching, an empty scope means "nothing matches the
     // query in this scope". Hide the section entirely — the default
@@ -338,12 +342,12 @@ fn scope_section(
         // independently. Header clicks no longer trigger invocation —
         // they only toggle the section open state. Individual skill
         // rows inside an open section keep their own click-to-invoke.
-        col = col.child(plugin_accordion(skills, &workspace, plugin_expanded, t));
+        col = col.child(plugin_accordion(skills, &workspace, plugin_expanded, t, cx));
     } else {
         for s in skills {
             let overrides =
                 matches!(scope, SkillScope::Project) && state.project_overrides_personal(&s.name);
-            col = col.child(skill_row(s, overrides, workspace.clone(), t));
+            col = col.child(skill_row(s, overrides, workspace.clone(), t, cx));
         }
     }
     Some(col.into_any_element())
@@ -399,14 +403,15 @@ fn group_plugin_skills(skills: &[Skill]) -> Vec<PluginGroup<'_>> {
 
 /// Build the per-plugin Accordion. Each `AccordionItem` corresponds
 /// to one plugin id and houses its skill rows as children. Header
-/// click toggles open / closed; the per-skill row's own
-/// `on_mouse_down` (set in `skill_row`) still triggers invocation,
-/// so clicking inside an open section is unambiguous.
+/// click toggles open / closed; the per-skill row's own name-button
+/// `on_click` (set in `skill_row`) still triggers invocation, so
+/// clicking inside an open section is unambiguous.
 fn plugin_accordion(
     skills: &[Skill],
     workspace: &gpui::WeakEntity<Workspace>,
     plugin_expanded: &std::collections::HashSet<String>,
     t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> impl IntoElement {
     use crate::ui::accordion::{AccordionItem, accordion};
 
@@ -433,7 +438,7 @@ fn plugin_accordion(
             .bordered(false);
         for s in &group.skills {
             item.extend(std::iter::once(
-                skill_row(s, false, workspace.clone(), t).into_any_element(),
+                skill_row(s, false, workspace.clone(), t, cx).into_any_element(),
             ));
         }
         acc = acc.item(|_| item);
@@ -482,8 +487,9 @@ fn skill_row(
     overrides_personal: bool,
     workspace: gpui::WeakEntity<Workspace>,
     t: &DarudaTheme,
+    cx: &gpui::App,
 ) -> AnyElement {
-    use crate::ui::{button, button_bare};
+    use crate::ui::{button, button_delete_glyph};
 
     let dir = s.dir.clone();
     let scope = s.scope;
@@ -601,14 +607,11 @@ fn skill_row(
                 }),
             )
             .child(
-                button_bare(SharedString::from(format!(
-                    "skill-delete-{}-{}",
-                    scope.slug(),
-                    s.name
-                )))
-                .xsmall()
-                .label(strings::SKILLS_BUTTON_DELETE_ICON)
-                .outline()
+                button_delete_glyph(
+                    SharedString::from(format!("skill-delete-{}-{}", scope.slug(), s.name)),
+                    cx,
+                )
+                .tooltip(strings::skills_button_delete())
                 .on_click(move |_: &gpui::ClickEvent, window, cx| {
                     if let Some(ws) = ws_delete.upgrade() {
                         let dir = dir_delete.clone();

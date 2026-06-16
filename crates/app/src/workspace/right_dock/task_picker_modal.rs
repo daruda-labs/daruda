@@ -23,10 +23,12 @@ use gpui::{
     Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 
+use crate::surface::strings;
 use crate::ui::WindowExt as _;
 use crate::ui::list::{FilteredItem, FilteredListState, ListEvent, list, searchable_list_state};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use daruda_terminal::ux::strings as ux_strings;
 
 /// Which action runs after the user picks a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,14 +48,14 @@ impl TaskPickAction {
     /// Modal title shown by the dialog. Reads naturally as "Start
     /// Task", "Cancel Task", … so the user knows which dispatch they
     /// are about to commit to.
-    pub(in crate::workspace) fn modal_title(self) -> &'static str {
+    pub(in crate::workspace) fn modal_title(self) -> String {
         match self {
-            Self::Start => "Start Task",
-            Self::Cancel => "Cancel Task",
-            Self::Reopen => "Reopen Task",
-            Self::Retry => "Retry Task",
-            Self::Delete => "Delete Task",
-            Self::Edit => "Edit Task",
+            Self::Start => strings::task_picker_title_start(),
+            Self::Cancel => strings::task_picker_title_cancel(),
+            Self::Reopen => strings::task_picker_title_reopen(),
+            Self::Retry => strings::task_picker_title_retry(),
+            Self::Delete => strings::task_picker_title_delete(),
+            Self::Edit => strings::task_picker_title_edit(),
         }
     }
 
@@ -198,25 +200,37 @@ impl TaskPickerModal {
 
 /// Compact one-line state summary used as the row's secondary label.
 /// Mirrors `right_panel::tasks::state_label` shape (state name only)
-/// so the picker reads as the same row, just shorter.
+/// so the picker reads as the same row, just shorter. The `Done` /
+/// `Error` cases reuse the `*_LABEL_PREFIX` consts bare ("Done",
+/// "Error") — the picker intentionally drops the suffix the right
+/// panel appends (e.g. "Done (Stop)"), so the `_PREFIX` name refers to
+/// the panel's usage, not this one.
 fn state_label(state: &daruda_store::tasks::TaskState) -> &'static str {
     match state {
-        daruda_store::tasks::TaskState::Backlog => "Backlog",
-        daruda_store::tasks::TaskState::Running { .. } => "Running",
-        daruda_store::tasks::TaskState::Done { .. } => "Done",
-        daruda_store::tasks::TaskState::Error { .. } => "Error",
-        daruda_store::tasks::TaskState::Cancelled { .. } => "Cancelled",
+        daruda_store::tasks::TaskState::Backlog => ux_strings::RIGHT_PANEL_TASK_BACKLOG_LABEL,
+        daruda_store::tasks::TaskState::Running { .. } => {
+            ux_strings::RIGHT_PANEL_TASK_RUNNING_LABEL
+        }
+        daruda_store::tasks::TaskState::Done { .. } => {
+            ux_strings::RIGHT_PANEL_TASK_DONE_LABEL_PREFIX
+        }
+        daruda_store::tasks::TaskState::Error { .. } => {
+            ux_strings::RIGHT_PANEL_TASK_ERROR_LABEL_PREFIX
+        }
+        daruda_store::tasks::TaskState::Cancelled { .. } => {
+            ux_strings::RIGHT_PANEL_TASK_CANCELLED_LABEL
+        }
     }
 }
 
-fn empty_message(action: TaskPickAction) -> &'static str {
+fn empty_message(action: TaskPickAction) -> String {
     match action {
-        TaskPickAction::Start => "No backlog tasks to start.",
-        TaskPickAction::Cancel => "No running tasks to cancel.",
-        TaskPickAction::Edit => "No tasks to edit.",
-        TaskPickAction::Reopen => "No completed tasks to reopen.",
-        TaskPickAction::Retry => "No errored tasks to retry.",
-        TaskPickAction::Delete => "No tasks to delete.",
+        TaskPickAction::Start => strings::task_picker_empty_start(),
+        TaskPickAction::Cancel => strings::task_picker_empty_cancel(),
+        TaskPickAction::Edit => strings::task_picker_empty_edit(),
+        TaskPickAction::Reopen => strings::task_picker_empty_reopen(),
+        TaskPickAction::Retry => strings::task_picker_empty_retry(),
+        TaskPickAction::Delete => strings::task_picker_empty_delete(),
     }
 }
 
@@ -249,6 +263,11 @@ impl Render for TaskPickerModal {
             .flex_col()
             .key_context("TaskPickerModal")
             .track_focus(&self.panel_focus_handle)
+            // Tab containment required by the modal tab rule — even
+            // though the body is a single `list()` that handles its own
+            // arrow-key navigation, the group anchor keeps Tab from
+            // escaping the dialog into the workspace behind it.
+            .tab_group()
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 if ev.keystroke.key.as_str() == "escape" {
                     this.dismiss(window, cx);
