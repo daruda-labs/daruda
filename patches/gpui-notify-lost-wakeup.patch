@@ -1,6 +1,6 @@
 --- a/crates/gpui/src/view.rs
 +++ b/crates/gpui/src/view.rs
-@@ -174,9 +174,19 @@
+@@ -174,10 +174,19 @@
                      let refreshing = mem::replace(&mut window.refreshing, true);
                      let prepaint_start = window.prepaint_index();
 -                    let (mut element, accessed_entities) = cx.detect_accessed_entities(|cx| {
