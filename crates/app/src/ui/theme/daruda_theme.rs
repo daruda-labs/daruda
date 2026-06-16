@@ -100,7 +100,7 @@ daruda_theme_fields! {
     lane_card_active_bg => BG_ACTIVE,
     modal_panel_bg => BG_RAISED,
     modal_panel_border => BORDER,
-    modal_input_bg => BG_BASE,
+    modal_input_bg => BG_ACTIVE,
     modal_input_border => BORDER,
     modal_secondary_text => TEXT_BODY,
     textarea_scrollbar_thumb => SCROLLBAR_THUMB,

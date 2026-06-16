@@ -376,7 +376,7 @@ padding:    sm (8px)
   background:    surface-3
   border:        1px hairline
   border-radius: md (6px)
-  focus-border:  2px solid accent
+  focus-border:  1px solid accent
   text:          ui-md, ink
   placeholder:   ui-md, mute
   padding:       sm md (8px 12px)
@@ -748,7 +748,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 
 | State | Visual treatment |
 |-------|-----------------|
-| Focus ring | `2px solid accent` outline, `2px` offset |
+| Focus ring | `1px solid accent` border (gpui_component `theme.ring`) |
 | Selected row (lane/tab) | `surface-2` background + `2px accent` left border |
 | Hover | One step up the surface ladder from resting state |
 | Disabled | `mute` text, no background change, no hover effect |
@@ -758,7 +758,7 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 | Drop target (invalid) | `2px solid error` outline |
 | Drop placeholder | 2px `accent` horizontal line between rows |
 | Text selected | `selection-bg` (accent 28%) background |
-| Input focused | Border changes from `hairline` → `2px solid accent` |
+| Input focused | Border changes from `hairline` → `1px solid accent` |
 | Pane focused | PaneHeader background `surface-1` → `surface-2` |
 | Tab active | Background drops to `canvas`; `2px accent` underline |
 | Claude running | `claude-active` (#f0a020) badge on WorktreeRow + StatusBar dot |

@@ -174,9 +174,9 @@
       "default": "#23252aff"
     },
     "modal_input_bg": {
-      "description": "Maps to `palette::BG_BASE`.",
+      "description": "Maps to `palette::BG_ACTIVE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#18191aff"
     },
     "modal_input_border": {
       "description": "Maps to `palette::BORDER`.",

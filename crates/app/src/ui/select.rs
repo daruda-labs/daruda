@@ -20,7 +20,8 @@
 //! `FocusHandle`'s tab fields directly — the value sticks because the
 //! handle is stored on `SelectState` and reused across re-renders.
 
-use gpui::{App, Context, Entity, Focusable as _, SharedString, Window};
+use crate::ui::theme;
+use gpui::{App, Context, Entity, Focusable as _, SharedString, Styled as _, Window};
 use gpui_component::Sizable as _;
 use gpui_component::select::SelectItem;
 
@@ -120,5 +121,9 @@ pub fn select<T: SelectTabSpec>(
     tab: T,
 ) -> Select<Vec<SelectOption>> {
     tab.apply(state, cx);
-    Select::new(state).small()
+    // Match the `input` surface — override Select's default
+    // `theme.background` with `modal_input_bg` (refine_style wins).
+    Select::new(state)
+        .small()
+        .bg(theme::current(cx).modal_input_bg)
 }

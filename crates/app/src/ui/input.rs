@@ -6,14 +6,12 @@
 //! leaving single-line inputs unchanged (single-line inner carries an
 //! explicit `input_h(size)`).
 //!
-//! daruda inputs sit on a darker surface (`MODAL_INPUT_BG`) than
-//! `gpui_component`'s default `theme.background`, but `gpui_component::ThemeColor`
-//! has no dedicated `input_background` slot — its `Input` element bakes
-//! `cx.theme().background` directly into the painted chrome. To keep
-//! the daruda tone, the wrapper turns the inner `Input::appearance`
-//! off and draws the bg / border / radius itself on a small wrapping
-//! `div`, while the inner `Input` keeps doing the text + caret + IME
-//! work (still `gpui_component`).
+//! daruda inputs sit on `MODAL_INPUT_BG`, not `gpui_component`'s
+//! default `theme.background`. Plain `input` keeps the inner `Input`'s
+//! own chrome (bg + border + 1px accent focus border) and just
+//! overrides the bg via `.bg()`. The `*_with_action` variants host the
+//! action in an outer div, so they keep the inner `Input` borderless
+//! and draw the bg / border / focus-within accent on that div.
 //!
 //! Tab participation is the same `XxxTabSpec` polymorphism used by
 //! `checkbox` / `radio` / `select`: pass an `isize` to slot the input
@@ -29,7 +27,10 @@
 //! ```
 
 use crate::ui::theme as d;
-use gpui::{App, Entity, Focusable as _, IntoElement, ParentElement as _, Styled as _, div, px};
+use gpui::{
+    App, Entity, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
+    Styled as _, div, px,
+};
 use gpui_component::Sizable as _;
 
 pub use gpui_component::input::{Input, InputEvent, InputState};
@@ -60,10 +61,8 @@ impl InputTabSpec for () {
 /// Construct a daruda-toned single-line input bound to `state`.
 ///
 /// `tab` decides Tab cycle participation (`isize` cycles at that
-/// index, `()` skips). The wrapping `div` paints the daruda chrome
-/// (`MODAL_INPUT_BG` / border / radius); the inner `Input` runs
-/// `appearance(false)` so its bg / border / radius doesn't double
-/// up on top.
+/// index, `()` skips). The inner `Input` paints its own chrome; `.bg()`
+/// overrides the surface to `MODAL_INPUT_BG`.
 ///
 /// `.w_full()` is baked in: the inner `gpui_component::Input` sizes
 /// to its parent via `size_full`, so a content-sized wrapper would
@@ -72,18 +71,14 @@ impl InputTabSpec for () {
 /// that need a narrower input can place this inside a sized
 /// container (`div().w(px(N))....child(input(...))`).
 pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> impl IntoElement {
-    let inner = Input::new(state).small().appearance(false);
-    let inner = tab.apply(state, cx, inner);
-    let t = d::current(cx);
-    div()
-        .flex()
-        .flex_row()
+    // gpui draws its own chrome (bg + hairline + 1px accent focus
+    // border); `.bg()` overrides the surface to `modal_input_bg`.
+    let inner = Input::new(state)
+        .small()
+        .bordered(true)
         .w_full()
-        .bg(t.modal_input_bg)
-        .border_1()
-        .border_color(t.modal_input_border)
-        .rounded(px(d::MODAL_BUTTON_RADIUS))
-        .child(inner)
+        .bg(d::current(cx).modal_input_bg);
+    tab.apply(state, cx, inner)
 }
 
 /// Chrome-cell input variant that hosts an action element inline,
@@ -110,13 +105,20 @@ pub fn input_with_action<T: InputTabSpec>(
     let inner = Input::new(state).small().appearance(false);
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
+    // Inner Input is borderless, so the focus-within accent border
+    // lives on this outer div (track_focus + in_focus). The inner Input
+    // track_focus'es the same handle; the duplicate collapses to one
+    // tab stop by FocusId — don't add a `tab_index` here (real 2nd stop).
+    let focus_handle = state.read(cx).focus_handle(cx);
     div()
+        .track_focus(&focus_handle)
         .flex()
         .flex_col()
         .w_full()
         .bg(t.modal_input_bg)
         .border_1()
         .border_color(t.modal_input_border)
+        .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
         // Text region fills the top — `flex_1` claims the vertical
         // space above the action bar; the inner flex propagates
@@ -157,7 +159,10 @@ pub fn input_with_action_inline<T: InputTabSpec>(
     let inner = Input::new(state).small().appearance(false);
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
+    // Focus-within accent border, same as `input_with_action`.
+    let focus_handle = state.read(cx).focus_handle(cx);
     div()
+        .track_focus(&focus_handle)
         .flex()
         .flex_row()
         .items_center()
@@ -165,6 +170,7 @@ pub fn input_with_action_inline<T: InputTabSpec>(
         .bg(t.modal_input_bg)
         .border_1()
         .border_color(t.modal_input_border)
+        .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
         // Text region claims the row's free width — `flex_1` lets the
         // input stretch while the action chip on the right keeps its

@@ -44,7 +44,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.lane_drop_target_bg, palette::LANE_DROP_TARGET_BG);
     assert_eq!(t.modal_panel_bg, palette::BG_RAISED);
     assert_eq!(t.modal_panel_border, palette::BORDER);
-    assert_eq!(t.modal_input_bg, palette::BG_BASE);
+    assert_eq!(t.modal_input_bg, palette::BG_ACTIVE);
     assert_eq!(t.modal_input_border, palette::BORDER);
     assert_eq!(t.modal_secondary_text, palette::TEXT_BODY);
     assert_eq!(t.textarea_scrollbar_thumb, palette::SCROLLBAR_THUMB);
