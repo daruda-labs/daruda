@@ -23,7 +23,7 @@ use super::pane_tree::PaneId;
 use crate::surface::strings;
 use crate::ui::select::select;
 use crate::ui::{
-    Disableable as _, Sizable as _, button, button_close_hover, button_danger, button_primary,
+    ButtonVariants as _, Disableable as _, Sizable as _, button, button_close, button_primary,
     checkbox, markdown_editor,
 };
 
@@ -48,16 +48,45 @@ pub(in crate::workspace) fn render(
     let pane_text = theme::TEXT_PRIMARY;
     let label_color = theme_t.muted_text;
 
-    let title_block = labeled_field(
-        "Title",
-        div()
-            .w_full()
-            .child(crate::ui::input(&te.title_input, cx, 0))
-            .into_any_element(),
+    // Title field doubles as the pane's discard affordance: the
+    // destructive close sits at the far right of the "Title" label row
+    // (a `×`, like a tab/pane close) rather than as a footer button, so
+    // the footer carries only the two save actions and the close reads
+    // as "dismiss this editor". `button_close` is always visible (not
+    // hover-gated) and stays out of the Tab cycle.
+    let title_block = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::MODAL_PANEL_GAP))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .child(field_label_with_color(
+                    strings::task_edit_title_label(),
+                    label_color,
+                ))
+                .child(
+                    button_close(("task-edit-discard", pane_id as usize), cx).on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.discard_task_edit_pane(pane_id, window, cx);
+                        }),
+                    ),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .child(crate::ui::input(&te.title_input, cx, 0)),
+        );
+
+    let branch_block = labeled_field(
+        strings::task_edit_branch_label(),
+        branch_field(te, cx),
         label_color,
     );
-
-    let branch_block = labeled_field("Branch", branch_field(te, cx), label_color);
 
     let base_block = labeled_field(
         strings::task_edit_base_label(),
@@ -76,14 +105,18 @@ pub(in crate::workspace) fn render(
 
     let auto_execute = te.auto_execute;
     let auto_row = checkbox_row(
-        checkbox("task-edit-auto-execute", "Auto-execute", 0)
-            .checked(auto_execute)
-            .on_click(cx.listener(move |this, checked: &bool, _w, cx| {
-                if let Some(te) = this.task_edit_content_mut_for_pane(pane_id) {
-                    te.auto_execute = *checked;
-                }
-                cx.notify();
-            })),
+        checkbox(
+            "task-edit-auto-execute",
+            strings::task_edit_auto_execute_label(),
+            0,
+        )
+        .checked(auto_execute)
+        .on_click(cx.listener(move |this, checked: &bool, _w, cx| {
+            if let Some(te) = this.task_edit_content_mut_for_pane(pane_id) {
+                te.auto_execute = *checked;
+            }
+            cx.notify();
+        })),
     );
 
     let can_save = !matches!(te.branch_validation, BranchValidation::Invalid { .. });
@@ -91,35 +124,29 @@ pub(in crate::workspace) fn render(
     // Action-bar footer overrides the wrapper-default `xsmall()` to
     // `small()` per CLAUDE.md §10 (size override justified inline):
     // these are top-level "what now?" buttons that benefit from a
-    // larger click target. Variants stay within the DESIGN.md button
-    // palette (Primary=accent, Secondary=surface-3, Destructive=error)
-    // and honour accent scarcity — exactly one accent button:
-    //   Discard — danger (error red), genuinely destructive (drops the
-    //   unsaved draft).
-    //   Save Draft — secondary (surface-3), the de-emphasized save.
-    //   Start — primary (accent), the single emphasized "go" CTA.
+    // larger click target. Discard lives as the `×` on the Title label
+    // row, so the footer carries only the two save actions. Save Draft
+    // is the emphasized accent CTA (saving the task is the primary
+    // intent); Start is the green "go/run" action, distinct in colour
+    // so the two aren't the same accent tone side-by-side.
+    //   Save Draft — primary (accent), the emphasized save.
+    //   Start — success (green), the "go" / launch action.
     let footer = div()
         .flex()
         .flex_row()
         .justify_end()
         .gap(px(theme::MODAL_FOOTER_GAP))
         .child(
-            button_danger("task-edit-discard", "Discard")
-                .small()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.discard_task_edit_pane(pane_id, window, cx);
-                })),
-        )
-        .child(
-            button("task-edit-save-draft", "Save Draft")
+            button_primary("task-edit-save-draft", strings::task_edit_save())
                 .small()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.save_task_edit_pane(pane_id, false, window, cx);
                 })),
         )
         .child(
-            button_primary("task-edit-start", "Start")
+            button("task-edit-start", strings::task_action_start())
                 .small()
+                .success()
                 .disabled(!can_save)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.save_task_edit_pane(pane_id, true, window, cx);
@@ -413,17 +440,12 @@ fn subtask_row(
 
     let sub_id_for_remove = sub.id.clone();
     let task_id_for_remove = task_id.clone();
-    let remove = button_close_hover(
-        SharedString::from(format!("subtask-remove-{}", sub.id)),
-        SharedString::from(format!("subtask-row-{}", sub.id)),
-        cx,
-    )
-    .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
-        this.delete_subtask(&task_id_for_remove, &sub_id_for_remove, cx);
-    }));
+    let remove = button_close(SharedString::from(format!("subtask-remove-{}", sub.id)), cx)
+        .on_click(cx.listener(move |this, _ev: &gpui::ClickEvent, _w, cx| {
+            this.delete_subtask(&task_id_for_remove, &sub_id_for_remove, cx);
+        }));
 
     div()
-        .group(SharedString::from(format!("subtask-row-{}", sub.id)))
         .flex()
         .flex_row()
         .items_center()
@@ -508,7 +530,7 @@ fn notes_header(cx: &gpui::App) -> impl IntoElement {
         .flex_row()
         .items_baseline()
         .gap(px(theme::MODAL_PANEL_GAP))
-        .child(field_label("Notes", cx))
+        .child(field_label(strings::task_edit_notes_label(), cx))
         .child(field_hint(strings::task_edit_notes_hint(), cx))
 }
 
@@ -553,7 +575,7 @@ fn prompt_header(
         .flex_row()
         .items_center()
         .justify_between()
-        .child(field_label("Prompt", cx))
+        .child(field_label(strings::task_edit_prompt_label(), cx))
         .child(open_btn)
 }
 

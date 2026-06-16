@@ -253,6 +253,21 @@
       "$ref": "#/$defs/Rgba",
       "default": "#ffffff73"
     },
+    "task_edit_bg": {
+      "description": "Maps to `palette::BG_RAISED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141516ff"
+    },
+    "task_edit_scrollbar_thumb": {
+      "description": "Maps to `palette::SCROLLBAR_THUMB`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff40"
+    },
+    "task_edit_scrollbar_thumb_hover": {
+      "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff73"
+    },
     "settings_sidebar_bg": {
       "description": "Maps to `palette::SETTINGS_SIDEBAR_BG`.",
       "$ref": "#/$defs/Rgba",

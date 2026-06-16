@@ -486,22 +486,18 @@ impl Render for Workspace {
             .items_center()
             .children(tab_titles.into_iter().map(
                 |(i, is_active, display, file_path, worktree_root)| {
-                    let group_name = SharedString::from(format!("tab-{}", i));
-
                     // Stop the left-press from bubbling to the tab cell's
                     // `on_mouse_down(Left, activate_tab)` below — clicking ×
                     // must close the tab without first activating it. The
                     // Button's own `on_click` (mouse-up) does the close.
-                    let close_button =
-                        crate::ui::button_close_hover(("tab-close", i), group_name.clone(), cx)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.request_close_tab(i, window, cx);
-                            }));
+                    let close_button = crate::ui::button_close(("tab-close", i), cx)
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.request_close_tab(i, window, cx);
+                        }));
 
                     div()
                         .id(("tab", i))
-                        .group(group_name)
                         .flex()
                         .flex_row()
                         .items_center()

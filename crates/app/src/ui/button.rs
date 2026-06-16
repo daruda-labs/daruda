@@ -11,7 +11,7 @@
 //! `.tab_stop(true).tab_index(n)` explicitly.
 
 use crate::ui::theme;
-use gpui::{App, ElementId, InteractiveElement as _, SharedString, Styled as _, px};
+use gpui::{App, ElementId, SharedString, Styled as _, px};
 use gpui_component::Sizable as _;
 use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
@@ -51,12 +51,11 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
         .h(px(theme::BUTTON_CHIP_SIZE))
 }
 
-/// Always-visible `×` close glyph sized to a pane header — muted at
-/// rest, fills bg with the destructive `ERROR` token on direct hover.
-/// Used by the pane header only; the pane header is always shown in
-/// split mode so the close affordance needs no hover gating. For the
-/// hover-revealed `×` shared by the tab cell and task_edit rows, use
-/// [`button_close_hover`].
+/// Always-visible `×` close glyph — muted at rest, fills bg with the
+/// destructive `ERROR` token on direct hover. The single close affordance
+/// shared by the tab cell, pane header, and task_edit rows: all three show
+/// the `×` unconditionally (no hover gating). `xsmall` + the compact
+/// pane-header box keeps it fitting the short pane-header height.
 pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
@@ -72,42 +71,6 @@ pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
         .p(px(0.))
         .rounded(px(theme::PANE_HEADER_CLOSE_RADIUS))
         .text_size(px(theme::PANE_HEADER_CLOSE_FONT_SIZE))
-}
-
-/// Hover-reveal `×` close glyph shared by the tab cell and task_edit
-/// subtask rows — invisible until the row/tab `group_name` is hovered,
-/// then muted at rest and filling bg with the destructive `ERROR`
-/// token on direct hover. Caller wraps the row/tab in the matching
-/// `.group(group_name)`. Both callers render through this single path
-/// so the glyph is pixel-identical between them.
-///
-/// `.invisible() + .group_hover(name, |d| d.visible())` is applied at
-/// the `Button` level, which currently routes the style refinement
-/// onto the outer element gpui_component emits. If a future
-/// `gpui_component` vendor bump wraps `Button` in an additional
-/// container, retest hover-reveal buttons end-to-end — the visible
-/// layer may need to move to the inner div instead.
-pub fn button_close_hover(
-    id: impl Into<ElementId>,
-    group_name: impl Into<SharedString>,
-    cx: &App,
-) -> Button {
-    let t = theme::current(cx);
-    let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.muted_text)
-        .hover(theme::ERROR);
-    Button::new(id)
-        .xsmall()
-        .tab_stop(false)
-        .custom(variant)
-        .label("\u{00d7}")
-        .w(px(theme::TAB_CLOSE_W))
-        .h(px(theme::TAB_CLOSE_W))
-        .p(px(0.))
-        .rounded(px(theme::TAB_CLOSE_RADIUS))
-        .text_size(px(theme::TAB_CLOSE_FONT_SIZE))
-        .invisible()
-        .group_hover(group_name, |d| d.visible())
 }
 
 /// Destructive `×` glyph for hover-revealed row actions — muted at

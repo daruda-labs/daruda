@@ -450,6 +450,27 @@ pub fn task_edit_base_active_label() -> String {
     rust_i18n::t!("task.edit_base_active_label").into_owned()
 }
 
+/// Field labels on the TaskEdit pane form. Title / Branch / Prompt /
+/// Notes are generic form-field labels routed through `common.field_*`
+/// (the same shared-token pattern as `skills_field_name` →
+/// `common.field_name`); the domain wrapper name is kept so call sites
+/// don't change. Auto-execute stays task-specific.
+pub fn task_edit_title_label() -> String {
+    rust_i18n::t!("common.field_title").into_owned()
+}
+pub fn task_edit_branch_label() -> String {
+    rust_i18n::t!("common.field_branch").into_owned()
+}
+pub fn task_edit_prompt_label() -> String {
+    rust_i18n::t!("common.field_prompt").into_owned()
+}
+pub fn task_edit_notes_label() -> String {
+    rust_i18n::t!("common.field_notes").into_owned()
+}
+pub fn task_edit_auto_execute_label() -> String {
+    rust_i18n::t!("task.edit_auto_execute_label").into_owned()
+}
+
 /// Glyph appended to the status pill label as the dropdown chevron.
 /// Leading space provides the visual gap between the label and the
 /// triangle.
