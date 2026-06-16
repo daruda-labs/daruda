@@ -88,6 +88,8 @@ doubles as a smoke test of the real app's startup.
 
 ## Coding Best Practices
 
+**Design reference**: before any UI/design work or refactoring/improvement pass, read [`DESIGN.md`](./DESIGN.md) — the design language (colors, surface ladder, typography, accent rules, component chrome). Align changes with it.
+
 **Priority order** when trade-offs arise: Correctness > Maintainability > Performance > Brevity
 
 ### Task Complexity Assessment
@@ -150,7 +152,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 3. **Zig FFI**: Ghostty enums are `u16`. Always range-check before casting.
 4. **IME**: printable characters must go through `replace_text_in_range` → `commit_text` → PTY. Never send directly from `on_key_down`.
 5. **GPUI Entity reentrancy**: calling `.read(cx)` on the same entity during `render()` or `entity.update()` panics. `persist_state` must only be called via `mark_dirty_and_save` (`cx.defer`).
-6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, **zed** (`/Users/woo/Downloads/term/zed-0.231.2/crates/{workspace,gpui}/`), and gpui-ghostty implement the same concept. For GPUI-specific patterns (entity lifecycles, window contexts, async re-entry) zed is the closest reference.
+6. **Reference comparison**: before adding a feature or fixing a bug, check how Alacritty, iTerm2, **zed** (`~/.cargo/git/checkouts/zed-a70e2ad075855582/193b55a/crates/{workspace,gpui}/` — the exact rev daruda builds against, see `gpui` in `Cargo.toml`), and gpui-ghostty implement the same concept. For GPUI-specific patterns (entity lifecycles, window contexts, async re-entry) zed is the closest reference; always read the version-matched source above rather than a standalone clone of a different version.
 7. **Text pixel mapping**: never use `index = offset_px / glyph_advance`. Always use the shaper's reverse-mapping API.
 8. **Paint-scope state**: `window.text_style()` / `window.rem_size()` are invalid outside the paint walk. Share metrics via `cell_dimensions()`.
 9. **Color palette**: `daruda_terminal/src/ux/theme.rs` uses a local `hsla()` with hue in degrees (0–360). `app/src/ui/theme.rs` is the gpui_component bridge using fractions (0–1). Never call `gpui::hsla` from the terminal theme file.
