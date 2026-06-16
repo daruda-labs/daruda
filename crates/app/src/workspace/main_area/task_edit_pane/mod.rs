@@ -23,8 +23,8 @@ use super::pane_tree::PaneId;
 use crate::surface::strings;
 use crate::ui::select::select;
 use crate::ui::{
-    ButtonVariants as _, Disableable as _, ScrollableElement as _, Sizable as _, button,
-    button_close, button_danger, button_primary, checkbox, markdown_editor,
+    Disableable as _, Sizable as _, button, button_close_hover, button_danger, button_primary,
+    checkbox, markdown_editor,
 };
 
 /// Reserved footer height (px). Used to position the absolute scroll
@@ -36,19 +36,15 @@ use crate::ui::{
 /// vertical padding (~10px top + 10px bottom).
 const TASK_EDIT_FOOTER_H_PX: f32 = 48.0;
 
-/// Right-side padding reserved for the overlay vertical scrollbar so
-/// text inputs and other content don't sit underneath the thumb. The
-/// gpui-component thumb is 6 / 8px wide depending on hover state — 14px
-/// covers the active width plus a small visual gap.
-const TASK_EDIT_SCROLLBAR_GUTTER_PX: f32 = 14.0;
-
 pub(in crate::workspace) fn render(
     pane_id: PaneId,
     te: &TaskEditContent,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let theme_t = theme::current(cx);
-    let pane_bg = theme_t.terminal_bg;
+    let pane_bg = theme_t.task_edit_bg;
+    let scrollbar_thumb = theme_t.task_edit_scrollbar_thumb;
+    let scrollbar_thumb_hover = theme_t.task_edit_scrollbar_thumb_hover;
     let pane_text = theme::TEXT_PRIMARY;
     let label_color = theme_t.muted_text;
 
@@ -95,13 +91,13 @@ pub(in crate::workspace) fn render(
     // Action-bar footer overrides the wrapper-default `xsmall()` to
     // `small()` per CLAUDE.md §10 (size override justified inline):
     // these are top-level "what now?" buttons that benefit from a
-    // larger click target. Variants are picked so the three actions
-    // are visually distinguishable at a glance:
-    //   Discard — danger (red), destructive.
-    //   Save Draft — primary (blue), the emphasized save target.
-    //   Start — success (green), the "go" action; green also reads
-    //   as run/launch and stops the two CTAs from being the same
-    //   blue tone side-by-side.
+    // larger click target. Variants stay within the DESIGN.md button
+    // palette (Primary=accent, Secondary=surface-3, Destructive=error)
+    // and honour accent scarcity — exactly one accent button:
+    //   Discard — danger (error red), genuinely destructive (drops the
+    //   unsaved draft).
+    //   Save Draft — secondary (surface-3), the de-emphasized save.
+    //   Start — primary (accent), the single emphasized "go" CTA.
     let footer = div()
         .flex()
         .flex_row()
@@ -115,16 +111,15 @@ pub(in crate::workspace) fn render(
                 })),
         )
         .child(
-            button_primary("task-edit-save-draft", "Save Draft")
+            button("task-edit-save-draft", "Save Draft")
                 .small()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.save_task_edit_pane(pane_id, false, window, cx);
                 })),
         )
         .child(
-            button("task-edit-start", "Start")
+            button_primary("task-edit-start", "Start")
                 .small()
-                .success()
                 .disabled(!can_save)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.save_task_edit_pane(pane_id, true, window, cx);
@@ -154,12 +149,11 @@ pub(in crate::workspace) fn render(
         .track_scroll(&scroll_handle)
         .pt(px(theme::RIGHT_PANEL_PAD_X))
         .pb(px(theme::RIGHT_PANEL_PAD_X))
-        // Symmetric horizontal padding — even though only the right
-        // edge actually overlaps with the overlay scrollbar, matching
-        // the left side keeps the form visually centered when the
-        // scrollbar is hidden (short content) or fading out.
-        .pl(px(TASK_EDIT_SCROLLBAR_GUTTER_PX + theme::RIGHT_PANEL_PAD_X))
-        .pr(px(TASK_EDIT_SCROLLBAR_GUTTER_PX + theme::RIGHT_PANEL_PAD_X))
+        // The thin 4px overlay thumb (see `body_scrollbar_thumb`) sits
+        // on top of the content with only a 2px right margin, so no
+        // dedicated gutter is reserved — the form uses the same
+        // symmetric `RIGHT_PANEL_PAD_X` padding as its sibling panels.
+        .px(px(theme::RIGHT_PANEL_PAD_X))
         .flex()
         .flex_col()
         .gap(px(theme::MODAL_PANEL_GAP))
@@ -209,7 +203,37 @@ pub(in crate::workspace) fn render(
         .text_color(pane_text)
         .child(scroll_area)
         .child(footer_bar)
-        .vertical_scrollbar(&scroll_handle)
+        .children(body_scrollbar_thumb(
+            &scroll_handle,
+            scrollbar_thumb,
+            scrollbar_thumb_hover,
+        ))
+}
+
+/// Overlay scrollbar thumb for the task-edit body. Reuses the shared
+/// `vertical_thumb` chrome (thin 4px overlay, 2px right margin) so the
+/// pane scrolls and looks identical to the file viewer and right dock,
+/// instead of the heavier gpui_component scrollbar. The scroll area is
+/// pinned to the container's top edge, so the thumb takes a `px(0.)`
+/// top offset; its track ends above the absolute footer bar because the
+/// measured viewport (`scroll_handle.bounds()`) excludes it. Returns
+/// `None` when the content fits without scrolling.
+fn body_scrollbar_thumb(
+    scroll_handle: &gpui::ScrollHandle,
+    thumb: gpui::Hsla,
+    thumb_hover: gpui::Hsla,
+) -> Option<gpui::AnyElement> {
+    let viewport_h = scroll_handle.bounds().size.height;
+    let max_offset = scroll_handle.max_offset().y;
+    crate::ui::scrollbar::vertical_thumb(
+        "task-edit-scrollbar-thumb",
+        viewport_h,
+        viewport_h + max_offset,
+        scroll_handle.offset().y,
+        px(0.),
+        thumb,
+        thumb_hover,
+    )
 }
 
 /// Vertical stack containing the prompt editor on top and the notes
@@ -389,7 +413,7 @@ fn subtask_row(
 
     let sub_id_for_remove = sub.id.clone();
     let task_id_for_remove = task_id.clone();
-    let remove = button_close(
+    let remove = button_close_hover(
         SharedString::from(format!("subtask-remove-{}", sub.id)),
         SharedString::from(format!("subtask-row-{}", sub.id)),
         cx,

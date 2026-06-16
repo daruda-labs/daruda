@@ -280,7 +280,6 @@ impl Render for Workspace {
         let tab_inactive_text = t.tab_inactive_text;
         let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
         let muted_text = t.muted_text;
-        let close_button_hover_bg = theme::ERROR;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         // User-set label (Window > Edit Tab Title…) wins; otherwise fall
@@ -489,27 +488,16 @@ impl Render for Workspace {
                 |(i, is_active, display, file_path, worktree_root)| {
                     let group_name = SharedString::from(format!("tab-{}", i));
 
-                    let close_button = div()
-                        .id(("tab-close", i))
-                        .flex_none()
-                        .w(px(theme::TAB_CLOSE_W))
-                        .h(px(theme::TAB_CLOSE_W))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(theme::TAB_CLOSE_RADIUS))
-                        .text_size(px(theme::TAB_CLOSE_FONT_SIZE))
-                        .text_color(muted_text)
-                        .invisible()
-                        .group_hover(group_name.clone(), |d| d.visible())
-                        .hover(move |d| d.text_color(tab_active_text).bg(close_button_hover_bg))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
+                    // Stop the left-press from bubbling to the tab cell's
+                    // `on_mouse_down(Left, activate_tab)` below — clicking ×
+                    // must close the tab without first activating it. The
+                    // Button's own `on_click` (mouse-up) does the close.
+                    let close_button =
+                        crate::ui::button_close_hover(("tab-close", i), group_name.clone(), cx)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 this.request_close_tab(i, window, cx);
-                            }),
-                        )
-                        .child("×");
+                            }));
 
                     div()
                         .id(("tab", i))

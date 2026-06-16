@@ -137,11 +137,11 @@ fn pane_header(
     is_zoomed: bool,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let group_name = SharedString::from(format!("pane-hdr-{}", pane_id));
-    let close = crate::ui::button_close(("pane-close", pane_id as usize), group_name.clone(), cx)
-        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+    let close = crate::ui::button_close(("pane-close", pane_id as usize), cx).on_click(
+        cx.listener(move |this, _: &ClickEvent, window, cx| {
             this.request_close_pane(pane_id, window, cx);
-        }));
+        }),
+    );
 
     let t = theme::current(cx);
     let focused_bg = t.pane_header_focused_bg;
@@ -152,7 +152,6 @@ fn pane_header(
 
     div()
         .id(("pane-hdr", pane_id as usize))
-        .group(group_name)
         .flex()
         .flex_row()
         .items_center()

@@ -44,8 +44,8 @@ pub mod tooltip;
 pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
 pub use badge::Badge;
 pub use button::{
-    Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
-    button_delete_glyph, button_header_action, button_primary, button_toggle,
+    Button, button, button_add_tile, button_bare, button_chip, button_close, button_close_hover,
+    button_danger, button_delete_glyph, button_header_action, button_primary, button_toggle,
 };
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};

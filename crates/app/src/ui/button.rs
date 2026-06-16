@@ -51,19 +51,43 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
         .h(px(theme::BUTTON_CHIP_SIZE))
 }
 
-/// `×` close glyph sized to a pane header — hidden by default, fades
-/// in when `group_name` is hovered, fills bg with the destructive
-/// `ERROR` token on direct hover.
+/// Always-visible `×` close glyph sized to a pane header — muted at
+/// rest, fills bg with the destructive `ERROR` token on direct hover.
+/// Used by the pane header only; the pane header is always shown in
+/// split mode so the close affordance needs no hover gating. For the
+/// hover-revealed `×` shared by the tab cell and task_edit rows, use
+/// [`button_close_hover`].
+pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
+    let t = theme::current(cx);
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.muted_text)
+        .hover(theme::ERROR);
+    Button::new(id)
+        .xsmall()
+        .tab_stop(false)
+        .custom(variant)
+        .label("\u{00d7}")
+        .w(px(theme::PANE_HEADER_CLOSE_W))
+        .h(px(theme::PANE_HEADER_CLOSE_H))
+        .p(px(0.))
+        .rounded(px(theme::PANE_HEADER_CLOSE_RADIUS))
+        .text_size(px(theme::PANE_HEADER_CLOSE_FONT_SIZE))
+}
+
+/// Hover-reveal `×` close glyph shared by the tab cell and task_edit
+/// subtask rows — invisible until the row/tab `group_name` is hovered,
+/// then muted at rest and filling bg with the destructive `ERROR`
+/// token on direct hover. Caller wraps the row/tab in the matching
+/// `.group(group_name)`. Both callers render through this single path
+/// so the glyph is pixel-identical between them.
 ///
 /// `.invisible() + .group_hover(name, |d| d.visible())` is applied at
 /// the `Button` level, which currently routes the style refinement
-/// onto the outer element gpui_component emits. The pattern is also
-/// reused by `button_bare(...).invisible().group_hover(...)` in
-/// `left_dock/projects/rows.rs` (row-hover-reveal `[+]` / `[×]`). If a
-/// future `gpui_component` vendor bump wraps `Button` in an additional
+/// onto the outer element gpui_component emits. If a future
+/// `gpui_component` vendor bump wraps `Button` in an additional
 /// container, retest hover-reveal buttons end-to-end — the visible
 /// layer may need to move to the inner div instead.
-pub fn button_close(
+pub fn button_close_hover(
     id: impl Into<ElementId>,
     group_name: impl Into<SharedString>,
     cx: &App,
@@ -73,15 +97,15 @@ pub fn button_close(
         .foreground(t.muted_text)
         .hover(theme::ERROR);
     Button::new(id)
-        .small()
+        .xsmall()
         .tab_stop(false)
         .custom(variant)
         .label("\u{00d7}")
-        .w(px(theme::PANE_HEADER_CLOSE_W))
-        .h(px(theme::PANE_HEADER_CLOSE_H))
+        .w(px(theme::TAB_CLOSE_W))
+        .h(px(theme::TAB_CLOSE_W))
         .p(px(0.))
-        .rounded(px(theme::PANE_HEADER_CLOSE_RADIUS))
-        .text_size(px(theme::PANE_HEADER_CLOSE_FONT_SIZE))
+        .rounded(px(theme::TAB_CLOSE_RADIUS))
+        .text_size(px(theme::TAB_CLOSE_FONT_SIZE))
         .invisible()
         .group_hover(group_name, |d| d.visible())
 }
