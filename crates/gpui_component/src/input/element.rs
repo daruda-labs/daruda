@@ -528,11 +528,25 @@ impl TextElement {
         window: &mut Window,
     ) -> (Pixels, usize) {
         let total_lines = text.lines_len();
-        let line_number_len = match total_lines {
-            0..=9999 => 5,
-            10000..=99999 => 6,
-            100000..=999999 => 7,
-            _ => 8,
+        // When the host installs custom gutter strings (e.g. the diff
+        // viewer's dual old/new numbers) size the gutter to the widest
+        // entry; otherwise size by the line-count digit width.
+        let line_number_len = if state.line_decorations.is_empty() {
+            match total_lines {
+                0..=9999 => 5,
+                10000..=99999 => 6,
+                100000..=999999 => 7,
+                _ => 8,
+            }
+        } else {
+            state
+                .line_decorations
+                .iter()
+                .filter_map(|d| d.gutter.as_ref())
+                .map(|g| g.chars().count())
+                .max()
+                .unwrap_or(5)
+                .max(1)
         };
 
         let line_number_width = if state.mode.line_number() {
@@ -741,6 +755,23 @@ impl TextElement {
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
         let state = self.state.read(cx);
+
+        // Host-injected highlights (the diff viewer) replace the tree-sitter
+        // highlighter: a synthetic unified-diff buffer with interleaved +/-
+        // lines is not valid source for any language. Clip the full-buffer
+        // spans to the visible byte range, matching the highlighter path's
+        // visible-only contract.
+        if let Some(spans) = &state.highlight_override {
+            let vr = &visible_byte_range;
+            return Some(
+                spans
+                    .iter()
+                    .filter(|(r, _)| r.start < vr.end && r.end > vr.start)
+                    .map(|(r, s)| (r.start.max(vr.start)..r.end.min(vr.end), *s))
+                    .collect(),
+            );
+        }
+
         let text = &state.text;
         let is_multi_line = state.mode.is_multi_line();
 
@@ -1171,33 +1202,33 @@ impl Element for TextElement {
         let state = self.state.read(cx);
         let line_numbers = if state.mode.line_number() {
             let mut line_numbers = vec![];
-            let other_line_runs = vec![TextRun {
-                len: line_number_len,
-                font: style.font(),
-                color: cx.theme().muted_foreground,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }];
-            let current_line_runs = vec![TextRun {
-                len: line_number_len,
-                font: style.font(),
-                color: cx.theme().foreground,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }];
 
             // build line numbers
             for (ix, line) in last_layout.lines.iter().enumerate() {
                 let ix = last_layout.visible_range.start + ix;
-                let line_no = format!("{:>width$}", ix + 1, width = line_number_len).into();
+                // A host-supplied gutter string (e.g. the diff viewer's
+                // dual old/new numbers) overrides the sequential row number.
+                let line_no: SharedString = state
+                    .line_decorations
+                    .get(ix)
+                    .and_then(|d| d.gutter.clone())
+                    .unwrap_or_else(|| {
+                        format!("{:>width$}", ix + 1, width = line_number_len).into()
+                    });
 
-                let runs = if current_row == Some(ix) {
-                    &current_line_runs
+                let color = if current_row == Some(ix) {
+                    cx.theme().foreground
                 } else {
-                    &other_line_runs
+                    cx.theme().muted_foreground
                 };
+                let runs = [TextRun {
+                    len: line_no.len(),
+                    font: style.font(),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }];
 
                 let mut sub_lines: SmallVec<[ShapedLine; 1]> = SmallVec::new();
                 sub_lines.push(
@@ -1316,7 +1347,14 @@ impl Element for TextElement {
                 let is_active = prepaint.current_row == Some(row);
                 let p = point(input_bounds.origin.x, origin.y + offset_y);
                 let height = line_height * lines.len() as f32;
-                // Paint the current line background
+                // Paint the per-row decoration background (diff tint), then
+                // the current-line highlight on top.
+                if let Some(bg_color) = state.line_decorations.get(row).and_then(|d| d.background) {
+                    window.paint_quad(fill(
+                        Bounds::new(p, size(bounds.size.width, height)),
+                        bg_color,
+                    ));
+                }
                 if is_active {
                     if let Some(bg_color) = active_line_color {
                         window.paint_quad(fill(

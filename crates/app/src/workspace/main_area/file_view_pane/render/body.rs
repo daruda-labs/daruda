@@ -9,12 +9,11 @@ use gpui::{AnyElement, Context, IntoElement, ScrollWheelEvent, div, prelude::*, 
 
 use super::content_element::FileViewerContentElement;
 use super::markdown::render_md_body;
-use super::row::{diff_selectable_row, diff_visual_row};
 use super::virtual_list::virtual_range;
 use crate::surface::strings;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::{
-    CharSelection, FileViewMode, PaneFileContent, PaneFileView, VisualRow, VisualRowKind,
+    CharSelection, FileViewMode, PaneFileContent, PaneFileView, VisualRow,
 };
 
 /// Scrollable body area: routes to the appropriate renderer by content type and mode.
@@ -89,6 +88,10 @@ pub(super) fn render_file_viewer_body(
 
         PaneFileContent::LoadedRaw => frame
             .id("file-viewer-body")
+            // The code editor stretches via `flex_grow` / `height: 100%`, which
+            // only resolves inside a flex parent; without `.flex()` it collapses
+            // to its 1-line `min_height`. (Matches the other branches above.)
+            .flex()
             .child(crate::ui::file_viewer_editor(editor_state))
             .into_any_element(),
 
@@ -102,18 +105,27 @@ pub(super) fn render_file_viewer_body(
             } else {
                 rows_all
             };
-            frame
-                .id("file-viewer-body")
-                .overflow_y_scroll()
-                .track_scroll(scroll_handle)
-                .child(render_diff_body(
-                    rows,
-                    char_selection.as_ref(),
-                    search_state,
-                    scroll_handle,
-                    cx,
-                ))
-                .into_any_element()
+            if rows.is_empty() {
+                frame
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+                    .text_color(ctx_text)
+                    .child(strings::file_viewer_empty_diff())
+                    .into_any_element()
+            } else {
+                // The diff renders through the same editor as raw — its
+                // synthetic buffer + decorations + injected highlights were
+                // installed at load time. `.flex()` lets the editor fill the
+                // body (see the LoadedRaw branch).
+                frame
+                    .id("file-viewer-body")
+                    .flex()
+                    .child(crate::ui::file_viewer_editor(editor_state))
+                    .into_any_element()
+            }
         }
 
         PaneFileContent::LoadedMarkdown {
@@ -237,87 +249,6 @@ fn render_raw_body(
     }
 
     col
-}
-
-/// Render inline unified diff with virtual-list scrolling.
-/// `rows` is already filtered by `hide_unchanged` (the caller picks `rows_all`
-/// or `rows_no_ctx` from `PaneFileContent::LoadedDiff`).
-fn render_diff_body(
-    rows: &[VisualRow],
-    char_selection: Option<&CharSelection>,
-    search: Option<(&[usize], Option<usize>)>,
-    scroll_handle: &gpui::ScrollHandle,
-    cx: &mut Context<Workspace>,
-) -> gpui::Div {
-    let t = theme::current(cx);
-    let ctx_text = t.file_diff_ctx_text;
-    let focused_bg = t.file_viewer_search_focused_bg;
-    let match_bg = t.file_viewer_search_match_bg;
-
-    if rows.is_empty() {
-        return div()
-            .flex()
-            .items_center()
-            .justify_center()
-            .size_full()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
-            .text_color(ctx_text)
-            .child(strings::file_viewer_empty_diff());
-    }
-
-    let line_h = px(theme::FILE_VIEWER_LINE_H);
-    let overscan = theme::FILE_VIEWER_VIRTUAL_OVERSCAN;
-
-    let scroll_y = -scroll_handle.offset().y;
-    let viewport_h = scroll_handle.bounds().size.height;
-
-    let (start, end) = virtual_range(rows.len(), scroll_y, viewport_h, line_h, overscan);
-    let top_h = px(start as f32 * theme::FILE_VIEWER_LINE_H);
-    let bottom_h = px((rows.len().saturating_sub(end)) as f32 * theme::FILE_VIEWER_LINE_H);
-
-    let workspace = cx.entity().clone();
-    let scroll_handle_guard = scroll_handle.clone();
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .on_scroll_wheel(move |event: &ScrollWheelEvent, window, cx| {
-            let delta_y = event.delta.pixel_delta(window.line_height()).y;
-            if delta_y == px(0.) {
-                return;
-            }
-            let current_y = scroll_handle_guard.offset().y;
-            let max_y = scroll_handle_guard.max_offset().y;
-            if max_y > px(0.) && (current_y + delta_y).clamp(-max_y, px(0.)) == current_y {
-                cx.stop_propagation();
-            }
-        })
-        .child(div().flex_none().h(top_h)); // top spacer
-
-    for (offset, row) in rows[start..end].iter().enumerate() {
-        let i = start + offset;
-        let is_hunk_header = row.kind == VisualRowKind::HunkHeader;
-        let search_bg = if !is_hunk_header {
-            search.and_then(|(m, f)| search_row_bg(i, m, f, focused_bg, match_bg))
-        } else {
-            None
-        };
-        let el = if is_hunk_header {
-            diff_visual_row(row, false, search_bg, line_h, cx)
-        } else {
-            diff_selectable_row(
-                row,
-                i,
-                char_selection,
-                search_bg,
-                line_h,
-                workspace.clone(),
-                cx,
-            )
-        };
-        col = col.child(el);
-    }
-
-    col.child(div().flex_none().h(bottom_h)) // bottom spacer
 }
 
 /// Return the search match background for a row, if any.

@@ -17,7 +17,6 @@
 mod body;
 mod content_element;
 mod markdown;
-mod row;
 mod scrollbar;
 mod search_panel;
 mod toolbar;
@@ -45,27 +44,40 @@ pub(in crate::workspace) fn render_pane_file_viewer(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let toolbar_h = px(theme::FILE_VIEWER_HEADER_H);
-    let is_raw_mode = matches!(&fv.content, PaneFileContent::LoadedRaw);
+    // Raw and diff both render through the shared editor.
+    let is_editor_mode = matches!(
+        &fv.content,
+        PaneFileContent::LoadedRaw | PaneFileContent::LoadedDiff { .. }
+    );
 
     // Preview mode renders variable-height blocks; derive content height from GPUI's
     // measured max_offset rather than total_rows * fixed_line_h to keep the thumb accurate.
     let is_preview_mode = matches!(&fv.content, PaneFileContent::LoadedMarkdown { .. })
         && fv.view_mode == FileViewMode::Preview;
-    let content_h = if is_preview_mode {
-        let viewport_h = scroll_handle.bounds().size.height;
-        viewport_h + scroll_handle.max_offset().y
-    } else {
-        let total_rows = fv.visible_row_count();
-        px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)
-    };
     let viewer_bg = theme::current(cx).file_viewer_bg;
-    // Raw mode: editor handles scrolling/search internally; skip the overlays.
-    let scrollbar: Option<AnyElement> = if is_raw_mode {
-        None
+
+    // One scrollbar style across all modes: a thin daruda thumb. For
+    // editor modes (raw / diff) the editor's built-in bar is suppressed
+    // (`show_scrollbar(false)`) and the thumb is driven by the editor's
+    // own scroll position; other modes use the pane's scroll handle.
+    let scrollbar: Option<AnyElement> = if is_editor_mode {
+        let editor_scroll = editor_state.read(cx).scroll_handle().clone();
+        let viewport_h = editor_scroll.bounds().size.height;
+        let content_h = viewport_h + editor_scroll.max_offset().y;
+        file_viewer_scrollbar(&editor_scroll, toolbar_h, content_h, cx)
     } else {
+        let content_h = if is_preview_mode {
+            let viewport_h = scroll_handle.bounds().size.height;
+            viewport_h + scroll_handle.max_offset().y
+        } else {
+            let total_rows = fv.visible_row_count();
+            px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)
+        };
         file_viewer_scrollbar(scroll_handle, toolbar_h, content_h, cx)
     };
-    let search_panel = if is_raw_mode {
+    // The editor provides its own find (Cmd+F); the custom search panel
+    // only drives the non-editor renderers.
+    let search_panel = if is_editor_mode {
         None
     } else {
         fv.search

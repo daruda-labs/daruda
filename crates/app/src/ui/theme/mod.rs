@@ -104,8 +104,11 @@ pub use daruda_terminal::ux::theme::*;
 // Bridge implementation reads every constant through the unified
 // `crate::ui::theme` surface so the underlying split between
 // `palette` and `daruda_terminal::ux::theme` is transparent.
+use std::sync::Arc;
+
 use crate::ui::theme as p;
 use gpui::{App, px};
+use gpui_component::highlighter::HighlightTheme;
 use gpui_component::{Theme, ThemeMode};
 
 /// Idempotent installer — ensures `gpui_component::Theme` Global
@@ -278,4 +281,16 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.radius = px(p::MODAL_BUTTON_RADIUS);
     t.radius_lg = px(p::MODAL_PANEL_RADIUS);
+
+    // ---------------------------------------------------------------
+    // Code highlighting — install daruda's `base16-ocean.dark` syntax
+    // palette so the raw editor (gpui_component `highlight_theme`) and the
+    // diff view (`syntax_color`) share one colour source (`syntax_theme`).
+    // Without this the editor keeps gpui_component's default theme and
+    // diverges from the diff view.
+    // ---------------------------------------------------------------
+    let mut highlight = (*HighlightTheme::default_dark()).clone();
+    highlight.style.editor_foreground = Some(p::syntax_theme().default);
+    highlight.style.syntax = p::editor_syntax_colors();
+    t.highlight_theme = Arc::new(highlight);
 }

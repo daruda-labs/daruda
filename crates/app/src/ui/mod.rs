@@ -51,7 +51,8 @@ pub use button::{
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_editor::{
-    file_viewer_editor, make_markdown_prose_state, make_markdown_state, markdown_editor,
+    LineDecoration, file_viewer_editor, make_markdown_prose_state, make_markdown_state,
+    markdown_editor,
 };
 pub use context_menu::{ContextMenu, ContextMenuCorner, ContextMenuItem};
 pub use divider::Divider;

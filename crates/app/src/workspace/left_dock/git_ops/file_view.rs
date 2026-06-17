@@ -8,6 +8,9 @@ use daruda_store::project::{LaneId, LaneRef};
 use gpui::{Context, Window};
 
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::diff_editor::{
+    DiffColors, build_diff_editor_model,
+};
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
 
@@ -311,17 +314,45 @@ impl Workspace {
 
     /// Toggle whether context lines are hidden in Changes (diff) mode.
     pub(in crate::workspace) fn toggle_hide_unchanged(&mut self, cx: &mut Context<Self>) {
-        let Some(fv) = self.focused_file_view_mut() else {
+        let Some(fc) = self.focused_file_content_mut() else {
             return;
         };
-        fv.hide_unchanged = !fv.hide_unchanged;
+        fc.view.hide_unchanged = !fc.view.hide_unchanged;
         // The active row Vec swaps between `rows_all` and `rows_no_ctx`
         // here, so any cached search `matches: Vec<usize>` / `focused`
         // now index into the wrong slice. Mirror `set_file_view_mode`
         // and drop the search alongside the other view-derived state.
-        fv.search = None;
-        fv.selection_drag = SelectionDrag::None;
+        fc.view.search = None;
+        fc.view.selection_drag = SelectionDrag::None;
+
+        // The diff renders through the editor, so rebuild its synthetic
+        // buffer from the now-active row list (context lines toggled).
+        let rebuild = if let PaneFileContent::LoadedDiff {
+            rows_all,
+            rows_no_ctx,
+            ..
+        } = &fc.view.content
+        {
+            let rows = if fc.view.hide_unchanged {
+                rows_no_ctx
+            } else {
+                rows_all
+            };
+            cx.try_global::<crate::ui::theme::DarudaTheme>()
+                .map(|t| build_diff_editor_model(rows, &DiffColors::from_theme(t)))
+        } else {
+            None
+        };
+        let editor = fc.editor_state.clone();
         cx.notify();
+        if let Some(model) = rebuild {
+            configure_file_editor(cx, editor, move |state, window, cx_s| {
+                state.set_value(model.text, window, cx_s);
+                state.set_disabled(true, cx_s);
+                state.set_line_decorations(model.decorations, cx_s);
+                state.set_highlight_override(Some(model.highlights), cx_s);
+            });
+        }
     }
 
     /// Close the focused file pane's tab (the file viewer is its own
@@ -494,32 +525,42 @@ impl Workspace {
                 };
                 match outcome {
                     LoadOutcome::Plain(content) => {
+                        // A diff renders through the shared editor too (one
+                        // renderer for raw and diff): convert the rows into a
+                        // synthetic buffer + decorations + injected highlight
+                        // spans before moving `content`.
+                        let diff_model =
+                            if let PaneFileContent::LoadedDiff { rows_all, .. } = &content {
+                                cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
+                                    build_diff_editor_model(rows_all, &DiffColors::from_theme(t))
+                                })
+                            } else {
+                                None
+                            };
                         fc.view.content = content;
+                        if let Some(model) = diff_model {
+                            let editor = fc.editor_state.clone();
+                            configure_file_editor(cx, editor, move |state, window, cx_s| {
+                                state.set_value(model.text, window, cx_s);
+                                state.set_disabled(true, cx_s);
+                                state.set_line_decorations(model.decorations, cx_s);
+                                state.set_highlight_override(Some(model.highlights), cx_s);
+                            });
+                        }
                     }
                     LoadOutcome::Raw { text } => {
                         // The editor entity owns the raw text from here on;
-                        // feed it exactly once. `set_value` needs a live
-                        // `&mut Window`, so re-enter the owning window.
+                        // feed it exactly once and clear any diff config left
+                        // over from a previous mode (read-only + decorations).
                         fc.saved_text = text.clone();
                         fc.view.content = PaneFileContent::LoadedRaw;
                         let editor = fc.editor_state.clone();
-                        let entity_id = cx.entity_id();
-                        if let Some(wh) =
-                            crate::window_registry::WindowRegistry::handle_for_workspace(
-                                entity_id, cx,
-                            )
-                        {
-                            crate::windows::try_update_workspace_window(
-                                wh,
-                                cx,
-                                "file_view.load_raw_editor",
-                                |window, cx_w| {
-                                    editor.update(cx_w, |state, cx_s| {
-                                        state.set_value(text, window, cx_s);
-                                    });
-                                },
-                            );
-                        }
+                        configure_file_editor(cx, editor, move |state, window, cx_s| {
+                            state.set_value(text, window, cx_s);
+                            state.set_disabled(false, cx_s);
+                            state.set_line_decorations(Vec::new(), cx_s);
+                            state.set_highlight_override(None, cx_s);
+                        });
                     }
                 }
                 cx.notify();
@@ -575,5 +616,31 @@ impl Workspace {
             },
         )
         .detach();
+    }
+}
+
+/// Re-enter the owning workspace window to (re)configure the file pane's
+/// shared editor. `set_value` and the decoration setters need a live
+/// `&mut Window`, which the background-load continuation doesn't hold.
+/// No-op if the window is gone (logged by `try_update_workspace_window`).
+fn configure_file_editor(
+    cx: &mut Context<Workspace>,
+    editor: gpui::Entity<gpui_component::input::InputState>,
+    apply: impl FnOnce(
+        &mut gpui_component::input::InputState,
+        &mut Window,
+        &mut Context<gpui_component::input::InputState>,
+    ) + 'static,
+) {
+    let entity_id = cx.entity_id();
+    if let Some(wh) = crate::window_registry::WindowRegistry::handle_for_workspace(entity_id, cx) {
+        crate::windows::try_update_workspace_window(
+            wh,
+            cx,
+            "file_view.configure_editor",
+            move |window, cx_w| {
+                editor.update(cx_w, |state, cx_s| apply(state, window, cx_s));
+            },
+        );
     }
 }

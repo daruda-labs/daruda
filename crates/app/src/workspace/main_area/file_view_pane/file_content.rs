@@ -161,6 +161,18 @@ fn load_raw(
     }
 }
 
+/// Unstaged diff (index ↔ working tree) computed in-app via `imara-diff`.
+/// Returns `None` when either side isn't readable UTF-8 text (binary file,
+/// missing from the index, or an IO/path error) so the caller can fall
+/// back to `git diff`.
+fn in_app_unstaged_diff(repo: &std::path::Path, path: &std::path::Path) -> Option<String> {
+    let rel = path.strip_prefix(repo).unwrap_or(path);
+    let old = crate::lane::git::git_show_staged(repo, rel).ok()?;
+    let old = String::from_utf8(old).ok()?;
+    let new = std::fs::read_to_string(path).ok()?;
+    Some(super::line_diff::unified_diff_text(&old, &new))
+}
+
 fn load_diff(
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
@@ -181,6 +193,15 @@ fn load_diff(
     let repo = repo_root.expect("repo_root is Some: is_git() was checked at function entry");
     let diff_result = if is_untracked {
         crate::lane::git::git_diff_untracked(repo, path)
+    } else if !staged {
+        // Unstaged diff computed in-app with the Histogram algorithm
+        // (index ↔ working tree, matching `git diff` with no options).
+        // Any failure (binary, unreadable, missing from index, path issue)
+        // falls back to `git diff` so behaviour never regresses.
+        match in_app_unstaged_diff(repo, path) {
+            Some(text) => Ok(text),
+            None => crate::lane::git::git_diff(repo, path, staged),
+        }
     } else {
         crate::lane::git::git_diff(repo, path, staged)
     };

@@ -16,6 +16,10 @@ use gpui::{App, AppContext as _, Entity, SharedString, Styled as _, Window};
 use gpui_component::Sizable as _;
 use gpui_component::input::{Input, InputState};
 
+/// Re-export so app code (the diff viewer) can build per-row editor
+/// decorations without importing `gpui_component` directly.
+pub use gpui_component::input::LineDecoration;
+
 /// Render `state` as a bordered editor with the daruda input
 /// background. `small()` (not the wrapper default `xsmall`) is
 /// intentional — for multi-line prompt / notes surfaces a slightly
@@ -91,5 +95,7 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 /// Render `state` as a full-size code editor for the file-viewer raw pane.
 /// `appearance(false)` hides the focus-ring border; the parent sets the bg.
 pub fn file_viewer_editor(state: &Entity<InputState>) -> Input {
-    Input::new(state).appearance(false)
+    // Suppress the built-in scrollbar; the file viewer overlays a thin
+    // daruda thumb so raw and diff match the other viewer modes.
+    Input::new(state).appearance(false).show_scrollbar(false)
 }

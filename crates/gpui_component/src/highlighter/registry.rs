@@ -204,6 +204,21 @@ pub struct ThemeStyle {
     font_weight: Option<FontWeightContent>,
 }
 
+impl ThemeStyle {
+    /// Build a foreground-only style from a single colour. Lets host
+    /// applications seed `SyntaxColors` programmatically (daruda maps its
+    /// semantic `SyntaxTheme` through this) instead of only via JSON
+    /// deserialization, so the editor and diff views can share one
+    /// colour source.
+    pub fn new(color: Hsla) -> Self {
+        Self {
+            color: Some(color),
+            font_style: None,
+            font_weight: None,
+        }
+    }
+}
+
 impl From<ThemeStyle> for HighlightStyle {
     fn from(style: ThemeStyle) -> Self {
         HighlightStyle {

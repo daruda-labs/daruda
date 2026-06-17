@@ -5,10 +5,11 @@
 use anyhow::Result;
 use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
-    Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString, Styled as _, Subscription,
-    Task, UTF16Selection, Window, actions, div, point, prelude::FluentBuilder as _, px,
+    EventEmitter, FocusHandle, Focusable, HighlightStyle, InteractiveElement as _, IntoElement,
+    KeyBinding, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    Styled as _, Subscription, Task, UTF16Selection, Window, actions, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use ropey::{Rope, RopeSlice};
 use serde::Deserialize;
@@ -288,6 +289,17 @@ pub struct InputState {
     pub(super) selecting: bool,
     pub(super) size: Size,
     pub(super) disabled: bool,
+    /// Per-row visual decorations (background + custom gutter) for
+    /// read-only render surfaces such as the diff viewer. Empty = the
+    /// editor's default sequential gutter with no line backgrounds.
+    pub(super) line_decorations: Vec<super::LineDecoration>,
+    /// Host-injected per-byte-range highlight styles that bypass the
+    /// tree-sitter highlighter. The diff viewer sets this because its
+    /// synthetic unified-diff buffer (interleaved +/- lines) is not valid
+    /// source for any language. Byte ranges index the full buffer text;
+    /// foreground carries the syntax colour, background the word-diff tint.
+    /// `None` uses the normal language highlighter.
+    pub(super) highlight_override: Option<Vec<(Range<usize>, HighlightStyle)>>,
     pub(super) masked: bool,
     pub(super) clean_on_escape: bool,
     pub(super) soft_wrap: bool,
@@ -381,6 +393,8 @@ impl InputState {
             input_bounds: Bounds::default(),
             selecting: false,
             disabled: false,
+            line_decorations: Vec::new(),
+            highlight_override: None,
             masked: false,
             clean_on_escape: false,
             soft_wrap: true,
@@ -484,6 +498,33 @@ impl InputState {
         if let InputMode::CodeEditor { line_number: l, .. } = &mut self.mode {
             *l = line_number;
         }
+        cx.notify();
+    }
+
+    /// Install per-row [`super::LineDecoration`]s (background fill + custom
+    /// gutter text) for read-only render surfaces such as the diff viewer.
+    /// Indexed by display row; rows past the end of the vec render with the
+    /// default sequential gutter and no background. Pass an empty vec to
+    /// clear and restore default behaviour.
+    pub fn set_line_decorations(
+        &mut self,
+        decorations: Vec<super::LineDecoration>,
+        cx: &mut Context<Self>,
+    ) {
+        self.line_decorations = decorations;
+        cx.notify();
+    }
+
+    /// Install host-computed highlight spans that replace the tree-sitter
+    /// highlighter (see [`Self::highlight_override`]). Byte ranges index the
+    /// full buffer text and should tile it contiguously. Pass `None` to
+    /// revert to the language highlighter. Used by the diff viewer.
+    pub fn set_highlight_override(
+        &mut self,
+        spans: Option<Vec<(Range<usize>, HighlightStyle)>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.highlight_override = spans;
         cx.notify();
     }
 
@@ -675,6 +716,22 @@ impl InputState {
     pub(crate) fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
+    }
+
+    /// Toggle disabled (read-only) mode at runtime. Read-only blocks
+    /// editing and IME but keeps selection and copy working, so the diff
+    /// viewer uses it to present a buffer the user can still select and
+    /// copy from.
+    pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
+        self.disabled = disabled;
+        cx.notify();
+    }
+
+    /// The editor's internal scroll handle — exposed so a host can overlay
+    /// its own scrollbar driven by the editor's scroll position (paired
+    /// with [`super::Input::show_scrollbar(false)`]).
+    pub fn scroll_handle(&self) -> &ScrollHandle {
+        &self.scroll_handle
     }
 
     /// Set with password masked state.

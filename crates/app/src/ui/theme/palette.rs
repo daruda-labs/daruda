@@ -23,6 +23,7 @@
 //! fraction); both helpers use the same degree-based contract.
 
 use gpui::Hsla;
+use gpui_component::highlighter::{SyntaxColors, ThemeStyle};
 
 /// `const`-friendly `Hsla` constructor — hue in degrees [0, 360].
 ///
@@ -933,30 +934,127 @@ fn base16(hex: u32) -> Hsla {
     gpui::rgb(hex).into()
 }
 
-/// Foreground colour for a tree-sitter highlight capture name, matching
-/// the `base16-ocean.dark` scheme (see [`FILE_VIEWER_SYNTAX_THEME`]).
-/// Unrecognised captures (and the empty string) fall back to the default
-/// editor foreground (`base05`), so every token gets an explicit foreground.
+/// Semantic syntax palette — the single source of truth for code
+/// highlighting colours, shared by the raw editor (via
+/// [`editor_syntax_colors`], installed into `gpui_component`'s
+/// `highlight_theme`) and the diff view (via [`syntax_color`]). Fields are
+/// semantic token groups; values are the `base16-ocean.dark` slots (see
+/// [`FILE_VIEWER_SYNTAX_THEME`]).
+pub struct SyntaxTheme {
+    /// `base0E` purple — keywords.
+    pub keyword: Hsla,
+    /// `base0D` blue — functions / titles.
+    pub function: Hsla,
+    /// `base0A` yellow — types, enums, constructors, labels, preproc, embedded.
+    pub type_: Hsla,
+    /// `base09` orange — constants, booleans, numbers, attributes, variants, link URIs.
+    pub constant: Hsla,
+    /// `base0B` green — strings, literal text.
+    pub string: Hsla,
+    /// `base0C` cyan — string escapes / regex / special symbols.
+    pub string_special: Hsla,
+    /// `base08` red — tags, special variables, link text.
+    pub tag: Hsla,
+    /// `base0F` brown — doctype tags.
+    pub tag_doctype: Hsla,
+    /// `base03` gray — comments, hints, predictive text.
+    pub comment: Hsla,
+    /// `base05` — default foreground (variables, operators, punctuation, …).
+    pub default: Hsla,
+}
+
+/// The active syntax palette (`base16-ocean.dark`). One source feeds both
+/// highlighting paths — change a colour here and the editor and diff
+/// views move together.
+pub fn syntax_theme() -> SyntaxTheme {
+    SyntaxTheme {
+        keyword: base16(0xb4_8e_ad),
+        function: base16(0x8f_a1_b3),
+        type_: base16(0xeb_cb_8b),
+        constant: base16(0xd0_87_70),
+        string: base16(0xa3_be_8c),
+        string_special: base16(0x96_b5_b4),
+        tag: base16(0xbf_61_6a),
+        tag_doctype: base16(0xab_79_67),
+        comment: base16(0x65_73_7e),
+        default: base16(0xc0_c5_ce),
+    }
+}
+
+/// Foreground colour for a tree-sitter highlight capture name, drawn from
+/// [`syntax_theme`]. Unrecognised captures (and the empty string) fall
+/// back to the default editor foreground (`base05`), so every token gets
+/// an explicit foreground. Used by the diff view's own highlighter.
 pub fn syntax_color(capture: &str) -> Hsla {
+    let t = syntax_theme();
     match capture {
-        "keyword" => base16(0xb4_8e_ad),            // base0E — purple
-        "function" | "title" => base16(0x8f_a1_b3), // base0D — blue
-        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => {
-            base16(0xeb_cb_8b) // base0A — yellow
-        }
-        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => {
-            base16(0xd0_87_70) // base09 — orange
-        }
-        "string" | "text.literal" => base16(0xa3_be_8c), // base0B — green
+        "keyword" => t.keyword,
+        "function" | "title" => t.function,
+        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => t.type_,
+        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => t.constant,
+        "string" | "text.literal" => t.string,
         "string.escape" | "string.regex" | "string.special" | "string.special.symbol" => {
-            base16(0x96_b5_b4) // base0C — cyan
+            t.string_special
         }
-        "tag" | "variable.special" | "link_text" => base16(0xbf_61_6a), // base08 — red
-        "tag.doctype" => base16(0xab_79_67),                            // base0F — brown
-        "comment" | "comment.doc" | "hint" | "predictive" => base16(0x65_73_7e), // base03 — gray
+        "tag" | "variable.special" | "link_text" => t.tag,
+        "tag.doctype" => t.tag_doctype,
+        "comment" | "comment.doc" | "hint" | "predictive" => t.comment,
         // variable / property / operator / punctuation.* / emphasis* /
         // primary and any unrecognised capture → default foreground.
-        _ => base16(0xc0_c5_ce), // base05 — default foreground
+        _ => t.default,
+    }
+}
+
+/// Build `gpui_component`'s per-capture [`SyntaxColors`] from
+/// [`syntax_theme`] so the raw editor highlights with the exact colours
+/// the diff view uses. The grouping mirrors [`syntax_color`] one-to-one;
+/// every field is set explicitly so a future upstream field addition
+/// fails to compile here rather than silently diverging.
+pub fn editor_syntax_colors() -> SyntaxColors {
+    let t = syntax_theme();
+    let s = |c: Hsla| Some(ThemeStyle::new(c));
+    SyntaxColors {
+        keyword: s(t.keyword),
+        function: s(t.function),
+        title: s(t.function),
+        type_: s(t.type_),
+        enum_: s(t.type_),
+        constructor: s(t.type_),
+        label: s(t.type_),
+        preproc: s(t.type_),
+        embedded: s(t.type_),
+        constant: s(t.constant),
+        boolean: s(t.constant),
+        number: s(t.constant),
+        attribute: s(t.constant),
+        variant: s(t.constant),
+        link_uri: s(t.constant),
+        string: s(t.string),
+        text_literal: s(t.string),
+        string_escape: s(t.string_special),
+        string_regex: s(t.string_special),
+        string_special: s(t.string_special),
+        string_special_symbol: s(t.string_special),
+        tag: s(t.tag),
+        variable_special: s(t.tag),
+        link_text: s(t.tag),
+        tag_doctype: s(t.tag_doctype),
+        comment: s(t.comment),
+        comment_doc: s(t.comment),
+        hint: s(t.comment),
+        predictive: s(t.comment),
+        // default-foreground bucket — mirrors `syntax_color`'s `_` arm.
+        variable: s(t.default),
+        property: s(t.default),
+        operator: s(t.default),
+        punctuation: s(t.default),
+        punctuation_bracket: s(t.default),
+        punctuation_delimiter: s(t.default),
+        punctuation_list_marker: s(t.default),
+        punctuation_special: s(t.default),
+        emphasis: s(t.default),
+        emphasis_strong: s(t.default),
+        primary: s(t.default),
     }
 }
 /// Gap between `@@ -N +M @@` and its trailing context text (px).
@@ -1516,3 +1614,69 @@ pub const MCP_BADGE_RADIUS: f32 = RADIUS_XS;
 /// Malformed chip — same shape as the transport badge, warning hue.
 pub const MCP_MALFORMED_BADGE_BG: Hsla = hsla(14.0, 0.50, 0.40, 0.30);
 pub const MCP_MALFORMED_BADGE_TEXT: Hsla = with_lightness(MCP_INDICATOR_MALFORMED, 0.85);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The editor's per-capture colours (looked up the exact way
+    /// gpui_component's highlighter does, via `SyntaxColors::style`) must
+    /// equal the diff view's `syntax_color` for the same capture. This is
+    /// the single-source invariant: drift between the two mappings fails
+    /// here.
+    #[test]
+    fn editor_and_diff_share_one_colour_source() {
+        let editor = editor_syntax_colors();
+        // One capture per semantic group plus a default-bucket member.
+        for capture in [
+            "keyword",
+            "function",
+            "title",
+            "type",
+            "enum",
+            "constant",
+            "number",
+            "string",
+            "text.literal",
+            "string.escape",
+            "tag",
+            "tag.doctype",
+            "comment",
+            "comment.doc",
+            "variable",
+            "operator",
+            "punctuation",
+        ] {
+            let from_editor = editor.style(capture).and_then(|s| s.color);
+            assert_eq!(
+                from_editor,
+                Some(syntax_color(capture)),
+                "capture {capture:?}: editor highlight must match the diff palette"
+            );
+        }
+    }
+
+    /// Distinct semantic groups must stay visually distinct after the
+    /// refactor — a guard against accidentally collapsing the palette.
+    #[test]
+    fn semantic_groups_are_distinct() {
+        let t = syntax_theme();
+        let groups = [
+            t.keyword,
+            t.function,
+            t.type_,
+            t.constant,
+            t.string,
+            t.string_special,
+            t.tag,
+            t.tag_doctype,
+            t.comment,
+            t.default,
+        ];
+        for (i, a) in groups.iter().enumerate() {
+            for b in &groups[i + 1..] {
+                assert_ne!(a, b, "syntax groups must be distinct colours");
+            }
+        }
+    }
+}

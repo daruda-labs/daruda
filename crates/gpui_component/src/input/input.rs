@@ -34,6 +34,7 @@ pub struct Input {
     focus_bordered: bool,
     tab_index: isize,
     selected: bool,
+    show_scrollbar: bool,
 }
 
 impl Sizable for Input {
@@ -72,7 +73,17 @@ impl Input {
             focus_bordered: true,
             tab_index: 0,
             selected: false,
+            show_scrollbar: true,
         }
+    }
+
+    /// Show the built-in scrollbar (default `true`). Set `false` when the
+    /// host overlays its own scrollbar (the file viewer drives a thin
+    /// daruda thumb from the editor's scroll position so raw and diff match
+    /// the other viewer modes).
+    pub fn show_scrollbar(mut self, show: bool) -> Self {
+        self.show_scrollbar = show;
+        self
     }
 
     pub fn prefix(mut self, prefix: impl IntoElement) -> Self {
@@ -168,6 +179,7 @@ impl Input {
         paddings: EdgesRefinement<DefiniteLength>,
         input_state: &Entity<InputState>,
         state: &InputState,
+        show_scrollbar: bool,
         window: &Window,
         _cx: &App,
     ) -> impl IntoElement {
@@ -197,7 +209,7 @@ impl Input {
             .size_full()
             .children(state.search_panel.clone())
             .child(div().flex_1().child(input_state.clone()).map(|this| {
-                if let Some(last_layout) = state.last_layout.as_ref() {
+                if show_scrollbar && let Some(last_layout) = state.last_layout.as_ref() {
                     let left = if last_layout.line_number_width.is_zero() {
                         px(0.)
                     } else {
@@ -386,6 +398,7 @@ impl RenderOnce for Input {
                     paddings,
                     &self.state,
                     &state,
+                    self.show_scrollbar,
                     window,
                     cx,
                 ))

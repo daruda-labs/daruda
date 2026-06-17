@@ -6,9 +6,11 @@
 //!
 //! Rendering lives in the sibling `render/` module.
 
+pub(in crate::workspace) mod diff_editor;
 mod diff_parser;
 pub(in crate::workspace) mod file_content;
 pub(in crate::workspace) mod highlighter;
+mod line_diff;
 pub(in crate::workspace) mod markdown_viewer;
 pub(in crate::workspace) mod search_ops;
 mod search_state;
