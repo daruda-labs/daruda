@@ -312,6 +312,8 @@ impl TerminalView {
             session.vertical_spacing(),
             session.horizontal_spacing(),
             session.background_alpha(),
+            session.inset_x(),
+            session.inset_y(),
         );
         Self {
             session,

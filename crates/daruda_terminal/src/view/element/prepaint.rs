@@ -66,6 +66,17 @@ impl TerminalTextElement {
         let line_height = px(layout.line_height);
         let cell_width = Some(px(cell_width_f));
 
+        // Apply the terminal-pane inset once: `full_bounds` is the whole
+        // pane (only the background base fill uses it, so the margin keeps
+        // the terminal background color); `bounds` is shadowed with the
+        // inset content rectangle so every glyph, cursor, selection,
+        // overlay, and grid-anchored quad below paints at the inset origin.
+        // Mouse↔cell and resize subtract the same inset (single source:
+        // `state.inset_*`).
+        let (inset_x, inset_y) = self.view.read(cx).inset();
+        let full_bounds = bounds;
+        let bounds = super::super::layout::content_bounds(full_bounds, inset_x, inset_y);
+
         self.view.update(cx, |view, _cx| {
             if view.state.viewport_lines.is_empty() {
                 view.line_layouts.clear();
@@ -218,7 +229,7 @@ impl TerminalTextElement {
         };
 
         let background_quads = self.build_background_quads(
-            bounds,
+            full_bounds,
             line_height,
             cell_width_f,
             default_bg,
@@ -646,13 +657,19 @@ impl TerminalTextElement {
         });
 
         let flash = self.view.read(cx).state.flash;
+        // Flash overlays cover the full pane (incl. the inset margin) to match
+        // the background fill — a visual bell that stopped short of the edge
+        // by `inset` px would read as a seam.
         let bell_flash =
-            flash_overlay_if_active(flash.bell, || fill(bounds, theme::BELL_FLASH_OVERLAY));
+            flash_overlay_if_active(flash.bell, || fill(full_bounds, theme::BELL_FLASH_OVERLAY));
 
         let prompt_jump_flash = flash_overlay_if_active(flash.prompt_jump, || {
             let stripe = Bounds::new(
-                bounds.origin,
-                gpui::size(bounds.size.width, px(theme::PROMPT_JUMP_FLASH_STRIPE_H)),
+                full_bounds.origin,
+                gpui::size(
+                    full_bounds.size.width,
+                    px(theme::PROMPT_JUMP_FLASH_STRIPE_H),
+                ),
             );
             fill(stripe, theme::PROMPT_JUMP_FLASH_STRIPE)
         });
@@ -668,7 +685,12 @@ impl TerminalTextElement {
                 )
             };
             let (quad, new_thumb_bounds) = if total_rows > viewport_rows {
-                let track_height = f32::from(bounds.size.height);
+                // The scrollbar hugs the full pane edge (NOT the inset content
+                // rect) so its painted position matches the mouse hit-test,
+                // which measures against `last_bounds` (the full bounds). A
+                // 2px scrollbar should also sit flush with the pane edge
+                // rather than float `inset_x` px inside it.
+                let track_height = f32::from(full_bounds.size.height);
                 let thumb_ratio = viewport_rows as f32 / total_rows as f32;
                 let thumb_height =
                     (track_height * thumb_ratio).max(theme::TERMINAL_SCROLLBAR_THUMB_MIN_H);
@@ -682,9 +704,9 @@ impl TerminalTextElement {
 
                 let thumb_bounds = Bounds::new(
                     point(
-                        bounds.right()
+                        full_bounds.right()
                             - px(theme::TERMINAL_SCROLLBAR_W + theme::TERMINAL_SCROLLBAR_MARGIN),
-                        bounds.top() + px(thumb_top),
+                        full_bounds.top() + px(thumb_top),
                     ),
                     size(px(theme::TERMINAL_SCROLLBAR_W), px(thumb_height)),
                 );

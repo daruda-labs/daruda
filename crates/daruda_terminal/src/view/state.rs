@@ -111,6 +111,17 @@ pub(crate) struct TerminalViewState {
     /// through when the OS window is `Transparent` / `Blurred`.
     pub(crate) background_alpha: f32,
 
+    /// Horizontal pane inset (left/right padding) in pixels. Paint
+    /// offsets the content origin by this; the background fill still
+    /// covers the full bounds so the inset region keeps the terminal
+    /// background color (iTerm2 `drawMarginsForLine`). Mouse↔cell and
+    /// resize cols/rows subtract it. iTerm2 `TerminalMargin`.
+    pub(crate) inset_x: f32,
+
+    /// Vertical pane inset (top/bottom padding) in pixels. iTerm2
+    /// `TerminalVMargin`. See [`Self::inset_x`].
+    pub(crate) inset_y: f32,
+
     /// Inactive-pane dim amount (0.0 = none). When `> 0` every color
     /// the element produces is blended toward mid-gray by this amount
     /// with its alpha preserved, matching iTerm2's
@@ -287,6 +298,8 @@ impl TerminalViewState {
         vertical_spacing: f32,
         horizontal_spacing: f32,
         background_alpha: f32,
+        inset_x: f32,
+        inset_y: f32,
     ) -> Self {
         Self {
             viewport_lock: super::viewport_lock::ViewportLock::default(),
@@ -296,6 +309,8 @@ impl TerminalViewState {
             vertical_spacing,
             horizontal_spacing,
             background_alpha,
+            inset_x,
+            inset_y,
             dim_amount: 0.0,
             search: super::SearchState::default(),
             search_overlay: false,
@@ -328,7 +343,7 @@ mod tests {
     use super::*;
 
     fn fixture(font_size: f32) -> TerminalViewState {
-        TerminalViewState::new(gpui::Font::default(), font_size, 1.0, 1.0, 1.0)
+        TerminalViewState::new(gpui::Font::default(), font_size, 1.0, 1.0, 1.0, 4.0, 2.0)
     }
 
     #[test]
@@ -336,11 +351,13 @@ mod tests {
         // The four metric fields stay distinct slots — a future
         // refactor that accidentally aliases (e.g. dropping one and
         // pointing reads at another) would fail this test.
-        let s = TerminalViewState::new(gpui::Font::default(), 14.0, 1.2, 0.95, 0.85);
+        let s = TerminalViewState::new(gpui::Font::default(), 14.0, 1.2, 0.95, 0.85, 5.0, 3.0);
         assert_eq!(s.font_size, 14.0);
         assert!((s.vertical_spacing - 1.2).abs() < f32::EPSILON);
         assert!((s.horizontal_spacing - 0.95).abs() < f32::EPSILON);
         assert!((s.background_alpha - 0.85).abs() < f32::EPSILON);
+        assert!((s.inset_x - 5.0).abs() < f32::EPSILON);
+        assert!((s.inset_y - 3.0).abs() < f32::EPSILON);
     }
 
     #[test]

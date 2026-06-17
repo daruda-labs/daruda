@@ -833,6 +833,17 @@ impl TerminalSession {
         self.config.background_alpha
     }
 
+    /// Horizontal pane inset in pixels (iTerm2 `TerminalMargin`). Used by
+    /// `TerminalView` at construction before any runtime config reload.
+    pub fn inset_x(&self) -> f32 {
+        self.config.inset_x
+    }
+
+    /// Vertical pane inset in pixels (iTerm2 `TerminalVMargin`).
+    pub fn inset_y(&self) -> f32 {
+        self.config.inset_y
+    }
+
     pub fn hyperlink_at(&self, col: u16, row: u16) -> Option<String> {
         self.terminal.hyperlink_at(col, row)
     }

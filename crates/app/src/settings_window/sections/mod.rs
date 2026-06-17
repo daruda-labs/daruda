@@ -210,6 +210,14 @@ impl SettingsWindow {
                 s::settings_label_max_fps(),
                 crate::ui::select::select(&self.max_fps_select, cx, ()),
             ))
+            .child(field_row(
+                s::settings_label_inset_x(),
+                crate::ui::input(&self.inset_x_input, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_label_inset_y(),
+                crate::ui::input(&self.inset_y_input, cx, ()),
+            ))
             .into_any_element()
     }
 

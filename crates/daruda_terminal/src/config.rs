@@ -75,6 +75,15 @@ pub struct TerminalConfig {
     /// Editing" preset. See `view::keybindings`. Mirrors
     /// `daruda_config::ShellConfig::natural_text_editing`.
     pub natural_text_editing: bool,
+    /// Horizontal inset (left/right padding) inside the terminal pane,
+    /// in pixels. iTerm2 `TerminalMargin`. Mirrors
+    /// `daruda_config::FontConfig::inset_x`. The pane background fills the
+    /// full bounds so the inset region keeps the terminal background color.
+    pub inset_x: f32,
+    /// Vertical inset (top/bottom padding) inside the terminal pane,
+    /// in pixels. iTerm2 `TerminalVMargin`. Mirrors
+    /// `daruda_config::FontConfig::inset_y`.
+    pub inset_y: f32,
 }
 
 /// Points. Monaco 13 on first launch — a notch above iTerm2's
@@ -89,6 +98,13 @@ pub const SPACING_MAX: f32 = 2.0;
 /// Clamp floor/ceil on font_size — matches typical terminal UX.
 pub const FONT_SIZE_MIN: f32 = 6.0;
 pub const FONT_SIZE_MAX: f32 = 72.0;
+/// Default terminal-pane inset in pixels (iTerm2 ships 5 / 2; daruda
+/// uses 4 / 2). X = left/right, Y = top/bottom.
+pub const DEFAULT_INSET_X: f32 = 4.0;
+pub const DEFAULT_INSET_Y: f32 = 2.0;
+/// Clamp range on the pane inset.
+pub const INSET_MIN: f32 = 0.0;
+pub const INSET_MAX: f32 = 32.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptJumpScroll {
@@ -123,6 +139,8 @@ impl Default for TerminalConfig {
             background_alpha: 1.0,
             osc1337_max_bytes: 10 * 1024 * 1024,
             natural_text_editing: true,
+            inset_x: DEFAULT_INSET_X,
+            inset_y: DEFAULT_INSET_Y,
         }
     }
 }
@@ -135,5 +153,7 @@ impl TerminalConfig {
         self.font_size = self.font_size.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX);
         self.vertical_spacing = self.vertical_spacing.clamp(SPACING_MIN, SPACING_MAX);
         self.horizontal_spacing = self.horizontal_spacing.clamp(SPACING_MIN, SPACING_MAX);
+        self.inset_x = self.inset_x.clamp(INSET_MIN, INSET_MAX);
+        self.inset_y = self.inset_y.clamp(INSET_MIN, INSET_MAX);
     }
 }

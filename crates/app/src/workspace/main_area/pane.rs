@@ -562,10 +562,14 @@ impl TerminalContent {
         });
 
         let Some(layout) = layout else { return false };
+        // Reserve the terminal-pane inset (left+right, top+bottom) so the
+        // grid matches the painted content area — the element insets the
+        // paint origin by the same `state.inset_*` (single source).
+        let (inset_x, inset_y) = self.view.read(cx).inset();
         // ghostty_vt render paths are undefined for a 1-column terminal
         // (mirrors Zed's `cell_width * 2` minimum guard).
-        let cols = layout.cols(avail_w).max(2);
-        let rows = layout.rows((avail_h - pane_header_h).max(1.0));
+        let cols = layout.cols((avail_w - inset_x * 2.0).max(1.0)).max(2);
+        let rows = layout.rows((avail_h - pane_header_h - inset_y * 2.0).max(1.0));
 
         if let Some(master) = &self.master {
             let _ = master.resize(portable_pty::PtySize {

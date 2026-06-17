@@ -93,6 +93,8 @@ pub struct SettingsWindow {
     window_blur: bool,
     // Terminal
     scrollback_input: Entity<InputState>,
+    inset_x_input: Entity<InputState>,
+    inset_y_input: Entity<InputState>,
     // Sidebar
     files_show_hidden: bool,
     files_use_gitignore: bool,
@@ -110,6 +112,8 @@ pub struct SettingsWindow {
     horizontal_spacing_fh: FocusHandle,
     opacity_fh: FocusHandle,
     scrollback_fh: FocusHandle,
+    inset_x_fh: FocusHandle,
+    inset_y_fh: FocusHandle,
     clipboard_streaming_fh: FocusHandle,
     panels_grid_columns_fh: FocusHandle,
     scroll_handle: gpui::ScrollHandle,
@@ -254,6 +258,16 @@ impl SettingsWindow {
                 .placeholder("e.g. 10000")
                 .default_value(format!("{}", config.scrollback.max_rows))
         });
+        let inset_x_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder("e.g. 4")
+                .default_value(format!("{}", config.font.inset_x))
+        });
+        let inset_y_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder("e.g. 2")
+                .default_value(format!("{}", config.font.inset_y))
+        });
         let clipboard_streaming_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .placeholder("e.g. 10485760")
@@ -311,6 +325,8 @@ impl SettingsWindow {
         let horizontal_spacing_fh = horizontal_spacing_input.read(cx).focus_handle(cx);
         let opacity_fh = opacity_input.read(cx).focus_handle(cx);
         let scrollback_fh = scrollback_input.read(cx).focus_handle(cx);
+        let inset_x_fh = inset_x_input.read(cx).focus_handle(cx);
+        let inset_y_fh = inset_y_input.read(cx).focus_handle(cx);
         let clipboard_streaming_fh = clipboard_streaming_input.read(cx).focus_handle(cx);
         let panels_grid_columns_fh = panels_grid_columns_input.read(cx).focus_handle(cx);
 
@@ -337,6 +353,8 @@ impl SettingsWindow {
             make_sub(&horizontal_spacing_input, cx),
             make_sub(&opacity_input, cx),
             make_sub(&scrollback_input, cx),
+            make_sub(&inset_x_input, cx),
+            make_sub(&inset_y_input, cx),
             make_sub(&clipboard_streaming_input, cx),
             make_sub(&panels_grid_columns_input, cx),
         ];
@@ -371,6 +389,8 @@ impl SettingsWindow {
             opacity_input,
             window_blur: config.window.blur,
             scrollback_input,
+            inset_x_input,
+            inset_y_input,
             files_show_hidden: config.left_dock.files_show_hidden,
             files_use_gitignore: config.left_dock.files_use_gitignore,
             syntax_theme_select,
@@ -382,6 +402,8 @@ impl SettingsWindow {
             horizontal_spacing_fh,
             opacity_fh,
             scrollback_fh,
+            inset_x_fh,
+            inset_y_fh,
             clipboard_streaming_fh,
             panels_grid_columns_fh,
             scroll_handle: gpui::ScrollHandle::new(),
@@ -554,6 +576,19 @@ impl SettingsWindow {
             .filter(|&v| (1_000..=500_000).contains(&v))
             .ok_or_else(|| SharedString::from(s::settings_err_scrollback()))?;
 
+        let ix_str = self.inset_x_input.read(cx).value().trim().to_string();
+        config.font.inset_x = ix_str
+            .parse::<f32>()
+            .ok()
+            .filter(|&v| (0.0..=32.0).contains(&v))
+            .ok_or_else(|| SharedString::from(s::settings_err_inset()))?;
+        let iy_str = self.inset_y_input.read(cx).value().trim().to_string();
+        config.font.inset_y = iy_str
+            .parse::<f32>()
+            .ok()
+            .filter(|&v| (0.0..=32.0).contains(&v))
+            .ok_or_else(|| SharedString::from(s::settings_err_inset()))?;
+
         config.left_dock.files_show_hidden = self.files_show_hidden;
         config.left_dock.files_use_gitignore = self.files_use_gitignore;
 
@@ -632,7 +667,9 @@ impl SettingsWindow {
                 &self.horizontal_spacing_fh,
             ],
             BuiltinSection::Window => vec![&self.opacity_fh],
-            BuiltinSection::Terminal => vec![&self.scrollback_fh],
+            BuiltinSection::Terminal => {
+                vec![&self.scrollback_fh, &self.inset_x_fh, &self.inset_y_fh]
+            }
             BuiltinSection::Clipboard => vec![&self.clipboard_streaming_fh],
             BuiltinSection::Panels => vec![&self.panels_grid_columns_fh],
             BuiltinSection::General

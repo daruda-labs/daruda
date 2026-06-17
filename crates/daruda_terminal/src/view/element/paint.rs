@@ -33,7 +33,11 @@ impl TerminalTextElement {
                 window.paint_quad(quad);
             }
 
-            let origin = bounds.origin;
+            // Glyphs paint at the inset content origin. `bounds` (full pane)
+            // stays the input-handler region, paint-layer clip, and
+            // `last_bounds` (mouse origin); only the text origin shifts.
+            let (inset_x, inset_y) = self.view.read(cx).inset();
+            let origin = super::super::layout::content_bounds(bounds, inset_x, inset_y).origin;
             for (row, line) in prepaint.shaped_lines.iter().enumerate() {
                 let y = origin.y + prepaint.line_height * row as f32;
                 let _ = line.paint(

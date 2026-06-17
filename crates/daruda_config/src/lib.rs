@@ -236,6 +236,8 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
         t["size"] = toml_edit::value(f64::from(config.font.size));
         t["vertical_spacing"] = toml_edit::value(f64::from(config.font.vertical_spacing));
         t["horizontal_spacing"] = toml_edit::value(f64::from(config.font.horizontal_spacing));
+        t["inset_x"] = toml_edit::value(f64::from(config.font.inset_x));
+        t["inset_y"] = toml_edit::value(f64::from(config.font.inset_y));
     });
 
     patch_section(&mut doc, "cursor", |t| {

@@ -41,23 +41,37 @@ fn dimmed_bg_color(bg: Rgb, alpha_u8: u8, dim_amount: f32) -> gpui::Rgba {
 impl TerminalTextElement {
     pub(super) fn build_background_quads(
         &self,
-        bounds: Bounds<Pixels>,
+        full_bounds: Bounds<Pixels>,
         line_height: Pixels,
         cell_width: f32,
         default_bg: Rgb,
         dim_amount: f32,
         cx: &mut App,
     ) -> Vec<PaintQuad> {
-        let origin = bounds.origin;
         let mut quads: Vec<PaintQuad> = Vec::new();
         let view = self.view.read(cx);
+        // Content origin = full bounds shifted in by the pane inset. The base
+        // fill uses the full bounds (margins keep the bg color); per-row quads
+        // anchor here. Single inset source: `state.inset_*`.
+        let origin = super::super::layout::content_bounds(
+            full_bounds,
+            view.state.inset_x,
+            view.state.inset_y,
+        )
+        .origin;
 
         // Single-owner background model:
-        //   1. Base fill — full bounds at default_bg × background_alpha.
-        //      Covers default-bg cells, the sub-row gap at the bottom, and
-        //      any area not mapped to a viewport row.
-        //   2. Per-cell overrides — non-default cells only, painted at 0xFF
-        //      so they are always opaque on top of the base fill.
+        //   1. Base fill — the *full* pane bounds at default_bg ×
+        //      background_alpha (NOT the inset content rect). This keeps the
+        //      inset margin the terminal background color instead of the
+        //      window canvas, so a full-screen TUI with a colored background
+        //      does not show a canvas-colored frame (iTerm2 drawTopMargin).
+        //   2. Per-cell overrides — non-default cells only, anchored at the
+        //      content origin and painted at 0xFF so they are always opaque.
+        //      A run touching the first/last column extends into the side
+        //      margin so a full-width colored bar reaches the pane edge
+        //      (iTerm2 drawMarginsForLine). Top/bottom margins stay at the
+        //      base default_bg.
         // The TerminalView root div carries no `.bg()` so this function is
         // the single source of truth for all terminal background rendering.
         let alpha_u8 = (view.state.background_alpha * 255.0)
@@ -66,12 +80,13 @@ impl TerminalTextElement {
         let base_color = dimmed_bg_color(default_bg, alpha_u8, dim_amount);
         quads.push(fill(
             Bounds::from_corners(
-                point(origin.x, bounds.top()),
-                point(bounds.right(), bounds.bottom()),
+                point(full_bounds.left(), full_bounds.top()),
+                point(full_bounds.right(), full_bounds.bottom()),
             ),
             base_color,
         ));
 
+        let cols = view.session.cols();
         for (row, runs) in view.state.viewport_style_runs.iter().enumerate() {
             let y = origin.y + line_height * row as f32;
             let shaped = view.line_layouts.get(row).and_then(|l| l.as_ref());
@@ -79,10 +94,21 @@ impl TerminalTextElement {
             for span in crate::view::bg_merge::merge_bg_runs(runs, default_bg) {
                 let (x_start, x_end) =
                     bg_pixel_range(shaped, line_text, span.start_col, span.end_col, cell_width);
-                let x = origin.x + x_start;
-                let w = x_end - x_start;
+                let mut left = origin.x + x_start;
+                let mut right = origin.x + x_end;
+                // Bleed the edge cells into the side margins so colored
+                // full-width rows reach the pane edge with no canvas sliver.
+                if span.start_col <= 1 {
+                    left = full_bounds.left();
+                }
+                if span.end_col >= cols {
+                    right = full_bounds.right();
+                }
                 let color = dimmed_bg_color(span.bg, 0xFF, dim_amount);
-                quads.push(fill(Bounds::new(point(x, y), size(w, line_height)), color));
+                quads.push(fill(
+                    Bounds::new(point(left, y), size(right - left, line_height)),
+                    color,
+                ));
             }
         }
 

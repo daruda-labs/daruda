@@ -1,6 +1,26 @@
-use gpui::Window;
+use gpui::{Bounds, Pixels, Window, point, px, size};
 
 use super::TerminalView;
+
+/// Shrink `bounds` by the terminal-pane inset: the content origin moves
+/// in by `(inset_x, inset_y)` and the size shrinks by twice that on each
+/// axis. The background fill keeps the *full* bounds (so the inset region
+/// stays the terminal background color, iTerm2 `drawMarginsForLine`); this
+/// helper is the single source for the content rectangle that glyphs,
+/// cursor, selection, overlays, mouse↔cell math, and grid sizing all share.
+/// Size is clamped to 0 so an oversized inset on a tiny pane can't go
+/// negative.
+pub(crate) fn content_bounds(bounds: Bounds<Pixels>, inset_x: f32, inset_y: f32) -> Bounds<Pixels> {
+    let ix = px(inset_x);
+    let iy = px(inset_y);
+    Bounds {
+        origin: point(bounds.origin.x + ix, bounds.origin.y + iy),
+        size: size(
+            (bounds.size.width - ix * 2.0).max(px(0.0)),
+            (bounds.size.height - iy * 2.0).max(px(0.0)),
+        ),
+    }
+}
 
 /// Physical dimensions of one terminal grid cell, with all spacing
 /// multipliers already applied. Single source of truth for grid geometry
@@ -92,6 +112,24 @@ impl TerminalView {
         self.state.background_alpha = alpha.clamp(0.0, 1.0);
     }
 
+    /// Push the terminal-pane inset (left/right = `x`, top/bottom = `y`)
+    /// from config at runtime, in pixels (clamped to the sane range).
+    /// Does not invalidate the shape cache — the inset shifts the paint
+    /// origin and shrinks the grid, but cell geometry (glyph shaping) is
+    /// unchanged. Does not `cx.notify()`; the caller decides when to
+    /// repaint (and a repaint re-runs `resize_to_fit`, which reads the new
+    /// inset back via [`Self::inset`]).
+    pub fn apply_inset(&mut self, x: f32, y: f32) {
+        self.state.inset_x = x.clamp(crate::INSET_MIN, crate::INSET_MAX);
+        self.state.inset_y = y.clamp(crate::INSET_MIN, crate::INSET_MAX);
+    }
+
+    /// Current pane inset `(x, y)` in pixels. Read by the app-layer
+    /// resize path so grid cols/rows match the painted content area.
+    pub fn inset(&self) -> (f32, f32) {
+        (self.state.inset_x, self.state.inset_y)
+    }
+
     /// Inactive-pane dim amount (0.0–1.0, clamped). `0.0` paints the
     /// terminal at full color; `> 0` blends every color toward mid-gray
     /// by this amount, alpha preserved (iTerm2-style). Set by the
@@ -107,5 +145,33 @@ impl TerminalView {
     /// skip redundant updates (notify only on change).
     pub fn dim_amount(&self) -> f32 {
         self.state.dim_amount
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_bounds_insets_origin_and_shrinks_size() {
+        let b = Bounds {
+            origin: point(px(10.0), px(20.0)),
+            size: size(px(100.0), px(50.0)),
+        };
+        let c = content_bounds(b, 4.0, 2.0);
+        assert_eq!(c.origin, point(px(14.0), px(22.0)));
+        // width loses 2*4, height loses 2*2.
+        assert_eq!(c.size, size(px(92.0), px(46.0)));
+    }
+
+    #[test]
+    fn content_bounds_clamps_size_to_zero_when_inset_exceeds_bounds() {
+        let b = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(5.0), px(3.0)),
+        };
+        // 2*4 = 8 > 5 width; 2*2 = 4 > 3 height — both clamp to 0, no underflow.
+        let c = content_bounds(b, 4.0, 2.0);
+        assert_eq!(c.size, size(px(0.0), px(0.0)));
     }
 }

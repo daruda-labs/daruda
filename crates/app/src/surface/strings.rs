@@ -1589,6 +1589,15 @@ pub fn settings_label_scrollback() -> String {
 pub fn settings_err_scrollback() -> String {
     rust_i18n::t!("settings.err_scrollback").into_owned()
 }
+pub fn settings_label_inset_x() -> String {
+    rust_i18n::t!("settings.label_inset_x").into_owned()
+}
+pub fn settings_label_inset_y() -> String {
+    rust_i18n::t!("settings.label_inset_y").into_owned()
+}
+pub fn settings_err_inset() -> String {
+    rust_i18n::t!("settings.err_inset").into_owned()
+}
 pub fn settings_section_sidebar() -> String {
     rust_i18n::t!("settings.section_sidebar").into_owned()
 }

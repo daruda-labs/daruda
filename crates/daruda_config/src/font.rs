@@ -16,6 +16,12 @@ pub struct FontConfig {
     pub vertical_spacing: f32,
     /// Cell width multiplier. 1.0 = natural advance width.
     pub horizontal_spacing: f32,
+    /// Horizontal inset (left/right padding) inside the terminal pane,
+    /// in pixels. iTerm2 `TerminalMargin`. Clamped to 0.0–32.0.
+    pub inset_x: f32,
+    /// Vertical inset (top/bottom padding) inside the terminal pane,
+    /// in pixels. iTerm2 `TerminalVMargin`. Clamped to 0.0–32.0.
+    pub inset_y: f32,
 }
 
 impl Default for FontConfig {
@@ -25,6 +31,8 @@ impl Default for FontConfig {
             size: 13.0,
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
+            inset_x: 4.0,
+            inset_y: 2.0,
         }
     }
 }
@@ -35,6 +43,8 @@ impl FontConfig {
         self.size = self.size.clamp(6.0, 72.0);
         self.vertical_spacing = self.vertical_spacing.clamp(0.5, 2.0);
         self.horizontal_spacing = self.horizontal_spacing.clamp(0.5, 2.0);
+        self.inset_x = self.inset_x.clamp(0.0, 32.0);
+        self.inset_y = self.inset_y.clamp(0.0, 32.0);
     }
 }
 

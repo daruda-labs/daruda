@@ -74,11 +74,20 @@ pub(crate) fn sgr_mouse_sequence(button_value: u8, col: u16, row: u16, pressed: 
 pub(super) fn window_position_to_local(
     last_bounds: Option<Bounds<Pixels>>,
     position: gpui::Point<Pixels>,
+    inset_x: f32,
+    inset_y: f32,
 ) -> gpui::Point<Pixels> {
     let origin = last_bounds
         .map(|bounds| bounds.origin)
         .unwrap_or_else(|| point(px(0.0), px(0.0)));
-    point(position.x - origin.x, position.y - origin.y)
+    // Subtract the pane inset alongside the element origin so pixel↔cell
+    // math lines up with the inset paint origin. A click inside the
+    // left/top inset margin would go negative; clamp to 0 so it maps to
+    // the first cell instead of underflowing the grid column/row.
+    point(
+        (position.x - origin.x - px(inset_x)).max(px(0.0)),
+        (position.y - origin.y - px(inset_y)).max(px(0.0)),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,6 +1058,11 @@ impl TerminalView {
         &self,
         position: gpui::Point<Pixels>,
     ) -> gpui::Point<Pixels> {
-        window_position_to_local(self.state.last_bounds, position)
+        window_position_to_local(
+            self.state.last_bounds,
+            position,
+            self.state.inset_x,
+            self.state.inset_y,
+        )
     }
 }

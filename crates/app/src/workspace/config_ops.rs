@@ -64,6 +64,7 @@ impl Workspace {
                 );
                 view.apply_colors(fg, bg, &pal);
                 view.set_background_alpha(config.window.opacity);
+                view.apply_inset(config.font.inset_x, config.font.inset_y);
             });
         }
         // Trigger #7 — left-dock config affecting filter state changed.
@@ -201,6 +202,8 @@ pub(in crate::workspace) fn terminal_config_from(
         font_size: config.font.size,
         vertical_spacing: config.font.vertical_spacing,
         horizontal_spacing: config.font.horizontal_spacing,
+        inset_x: config.font.inset_x,
+        inset_y: config.font.inset_y,
         max_scrollback: config.scrollback.max_rows,
         background_alpha: config.window.opacity,
         osc1337_max_bytes: config.clipboard.streaming_max_bytes,

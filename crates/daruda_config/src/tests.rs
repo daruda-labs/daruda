@@ -66,6 +66,22 @@ fn empty_toml_produces_defaults() {
 }
 
 #[test]
+fn font_inset_defaults_to_4_and_2() {
+    let cfg = Config::default();
+    assert_eq!(cfg.font.inset_x, 4.0);
+    assert_eq!(cfg.font.inset_y, 2.0);
+}
+
+#[test]
+fn font_inset_clamps_to_range() {
+    let input = "[font]\ninset_x = 100.0\ninset_y = -5.0\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    cfg.clamp();
+    assert_eq!(cfg.font.inset_x, 32.0);
+    assert_eq!(cfg.font.inset_y, 0.0);
+}
+
+#[test]
 fn partial_toml_fills_missing_with_defaults() {
     let input = "\
 [font]\n\
