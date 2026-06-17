@@ -447,7 +447,16 @@ impl TerminalView {
         let new_offset = self.session.viewport_row_offset();
         let rows = self.session.rows() as u32;
         let total = self.session.total_rows();
-        if new_offset + rows >= total {
+        // Within `FOLLOW_SLACK_ROWS` of the bottom counts as the live edge, so
+        // a small scroll-up while output streams keeps follow (a Live viewport
+        // still snaps to the exact bottom on the next output via
+        // `maybe_scroll_to_bottom_on_output`).
+        if super::viewport_lock::at_live_edge(
+            new_offset,
+            rows,
+            total,
+            super::viewport_lock::FOLLOW_SLACK_ROWS,
+        ) {
             self.state.viewport_lock.unlock();
         } else {
             self.state

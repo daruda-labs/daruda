@@ -19,6 +19,23 @@
 /// An ever-increasing absolute line index (`overflow + screen_row`).
 pub type AbsLineIndex = u64;
 
+/// How many rows above the true bottom still count as "at the live edge"
+/// for auto-follow. iTerm2 / zed / Alacritty use an exact bottom (slack 0);
+/// daruda allows a small slack so a one-row nudge while output streams does
+/// not break follow. To intentionally pin and read, scroll up past the slack.
+pub(crate) const FOLLOW_SLACK_ROWS: u32 = 1;
+
+/// Whether the viewport sits at (or within `slack` rows of) the live bottom,
+/// given the viewport-top `offset`, the visible row count `rows`, and the
+/// `total` row count (scrollback + grid), all in absolute screen-row units.
+///
+/// Written as `offset + rows + slack >= total` (left side grows) rather than
+/// `offset + rows >= total - slack` so it never underflows when `total` is
+/// smaller than `slack` (no-scrollback case).
+pub(crate) fn at_live_edge(offset: u32, rows: u32, total: u32, slack: u32) -> bool {
+    offset + rows + slack >= total
+}
+
 /// Viewport scroll-lock state.
 ///
 /// Combining the boolean "user scrolled" flag with the anchor into one
@@ -68,6 +85,32 @@ mod tests {
         let lock = ViewportLock::default();
         assert!(!lock.is_locked());
         assert_eq!(lock.anchor(), None);
+    }
+
+    #[test]
+    fn at_live_edge_exact_bottom_follows() {
+        // Last visible row is the last content row (offset + rows == total).
+        assert!(at_live_edge(10, 24, 34, 0));
+        assert!(at_live_edge(10, 24, 34, 1));
+    }
+
+    #[test]
+    fn at_live_edge_slack_keeps_one_row_up_live() {
+        // One row above the bottom: pinned with slack 0, still live with slack 1.
+        assert!(!at_live_edge(9, 24, 34, 0));
+        assert!(at_live_edge(9, 24, 34, 1));
+    }
+
+    #[test]
+    fn at_live_edge_two_rows_up_pins_even_with_slack_one() {
+        assert!(!at_live_edge(8, 24, 34, 1));
+    }
+
+    #[test]
+    fn at_live_edge_no_scrollback_never_underflows() {
+        // total < slack must not panic and must read as live (everything fits).
+        assert!(at_live_edge(0, 24, 2, 1));
+        assert!(at_live_edge(0, 24, 0, 1));
     }
 
     #[test]
