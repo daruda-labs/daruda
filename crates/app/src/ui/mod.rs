@@ -25,6 +25,7 @@ pub mod dialog;
 pub mod divider;
 pub mod form_helpers;
 pub mod group_box;
+pub mod highlighter;
 pub mod input;
 pub mod input_panel;
 pub mod label;

@@ -1249,12 +1249,12 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "similar",
- "syntect",
  "sys-locale",
  "sysinfo 0.32.1",
  "tempfile",
  "toml 0.8.23",
- "two-face",
+ "tree-sitter",
+ "tree-sitter-highlight",
  "unicode-segmentation",
  "which",
 ]
@@ -5976,6 +5976,18 @@ checksum = "efedc4cac157161cc23a0adc4553a2cedc908e1cd754b6cd033a919bb81ce5d6"
 dependencies = [
  "cc",
  "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-highlight"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc5f880ad8d8f94e88cb81c3557024cf1a8b75e3b504c50481ed4f5a6006ff3"
+dependencies = [
+ "regex",
+ "streaming-iterator",
+ "thiserror 2.0.18",
+ "tree-sitter",
 ]
 
 [[package]]

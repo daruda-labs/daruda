@@ -922,8 +922,43 @@ pub const FILE_VIEWER_DIFF_LINE_NO_PAD_R: f32 = PAD_XS;
 pub const FILE_VIEWER_DIFF_MARKER_W: f32 = 10.0;
 /// Hunk header trailing context text color (function name / class name, dim).
 pub const FILE_DIFF_HUNK_CTX_TEXT: Hsla = hsla(220.0, 0.20, 0.45, 1.0);
-/// syntect theme name used for diff syntax highlighting.
+/// Palette name for the file-viewer syntax highlighting. [`syntax_color`]
+/// maps tree-sitter capture names onto this `base16-ocean.dark` scheme;
+/// colouring is per-capture (one colour per capture name).
 pub const FILE_VIEWER_SYNTAX_THEME: &str = "base16-ocean.dark";
+
+/// `base16-ocean.dark` slot → `Hsla`. Hex literals live here (the
+/// designated colour home, G4-exempt), never at the call site.
+fn base16(hex: u32) -> Hsla {
+    gpui::rgb(hex).into()
+}
+
+/// Foreground colour for a tree-sitter highlight capture name, matching
+/// the `base16-ocean.dark` scheme (see [`FILE_VIEWER_SYNTAX_THEME`]).
+/// Unrecognised captures (and the empty string) fall back to the default
+/// editor foreground (`base05`), so every token gets an explicit foreground.
+pub fn syntax_color(capture: &str) -> Hsla {
+    match capture {
+        "keyword" => base16(0xb4_8e_ad),            // base0E — purple
+        "function" | "title" => base16(0x8f_a1_b3), // base0D — blue
+        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => {
+            base16(0xeb_cb_8b) // base0A — yellow
+        }
+        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => {
+            base16(0xd0_87_70) // base09 — orange
+        }
+        "string" | "text.literal" => base16(0xa3_be_8c), // base0B — green
+        "string.escape" | "string.regex" | "string.special" | "string.special.symbol" => {
+            base16(0x96_b5_b4) // base0C — cyan
+        }
+        "tag" | "variable.special" | "link_text" => base16(0xbf_61_6a), // base08 — red
+        "tag.doctype" => base16(0xab_79_67),                            // base0F — brown
+        "comment" | "comment.doc" | "hint" | "predictive" => base16(0x65_73_7e), // base03 — gray
+        // variable / property / operator / punctuation.* / emphasis* /
+        // primary and any unrecognised capture → default foreground.
+        _ => base16(0xc0_c5_ce), // base05 — default foreground
+    }
+}
 /// Gap between `@@ -N +M @@` and its trailing context text (px).
 pub const FILE_DIFF_HUNK_CTX_GAP_X: f32 = GAP_LG;
 /// Gap between `+N` and `-N` in the diff stat badge (px).
