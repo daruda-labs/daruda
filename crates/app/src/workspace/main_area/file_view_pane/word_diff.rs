@@ -4,9 +4,10 @@
 //! with intra-line change ranges using `similar`.
 //!
 //! Pairing strategy: consecutive Removed lines and the consecutive Added lines
-//! immediately following them are treated as a section pair. Only equal-count
-//! sections (N:N) receive word diff; N≠M sections and lines over
-//! `WORD_DIFF_LINE_LIMIT` bytes are left without intra-line highlights.
+//! immediately following them are treated as a section pair. Lines are paired
+//! by position for the first `min(N, M)` lines of the section and word-diffed;
+//! surplus lines on the longer side, and lines over `WORD_DIFF_LINE_LIMIT`
+//! bytes, are left without intra-line highlights.
 //!
 //! Tokenisation: runs of alphanumeric/`_` characters form one token each;
 //! every other character (whitespace, operator, punctuation) is its own token.
@@ -25,11 +26,9 @@ const WORD_DIFF_LINE_LIMIT: usize = 300;
 /// Scan every hunk for consecutive Removed/Added blocks and annotate them
 /// with word-level change ranges in-place.
 ///
-/// Pairing rule (mirrors GitButler):
 /// - Collect a run of consecutive `Removed` lines, then a run of consecutive
 ///   `Added` lines immediately following.
-/// - Only pair when both runs have the **same length** (N:N). N≠M blocks are
-///   skipped — the line counts differ too much for meaningful pairing.
+/// - Delegate pairing to [`word_diff_runs`] (positional, `min(N, M)` lines).
 /// - Lines longer than `WORD_DIFF_LINE_LIMIT` bytes are skipped individually.
 pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
     for hunk in hunks.iter_mut() {
@@ -60,40 +59,73 @@ pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
             }
             let added_end = i;
 
-            let removed_count = removed_end - removed_start;
-            let added_count = added_end - added_start;
-
-            // Skip N≠M blocks — line counts too different to pair meaningfully.
-            if removed_count != added_count {
-                continue;
-            }
-
-            for j in 0..removed_count {
-                let old = match &hunk.lines[removed_start + j] {
+            // Snapshot the run contents (owned, so the borrow on `hunk.lines`
+            // is released before we write the results back).
+            let removed: Vec<String> = (removed_start..removed_end)
+                .map(|k| match &hunk.lines[k] {
                     DiffLine::Removed { content, .. } => content.clone(),
                     _ => unreachable!(),
-                };
-                let new = match &hunk.lines[added_start + j] {
+                })
+                .collect();
+            let added: Vec<String> = (added_start..added_end)
+                .map(|k| match &hunk.lines[k] {
                     DiffLine::Added { content, .. } => content.clone(),
                     _ => unreachable!(),
-                };
+                })
+                .collect();
 
-                // Skip very long lines to keep diffing responsive.
-                if old.len() > WORD_DIFF_LINE_LIMIT || new.len() > WORD_DIFF_LINE_LIMIT {
-                    continue;
+            let (removed_changes, added_changes) = word_diff_runs(&removed, &added);
+
+            for (k, changes) in removed_changes.into_iter().enumerate() {
+                if let DiffLine::Removed { word_changes, .. } = &mut hunk.lines[removed_start + k] {
+                    *word_changes = changes;
                 }
-
-                let (old_changes, new_changes) = compute_word_diff(&old, &new);
-
-                if let DiffLine::Removed { word_changes, .. } = &mut hunk.lines[removed_start + j] {
-                    *word_changes = old_changes;
-                }
-                if let DiffLine::Added { word_changes, .. } = &mut hunk.lines[added_start + j] {
-                    *word_changes = new_changes;
+            }
+            for (k, changes) in added_changes.into_iter().enumerate() {
+                if let DiffLine::Added { word_changes, .. } = &mut hunk.lines[added_start + k] {
+                    *word_changes = changes;
                 }
             }
         }
     }
+}
+
+/// Pairing seam: given a run of `removed` line contents and the run of `added`
+/// line contents that immediately follows it, return the per-line intra-line
+/// change ranges for each side (one entry per input line; an empty inner vec
+/// means "no intra-line highlight for that line").
+///
+/// This is the single decision point for *how* removed/added lines are paired.
+/// The scan in [`apply_word_diff`] is intentionally agnostic to it.
+///
+/// Current rule: pair lines by position for the first `min(N, M)` lines and
+/// word-diff each pair. Surplus lines on the longer side (a pure addition or
+/// deletion with no counterpart) are left un-highlighted. This covers the
+/// common N:N modify-in-place case and degrades gracefully for N≠M blocks
+/// instead of dropping intra-line highlights entirely.
+fn word_diff_runs(
+    removed: &[String],
+    added: &[String],
+) -> (Vec<Vec<WordChange>>, Vec<Vec<WordChange>>) {
+    let mut removed_changes = vec![Vec::new(); removed.len()];
+    let mut added_changes = vec![Vec::new(); added.len()];
+
+    let paired = removed.len().min(added.len());
+    for j in 0..paired {
+        let old = &removed[j];
+        let new = &added[j];
+
+        // Skip very long lines to keep diffing responsive.
+        if old.len() > WORD_DIFF_LINE_LIMIT || new.len() > WORD_DIFF_LINE_LIMIT {
+            continue;
+        }
+
+        let (old_changes, new_changes) = compute_word_diff(old, new);
+        removed_changes[j] = old_changes;
+        added_changes[j] = new_changes;
+    }
+
+    (removed_changes, added_changes)
 }
 
 /// Split a string into tokens for word-level diffing.
@@ -333,24 +365,68 @@ mod tests {
     }
 
     #[test]
-    fn apply_word_diff_skips_unequal_block() {
+    fn apply_word_diff_pairs_unequal_block_by_position() {
         use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
-        // 2 removed + 1 added — N≠M, no word diff on either side.
+        // 2 removed + 1 added — N≠M. The first min(N,M)=1 line pair is
+        // word-diffed positionally; the surplus removed line is left plain.
         let diff = "@@ -1,2 +1,1 @@\n-foo\n-bar\n+baz\n";
         let mut hunks = parse_diff_hunks(diff);
         apply_word_diff(&mut hunks);
 
-        for line in &hunks[0].lines {
-            match line {
-                DiffLine::Removed { word_changes, .. } | DiffLine::Added { word_changes, .. } => {
-                    assert!(
-                        word_changes.is_empty(),
-                        "N≠M block should not be word-diffed"
-                    );
-                }
-                _ => {}
-            }
-        }
+        let (r0, r1, a0) = match (&hunks[0].lines[0], &hunks[0].lines[1], &hunks[0].lines[2]) {
+            (
+                DiffLine::Removed {
+                    word_changes: r0, ..
+                },
+                DiffLine::Removed {
+                    word_changes: r1, ..
+                },
+                DiffLine::Added {
+                    word_changes: a0, ..
+                },
+            ) => (r0, r1, a0),
+            _ => panic!("unexpected line types"),
+        };
+
+        // removed[0]↔added[0] paired and word-diffed (fully different).
+        assert!(!r0.is_empty(), "paired removed line should be word-diffed");
+        assert!(!a0.is_empty(), "paired added line should be word-diffed");
+        // The surplus removed line (no counterpart) stays plain.
+        assert!(
+            r1.is_empty(),
+            "unpaired surplus line should not be word-diffed"
+        );
+    }
+
+    #[test]
+    fn apply_word_diff_pairs_unequal_block_added_surplus() {
+        use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
+        // 1 removed + 2 added — surplus on the added side this time.
+        let diff = "@@ -1,1 +1,2 @@\n-foo\n+baz\n+qux\n";
+        let mut hunks = parse_diff_hunks(diff);
+        apply_word_diff(&mut hunks);
+
+        let (r0, a0, a1) = match (&hunks[0].lines[0], &hunks[0].lines[1], &hunks[0].lines[2]) {
+            (
+                DiffLine::Removed {
+                    word_changes: r0, ..
+                },
+                DiffLine::Added {
+                    word_changes: a0, ..
+                },
+                DiffLine::Added {
+                    word_changes: a1, ..
+                },
+            ) => (r0, a0, a1),
+            _ => panic!("unexpected line types"),
+        };
+
+        assert!(!r0.is_empty(), "paired removed line should be word-diffed");
+        assert!(!a0.is_empty(), "paired added line should be word-diffed");
+        assert!(
+            a1.is_empty(),
+            "unpaired surplus added line should not be word-diffed"
+        );
     }
 
     #[test]
