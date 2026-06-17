@@ -304,6 +304,38 @@ pub const SEARCH_BAR_BUTTON_PAD_X: f32 = 6.0;
 pub const SEARCH_BAR_CLOSE_ML: f32 = 4.0;
 
 // ============================================================================
+// Scroll-to-bottom button (floating chrome inside the terminal view; shown
+// only when the viewport is scrolled above the live bottom)
+// ============================================================================
+
+/// Diameter of the circular scroll-to-bottom button (px).
+pub const SCROLL_BTN_SIZE: f32 = 28.0;
+
+/// Inset of the button from the bottom and right pane edges (px). Clears the
+/// 2px scrollbar at the right edge.
+pub const SCROLL_BTN_MARGIN: f32 = 12.0;
+
+/// Button fill (surface-4 — the floating-chrome level).
+pub const SCROLL_BTN_BG: Hsla = hsla(0.0, 0.0, 0.13, 0.97);
+
+/// Button fill on hover (one step up the surface ladder).
+pub const SCROLL_BTN_BG_HOVER: Hsla = hsla(0.0, 0.0, 0.17, 0.98);
+
+/// Button hairline-soft border.
+pub const SCROLL_BTN_BORDER: Hsla = hsla(0.0, 0.0, 1.0, 0.08);
+
+/// Down-chevron icon color (mute). Hover lifts the button fill (canonical
+/// surface-ladder hover), so the icon keeps one resting color.
+pub const SCROLL_BTN_ICON: Hsla = hsla(0.0, 0.0, 0.57, 1.0);
+
+/// Down-chevron icon square size (px).
+pub const SCROLL_BTN_ICON_SIZE: f32 = 16.0;
+
+/// Asset path for the down-chevron icon. Resolved at runtime through
+/// `DarudaAssets` → `gpui_component_assets`; not a crate dependency.
+pub const SCROLL_BTN_ICON_PATH: &str = "icons/chevron-down.svg";
+
+// ============================================================================
 // Workspace render layout — structural minima
 // ============================================================================
 

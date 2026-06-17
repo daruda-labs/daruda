@@ -51,6 +51,54 @@ impl TerminalView {
             }
         }));
     }
+
+    /// `true` when the viewport is scrolled above the live bottom, i.e. there
+    /// is content below the last visible row to jump down to. Gates the
+    /// floating scroll-to-bottom button. Exact (slack 0): the button shows
+    /// even one row up, where `FOLLOW_SLACK_ROWS` keeps follow live.
+    fn has_content_below_viewport(&self) -> bool {
+        let offset = self.session.viewport_row_offset();
+        let rows = self.session.rows() as u32;
+        let total = self.session.total_rows();
+        offset + rows < total
+    }
+
+    /// Floating circular "scroll to bottom" button, bottom-right of the
+    /// terminal pane. Clicking snaps to the live bottom (and re-enables
+    /// auto-follow, like `Cmd+End`). Mirrors Superset's jump-to-bottom
+    /// affordance, styled per DESIGN.md (surface-4 fill, hairline-soft
+    /// border, no shadow).
+    fn render_scroll_to_bottom_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ux::theme as ux_theme;
+        div()
+            .id("terminal-scroll-to-bottom")
+            .absolute()
+            .bottom(gpui::px(ux_theme::SCROLL_BTN_MARGIN))
+            .right(gpui::px(ux_theme::SCROLL_BTN_MARGIN))
+            .size(gpui::px(ux_theme::SCROLL_BTN_SIZE))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .bg(ux_theme::SCROLL_BTN_BG)
+            .border_1()
+            .border_color(ux_theme::SCROLL_BTN_BORDER)
+            .cursor_pointer()
+            .hover(|s| s.bg(ux_theme::SCROLL_BTN_BG_HOVER))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, cx| {
+                    this.snap_to_bottom_and_refresh(cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                gpui::svg()
+                    .path(ux_theme::SCROLL_BTN_ICON_PATH)
+                    .size(gpui::px(ux_theme::SCROLL_BTN_ICON_SIZE))
+                    .text_color(ux_theme::SCROLL_BTN_ICON),
+            )
+    }
 }
 
 impl Render for TerminalView {
@@ -170,6 +218,9 @@ impl Render for TerminalView {
             .child(TerminalTextElement { view: cx.entity() })
             .when(self.state.search_overlay, |el| {
                 el.child(self.render_search_bar(cx))
+            })
+            .when(self.has_content_below_viewport(), |el| {
+                el.child(self.render_scroll_to_bottom_button(cx))
             })
     }
 }
