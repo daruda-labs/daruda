@@ -41,6 +41,8 @@ mod project_ops;
 mod project_palette_ops;
 mod render;
 mod right_dock;
+#[cfg(feature = "screenshot")]
+pub(crate) mod screenshot_scenario;
 mod spawn_helpers;
 pub(crate) mod status_bar;
 pub(in crate::workspace) mod sync;

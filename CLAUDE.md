@@ -86,11 +86,89 @@ Verification loop: render → PNG → an agent reads the PNG and checks the resu
 This catches both rendering bugs and runtime state (e.g. error toasts), so it
 doubles as a smoke test of the real app's startup.
 
+### Driving the captured state
+
+`--screenshot` takes no view argument — it captures the **restored** workspace
+(or welcome screen), so you steer it by steering what gets restored *before*
+launch. Two isolation levers + three reach tiers:
+
+- **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim).
+  Pre-seed it; isolates from your real workspace.
+- **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`.
+  Debug builds already use `daruda-debug/`, so runs are isolated by default.
+
+```bash
+export DARUDA_DATA_DIR=/tmp/daruda-shot-state   # throwaway, pre-seeded state
+cargo build -p daruda --features screenshot && target/debug/daruda --screenshot /tmp/shot.png
+```
+
+**Tier 1 — `config.toml` (appearance, mostly live-reload):** `[theme]`
+(terminal_preset / ui_preset), `[colors]`, `[font]` (size/spacing/inset), `[cursor]`,
+`[window]`, `[file_viewer]`, `[left_dock]`, `[panels]`, `[render]`, etc. Does **not**
+control which tab/pane/view is active — that's Tier 2.
+
+For the UI theme specifically, `--screenshot-theme <light|dark>` overrides
+`ui_preset` at capture time (via `apply_ui_theme`) without touching config —
+orthogonal to and composable with `--screenshot-scenario` (e.g. shoot the command
+palette in light mode). Pass a **comma list** (`light,dark`) for a batch: one PNG
+per theme in a single launch (output names get a `.<theme>` suffix —
+`shot.png` → `shot.light.png` / `shot.dark.png`), the scenario stays applied and is
+re-themed in place between captures.
+
+```bash
+target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light --screenshot-scenario command-palette
+target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light,dark   # batch: s.light.png + s.dark.png
+```
+
+Two more capture knobs (compose with everything above):
+- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead
+  of the restored bounds; for stable doc / pixel-regression shots.
+- `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on
+  slow CI / big workspaces, lower for quick local shots).
+
+**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):**
+`workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active
+project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups),
+`projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path
++ view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in
+`daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set
+`DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with
+`--screenshot` against the same dir** — no schema guessing.
+
+**Tier 3 — transient / live state: NOT reachable by config or state alone.**
+Restore recomputes these fresh. The `--screenshot-scenario <name>` flag drives one
+transient overlay into view after settle and before capture (it forces a repaint
+since `render_to_image` captures the last *painted* frame). Implemented scenarios:
+`command-palette`, `error-modal`, `settings` / `settings:<section-slug>` (Settings is
+a separate window — the scenario captures *that* window; slug = `BuiltinSection::slug`,
+e.g. `font`, `keymap`, `notifications`), `toast`. Add a variant to `ScreenshotScenario` +
+`screenshot_scenario::drive` (`crates/app/src/workspace/screenshot_scenario.rs`) to
+cover more. The rest below still need a real backing source, not just a scenario:
+
+```bash
+target/debug/daruda --screenshot /tmp/shot.png --screenshot-scenario command-palette
+target/debug/daruda --screenshot /tmp/s.png   --screenshot-scenario settings:font
+```
+
+| State | On restore |
+|---|---|
+| Modals, command palette, Settings | closed — use `--screenshot-scenario` (`error-modal`, `command-palette`, `settings[:<slug>]`) |
+| Toasts | empty queue — use `--screenshot-scenario toast` |
+| Drag / hover / text selection | gone (real-time only) |
+| Terminal output | fresh shell prompt — scrollback is **not** persisted |
+| File-viewer content / git-changes | reloaded from disk — needs **real files / git repo** |
+| Usage / Skills / Tools panels | fetched fresh (net / FS / MCP); cold → placeholder |
+| Live Claude session badge | in-memory — needs a real attached session |
+
 ## Coding Best Practices
 
 **Design reference**: before any UI/design work or refactoring/improvement pass, read [`DESIGN.md`](./DESIGN.md) — the design language (colors, surface ladder, typography, accent rules, component chrome). Align changes with it.
 
 **Priority order** when trade-offs arise: Correctness > Maintainability > Performance > Brevity
+
+**Root-cause priority**: fix the root cause, not the symptom — never ship a band-aid when the underlying defect is reachable.
+- When a workaround is the only thing that comes to mind, that is the signal to stop and surface the root problem **first**: name the actual defect, where it lives, and why the symptom appears — then decide whether to fix it or, only with explicit reason, defer.
+- A workaround is acceptable **only** when the root cause is out of scope (upstream dependency, separate subsystem, or deliberately deferred). In that case, mark it inline (`// WORKAROUND: <root cause> — <why deferred>`) and report it; never let it pass silently as if the problem were solved.
 
 ### Task Complexity Assessment
 Before starting, classify the task:

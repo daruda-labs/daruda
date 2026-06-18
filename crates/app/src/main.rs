@@ -205,7 +205,13 @@ fn main() {
         // `--screenshot <path>`: capture the live window to a PNG, then quit.
         #[cfg(feature = "screenshot")]
         if let Some(path) = screenshot::parse_screenshot_arg() {
-            screenshot::schedule_capture(path, cx);
+            screenshot::schedule_capture(
+                path,
+                screenshot::parse_scenario_arg(),
+                screenshot::parse_themes_arg(),
+                screenshot::parse_size_arg(),
+                cx,
+            );
         }
     });
 }

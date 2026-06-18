@@ -22,6 +22,8 @@ mod projects;
 mod pure_ops;
 mod regression_namespace;
 mod restore_from_disk;
+#[cfg(feature = "screenshot")]
+mod screenshot_scenario;
 mod snapshot_for_disk;
 mod splits;
 mod task_edit_tab_cycle;
