@@ -504,7 +504,7 @@ fn readonly_value(value: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .border_1()
         .border_color(t.border)
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::TEXT_PRIMARY)
+        .text_color(t.text_primary)
         .child(value.into())
 }
 

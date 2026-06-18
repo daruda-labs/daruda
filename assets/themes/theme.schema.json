@@ -23,6 +23,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
+    "text_primary": {
+      "description": "Maps to `palette::TEXT_PRIMARY`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#f7f7f7ff"
+    },
     "text_muted": {
       "description": "Maps to `palette::TEXT_MUTE`.",
       "$ref": "#/$defs/Rgba",

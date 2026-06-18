@@ -67,10 +67,10 @@ fn group_plugins_for_settings(skills: &[Skill]) -> Vec<PluginGroupForSettings> {
     out
 }
 
-fn plugin_subheading(label: impl Into<gpui::SharedString>) -> impl IntoElement {
+fn plugin_subheading(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::TEXT_PRIMARY)
+        .text_color(theme::current(cx).text_primary)
         .child(label.into())
 }
 
@@ -92,7 +92,7 @@ fn detail_row(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let label_color = t.text_body;
-    let value_color = theme::TEXT_PRIMARY;
+    let value_color = t.text_primary;
     div()
         .flex()
         .flex_row()
@@ -225,7 +225,7 @@ impl SettingsWindow {
 
         let mut col = div().flex().flex_col().gap(px(theme::MODAL_PANEL_GAP));
 
-        col = col.child(plugin_subheading(s::settings_plugin_installed_header()));
+        col = col.child(plugin_subheading(s::settings_plugin_installed_header(), cx));
         if installed.is_empty() {
             col = col.child(plugin_empty_hint(s::settings_plugin_none_installed(), cx));
         } else {
@@ -234,7 +234,7 @@ impl SettingsWindow {
             }
         }
 
-        col = col.child(plugin_subheading(s::settings_plugin_available_header()));
+        col = col.child(plugin_subheading(s::settings_plugin_available_header(), cx));
         if available.is_empty() {
             col = col.child(plugin_empty_hint(s::settings_plugin_none_available(), cx));
         } else {
@@ -396,11 +396,15 @@ impl SettingsWindow {
 
         let action_row = self.plugin_action_row(group, in_flight, cx);
 
-        let mut skills_col = div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::SKILL_ROW_GAP))
-            .child(plugin_subheading(s::settings_plugin_detail_skills_header()));
+        let mut skills_col =
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::SKILL_ROW_GAP))
+                .child(plugin_subheading(
+                    s::settings_plugin_detail_skills_header(),
+                    cx,
+                ));
         if skills_for_plugin.is_empty() {
             skills_col =
                 skills_col.child(plugin_empty_hint(s::settings_plugin_detail_no_skills(), cx));

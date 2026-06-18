@@ -228,7 +228,7 @@ fn inaccessible_empty_state(
         .items_center()
         .justify_center()
         .gap(px(theme::MAIN_EMPTY_STATE_GAP))
-        .bg(theme::CANVAS)
+        .bg(t.file_viewer_bg)
         .child(
             Icon::new(icon)
                 .with_size(px(theme::MAIN_EMPTY_STATE_ICON_SIZE))
@@ -237,7 +237,7 @@ fn inaccessible_empty_state(
         .child(
             div()
                 .text_size(px(theme::MAIN_EMPTY_STATE_TITLE_FONT_SIZE))
-                .text_color(theme::TEXT_PRIMARY)
+                .text_color(t.text_primary)
                 .child(SharedString::from(title)),
         )
         .child(

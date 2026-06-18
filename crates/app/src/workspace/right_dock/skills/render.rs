@@ -62,7 +62,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     let searching = !query.is_empty();
 
     let mut col = crate::workspace::right_dock::right_panel_body()
-        .child(header_row(workspace.clone()))
+        .child(header_row(workspace.clone(), t.text_primary))
         .child(search_row(snap, cx));
 
     if searching && !any_match {
@@ -205,7 +205,7 @@ fn search_empty_hint(query: String) -> impl IntoElement {
         )))
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
+fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
@@ -216,7 +216,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
         .child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(theme::TEXT_PRIMARY)
+                .text_color(title_color)
                 .child(strings::right_panel_tab_skills()),
         )
         .child(
@@ -475,7 +475,7 @@ fn plugin_title(plugin_local: &str, count: usize, t: &DarudaTheme) -> gpui::AnyE
             div()
                 .flex_1()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(theme::TEXT_PRIMARY)
+                .text_color(t.text_primary)
                 .child(SharedString::from(plugin_local.to_string())),
         )
         .child(neutral_chip(SharedString::from(format!("{count}")), t))

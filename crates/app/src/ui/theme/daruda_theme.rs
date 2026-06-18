@@ -70,6 +70,7 @@ daruda_theme_fields! {
     tab_inactive_bg => BG_PANEL,
     tab_inactive_hover_bg => BG_HOVER,
     border => BORDER,
+    text_primary => TEXT_PRIMARY,
     text_muted => TEXT_MUTE,
     text_body => TEXT_BODY,
     text_subtle => TEXT_SUBTLE,

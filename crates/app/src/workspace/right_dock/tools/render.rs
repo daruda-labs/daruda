@@ -36,7 +36,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 
     let has_lane = mcp.project_root.is_some();
     crate::workspace::right_dock::right_panel_body()
-        .child(header_row(workspace.clone()))
+        .child(header_row(workspace.clone(), t.text_primary))
         .child(scope_section(
             strings::mcp_project(),
             McpScope::Project,
@@ -66,7 +66,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .into_any_element()
 }
 
-fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
+fn header_row(workspace: gpui::WeakEntity<Workspace>, title_color: gpui::Hsla) -> impl IntoElement {
     div()
         .flex()
         .flex_row()
@@ -77,7 +77,7 @@ fn header_row(workspace: gpui::WeakEntity<Workspace>) -> impl IntoElement {
         .child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(theme::TEXT_PRIMARY)
+                .text_color(title_color)
                 .child(strings::right_panel_tab_tools()),
         )
         .child(new_server_button(workspace))

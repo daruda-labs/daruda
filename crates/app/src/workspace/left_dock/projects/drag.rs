@@ -58,7 +58,7 @@ impl Render for DragGhost {
             .px(px(theme::LANE_ROW_PAD_X))
             .py(px(theme::LANE_DRAG_GHOST_PAD_Y))
             .text_size(px(theme::LANE_LABEL_FONT_SIZE))
-            .text_color(theme::TEXT_PRIMARY)
+            .text_color(t.text_primary)
             .bg(t.lane_row_hover_bg)
             .rounded(px(theme::MODAL_BUTTON_RADIUS))
             .child(self.label.clone())
