@@ -137,10 +137,10 @@ impl RenderOnce for MacroKey {
 
         let t = theme::current(cx);
         let disabled_bg = t.disabled_item_bg;
-        let disabled_text = t.disabled_item_text;
+        let disabled_text = t.text_subtle;
         let widget_bg = t.button_widget_bg;
         let widget_bg_hover = t.button_widget_bg_hover;
-        let widget_text = t.button_widget_text;
+        let widget_text = t.text_body;
 
         let base = div()
             .id(id)

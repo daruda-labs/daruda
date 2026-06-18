@@ -83,7 +83,7 @@ fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<AnyElement> {
         viewport_h + max_offset,
         handle.offset().y,
         px(0.),
-        t.right_panel_scrollbar_thumb,
+        t.scrollbar_thumb,
         t.right_panel_scrollbar_thumb_hover,
     )
 }

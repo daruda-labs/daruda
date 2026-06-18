@@ -31,7 +31,7 @@ pub(super) fn file_viewer_scrollbar(
         content_h,
         scroll_handle.offset().y,
         body_top,
-        t.file_viewer_scrollbar_thumb,
+        t.scrollbar_thumb,
         t.file_viewer_scrollbar_thumb_hover,
     )
 }

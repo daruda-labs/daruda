@@ -21,11 +21,11 @@ pub(super) fn render_file_viewer_toolbar(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let header_bg = t.file_viewer_header_bg;
-    let header_border = t.file_viewer_header_border;
-    let header_text = t.file_viewer_header_text;
+    let header_border = t.border;
+    let header_text = t.text_body;
     let stat_add = t.file_diff_stat_add;
     let stat_del = t.file_diff_stat_del;
-    let tab_text = t.file_viewer_tab_text;
+    let tab_text = t.text_muted;
     let tab_active_bg = t.file_viewer_tab_active_bg;
     let tab_active_text = theme::TEXT_PRIMARY;
     let close_hover = theme::TEXT_PRIMARY;

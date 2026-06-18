@@ -213,7 +213,7 @@ fn view_header(
             }
         }));
 
-    let tracking_color = theme::current(cx).muted_text;
+    let tracking_color = theme::current(cx).text_muted;
     let mut header_actions = div()
         .flex()
         .flex_row()
@@ -287,9 +287,9 @@ fn summary_bar(
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let t = theme::current(cx);
-    let summary_text_color = t.dock_header_text;
-    let toggle_inflight = t.faint_text;
-    let toggle_idle = t.muted_text;
+    let summary_text_color = t.text_muted;
+    let toggle_inflight = t.text_subtle;
+    let toggle_idle = t.text_muted;
     let toggle_hover = theme::TEXT_PRIMARY;
 
     let label = match (staged_count, unstaged_count) {
@@ -390,12 +390,12 @@ fn dir_header(
     let in_flight = snap.git_stage_in_flight;
 
     let t = theme::current(cx);
-    let checkbox_border = t.git_stage_checkbox_border;
+    let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
     let checkbox_tick_color = theme::TEXT_PRIMARY;
-    let dir_label_color = t.faint_text;
-    let dir_label_hover = t.muted_text;
+    let dir_label_color = t.text_subtle;
+    let dir_label_hover = t.text_muted;
 
     let chevron_icon = if is_collapsed {
         IconName::ChevronRight
@@ -598,14 +598,14 @@ fn unified_file_row(
 
     // Snapshot every row chrome colour from the live theme.
     let t = theme::current(cx);
-    let checkbox_border = t.git_stage_checkbox_border;
+    let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
     let checkbox_tick_color = theme::TEXT_PRIMARY;
     let cursor_border_color = theme::PRIMARY;
     let row_selected_bg = t.git_file_row_selected_bg;
     let row_hover_bg = t.git_file_row_hover_bg;
-    let filename_color = t.muted_text;
+    let filename_color = t.text_muted;
     let diff_add_color = t.file_diff_stat_add;
     let diff_del_color = t.file_diff_stat_del;
 
@@ -852,7 +852,7 @@ fn unified_file_row(
 // ----------------------------------------------------------------
 
 fn commit_footer(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
-    let border = theme::current(cx).git_commit_border;
+    let border = theme::current(cx).border;
     div()
         .flex()
         .flex_col()
@@ -877,7 +877,7 @@ fn git_changes_scrollbar(handle: &gpui::ScrollHandle, cx: &gpui::App) -> Option<
         viewport_h + max_offset,
         handle.offset().y,
         px(0.),
-        t.dock_scrollbar_thumb,
+        t.scrollbar_thumb,
         t.dock_scrollbar_thumb_hover,
     )
 }
@@ -891,7 +891,7 @@ fn loading_placeholder(
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
-    let text_color = theme::current(cx).faint_text;
+    let text_color = theme::current(cx).text_subtle;
     let workspace = snap.workspace.clone();
     let active_ref = snap.active;
     let refresh_btn = button("git-refresh-fallback", app_strings::git_refresh_btn()).on_click(
@@ -922,7 +922,7 @@ fn clean_placeholder(cx: &gpui::App) -> impl IntoElement {
         .items_center()
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
+        .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(app_strings::git_no_changes()))
 }
 
@@ -944,7 +944,7 @@ fn non_git_placeholder(
     use crate::ui::Disableable as _;
     let init_btn = init_btn.disabled(in_flight).loading(in_flight);
 
-    let text_color = theme::current(cx).dock_placeholder_text;
+    let text_color = theme::current(cx).text_subtle;
     div()
         .flex_1()
         .flex()

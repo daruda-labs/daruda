@@ -124,8 +124,8 @@ impl Render for ErrorReportModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
         let body_bg = t.error_modal_body_bg;
-        let body_border = t.error_modal_body_border;
-        let body_text = t.toast_text;
+        let body_border = t.border;
+        let body_text = t.text_body;
         let body = div()
             .id("error-modal-body")
             .flex()

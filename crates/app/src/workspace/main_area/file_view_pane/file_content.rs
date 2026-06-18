@@ -52,6 +52,7 @@ pub(in crate::workspace) fn load_file_content(
             staged,
             file_status,
             syntax_theme,
+            diagram_dark,
         )),
     }
 }
@@ -122,7 +123,8 @@ fn load_raw(
             let ext = path.extension_str();
 
             if ext == "md" || ext == "markdown" {
-                let mut blocks = super::markdown_viewer::parse_markdown(&text, syntax_theme);
+                let mut blocks =
+                    super::markdown_viewer::parse_markdown(&text, syntax_theme, !diagram_dark);
                 if let Some(base_dir) = path.parent().map(std::path::Path::to_path_buf) {
                     super::markdown_viewer::resolve_images(&mut blocks, &mut |url| {
                         super::visual::load_image_source(url, &base_dir)
@@ -147,7 +149,7 @@ fn load_raw(
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);
-                highlight_raw_rows(&mut raw_rows, ext, syntax_theme);
+                highlight_raw_rows(&mut raw_rows, ext, syntax_theme, !diagram_dark);
                 return LoadOutcome::Plain(PaneFileContent::LoadedMarkdown {
                     blocks,
                     raw_rows,
@@ -179,6 +181,7 @@ fn load_diff(
     staged: bool,
     file_status: Option<char>,
     syntax_theme: &str,
+    diagram_dark: bool,
 ) -> PaneFileContent {
     if repo_root.is_none() {
         return PaneFileContent::Error("No git repository root".to_owned());
@@ -216,7 +219,7 @@ fn load_diff(
 
             // Phase 3: syntax highlighting (file extension → language detection).
             let ext = path.extension_str();
-            highlight_hunks(&mut hunks, ext, syntax_theme);
+            highlight_hunks(&mut hunks, ext, syntax_theme, !diagram_dark);
 
             // Phase 4: word-level diff for adjacent Removed/Added pairs.
             apply_word_diff(&mut hunks);

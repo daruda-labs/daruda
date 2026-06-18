@@ -52,7 +52,7 @@ pub(super) fn claude_badges_row(
 ) -> impl IntoElement + use<> {
     let count = sessions.len();
     let label = format!("{count}{}", surface_strings::claude_sessions_label_suffix());
-    let faint_text = theme::current(cx).faint_text;
+    let faint_text = theme::current(cx).text_subtle;
     div()
         .flex()
         .flex_row()

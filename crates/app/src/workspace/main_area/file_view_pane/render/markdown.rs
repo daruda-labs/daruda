@@ -20,7 +20,7 @@ pub(super) fn render_md_body(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let body_text = t.file_viewer_text;
+    let body_text = t.text_body;
     let block_sel_bg = theme::SELECTION_BG;
     let t = t.clone();
     let mut col = div()
@@ -93,13 +93,13 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         }
 
         MdBlock::CodeBlock { rows, .. } => {
-            let body_text = t.file_viewer_text;
+            let body_text = t.text_body;
             let mut code_col = div()
                 .flex()
                 .flex_col()
                 .bg(t.md_code_block_bg)
                 .border_1()
-                .border_color(t.md_code_block_border)
+                .border_color(t.border)
                 .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
                 .px(px(theme::MD_CODE_BLOCK_PAD_X))
                 .py(px(theme::MD_CODE_BLOCK_PAD_Y))
@@ -133,13 +133,13 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             None => {
                 // Rendering failed/pending: fall back to the raw source, styled
                 // like a code block.
-                let body_text = t.file_viewer_text;
+                let body_text = t.text_body;
                 let mut col = div()
                     .flex()
                     .flex_col()
                     .bg(t.md_code_block_bg)
                     .border_1()
-                    .border_color(t.md_code_block_border)
+                    .border_color(t.border)
                     .rounded(px(theme::MD_CODE_BLOCK_RADIUS))
                     .px(px(theme::MD_CODE_BLOCK_PAD_X))
                     .py(px(theme::MD_CODE_BLOCK_PAD_Y))
@@ -231,7 +231,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                 div()
                     .flex_none()
                     .w(px(theme::MD_BLOCKQUOTE_BORDER_W))
-                    .bg(t.md_blockquote_border)
+                    .bg(t.border)
                     .rounded(px(theme::MD_BLOCKQUOTE_BORDER_W / 2.0)),
             )
             .child(
@@ -240,7 +240,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                     .flex_row()
                     .flex_wrap()
                     .italic()
-                    .text_color(t.md_blockquote_text)
+                    .text_color(t.text_muted)
                     .children(render_md_spans(spans, t)),
             )
             .into_any_element(),
@@ -248,7 +248,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         MdBlock::Rule => div()
             .w_full()
             .h(px(theme::MD_RULE_H))
-            .bg(t.md_rule_color)
+            .bg(t.border)
             .my(px(theme::MD_BLOCK_MARGIN_Y))
             .into_any_element(),
 
@@ -277,8 +277,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             .into_any_element(),
 
         MdBlock::Table { header, rows } => {
-            let table_border = t.md_table_border;
-            let body_text = t.file_viewer_text;
+            let table_border = t.border;
+            let body_text = t.text_body;
             let render_cell = |cell: &[MdSpan], is_header: bool, is_last: bool| {
                 let mut d = div()
                     .flex_1()

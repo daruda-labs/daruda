@@ -155,10 +155,10 @@ impl RenderOnce for ContextMenu {
         } = self;
 
         let t = theme::current(cx);
-        let panel_border = t.modal_panel_border;
+        let panel_border = t.border;
         let panel_bg = t.modal_panel_bg;
         let item_text = theme::TEXT_PRIMARY;
-        let item_disabled_text = t.disabled_item_text;
+        let item_disabled_text = t.text_subtle;
         let item_hover_bg = t.lane_row_hover_bg;
 
         let mut menu = div()

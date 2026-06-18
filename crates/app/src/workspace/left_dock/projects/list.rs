@@ -222,7 +222,7 @@ fn empty_state(cx: &mut Context<Dock>) -> impl IntoElement {
         .justify_center()
         .gap(px(theme::MAIN_EMPTY_STATE_GAP))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
+        .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(
             surface_strings::projects_empty_state(),
         ))

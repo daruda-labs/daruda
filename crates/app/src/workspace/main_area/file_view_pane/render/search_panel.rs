@@ -21,9 +21,9 @@ pub(super) fn render_search_panel(
     let focused_n = search.focused.map(|i| i + 1).unwrap_or(0);
 
     let t = theme::current(cx);
-    let count_color = t.file_viewer_search_count;
+    let count_color = t.text_muted;
     let empty_color = t.file_viewer_search_empty;
-    let text_color = t.file_viewer_search_text;
+    let text_color = t.text_body;
     let button_color = theme::SEARCH_BUTTON;
 
     let (counter, counter_color) = if !has_query {

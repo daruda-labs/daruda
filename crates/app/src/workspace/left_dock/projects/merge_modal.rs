@@ -469,7 +469,7 @@ impl Render for MergeModal {
 
         let t = theme::current(cx);
         let strong_text = theme::TEXT_PRIMARY;
-        let muted_text = t.muted_text;
+        let muted_text = t.text_muted;
         let row_hover_bg = t.lane_row_hover_bg;
         let radio_dot_color = theme::TEXT_PRIMARY;
 

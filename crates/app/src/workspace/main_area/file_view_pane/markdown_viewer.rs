@@ -108,7 +108,11 @@ pub(in crate::workspace) enum MdBlock {
 
 /// Parse `text` into a `Vec<MdBlock>`. Code fences are syntax-highlighted
 /// using `syntax_theme` (falls back to the bundled default on unknown names).
-pub(in crate::workspace) fn parse_markdown(text: &str, syntax_theme: &str) -> Vec<MdBlock> {
+pub(in crate::workspace) fn parse_markdown(
+    text: &str,
+    syntax_theme: &str,
+    is_light: bool,
+) -> Vec<MdBlock> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TABLES);
@@ -120,7 +124,7 @@ pub(in crate::workspace) fn parse_markdown(text: &str, syntax_theme: &str) -> Ve
     let mut blocks = Vec::new();
 
     while pos < events.len() {
-        if let Some((block, consumed)) = parse_block(&events, pos, syntax_theme) {
+        if let Some((block, consumed)) = parse_block(&events, pos, syntax_theme, is_light) {
             blocks.push(block);
             pos += consumed;
         } else {
@@ -134,7 +138,12 @@ pub(in crate::workspace) fn parse_markdown(text: &str, syntax_theme: &str) -> Ve
 // Block-level parsing helpers
 // ----------------------------------------------------------------
 
-fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(MdBlock, usize)> {
+fn parse_block(
+    events: &[Event<'_>],
+    pos: usize,
+    syntax_theme: &str,
+    is_light: bool,
+) -> Option<(MdBlock, usize)> {
     match &events[pos] {
         Event::Start(Tag::Heading { level, .. }) => {
             let (spans, consumed) = collect_inline_until(events, pos + 1, |e| {
@@ -178,7 +187,7 @@ fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(
             }
             let mut rows = build_code_rows(&text);
             if let Some(ref l) = lang {
-                highlight_raw_rows(&mut rows, l, syntax_theme);
+                highlight_raw_rows(&mut rows, l, syntax_theme, is_light);
             }
             Some((MdBlock::CodeBlock { lang, rows }, consumed + 2))
         }
@@ -198,7 +207,7 @@ fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(
             while i < events.len() {
                 match &events[i] {
                     Event::Start(Tag::Item) => {
-                        let (item, consumed) = parse_item(events, i + 1, syntax_theme);
+                        let (item, consumed) = parse_item(events, i + 1, syntax_theme, is_light);
                         items.push(item);
                         i += consumed + 2;
                     }
@@ -324,7 +333,12 @@ fn parse_block(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> Option<(
 
 /// Parse one list item starting at `pos` (just after `Start(Item)`).
 /// Returns the item and the number of events consumed (NOT including `End(Item)`).
-fn parse_item(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> (ListItem, usize) {
+fn parse_item(
+    events: &[Event<'_>],
+    pos: usize,
+    syntax_theme: &str,
+    is_light: bool,
+) -> (ListItem, usize) {
     let mut i = pos;
 
     // Task list marker is always the first event in task list items.
@@ -354,7 +368,7 @@ fn parse_item(events: &[Event<'_>], pos: usize, syntax_theme: &str) -> (ListItem
 
             // Nested list — recurse via parse_block.
             Event::Start(Tag::List(_)) => {
-                if let Some((block, consumed)) = parse_block(events, i, syntax_theme) {
+                if let Some((block, consumed)) = parse_block(events, i, syntax_theme, is_light) {
                     children.push(block);
                     i += consumed;
                 } else {
@@ -759,13 +773,13 @@ mod tests {
 
     #[test]
     fn parse_heading() {
-        let blocks = parse_markdown("# Hello\n", "base16-ocean.dark");
+        let blocks = parse_markdown("# Hello\n", "base16-ocean.dark", false);
         assert!(matches!(blocks[0], MdBlock::Heading { level: 1, .. }));
     }
 
     #[test]
     fn parse_paragraph_with_inline() {
-        let blocks = parse_markdown("normal **bold** text\n", "base16-ocean.dark");
+        let blocks = parse_markdown("normal **bold** text\n", "base16-ocean.dark", false);
         assert!(matches!(blocks[0], MdBlock::Paragraph(_)));
         if let MdBlock::Paragraph(spans) = &blocks[0] {
             assert!(spans.iter().any(|s| matches!(s, MdSpan::Bold(_))));
@@ -775,7 +789,7 @@ mod tests {
     #[test]
     fn parse_fenced_code_block() {
         let md = "```rust\nfn main() {}\n```\n";
-        let blocks = parse_markdown(md, "base16-ocean.dark");
+        let blocks = parse_markdown(md, "base16-ocean.dark", false);
         assert!(matches!(
             blocks[0],
             MdBlock::CodeBlock { lang: Some(_), .. }
@@ -784,7 +798,7 @@ mod tests {
 
     #[test]
     fn parse_bullet_list() {
-        let blocks = parse_markdown("- item one\n- item two\n", "base16-ocean.dark");
+        let blocks = parse_markdown("- item one\n- item two\n", "base16-ocean.dark", false);
         assert!(matches!(blocks[0], MdBlock::BulletList(_)));
         if let MdBlock::BulletList(items) = &blocks[0] {
             assert_eq!(items.len(), 2);
@@ -793,7 +807,7 @@ mod tests {
 
     #[test]
     fn parse_horizontal_rule() {
-        let blocks = parse_markdown("---\n", "base16-ocean.dark");
+        let blocks = parse_markdown("---\n", "base16-ocean.dark", false);
         assert!(matches!(blocks[0], MdBlock::Rule));
     }
 

@@ -228,7 +228,7 @@ fn empty_state(filter: TaskFilter, cx: &gpui::App) -> AnyElement {
     crate::ui::placeholder_text(msg)
         .py(px(theme::RIGHT_PANEL_PAD_Y))
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
+        .text_color(theme::current(cx).text_subtle)
         .into_any_element()
 }
 
@@ -293,7 +293,7 @@ fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
     let (done, total) = task.subtask_progress();
     div()
         .flex_none()
-        .text_color(theme::current(cx).muted_text)
+        .text_color(theme::current(cx).text_muted)
         .child(SharedString::from(format!(
             "{}{}/{}",
             ux_strings::RIGHT_PANEL_SUBTASK_PROGRESS_GLYPH,

@@ -80,7 +80,7 @@ fn header(plan: Option<&PlanInfo>, cx: &gpui::App) -> impl IntoElement {
             div()
                 .flex_grow()
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
-                .text_color(t.muted_text)
+                .text_color(t.text_muted)
                 .child(SharedString::from(strings::usage_brand_title())),
         );
 
@@ -206,7 +206,7 @@ fn gauge_card(
     let Some(win) = window else {
         // Placeholder: label + dim bar + "Unavailable".
         return card
-            .child(gauge_header_row(label, None, t.muted_text, t.faint_text))
+            .child(gauge_header_row(label, None, t.text_muted, t.text_subtle))
             .child(gauge_bar(0.0, t.gauge_track_bg))
             .into_any_element();
     };
@@ -222,15 +222,15 @@ fn gauge_card(
         .child(gauge_header_row(
             label,
             Some(pct),
-            t.faint_text,
-            t.muted_text,
+            t.text_subtle,
+            t.text_muted,
         ))
         .child(gauge_bar(pct, color));
     if let Some(reset) = reset_text {
         card = card.child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-                .text_color(t.faint_text)
+                .text_color(t.text_subtle)
                 .child(SharedString::from(reset)),
         );
     }
@@ -342,13 +342,13 @@ fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
                 .child(
                     div()
                         .text_size(px(theme::USAGE_STAT_VALUE_FONT_SIZE))
-                        .text_color(t.muted_text)
+                        .text_color(t.text_muted)
                         .child(SharedString::from(value)),
                 )
                 .child(
                     div()
                         .text_size(px(theme::USAGE_STAT_LABEL_FONT_SIZE))
-                        .text_color(t.faint_text)
+                        .text_color(t.text_subtle)
                         .child(SharedString::from(label)),
                 ),
         ),
@@ -423,7 +423,7 @@ fn chart_bar(
     let label = parsed
         .map(|d| strings::usage_weekday_label(d.weekday().num_days_from_sunday() as u8))
         .unwrap_or_default();
-    let label_color = theme::current(cx).faint_text;
+    let label_color = theme::current(cx).text_subtle;
 
     div()
         .flex_1()
@@ -506,13 +506,13 @@ fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement 
                 .child(
                     div()
                         .text_size(px(theme::USAGE_TOTAL_VALUE_FONT_SIZE))
-                        .text_color(t.muted_text)
+                        .text_color(t.text_muted)
                         .child(SharedString::from(value)),
                 )
                 .child(
                     div()
                         .text_size(px(theme::USAGE_TOTAL_LABEL_FONT_SIZE))
-                        .text_color(t.faint_text)
+                        .text_color(t.text_subtle)
                         .child(SharedString::from(label)),
                 ),
         ),
@@ -528,7 +528,7 @@ fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement 
 fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
     let color = indicator_color(status.indicator);
     let label = strings::service_status_label(status);
-    let muted_text = theme::current(cx).muted_text;
+    let muted_text = theme::current(cx).text_muted;
     let mut tint = color;
     tint.a = theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA;
 

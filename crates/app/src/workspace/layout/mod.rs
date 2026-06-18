@@ -222,7 +222,7 @@ impl Render for Dock {
         }
 
         let t = theme::current(cx);
-        let dock_border = t.dock_border;
+        let dock_border = t.border;
         let dock_bg = t.dock_bg;
 
         let (header_el, content_el) = match &self.snap {

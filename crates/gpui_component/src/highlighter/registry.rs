@@ -217,6 +217,20 @@ impl ThemeStyle {
             font_weight: None,
         }
     }
+
+    /// Builder: render this token bold. Lets the host seed a non-color
+    /// channel (figure/ground without relying on chroma) alongside the
+    /// foreground colour.
+    pub fn bold(mut self) -> Self {
+        self.font_weight = Some(FontWeightContent::Bold);
+        self
+    }
+
+    /// Builder: render this token italic.
+    pub fn italic(mut self) -> Self {
+        self.font_style = Some(FontStyle::Italic);
+        self
+    }
 }
 
 impl From<ThemeStyle> for HighlightStyle {

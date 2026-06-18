@@ -140,18 +140,35 @@ pub fn init_if_missing(cx: &mut App) {
 /// palette that was active at app start.
 pub fn apply_daruda_palette(cx: &mut App) {
     Theme::change(ThemeMode::Dark, None, cx);
-    // Snapshot the active DarudaTheme as a value so the subsequent
-    // `Theme::global_mut(cx)` mutable borrow doesn't conflict.
+    // Snapshot values before the `Theme::global_mut(cx)` mutable borrow.
     let d = cx.global::<DarudaTheme>().clone();
+    let palette = active_syntax_palette(cx);
+    // Pick the light or dark variant of the syntax palette to match the
+    // active UI theme's editor background, so syntax stays legible on light.
+    let syntax_is_light = !d.is_dark();
+    // Light-aware surface picks. gpui_component-themed surfaces (base bg,
+    // lists, tabs, selected rows) were hard-locked to the dark consts, so
+    // they rendered dark on the light theme. Pick the cool-tinted light
+    // ladder when the active theme is light.
+    let s_canvas = if syntax_is_light {
+        LIGHT_CANVAS
+    } else {
+        CANVAS
+    };
+    let s_surface_1 = if syntax_is_light {
+        LIGHT_SURFACE_1
+    } else {
+        SURFACE_1
+    };
     let t = Theme::global_mut(cx);
 
     // ---------------------------------------------------------------
     // Surfaces
     // ---------------------------------------------------------------
-    t.background = SURFACE_1;
+    t.background = s_surface_1;
     t.popover = d.modal_panel_bg;
     t.popover_foreground = TEXT_PRIMARY;
-    t.list = SURFACE_1;
+    t.list = s_surface_1;
     t.list_head = d.tab_inactive_bg;
     t.list_even = d.modal_panel_bg;
     // Transparent accordion bg so the right-bar Skills tab's plugin
@@ -162,20 +179,20 @@ pub fn apply_daruda_palette(cx: &mut App) {
     t.accordion = TRANSPARENT;
     t.muted = d.tab_inactive_bg;
     t.group_box = d.modal_panel_bg;
-    t.group_box_foreground = d.muted_text;
+    t.group_box_foreground = d.text_muted;
 
     // ---------------------------------------------------------------
     // Foreground (text)
     // ---------------------------------------------------------------
     t.foreground = TEXT_PRIMARY;
-    t.muted_foreground = d.muted_text;
-    t.description_list_label_foreground = d.muted_text;
+    t.muted_foreground = d.text_muted;
+    t.description_list_label_foreground = d.text_muted;
 
     // ---------------------------------------------------------------
     // Borders
     // ---------------------------------------------------------------
-    t.border = d.modal_panel_border;
-    t.input = d.modal_input_border;
+    t.border = d.border;
+    t.input = d.border;
     t.drag_border = PRIMARY;
 
     // ---------------------------------------------------------------
@@ -205,14 +222,14 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.secondary = d.button_widget_bg;
     t.secondary_hover = d.button_widget_bg_hover;
-    t.secondary_active = CANVAS;
-    t.secondary_foreground = d.modal_secondary_text;
+    t.secondary_active = s_canvas;
+    t.secondary_foreground = d.text_body;
 
     // ---------------------------------------------------------------
     // List rows / accordion (hover + selection)
     // ---------------------------------------------------------------
     t.list_hover = d.lane_row_hover_bg;
-    t.list_active = CANVAS;
+    t.list_active = s_canvas;
     t.list_active_border = PRIMARY;
     t.accordion_hover = d.lane_row_hover_bg;
 
@@ -248,11 +265,11 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // sub-tab usage (left/right dock view tabs, segmented controls).
     // ---------------------------------------------------------------
     t.tab = d.tab_inactive_bg;
-    t.tab_active = CANVAS;
+    t.tab_active = s_canvas;
     t.tab_active_foreground = TEXT_PRIMARY;
-    t.tab_bar = SURFACE_1;
+    t.tab_bar = s_surface_1;
     t.tab_bar_segmented = d.tab_inactive_bg;
-    t.tab_foreground = d.tab_inactive_text;
+    t.tab_foreground = d.text_muted;
 
     // ---------------------------------------------------------------
     // Scrollbar / progress / skeleton
@@ -290,7 +307,38 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // diverges from the diff view.
     // ---------------------------------------------------------------
     let mut highlight = (*HighlightTheme::default_dark()).clone();
-    highlight.style.editor_foreground = Some(p::syntax_theme().default);
-    highlight.style.syntax = p::editor_syntax_colors();
+    highlight.style.editor_foreground = Some(p::syntax_theme_of(palette, syntax_is_light).default);
+    highlight.style.syntax = p::editor_syntax_colors_of(palette, syntax_is_light);
+    // The default-dark active-line band is dark; on a light editor it reads
+    // as a black stripe. Use a faint cool-light band in light mode.
+    if syntax_is_light {
+        highlight.style.editor_active_line = Some(LIGHT_SURFACE_1);
+    }
     t.highlight_theme = Arc::new(highlight);
+}
+
+/// The active syntax palette, mirrored from `config.file_viewer.syntax_theme`
+/// into a Global so [`apply_daruda_palette`] (which has no config access — it
+/// also runs on light/dark theme switches) can re-seed the editor highlight
+/// colours without losing the user's selection. Single update site:
+/// [`set_active_syntax_palette`], called from the config-reload path.
+#[derive(Clone, Copy, Default)]
+struct ActiveSyntaxPalette(p::SyntaxPalette);
+
+impl gpui::Global for ActiveSyntaxPalette {}
+
+/// Read the active syntax palette (defaults to the recommended
+/// [`SyntaxPalette::Daruda`](p::SyntaxPalette::Daruda) before any config load).
+pub fn active_syntax_palette(cx: &App) -> p::SyntaxPalette {
+    cx.try_global::<ActiveSyntaxPalette>()
+        .map(|g| g.0)
+        .unwrap_or_default()
+}
+
+/// Set the active syntax palette and re-bridge the editor highlight theme so
+/// the raw editor picks up the new colours. The single source remains the
+/// config string; this mirrors the resolved selection for the GPUI side.
+pub fn set_active_syntax_palette(cx: &mut App, palette: p::SyntaxPalette) {
+    cx.set_global(ActiveSyntaxPalette(palette));
+    apply_daruda_palette(cx);
 }

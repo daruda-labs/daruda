@@ -277,7 +277,7 @@ impl ModalView for CreateWorktreeModal {}
 
 impl Render for CreateWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted_text = theme::current(cx).muted_text;
+        let muted_text = theme::current(cx).text_muted;
         let body = div()
             .flex()
             .flex_col()

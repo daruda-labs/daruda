@@ -121,7 +121,11 @@ fn availability_chip(icon: IconName, label: String, label_color: gpui::Hsla) -> 
 /// (e.g. `⎇ main`). Uses `GalleryVerticalEnd` as the branch glyph — the
 /// closest available icon to the standard branch symbol; no dedicated
 /// `GitBranch` variant exists in the current icon set.
-fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElement {
+fn branch_chip(
+    branch: SharedString,
+    label_color: gpui::Hsla,
+    chip_bg: gpui::Hsla,
+) -> impl IntoElement {
     div()
         .flex()
         .flex_none() // must not stretch: sits right-aligned after the flex_1 name and keeps its intrinsic width
@@ -135,7 +139,7 @@ fn branch_chip(branch: SharedString, label_color: gpui::Hsla) -> impl IntoElemen
         .border_color(theme::BORDER)
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(label_color)
-        .bg(theme::SURFACE_3)
+        .bg(chip_bg)
         .child(
             Icon::new(IconName::GalleryVerticalEnd)
                 .with_size(px(theme::LANE_SUB_FONT_SIZE))
@@ -374,9 +378,9 @@ pub(in crate::workspace) fn project_header_row(
     let label_color = if is_active && !is_unavailable {
         theme::TEXT_PRIMARY
     } else {
-        t.muted_text
+        t.text_muted
     };
-    let chip_color = t.faint_text;
+    let chip_color = t.text_subtle;
     let row_hover_bg = t.lane_row_hover_bg;
     let row_active_bg = t.lane_card_active_bg;
     let drop_target_bg = t.lane_drop_target_bg;
@@ -519,7 +523,12 @@ pub(in crate::workspace) fn project_header_row(
         // default branch is known and the project is not in an error state so
         // it doesn't compete visually with the availability chip.
         .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {
-            row.child(branch_chip(branch, chip_color))
+            let chip_bg = if t.is_dark() {
+                theme::SURFACE_3
+            } else {
+                theme::LIGHT_SURFACE_2
+            };
+            row.child(branch_chip(branch, chip_color, chip_bg))
         })
         .when_some(avail_badge, |row, (icon, state_label)| {
             row.child(availability_chip(icon, state_label, chip_color))
@@ -707,11 +716,11 @@ pub(in crate::workspace) fn worktree_row(
     let t = theme::current(cx);
     let unread_dot_color = theme::WARNING;
     let label_active = theme::TEXT_PRIMARY;
-    let label_inactive = t.muted_text;
+    let label_inactive = t.text_muted;
     let badge_pill_bg = theme::OVERLAY_PROMINENT;
     let badge_pill_text = theme::TEXT_PRIMARY;
     let badge_arrow_text = theme::TEXT_TERTIARY;
-    let sublabel_color = t.faint_text;
+    let sublabel_color = t.text_subtle;
     let row_hover_bg = t.lane_row_hover_bg;
     let row_active_bg = t.lane_card_active_bg;
     let drop_target_bg = t.lane_drop_target_bg;
@@ -1004,8 +1013,8 @@ pub(in crate::workspace) fn worktree_row(
 
 pub(in crate::workspace) fn non_git_placeholder(cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
-    let hint_color = t.faint_text;
-    let init_color = t.muted_text;
+    let hint_color = t.text_subtle;
+    let init_color = t.text_muted;
     div()
         .flex()
         .flex_col()

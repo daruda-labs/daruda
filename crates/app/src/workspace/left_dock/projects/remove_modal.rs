@@ -206,8 +206,8 @@ impl ModalView for RemoveWorktreeModal {}
 impl Render for RemoveWorktreeModal {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
-        let muted_text = t.muted_text;
-        let faint_text = t.faint_text;
+        let muted_text = t.text_muted;
+        let faint_text = t.text_subtle;
         let mut body = div()
             .flex()
             .flex_col()

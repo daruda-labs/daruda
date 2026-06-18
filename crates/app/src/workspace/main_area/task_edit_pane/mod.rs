@@ -43,10 +43,10 @@ pub(in crate::workspace) fn render(
 ) -> impl IntoElement {
     let theme_t = theme::current(cx);
     let pane_bg = theme_t.task_edit_bg;
-    let scrollbar_thumb = theme_t.task_edit_scrollbar_thumb;
+    let scrollbar_thumb = theme_t.scrollbar_thumb;
     let scrollbar_thumb_hover = theme_t.task_edit_scrollbar_thumb_hover;
     let pane_text = theme::TEXT_PRIMARY;
-    let label_color = theme_t.muted_text;
+    let label_color = theme_t.text_muted;
 
     // Title field doubles as the pane's discard affordance: the
     // destructive close sits at the far right of the "Title" label row
@@ -362,7 +362,7 @@ fn subtasks_section(
 }
 
 fn draft_subtasks_hint(_te: &TaskEditContent, cx: &gpui::App) -> gpui::AnyElement {
-    let muted = theme::current(cx).muted_text;
+    let muted = theme::current(cx).text_muted;
     div()
         .flex()
         .flex_col()
@@ -400,7 +400,7 @@ fn subtask_row(
     }));
 
     let t = theme::current(cx);
-    let muted_color = t.muted_text;
+    let muted_color = t.text_muted;
     let strong_color = theme::TEXT_PRIMARY;
 
     let title_body: gpui::AnyElement = if is_editing {
@@ -477,7 +477,7 @@ fn add_subtask_row(te: &TaskEditContent, cx: &gpui::App) -> impl IntoElement {
 fn field_label_shared(text: SharedString, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
+        .text_color(theme::current(cx).text_muted)
         .child(text)
 }
 
@@ -495,7 +495,7 @@ fn labeled_field(
 }
 
 fn field_label(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
-    field_label_with_color(text, theme::current(cx).muted_text)
+    field_label_with_color(text, theme::current(cx).text_muted)
 }
 
 fn field_label_with_color(
@@ -516,7 +516,7 @@ fn field_label_with_color(
 fn field_hint(text: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
+        .text_color(theme::current(cx).text_muted)
         .child(text.into())
 }
 

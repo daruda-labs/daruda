@@ -1607,11 +1607,64 @@ pub fn settings_label_show_hidden() -> String {
 pub fn settings_label_use_gitignore() -> String {
     rust_i18n::t!("settings.label_use_gitignore").into_owned()
 }
-pub fn settings_section_file_viewer() -> String {
-    rust_i18n::t!("settings.section_file_viewer").into_owned()
-}
 pub fn settings_label_syntax_theme() -> String {
     rust_i18n::t!("settings.label_syntax_theme").into_owned()
+}
+
+pub fn settings_syntax_theme_daruda() -> String {
+    rust_i18n::t!("settings.syntax_theme_daruda").into_owned()
+}
+
+pub fn settings_syntax_theme_one_dark() -> String {
+    rust_i18n::t!("settings.syntax_theme_one_dark").into_owned()
+}
+
+pub fn settings_syntax_theme_tokyo_night() -> String {
+    rust_i18n::t!("settings.syntax_theme_tokyo_night").into_owned()
+}
+
+pub fn settings_syntax_theme_catppuccin_mocha() -> String {
+    rust_i18n::t!("settings.syntax_theme_catppuccin_mocha").into_owned()
+}
+
+pub fn settings_syntax_theme_dracula() -> String {
+    rust_i18n::t!("settings.syntax_theme_dracula").into_owned()
+}
+
+pub fn settings_syntax_theme_github_dark() -> String {
+    rust_i18n::t!("settings.syntax_theme_github_dark").into_owned()
+}
+
+pub fn settings_syntax_theme_material_palenight() -> String {
+    rust_i18n::t!("settings.syntax_theme_material_palenight").into_owned()
+}
+
+pub fn settings_syntax_theme_monokai() -> String {
+    rust_i18n::t!("settings.syntax_theme_monokai").into_owned()
+}
+
+pub fn settings_syntax_theme_nord() -> String {
+    rust_i18n::t!("settings.syntax_theme_nord").into_owned()
+}
+
+pub fn settings_syntax_theme_gruvbox_dark() -> String {
+    rust_i18n::t!("settings.syntax_theme_gruvbox_dark").into_owned()
+}
+
+pub fn settings_syntax_theme_solarized_dark() -> String {
+    rust_i18n::t!("settings.syntax_theme_solarized_dark").into_owned()
+}
+
+pub fn settings_syntax_theme_ayu_mirage() -> String {
+    rust_i18n::t!("settings.syntax_theme_ayu_mirage").into_owned()
+}
+
+pub fn settings_syntax_theme_night_owl() -> String {
+    rust_i18n::t!("settings.syntax_theme_night_owl").into_owned()
+}
+
+pub fn settings_syntax_theme_darcula() -> String {
+    rust_i18n::t!("settings.syntax_theme_darcula").into_owned()
 }
 
 // ----------------------------------------------------------------
@@ -1639,9 +1692,6 @@ pub fn settings_nav_terminal() -> String {
 }
 pub fn settings_nav_sidebar() -> String {
     rust_i18n::t!("settings.nav_sidebar").into_owned()
-}
-pub fn settings_nav_file_viewer() -> String {
-    rust_i18n::t!("settings.nav_file_viewer").into_owned()
 }
 pub fn settings_nav_clipboard() -> String {
     rust_i18n::t!("settings.nav_clipboard").into_owned()

@@ -222,6 +222,18 @@ impl WindowRegistry {
             .map(|(h, w)| (*h, w.clone()))
     }
 
+    /// First registered workspace `(handle, weak)`, ignoring OS focus. The
+    /// `--screenshot-scenario` driver targets the same window the capture
+    /// uses (the first open window); in an automated launch no window is the
+    /// active one, so [`active_workspace`] returns `None` there.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn first_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
+        cx.try_global::<WindowRegistry>()?
+            .workspaces
+            .first()
+            .cloned()
+    }
+
     /// Record the live Settings singleton. Called from
     /// `SettingsWindow::new_with_section` so the entry is in place before the
     /// first render. Replaces any previous entry (the caller path guarantees
@@ -293,6 +305,17 @@ impl WindowRegistry {
     pub(crate) fn welcome_window(cx: &App) -> Option<AnyWindowHandle> {
         cx.try_global::<WindowRegistry>()?
             .welcome
+            .as_ref()
+            .map(|h| h.window)
+    }
+
+    /// Return the window handle of the open Settings window, if any. Used by
+    /// the `--screenshot-scenario settings` driver to capture the Settings
+    /// window (a separate window) instead of the workspace.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn settings_window(cx: &App) -> Option<AnyWindowHandle> {
+        cx.try_global::<WindowRegistry>()?
+            .settings
             .as_ref()
             .map(|h| h.window)
     }

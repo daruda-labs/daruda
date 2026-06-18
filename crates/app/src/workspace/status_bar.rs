@@ -42,17 +42,17 @@ impl RenderOnce for StatusBar {
         let data = self.0;
         // Snapshot every theme slot once so the chain below reads each
         // colour through the live `DarudaTheme` Global; the four mid-render
-        // `.text_color(t.muted_text)` etc. lookups stay consistent even if
+        // `.text_color(t.text_muted)` etc. lookups stay consistent even if
         // a theme swap fires between expressions.
         let t = theme::current(cx);
-        let muted = t.muted_text;
-        let faint = t.faint_text;
+        let muted = t.text_muted;
+        let faint = t.text_subtle;
         let project_dot = t.status_bar_project_dot;
         let error_color = theme::ERROR;
         let detached_bg = t.status_bar_detached_bg;
         let detached_text = t.status_bar_detached_text;
         let bg = t.status_bar_bg;
-        let border = t.status_bar_border;
+        let border = t.border;
 
         // Detached chip is meaningful only when there's a
         // project/branch slot to anchor next to; in Welcome state

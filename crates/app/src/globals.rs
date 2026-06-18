@@ -27,8 +27,15 @@ pub(crate) fn init_all(cx: &mut App) {
         let user = crate::settings_store::SettingsStore::global(cx).user();
         let preset = user.theme.ui_preset.clone();
         let lang = user.general.language.clone();
+        let syntax = user.file_viewer.syntax_theme.clone();
         ui::theme::apply_ui_theme(&preset, cx);
         apply_locale_str(&lang);
+        // Seed the selected syntax palette so the editor highlight theme
+        // matches the user's choice from the first paint (not the default).
+        ui::theme::set_active_syntax_palette(
+            cx,
+            ui::theme::SyntaxPalette::from_config_name(&syntax),
+        );
     }
     crate::agent::skills::global::init(cx);
     crate::agent::mcp::global::init(cx);

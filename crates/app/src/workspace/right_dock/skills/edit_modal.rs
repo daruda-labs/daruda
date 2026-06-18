@@ -502,7 +502,7 @@ fn readonly_value(value: impl Into<SharedString>, cx: &App) -> impl IntoElement 
         .rounded(px(theme::MODAL_BUTTON_RADIUS))
         .bg(t.modal_input_bg)
         .border_1()
-        .border_color(t.modal_input_border)
+        .border_color(t.border)
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
         .text_color(theme::TEXT_PRIMARY)
         .child(value.into())

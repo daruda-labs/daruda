@@ -49,9 +49,10 @@ pub fn apply_keybinding_overrides(
             continue;
         }
         // Per-section overrides come first so the dotted form wins over
-        // the bare `open_settings` arm. Unknown slugs fall through to
-        // the default (General) so a typo doesn't silently bind an
-        // unrelated action.
+        // the bare `open_settings` arm. An unknown dotted slug (typo, or a
+        // removed section like the former `file_viewer`) matches neither
+        // this arm nor the bare `open_settings` literal below, so it binds
+        // nothing rather than silently opening an unrelated section.
         if let Some(stripped) = name_str.strip_prefix("open_settings.")
             && let Some(section) = daruda_config::BuiltinSection::from_slug(stripped)
         {

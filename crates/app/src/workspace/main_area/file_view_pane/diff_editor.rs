@@ -15,7 +15,9 @@
 
 use std::ops::Range;
 
-use gpui::{HighlightStyle, Hsla, SharedString};
+use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
+
+use crate::ui::theme::TokenStyle;
 
 use crate::ui::LineDecoration;
 
@@ -46,7 +48,7 @@ impl DiffColors {
             hunk_bg: t.file_diff_hunk_bg,
             add_text: t.file_diff_add_text,
             del_text: t.file_diff_del_text,
-            ctx_text: t.file_diff_ctx_text,
+            ctx_text: t.text_muted,
             hunk_text: t.file_diff_hunk_text,
             hunk_ctx_text: t.file_diff_hunk_ctx_text,
             word_add_bg: t.file_diff_word_add_bg,
@@ -107,17 +109,17 @@ fn line_spans(
     // Foreground segments from the syntax spans (their `text` concatenates
     // to `content`). Fall back to one base-coloured segment when absent or
     // short.
-    let mut fg: Vec<(usize, usize, Hsla)> = Vec::new();
+    let mut fg: Vec<(usize, usize, Hsla, TokenStyle)> = Vec::new();
     let mut off = 0usize;
     for span in &row.spans {
         let end = (off + span.text.len()).min(line_text.len());
         if end > off {
-            fg.push((off, end, span.color.unwrap_or(base_fg)));
+            fg.push((off, end, span.color.unwrap_or(base_fg), span.style));
         }
         off = end;
     }
     if off < line_text.len() {
-        fg.push((off, line_text.len(), base_fg));
+        fg.push((off, line_text.len(), base_fg, TokenStyle::default()));
     }
     if fg.is_empty() {
         // Empty line: nothing to cover.
@@ -131,7 +133,7 @@ fn line_spans(
 
     // Boundary set: segment edges + word-change edges, clamped to the line.
     let mut bounds: Vec<usize> = vec![0, line_text.len()];
-    for (s, e, _) in &fg {
+    for (s, e, _, _) in &fg {
         bounds.push(*s);
         bounds.push(*e);
     }
@@ -148,11 +150,11 @@ fn line_spans(
         if a >= b {
             continue;
         }
-        let color = fg
+        let (color, style) = fg
             .iter()
-            .find(|(s, e, _)| *s <= a && a < *e)
-            .map(|(_, _, c)| *c)
-            .unwrap_or(base_fg);
+            .find(|(s, e, _, _)| *s <= a && a < *e)
+            .map(|(_, _, c, st)| (*c, *st))
+            .unwrap_or((base_fg, TokenStyle::default()));
         let bg = row
             .word_changes
             .iter()
@@ -163,6 +165,8 @@ fn line_spans(
             HighlightStyle {
                 color: Some(color),
                 background_color: bg,
+                font_weight: style.bold.then_some(FontWeight::BOLD),
+                font_style: style.italic.then_some(FontStyle::Italic),
                 ..Default::default()
             },
         ));
@@ -322,10 +326,12 @@ mod tests {
                     l: 0.9,
                     a: 1.,
                 }),
+                style: TokenStyle::default(),
             },
             HighlightedSpan {
                 text: "y = 2;".into(),
                 color: None,
+                style: TokenStyle::default(),
             },
         ];
         // The "y" differs at the word level (bytes 4..5).

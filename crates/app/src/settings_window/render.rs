@@ -140,7 +140,6 @@ impl SettingsWindow {
             BuiltinSection::Window => self.render_window(cx),
             BuiltinSection::Terminal => self.render_terminal(cx),
             BuiltinSection::LeftDock => self.render_sidebar(cx),
-            BuiltinSection::FileViewer => self.render_file_viewer(cx),
             BuiltinSection::Clipboard => self.render_clipboard(cx),
             BuiltinSection::Panels => self.render_panels(cx),
             BuiltinSection::ClaudeStatus => self.render_claude_status(cx),
@@ -219,7 +218,6 @@ fn section_nav_label(section: BuiltinSection) -> String {
         BuiltinSection::Window => s::settings_nav_window(),
         BuiltinSection::Terminal => s::settings_nav_terminal(),
         BuiltinSection::LeftDock => s::settings_nav_sidebar(),
-        BuiltinSection::FileViewer => s::settings_nav_file_viewer(),
         BuiltinSection::Clipboard => s::settings_nav_clipboard(),
         BuiltinSection::Panels => s::settings_nav_panels(),
         BuiltinSection::ClaudeStatus => s::settings_nav_claude_status(),
@@ -242,7 +240,7 @@ fn settings_scrollbar(
         viewport_h + max_offset,
         scroll_handle.offset().y,
         px(0.),
-        t.settings_scrollbar_thumb,
+        t.scrollbar_thumb,
         t.settings_scrollbar_thumb_hover,
     )
 }

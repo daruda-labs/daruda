@@ -43,6 +43,7 @@ impl Workspace {
             .expect("terminal_config_from always sets palette");
         self.font_family = config.font.family.clone();
         self.shell_program = config.shell.program.clone();
+        let syntax_theme_changed = self.syntax_theme != config.file_viewer.syntax_theme;
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.notifications = config.notifications.clone();
@@ -91,11 +92,23 @@ impl Workspace {
             // re-render on `cx.notify()` alone (Pitfall #10).
             self.notify_left_dock(cx);
         }
-        // A UI-theme switch changes the host appearance; re-render open
-        // markdown panes so their diagrams (mermaid) re-theme for the new
-        // surface — the bitmaps were baked for the previous appearance.
+        // A UI-theme switch changes the editor background's lightness, so the
+        // syntax palette flips its light/dark variant. Reload open file views
+        // to recompute the baked diff/markdown spans (and re-theme mermaid
+        // diagrams) for the new surface; raw editors recolour from the
+        // re-seeded highlight theme on their own.
         if theme_changed {
-            self.reload_markdown_panes(cx);
+            self.reload_file_panes(cx);
+        }
+        // A syntax-palette switch re-seeds the editor highlight theme (the
+        // raw editor repaints from it) and recomputes the baked-in diff /
+        // markdown spans by reloading every open file-view pane.
+        if syntax_theme_changed {
+            crate::ui::theme::set_active_syntax_palette(
+                cx,
+                crate::ui::theme::SyntaxPalette::from_config_name(&self.syntax_theme),
+            );
+            self.reload_file_panes(cx);
         }
         // Mirrors `claude_status.stale_threshold_secs` for the
         // notification-push freshness gate.

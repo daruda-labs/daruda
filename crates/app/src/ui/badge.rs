@@ -123,8 +123,8 @@ impl RenderOnce for Badge {
 
         let t = theme::current(cx);
         let bg_color = bg_color.unwrap_or(t.badge_bg);
-        let border_color = border_color.unwrap_or(t.badge_border);
-        let text_color = text_color.unwrap_or(t.badge_text);
+        let border_color = border_color.unwrap_or(t.border);
+        let text_color = text_color.unwrap_or(t.text_body);
 
         let mut tag = Tag::custom(bg_color, text_color, border_color)
             .small()

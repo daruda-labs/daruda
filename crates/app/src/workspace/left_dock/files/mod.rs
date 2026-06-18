@@ -139,7 +139,7 @@ fn build_files_scrollbar(
         viewport_h + max_offset_h,
         offset_y,
         px(0.),
-        t.dock_scrollbar_thumb,
+        t.scrollbar_thumb,
         t.dock_scrollbar_thumb_hover,
     )
 }
@@ -194,8 +194,8 @@ fn render_row(
     let git_status = v.git_status;
 
     let t = theme::current(cx);
-    let faint = t.faint_text;
-    let muted = t.muted_text;
+    let faint = t.text_subtle;
+    let muted = t.text_muted;
     let row_selected_bg = t.git_file_row_selected_bg;
     let row_hover_bg = t.git_file_row_hover_bg;
 
@@ -349,7 +349,7 @@ fn loading_placeholder(cx: &gpui::App) -> AnyElement {
         .items_center()
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
+        .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(strings::files_loading()))
         .into_any_element()
 }
@@ -361,7 +361,7 @@ fn empty_dir_placeholder(cx: &gpui::App) -> AnyElement {
         .items_center()
         .justify_center()
         .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
-        .text_color(theme::current(cx).dock_placeholder_text)
+        .text_color(theme::current(cx).text_subtle)
         .child(crate::ui::placeholder_text(strings::files_empty_dir()))
         .into_any_element()
 }

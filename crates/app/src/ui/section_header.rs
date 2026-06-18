@@ -113,7 +113,7 @@ impl RenderOnce for SectionHeader {
             .items_center()
             .justify_between()
             .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
-            .text_color(theme::current(cx).dock_header_text);
+            .text_color(theme::current(cx).text_muted);
 
         if let Some(x) = pad_x {
             row = row.px(px(x));

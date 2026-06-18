@@ -149,7 +149,7 @@ fn add_widget_button(
 }
 
 fn placeholder(message: &'static str, cx: &mut Context<Dock>) -> impl IntoElement {
-    let text_color = theme::current(cx).dock_placeholder_text;
+    let text_color = theme::current(cx).text_subtle;
     div()
         .flex_1()
         .flex()

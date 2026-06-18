@@ -98,6 +98,10 @@ impl SettingsWindow {
                 crate::ui::select::select(&self.terminal_preset_select, cx, ()),
             ))
             .child(field_row(s::settings_label_ui_theme(), ui_preset_widget))
+            .child(field_row(
+                s::settings_label_syntax_theme(),
+                crate::ui::select::select(&self.syntax_theme_select, cx, ()),
+            ))
             .into_any_element()
     }
 
@@ -248,19 +252,6 @@ impl SettingsWindow {
                     this.files_use_gitignore = *checked;
                     cx.notify();
                 })),
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_file_viewer(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .child(Self::section_label(s::settings_section_file_viewer(), cx))
-            .child(field_row(
-                s::settings_label_syntax_theme(),
-                crate::ui::select::select(&self.syntax_theme_select, cx, ()),
             ))
             .into_any_element()
     }

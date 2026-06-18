@@ -35,7 +35,7 @@ pub(super) fn render_file_viewer_body(
     });
 
     let t = theme::current(cx);
-    let ctx_text = t.file_diff_ctx_text;
+    let ctx_text = t.text_muted;
     let del_text = t.file_diff_del_text;
 
     let frame = div()
@@ -168,8 +168,8 @@ fn render_raw_body(
     cx: &mut Context<Workspace>,
 ) -> gpui::Div {
     let t = theme::current(cx);
-    let line_no_text = t.file_viewer_line_no_text;
-    let body_text = t.file_viewer_text;
+    let line_no_text = t.text_subtle;
+    let body_text = t.text_body;
     let focused_bg = t.file_viewer_search_focused_bg;
     let match_bg = t.file_viewer_search_match_bg;
     let line_h = px(theme::FILE_VIEWER_LINE_H);

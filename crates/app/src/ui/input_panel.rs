@@ -277,7 +277,7 @@ impl EventEmitter<InputPanelEvent> for InputPanel {}
 
 impl Render for InputPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let bar_border = theme::current(cx).git_commit_border;
+        let bar_border = theme::current(cx).border;
         let area = Input::new(&self.area).small().appearance(self.appearance);
 
         let buttons: Vec<AnyElement> = self

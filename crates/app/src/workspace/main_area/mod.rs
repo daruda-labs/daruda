@@ -105,7 +105,7 @@ fn pane_divider(
             base.left_0().right_0().top(px(offset)).h(px(hit))
         }
     };
-    let divider_bg = theme::current(cx).pane_divider_bg;
+    let divider_bg = theme::current(cx).border;
     if is_horizontal {
         div()
             .relative()
@@ -147,8 +147,8 @@ fn pane_header(
     let focused_bg = t.pane_header_focused_bg;
     let focused_text = theme::TEXT_PRIMARY;
     let unfocused_bg = t.pane_header_unfocused_bg;
-    let unfocused_text = t.muted_text;
-    let cwd_text = t.pane_header_cwd_text;
+    let unfocused_text = t.text_muted;
+    let cwd_text = t.text_muted;
 
     div()
         .id(("pane-hdr", pane_id as usize))

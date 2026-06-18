@@ -7,12 +7,10 @@
 //! string literals, …) are coloured correctly across line boundaries;
 //! the resulting capture ranges are then split back into per-line spans.
 //!
-//! Colours come from the `base16-ocean.dark` palette via
-//! [`dt_theme::syntax_color`], keyed by tree-sitter capture name — one
-//! colour per capture.
-//!
-//! The `theme_name` argument is accepted for call-site compatibility but
-//! unused: the palette is fixed to `base16-ocean.dark`.
+//! Colours come from the syntax palette selected by `theme_name`
+//! ([`dt_theme::SyntaxPalette::from_config_name`]), keyed by tree-sitter
+//! capture name — one colour (and optional bold/italic channel) per capture.
+//! Unknown / legacy names fall back to the recommended Daruda palette.
 //!
 //! All public functions are GPUI-free and safe to call on `background_executor`.
 
@@ -79,10 +77,19 @@ const HIGHLIGHT_NAMES: [&str; 40] = [
 /// `ext` is the file extension (e.g. `"rs"`, `"py"`) used to select the
 /// language. Each hunk is highlighted independently (its display lines
 /// joined and parsed together). Unknown extensions leave lines un-highlighted.
-pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], ext: &str, _theme_name: &str) {
+pub(in crate::workspace) fn highlight_hunks(
+    hunks: &mut [DiffHunk],
+    ext: &str,
+    theme_name: &str,
+    is_light: bool,
+) {
     let Some(config) = build_config(ext) else {
         return;
     };
+    let theme = dt_theme::syntax_theme_of(
+        dt_theme::SyntaxPalette::from_config_name(theme_name),
+        is_light,
+    );
 
     for hunk in hunks.iter_mut() {
         // Collect the display-line contents and remember their index in
@@ -100,7 +107,7 @@ pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], ext: &str, _
             contents.push(content);
         }
 
-        let per_line = highlight_lines(&config, &contents);
+        let per_line = highlight_lines(&config, &contents, &theme);
         for (n, spans) in per_line.into_iter().enumerate() {
             if spans.is_empty() {
                 continue;
@@ -122,14 +129,19 @@ pub(in crate::workspace) fn highlight_hunks(hunks: &mut [DiffHunk], ext: &str, _
 pub(in crate::workspace) fn highlight_raw_rows(
     rows: &mut [VisualRow],
     ext: &str,
-    _theme_name: &str,
+    theme_name: &str,
+    is_light: bool,
 ) {
     let Some(config) = build_config(ext) else {
         return;
     };
+    let theme = dt_theme::syntax_theme_of(
+        dt_theme::SyntaxPalette::from_config_name(theme_name),
+        is_light,
+    );
 
     let contents: Vec<&str> = rows.iter().map(|r| r.content.as_str()).collect();
-    let per_line = highlight_lines(&config, &contents);
+    let per_line = highlight_lines(&config, &contents, &theme);
     for (i, spans) in per_line.into_iter().enumerate() {
         if !spans.is_empty() {
             rows[i].spans = spans;
@@ -172,6 +184,7 @@ fn build_config(ext: &str) -> Option<HighlightConfiguration> {
 fn highlight_lines(
     config: &HighlightConfiguration,
     contents: &[&str],
+    theme: &dt_theme::SyntaxTheme,
 ) -> Vec<Vec<HighlightedSpan>> {
     let mut out = vec![Vec::new(); contents.len()];
     if contents.is_empty() {
@@ -195,13 +208,14 @@ fn highlight_lines(
         return out;
     };
 
-    let default = dt_theme::syntax_color("");
+    let default_color = theme.color(dt_theme::SyntaxBucket::Default);
 
     // Flatten the event stream into contiguous coloured byte ranges. The
     // active capture is the top of the start/end stack; `Source` events
-    // cover the whole text, so uncaptured gaps fall through to `default`.
+    // cover the whole text, so uncaptured gaps fall through to the default
+    // bucket. Each range carries both the colour and the non-color channel.
     let mut stack: Vec<usize> = Vec::new();
-    let mut ranges: Vec<(usize, usize, gpui::Hsla)> = Vec::new();
+    let mut ranges: Vec<(usize, usize, gpui::Hsla, dt_theme::TokenStyle)> = Vec::new();
     for event in events {
         let Ok(event) = event else {
             return out;
@@ -215,12 +229,15 @@ fn highlight_lines(
                 if start >= end {
                     continue;
                 }
-                let color = stack
+                let (color, style) = stack
                     .last()
                     .and_then(|&idx| HIGHLIGHT_NAMES.get(idx))
-                    .map(|name| dt_theme::syntax_color(name))
-                    .unwrap_or(default);
-                ranges.push((start, end, color));
+                    .map(|name| {
+                        let bucket = dt_theme::bucket_for_capture(name);
+                        (theme.color(bucket), theme.style(bucket))
+                    })
+                    .unwrap_or((default_color, dt_theme::TokenStyle::default()));
+                ranges.push((start, end, color, style));
             }
         }
     }
@@ -229,7 +246,7 @@ fn highlight_lines(
     // boundaries (the joining `\n` bytes sit between ranges and are dropped).
     for (li, lr) in line_ranges.iter().enumerate() {
         let mut spans: Vec<HighlightedSpan> = Vec::new();
-        for &(start, end, color) in &ranges {
+        for &(start, end, color, style) in &ranges {
             let clip_start = start.max(lr.start);
             let clip_end = end.min(lr.end);
             if clip_start >= clip_end {
@@ -237,10 +254,13 @@ fn highlight_lines(
             }
             let text = &src[clip_start..clip_end];
             match spans.last_mut() {
-                Some(last) if last.color == Some(color) => last.text.push_str(text),
+                Some(last) if last.color == Some(color) && last.style == style => {
+                    last.text.push_str(text)
+                }
                 _ => spans.push(HighlightedSpan {
                     text: text.to_owned(),
                     color: Some(color),
+                    style,
                 }),
             }
         }
@@ -266,7 +286,7 @@ mod tests {
         let diff = "@@ -1,2 +1,2 @@\n-old\n+new\n";
         let mut hunks = parse_diff_hunks(diff);
         // Unknown extension → no language → lines left intact, no panic.
-        highlight_hunks(&mut hunks, "unknown_ext_xyz", "base16-ocean.dark");
+        highlight_hunks(&mut hunks, "unknown_ext_xyz", "base16-ocean.dark", false);
         assert_eq!(hunks[0].lines.len(), 2);
         for line in &hunks[0].lines {
             if let DiffLine::Removed { spans, .. } | DiffLine::Added { spans, .. } = line {
@@ -280,7 +300,7 @@ mod tests {
         use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
         let diff = "@@ -1,1 +1,1 @@\n-let x = 1;\n+let y = 2;\n";
         let mut hunks = parse_diff_hunks(diff);
-        highlight_hunks(&mut hunks, "rs", "base16-ocean.dark");
+        highlight_hunks(&mut hunks, "rs", "base16-ocean.dark", false);
 
         // Every display line should be fully covered by spans, and the
         // `let` keyword should not be coloured with the default foreground.
@@ -317,7 +337,7 @@ mod tests {
             spans: Vec::new(),
             word_changes: Vec::new(),
         }];
-        highlight_raw_rows(&mut rows, "unknown_ext_xyz", "base16-ocean.dark");
+        highlight_raw_rows(&mut rows, "unknown_ext_xyz", "base16-ocean.dark", false);
         assert!(rows[0].spans.is_empty());
     }
 
@@ -338,7 +358,7 @@ mod tests {
         // must colour BOTH rows as `comment`; a per-line parse would miss
         // the continuation line — this is the reason the rows are joined.
         let mut rows = vec![make("/* a block comment"), make("that spans lines */")];
-        highlight_raw_rows(&mut rows, "rs", "base16-ocean.dark");
+        highlight_raw_rows(&mut rows, "rs", "base16-ocean.dark", false);
 
         let comment = dt_theme::syntax_color("comment");
         assert_ne!(comment, dt_theme::syntax_color(""), "palette sanity");
@@ -350,5 +370,51 @@ mod tests {
                 row.spans.iter().map(|s| s.color).collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn selected_palette_changes_the_highlight_colour() {
+        use super::super::{VisualRow, VisualRowKind};
+        let make = || VisualRow {
+            kind: VisualRowKind::Plain,
+            line_no_left: String::new(),
+            line_no_right: String::new(),
+            content: "let x = 1;".to_owned(),
+            header_context: String::new(),
+            spans: Vec::new(),
+            word_changes: Vec::new(),
+        };
+
+        // The same source highlighted under different palettes must differ
+        // somewhere — proving the selection actually drives the colours.
+        let profile = |theme_name: &str| {
+            let mut rows = vec![make()];
+            highlight_raw_rows(&mut rows, "rs", theme_name, false);
+            rows[0]
+                .spans
+                .iter()
+                .map(|s| (s.text.clone(), s.color))
+                .collect::<Vec<_>>()
+        };
+
+        let daruda = profile("daruda");
+        assert_ne!(daruda, profile("one-dark"), "one-dark differs from daruda");
+        assert_ne!(
+            daruda,
+            profile("tokyo-night"),
+            "tokyo-night differs from daruda"
+        );
+        // Unknown / legacy names resolve to the recommended Daruda palette.
+        assert_eq!(daruda, profile("base16-ocean.dark"), "legacy name → daruda");
+        // Daruda carries a non-color channel on keywords (bold).
+        let mut rows = vec![make()];
+        highlight_raw_rows(&mut rows, "rs", "daruda", false);
+        assert!(
+            rows[0]
+                .spans
+                .iter()
+                .any(|s| s.text.contains("let") && s.style.bold),
+            "daruda keyword span should be bold"
+        );
     }
 }

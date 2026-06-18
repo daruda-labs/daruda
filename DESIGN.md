@@ -10,9 +10,18 @@
 **"Cool precision."** The terminal is the hero; daruda's chrome must recede.
 
 Three rules:
-1. **Cool dark everywhere.** Near-pure black with a faint blue tint — the deepest dark surface. Never neutral gray, never warm brown.
+1. **Cool dark everywhere.** Near-pure black with a faint blue tint — the deepest dark surface. Never neutral gray, never warm brown. The optional `daruda_light` preset inverts lightness but keeps the cool tint (see Elevation & Depth → Light theme).
 2. **Accent through scarcity.** One chromatic accent (`#5e6ad2` lavender-blue). Used only for: active lane indicator, focus ring, primary button, Claude active badge.
 3. **Elevation without shadow.** Depth comes from the 4-step surface ladder and 1 px hairline borders. Drop shadows are forbidden in application chrome.
+
+**Key characteristics** (the quick-scan identity):
+- **Compact, dense chrome.** Dev tool, not a marketing page — UI text lives at 10–13px, spacing snaps to a 2px-step scale. The chrome is meant to disappear behind the terminal.
+- **Cool near-black canvas** (`#010102`), faint blue tint, dark-first. Light is a sanctioned cool-tinted variant, not a neutral-gray flip.
+- **Single lavender-blue accent**, rationed to ≤ 3–4 visible elements; the `2px accent` left border is the primary "selected" signal.
+- **Surface-ladder + hairline depth.** No shadows anywhere in chrome.
+- **Semantic color is reserved for state** — Claude lifecycle, agent activity, git status, diff — never decoration.
+- **Syntax highlighting is a separate axis** — selectable, readability-tuned, light/dark-paired (see Syntax Highlighting).
+- **Terminal pane is sacred:** `canvas` background, never wrapped in a card.
 
 ---
 
@@ -175,6 +184,25 @@ No drop shadows. Depth = surface color ladder + 1px hairline borders.
 | 4 — Float | `surface-4` | `#1f2022` | `1px hairline-soft` | Popover, context menu, tooltip |
 
 **Active indicator:** selected lane / focused pane uses a `2px solid accent` left border, not a background fill change alone.
+
+### Light theme (`daruda_light`)
+
+The optional light preset inverts the ladder's lightness but **keeps the
+cool blue identity** — every surface is a faint-blue near-white, never a
+neutral gray (mirroring how `canvas` is a cool near-black, not pure black).
+Tint deepens slightly as surfaces darken; accent, status, and diff colors
+are unchanged from dark.
+
+| Level | Hex | Use |
+|-------|-----|-----|
+| 0 — Base | `#f9fafb` | Window / editor / terminal background |
+| 1 — Panel | `#eaecf0` | Docks, sidebar, tab strip |
+| 2 — Card | `#e4e6ec` | Title bar, hovered row, active tab |
+| 3 — Raised | `#dbdee5` | Active/pressed row, button-widget surfaces |
+| 4 — Float | `#f6f6f8` | Popover / modal panel (raised above base) |
+
+Text on light stays a neutral dark scale; only **surfaces** carry the cool
+tint. Input fields remain pure `#ffffff`.
 
 ---
 
@@ -601,6 +629,75 @@ unchanged line:
 
 ---
 
+## Syntax Highlighting
+
+Code readability is its **own design axis**, deliberately decoupled from the
+brand palette above. The brand accent governs *chrome*; the syntax palette
+governs *code legibility* — figure/ground against body text, signal/noise
+(comments recede, structure stands out), token-class separation, and
+colour-vision-deficiency safety. The two are tuned independently and never
+borrowed from each other.
+
+**Selectable, not fixed.** The syntax palette is chosen via
+`config.file_viewer.syntax_theme` and applied live (no Save). 14 curated
+families ship; the dropdown shows the family name (light/dark variant is
+chosen automatically — see below), and the default is **Daruda**, a
+readability-tuned palette built for the `canvas` background.
+
+| Family (config slug) | Origin |
+|---|---|
+| **Daruda** (`daruda`, default) | daruda's own readability-tuned palette |
+| One (`one-dark`) · Tokyo Night · Catppuccin · Dracula · GitHub · Material · Monokai · Nord · Gruvbox · Solarized · Ayu · Night Owl · Darcula (IntelliJ) | ported from the named editor themes, verified against their authoritative sources |
+
+**One source feeds both render paths.** `palette::syntax_theme_of(palette,
+is_light)` produces a `SyntaxTheme`; it seeds the raw editor (through
+`gpui_component`'s `highlight_theme`) and the diff view (through injected
+spans) identically. `bucket_for_capture()` is the single tree-sitter
+capture → semantic-bucket map — colour, non-color channel, and the editor's
+`SyntaxColors` all read through it so the two paths can't drift.
+
+**Light/dark auto-pairing.** A palette is not a fixed colour set — it has a
+dark and a light variant, picked from the editor background's lightness
+(`DarudaTheme::is_dark()`). A dark UI gets the dark variant; `daruda_light`
+gets the light one (One Light, Solarized Light, Catppuccin Latte, Daruda
+Light, …). Families without a published light theme fall back to Daruda
+Light. This keeps syntax legible in both appearances instead of washing out
+a dark palette on a near-white surface.
+
+**Three readability rules (the Daruda default embodies them):**
+1. **Figure/ground over background-contrast.** The near-black `canvas`
+   already gives every token ample contrast; the real risk is low-chroma
+   tokens (`function`, `string.special`) collapsing toward gray and
+   disappearing *into the body text*. Meaning-bearing buckets stay at a
+   chroma that reads as a distinct colour, not a tinted gray.
+2. **A non-color channel carries structure.** Keyword **bold** and comment
+   *italic* (and bold string escapes) encode token class without relying on
+   hue alone — robust under colour-vision deficiency and low chroma. Each
+   palette owns its own bold/italic per bucket.
+3. **Comments recede, never vanish.** Comments are the one bucket dimmed on
+   purpose (signal/noise), but never below the readability floor — lifted
+   where a ported theme's own comment colour falls under it on the target
+   background.
+
+**Daruda default palette** (on `canvas`; light variant on `#f9fafb`):
+
+| Bucket | Dark | Channel |
+|---|---|---|
+| keyword | `#c678dd` | **bold** |
+| function | `#82aaff` | — |
+| type | `#ebcb8b` | — |
+| constant / number | `#d08770` | — |
+| string | `#a3be8c` | — |
+| string.special (escape/regex) | `#7fdbca` | **bold** |
+| tag | `#bf616a` | — |
+| comment | `#65737e` | *italic* |
+| default (variable/operator/punct) | `#c0c5ce` | — |
+
+Operators, punctuation, and plain variables intentionally inherit the
+default foreground — colouring them is line noise, not signal.
+
+---
+
 ## File Viewer (FileViewPane)
 
 ```
@@ -784,11 +881,11 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 - Place keyboard shortcut chips (Raycast keycap pattern) on MacroKey cards, right-aligned.
 - Apply the `2px accent` left border as the primary "selected" signal; background lift alone is too subtle.
 - Use `radius.pill` for Claude state badges and status pills only.
-- Reuse agent state colors for syntax highlight — no extra tokens needed.
+- Treat the syntax palette as its own axis: tune it for code legibility (figure/ground, non-color channel, CVD), independent of the brand accent (see Syntax Highlighting).
 
 ## Don'ts
 
-- Don't introduce a light mode.
+- Don't ship a neutral-gray light theme. The `daruda_light` preset is the only sanctioned light mode and its surfaces stay faint-blue cool-tinted (see Elevation & Depth → Light theme) — the cool identity holds in both appearances.
 - Don't add drop shadows to any application chrome element.
 - Don't use `accent` as a panel or large-surface background fill.
 - Don't use border radius > `lg` (8px) on any in-app element.
@@ -797,3 +894,26 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 - Don't wrap the terminal pane in a card — `canvas` direct, always.
 - Don't use `error` / `warning` / `success` colors for decoration; reserve them for genuine state.
 - Don't use warm-tinted or neutral-gray surfaces — the cool blue-black tone is the identity.
+- Don't borrow the brand accent (or agent-state colors) for syntax tokens, or vice versa — chrome and code legibility are tuned on separate axes.
+- Don't ship a syntax palette that only works on dark — every family pairs a light variant (or falls back to Daruda Light) so light mode stays legible.
+
+---
+
+## Iteration Guide
+
+How to apply this doc when changing daruda's UI:
+
+1. **Colors and pixel metrics are tokens, never inline.** Every value here maps to a named constant in `daruda_terminal::ux::theme` (terminal) or `app/src/ui/theme/palette.rs` (chrome) — change the constant, not the call site. Theme-variant values (light/dark chrome) live in `assets/themes/daruda_{dark,light}.json`.
+2. **Reach for surface change before chrome.** When something needs emphasis, move it one step on the surface ladder or add the `2px accent` border — don't add a shadow, a second accent, or a gradient.
+3. **State colors are off-limits for decoration.** `error`/`warning`/`success`/`claude-*`/`agent-*` mean a genuine state. If you want "a nice color," you don't — use a surface step.
+4. **Syntax ≠ chrome.** Touch the syntax palette only for code legibility, through `palette::syntax_theme_of` + `bucket_for_capture`; never reuse the brand accent there or vice versa.
+5. **Both appearances or none.** Any new chrome surface needs a light-theme value in `daruda_light.json`, cool-tinted (faint blue), not neutral gray. Any new syntax family needs a light variant or a documented fallback.
+6. **Stay in the type ladder** (Inter 400 / 500 / 600 at 10–13px for chrome; `label` is 600 uppercase). No UI label below 10px or above 13px.
+
+## Known Gaps
+
+- **No hover-state spec for most components.** daruda documents resting / active / focused / selected; hover is "one step up the surface ladder" generically and not enumerated per component.
+- **Light theme is documentation-light.** The surface ladder is defined (Elevation & Depth → Light theme), but per-component light values live only in `daruda_light.json`, not re-tabulated here.
+- **Motion is barely specified.** Only the badge pulse cadences (slow/fast) and the absence of hover transitions are stated; there is no easing/duration token system.
+- **Responsive/window-resize behavior is implicit.** daruda is a single-window desktop app; dock collapse and min-width behavior are driven by code, not a breakpoint table.
+- **Custom user palettes are out of scope.** The syntax palette is a curated set; there is no user-defined-palette format documented.

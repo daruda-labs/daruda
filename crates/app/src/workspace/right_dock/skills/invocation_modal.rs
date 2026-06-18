@@ -166,7 +166,7 @@ impl Render for SkillInvocationModal {
 
         let t = theme::current(cx);
         let title_text = theme::TEXT_PRIMARY;
-        let description_text = t.modal_secondary_text;
+        let description_text = t.text_body;
 
         let mut header = div()
             .flex()

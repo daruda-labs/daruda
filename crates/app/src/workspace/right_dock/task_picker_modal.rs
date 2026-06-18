@@ -250,7 +250,7 @@ impl Render for TaskPickerModal {
         let body = if let Some(hint) = self.empty_hint.clone() {
             div()
                 .py(px(theme::RIGHT_PANEL_PAD_Y))
-                .text_color(theme::current(cx).dock_placeholder_text)
+                .text_color(theme::current(cx).text_subtle)
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                 .child(hint)
                 .into_any_element()

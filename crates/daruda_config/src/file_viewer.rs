@@ -1,16 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_SYNTAX_THEME: &str = "base16-ocean.dark";
+pub const DEFAULT_SYNTAX_THEME: &str = "daruda";
 
 /// File viewer display settings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FileViewerConfig {
-    /// Syntect theme name for syntax highlighting in raw and diff views.
-    /// Built-in choices: "base16-ocean.dark", "base16-ocean.light",
-    /// "base16-eighties.dark", "base16-mocha.dark", "InspiredGitHub",
-    /// "Solarized (dark)", "Solarized (light)".
-    /// Unknown names fall back to "base16-ocean.dark".
+    /// Selected syntax palette for raw and diff highlighting. Curated
+    /// choices: "daruda" (recommended default), "one-dark", "tokyo-night",
+    /// "catppuccin-mocha". Unknown / legacy names fall back to "daruda".
     pub syntax_theme: String,
     /// When true (default), clicking a file in the left dock reuses the
     /// existing file-viewer tab instead of opening a new one. The tab

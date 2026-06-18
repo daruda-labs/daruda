@@ -433,38 +433,48 @@ impl Workspace {
         }
     }
 
-    /// Spawn a background task to load file content for the given mode
-    /// and update the matching file pane's `content` on completion. The
-    /// pane is identified by `(lane_id, path, staged, mode)` — if
-    /// no pane still matches when the load returns (because the user
-    /// switched mode or closed the tab), the result is dropped.
-    /// Re-issue the load for every open markdown preview pane. Called on a UI
-    /// theme switch so rendered diagrams (mermaid) re-theme for the new
-    /// appearance — their bitmaps are baked at load time and don't follow a
-    /// live theme change otherwise.
-    pub(in crate::workspace) fn reload_markdown_panes(&mut self, cx: &mut Context<Self>) {
+    /// Re-apply the current syntax palette to every open file-view pane.
+    ///
+    /// Raw panes highlight live from `cx.theme().highlight_theme` at paint
+    /// time, so a `cx.notify()` on the editor recolours them while
+    /// preserving scroll position and selection. Diff and markdown panes
+    /// bake their colours into spans at load time, so they need a full
+    /// reload. Called when `config.file_viewer.syntax_theme` changes.
+    pub(in crate::workspace) fn reload_file_panes(&mut self, cx: &mut Context<Self>) {
         // Collect first — `load_pane_file_content` reborrows `self`.
-        let reloads: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = self
-            .main_area
-            .panes
-            .iter()
-            .filter_map(|p| p.file_view())
-            .filter(|fv| matches!(fv.content, PaneFileContent::LoadedMarkdown { .. }))
-            .map(|fv| {
-                (
-                    fv.lane_id,
-                    fv.path.clone(),
-                    fv.staged,
-                    fv.view_mode,
-                    fv.file_status,
-                )
-            })
-            .collect();
+        let mut raw_editors = Vec::new();
+        let mut reloads: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = Vec::new();
+        for pane in &self.main_area.panes {
+            let Some(f) = pane.file_content() else {
+                continue;
+            };
+            match &f.view.content {
+                PaneFileContent::LoadedRaw => raw_editors.push(f.editor_state.clone()),
+                PaneFileContent::LoadedDiff { .. } | PaneFileContent::LoadedMarkdown { .. } => {
+                    reloads.push((
+                        f.view.lane_id,
+                        f.view.path.clone(),
+                        f.view.staged,
+                        f.view.view_mode,
+                        f.view.file_status,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        for editor in raw_editors {
+            editor.update(cx, |_, cx| cx.notify());
+        }
         for (lane_id, path, staged, mode, file_status) in reloads {
             self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
         }
     }
 
+    /// Spawn a background task to load file content for the given mode
+    /// and update the matching file pane's `content` on completion. The
+    /// pane is identified by `(lane_id, path, staged, mode)` — if
+    /// no pane still matches when the load returns (because the user
+    /// switched mode or closed the tab), the result is dropped.
     fn load_pane_file_content(
         &mut self,
         lane_id: LaneId,

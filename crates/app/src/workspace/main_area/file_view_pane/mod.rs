@@ -41,6 +41,8 @@ pub(in crate::workspace) struct HighlightedSpan {
     pub text: String,
     /// `None` means use the default text color for the row kind.
     pub color: Option<gpui::Hsla>,
+    /// Non-color channel (bold/italic) for this segment, from the palette.
+    pub style: crate::ui::theme::TokenStyle,
 }
 
 /// A byte range within a `VisualRow::content` string that differs at the

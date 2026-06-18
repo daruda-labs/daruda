@@ -78,6 +78,19 @@ pub const CANVAS: Hsla = hsla(240.0, 0.333, 0.006, 1.0);
 pub const SURFACE_1: Hsla = hsla(210.0, 0.063, 0.063, 1.0);
 pub const SURFACE_2: Hsla = hsla(210.0, 0.048, 0.082, 1.0);
 pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
+
+// Light-theme surface ladder — cool-tinted near-whites (faint blue, never
+// neutral gray), mirroring the dark ladder's cool identity. Used by
+// `apply_daruda_palette` and theme-variant render helpers so light mode
+// doesn't fall through to the dark consts above. Matches `daruda_light.json`.
+pub const LIGHT_CANVAS: Hsla = hsla(222.0, 0.20, 0.984, 1.0);
+pub const LIGHT_SURFACE_1: Hsla = hsla(222.0, 0.18, 0.937, 1.0);
+pub const LIGHT_SURFACE_2: Hsla = hsla(222.0, 0.17, 0.909, 1.0);
+pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 0.16, 0.876, 1.0);
+/// Near-black ink for text on light surfaces (the inverse of `INK`, which is
+/// a near-white for dark surfaces). Used by render sites that still read a
+/// raw text const instead of a theme-variant field.
+pub const LIGHT_INK: Hsla = hsla(222.0, 0.14, 0.12, 1.0);
 pub const HAIRLINE: Hsla = hsla(223.0, 0.091, 0.151, 1.0);
 pub const ACCENT: Hsla = hsla(233.8, 0.563, 0.596, 1.0);
 pub const INK: Hsla = hsla(0.0, 0.0, 0.97, 1.0);
@@ -923,86 +936,670 @@ pub const FILE_VIEWER_DIFF_LINE_NO_PAD_R: f32 = PAD_XS;
 pub const FILE_VIEWER_DIFF_MARKER_W: f32 = 10.0;
 /// Hunk header trailing context text color (function name / class name, dim).
 pub const FILE_DIFF_HUNK_CTX_TEXT: Hsla = hsla(220.0, 0.20, 0.45, 1.0);
-/// Palette name for the file-viewer syntax highlighting. [`syntax_color`]
-/// maps tree-sitter capture names onto this `base16-ocean.dark` scheme;
-/// colouring is per-capture (one colour per capture name).
-pub const FILE_VIEWER_SYNTAX_THEME: &str = "base16-ocean.dark";
-
-/// `base16-ocean.dark` slot → `Hsla`. Hex literals live here (the
-/// designated colour home, G4-exempt), never at the call site.
+/// 24-bit hex → `Hsla`. Hex literals live here (the designated colour
+/// home, G4-exempt), never at the call site.
 fn base16(hex: u32) -> Hsla {
     gpui::rgb(hex).into()
 }
 
-/// Semantic syntax palette — the single source of truth for code
-/// highlighting colours, shared by the raw editor (via
-/// [`editor_syntax_colors`], installed into `gpui_component`'s
-/// `highlight_theme`) and the diff view (via [`syntax_color`]). Fields are
-/// semantic token groups; values are the `base16-ocean.dark` slots (see
-/// [`FILE_VIEWER_SYNTAX_THEME`]).
+/// Semantic syntax palette — one resolved [`SyntaxPalette`]'s colours,
+/// shared by the raw editor (via [`editor_syntax_colors_of`], installed
+/// into `gpui_component`'s `highlight_theme`) and the diff view (via
+/// [`syntax_color_of`]). Fields are semantic token buckets.
 pub struct SyntaxTheme {
-    /// `base0E` purple — keywords.
+    /// purple — keywords.
     pub keyword: Hsla,
-    /// `base0D` blue — functions / titles.
+    /// blue — functions / titles.
     pub function: Hsla,
-    /// `base0A` yellow — types, enums, constructors, labels, preproc, embedded.
+    /// yellow — types, enums, constructors, labels, preproc, embedded.
     pub type_: Hsla,
-    /// `base09` orange — constants, booleans, numbers, attributes, variants, link URIs.
+    /// orange — constants, booleans, numbers, attributes, variants, link URIs.
     pub constant: Hsla,
-    /// `base0B` green — strings, literal text.
+    /// green — strings, literal text.
     pub string: Hsla,
-    /// `base0C` cyan — string escapes / regex / special symbols.
+    /// cyan — string escapes / regex / special symbols.
     pub string_special: Hsla,
-    /// `base08` red — tags, special variables, link text.
+    /// red — tags, special variables, link text.
     pub tag: Hsla,
-    /// `base0F` brown — doctype tags.
+    /// brown — doctype tags.
     pub tag_doctype: Hsla,
-    /// `base03` gray — comments, hints, predictive text.
+    /// gray — comments, hints, predictive text.
     pub comment: Hsla,
-    /// `base05` — default foreground (variables, operators, punctuation, …).
+    /// default foreground (variables, operators, punctuation, …).
     pub default: Hsla,
+    /// Non-color channel (R1) for keywords — bold to carry structure
+    /// without relying on chroma / CVD-robust.
+    pub keyword_style: TokenStyle,
+    /// Non-color channel for string escapes / regex / special symbols —
+    /// distinguishes them from plain strings even at low chroma.
+    pub string_special_style: TokenStyle,
+    /// Non-color channel for comments — italic to signal "noise".
+    pub comment_style: TokenStyle,
+}
+
+/// A token's non-color rendering channel. `Default` = plain (no
+/// weight / style override). Lets a palette carry bold/italic alongside
+/// its colours so figure/ground survives low chroma and colour-vision
+/// deficiency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TokenStyle {
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl TokenStyle {
+    const PLAIN: Self = Self {
+        bold: false,
+        italic: false,
+    };
+    const BOLD: Self = Self {
+        bold: true,
+        italic: false,
+    };
+    const ITALIC: Self = Self {
+        bold: false,
+        italic: true,
+    };
+}
+
+/// Selectable syntax palette — chosen independently of the brand theme
+/// (background / accent). Resolved from `config.file_viewer.syntax_theme`
+/// via [`SyntaxPalette::from_config_name`]; the single source of truth for
+/// which colours the raw editor and the diff view both render with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyntaxPalette {
+    /// Daruda's own palette — the readability-tuned default (recommended).
+    #[default]
+    Daruda,
+    OneDark,
+    TokyoNight,
+    CatppuccinMocha,
+    Dracula,
+    GitHubDark,
+    MaterialPalenight,
+    Monokai,
+    Nord,
+    GruvboxDark,
+    SolarizedDark,
+    AyuMirage,
+    NightOwl,
+    Darcula,
+}
+
+impl SyntaxPalette {
+    /// Resolve a config string to a palette. Unknown / legacy names
+    /// (including the old `base16-*` slots) fall back to the recommended
+    /// [`SyntaxPalette::Daruda`] — a normal fallback, not an error.
+    pub fn from_config_name(name: &str) -> Self {
+        match name {
+            "one-dark" => Self::OneDark,
+            "tokyo-night" => Self::TokyoNight,
+            "catppuccin-mocha" => Self::CatppuccinMocha,
+            "dracula" => Self::Dracula,
+            "github-dark" => Self::GitHubDark,
+            "material-palenight" => Self::MaterialPalenight,
+            "monokai" => Self::Monokai,
+            "nord" => Self::Nord,
+            "gruvbox-dark" => Self::GruvboxDark,
+            "solarized-dark" => Self::SolarizedDark,
+            "ayu-mirage" => Self::AyuMirage,
+            "night-owl" => Self::NightOwl,
+            "darcula" => Self::Darcula,
+            _ => Self::Daruda,
+        }
+    }
+
+    /// Canonical config slug — inverse of [`SyntaxPalette::from_config_name`].
+    /// Lets the settings dropdown resolve a stored (possibly legacy) value to
+    /// the slug that is actually selected, so the effective palette always
+    /// shows as the active option.
+    pub fn config_name(self) -> &'static str {
+        match self {
+            Self::Daruda => "daruda",
+            Self::OneDark => "one-dark",
+            Self::TokyoNight => "tokyo-night",
+            Self::CatppuccinMocha => "catppuccin-mocha",
+            Self::Dracula => "dracula",
+            Self::GitHubDark => "github-dark",
+            Self::MaterialPalenight => "material-palenight",
+            Self::Monokai => "monokai",
+            Self::Nord => "nord",
+            Self::GruvboxDark => "gruvbox-dark",
+            Self::SolarizedDark => "solarized-dark",
+            Self::AyuMirage => "ayu-mirage",
+            Self::NightOwl => "night-owl",
+            Self::Darcula => "darcula",
+        }
+    }
+}
+
+/// Semantic colour bucket — the unit a tree-sitter capture maps to.
+/// [`bucket_for_capture`] is the single place the capture grouping lives;
+/// every consumer (colour, non-color channel, editor `SyntaxColors`) reads
+/// through it so the grouping can't drift between paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxBucket {
+    Keyword,
+    Function,
+    Type,
+    Constant,
+    String,
+    StringSpecial,
+    Tag,
+    TagDoctype,
+    Comment,
+    Default,
+}
+
+/// Map a tree-sitter highlight capture name onto its [`SyntaxBucket`].
+/// Unrecognised captures (and the empty string) fall back to
+/// [`SyntaxBucket::Default`], so every token resolves to an explicit bucket.
+pub fn bucket_for_capture(capture: &str) -> SyntaxBucket {
+    use SyntaxBucket::*;
+    match capture {
+        "keyword" => Keyword,
+        "function" | "title" => Function,
+        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => Type,
+        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => Constant,
+        "string" | "text.literal" => String,
+        "string.escape" | "string.regex" | "string.special" | "string.special.symbol" => {
+            StringSpecial
+        }
+        "tag" | "variable.special" | "link_text" => Tag,
+        "tag.doctype" => TagDoctype,
+        "comment" | "comment.doc" | "hint" | "predictive" => Comment,
+        _ => Default,
+    }
+}
+
+impl SyntaxTheme {
+    /// Foreground colour for a bucket.
+    pub fn color(&self, bucket: SyntaxBucket) -> Hsla {
+        use SyntaxBucket::*;
+        match bucket {
+            Keyword => self.keyword,
+            Function => self.function,
+            Type => self.type_,
+            Constant => self.constant,
+            String => self.string,
+            StringSpecial => self.string_special,
+            Tag => self.tag,
+            TagDoctype => self.tag_doctype,
+            Comment => self.comment,
+            Default => self.default,
+        }
+    }
+
+    /// Non-color channel (bold/italic) for a bucket. Only keyword /
+    /// string_special / comment carry one; the rest are plain.
+    pub fn style(&self, bucket: SyntaxBucket) -> TokenStyle {
+        use SyntaxBucket::*;
+        match bucket {
+            Keyword => self.keyword_style,
+            StringSpecial => self.string_special_style,
+            Comment => self.comment_style,
+            _ => TokenStyle::default(),
+        }
+    }
+
+    /// Foreground colour for a capture name — [`bucket_for_capture`] +
+    /// [`SyntaxTheme::color`]. Used by the diff view's own highlighter.
+    pub fn color_for(&self, capture: &str) -> Hsla {
+        self.color(bucket_for_capture(capture))
+    }
+
+    /// Non-color channel for a capture name.
+    pub fn style_for(&self, capture: &str) -> TokenStyle {
+        self.style(bucket_for_capture(capture))
+    }
 }
 
 /// The active syntax palette (`base16-ocean.dark`). One source feeds both
 /// highlighting paths — change a colour here and the editor and diff
 /// views move together.
 pub fn syntax_theme() -> SyntaxTheme {
-    SyntaxTheme {
-        keyword: base16(0xb4_8e_ad),
-        function: base16(0x8f_a1_b3),
-        type_: base16(0xeb_cb_8b),
-        constant: base16(0xd0_87_70),
-        string: base16(0xa3_be_8c),
-        string_special: base16(0x96_b5_b4),
-        tag: base16(0xbf_61_6a),
-        tag_doctype: base16(0xab_79_67),
-        comment: base16(0x65_73_7e),
-        default: base16(0xc0_c5_ce),
+    syntax_theme_of(SyntaxPalette::Daruda, false)
+}
+
+/// The semantic syntax palette for `palette` at the editor's lightness.
+/// Hex literals live here (the designated colour home, G4-exempt), never at
+/// the call site. One source feeds both highlighting paths — the raw editor
+/// (via [`editor_syntax_colors_of`]) and the diff view (via
+/// [`syntax_color_of`]). When `is_light` the palette's light variant is used
+/// (families without one fall back to Daruda Light) so syntax stays legible
+/// on a light editor background.
+pub fn syntax_theme_of(palette: SyntaxPalette, is_light: bool) -> SyntaxTheme {
+    if is_light {
+        return light_syntax_theme(palette);
+    }
+    match palette {
+        // Daruda — readability-tuned default. function / string_special
+        // lifted out of the near-gray band; keyword + escape bold and
+        // comment italic add non-color channels (R1).
+        SyntaxPalette::Daruda => SyntaxTheme {
+            keyword: base16(0xc6_78_dd),
+            function: base16(0x82_aa_ff),
+            type_: base16(0xeb_cb_8b),
+            constant: base16(0xd0_87_70),
+            string: base16(0xa3_be_8c),
+            string_special: base16(0x7f_db_ca),
+            tag: base16(0xbf_61_6a),
+            tag_doctype: base16(0xab_79_67),
+            comment: base16(0x65_73_7e),
+            default: base16(0xc0_c5_ce),
+            keyword_style: TokenStyle::BOLD,
+            string_special_style: TokenStyle::BOLD,
+            comment_style: TokenStyle::ITALIC,
+        },
+        // One Dark (Atom / zed) — color-only.
+        SyntaxPalette::OneDark => SyntaxTheme {
+            keyword: base16(0xc6_78_dd),
+            function: base16(0x61_af_ef),
+            type_: base16(0xe5_c0_7b),
+            constant: base16(0xd1_9a_66),
+            string: base16(0x98_c3_79),
+            string_special: base16(0x56_b6_c2),
+            tag: base16(0xe0_6c_75),
+            tag_doctype: base16(0xbe_50_46),
+            comment: base16(0x5c_63_70),
+            default: base16(0xab_b2_bf),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Tokyo Night — color + italic comments. The original comment
+        // `#565f89` only reaches ~3.4x on near-black; lifted to `#6b74a3`
+        // to clear the readability floor against daruda's background.
+        SyntaxPalette::TokyoNight => SyntaxTheme {
+            keyword: base16(0xbb_9a_f7),
+            function: base16(0x7a_a2_f7),
+            type_: base16(0x0d_b9_d7),
+            constant: base16(0xff9e64),
+            string: base16(0x9e_ce_6a),
+            string_special: base16(0x89_dd_ff),
+            tag: base16(0xf7_76_8e),
+            tag_doctype: base16(0xff9e64),
+            comment: base16(0x6b_74_a3),
+            default: base16(0xc0_ca_f5),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        // Catppuccin Mocha — color-only.
+        SyntaxPalette::CatppuccinMocha => SyntaxTheme {
+            keyword: base16(0xcb_a6_f7),
+            function: base16(0x89_b4_fa),
+            type_: base16(0xf9_e2_af),
+            constant: base16(0xfa_b3_87),
+            string: base16(0xa6_e3_a1),
+            string_special: base16(0xf5_c2_e7),
+            tag: base16(0xf3_8b_a8),
+            tag_doctype: base16(0xeb_a0_ac),
+            comment: base16(0x93_99_b2),
+            default: base16(0xcd_d6_f4),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Dracula — high-chroma, color-only.
+        SyntaxPalette::Dracula => SyntaxTheme {
+            keyword: base16(0xff_79_c6),
+            function: base16(0x50_fa_7b),
+            type_: base16(0x8b_e9_fd),
+            constant: base16(0xbd_93_f9),
+            string: base16(0xf1_fa_8c),
+            string_special: base16(0xff_b8_6c),
+            tag: base16(0xff_55_55),
+            tag_doctype: base16(0x62_72_a4),
+            comment: base16(0x62_72_a4),
+            default: base16(0xf8_f8_f2),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // GitHub Dark — neutral; escapes bold (GitHub's own convention).
+        SyntaxPalette::GitHubDark => SyntaxTheme {
+            keyword: base16(0xff_7b_72),
+            function: base16(0xd2_a8_ff),
+            type_: base16(0xff_a6_57),
+            constant: base16(0x79_c0_ff),
+            string: base16(0xa5_d6_ff),
+            string_special: base16(0xa5_d6_ff),
+            tag: base16(0x7e_e7_87),
+            tag_doctype: base16(0x7e_e7_87),
+            comment: base16(0x8b_94_9e),
+            default: base16(0xc9_d1_d9),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::BOLD,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Material Palenight — calm purples/blues; italic comments.
+        SyntaxPalette::MaterialPalenight => SyntaxTheme {
+            keyword: base16(0xc7_92_ea),
+            function: base16(0x82_aa_ff),
+            type_: base16(0xff_cb_6b),
+            constant: base16(0xf7_8c_6c),
+            string: base16(0xc3_e8_8d),
+            string_special: base16(0x89_dd_ff),
+            tag: base16(0xff_55_72),
+            tag_doctype: base16(0xff_55_72),
+            comment: base16(0x69_70_98),
+            default: base16(0xbf_c7_d5),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        // Monokai — the Sublime classic; color-only.
+        SyntaxPalette::Monokai => SyntaxTheme {
+            keyword: base16(0xf9_26_72),
+            function: base16(0xa6_e2_2e),
+            type_: base16(0x66_d9_ef),
+            constant: base16(0xae_81_ff),
+            string: base16(0xe6_db_74),
+            string_special: base16(0xae_81_ff),
+            tag: base16(0xf9_26_72),
+            tag_doctype: base16(0xf9_26_72),
+            comment: base16(0x88_84_6f),
+            default: base16(0xf8_f8_f2),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Nord — muted arctic cool tones; comment lifted from nord3 (too
+        // dim) to nord3's brighter editor variant for the near-black bg.
+        SyntaxPalette::Nord => SyntaxTheme {
+            keyword: base16(0x81_a1_c1),
+            function: base16(0x88_c0_d0),
+            type_: base16(0x8f_bc_bb),
+            constant: base16(0xb4_8e_ad),
+            string: base16(0xa3_be_8c),
+            string_special: base16(0xeb_cb_8b),
+            tag: base16(0xbf_61_6a),
+            tag_doctype: base16(0xd0_87_70),
+            comment: base16(0x61_6e_88),
+            default: base16(0xd8_de_e9),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Gruvbox Dark — warm retro; function uses aqua to stay distinct
+        // from the green strings.
+        SyntaxPalette::GruvboxDark => SyntaxTheme {
+            keyword: base16(0xfb_49_34),
+            function: base16(0x8e_c0_7c),
+            type_: base16(0xfa_bd_2f),
+            constant: base16(0xd3_86_9b),
+            string: base16(0xb8_bb_26),
+            string_special: base16(0xfe_80_19),
+            tag: base16(0xfb_49_34),
+            tag_doctype: base16(0xfe_80_19),
+            comment: base16(0x92_83_74),
+            default: base16(0xeb_db_b2),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Solarized Dark — balanced; comment lifted base01 -> base00 to
+        // clear the contrast floor on the near-black background.
+        SyntaxPalette::SolarizedDark => SyntaxTheme {
+            keyword: base16(0x85_99_00),
+            function: base16(0x26_8b_d2),
+            type_: base16(0xb5_89_00),
+            constant: base16(0xd3_36_82),
+            string: base16(0x2a_a1_98),
+            string_special: base16(0xcb4b16),
+            tag: base16(0x26_8b_d2),
+            tag_doctype: base16(0x58_6e_75),
+            comment: base16(0x65_7b_83),
+            default: base16(0x83_94_96),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        // Ayu Mirage — modern minimal; italic comments.
+        SyntaxPalette::AyuMirage => SyntaxTheme {
+            keyword: base16(0xff_a6_59),
+            function: base16(0xff_cd_66),
+            type_: base16(0x73_d0_ff),
+            constant: base16(0xdf_bf_ff),
+            string: base16(0xd5_ff_80),
+            string_special: base16(0x95_e6_cb),
+            tag: base16(0x5c_cf_e6),
+            tag_doctype: base16(0x5c_cf_e6),
+            comment: base16(0x6e_7c_8f),
+            default: base16(0xcc_ca_c2),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        // Night Owl — italic keywords and comments.
+        SyntaxPalette::NightOwl => SyntaxTheme {
+            keyword: base16(0xc7_92_ea),
+            function: base16(0x82_aa_ff),
+            type_: base16(0xff_cb_8b),
+            constant: base16(0xf7_8c_6c),
+            string: base16(0xec_c4_8d),
+            string_special: base16(0x7f_db_ca),
+            tag: base16(0xca_ec_e6),
+            tag_doctype: base16(0x63_77_77),
+            comment: base16(0x63_77_77),
+            default: base16(0xd6_de_eb),
+            keyword_style: TokenStyle::ITALIC,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        // Darcula — IntelliJ default; bold keywords (its signature).
+        SyntaxPalette::Darcula => SyntaxTheme {
+            keyword: base16(0xcc7832),
+            function: base16(0xff_c6_6d),
+            type_: base16(0xa9_b7_c6),
+            constant: base16(0x98_76_aa),
+            string: base16(0x6a_87_59),
+            string_special: base16(0xcc7832),
+            tag: base16(0xe8_bf_6a),
+            tag_doctype: base16(0xe8_bf_6a),
+            comment: base16(0x80_80_80),
+            default: base16(0xa9_b7_c6),
+            keyword_style: TokenStyle::BOLD,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
     }
 }
 
-/// Foreground colour for a tree-sitter highlight capture name, drawn from
-/// [`syntax_theme`]. Unrecognised captures (and the empty string) fall
-/// back to the default editor foreground (`base05`), so every token gets
-/// an explicit foreground. Used by the diff view's own highlighter.
-pub fn syntax_color(capture: &str) -> Hsla {
-    let t = syntax_theme();
-    match capture {
-        "keyword" => t.keyword,
-        "function" | "title" => t.function,
-        "type" | "enum" | "constructor" | "label" | "preproc" | "embedded" => t.type_,
-        "constant" | "boolean" | "number" | "attribute" | "variant" | "link_uri" => t.constant,
-        "string" | "text.literal" => t.string,
-        "string.escape" | "string.regex" | "string.special" | "string.special.symbol" => {
-            t.string_special
-        }
-        "tag" | "variable.special" | "link_text" => t.tag,
-        "tag.doctype" => t.tag_doctype,
-        "comment" | "comment.doc" | "hint" | "predictive" => t.comment,
-        // variable / property / operator / punctuation.* / emphasis* /
-        // primary and any unrecognised capture → default foreground.
-        _ => t.default,
+/// Light-background variant for `palette`. Families with a published light
+/// theme map to it; dark-only families (Monokai / Nord / Darcula) fall back
+/// to Daruda Light so a light editor stays legible. Values are floored for
+/// contrast on the light editor background (`#fafafa`); Daruda Light is fully
+/// WCAG-AA, the ported families keep their identity at their native contrast.
+fn light_syntax_theme(palette: SyntaxPalette) -> SyntaxTheme {
+    match palette {
+        // Daruda Light — the readability-tuned light default. Also the
+        // fallback for dark-only families on a light editor.
+        SyntaxPalette::Daruda
+        | SyntaxPalette::Monokai
+        | SyntaxPalette::Nord
+        | SyntaxPalette::Darcula => SyntaxTheme {
+            keyword: base16(0x7c_3a_ed),
+            function: base16(0x1d_4e_d8),
+            type_: base16(0xb4_53_09),
+            constant: base16(0xc2_41_0c),
+            string: base16(0x15_80_3d),
+            string_special: base16(0x0e_74_90),
+            tag: base16(0xb9_1c_1c),
+            tag_doctype: base16(0x92_40_0e),
+            comment: base16(0x6e_73_7d),
+            default: base16(0x38_3a_42),
+            keyword_style: TokenStyle::BOLD,
+            string_special_style: TokenStyle::BOLD,
+            comment_style: TokenStyle::ITALIC,
+        },
+        SyntaxPalette::OneDark => SyntaxTheme {
+            keyword: base16(0xa6_26_a4),
+            function: base16(0x40_78_f2),
+            type_: base16(0xc1_84_01),
+            constant: base16(0x98_68_01),
+            string: base16(0x50_a1_4f),
+            string_special: base16(0x01_84_bc),
+            tag: base16(0xe4_56_49),
+            tag_doctype: base16(0x83_84_8c),
+            comment: base16(0x83_84_8c),
+            default: base16(0x38_3a_42),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::TokyoNight => SyntaxTheme {
+            keyword: base16(0x65_35_9d),
+            function: base16(0x29_59_aa),
+            type_: base16(0x00_6c_86),
+            constant: base16(0x96_50_27),
+            string: base16(0x38_5f_0d),
+            string_special: base16(0x00_6c_86),
+            tag: base16(0x8c_43_51),
+            tag_doctype: base16(0x82_85_8f),
+            comment: base16(0x82_85_8f),
+            default: base16(0x34_3b_59),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        SyntaxPalette::CatppuccinMocha => SyntaxTheme {
+            keyword: base16(0x88_39_ef),
+            function: base16(0x1e_66_f5),
+            type_: base16(0xcb_81_1a),
+            constant: base16(0xfb_5c_01),
+            string: base16(0x40_a0_2b),
+            string_special: base16(0xe6_5b_c1),
+            tag: base16(0xd2_0f_39),
+            tag_doctype: base16(0x7c_7f_93),
+            comment: base16(0x7c_7f_93),
+            default: base16(0x4c_4f_69),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::Dracula => SyntaxTheme {
+            keyword: base16(0xa3_14_4d),
+            function: base16(0x14_71_0a),
+            type_: base16(0x03_6a_96),
+            constant: base16(0x64_4a_c9),
+            string: base16(0x84_6e_15),
+            string_special: base16(0xa3_4d_14),
+            tag: base16(0xcb_3a_2a),
+            tag_doctype: base16(0x6c_66_4b),
+            comment: base16(0x6c_66_4b),
+            default: base16(0x1f_1f_1f),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::GitHubDark => SyntaxTheme {
+            keyword: base16(0xcf_22_2e),
+            function: base16(0x82_50_df),
+            type_: base16(0x95_38_00),
+            constant: base16(0x09_69_da),
+            string: base16(0x0a_30_69),
+            string_special: base16(0x0a_30_69),
+            tag: base16(0x1a_7f_37),
+            tag_doctype: base16(0x1a_7f_37),
+            comment: base16(0x6e_77_81),
+            default: base16(0x1f_23_28),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::BOLD,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::MaterialPalenight => SyntaxTheme {
+            keyword: base16(0x7c_4d_ff),
+            function: base16(0x61_82_b8),
+            type_: base16(0xd0_7c_09),
+            constant: base16(0xf6_61_38),
+            string: base16(0x78_9d_43),
+            string_special: base16(0x34_9f_a7),
+            tag: base16(0xe5_39_35),
+            tag_doctype: base16(0x6f_89_96),
+            comment: base16(0x6f_89_96),
+            default: base16(0x54_6e_7a),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        SyntaxPalette::GruvboxDark => SyntaxTheme {
+            keyword: base16(0x9d_00_06),
+            function: base16(0x42_7b_58),
+            type_: base16(0xb5_76_14),
+            constant: base16(0x8f_3f_71),
+            string: base16(0x79_74_0e),
+            string_special: base16(0xaf_3a_03),
+            tag: base16(0x9d_00_06),
+            tag_doctype: base16(0xaf_3a_03),
+            comment: base16(0x92_83_74),
+            default: base16(0x3c_38_36),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::SolarizedDark => SyntaxTheme {
+            keyword: base16(0x85_99_00),
+            function: base16(0x26_8b_d2),
+            type_: base16(0xb5_89_00),
+            constant: base16(0xd3_36_82),
+            string: base16(0x2a_a1_98),
+            string_special: base16(0xcb4b16),
+            tag: base16(0x26_8b_d2),
+            tag_doctype: base16(0x77_89_89),
+            comment: base16(0x77_89_89),
+            default: base16(0x62_77_7f),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::PLAIN,
+        },
+        SyntaxPalette::AyuMirage => SyntaxTheme {
+            keyword: base16(0xf0_67_06),
+            function: base16(0xc1_86_00),
+            type_: base16(0x2a_97_e4),
+            constant: base16(0xa3_7a_cc),
+            string: base16(0x76_9e_00),
+            string_special: base16(0x3a_a1_7f),
+            tag: base16(0x31_9c_c0),
+            tag_doctype: base16(0x84_85_8a),
+            comment: base16(0x84_85_8a),
+            default: base16(0x5c_61_66),
+            keyword_style: TokenStyle::PLAIN,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
+        SyntaxPalette::NightOwl => SyntaxTheme {
+            keyword: base16(0x99_4c_c3),
+            function: base16(0x48_76_d6),
+            type_: base16(0x0c_96_9b),
+            constant: base16(0xaa_09_82),
+            string: base16(0xc9_67_65),
+            string_special: base16(0x0c_96_9b),
+            tag: base16(0x99_4c_c3),
+            tag_doctype: base16(0x7c_85_9c),
+            comment: base16(0x7c_85_9c),
+            default: base16(0x40_3f_53),
+            keyword_style: TokenStyle::ITALIC,
+            string_special_style: TokenStyle::PLAIN,
+            comment_style: TokenStyle::ITALIC,
+        },
     }
+}
+
+/// Foreground colour for a tree-sitter highlight capture name. Unrecognised
+/// captures (and the empty string) fall back to the default editor
+/// foreground, so every token gets an explicit foreground. Used by the diff
+/// view's own highlighter.
+pub fn syntax_color(capture: &str) -> Hsla {
+    syntax_color_of(SyntaxPalette::Daruda, false, capture)
+}
+
+/// Foreground colour for a capture in `palette` at the editor's lightness.
+/// Thin wrapper over [`SyntaxTheme::color_for`] for call sites that hold only
+/// a palette.
+pub fn syntax_color_of(palette: SyntaxPalette, is_light: bool, capture: &str) -> Hsla {
+    syntax_theme_of(palette, is_light).color_for(capture)
 }
 
 /// Build `gpui_component`'s per-capture [`SyntaxColors`] from
@@ -1011,50 +1608,69 @@ pub fn syntax_color(capture: &str) -> Hsla {
 /// every field is set explicitly so a future upstream field addition
 /// fails to compile here rather than silently diverging.
 pub fn editor_syntax_colors() -> SyntaxColors {
-    let t = syntax_theme();
-    let s = |c: Hsla| Some(ThemeStyle::new(c));
+    editor_syntax_colors_of(SyntaxPalette::Daruda, false)
+}
+
+/// Build `gpui_component`'s per-capture [`SyntaxColors`] for `palette` at the
+/// editor's lightness. The styled buckets (keyword / string_special /
+/// comment) carry the palette's bold/italic channel; every other bucket is
+/// colour-only.
+pub fn editor_syntax_colors_of(palette: SyntaxPalette, is_light: bool) -> SyntaxColors {
+    use SyntaxBucket::*;
+    let t = syntax_theme_of(palette, is_light);
+    // Colour + non-color channel for a bucket, as one `ThemeStyle`.
+    let b = |bucket: SyntaxBucket| {
+        let st = t.style(bucket);
+        let mut ts = ThemeStyle::new(t.color(bucket));
+        if st.bold {
+            ts = ts.bold();
+        }
+        if st.italic {
+            ts = ts.italic();
+        }
+        Some(ts)
+    };
     SyntaxColors {
-        keyword: s(t.keyword),
-        function: s(t.function),
-        title: s(t.function),
-        type_: s(t.type_),
-        enum_: s(t.type_),
-        constructor: s(t.type_),
-        label: s(t.type_),
-        preproc: s(t.type_),
-        embedded: s(t.type_),
-        constant: s(t.constant),
-        boolean: s(t.constant),
-        number: s(t.constant),
-        attribute: s(t.constant),
-        variant: s(t.constant),
-        link_uri: s(t.constant),
-        string: s(t.string),
-        text_literal: s(t.string),
-        string_escape: s(t.string_special),
-        string_regex: s(t.string_special),
-        string_special: s(t.string_special),
-        string_special_symbol: s(t.string_special),
-        tag: s(t.tag),
-        variable_special: s(t.tag),
-        link_text: s(t.tag),
-        tag_doctype: s(t.tag_doctype),
-        comment: s(t.comment),
-        comment_doc: s(t.comment),
-        hint: s(t.comment),
-        predictive: s(t.comment),
-        // default-foreground bucket — mirrors `syntax_color`'s `_` arm.
-        variable: s(t.default),
-        property: s(t.default),
-        operator: s(t.default),
-        punctuation: s(t.default),
-        punctuation_bracket: s(t.default),
-        punctuation_delimiter: s(t.default),
-        punctuation_list_marker: s(t.default),
-        punctuation_special: s(t.default),
-        emphasis: s(t.default),
-        emphasis_strong: s(t.default),
-        primary: s(t.default),
+        keyword: b(Keyword),
+        function: b(Function),
+        title: b(Function),
+        type_: b(Type),
+        enum_: b(Type),
+        constructor: b(Type),
+        label: b(Type),
+        preproc: b(Type),
+        embedded: b(Type),
+        constant: b(Constant),
+        boolean: b(Constant),
+        number: b(Constant),
+        attribute: b(Constant),
+        variant: b(Constant),
+        link_uri: b(Constant),
+        string: b(String),
+        text_literal: b(String),
+        string_escape: b(StringSpecial),
+        string_regex: b(StringSpecial),
+        string_special: b(StringSpecial),
+        string_special_symbol: b(StringSpecial),
+        tag: b(Tag),
+        variable_special: b(Tag),
+        link_text: b(Tag),
+        tag_doctype: b(TagDoctype),
+        comment: b(Comment),
+        comment_doc: b(Comment),
+        hint: b(Comment),
+        predictive: b(Comment),
+        variable: b(Default),
+        property: b(Default),
+        operator: b(Default),
+        punctuation: b(Default),
+        punctuation_bracket: b(Default),
+        punctuation_delimiter: b(Default),
+        punctuation_list_marker: b(Default),
+        punctuation_special: b(Default),
+        emphasis: b(Default),
+        emphasis_strong: b(Default),
+        primary: b(Default),
     }
 }
 /// Gap between `@@ -N +M @@` and its trailing context text (px).
@@ -1627,25 +2243,47 @@ mod tests {
     #[test]
     fn editor_and_diff_share_one_colour_source() {
         let editor = editor_syntax_colors();
-        // One capture per semantic group plus a default-bucket member.
+        // Every capture whose `SyntaxColors` field is set explicitly in
+        // `editor_syntax_colors_of`. Exercising all of them guards the
+        // static field->bucket map against drifting from
+        // `bucket_for_capture` (which the diff path uses). The field->bucket
+        // mapping is palette-independent, so checking Daruda catches any
+        // misassignment for all palettes.
         for capture in [
             "keyword",
             "function",
             "title",
             "type",
             "enum",
+            "constructor",
+            "label",
+            "preproc",
+            "embedded",
             "constant",
+            "boolean",
             "number",
+            "attribute",
+            "variant",
+            "link_uri",
             "string",
             "text.literal",
             "string.escape",
+            "string.regex",
+            "string.special",
+            "string.special.symbol",
             "tag",
+            "variable.special",
+            "link_text",
             "tag.doctype",
             "comment",
             "comment.doc",
+            "hint",
+            "predictive",
             "variable",
+            "property",
             "operator",
             "punctuation",
+            "emphasis",
         ] {
             let from_editor = editor.style(capture).and_then(|s| s.color);
             assert_eq!(
@@ -1678,5 +2316,152 @@ mod tests {
                 assert_ne!(a, b, "syntax groups must be distinct colours");
             }
         }
+    }
+
+    #[test]
+    fn from_config_name_maps_curated_and_falls_back() {
+        assert_eq!(
+            SyntaxPalette::from_config_name("daruda"),
+            SyntaxPalette::Daruda
+        );
+        assert_eq!(
+            SyntaxPalette::from_config_name("one-dark"),
+            SyntaxPalette::OneDark
+        );
+        assert_eq!(
+            SyntaxPalette::from_config_name("tokyo-night"),
+            SyntaxPalette::TokyoNight
+        );
+        assert_eq!(
+            SyntaxPalette::from_config_name("catppuccin-mocha"),
+            SyntaxPalette::CatppuccinMocha
+        );
+        // Unknown + legacy base16 names fall back to the recommended default.
+        assert_eq!(SyntaxPalette::from_config_name(""), SyntaxPalette::Daruda);
+        assert_eq!(
+            SyntaxPalette::from_config_name("base16-ocean.dark"),
+            SyntaxPalette::Daruda
+        );
+        assert_eq!(
+            SyntaxPalette::from_config_name("nonsense"),
+            SyntaxPalette::Daruda
+        );
+    }
+
+    /// Every curated palette, used to assert invariants across all of them.
+    const ALL_PALETTES: [SyntaxPalette; 14] = [
+        SyntaxPalette::Daruda,
+        SyntaxPalette::OneDark,
+        SyntaxPalette::TokyoNight,
+        SyntaxPalette::CatppuccinMocha,
+        SyntaxPalette::Dracula,
+        SyntaxPalette::GitHubDark,
+        SyntaxPalette::MaterialPalenight,
+        SyntaxPalette::Monokai,
+        SyntaxPalette::Nord,
+        SyntaxPalette::GruvboxDark,
+        SyntaxPalette::SolarizedDark,
+        SyntaxPalette::AyuMirage,
+        SyntaxPalette::NightOwl,
+        SyntaxPalette::Darcula,
+    ];
+
+    #[test]
+    fn every_palette_separates_keyword_from_default() {
+        for p in ALL_PALETTES {
+            for is_light in [false, true] {
+                let t = syntax_theme_of(p, is_light);
+                assert_ne!(
+                    t.color_for("keyword"),
+                    t.color_for(""),
+                    "{p:?} (light={is_light}): keyword must differ from default"
+                );
+            }
+        }
+    }
+
+    fn wcag_contrast(fg: Hsla, bg: Hsla) -> f32 {
+        fn lum(c: Hsla) -> f32 {
+            let rgba = gpui::Rgba::from(c);
+            let f = |v: f32| {
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(rgba.r) + 0.7152 * f(rgba.g) + 0.0722 * f(rgba.b)
+        }
+        let (a, b) = (lum(fg), lum(bg));
+        let (hi, lo) = if a > b { (a, b) } else { (b, a) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    #[test]
+    fn light_variant_clears_contrast_on_light_bg() {
+        // Daruda Light is the WCAG-AA light default; every bucket must clear
+        // 4.5:1 on the light editor background (`#fafafa`).
+        let bg = base16(0xfa_fa_fa);
+        let t = syntax_theme_of(SyntaxPalette::Daruda, true);
+        for capture in [
+            "keyword", "function", "type", "constant", "string", "comment", "",
+        ] {
+            assert!(
+                wcag_contrast(t.color_for(capture), bg) >= 4.5,
+                "Daruda Light {capture:?} must clear 4.5:1 on #fafafa"
+            );
+        }
+    }
+
+    #[test]
+    fn every_palette_round_trips_through_config_name() {
+        // Each curated palette must have a config name that resolves back
+        // to it (the settings dropdown relies on this).
+        let names = [
+            "daruda",
+            "one-dark",
+            "tokyo-night",
+            "catppuccin-mocha",
+            "dracula",
+            "github-dark",
+            "material-palenight",
+            "monokai",
+            "nord",
+            "gruvbox-dark",
+            "solarized-dark",
+            "ayu-mirage",
+            "night-owl",
+            "darcula",
+        ];
+        assert_eq!(names.len(), ALL_PALETTES.len());
+        for (name, expected) in names.iter().zip(ALL_PALETTES) {
+            assert_eq!(SyntaxPalette::from_config_name(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn capture_grouping_is_shared_by_color_and_style() {
+        // color_for / style_for / editor colours must all read the same
+        // bucket for a capture — guard against the grouping drifting.
+        let t = syntax_theme_of(SyntaxPalette::Daruda, false);
+        for capture in ["keyword", "string.escape", "comment", "function", ""] {
+            let bucket = bucket_for_capture(capture);
+            assert_eq!(t.color_for(capture), t.color(bucket));
+            assert_eq!(t.style_for(capture), t.style(bucket));
+        }
+    }
+
+    #[test]
+    fn daruda_carries_non_color_channels() {
+        let t = syntax_theme_of(SyntaxPalette::Daruda, false);
+        assert!(t.style_for("keyword").bold, "Daruda keyword is bold");
+        assert!(
+            t.style_for("string.escape").bold,
+            "Daruda string_special is bold"
+        );
+        assert!(t.style_for("comment").italic, "Daruda comment is italic");
+        // A color-only palette carries no non-color channel.
+        let one = syntax_theme_of(SyntaxPalette::OneDark, false);
+        assert_eq!(one.style_for("keyword"), TokenStyle::default());
     }
 }

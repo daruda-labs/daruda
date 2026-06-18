@@ -244,7 +244,7 @@ fn inaccessible_empty_state(
             div()
                 .max_w(px(theme::MAIN_EMPTY_STATE_BODY_MAX_W))
                 .text_size(px(theme::MAIN_EMPTY_STATE_BODY_FONT_SIZE))
-                .text_color(t.muted_text)
+                .text_color(t.text_muted)
                 .text_center()
                 .child(SharedString::from(body)),
         )
@@ -271,15 +271,35 @@ impl Render for Workspace {
         }
 
         let t = theme::current(cx);
+        let dark = t.is_dark();
         let title_bar_bg = t.title_bar_bg;
-        let tab_bar_bg = theme::SURFACE_1;
-        let tab_bar_border = theme::HAIRLINE;
-        let tab_active_bg = theme::CANVAS;
-        let tab_active_text = theme::TEXT_PRIMARY;
+        // These tab-strip slots still read raw consts (the deferred Phase-3
+        // migration tail); pick light-aware values so the tab bar doesn't
+        // render dark with white text on the light theme.
+        let tab_bar_bg = if dark {
+            theme::SURFACE_1
+        } else {
+            theme::LIGHT_SURFACE_1
+        };
+        let tab_bar_border = if dark {
+            theme::HAIRLINE
+        } else {
+            theme::LIGHT_SURFACE_3
+        };
+        let tab_active_bg = if dark {
+            theme::CANVAS
+        } else {
+            theme::LIGHT_CANVAS
+        };
+        let tab_active_text = if dark {
+            theme::TEXT_PRIMARY
+        } else {
+            theme::LIGHT_INK
+        };
         let tab_inactive_bg = t.tab_inactive_bg;
-        let tab_inactive_text = t.tab_inactive_text;
+        let tab_inactive_text = t.text_muted;
         let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
-        let muted_text = t.muted_text;
+        let muted_text = t.text_muted;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         // User-set label (Window > Edit Tab Title…) wins; otherwise fall

@@ -21,7 +21,7 @@ pub(in crate::workspace) fn claude_install_banner(
     let hover_bg = t.claude_banner_hover_bg;
     let text = theme::TEXT_SECONDARY;
     let icon = t.claude_banner_icon;
-    let hint_text = t.faint_text;
+    let hint_text = t.text_subtle;
     div()
         .id("claude-install-banner")
         .mx(px(theme::CLAUDE_BANNER_MARGIN_X))

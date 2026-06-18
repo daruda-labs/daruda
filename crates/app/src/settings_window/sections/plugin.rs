@@ -77,7 +77,7 @@ fn plugin_subheading(label: impl Into<gpui::SharedString>) -> impl IntoElement {
 fn plugin_empty_hint(label: impl Into<gpui::SharedString>, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).modal_secondary_text)
+        .text_color(theme::current(cx).text_body)
         .child(label.into())
 }
 
@@ -91,7 +91,7 @@ fn detail_row(
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let label_color = t.modal_secondary_text;
+    let label_color = t.text_body;
     let value_color = theme::TEXT_PRIMARY;
     div()
         .flex()
@@ -118,10 +118,7 @@ fn detail_row(
 /// Thin horizontal rule used between meta and skills sections inside
 /// the right pane.
 fn plugin_divider(cx: &gpui::App) -> impl IntoElement {
-    div()
-        .h(px(1.0_f32))
-        .w_full()
-        .bg(theme::current(cx).modal_panel_border)
+    div().h(px(1.0_f32)).w_full().bg(theme::current(cx).border)
 }
 
 /// Display string for the invocation header — the literal characters
@@ -267,7 +264,7 @@ impl SettingsWindow {
 
         let t = theme::current(cx);
         let title_color = theme::TEXT_PRIMARY;
-        let subtitle_color = t.modal_secondary_text;
+        let subtitle_color = t.text_body;
         let active_bg = theme::OVERLAY_PROMINENT;
         let hover_bg = t.skill_row_hover_bg;
 
@@ -602,11 +599,11 @@ impl SettingsWindow {
     ) -> AnyElement {
         let t = theme::current(cx);
         let title_color = theme::TEXT_PRIMARY;
-        let secondary_color = t.modal_secondary_text;
+        let secondary_color = t.text_body;
         let error_color = theme::ERROR;
         let section_header_color = theme::TEXT_TERTIARY;
         let input_bg = t.modal_input_bg;
-        let input_border = t.modal_input_border;
+        let input_border = t.border;
         let body_text_color = theme::TEXT_PRIMARY;
 
         let header = div()

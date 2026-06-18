@@ -311,11 +311,17 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&max_fps_str), window, cx)
         });
 
-        let syntax_theme = SharedString::from(config.file_viewer.syntax_theme.clone());
+        // Resolve through the palette so a legacy / unknown stored value
+        // (e.g. an old "base16-ocean.dark") still shows its effective
+        // palette selected instead of a blank dropdown.
+        let syntax_theme = SharedString::from(
+            crate::ui::theme::SyntaxPalette::from_config_name(&config.file_viewer.syntax_theme)
+                .config_name(),
+        );
         let syntax_theme_select = cx.new(|cx| {
             let opts = SYNTAX_THEMES
                 .iter()
-                .map(|(v, l)| SelectOption::new(*v, *l))
+                .map(|v| SelectOption::new(*v, syntax_theme_label(v)))
                 .collect();
             select::state_with_options(opts, Some(&syntax_theme), window, cx)
         });
@@ -357,6 +363,36 @@ impl SettingsWindow {
             make_sub(&inset_y_input, cx),
             make_sub(&clipboard_streaming_input, cx),
             make_sub(&panels_grid_columns_input, cx),
+            // Theme dropdowns apply live on pick (no Save needed): the
+            // commit persists just that one field, and the existing config
+            // fan-out repaints every open editor / diff view / pane.
+            cx.subscribe_in(
+                &syntax_theme_select,
+                window,
+                |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        this.persist_theme_field(state, |c, v| c.file_viewer.syntax_theme = v, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &terminal_preset_select,
+                window,
+                |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        this.persist_theme_field(state, |c, v| c.theme.terminal_preset = v, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &ui_preset_select,
+                window,
+                |this, state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        this.persist_theme_field(state, |c, v| c.theme.ui_preset = v, cx);
+                    }
+                },
+            ),
         ];
 
         // Map each section to the focus target it should land on when
@@ -628,6 +664,30 @@ impl SettingsWindow {
         Ok(config)
     }
 
+    /// Persist a picked theme dropdown value immediately (no Save
+    /// required). Writes only the one field `set` touches; `patch_user`'s
+    /// fan-out then re-bridges themes and repaints open views, so the
+    /// change is visible the moment the dropdown commits. `set` is a
+    /// non-capturing fn so it coerces to a plain `fn` pointer.
+    fn persist_theme_field(
+        &mut self,
+        select: &Entity<SelectState>,
+        set: fn(&mut daruda_config::Config, String),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(value) = select.read(cx).selected_value().map(|s| s.to_string()) else {
+            return;
+        };
+        use gpui::BorrowAppContext as _;
+        let result = cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.patch_user(|cfg| set(cfg, value.clone()))
+        });
+        if let Err(msg) = result {
+            self.error = Some(SharedString::from(msg));
+            cx.notify();
+        }
+    }
+
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let config = match self.validate(cx) {
             Ok(c) => c,
@@ -676,7 +736,6 @@ impl SettingsWindow {
             | BuiltinSection::Cursor
             | BuiltinSection::Shell
             | BuiltinSection::LeftDock
-            | BuiltinSection::FileViewer
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Notifications
             | BuiltinSection::Keymap
@@ -704,7 +763,7 @@ impl SettingsWindow {
     ) -> impl IntoElement {
         div()
             .text_size(px(theme::LANE_SECTION_HEADER_FONT_SIZE))
-            .text_color(theme::current(cx).muted_text)
+            .text_color(theme::current(cx).text_muted)
             .mt(px(theme::MODAL_FOOTER_MARGIN_TOP))
             .child(label.into())
     }
@@ -721,16 +780,45 @@ pub(crate) fn window_background_for(config: &daruda_config::Config) -> WindowBac
     }
 }
 
-/// Syntect bundled theme names (ThemeSet::load_defaults) paired with display labels.
-const SYNTAX_THEMES: &[(&str, &str)] = &[
-    ("base16-ocean.dark", "Base16 Ocean Dark"),
-    ("base16-ocean.light", "Base16 Ocean Light"),
-    ("base16-eighties.dark", "Base16 Eighties Dark"),
-    ("base16-mocha.dark", "Base16 Mocha Dark"),
-    ("InspiredGitHub", "Inspired GitHub"),
-    ("Solarized (dark)", "Solarized Dark"),
-    ("Solarized (light)", "Solarized Light"),
+/// Curated syntax palettes. Value = config key resolved by
+/// `palette::SyntaxPalette::from_config_name`; labels are i18n'd via
+/// [`syntax_theme_label`]. The recommended Daruda palette is first.
+const SYNTAX_THEMES: &[&str] = &[
+    "daruda",
+    "one-dark",
+    "tokyo-night",
+    "catppuccin-mocha",
+    "dracula",
+    "github-dark",
+    "material-palenight",
+    "monokai",
+    "nord",
+    "gruvbox-dark",
+    "solarized-dark",
+    "ayu-mirage",
+    "night-owl",
+    "darcula",
 ];
+
+/// Localized display label for a syntax-palette config value.
+fn syntax_theme_label(value: &str) -> String {
+    match value {
+        "one-dark" => s::settings_syntax_theme_one_dark(),
+        "tokyo-night" => s::settings_syntax_theme_tokyo_night(),
+        "catppuccin-mocha" => s::settings_syntax_theme_catppuccin_mocha(),
+        "dracula" => s::settings_syntax_theme_dracula(),
+        "github-dark" => s::settings_syntax_theme_github_dark(),
+        "material-palenight" => s::settings_syntax_theme_material_palenight(),
+        "monokai" => s::settings_syntax_theme_monokai(),
+        "nord" => s::settings_syntax_theme_nord(),
+        "gruvbox-dark" => s::settings_syntax_theme_gruvbox_dark(),
+        "solarized-dark" => s::settings_syntax_theme_solarized_dark(),
+        "ayu-mirage" => s::settings_syntax_theme_ayu_mirage(),
+        "night-owl" => s::settings_syntax_theme_night_owl(),
+        "darcula" => s::settings_syntax_theme_darcula(),
+        _ => s::settings_syntax_theme_daruda(),
+    }
+}
 
 /// Return all font family names available on this system, sorted alphabetically.
 /// The `current` family is always included as the first entry so the select

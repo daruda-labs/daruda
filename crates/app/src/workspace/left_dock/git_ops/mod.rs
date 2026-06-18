@@ -55,6 +55,6 @@ pub(in crate::workspace) fn git_status_color(ch: char, staged: bool, cx: &gpui::
         'A' | 'R' | 'C' => theme::GIT_STAGED,
         '?' => theme::GIT_UNTRACKED,
         'U' => theme::GIT_MODIFIED,
-        _ => t.faint_text,
+        _ => t.text_subtle,
     }
 }

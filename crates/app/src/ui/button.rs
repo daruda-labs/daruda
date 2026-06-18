@@ -59,7 +59,7 @@ pub fn button_chip(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
 pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.muted_text)
+        .foreground(t.text_muted)
         .hover(theme::ERROR);
     Button::new(id)
         .xsmall()
@@ -83,7 +83,7 @@ pub fn button_close(id: impl Into<ElementId>, cx: &App) -> Button {
 pub fn button_delete_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.muted_text)
+        .foreground(t.text_muted)
         .hover(theme::ERROR);
     Button::new(id)
         .xsmall()
@@ -102,7 +102,7 @@ pub fn button_header_action(
 ) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.muted_text)
+        .foreground(t.text_muted)
         .hover(theme::TEXT_PRIMARY);
     Button::new(id)
         .small()
@@ -117,8 +117,8 @@ pub fn button_header_action(
 pub fn button_add_tile(id: impl Into<ElementId>, cx: &App) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
-        .foreground(t.muted_text)
-        .border(t.muted_text)
+        .foreground(t.text_muted)
+        .border(t.text_muted)
         .hover(t.button_widget_bg_hover);
     Button::new(id)
         .small()
@@ -147,7 +147,7 @@ pub fn button_toggle(
     let fg = if active {
         theme::TEXT_PRIMARY
     } else {
-        t.dock_icon_inactive
+        t.text_muted
     };
     let active_bg = t.dock_icon_active_bg;
     let variant = if active {

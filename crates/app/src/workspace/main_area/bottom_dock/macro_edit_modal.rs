@@ -302,7 +302,7 @@ impl MacroEditModal {
         let t = theme::current(cx);
         let widget_bg = t.button_widget_bg;
         let widget_bg_hover = t.button_widget_bg_hover;
-        let widget_text = t.button_widget_text;
+        let widget_text = t.text_body;
         let bg = if recording {
             widget_bg_hover
         } else {
@@ -481,7 +481,7 @@ fn has_any_modifier(ks: &Keystroke) -> bool {
 fn field_label(text: &'static str, cx: &gpui::App) -> impl IntoElement {
     div()
         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-        .text_color(theme::current(cx).muted_text)
+        .text_color(theme::current(cx).text_muted)
         .child(text)
 }
 

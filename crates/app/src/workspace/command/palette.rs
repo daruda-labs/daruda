@@ -74,11 +74,6 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
-        id: "open_settings.file_viewer",
-        label: "Settings: File Viewer",
-        shortcut: "",
-    },
-    PaletteEntry {
         id: "open_settings.clipboard",
         label: "Settings: Clipboard",
         shortcut: "",
@@ -507,15 +502,15 @@ impl RenderOnce for CommandPaletteOverlay {
         let filtered = state.filtered_entries();
 
         let t = theme::current(cx);
-        let input_border = t.palette_input_border;
+        let input_border = t.border;
         let query_text = theme::TEXT_PRIMARY;
         let focused_bg = t.palette_focused_bg;
         let focused_text = theme::TEXT_PRIMARY;
-        let entry_text = t.palette_entry_text;
-        let shortcut_text = t.palette_shortcut_text;
-        let empty_text = t.palette_empty_text;
+        let entry_text = t.text_body;
+        let shortcut_text = t.text_subtle;
+        let empty_text = t.text_subtle;
         let panel_bg = t.palette_bg;
-        let panel_border = t.palette_border;
+        let panel_border = t.border;
 
         let input = div()
             .flex()

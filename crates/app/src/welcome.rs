@@ -59,10 +59,10 @@ impl Render for WelcomeScreen {
 
         let t = theme::current(cx);
         let welcome_text = theme::TEXT_PRIMARY;
-        let faint_text = t.faint_text;
-        let muted_text = t.muted_text;
+        let faint_text = t.text_subtle;
+        let muted_text = t.text_muted;
         let button_bg = t.welcome_button_bg;
-        let button_border = t.welcome_button_border;
+        let button_border = t.border;
         let button_hover_bg = t.welcome_button_hover_bg;
         let recent_hover_bg = t.welcome_recent_hover_bg;
         let panel_bg = t.welcome_bg;

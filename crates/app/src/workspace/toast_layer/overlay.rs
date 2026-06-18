@@ -95,8 +95,8 @@ fn toast_pill(
 ) -> impl IntoElement {
     let t = theme::current(cx);
     let pill_bg = theme::SURFACE_4;
-    let pill_border = t.toast_border;
-    let pill_text = t.toast_text;
+    let pill_border = t.border;
+    let pill_text = t.text_body;
     let pill_text_dim = theme::TEXT_SECONDARY;
     let repeat_bg = t.toast_repeat_bg;
     let tint = severity_tint(snap.severity);
