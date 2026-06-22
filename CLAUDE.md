@@ -60,7 +60,7 @@ scripts/lint-viewport-row-scroll.sh
 Render the UI offscreen to a PNG and read it back — text, layout, colors,
 images, and toasts all render, permission-free (no Screen Recording grant).
 Capture goes through gpui's `render_to_image`, gated upstream behind
-`test-support`; both paths below require it, plus `gpui_macos/font-kit`
+`test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit`
 (without that feature glyphs don't rasterize — shapes render but **text is
 invisible**, the post-bump regression).
 
@@ -74,13 +74,6 @@ target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures,
 The opt-in `screenshot` feature enables `gpui/test-support` +
 `gpui_macos/font-kit`; it is off by default to keep the shipping binary clean.
 Entry point: `crates/app/src/screenshot.rs`.
-
-**Isolated view** — the `visual_verifier` example renders a hand-built view
-with no app state:
-
-```bash
-cargo run -p daruda --example visual_verifier   # → /tmp/daruda_verifier.png
-```
 
 Verification loop: render → PNG → an agent reads the PNG and checks the result.
 This catches both rendering bugs and runtime state (e.g. error toasts), so it
