@@ -1502,6 +1502,9 @@ pub fn settings_label_font_family() -> String {
 pub fn settings_label_font_size() -> String {
     rust_i18n::t!("settings.label_font_size").into_owned()
 }
+pub fn settings_label_editor_font_size() -> String {
+    rust_i18n::t!("settings.label_editor_font_size").into_owned()
+}
 pub fn settings_label_vertical_spacing() -> String {
     rust_i18n::t!("settings.label_vertical_spacing").into_owned()
 }
@@ -1537,6 +1540,9 @@ pub fn settings_save() -> String {
 }
 pub fn settings_err_font_size() -> String {
     rust_i18n::t!("settings.err_font_size").into_owned()
+}
+pub fn settings_err_editor_font_size() -> String {
+    rust_i18n::t!("settings.err_editor_font_size").into_owned()
 }
 pub fn settings_err_spacing() -> String {
     rust_i18n::t!("settings.err_spacing").into_owned()

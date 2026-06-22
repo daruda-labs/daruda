@@ -83,10 +83,10 @@ pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
 // neutral gray), mirroring the dark ladder's cool identity. Used by
 // `apply_daruda_palette` and theme-variant render helpers so light mode
 // doesn't fall through to the dark consts above. Matches `daruda_light.json`.
-pub const LIGHT_CANVAS: Hsla = hsla(222.0, 0.20, 0.984, 1.0);
-pub const LIGHT_SURFACE_1: Hsla = hsla(222.0, 0.18, 0.937, 1.0);
-pub const LIGHT_SURFACE_2: Hsla = hsla(222.0, 0.17, 0.909, 1.0);
-pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 0.16, 0.876, 1.0);
+pub const LIGHT_CANVAS: Hsla = hsla(222.0, 0.10, 0.954, 1.0);
+pub const LIGHT_SURFACE_1: Hsla = hsla(222.0, 0.09, 0.907, 1.0);
+pub const LIGHT_SURFACE_2: Hsla = hsla(222.0, 0.085, 0.879, 1.0);
+pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 0.08, 0.846, 1.0);
 /// Near-black ink for text on light surfaces (the inverse of `INK`, which is
 /// a near-white for dark surfaces). Used by render sites that still read a
 /// raw text const instead of a theme-variant field.
@@ -900,9 +900,13 @@ pub const FILE_VIEWER_MAX_LINES: usize = 2000;
 /// truncated before line-splitting so the process never loads unbounded data.
 pub const FILE_VIEWER_MAX_BYTES: usize = 5 * 1024 * 1024; // 5 MB
 
+/// Row-height multiple over the body font size (≈ phi). Applied to the
+/// config-driven editor font so the raw virtual-list row height scales
+/// with `font.editor_size` instead of the fixed const.
+pub const FILE_VIEWER_LINE_H_RATIO: f32 = 1.7;
 /// Fixed row height for the virtual-list renderer (px).
 /// Derived so it is always ≥ FILE_VIEWER_FONT_SIZE * phi() without manual sync.
-pub const FILE_VIEWER_LINE_H: f32 = FILE_VIEWER_FONT_SIZE * 1.7;
+pub const FILE_VIEWER_LINE_H: f32 = FILE_VIEWER_FONT_SIZE * FILE_VIEWER_LINE_H_RATIO;
 /// Rows rendered above and below the visible viewport (overscan).
 pub const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Gap between toolbar button group items (px).

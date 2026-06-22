@@ -265,7 +265,7 @@ impl SettingsWindow {
         let t = theme::current(cx);
         let title_color = t.text_primary;
         let subtitle_color = t.text_body;
-        let active_bg = theme::OVERLAY_PROMINENT;
+        let active_bg = t.overlay_prominent;
         let hover_bg = t.skill_row_hover_bg;
 
         let mut row = div()

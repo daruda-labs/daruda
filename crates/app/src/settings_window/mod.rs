@@ -79,6 +79,7 @@ pub struct SettingsWindow {
     // Font
     font_family_select: Entity<SelectState>,
     font_size_input: Entity<InputState>,
+    editor_font_size_input: Entity<InputState>,
     vertical_spacing_input: Entity<InputState>,
     horizontal_spacing_input: Entity<InputState>,
     // Cursor
@@ -238,6 +239,11 @@ impl SettingsWindow {
                 .placeholder("e.g. 13")
                 .default_value(format!("{}", config.font.size))
         });
+        let editor_font_size_input = cx.new(|cx_state| {
+            InputState::new(window, cx_state)
+                .placeholder("e.g. 13")
+                .default_value(format!("{}", config.font.editor_size))
+        });
         let vertical_spacing_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .placeholder("e.g. 1.0")
@@ -355,6 +361,7 @@ impl SettingsWindow {
 
         let _input_subscriptions = vec![
             make_sub(&font_size_input, cx),
+            make_sub(&editor_font_size_input, cx),
             make_sub(&vertical_spacing_input, cx),
             make_sub(&horizontal_spacing_input, cx),
             make_sub(&opacity_input, cx),
@@ -416,6 +423,7 @@ impl SettingsWindow {
             ui_preset_select,
             font_family_select,
             font_size_input,
+            editor_font_size_input,
             vertical_spacing_input,
             horizontal_spacing_input,
             cursor_style_select,
@@ -550,6 +558,18 @@ impl SettingsWindow {
             .ok()
             .filter(|&v| (6.0..=72.0).contains(&v))
             .ok_or_else(|| SharedString::from(s::settings_err_font_size()))?;
+
+        let editor_size_str = self
+            .editor_font_size_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        config.font.editor_size = editor_size_str
+            .parse::<f32>()
+            .ok()
+            .filter(|&v| (6.0..=72.0).contains(&v))
+            .ok_or_else(|| SharedString::from(s::settings_err_editor_font_size()))?;
 
         let vs_str = self
             .vertical_spacing_input

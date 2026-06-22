@@ -184,7 +184,7 @@ impl SettingsWindow {
         is_active: bool,
     ) -> impl IntoElement {
         let row_text = theme::current(cx).text_primary;
-        let active_bg = theme::OVERLAY_PROMINENT;
+        let active_bg = theme::current(cx).overlay_prominent;
         let hover_bg = theme::current(cx).overlay_selected;
 
         let row_id: gpui::ElementId =

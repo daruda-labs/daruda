@@ -120,6 +120,10 @@ impl SettingsWindow {
                 crate::ui::input(&self.font_size_input, cx, ()),
             ))
             .child(field_row(
+                s::settings_label_editor_font_size(),
+                crate::ui::input(&self.editor_font_size_input, cx, ()),
+            ))
+            .child(field_row(
                 s::settings_label_vertical_spacing(),
                 crate::ui::input(&self.vertical_spacing_input, cx, ()),
             ))

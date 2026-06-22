@@ -28,6 +28,7 @@ pub(crate) fn init_all(cx: &mut App) {
         let preset = user.theme.ui_preset.clone();
         let lang = user.general.language.clone();
         let syntax = user.file_viewer.syntax_theme.clone();
+        let editor_font_size = user.font.editor_size;
         ui::theme::apply_ui_theme(&preset, cx);
         apply_locale_str(&lang);
         // Seed the selected syntax palette so the editor highlight theme
@@ -36,6 +37,9 @@ pub(crate) fn init_all(cx: &mut App) {
             cx,
             ui::theme::SyntaxPalette::from_config_name(&syntax),
         );
+        // Seed the file-viewer editor font size so raw / diff / markdown
+        // rows render at the configured size from the first paint.
+        ui::theme::set_editor_font_size(cx, editor_font_size);
     }
     crate::agent::skills::global::init(cx);
     crate::agent::mcp::global::init(cx);

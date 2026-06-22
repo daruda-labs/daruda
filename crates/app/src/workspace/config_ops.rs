@@ -92,6 +92,14 @@ impl Workspace {
             // re-render on `cx.notify()` alone (Pitfall #10).
             self.notify_left_dock(cx);
         }
+        // File-viewer editor font size (config `font.editor_size`),
+        // independent of the terminal font. Mirror it to the GPUI-side
+        // global *before* any file-pane reload below so a re-bake reads
+        // the fresh size; the render path reads the global directly.
+        let editor_font_changed =
+            (crate::ui::theme::editor_font_size(cx) - config.font.editor_size).abs() > f32::EPSILON;
+        crate::ui::theme::set_editor_font_size(cx, config.font.editor_size);
+
         // A UI-theme switch changes the editor background's lightness, so the
         // syntax palette flips its light/dark variant. Reload open file views
         // to recompute the baked diff/markdown spans (and re-theme mermaid
@@ -108,6 +116,11 @@ impl Workspace {
                 cx,
                 crate::ui::theme::SyntaxPalette::from_config_name(&self.syntax_theme),
             );
+            self.reload_file_panes(cx);
+        }
+        // Reload for a standalone editor-font change (a theme / syntax
+        // switch above already reloaded, so gate it out to avoid a double).
+        if editor_font_changed && !theme_changed && !syntax_theme_changed {
             self.reload_file_panes(cx);
         }
         // Mirrors `claude_status.stale_threshold_secs` for the

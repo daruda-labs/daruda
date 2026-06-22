@@ -35,6 +35,7 @@ pub struct Input {
     tab_index: isize,
     selected: bool,
     show_scrollbar: bool,
+    input_padding: bool,
 }
 
 impl Sizable for Input {
@@ -74,7 +75,19 @@ impl Input {
             tab_index: 0,
             selected: false,
             show_scrollbar: true,
+            input_padding: true,
         }
+    }
+
+    /// Apply the size-derived inner padding (`input_px` / `input_py`),
+    /// default `true`. Set `false` when the host wants the editor content
+    /// (line-number gutter + text) flush to the element edge and controls
+    /// the surrounding spacing itself. Pairs with `appearance(false)`,
+    /// which strips chrome but not padding — so a borderless editor still
+    /// inherits the size-default `Size::Medium` 12px / 8px gap without this.
+    pub fn input_padding(mut self, padded: bool) -> Self {
+        self.input_padding = padded;
+        self
     }
 
     /// Show the built-in scrollbar (default `true`). Set `false` when the
@@ -366,8 +379,9 @@ impl RenderOnce for Input {
             .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
             .size_full()
             .line_height(LINE_HEIGHT)
-            .input_px(self.size)
-            .input_py(self.size)
+            .when(self.input_padding, |this| {
+                this.input_px(self.size).input_py(self.size)
+            })
             .input_h(self.size)
             .input_text_size(self.size)
             .cursor_text()

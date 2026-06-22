@@ -139,6 +139,19 @@ fn font_size_clamps_to_range() {
 }
 
 #[test]
+fn editor_font_size_clamps_to_range() {
+    let input = "[font]\neditor_size = 200.0\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    cfg.clamp();
+    assert_eq!(cfg.font.editor_size, 72.0);
+
+    let input = "[font]\neditor_size = 1.0\n";
+    let mut cfg: Config = toml::from_str(input).unwrap();
+    cfg.clamp();
+    assert_eq!(cfg.font.editor_size, 6.0);
+}
+
+#[test]
 fn opacity_clamps_to_range() {
     let input = "[window]\nopacity = 0.0\n";
     let mut cfg: Config = toml::from_str(input).unwrap();

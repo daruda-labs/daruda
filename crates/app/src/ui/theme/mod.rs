@@ -348,3 +348,28 @@ pub fn set_active_syntax_palette(cx: &mut App, palette: p::SyntaxPalette) {
     cx.set_global(ActiveSyntaxPalette(palette));
     apply_daruda_palette(cx);
 }
+
+/// File-viewer / editor font size in points, mirrored from config
+/// `font.editor_size`. Drives the raw + diff editor body, the markdown
+/// raw rows, and the line-number gutter so they share one size that is
+/// independent of the terminal font. Single update site:
+/// [`set_editor_font_size`], called from the config-reload path.
+#[derive(Clone, Copy)]
+struct EditorFontSize(f32);
+
+impl gpui::Global for EditorFontSize {}
+
+/// Read the file-viewer editor font size (points). Defaults to
+/// [`FILE_VIEWER_FONT_SIZE`](p::FILE_VIEWER_FONT_SIZE) before any config load.
+pub fn editor_font_size(cx: &App) -> f32 {
+    cx.try_global::<EditorFontSize>()
+        .map(|g| g.0)
+        .unwrap_or(p::FILE_VIEWER_FONT_SIZE)
+}
+
+/// Mirror the resolved config `font.editor_size` for the GPUI side. The
+/// config string stays the single source; this caches the value for the
+/// file-viewer render path.
+pub fn set_editor_font_size(cx: &mut App, size: f32) {
+    cx.set_global(EditorFontSize(size));
+}

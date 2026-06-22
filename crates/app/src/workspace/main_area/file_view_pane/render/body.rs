@@ -172,7 +172,11 @@ fn render_raw_body(
     let body_text = t.text_body;
     let focused_bg = t.file_viewer_search_focused_bg;
     let match_bg = t.file_viewer_search_match_bg;
-    let line_h = px(theme::FILE_VIEWER_LINE_H);
+    // Config-driven editor font + matching row height, so the markdown raw
+    // view shares one size with the raw/diff editor (`font.editor_size`).
+    let editor_font = theme::editor_font_size(cx);
+    let row_h = editor_font * theme::FILE_VIEWER_LINE_H_RATIO;
+    let line_h = px(row_h);
     let overscan = theme::FILE_VIEWER_VIRTUAL_OVERSCAN;
 
     // offset().y is 0 at top, negative when scrolled down; negate for a positive value.
@@ -180,8 +184,8 @@ fn render_raw_body(
     let viewport_h = scroll_handle.bounds().size.height;
 
     let (start, end) = virtual_range(rows.len(), scroll_y, viewport_h, line_h, overscan);
-    let top_h = px(start as f32 * theme::FILE_VIEWER_LINE_H);
-    let bottom_h = px((rows.len().saturating_sub(end)) as f32 * theme::FILE_VIEWER_LINE_H);
+    let top_h = px(start as f32 * row_h);
+    let bottom_h = px((rows.len().saturating_sub(end)) as f32 * row_h);
 
     let workspace = cx.entity().clone();
     let scroll_handle_guard = scroll_handle.clone();
@@ -210,7 +214,7 @@ fn render_raw_body(
             .flex_none()
             .h(line_h)
             .overflow_hidden()
-            .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+            .text_size(px(editor_font))
             .when_some(search_bg, |d, bg| d.bg(bg))
             .child(
                 div()
@@ -240,11 +244,15 @@ fn render_raw_body(
         col = col.child(footer_row(
             strings::file_viewer_byte_truncated(shown, theme::FILE_VIEWER_MAX_BYTES, total_count),
             line_no_text,
+            editor_font,
+            row_h,
         ));
     } else if total_count > shown {
         col = col.child(footer_row(
             strings::file_viewer_more_lines(total_count - shown),
             line_no_text,
+            editor_font,
+            row_h,
         ));
     }
 
@@ -271,15 +279,17 @@ fn search_row_bg(
     }
 }
 
-/// A non-interactive footer row for truncation notices.
-fn footer_row(text: String, text_color: gpui::Hsla) -> gpui::Div {
+/// A non-interactive footer row for truncation notices. Sized from the
+/// config-driven editor font (`font` / `row_h`) so it matches the
+/// virtual-list rows above it instead of the fixed default.
+fn footer_row(text: String, text_color: gpui::Hsla, font: f32, row_h: f32) -> gpui::Div {
     div()
         .flex_none()
         .px(px(theme::FILE_VIEWER_LINE_NO_W))
-        .h(px(theme::FILE_VIEWER_LINE_H))
+        .h(px(row_h))
         .flex()
         .items_center()
-        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_size(px(font))
         .text_color(text_color)
         .child(text)
 }

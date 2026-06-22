@@ -12,7 +12,7 @@
 //!   minimum). The task-edit prompt + notes use this.
 
 use crate::ui::theme;
-use gpui::{App, AppContext as _, Entity, SharedString, Styled as _, Window};
+use gpui::{App, AppContext as _, Entity, SharedString, Styled as _, Window, px};
 use gpui_component::Sizable as _;
 use gpui_component::input::{Input, InputState};
 
@@ -94,6 +94,9 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 
 /// Render `state` as a full-size code editor for the file-viewer raw pane.
 /// `appearance(false)` hides the focus-ring border; the parent sets the bg.
+/// `input_padding(false)` drops the size-default inner padding so the
+/// line-number gutter sits flush left like the markdown-raw / preview
+/// renderers (the body frame owns any surrounding spacing).
 pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
     use gpui_component::ActiveTheme as _;
     // Suppress the built-in scrollbar; the file viewer overlays a thin
@@ -114,8 +117,16 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
         .style
         .editor_foreground
         .unwrap_or_else(|| theme::palette::syntax_theme().default);
+    // Size the editor text from the config-driven file-viewer font
+    // (`font.editor_size`). `input.rs` applies `input_text_size(self.size)`
+    // and then `refine_style(self.style)`, so this explicit `text_size`
+    // (which lands in `self.style`) wins over the Sizable default — the
+    // raw + diff editor and its line-number gutter render at the
+    // configured size instead of gpui_component's `text_sm`.
     Input::new(state)
         .appearance(false)
+        .input_padding(false)
         .show_scrollbar(false)
+        .text_size(px(theme::editor_font_size(cx)))
         .text_color(fg)
 }
