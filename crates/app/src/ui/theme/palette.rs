@@ -1092,8 +1092,16 @@ pub enum SyntaxBucket {
 }
 
 /// Map a tree-sitter highlight capture name onto its [`SyntaxBucket`].
-/// Unrecognised captures (and the empty string) fall back to
-/// [`SyntaxBucket::Default`], so every token resolves to an explicit bucket.
+///
+/// A dotted capture that doesn't match exactly falls back to its first
+/// segment (`function.method` → `function`, `keyword.control` →
+/// `keyword`), mirroring the gpui_component editor's
+/// `SyntaxColors::style` resolution (`registry.rs`). Without this the
+/// raw editor coloured `function.method` / `type.builtin` via the base
+/// field while the diff view dropped them to `Default` — the two views
+/// disagreed on methods, qualified types, and keyword sub-kinds.
+/// Unrecognised captures (and the empty string) resolve to
+/// [`SyntaxBucket::Default`], so every token gets an explicit bucket.
 pub fn bucket_for_capture(capture: &str) -> SyntaxBucket {
     use SyntaxBucket::*;
     match capture {
@@ -1108,7 +1116,10 @@ pub fn bucket_for_capture(capture: &str) -> SyntaxBucket {
         "tag" | "variable.special" | "link_text" => Tag,
         "tag.doctype" => TagDoctype,
         "comment" | "comment.doc" | "hint" | "predictive" => Comment,
-        _ => Default,
+        _ => match capture.split_once('.') {
+            Some((prefix, _)) => bucket_for_capture(prefix),
+            None => Default,
+        },
     }
 }
 
@@ -2284,6 +2295,21 @@ mod tests {
             "operator",
             "punctuation",
             "emphasis",
+            // Dotted sub-captures with no exact field: both paths must
+            // fall back to the first segment (editor via
+            // `SyntaxColors::style`, diff via `bucket_for_capture`). These
+            // are the methods / qualified types / keyword sub-kinds that
+            // previously diverged between the raw and diff views.
+            "function.method",
+            "function.call",
+            "function.macro",
+            "keyword.control",
+            "keyword.function",
+            "type.builtin",
+            "constant.builtin",
+            "variable.parameter",
+            "variable.member",
+            "punctuation.bracket",
         ] {
             let from_editor = editor.style(capture).and_then(|s| s.color);
             assert_eq!(

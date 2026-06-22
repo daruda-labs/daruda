@@ -94,8 +94,28 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
 
 /// Render `state` as a full-size code editor for the file-viewer raw pane.
 /// `appearance(false)` hides the focus-ring border; the parent sets the bg.
-pub fn file_viewer_editor(state: &Entity<InputState>) -> Input {
+pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
+    use gpui_component::ActiveTheme as _;
     // Suppress the built-in scrollbar; the file viewer overlays a thin
     // daruda thumb so raw and diff match the other viewer modes.
-    Input::new(state).appearance(false).show_scrollbar(false)
+    //
+    // Pin the base text color. `Input` never sets one, so code-editor runs
+    // left uncoloured by tree-sitter (uncaptured identifiers, whitespace,
+    // any capture without a `SyntaxColors` mapping) inherit gpui's default
+    // black `window.text_style()` and vanish on the dark theme. The
+    // `HighlightTheme::editor_foreground` slot is upstream's home for this,
+    // but gpui_component never applies it as a text color — the host must.
+    // Read it back from the live theme (set light-aware by
+    // `apply_daruda_palette`) rather than the fixed dark-variant default,
+    // so uncaptured runs stay legible on the light theme too.
+    let fg = cx
+        .theme()
+        .highlight_theme
+        .style
+        .editor_foreground
+        .unwrap_or_else(|| theme::palette::syntax_theme().default);
+    Input::new(state)
+        .appearance(false)
+        .show_scrollbar(false)
+        .text_color(fg)
 }

@@ -15,7 +15,7 @@ use gpui::{
 };
 
 use super::modal_shared::{
-    chip_button, field_error_to_msg, field_label, join_args, split_args, transport_options,
+    field_error_to_msg, field_label, join_args, split_args, transport_options,
 };
 use crate::agent::mcp::{
     McpScope, McpServerDraft, McpTransport, format_env_lines, parse_env_lines, validate_command,
@@ -23,8 +23,9 @@ use crate::agent::mcp::{
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
+use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 
@@ -327,23 +328,25 @@ impl Render for EditMcpServerModal {
                 scope_label(self.initial.scope)
             )));
 
-        let transport_chip = {
-            let mut row = div().flex().flex_row().gap(px(theme::MCP_HEADER_GAP));
-            for (transport, label) in transport_options() {
-                let active = self.transport == transport;
-                row = row.child(chip_button(
-                    SharedString::from(format!("transport-{}", transport.slug())),
+        // Transport segmented selector. Children align with
+        // `transport_values` by index; the click callback maps the
+        // selected index back to its `McpTransport`.
+        let transport_values: Vec<McpTransport> =
+            transport_options().iter().map(|(tp, _)| *tp).collect();
+        let transport_chip = button_group("transport-group")
+            .children(transport_options().into_iter().map(|(tp, label)| {
+                button(
+                    SharedString::from(format!("transport-{}", tp.slug())),
                     label,
-                    active,
-                    cx,
-                    cx.listener(move |this, _, _w, cx| {
-                        this.transport = transport;
-                        cx.notify();
-                    }),
-                ));
-            }
-            row
-        };
+                )
+                .selected(self.transport == tp)
+            }))
+            .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if let Some(&ix) = ixs.first() {
+                    this.transport = transport_values[ix];
+                    cx.notify();
+                }
+            }));
 
         let mut body = div()
             .flex()

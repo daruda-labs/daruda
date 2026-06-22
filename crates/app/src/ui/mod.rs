@@ -17,6 +17,7 @@ pub mod agent_status_badge;
 pub mod alert;
 pub mod badge;
 pub mod button;
+pub mod button_group;
 pub mod chart;
 pub mod checkbox;
 pub mod code_editor;
@@ -48,6 +49,7 @@ pub use button::{
     Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
     button_delete_glyph, button_header_action, button_primary, button_toggle,
 };
+pub use button_group::{ButtonGroup, button_group};
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_editor::{
@@ -75,5 +77,5 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
-pub use gpui_component::{ActiveTheme, Disableable, Sizable, WindowExt};
+pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};

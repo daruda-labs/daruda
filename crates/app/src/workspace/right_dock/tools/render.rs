@@ -320,7 +320,7 @@ fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
         .px(px(theme::MCP_BADGE_PAD_X))
         .py(px(theme::MCP_BADGE_PAD_Y))
         .rounded(px(theme::MCP_BADGE_RADIUS))
-        .bg(theme::OVERLAY_SELECTED)
+        .bg(t.overlay_selected)
         .text_size(px(theme::MCP_BADGE_FONT_SIZE))
         .text_color(t.text_body)
         .child(label)

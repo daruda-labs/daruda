@@ -167,7 +167,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.background = s_surface_1;
     t.popover = d.modal_panel_bg;
-    t.popover_foreground = TEXT_PRIMARY;
+    t.popover_foreground = d.text_primary;
     t.list = s_surface_1;
     t.list_head = d.tab_inactive_bg;
     t.list_even = d.modal_panel_bg;
@@ -184,7 +184,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     // Foreground (text)
     // ---------------------------------------------------------------
-    t.foreground = TEXT_PRIMARY;
+    t.foreground = d.text_primary;
     t.muted_foreground = d.text_muted;
     t.description_list_label_foreground = d.text_muted;
 
@@ -203,7 +203,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     t.primary_active = PRIMARY;
     t.primary_foreground = TEXT_PRIMARY;
     t.accent = d.lane_row_hover_bg;
-    t.accent_foreground = TEXT_PRIMARY;
+    t.accent_foreground = d.text_primary;
     t.ring = PRIMARY;
 
     // ---------------------------------------------------------------
@@ -266,7 +266,7 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     t.tab = d.tab_inactive_bg;
     t.tab_active = s_canvas;
-    t.tab_active_foreground = TEXT_PRIMARY;
+    t.tab_active_foreground = d.text_primary;
     t.tab_bar = s_surface_1;
     t.tab_bar_segmented = d.tab_inactive_bg;
     t.tab_foreground = d.text_muted;
@@ -309,6 +309,12 @@ pub fn apply_daruda_palette(cx: &mut App) {
     let mut highlight = (*HighlightTheme::default_dark()).clone();
     highlight.style.editor_foreground = Some(p::syntax_theme_of(palette, syntax_is_light).default);
     highlight.style.syntax = p::editor_syntax_colors_of(palette, syntax_is_light);
+    // `default_dark()` carries a dark `editor_background`, which the editor
+    // element paints behind the line-number gutter (and ghost rows) via
+    // `cx.theme().editor_background()`. Left unset it stays dark on the light
+    // theme — a black gutter stripe beside the light content. Pin it to the
+    // file-viewer surface so the gutter matches the content in both modes.
+    highlight.style.editor_background = Some(d.file_viewer_bg);
     // The default-dark active-line band is dark; on a light editor it reads
     // as a black stripe. Use a faint cool-light band in light mode.
     if syntax_is_light {

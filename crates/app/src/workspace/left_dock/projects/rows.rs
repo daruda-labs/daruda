@@ -125,6 +125,7 @@ fn branch_chip(
     branch: SharedString,
     label_color: gpui::Hsla,
     chip_bg: gpui::Hsla,
+    border_color: gpui::Hsla,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -136,7 +137,7 @@ fn branch_chip(
         .py(px(theme::LANE_BRANCH_CHIP_PAD_Y))
         .rounded(px(theme::LANE_BRANCH_CHIP_RADIUS))
         .border(px(theme::LANE_BRANCH_CHIP_BORDER_W))
-        .border_color(theme::BORDER)
+        .border_color(border_color)
         .text_size(px(theme::LANE_SUB_FONT_SIZE))
         .text_color(label_color)
         .bg(chip_bg)
@@ -528,7 +529,7 @@ pub(in crate::workspace) fn project_header_row(
             } else {
                 theme::LIGHT_SURFACE_2
             };
-            row.child(branch_chip(branch, chip_color, chip_bg))
+            row.child(branch_chip(branch, chip_color, chip_bg, t.border))
         })
         .when_some(avail_badge, |row, (icon, state_label)| {
             row.child(availability_chip(icon, state_label, chip_color))
@@ -717,7 +718,7 @@ pub(in crate::workspace) fn worktree_row(
     let unread_dot_color = theme::WARNING;
     let label_active = t.text_primary;
     let label_inactive = t.text_muted;
-    let badge_pill_bg = theme::OVERLAY_PROMINENT;
+    let badge_pill_bg = t.overlay_prominent;
     let badge_pill_text = t.text_primary;
     let badge_arrow_text = t.text_muted;
     let sublabel_color = t.text_subtle;

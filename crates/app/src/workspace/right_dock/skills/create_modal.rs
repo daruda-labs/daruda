@@ -27,8 +27,9 @@ use crate::agent::skills::{
 };
 use crate::surface::strings;
 use crate::ui::Disableable as _;
+use crate::ui::Selectable as _;
 use crate::ui::WindowExt as _;
-use crate::ui::{InputEvent, InputState, button, button_primary, checkbox, input};
+use crate::ui::{InputEvent, InputState, button, button_group, button_primary, checkbox, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::skills::modal_shared::field_label;
@@ -312,44 +313,32 @@ impl Render for CreateSkillModal {
             .as_ref()
             .map(|msg| crate::ui::alert::error("create-skill-error", msg.clone()));
 
-        // Scope chips — assemble before mutable-borrow paths run.
-        let scope_chip = {
-            let mut row = div().flex().flex_row().gap(px(theme::SKILL_HEADER_GAP));
-            for scope in &self.scope_options {
-                let scope = *scope;
-                let active = self.scope == scope;
-                let label = match scope {
-                    SkillScope::Project => strings::skills_project(),
-                    SkillScope::Personal => strings::skills_personal(),
-                    // `scope_options` only ever holds writable scopes
-                    // (Project / Personal) — Plugin is read-only and
-                    // cannot reach the Create modal.
-                    SkillScope::Plugin => continue,
-                };
-                let t = theme::current(cx);
-                let (bg, text_color) = if active {
-                    (theme::ACCENT_MUTED, theme::PRIMARY)
-                } else {
-                    (t.skill_aux_chip_bg, t.text_body)
-                };
-                let chip = div()
-                    .id(SharedString::from(format!("scope-{}", scope.slug())))
-                    .cursor_pointer()
-                    .px(px(theme::SKILL_BADGE_PAD_X))
-                    .py(px(theme::SKILL_BADGE_PAD_Y))
-                    .rounded(px(theme::SKILL_BADGE_RADIUS))
-                    .bg(bg)
-                    .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-                    .text_color(text_color)
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _w, cx| {
-                        this.scope = scope;
-                        cx.notify();
-                    }));
-                row = row.child(chip);
-            }
-            row
-        };
+        // Scope segmented selector. Children align with `scope_values`
+        // by index; the click callback maps the selected index back to
+        // its `SkillScope`. `scope_options` only ever holds writable
+        // scopes (Project / Personal) — Plugin is read-only and cannot
+        // reach the Create modal.
+        let scope_pairs: Vec<(SkillScope, SharedString)> = self
+            .scope_options
+            .iter()
+            .filter_map(|scope| match scope {
+                SkillScope::Project => Some((*scope, strings::skills_project().into())),
+                SkillScope::Personal => Some((*scope, strings::skills_personal().into())),
+                SkillScope::Plugin => None,
+            })
+            .collect();
+        let scope_values: Vec<SkillScope> = scope_pairs.iter().map(|(scope, _)| *scope).collect();
+        let scope_chip = button_group("skill-scope-group")
+            .children(scope_pairs.into_iter().map(|(scope, label)| {
+                button(SharedString::from(format!("scope-{}", scope.slug())), label)
+                    .selected(self.scope == scope)
+            }))
+            .on_click(cx.listener(move |this, ixs: &Vec<usize>, _w, cx| {
+                if let Some(&ix) = ixs.first() {
+                    this.scope = scope_values[ix];
+                    cx.notify();
+                }
+            }));
 
         let left = div()
             .flex()

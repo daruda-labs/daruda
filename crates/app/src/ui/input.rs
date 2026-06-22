@@ -117,7 +117,7 @@ pub fn input_with_action<T: InputTabSpec>(
         .w_full()
         .bg(t.modal_input_bg)
         .border_1()
-        .border_color(t.modal_input_border)
+        .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
         // Text region fills the top — `flex_1` claims the vertical
@@ -169,7 +169,7 @@ pub fn input_with_action_inline<T: InputTabSpec>(
         .w_full()
         .bg(t.modal_input_bg)
         .border_1()
-        .border_color(t.modal_input_border)
+        .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
         // Text region claims the row's free width — `flex_1` lets the
@@ -188,4 +188,43 @@ pub fn input_with_action_inline<T: InputTabSpec>(
                 .pl(px(d::INPUT_PANEL_BUTTON_GAP))
                 .child(action),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InputState;
+    use crate::test_support::init_gpui_component;
+    use gpui::TestAppContext;
+
+    /// A single-line input must drop newlines on `set_value`. A stored
+    /// newline routes into the single-line layout path, where gpui's
+    /// `shape_line` panics ("text argument should not contain newlines").
+    /// Regression: opening the file-viewer editor search (Cmd+F) over a
+    /// multi-line selection pre-filled the single-line search input with
+    /// the selection, newlines and all.
+    #[gpui::test]
+    fn single_line_set_value_strips_newlines(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+        let window = cx.add_window(InputState::new);
+        window
+            .update(cx, |state, window, cx| {
+                state.set_value("first\nsecond\nthird", window, cx);
+                assert_eq!(state.value().as_ref(), "firstsecondthird");
+                assert!(!state.value().contains('\n'));
+            })
+            .unwrap();
+    }
+
+    /// A multi-line input keeps newlines — the strip is single-line only.
+    #[gpui::test]
+    fn multi_line_set_value_keeps_newlines(cx: &mut TestAppContext) {
+        init_gpui_component(cx);
+        let window = cx.add_window(|window, cx| InputState::new(window, cx).multi_line(true));
+        window
+            .update(cx, |state, window, cx| {
+                state.set_value("first\nsecond", window, cx);
+                assert_eq!(state.value().as_ref(), "first\nsecond");
+            })
+            .unwrap();
+    }
 }

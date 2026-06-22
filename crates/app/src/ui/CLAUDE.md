@@ -51,6 +51,7 @@ ui/
 ├── alert.rs        # error/warning/info/success(id, msg) factories
 ├── badge.rs        # Badge::new(label).monospace()/.bg_color()/... over Tag::custom
 ├── button.rs       # button / button_primary / button_danger / button_bare
+├── button_group.rs # button_group(id) — segmented single-select strip over gpui_component::ButtonGroup (theme-aware selected styling; `.children(buttons.selected(..))` + `.on_click(|indices|..)`)
 ├── chart.rs        # BarChart re-export over gpui_component::chart (Plot-backed; caller wraps in a fixed-height container)
 ├── checkbox.rs     # checkbox(id, label)
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
@@ -279,7 +280,7 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor patches in `crates/gpui_component/`
 
-Thirteen small patches over upstream `longbridge/gpui-component` v0.5.1
+Fourteen small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
 gap / height control working. Re-apply on rev bump:
 
@@ -295,9 +296,10 @@ gap / height control working. Re-apply on rev bump:
 | Button hover text color | `src/button/button.rs` (`RenderOnce::render`) | replace `text_color(crate::red_400())` with `text_color(hover_style.fg)` in the `.hover(...)` closure — upstream accidentally left a debug red literal instead of the theme foreground color, making all button text turn red on hover. |
 | PopupMenu small size | `src/menu/popup_menu.rs` (`PopupMenu::small` + `render_menu_item`) | change `pub(crate)` to `pub`; also wire `Size::Small` into the font — `text_xs` for small, `text_sm` otherwise (upstream only shrank item height to 20 px but left font at `text_sm`). |
 | GroupBox compact padding + gap | `src/group_box.rs` (`RenderOnce::render`) | content padding `p_4`→`p_2` (16→8px) and child spacing `gap_4`→`gap_1` (16→4px) so `.fill()`/`.outline()`/`.normal()` cards stay compact in the narrow right dock (Usage tab gauge bars + 3-up stat grid). Upstream's 16px overflows the 3-column stat row and over-spaces the gauge bar. |
-| `ThemeStyle::new` constructor | `src/highlighter/registry.rs` (`impl ThemeStyle`) | add `pub fn new(color: Hsla) -> Self` (a foreground-only style). Upstream only builds `ThemeStyle` via JSON deserialization (fields private), so the host can't seed `SyntaxColors` programmatically. daruda's `apply_daruda_palette` maps its semantic `palette::syntax_theme()` through this into `highlight_theme.style.syntax`, so the raw editor and the diff view share one syntax-colour source. |
+| `ThemeStyle::new` + `bold()`/`italic()` | `src/highlighter/registry.rs` (`impl ThemeStyle`) | add `pub fn new(color: Hsla) -> Self` (a foreground-only style) plus `bold()` / `italic()` builders that set `font_weight` / `font_style`. Upstream only builds `ThemeStyle` via JSON deserialization (fields private), so the host can't seed `SyntaxColors` programmatically. daruda's `apply_daruda_palette` maps the selected `palette::editor_syntax_colors_of(..)` through this into `highlight_theme.style.syntax`, so the raw editor and the diff view share one syntax-colour source — and a palette's non-color channel (keyword bold / comment italic) reaches the editor. |
 | Per-line editor decorations | `src/input/decoration.rs` (new), `src/input/mod.rs` (`mod`/`pub use`), `src/input/state.rs` (`line_decorations` field + `set_line_decorations`), `src/input/element.rs` (`layout_line_numbers` width, gutter build loop, active-line paint loop) | add `LineDecoration { background, gutter }` + `InputState::set_line_decorations(Vec<_>)`. Lets the host paint a per-row background fill and override the sequential `ix + 1` gutter with a custom string (the diff viewer packs dual old/new line numbers into one column). Empty list = upstream behaviour. Foundation for rendering the diff *through* the editor (renderer unification, 3b). |
 | Editor diff/read-only support | `src/input/state.rs` (`highlight_override` field + `set_highlight_override` + `set_disabled` + `scroll_handle` getter), `src/input/element.rs` (`highlight_lines` override short-circuit), `src/input/input.rs` (`Input::show_scrollbar` field + builder + gate in `render_editor`) | render the diff *through* the editor (3b). `set_highlight_override(Vec<(Range, HighlightStyle)>)` replaces the tree-sitter highlighter (a synthetic +/- diff buffer isn't valid source — fg = syntax, bg = word-diff). `set_disabled` toggles read-only (blocks edit/IME, keeps selection/copy). `show_scrollbar(false)` + the public `scroll_handle()` let the file viewer suppress the built-in 16px bar and overlay its thin 4px daruda thumb so raw and diff match the other viewer modes. |
+| Single-line newline guard | `src/input/state.rs` (`replace_text_in_range` single-line branch) | strip `\n` from `new_text` for non-multi-line inputs at the one mutation entry point, so every path (`set_value`, programmatic `insert`, the search panel's selection pre-fill) honours the invariant the paste path already enforced. A single-line value reaches `TextElement::layout_lines`' single-line branch, which feeds the whole string to gpui's `shape_line` — and `shape_line` panics on an embedded newline. Repro: open the file-viewer editor search (Cmd+F) with a multi-line selection; `on_action_search` pre-fills the single-line search input with the selection → panic on next prepaint. |
 
 Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).

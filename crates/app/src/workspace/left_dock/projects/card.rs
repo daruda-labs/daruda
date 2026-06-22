@@ -36,7 +36,7 @@ pub(in crate::workspace::left_dock::projects) fn group_card(
         .rounded(px(theme::LANE_CARD_RADIUS))
         .bg(bg)
         .border(px(theme::LANE_CARD_BORDER_W))
-        .border_color(theme::OVERLAY_ACTIVE)
+        .border_color(t.overlay_active)
         .child(header)
         .child(body)
 }

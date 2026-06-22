@@ -2023,6 +2023,20 @@ impl EntityInputHandler for InputState {
             }))
             .unwrap_or(self.selected_range.into());
 
+        // A single-line input must never store a newline: the single-line
+        // layout path (`TextElement::layout_lines`) feeds the whole value to
+        // `shape_line`, which panics on an embedded newline. The paste path
+        // strips newlines for this reason; enforce the same invariant for
+        // every mutation (set_value, programmatic insert, the search panel's
+        // multi-line selection pre-fill) at this single entry point.
+        let sanitized;
+        let new_text = if !self.mode.is_multi_line() && new_text.contains('\n') {
+            sanitized = new_text.replace('\n', "");
+            sanitized.as_str()
+        } else {
+            new_text
+        };
+
         let old_text = self.text.clone();
         self.text.replace(range.clone(), new_text);
 

@@ -23,6 +23,21 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
+    "overlay_active": {
+      "description": "Maps to `palette::OVERLAY_ACTIVE`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff14"
+    },
+    "overlay_prominent": {
+      "description": "Maps to `palette::OVERLAY_PROMINENT`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff1a"
+    },
+    "overlay_selected": {
+      "description": "Maps to `palette::OVERLAY_SELECTED`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0f"
+    },
     "text_primary": {
       "description": "Maps to `palette::TEXT_PRIMARY`.",
       "$ref": "#/$defs/Rgba",

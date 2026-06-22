@@ -92,7 +92,7 @@ pub(super) fn render_file_viewer_body(
             // only resolves inside a flex parent; without `.flex()` it collapses
             // to its 1-line `min_height`. (Matches the other branches above.)
             .flex()
-            .child(crate::ui::file_viewer_editor(editor_state))
+            .child(crate::ui::file_viewer_editor(editor_state, cx))
             .into_any_element(),
 
         PaneFileContent::LoadedDiff {
@@ -123,7 +123,7 @@ pub(super) fn render_file_viewer_body(
                 frame
                     .id("file-viewer-body")
                     .flex()
-                    .child(crate::ui::file_viewer_editor(editor_state))
+                    .child(crate::ui::file_viewer_editor(editor_state, cx))
                     .into_any_element()
             }
         }

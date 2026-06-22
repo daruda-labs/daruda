@@ -44,38 +44,6 @@ pub(super) fn field_label(
         .child(text.into())
 }
 
-/// Pill button used for both the Scope and Transport chip strips. The
-/// shape is identical between AddModal and EditModal — keep it here
-/// so a future style tweak edits one site.
-pub(super) fn chip_button<F>(
-    id: SharedString,
-    label: impl Into<SharedString>,
-    active: bool,
-    cx: &gpui::App,
-    on_click: F,
-) -> impl IntoElement
-where
-    F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-{
-    let t = theme::current(cx);
-    let (bg, text_color) = if active {
-        (t.text_body, t.modal_panel_bg)
-    } else {
-        (theme::OVERLAY_SELECTED, t.text_body)
-    };
-    div()
-        .id(id)
-        .cursor_pointer()
-        .px(px(theme::MCP_BADGE_PAD_X))
-        .py(px(theme::MCP_BADGE_PAD_Y))
-        .rounded(px(theme::MCP_BADGE_RADIUS))
-        .bg(bg)
-        .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(text_color)
-        .child(label.into())
-        .on_click(move |e, w, cx| on_click(e, w, cx))
-}
-
 /// Map a typed [`FieldError`] back to its localised banner string.
 pub(super) fn field_error_to_msg(e: FieldError) -> SharedString {
     match e {
