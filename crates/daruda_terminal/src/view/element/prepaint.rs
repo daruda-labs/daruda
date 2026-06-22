@@ -183,6 +183,19 @@ impl TerminalTextElement {
                     });
                 }
 
+                // A row with any 2-cell glyph (CJK / emoji) is shaped with
+                // `force_width = None` so the glyph keeps the font's natural
+                // advance. Passing `Some(cell_width)` would route it through
+                // GPUI's `apply_force_width_to_layout`, which advances exactly
+                // one cell per glyph (`glyph_pos += 1`) and so collapses a
+                // 2-cell glyph into a single cell, overlapping the next one.
+                // Natural advance keeps CJK legible; the cost is the row being
+                // shorter than `cols * cell_width` (its line-level background
+                // can render narrower than the two-cell convention), and
+                // column-anchored overlays drift — recovered via
+                // `text_metrics::shaped_pixel_range_for_cols`. Deliberate
+                // trade-off; do not flip to `Some` without making the shaper
+                // snap width-aware (advance 2 cells per wide glyph).
                 let force_width = cell_width.and_then(|cell_width| {
                     use unicode_width::UnicodeWidthChar as _;
                     let has_wide = text.as_str().chars().any(|ch| ch.width().unwrap_or(0) > 1);

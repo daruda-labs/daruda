@@ -32,6 +32,10 @@ pub fn markdown_editor(state: &Entity<InputState>, cx: &App) -> Input {
         .small()
         .bordered(true)
         .bg(theme::current(cx).modal_input_bg)
+        // Follow the config-driven editor font (`font.editor_size`) like the
+        // file-viewer editor; `.small()` still owns the padding/height, this
+        // overrides only the text size via `refine_style`.
+        .text_size(px(theme::editor_font_size(cx)))
 }
 
 /// Build an `Entity<InputState>` configured for markdown editing in

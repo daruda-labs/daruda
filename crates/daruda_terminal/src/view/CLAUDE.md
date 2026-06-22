@@ -100,9 +100,16 @@ Cmd+F        → actions.rs → search_bar.rs (render_search_bar / recompute_mat
 **Column → pixel conversion must go through
 `text_metrics::shaped_pixel_range_for_cols`.**
 
-- GPUI's `shape_line` does not apply `force_width` when the line contains
-  wide characters (CJK / emoji), so `cell_width * col` misses the real
-  glyph position by ≥ 1 cell.
+- Wide rows are shaped with `force_width = None` **on purpose**
+  (`element/prepaint.rs`): GPUI's `apply_force_width_to_layout` advances one
+  cell per glyph, so `Some` would crush a 2-cell CJK glyph into a single cell
+  and overlap the next one. Letting wide glyphs keep their natural advance
+  keeps them legible, but the row is then shorter than `cols * cell_width`, so
+  `cell_width * col` misses the real glyph position by ≥ 1 cell (and a wide
+  row's line-level background renders narrower than the two-cell convention).
+  This is a deliberate trade-off (README → Features → Terminal); do **not**
+  switch wide rows to `force_width = Some` to "fix" the drift without first
+  making the shaper snap width-aware (advance 2 cells per wide glyph).
 - Helper path: `byte_index_for_column_in_line` →
   `ShapedLine::x_for_index`.
 - Applies to: search highlight, URL hover underline, every column-based

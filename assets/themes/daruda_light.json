@@ -120,6 +120,7 @@
   "lane_drop_target_rejected_bg": "#c3323226",
   "border": "#d1d3d9",
   "overlay_active": "#00000014",
+  "overlay_hover": "#0000000d",
   "overlay_prominent": "#0000001a",
   "overlay_selected": "#00000010",
   "text_muted": "#6b7280",

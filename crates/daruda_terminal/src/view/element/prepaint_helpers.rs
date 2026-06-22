@@ -317,8 +317,8 @@ impl TerminalTextElement {
 /// `line_layouts` is populated.
 ///
 /// Using grid arithmetic for multi-cell spans containing wide/CJK glyphs
-/// drifts from the actual glyph position: GPUI drops `force_width` when
-/// any glyph on the line is wide, so `cell_width * col` no longer tracks
+/// drifts from the actual glyph position: `element::prepaint` shapes any
+/// wide row with `force_width = None`, so `cell_width * col` no longer tracks
 /// the shaper's advance.  The shaper path is therefore used for all spans,
 /// not just single-cell ones.  `shaped_pixel_range_for_cols` returns `None`
 /// only when the shaped text is empty or the byte range collapses (e.g. the

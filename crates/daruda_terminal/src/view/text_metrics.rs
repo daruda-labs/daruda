@@ -170,9 +170,9 @@ pub(crate) fn shaped_pixel_range_for_cols(
 /// Pixel x of a byte offset inside `text`, shaping `text` at the exact
 /// font + size used for rendering. Used for IME preedit positioning —
 /// `cell_width * cell_offset` drifts on mixed narrow / wide preedit
-/// text because GPUI's shaper drops `force_width` when any glyph is
-/// wide, so glyphs rendered beyond that point sit at their natural
-/// advances rather than a multiple of the monospace cell.
+/// text because `element::prepaint` shapes any wide row with
+/// `force_width = None`, so glyphs rendered beyond that point sit at their
+/// natural advances rather than a multiple of the monospace cell.
 pub(crate) fn x_for_byte_in_text(
     window: &mut gpui::Window,
     font: &gpui::Font,
@@ -277,7 +277,8 @@ fn display_columns_in_line(line: &str) -> usize {
 /// row, accounting for trailing grid cells the row-text dump trimmed.
 ///
 /// For columns inside the shaped text the shaper's `x_for_index` is
-/// authoritative — GPUI drops `force_width` on wide/CJK rows, so the linear
+/// authoritative — `element::prepaint` shapes wide/CJK rows with
+/// `force_width = None`, so glyphs keep their natural advance and the linear
 /// `(col-1) × cell_width` drifts by up to a cell per wide glyph.
 ///
 /// But the cursor (and the IME preedit anchored to it) can legitimately sit

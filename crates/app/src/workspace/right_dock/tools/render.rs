@@ -164,8 +164,8 @@ fn server_row(
     // revealed Edit / Delete fully mask the status text behind them —
     // a translucent fill let that text bleed through and collide with
     // the buttons.
-    let row_hover_bg = theme::BG_HOVER;
-    let actions_bg = theme::BG_HOVER;
+    let row_hover_bg = t.skill_row_hover_bg;
+    let actions_bg = t.skill_row_hover_bg;
 
     let indicator_color = if s.disabled {
         t.text_subtle

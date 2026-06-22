@@ -417,4 +417,60 @@ mod tests {
             "daruda keyword span should be bold"
         );
     }
+
+    /// Reproduction for the "raw file viewer shows no syntax colour" bug.
+    ///
+    /// The diff path (above) uses daruda's own `tree_sitter_highlight`
+    /// pipeline and works. The *raw* editor path instead drives
+    /// gpui_component's built-in `SyntaxHighlighter` (`code_editor("rust")`
+    /// → `set_value` → `update_highlighter` → `styles`). This exercises that
+    /// exact path in isolation: build the highlighter the way the editor
+    /// does and assert it yields coloured spans for rust source. If this
+    /// fails while the diff test passes, the bug is in the gpui_component
+    /// highlighter path, not in the language data / registry.
+    #[test]
+    fn gpui_raw_editor_highlighter_colours_rust() {
+        let code = "fn main() {\n    let x = 1;\n}\n";
+        let rope = gpui_component::Rope::from_str(code);
+
+        let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new("rust");
+        highlighter.update(None, &rope);
+
+        let theme = gpui_component::highlighter::HighlightTheme::default_dark();
+        let styles = highlighter.styles(&(0..code.len()), &theme);
+
+        let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
+        assert!(
+            colored > 0,
+            "gpui_component SyntaxHighlighter produced no coloured spans for \
+             rust (raw editor path is broken): {styles:?}"
+        );
+    }
+
+    /// Same as above but with the *daruda* highlight theme the live app
+    /// installs (`apply_daruda_palette` seeds `style.syntax` from
+    /// `editor_syntax_colors_of`), not the upstream `default_dark`. Rules out
+    /// "the theme's `style(name)` mapping returns no colour for daruda's
+    /// SyntaxColors" as the cause.
+    #[test]
+    fn gpui_raw_editor_highlighter_colours_rust_with_daruda_theme() {
+        use crate::ui::theme::palette;
+
+        let code = "fn main() {\n    let x = 1;\n}\n";
+        let rope = gpui_component::Rope::from_str(code);
+
+        let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new("rust");
+        highlighter.update(None, &rope);
+
+        let mut theme =
+            (*gpui_component::highlighter::HighlightTheme::default_dark()).clone();
+        theme.style.syntax = palette::editor_syntax_colors_of(palette::SyntaxPalette::Daruda, false);
+
+        let styles = highlighter.styles(&(0..code.len()), &theme);
+        let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
+        assert!(
+            colored > 0,
+            "daruda highlight theme yields no coloured spans: {styles:?}"
+        );
+    }
 }

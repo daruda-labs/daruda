@@ -23,6 +23,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#23252aff"
     },
+    "overlay_hover": {
+      "description": "Maps to `palette::OVERLAY_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#ffffff0a"
+    },
     "overlay_active": {
       "description": "Maps to `palette::OVERLAY_ACTIVE`.",
       "$ref": "#/$defs/Rgba",

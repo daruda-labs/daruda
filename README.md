@@ -31,7 +31,17 @@ Each AI agent runs in its own **lane** — a git worktree (own directory, own HE
 ### Terminal
 
 - VT100/ANSI, 256-color, 24-bit True Color
-- Unicode and wide characters (`unicode_width`)
+- Unicode-aware rendering — wide CJK and fullwidth glyphs draw at the font's natural size instead of being squeezed into the monospace cell, so two-cell-wide text stays legible (`unicode_width`):
+  - Hangul
+  - Chinese Hanzi, Japanese Kanji
+  - Japanese kana (hiragana / katakana)
+  - Fullwidth symbols
+  - Most emoji
+
+  Trade-off: the conventional terminal fixes CJK to a two-cell width. Because daruda draws these glyphs at their natural advance — often narrower than two cells — a line that contains them is shorter overall, so its line-level background fill can be drawn narrower than under the two-cell convention. This is a deliberate choice:
+  - **Legibility** — glyphs keep the font's true shape and size instead of being stretched or crushed to fit a fixed two-cell box.
+  - **No shaper fork** — snapping CJK to exactly two cells would require patching GPUI's line layout, which otherwise collapses a wide glyph into a single cell and overlaps the next one; the natural-advance path works with upstream GPUI unchanged, with no patch to carry across version bumps.
+  - **Contained cost** — the resulting column drift is corrected in daruda's own paint code (`shaped_pixel_range_for_cols`), so the cursor, selection, and search highlights still land on real glyph boundaries.
 - Box drawing (procedural — no font dependency)
 - Alternate screen buffer (SMCUP/RMCUP)
 - IME and Korean/CJK input (`set_marked_text` / `commit_text`)

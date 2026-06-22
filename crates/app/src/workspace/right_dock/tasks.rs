@@ -243,7 +243,7 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
     let failures = failure_indicator(task, snap);
     let subtask_progress = subtask_progress_cell(task, cx);
 
-    let row_hover_bg = theme::OVERLAY_HOVER;
+    let row_hover_bg = theme::current(cx).overlay_hover;
     let ws = snap.workspace.clone();
     let id_for_open = task.id.clone();
 

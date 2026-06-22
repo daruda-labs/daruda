@@ -70,6 +70,7 @@ daruda_theme_fields! {
     tab_inactive_bg => BG_PANEL,
     tab_inactive_hover_bg => BG_HOVER,
     border => BORDER,
+    overlay_hover => OVERLAY_HOVER,
     overlay_active => OVERLAY_ACTIVE,
     overlay_prominent => OVERLAY_PROMINENT,
     overlay_selected => OVERLAY_SELECTED,
