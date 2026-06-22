@@ -201,8 +201,11 @@ are unchanged from dark.
 | 3 — Raised | `#dbdee5` | Active/pressed row, button-widget surfaces |
 | 4 — Float | `#f6f6f8` | Popover / modal panel (raised above base) |
 
-Text on light stays a neutral dark scale; only **surfaces** carry the cool
-tint. Input fields remain pure `#ffffff`.
+Text on light stays a near-neutral dark scale; muted/subtle tiers carry a
+faint cool tint, and only **surfaces** otherwise carry it. Re-darken the
+dark grays rather than just inverting lightness — a gray that reads on
+near-black collapses on near-white. Floor: **muted ≳ 4.5:1, subtle ≳ 3:1**
+against its surface. Input fields remain pure `#ffffff`.
 
 ---
 

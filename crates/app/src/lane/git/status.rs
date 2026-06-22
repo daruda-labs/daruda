@@ -313,6 +313,12 @@ pub fn git_commit_amend(repo_root: &Path, message: &str) -> Result<(), GitError>
     run_git(repo_root, ["commit", "--amend", "-m", message]).map(|_| ())
 }
 
+/// `git log -1 --pretty=%B` — the tip commit's full message (subject + body),
+/// with the trailing newline trimmed. Errors if the repo has no commits yet.
+pub fn git_head_message(repo_root: &Path) -> Result<String, GitError> {
+    run_git(repo_root, ["log", "-1", "--pretty=%B"]).map(|s| s.trim_end().to_string())
+}
+
 /// `git fetch` — download objects and refs from all remotes.
 pub fn git_fetch(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["fetch"]).map(|_| ())

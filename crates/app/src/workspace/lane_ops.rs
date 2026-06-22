@@ -427,6 +427,9 @@ impl Workspace {
         if self.lane_for(target).is_none() {
             return;
         }
+        // Leaving the active lane abandons any pending amend — the prefilled
+        // message belongs to the lane we're leaving. No-op when not amending.
+        self.exit_amend_mode(window, cx);
         // Re-classify the incoming lane's root against the live
         // filesystem before any path-dependent work runs below. A lane
         // whose directory vanished while inactive must flip to

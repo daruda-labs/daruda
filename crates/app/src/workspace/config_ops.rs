@@ -159,6 +159,8 @@ impl Workspace {
         let skill_search_input = self.skill_search_input.clone();
         let task_search_input = self.task_search_input.clone();
         let handle = self.window_handle;
+        // Keep the amend-mode labels if a language switch lands mid-amend.
+        let amend_mode = self.is_amend_mode();
 
         crate::windows::try_update_workspace_window(
             handle,
@@ -170,8 +172,13 @@ impl Workspace {
                     panel.area.update(cx, |input, cx| {
                         input.set_placeholder(s::git_commit_placeholder(), window, cx);
                     });
-                    panel.set_action_label("commit", s::git_commit_btn(), cx);
-                    panel.set_action_dropdown_label("commit", 0, s::ctx_git_commit_amend(), cx);
+                    let (primary, dropdown) = if amend_mode {
+                        (s::git_amend_btn(), s::git_cancel_amend())
+                    } else {
+                        (s::git_commit_btn(), s::ctx_git_commit_amend())
+                    };
+                    panel.set_action_label("commit", primary, cx);
+                    panel.set_action_dropdown_label("commit", 0, dropdown, cx);
                 });
 
                 // Skills search input — placeholder.

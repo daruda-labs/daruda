@@ -462,9 +462,9 @@ mod tests {
         let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new("rust");
         highlighter.update(None, &rope);
 
-        let mut theme =
-            (*gpui_component::highlighter::HighlightTheme::default_dark()).clone();
-        theme.style.syntax = palette::editor_syntax_colors_of(palette::SyntaxPalette::Daruda, false);
+        let mut theme = (*gpui_component::highlighter::HighlightTheme::default_dark()).clone();
+        theme.style.syntax =
+            palette::editor_syntax_colors_of(palette::SyntaxPalette::Daruda, false);
 
         let styles = highlighter.styles(&(0..code.len()), &theme);
         let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();

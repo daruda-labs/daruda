@@ -543,8 +543,9 @@ pub const GIT_DIFF_MAX_LINES: usize = 120;
 pub const GIT_STAGE_CHECKBOX_SIZE: f32 = 13.0;
 /// Stage checkbox border radius (px).
 pub const GIT_STAGE_CHECKBOX_RADIUS: f32 = RADIUS_XS;
-/// Stage checkbox background when staged (green tint).
-pub const GIT_STAGE_CHECKBOX_CHECKED_BG: Hsla = with_lightness(SUCCESS, 0.30);
+/// Stage checkbox background when staged (accent fill — matches the
+/// gpui_component checkbox `primary` convention; theme-invariant).
+pub const GIT_STAGE_CHECKBOX_CHECKED_BG: Hsla = ACCENT;
 /// Tick glyph font size inside the stage checkbox (px).
 pub const GIT_STAGE_CHECKBOX_TICK_SIZE: f32 = 9.0;
 /// Git Changes header padding X (px).

@@ -261,7 +261,7 @@
     "git_stage_checkbox_checked_bg": {
       "description": "Maps to `palette::GIT_STAGE_CHECKBOX_CHECKED_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#2d6c4aff"
+      "default": "#5e6ad2ff"
     },
     "git_stage_checkbox_unchecked_bg": {
       "description": "Maps to `palette::BG_RAISED`.",

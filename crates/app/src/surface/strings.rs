@@ -1372,6 +1372,23 @@ pub fn git_confirm_amend_body() -> String {
 pub fn git_confirm_amend_ok() -> String {
     rust_i18n::t!("git.confirm_amend_ok").into_owned()
 }
+/// Toast shown when the previous commit message can't be loaded for amend
+/// (no commits yet, or an empty tip-commit message).
+pub fn git_amend_load_failed() -> String {
+    rust_i18n::t!("git.amend_load_failed").into_owned()
+}
+/// Primary commit-button label while in amend mode (replaces "Commit").
+pub fn git_amend_btn() -> String {
+    rust_i18n::t!("git.amend_btn").into_owned()
+}
+/// Dropdown label while in amend mode — backs out to a normal commit.
+pub fn git_cancel_amend() -> String {
+    rust_i18n::t!("git.cancel_amend").into_owned()
+}
+/// Warning when the user clears the commit box and tries to amend with no message.
+pub fn git_amend_needs_message() -> String {
+    rust_i18n::t!("git.amend_needs_message").into_owned()
+}
 
 /// Branch label fallback when HEAD is detached.
 pub fn git_detached_label() -> String {

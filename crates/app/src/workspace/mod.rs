@@ -225,6 +225,16 @@ actions!(
 const TITLE_BAR_HEIGHT: f32 = crate::ui::theme::TITLE_BAR_HEIGHT;
 const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 
+/// State of the Commit split button. `Amend` carries `saved_draft` — the
+/// commit-box text captured at the moment amend mode was entered — so
+/// "Cancel Amend" restores exactly that (the user's own message, or empty)
+/// instead of wiping a draft they meant to commit normally.
+#[derive(Debug, Clone)]
+pub(in crate::workspace) enum CommitMode {
+    Normal,
+    Amend { saved_draft: String },
+}
+
 pub struct Workspace {
     /// Stable cross-session identifier — matches the UUID stored on
     /// disk at `workspaces/<uuid>.json`. Minted at construction (or
@@ -398,6 +408,12 @@ pub struct Workspace {
     /// True while a git commit or push operation is running. Prevents
     /// duplicate submissions when the user double-clicks Commit/Push.
     pub(in crate::workspace) git_op_in_flight: bool,
+    /// Commit split button mode (Normal vs Amend). In `Amend` the primary
+    /// button reads "Amend" (drives `git commit --amend`) and the dropdown
+    /// reads "Cancel Amend". Entered via the dropdown's "Amend Last Commit",
+    /// left on success / cancel / lane switch. Tied to the active lane — the
+    /// prefilled message belongs to that lane's HEAD.
+    pub(in crate::workspace) commit_mode: CommitMode,
     /// True while a staging operation (git add / restore-staged / add-all) is
     /// running. Separate from `git_op_in_flight` so a stage click doesn't
     /// block the commit button and vice versa.
@@ -829,6 +845,7 @@ impl Workspace {
             notifications: config.notifications.clone(),
             clipboard: config.clipboard.clone(),
             git_op_in_flight: false,
+            commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
             git_collapsed_dirs: std::collections::HashMap::new(),
             git_changes_cursor: std::collections::HashMap::new(),

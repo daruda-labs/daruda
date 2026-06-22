@@ -7,7 +7,7 @@ use gpui::{AppContext as _, Context, Window};
 use crate::surface::strings as app_strings;
 use crate::ui::ButtonVariant;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
-use crate::workspace::{CommitChanges, PushChanges, Workspace};
+use crate::workspace::{CommitChanges, CommitMode, PushChanges, Workspace};
 
 impl Workspace {
     /// Commit staged changes with the current commit-message input text.
@@ -21,6 +21,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.git_op_in_flight {
+            return;
+        }
+
+        // In amend mode the primary button (and Cmd+Enter) amends instead of
+        // creating a new commit.
+        if self.is_amend_mode() {
+            self.perform_amend(window, cx);
             return;
         }
 
@@ -124,9 +131,14 @@ impl Workspace {
         .detach();
     }
 
-    /// Amend the last commit with the current staged changes and the given
-    /// message. Opens a confirm dialog warning about history rewrite before
-    /// the actual amend runs in [`Self::do_commit_amend`].
+    /// Whether the Commit split button is currently in amend mode.
+    pub(in crate::workspace) fn is_amend_mode(&self) -> bool {
+        matches!(self.commit_mode, CommitMode::Amend { .. })
+    }
+
+    /// Dropdown action under the Commit split button. Normal mode → enter
+    /// amend mode (see [`Self::enter_amend_mode`]); amend mode → cancel back to
+    /// a normal commit (see [`Self::exit_amend_mode`]).
     pub(in crate::workspace) fn on_commit_amend(
         &mut self,
         window: &mut Window,
@@ -136,21 +148,149 @@ impl Workspace {
         if self.git_op_in_flight {
             return;
         }
+        if self.is_amend_mode() {
+            self.exit_amend_mode(window, cx);
+        } else {
+            self.enter_amend_mode(window, cx);
+        }
+    }
 
-        let message = {
-            let panel = self.git_commit_input.read(cx);
-            panel.text(cx).to_string()
+    /// Switch the Commit split button into amend mode. The box text present
+    /// when entering is saved on the `Amend` variant so Cancel can restore it.
+    /// A non-empty box keeps the user's text and enters immediately; an empty
+    /// box first loads the tip commit message (async) and enters once it
+    /// arrives. A repo with no commits stays in normal mode and toasts.
+    fn enter_amend_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(repo_root) = self.git_repo_root_for(self.active) else {
+            return;
         };
+
+        let current = self.git_commit_input.read(cx).text(cx).to_string();
+        if !current.trim().is_empty() {
+            // Keep the user's own draft as both the box content and the saved
+            // draft, so Cancel returns to exactly this normal-commit state.
+            self.set_commit_mode(
+                CommitMode::Amend {
+                    saved_draft: current,
+                },
+                cx,
+            );
+            return;
+        }
+
+        // Empty box → load HEAD's message, then enter amend mode in the
+        // continuation. The saved draft is empty (Cancel restores an empty box).
+        // `wh` recovers a live `&mut Window` for `set_text`.
+        let wh = window.window_handle();
+        let repo_for_report = repo_root.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || crate::lane::git::git_head_message(&repo_root),
+            move |ws, result, cx| match result {
+                Ok(message) if !message.trim().is_empty() => {
+                    let input = ws.git_commit_input.clone();
+                    if cx
+                        .update_window(wh, |_, window, cx| {
+                            input.update(cx, |panel, cx_state| {
+                                panel.set_text(message.as_str(), window, cx_state)
+                            });
+                        })
+                        .is_err()
+                    {
+                        // Window closed during async load — input is gone.
+                        return;
+                    }
+                    ws.set_commit_mode(
+                        CommitMode::Amend {
+                            saved_draft: String::new(),
+                        },
+                        cx,
+                    );
+                }
+                Ok(_) => {
+                    // Tip commit has an empty message (--allow-empty-message) —
+                    // nothing useful to prefill, so don't enter amend mode.
+                    let report = ErrorReport::new(app_strings::git_amend_load_failed())
+                        .severity(ErrorSeverity::Warning)
+                        .at(file!(), line!())
+                        .dedup("git.amend.load_failed")
+                        .build();
+                    ws.report_error(report, cx);
+                }
+                Err(e) => {
+                    // Most commonly: the repo has no commits yet, so there is
+                    // nothing to amend. Surface the real git error in details.
+                    let report = ErrorReport::new(app_strings::git_amend_load_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("repo", redact_home(&repo_for_report))
+                        .dedup("git.amend.load_failed")
+                        .build();
+                    ws.report_error(report, cx);
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Cancel amend mode: restore the box to the draft saved when amend mode
+    /// was entered (the user's own message, or empty if we'd prefilled), then
+    /// switch back to normal Commit labels — so a user who cancels can commit
+    /// their original message without it being wiped. Safe to call
+    /// unconditionally; a no-op when not in amend mode. Used by Cancel Amend
+    /// and by lane switches.
+    pub(in crate::workspace) fn exit_amend_mode(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let CommitMode::Amend { saved_draft } = &self.commit_mode else {
+            return;
+        };
+        let saved_draft = saved_draft.clone();
+        self.git_commit_input.update(cx, |panel, cx_state| {
+            panel.set_text(saved_draft.as_str(), window, cx_state);
+        });
+        self.set_commit_mode(CommitMode::Normal, cx);
+    }
+
+    /// Set the commit mode and resync the split button: primary label
+    /// (Commit ↔ Amend), dropdown label (Amend Last Commit ↔ Cancel Amend),
+    /// and the disabled state (amend is allowed with zero staged changes —
+    /// a message-only amend — so the disable rule differs by mode).
+    fn set_commit_mode(&mut self, mode: CommitMode, cx: &mut Context<Self>) {
+        let amend = matches!(mode, CommitMode::Amend { .. });
+        self.commit_mode = mode;
+        let (primary, dropdown) = if amend {
+            (app_strings::git_amend_btn(), app_strings::git_cancel_amend())
+        } else {
+            (
+                app_strings::git_commit_btn(),
+                app_strings::ctx_git_commit_amend(),
+            )
+        };
+        self.git_commit_input.update(cx, |panel, cx_state| {
+            panel.set_action_label("commit", primary, cx_state);
+            panel.set_action_dropdown_label("commit", 0, dropdown, cx_state);
+        });
+        self.sync_commit_buttons(cx);
+    }
+
+    /// Perform the amend the user set up in amend mode: validate the (prefilled
+    /// or edited) message, confirm the history rewrite, then run the amend.
+    fn perform_amend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let message = self.git_commit_input.read(cx).text(cx).to_string();
         if message.trim().is_empty() {
-            let report = ErrorReport::new("Commit message cannot be empty")
+            // User cleared the prefilled message; amend still needs one.
+            let report = ErrorReport::new(app_strings::git_amend_needs_message())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
-                .dedup("git.amend.empty_message")
+                .dedup("git.amend.needs_message")
                 .build();
             self.report_error(report, cx);
             return;
         }
-
         if self.git_repo_root_for(self.active).is_none() {
             return;
         }
@@ -213,6 +353,9 @@ impl Workspace {
                         {
                             // Window closed during async amend — input no longer exists.
                         }
+                        // Amend succeeded → leave amend mode (restore the
+                        // Commit labels). The box was just cleared above.
+                        ws.set_commit_mode(CommitMode::Normal, cx);
                         ws.refresh_git_status(active_ref, cx);
                     }
                     Err(e) => {

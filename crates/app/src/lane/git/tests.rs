@@ -337,6 +337,47 @@ fn current_branch_after_init_is_main_or_master() {
 }
 
 #[test]
+fn head_message_returns_tip_commit_message() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("headmsg");
+    init(&dir).unwrap();
+    run_git(&dir, ["config", "user.email", "daruda@test"]).unwrap();
+    run_git(&dir, ["config", "user.name", "daruda"]).unwrap();
+    run_git(
+        &dir,
+        [
+            "commit",
+            "--allow-empty",
+            "-m",
+            "first subject\n\nbody line",
+        ],
+    )
+    .unwrap();
+
+    // Full subject + body, trailing newline trimmed.
+    assert_eq!(
+        git_head_message(&dir).unwrap(),
+        "first subject\n\nbody line"
+    );
+    teardown(&dir);
+}
+
+#[test]
+fn head_message_errors_when_no_commits() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("headmsg_empty");
+    init(&dir).unwrap();
+    // No commit yet → `git log -1` fails; the empty-box amend path turns this
+    // into the "nothing to amend" toast.
+    assert!(git_head_message(&dir).is_err());
+    teardown(&dir);
+}
+
+#[test]
 fn default_branch_prefers_origin_head() {
     if !require_git() {
         return;

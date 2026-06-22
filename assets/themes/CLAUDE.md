@@ -68,14 +68,21 @@ Light is a sanctioned variant but keeps the brand's **cool** identity — see
 `DESIGN.md` → Elevation & Depth → Light theme. So in `daruda_light.json`:
 
 - **Surfaces are faint-blue cool near-whites, never neutral gray.** Mirror the
-  cool light ladder in `palette.rs` (`LIGHT_CANVAS`/`LIGHT_SURFACE_1..3`):
-  base `#f9fafb` → panel `#eaecf0` → card `#e4e6ec` → raised `#dbdee5`. Tint
-  deepens slightly as the surface darkens.
-- **Text is a neutral dark scale** (e.g. `#1a1a1a` / `#2d2d2d` / muted
-  `#777e8b`). Inputs stay pure `#ffffff`.
-- **Borders** are light cool hairlines (`~#d6dae3`); **scrollbar thumbs** are
-  black-alpha (`#00000040`); **banners** are light-tinted bg + dark text;
-  **accent / status / diff** colors keep their hue (don't gray them out).
+  cool light ladder in `palette.rs` — read the constants
+  `LIGHT_CANVAS` → `LIGHT_SURFACE_1` → `LIGHT_SURFACE_2` → `LIGHT_SURFACE_3`,
+  don't inline their hex here (it drifts from the source). All sit at hue
+  ~222° with a low cool saturation; tint deepens slightly as the surface
+  darkens.
+- **Text is a near-neutral dark scale** — the `text_primary` / `text_body` /
+  `text_muted` / `text_subtle` fields in `daruda_light.json`. Text inputs stay
+  pure `#ffffff` (e.g. `modal_input_bg`). **Re-darken the dark grays, don't just
+  invert lightness**: a gray that reads on near-black collapses on near-white.
+  Hold a contrast floor — `text_muted` ≳ 4.5:1, `text_subtle` ≳ 3:1 against its
+  surface (the `#9aa1ad` subtle = 2.06:1 washout bug is what this prevents).
+- **Borders** are light cool hairlines (the `border` field); **scrollbar
+  thumbs** are black-alpha (`scrollbar_thumb` = `#00000040`); **banners** are
+  light-tinted bg + dark text; **accent / status / diff** colors keep their hue
+  (don't gray them out).
 
 The theme's light/dark *appearance* is detected from luminance:
 `DarudaTheme::is_dark()` is `title_bar_bg.l < 0.5`. A light preset's

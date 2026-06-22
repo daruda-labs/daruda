@@ -393,7 +393,10 @@ fn dir_header(
     let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    let checkbox_tick_color = t.text_primary;
+    // Checkmark sits on the accent fill → accent-fg for contrast; the
+    // indeterminate dash sits on the unchecked surface → theme foreground.
+    let checkbox_tick_color = theme::ACCENT_FG;
+    let dash_color = t.text_primary;
     let dir_label_color = t.text_subtle;
     let dir_label_hover = t.text_muted;
 
@@ -426,7 +429,12 @@ fn dir_header(
         .h(px(theme::GIT_STAGE_CHECKBOX_SIZE))
         .rounded(px(theme::GIT_STAGE_CHECKBOX_RADIUS))
         .border_1()
-        .border_color(checkbox_border)
+        // Checked → border matches the accent fill (seamless, like the
+        // gpui_component checkbox); otherwise a hairline rim.
+        .border_color(match state {
+            DirStageState::AllStaged => checkbox_checked_bg,
+            DirStageState::Mixed | DirStageState::NoneStaged => checkbox_border,
+        })
         .bg(match state {
             DirStageState::AllStaged => checkbox_checked_bg,
             DirStageState::Mixed | DirStageState::NoneStaged => checkbox_unchecked_bg,
@@ -435,13 +443,13 @@ fn dir_header(
         .items_center()
         .justify_center()
         .text_size(px(theme::GIT_STAGE_CHECKBOX_TICK_SIZE))
-        .text_color(checkbox_tick_color)
         .when(state == DirStageState::AllStaged, |d| {
-            d.child(app_strings::UI_CHECKMARK)
+            d.text_color(checkbox_tick_color)
+                .child(app_strings::UI_CHECKMARK)
         })
         .when(state == DirStageState::Mixed, |d| {
             // Indeterminate: dash glyph at the same size as the tick.
-            d.child("–")
+            d.text_color(dash_color).child("–")
         })
         .when(!in_flight && !stage_paths.is_empty(), |d| {
             d.cursor_pointer().on_mouse_down(
@@ -601,7 +609,8 @@ fn unified_file_row(
     let checkbox_border = t.border;
     let checkbox_checked_bg = t.git_stage_checkbox_checked_bg;
     let checkbox_unchecked_bg = t.git_stage_checkbox_unchecked_bg;
-    let checkbox_tick_color = t.text_primary;
+    // Tick only renders on the checked (accent) fill → accent-fg.
+    let checkbox_tick_color = theme::ACCENT_FG;
     let cursor_border_color = theme::PRIMARY;
     let row_selected_bg = t.git_file_row_selected_bg;
     let row_hover_bg = t.git_file_row_hover_bg;
@@ -617,7 +626,13 @@ fn unified_file_row(
         .h(px(theme::GIT_STAGE_CHECKBOX_SIZE))
         .rounded(px(theme::GIT_STAGE_CHECKBOX_RADIUS))
         .border_1()
-        .border_color(checkbox_border)
+        // Staged → border matches the accent fill (seamless, like the
+        // gpui_component checkbox); otherwise a hairline rim.
+        .border_color(if is_staged {
+            checkbox_checked_bg
+        } else {
+            checkbox_border
+        })
         .bg(if is_staged {
             checkbox_checked_bg
         } else {
@@ -627,8 +642,10 @@ fn unified_file_row(
         .items_center()
         .justify_center()
         .text_size(px(theme::GIT_STAGE_CHECKBOX_TICK_SIZE))
-        .text_color(checkbox_tick_color)
-        .when(is_staged, |d| d.child(app_strings::UI_CHECKMARK))
+        .when(is_staged, |d| {
+            d.text_color(checkbox_tick_color)
+                .child(app_strings::UI_CHECKMARK)
+        })
         .when(!in_flight, |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,

@@ -165,7 +165,9 @@ impl Workspace {
             .map(|s| s.staged.len())
             .unwrap_or(0);
         let in_flight = self.git_op_in_flight;
-        let commit_disabled = in_flight || staged_count == 0;
+        // A normal commit needs staged changes; an amend can be message-only
+        // (no staged changes), so amend mode only blocks while in flight.
+        let commit_disabled = in_flight || (!self.is_amend_mode() && staged_count == 0);
         self.git_commit_input.update(cx, |panel, cx| {
             panel.set_action_disabled("commit", commit_disabled, cx);
         });

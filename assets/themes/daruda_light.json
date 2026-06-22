@@ -25,7 +25,7 @@
   "panel_tab_drop_target_bg": "#bfc2ca",
   "input_panel_drop_target_bg": "#5a8fbf33",
   "disabled_item_bg": "#e1e3e5",
-  "git_stage_checkbox_checked_bg": "#3a8bc4",
+  "git_stage_checkbox_checked_bg": "#5e6ad2",
   "git_stage_checkbox_unchecked_bg": "#ffffff",
   "file_diff_stat_add": "#2c8b3a",
   "file_diff_stat_del": "#c33232",
@@ -123,9 +123,9 @@
   "overlay_hover": "#0000000d",
   "overlay_prominent": "#0000001a",
   "overlay_selected": "#00000010",
-  "text_muted": "#6b7280",
+  "text_muted": "#5e6573",
   "text_body": "#2d2d2d",
-  "text_subtle": "#9aa1ad",
+  "text_subtle": "#7b818e",
   "scrollbar_thumb": "#00000040",
   "text_primary": "#1a1d24"
 }
