@@ -145,7 +145,7 @@ fn pane_header(
 
     let t = theme::current(cx);
     let focused_bg = t.pane_header_focused_bg;
-    let focused_text = theme::TEXT_PRIMARY;
+    let focused_text = t.text_primary;
     let unfocused_bg = t.pane_header_unfocused_bg;
     let unfocused_text = t.text_muted;
     let cwd_text = t.text_muted;

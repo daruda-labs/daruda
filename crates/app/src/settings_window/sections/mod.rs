@@ -328,7 +328,7 @@ impl SettingsWindow {
         body: impl Into<gpui::SharedString>,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let body_color = theme::TEXT_PRIMARY;
+        let body_color = theme::current(cx).text_primary;
         div()
             .flex()
             .flex_col()

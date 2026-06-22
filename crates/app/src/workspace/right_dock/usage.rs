@@ -526,7 +526,7 @@ fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement 
 /// Status row: a colored dot plus the upstream status label on a faint
 /// tint of the indicator color.
 fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
-    let color = indicator_color(status.indicator);
+    let color = indicator_color(status.indicator, cx);
     let label = strings::service_status_label(status);
     let muted_text = theme::current(cx).text_muted;
     let mut tint = color;
@@ -574,13 +574,13 @@ fn severity_color(severity: LimitSeverity) -> Hsla {
 }
 
 /// Map a service-status indicator to its pill color.
-fn indicator_color(indicator: StatusIndicator) -> Hsla {
+fn indicator_color(indicator: StatusIndicator, cx: &gpui::App) -> Hsla {
     match indicator {
         StatusIndicator::None => theme::SIGNAL_GREEN,
         StatusIndicator::Minor => theme::SIGNAL_YELLOW,
         StatusIndicator::Major => theme::SIGNAL_ORANGE,
         StatusIndicator::Critical => theme::SIGNAL_RED,
-        StatusIndicator::Unknown => theme::TEXT_TERTIARY,
+        StatusIndicator::Unknown => theme::current(cx).text_muted,
     }
 }
 
@@ -814,22 +814,25 @@ mod tests {
     #[gpui::test]
     fn indicator_color_dims_unknown(cx: &mut gpui::TestAppContext) {
         crate::test_support::init_gpui_component(cx);
-        cx.update(|_cx| {
-            assert_eq!(indicator_color(StatusIndicator::None), theme::SIGNAL_GREEN);
+        cx.update(|cx| {
             assert_eq!(
-                indicator_color(StatusIndicator::Minor),
+                indicator_color(StatusIndicator::None, cx),
+                theme::SIGNAL_GREEN
+            );
+            assert_eq!(
+                indicator_color(StatusIndicator::Minor, cx),
                 theme::SIGNAL_YELLOW
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Major),
+                indicator_color(StatusIndicator::Major, cx),
                 theme::SIGNAL_ORANGE
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Critical),
+                indicator_color(StatusIndicator::Critical, cx),
                 theme::SIGNAL_RED
             );
             assert_eq!(
-                indicator_color(StatusIndicator::Unknown),
+                indicator_color(StatusIndicator::Unknown, cx),
                 theme::TEXT_TERTIARY
             );
         });

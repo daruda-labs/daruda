@@ -292,7 +292,7 @@ impl Render for Workspace {
             theme::LIGHT_CANVAS
         };
         let tab_active_text = if dark {
-            theme::TEXT_PRIMARY
+            t.text_primary
         } else {
             theme::LIGHT_INK
         };

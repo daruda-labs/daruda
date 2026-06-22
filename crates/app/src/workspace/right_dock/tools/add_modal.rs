@@ -322,6 +322,7 @@ impl ModalView for AddMcpServerModal {}
 
 impl Render for AddMcpServerModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = crate::ui::theme::current(cx).clone();
         let panel_focus = self.panel_focus_handle.clone();
         let submitting = self.submitting;
         let banner = self
@@ -374,26 +375,26 @@ impl Render for AddMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp_field_name()))
+            .child(field_label(strings::mcp_field_name(), &t))
             .child(input(&self.name_input, cx, 0))
-            .child(field_label(strings::mcp_field_scope()))
+            .child(field_label(strings::mcp_field_scope(), &t))
             .child(scope_chip)
-            .child(field_label(strings::mcp_field_transport()))
+            .child(field_label(strings::mcp_field_transport(), &t))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::mcp_field_command()))
+                    .child(field_label(strings::mcp_field_command(), &t))
                     .child(input(&self.command_input, cx, 1))
-                    .child(field_label(strings::mcp_field_args()))
+                    .child(field_label(strings::mcp_field_args(), &t))
                     .child(input(&self.args_input, cx, 2));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::mcp_field_url()))
+                    .child(field_label(strings::mcp_field_url(), &t))
                     .child(input(&self.url_input, cx, 1))
-                    .child(field_label(strings::mcp_field_headers()))
+                    .child(field_label(strings::mcp_field_headers(), &t))
                     .child(input(&self.headers_input, cx, 2));
             }
         }
@@ -403,7 +404,7 @@ impl Render for AddMcpServerModal {
         // regardless of the active transport (Stdio uses 1,2; remote
         // uses 1,2 for url+headers — env uses 3 across both branches).
         body = body
-            .child(field_label(strings::mcp_field_env()))
+            .child(field_label(strings::mcp_field_env(), &t))
             .child(input(&self.env_input, cx, 3))
             .child(
                 checkbox("mcp-disabled", strings::mcp_field_disabled(), 4)

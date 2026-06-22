@@ -468,10 +468,10 @@ impl Render for MergeModal {
         let sel_branch = self.target_options[self.selected_idx].branch.clone();
 
         let t = theme::current(cx);
-        let strong_text = theme::TEXT_PRIMARY;
+        let strong_text = t.text_primary;
         let muted_text = t.text_muted;
         let row_hover_bg = t.lane_row_hover_bg;
-        let radio_dot_color = theme::TEXT_PRIMARY;
+        let radio_dot_color = t.text_primary;
 
         // ---- branch list ----
         let mut branch_list = div().flex().flex_col().gap(px(theme::MODAL_BUTTON_PAD_Y));

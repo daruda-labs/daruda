@@ -69,11 +69,11 @@ pub(in crate::workspace) fn status_pill(
 fn pill_background(state: &TaskState, cx: &gpui::App) -> Hsla {
     let t = theme::current(cx);
     let base = match state {
-        TaskState::Backlog => theme::TEXT_DISABLED,
+        TaskState::Backlog => t.text_subtle,
         TaskState::Running { .. } => t.right_panel_task_running_color,
-        TaskState::Done { .. } => theme::TEXT_TERTIARY,
+        TaskState::Done { .. } => t.text_muted,
         TaskState::Error { .. } => theme::ERROR,
-        TaskState::Cancelled { .. } => theme::TEXT_DISABLED,
+        TaskState::Cancelled { .. } => t.text_subtle,
     };
     Hsla {
         a: theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA,

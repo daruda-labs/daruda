@@ -15,7 +15,7 @@ impl Render for SettingsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
         let header_bg = theme::SURFACE_1;
-        let header_text = theme::TEXT_PRIMARY;
+        let header_text = t.text_primary;
         let error_text = theme::ERROR;
         let panel_bg = t.modal_panel_bg;
 
@@ -180,7 +180,7 @@ impl SettingsWindow {
         label: impl Into<gpui::SharedString>,
         is_active: bool,
     ) -> impl IntoElement {
-        let row_text = theme::TEXT_PRIMARY;
+        let row_text = theme::current(cx).text_primary;
         let active_bg = theme::OVERLAY_PROMINENT;
         let hover_bg = theme::OVERLAY_SELECTED;
 

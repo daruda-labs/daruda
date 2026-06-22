@@ -58,7 +58,7 @@ impl Render for WelcomeScreen {
         let has_recent = !self.recent.is_empty();
 
         let t = theme::current(cx);
-        let welcome_text = theme::TEXT_PRIMARY;
+        let welcome_text = t.text_primary;
         let faint_text = t.text_subtle;
         let muted_text = t.text_muted;
         let button_bg = t.welcome_button_bg;

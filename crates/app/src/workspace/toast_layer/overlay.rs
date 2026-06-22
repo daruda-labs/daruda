@@ -97,7 +97,7 @@ fn toast_pill(
     let pill_bg = theme::SURFACE_4;
     let pill_border = t.border;
     let pill_text = t.text_body;
-    let pill_text_dim = theme::TEXT_SECONDARY;
+    let pill_text_dim = t.text_body;
     let repeat_bg = t.toast_repeat_bg;
     let tint = severity_tint(snap.severity);
     let glyph = severity_glyph(snap.severity);

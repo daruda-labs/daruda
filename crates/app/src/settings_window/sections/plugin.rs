@@ -263,7 +263,7 @@ impl SettingsWindow {
         let plugin_id = group.plugin_id.clone();
 
         let t = theme::current(cx);
-        let title_color = theme::TEXT_PRIMARY;
+        let title_color = t.text_primary;
         let subtitle_color = t.text_body;
         let active_bg = theme::OVERLAY_PROMINENT;
         let hover_bg = t.skill_row_hover_bg;
@@ -338,7 +338,7 @@ impl SettingsWindow {
             .filter(|sk| sk.plugin_id.as_deref() == Some(group.plugin_id.as_str()))
             .collect();
 
-        let title_color = theme::TEXT_PRIMARY;
+        let title_color = theme::current(cx).text_primary;
         let header = div().flex().flex_col().gap(px(theme::SKILL_ROW_GAP)).child(
             div()
                 .text_size(px(theme::MODAL_TITLE_FONT_SIZE))
@@ -510,8 +510,8 @@ impl SettingsWindow {
         ));
 
         let t = theme::current(cx);
-        let name_color = theme::TEXT_PRIMARY;
-        let meta_color = theme::TEXT_SECONDARY;
+        let name_color = t.text_primary;
+        let meta_color = t.text_body;
         let row_hover_bg = t.skill_row_hover_bg;
 
         let header_line = div()
@@ -602,13 +602,13 @@ impl SettingsWindow {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let t = theme::current(cx);
-        let title_color = theme::TEXT_PRIMARY;
+        let title_color = t.text_primary;
         let secondary_color = t.text_body;
         let error_color = theme::ERROR;
-        let section_header_color = theme::TEXT_TERTIARY;
+        let section_header_color = t.text_muted;
         let input_bg = t.modal_input_bg;
         let input_border = t.border;
-        let body_text_color = theme::TEXT_PRIMARY;
+        let body_text_color = t.text_primary;
 
         let header = div()
             .flex()

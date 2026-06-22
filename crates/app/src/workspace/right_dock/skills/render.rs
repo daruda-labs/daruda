@@ -66,7 +66,7 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .child(search_row(snap, cx));
 
     if searching && !any_match {
-        col = col.child(search_empty_hint(snap.skill_search_query.clone()));
+        col = col.child(search_empty_hint(snap.skill_search_query.clone(), &t));
         return col.into_any_element();
     }
 
@@ -152,8 +152,8 @@ fn filter_skills(skills: &[Skill], query_lower: &str) -> Vec<Skill> {
 /// non-empty — the row collapses back to a plain input at rest.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.skill_search_query.trim().is_empty();
-    let chip_text = theme::TEXT_SECONDARY;
-    let chip_hover_text = theme::TEXT_PRIMARY;
+    let chip_text = theme::current(cx).text_body;
+    let chip_hover_text = theme::current(cx).text_primary;
     let workspace = snap.workspace.clone();
     div()
         .relative()
@@ -193,11 +193,11 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
 /// Body shown when a non-empty search yields zero matches across every
 /// scope. Text-only — the in-field `✕` already provides one-click
 /// recovery, so a second affordance here would be redundant.
-fn search_empty_hint(query: String) -> impl IntoElement {
+fn search_empty_hint(query: String, t: &DarudaTheme) -> impl IntoElement {
     let display_query = SharedString::from(format!("\"{}\"", query.trim()));
     div()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-        .text_color(theme::TEXT_DISABLED)
+        .text_color(t.text_subtle)
         .child(SharedString::from(format!(
             "{}{}.",
             strings::skills_search_empty_prefix(),
@@ -296,7 +296,7 @@ fn scope_section(
             .items_center()
             .gap(px(theme::SKILL_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(theme::TEXT_TERTIARY)
+            .text_color(t.text_muted)
             .child(label.into())
             .child(neutral_chip(count_text, t)),
     );
@@ -307,7 +307,7 @@ fn scope_section(
             col.child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(theme::TEXT_DISABLED)
+                    .text_color(t.text_subtle)
                     .child(strings::skills_no_project_hint()),
             )
             .into_any_element(),
@@ -329,7 +329,7 @@ fn scope_section(
             col.child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(theme::TEXT_DISABLED)
+                    .text_color(t.text_subtle)
                     .child(msg),
             )
             .into_any_element(),
@@ -493,7 +493,7 @@ fn skill_row(
 
     let dir = s.dir.clone();
     let scope = s.scope;
-    let meta_color = theme::TEXT_SECONDARY;
+    let meta_color = t.text_body;
     let row_hover_bg = t.skill_row_hover_bg;
     let actions_bg = t.skill_row_hover_bg;
 
@@ -723,7 +723,7 @@ fn neutral_chip(label: impl Into<SharedString>, t: &DarudaTheme) -> impl IntoEle
         .rounded(px(theme::SKILL_BADGE_RADIUS))
         .bg(t.skill_aux_chip_bg)
         .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-        .text_color(theme::TEXT_SECONDARY)
+        .text_color(t.text_body)
         .child(label.into())
 }
 

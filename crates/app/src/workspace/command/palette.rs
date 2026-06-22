@@ -503,9 +503,9 @@ impl RenderOnce for CommandPaletteOverlay {
 
         let t = theme::current(cx);
         let input_border = t.border;
-        let query_text = theme::TEXT_PRIMARY;
+        let query_text = t.text_primary;
         let focused_bg = t.palette_focused_bg;
-        let focused_text = theme::TEXT_PRIMARY;
+        let focused_text = t.text_primary;
         let entry_text = t.text_body;
         let shortcut_text = t.text_subtle;
         let empty_text = t.text_subtle;

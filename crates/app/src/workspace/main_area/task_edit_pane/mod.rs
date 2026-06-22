@@ -45,7 +45,7 @@ pub(in crate::workspace) fn render(
     let pane_bg = theme_t.task_edit_bg;
     let scrollbar_thumb = theme_t.scrollbar_thumb;
     let scrollbar_thumb_hover = theme_t.task_edit_scrollbar_thumb_hover;
-    let pane_text = theme::TEXT_PRIMARY;
+    let pane_text = theme::current(cx).text_primary;
     let label_color = theme_t.text_muted;
 
     // Title field doubles as the pane's discard affordance: the
@@ -401,7 +401,7 @@ fn subtask_row(
 
     let t = theme::current(cx);
     let muted_color = t.text_muted;
-    let strong_color = theme::TEXT_PRIMARY;
+    let strong_color = t.text_primary;
 
     let title_body: gpui::AnyElement = if is_editing {
         div()

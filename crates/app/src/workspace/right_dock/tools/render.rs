@@ -109,7 +109,7 @@ fn scope_section(
             .items_center()
             .gap(px(theme::MCP_HEADER_GAP))
             .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-            .text_color(theme::TEXT_TERTIARY)
+            .text_color(t.text_muted)
             .child(label.into()),
     );
 
@@ -118,7 +118,7 @@ fn scope_section(
             .child(
                 div()
                     .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                    .text_color(theme::TEXT_DISABLED)
+                    .text_color(t.text_subtle)
                     .child(strings::mcp_no_project_hint()),
             )
             .into_any_element();
@@ -133,7 +133,7 @@ fn scope_section(
         col = col.child(
             div()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
-                .text_color(theme::TEXT_DISABLED)
+                .text_color(t.text_subtle)
                 .child(msg),
         );
         return col.into_any_element();
@@ -168,7 +168,7 @@ fn server_row(
     let actions_bg = theme::BG_HOVER;
 
     let indicator_color = if s.disabled {
-        theme::TEXT_DISABLED
+        t.text_subtle
     } else if s.is_malformed() {
         t.mcp_indicator_malformed
     } else {
@@ -180,7 +180,7 @@ fn server_row(
     // full-brightness name alone, so a redundant "enabled" word is
     // omitted.
     let status: Option<(String, gpui::Hsla)> = if s.disabled {
-        Some((strings::mcp_status_disabled(), theme::TEXT_DISABLED))
+        Some((strings::mcp_status_disabled(), t.text_subtle))
     } else if s.is_malformed() {
         Some((strings::mcp_status_malformed(), t.mcp_malformed_badge_text))
     } else {
@@ -228,13 +228,13 @@ fn server_row(
                 .flex_none()
                 .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
                 .text_color(if s.disabled {
-                    theme::TEXT_DISABLED
+                    t.text_subtle
                 } else {
-                    theme::TEXT_PRIMARY
+                    t.text_primary
                 })
                 .child(server_name),
         )
-        .child(transport_chip(transport_label))
+        .child(transport_chip(transport_label, t))
         .child(
             // Always present as the flex spacer that fills the row and
             // backs the hover-action overlay; carries text only for the
@@ -267,6 +267,7 @@ fn server_row(
                     name_for_delete,
                     workspace_edit,
                     workspace_delete,
+                    t,
                 )),
         )
         .into_any_element()
@@ -278,6 +279,7 @@ fn row_actions(
     name_for_delete: String,
     workspace_edit: gpui::WeakEntity<Workspace>,
     workspace_delete: gpui::WeakEntity<Workspace>,
+    t: &DarudaTheme,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -287,7 +289,8 @@ fn row_actions(
         .child(text_action_button(
             "edit",
             strings::mcp_button_edit(),
-            theme::TEXT_PRIMARY,
+            t.text_primary,
+            t,
             move |window, cx| {
                 if let Some(ws) = workspace_edit.upgrade() {
                     let n = name_for_edit.clone();
@@ -299,6 +302,7 @@ fn row_actions(
             "del",
             strings::mcp_button_delete(),
             theme::ERROR,
+            t,
             move |window, cx| {
                 if let Some(ws) = workspace_delete.upgrade() {
                     let n = name_for_delete.clone();
@@ -310,7 +314,7 @@ fn row_actions(
         ))
 }
 
-fn transport_chip(label: &'static str) -> impl IntoElement {
+fn transport_chip(label: &'static str, t: &DarudaTheme) -> impl IntoElement {
     div()
         .flex_none()
         .px(px(theme::MCP_BADGE_PAD_X))
@@ -318,7 +322,7 @@ fn transport_chip(label: &'static str) -> impl IntoElement {
         .rounded(px(theme::MCP_BADGE_RADIUS))
         .bg(theme::OVERLAY_SELECTED)
         .text_size(px(theme::MCP_BADGE_FONT_SIZE))
-        .text_color(theme::TEXT_SECONDARY)
+        .text_color(t.text_body)
         .child(label)
 }
 
@@ -331,12 +335,13 @@ fn text_action_button<F>(
     id: impl Into<gpui::ElementId>,
     label: impl Into<gpui::SharedString>,
     hover_color: gpui::Hsla,
+    t: &DarudaTheme,
     on_click: F,
 ) -> impl IntoElement
 where
     F: Fn(&mut gpui::Window, &mut gpui::App) + 'static,
 {
-    let idle_color = theme::TEXT_SECONDARY;
+    let idle_color = t.text_body;
     div()
         .id(id)
         .flex_none()

@@ -158,8 +158,8 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
             for item in items {
                 let (bullet, bullet_color) = match item.checked {
                     Some(true) => ("☑", theme::SUCCESS),
-                    Some(false) => ("☐", theme::TEXT_TERTIARY),
-                    None => ("•", theme::TEXT_TERTIARY),
+                    Some(false) => ("☐", t.text_muted),
+                    None => ("•", t.text_muted),
                 };
                 let mut item_col = div().flex().flex_col();
                 let row = div()
@@ -200,7 +200,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
                         div()
                             .flex_none()
                             .min_w(px(theme::MD_LIST_INDENT))
-                            .text_color(theme::TEXT_TERTIARY)
+                            .text_color(t.text_muted)
                             .child(num),
                     )
                     .child(
@@ -272,7 +272,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         MdBlock::HtmlBlock(html) => div()
             .font(gpui::font("monospace"))
             .text_size(px(theme::MD_HTML_FONT_SIZE))
-            .text_color(theme::TEXT_DISABLED)
+            .text_color(t.text_subtle)
             .child(html.clone())
             .into_any_element(),
 
@@ -407,7 +407,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
             .flex()
             .flex_row()
             .flex_wrap()
-            .text_color(theme::TEXT_DISABLED)
+            .text_color(t.text_subtle)
             .children(render_md_spans(inner, t))
             .into_any_element(),
 
@@ -425,7 +425,7 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
 
         MdSpan::Html(s) => div()
             .font(gpui::font("monospace"))
-            .text_color(theme::TEXT_DISABLED)
+            .text_color(t.text_subtle)
             .text_size(px(theme::MD_HTML_FONT_SIZE))
             .child(s.clone())
             .into_any_element(),

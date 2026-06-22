@@ -305,6 +305,7 @@ impl ModalView for EditMcpServerModal {}
 
 impl Render for EditMcpServerModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = crate::ui::theme::current(cx).clone();
         let panel_focus = self.panel_focus_handle.clone();
         let submitting = self.submitting;
         let banner = self
@@ -313,7 +314,7 @@ impl Render for EditMcpServerModal {
             .map(|msg| crate::ui::alert::error("edit-tool-error", msg.clone()));
 
         // Read-only summary line: "Name @ Scope"
-        let summary_text = theme::TEXT_SECONDARY;
+        let summary_text = t.text_body;
         let summary = div()
             .flex()
             .flex_row()
@@ -348,24 +349,24 @@ impl Render for EditMcpServerModal {
             .flex()
             .flex_col()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::mcp_field_name()))
+            .child(field_label(strings::mcp_field_name(), &t))
             .child(summary)
-            .child(field_label(strings::mcp_field_transport()))
+            .child(field_label(strings::mcp_field_transport(), &t))
             .child(transport_chip);
 
         match self.transport {
             McpTransport::Stdio => {
                 body = body
-                    .child(field_label(strings::mcp_field_command()))
+                    .child(field_label(strings::mcp_field_command(), &t))
                     .child(input(&self.command_input, cx, 0))
-                    .child(field_label(strings::mcp_field_args()))
+                    .child(field_label(strings::mcp_field_args(), &t))
                     .child(input(&self.args_input, cx, 1));
             }
             McpTransport::Sse | McpTransport::Http => {
                 body = body
-                    .child(field_label(strings::mcp_field_url()))
+                    .child(field_label(strings::mcp_field_url(), &t))
                     .child(input(&self.url_input, cx, 0))
-                    .child(field_label(strings::mcp_field_headers()))
+                    .child(field_label(strings::mcp_field_headers(), &t))
                     .child(input(&self.headers_input, cx, 1));
             }
         }
@@ -375,7 +376,7 @@ impl Render for EditMcpServerModal {
         // checkbox regardless of transport. Name is read-only here, so
         // indices start at 0 (both branches use 0,1 for their inputs).
         body = body
-            .child(field_label(strings::mcp_field_env()))
+            .child(field_label(strings::mcp_field_env(), &t))
             .child(input(&self.env_input, cx, 2))
             .child(
                 checkbox("mcp-edit-disabled", strings::mcp_field_disabled(), 3)

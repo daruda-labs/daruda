@@ -342,6 +342,7 @@ impl ModalView for EditSkillModal {}
 
 impl Render for EditSkillModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = crate::ui::theme::current(cx).clone();
         let panel_focus = self.panel_focus_handle.clone();
         let name_label = self.name.clone();
         let scope_label = match self.scope {
@@ -361,21 +362,21 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_name()))
+            .child(field_label(strings::skills_field_name(), &t))
             .child(readonly_value(name_label, cx))
-            .child(field_label(strings::skills_field_scope()))
+            .child(field_label(strings::skills_field_scope(), &t))
             .child(readonly_value(scope_label.to_string(), cx))
-            .child(field_label(strings::skills_field_description()))
+            .child(field_label(strings::skills_field_description(), &t))
             .child(input(&self.description_input, cx, 0))
-            .child(field_label(strings::skills_field_when_to_use()))
+            .child(field_label(strings::skills_field_when_to_use(), &t))
             .child(input(&self.when_to_use_input, cx, 1))
-            .child(field_label(strings::skills_field_allowed_tools()))
+            .child(field_label(strings::skills_field_allowed_tools(), &t))
             .child(input(&self.allowed_tools_input, cx, 2))
-            .child(field_label(strings::skills_field_arg_hint()))
+            .child(field_label(strings::skills_field_arg_hint(), &t))
             .child(input(&self.argument_hint_input, cx, 3))
-            .child(field_label(strings::skills_field_paths()))
+            .child(field_label(strings::skills_field_paths(), &t))
             .child(input(&self.paths_input, cx, 4))
-            .child(field_label(strings::skills_field_model()))
+            .child(field_label(strings::skills_field_model(), &t))
             .child(input(&self.model_input, cx, 5))
             .child(
                 checkbox(
@@ -407,7 +408,7 @@ impl Render for EditSkillModal {
             .flex_col()
             .flex_1()
             .gap(px(theme::FORM_MODAL_SECTION_GAP))
-            .child(field_label(strings::skills_field_body()))
+            .child(field_label(strings::skills_field_body(), &t))
             // body_editor sits between the left-column inputs and the
             // two toggles so Tab moves directly from the last metadata
             // field into the markdown body — toggles come last as

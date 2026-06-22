@@ -103,7 +103,7 @@ pub fn button_header_action(
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
         .foreground(t.text_muted)
-        .hover(theme::TEXT_PRIMARY);
+        .hover(t.text_primary);
     Button::new(id)
         .small()
         .tab_stop(false)
@@ -144,11 +144,7 @@ pub fn button_toggle(
     cx: &App,
 ) -> Button {
     let t = theme::current(cx);
-    let fg = if active {
-        theme::TEXT_PRIMARY
-    } else {
-        t.text_muted
-    };
+    let fg = if active { t.text_primary } else { t.text_muted };
     let active_bg = t.dock_icon_active_bg;
     let variant = if active {
         ButtonCustomVariant::new(cx)

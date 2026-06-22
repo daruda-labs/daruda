@@ -9,9 +9,12 @@ use gpui::{IntoElement, SharedString, div, prelude::*, px};
 /// Small label rendered above a form field. Matches the typography of
 /// `field_row` from `ui::form_helpers` but lives here because the
 /// Skills modal stacks label-on-top instead of inline.
-pub(super) fn field_label(text: impl Into<SharedString>) -> impl IntoElement {
+pub(super) fn field_label(
+    text: impl Into<SharedString>,
+    t: &crate::ui::theme::DarudaTheme,
+) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_LABEL_FONT_SIZE))
-        .text_color(theme::TEXT_TERTIARY)
+        .text_color(t.text_muted)
         .child(text.into())
 }

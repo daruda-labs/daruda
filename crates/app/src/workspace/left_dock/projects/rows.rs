@@ -159,7 +159,7 @@ pub(in crate::workspace) fn group_header_row(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     let t = theme::current(cx);
-    let label_color = theme::TEXT_PRIMARY;
+    let label_color = t.text_primary;
     let row_hover_bg = t.lane_row_hover_bg;
     let drop_target_bg = t.lane_drop_target_bg;
     let drop_target_rejected_bg = t.lane_drop_target_rejected_bg;
@@ -376,7 +376,7 @@ pub(in crate::workspace) fn project_header_row(
     let avail_badge = availability_badge(availability);
     let is_unavailable = avail_badge.is_some();
     let label_color = if is_active && !is_unavailable {
-        theme::TEXT_PRIMARY
+        t.text_primary
     } else {
         t.text_muted
     };
@@ -715,11 +715,11 @@ pub(in crate::workspace) fn worktree_row(
     // below (hover, drag_over) capture stable values.
     let t = theme::current(cx);
     let unread_dot_color = theme::WARNING;
-    let label_active = theme::TEXT_PRIMARY;
+    let label_active = t.text_primary;
     let label_inactive = t.text_muted;
     let badge_pill_bg = theme::OVERLAY_PROMINENT;
-    let badge_pill_text = theme::TEXT_PRIMARY;
-    let badge_arrow_text = theme::TEXT_TERTIARY;
+    let badge_pill_text = t.text_primary;
+    let badge_arrow_text = t.text_muted;
     let sublabel_color = t.text_subtle;
     let row_hover_bg = t.lane_row_hover_bg;
     let row_active_bg = t.lane_card_active_bg;
