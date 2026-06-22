@@ -263,7 +263,10 @@ impl Workspace {
         let amend = matches!(mode, CommitMode::Amend { .. });
         self.commit_mode = mode;
         let (primary, dropdown) = if amend {
-            (app_strings::git_amend_btn(), app_strings::git_cancel_amend())
+            (
+                app_strings::git_amend_btn(),
+                app_strings::git_cancel_amend(),
+            )
         } else {
             (
                 app_strings::git_commit_btn(),
