@@ -14,7 +14,10 @@ use crate::surface::strings as s;
 impl Render for SettingsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme::current(cx);
-        let header_bg = theme::SURFACE_1;
+        // Match the workspace title bar's themed token (retones for light mode)
+        // rather than the fixed-dark `SURFACE_1` const, which left dark header
+        // text on a dark bar in light mode.
+        let header_bg = t.title_bar_bg;
         let header_text = t.text_primary;
         let error_text = theme::ERROR;
         let panel_bg = t.modal_panel_bg;
@@ -182,7 +185,7 @@ impl SettingsWindow {
     ) -> impl IntoElement {
         let row_text = theme::current(cx).text_primary;
         let active_bg = theme::OVERLAY_PROMINENT;
-        let hover_bg = theme::OVERLAY_SELECTED;
+        let hover_bg = theme::current(cx).overlay_selected;
 
         let row_id: gpui::ElementId =
             gpui::ElementId::Name(format!("settings-nav-{}", section.slug()).into());
