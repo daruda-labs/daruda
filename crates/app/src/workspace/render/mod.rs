@@ -291,6 +291,12 @@ impl Render for Workspace {
         } else {
             theme::LIGHT_CANVAS
         };
+        // A File/diff pane renders on the editor surface, not canvas. The
+        // active tab is meant to read as continuous with the content below
+        // it, so a file tab's active background must match that surface —
+        // otherwise it shows as a darker pure-black notch over the lifted
+        // editor body. Terminal tabs stay on `tab_active_bg` (canvas).
+        let tab_active_file_bg = t.file_viewer_bg;
         let tab_active_text = if dark {
             t.text_primary
         } else {
@@ -535,7 +541,12 @@ impl Render for Workspace {
                         .text_size(px(theme::TAB_FONT_SIZE))
                         .cursor_pointer()
                         .when(is_active, |d| {
-                            d.bg(tab_active_bg).text_color(tab_active_text)
+                            let active_bg = if file_path.is_some() {
+                                tab_active_file_bg
+                            } else {
+                                tab_active_bg
+                            };
+                            d.bg(active_bg).text_color(tab_active_text)
                         })
                         .when(!is_active, |d| {
                             d.bg(tab_inactive_bg)

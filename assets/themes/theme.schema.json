@@ -6,7 +6,7 @@
     "title_bar_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#070809ff"
     },
     "tab_inactive_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
@@ -71,7 +71,7 @@
     "status_bar_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#070809ff"
     },
     "status_bar_project_dot": {
       "description": "Maps to `palette::STATUS_BAR_PROJECT_DOT`.",
@@ -226,7 +226,7 @@
     "settings_sidebar_bg": {
       "description": "Maps to `palette::SETTINGS_SIDEBAR_BG`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#0101022e"
+      "default": "#0708092e"
     },
     "palette_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -296,7 +296,7 @@
     "welcome_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#070809ff"
     },
     "welcome_button_bg": {
       "description": "Maps to `palette::BG_HOVER`.",
@@ -466,7 +466,7 @@
     "error_modal_body_bg": {
       "description": "Maps to `palette::BG_BASE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#070809ff"
     },
     "terminal_bg": {
       "description": "Maps to `palette::TERMINAL_BG`.",

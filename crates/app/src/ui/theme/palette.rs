@@ -74,13 +74,20 @@ pub const TRANSPARENT: Hsla = hsla(0.0, 0.0, 0.0, 0.0);
 // Design tokens — primitive colour literals (single source of truth)
 // ============================================================================
 
-pub const CANVAS: Hsla = hsla(240.0, 0.333, 0.006, 1.0);
+// Lifted off pure black (l 0.006 → 0.031) so the window frame isn't harsher
+// than the content it surrounds. Hue/saturation match the SURFACE_* ladder
+// (cyan-blue 210, faint) rather than a pure-240 navy — at this lightness a
+// high-240 tint reads as visibly navy. Values are the exact HSL of the 8-bit
+// hex #070809 (B−R = 2, same cool strength as SURFACE_1), so the theme
+// survives its serialize→hex→parse round-trip cleanly.
+pub const CANVAS: Hsla = hsla(210.0, 0.125, 0.0314, 1.0);
 pub const SURFACE_1: Hsla = hsla(210.0, 0.063, 0.063, 1.0);
 pub const SURFACE_2: Hsla = hsla(210.0, 0.048, 0.082, 1.0);
 pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
-/// Code-viewing surface (file viewer + diff). Lifted a hair off the
-/// near-pure-black `CANVAS` so bright glyphs don't halate while the
-/// syntax palette stays above the contrast floor — see DESIGN §Readability.
+/// Code-viewing surface (file viewer + diff). Sits one rung above
+/// `CANVAS` so the editor reads as its own plane and bright glyphs stay
+/// off the deepest base, while the syntax palette stays above the
+/// contrast floor — see DESIGN §Readability.
 pub const EDITOR_SURFACE: Hsla = hsla(220.0, 0.10, 0.05, 1.0);
 
 // Light-theme surface ladder — cool-tinted near-whites (faint blue, never

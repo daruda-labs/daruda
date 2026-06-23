@@ -30,8 +30,8 @@ Three rules:
 ```yaml
 colors:
   # Canvas — cool near-black (Linear-inspired, faint blue tint)
-  canvas:         "#010102"                   # Window background; terminal pane background
-  editor-surface: "#0b0c0e"                   # File viewer + diff code area — lifted off pure black (see §Readability)
+  canvas:         "#070809"                   # Window frame base: title/status bar, welcome, active terminal tab, active-state recesses. Lifted off pure black so the frame isn't harsher than the lifted content; cool tint matches the surface ladder (hue 210), not navy (see §Readability).
+  editor-surface: "#0b0c0e"                   # File viewer + diff code area — one rung above canvas (see §Readability)
   surface-1:      "#0f1011"                   # Dock panels, sidebar, card backgrounds
   surface-2:      "#141516"                   # Hover row, active tab, MacroKey resting state
   surface-3:      "#18191a"                   # Active/pressed row, input background
@@ -151,10 +151,11 @@ output, and syntax-highlighted code.
 | UI component edges / icons | 3:1 | Borders, focus rings, glyph-only affordances. |
 
 **Avoid both extremes — contrast is a tuned band, not "more is better":**
-- **Never pure-black background under text.** `#000`/`#010102` makes bright glyphs
-  *halate* (bloom) and leaves afterimages, especially on OLED. Code renders on
-  `editor-surface` (`#0b0c0e`), a hair above `canvas`, for exactly this reason.
-  The terminal's `#1e1e1e` default is the comfortable reference.
+- **Never pure-black background under text.** `#000`-ish backgrounds make bright
+  glyphs *halate* (bloom) and leave afterimages, especially on OLED. No reading
+  surface sits on pure black: code renders on `editor-surface` (`#0b0c0e`), the
+  terminal on its `#1e1e1e` preset, and even the window base `canvas` is lifted
+  to `#070809` so the frame isn't the harshest thing on screen.
 - **Never pure-white text.** A near-white (`ink #f7f8f8`) at ~13–18:1 is the
   ceiling; literal `#fff` on near-black overshoots into glare. Tone down, don't max out.
 
