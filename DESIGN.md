@@ -30,11 +30,12 @@ Three rules:
 ```yaml
 colors:
   # Canvas — cool near-black (Linear-inspired, faint blue tint)
-  canvas:        "#010102"                    # Window background; terminal pane background
-  surface-1:     "#0f1011"                    # Dock panels, sidebar, card backgrounds
-  surface-2:     "#141516"                    # Hover row, active tab, MacroKey resting state
-  surface-3:     "#18191a"                    # Active/pressed row, input background
-  surface-4:     "#1f2022"                    # Popover, context menu, tooltip
+  canvas:         "#010102"                   # Window background; terminal pane background
+  editor-surface: "#0b0c0e"                   # File viewer + diff code area — lifted off pure black (see §Readability)
+  surface-1:      "#0f1011"                   # Dock panels, sidebar, card backgrounds
+  surface-2:      "#141516"                   # Hover row, active tab, MacroKey resting state
+  surface-3:      "#18191a"                   # Active/pressed row, input background
+  surface-4:      "#1f2022"                   # Popover, context menu, tooltip
   hairline:      "#23252a"                    # 1px borders everywhere
   hairline-soft: "rgba(255,255,255,0.06)"    # Faint overlay borders (popover edges)
 
@@ -48,7 +49,7 @@ colors:
   ink:           "#f7f8f8"   # Primary: active labels, tab titles, focused row
   body:          "#d0d6e0"   # Default: descriptions, inactive labels, body text
   mute:          "#8a8f98"   # Tertiary: timestamps, dock section headers, placeholders
-  subtle:        "#62666d"   # Disabled: greyed-out controls, lowest emphasis
+  subtle:        "#797e86"   # Lowest-emphasis *readable* copy: line numbers, hints, metadata, shortcuts, empty states (≥4.5:1 on surface-1). Also the disabled-control tier, where inertness is carried by bg + loss of hover, not by this color alone.
 
   # Semantic — Claude lane states (badge on WorktreeRow)
   claude-active: "#f0a020"   # Claude is running in this lane (vivid gold — distinct from warning)
@@ -91,6 +92,7 @@ colors:
 - `accent` appears on at most 3–4 elements visible at one time. Never use it as a panel fill.
 - `claude-active` / `claude-done` / `claude-error` are badge-only colors — never applied to text or large surfaces.
 - `canvas` is the only valid background for the terminal pane. The terminal is not a card.
+- `editor-surface` (not `canvas`) backs the file viewer and diff code area — code renders on a gentle dark-gray, never on pure-black `canvas` (see §Readability).
 
 ---
 
@@ -129,6 +131,59 @@ typography:
 - `label` (ALL-CAPS, positive tracking) is reserved for dock section headers and group names only.
 - Negative letter-spacing only at 13px (`ui-lg`, `ui-lg-strong`).
 - Inter font features (`calt`, `kern`, `liga`) — enable if GPUI's text shaper exposes per-font feature flags.
+
+---
+
+## Readability
+
+Dark-mode text legibility is a first-class constraint, not an afterthought. The
+rules below come from contrast research (WCAG 2.x, BOIA, Material dark theme) and
+hold for **all** text the user reads for more than a glance — UI chrome, terminal
+output, and syntax-highlighted code.
+
+**Contrast floors** (WCAG, against the surface the text sits on):
+
+| Text role | Min ratio | Notes |
+|-----------|-----------|-------|
+| Body / normal-size text | **4.5:1** (AA) | The hard floor for anything read continuously. |
+| Large text (≥18px, or ≥14px bold) | 3:1 (AA-large) | Headings, large labels only. |
+| Comfortable target | **7:1** (AAA) | Where daruda aims for body copy (`ink`, `body`). |
+| UI component edges / icons | 3:1 | Borders, focus rings, glyph-only affordances. |
+
+**Avoid both extremes — contrast is a tuned band, not "more is better":**
+- **Never pure-black background under text.** `#000`/`#010102` makes bright glyphs
+  *halate* (bloom) and leaves afterimages, especially on OLED. Code renders on
+  `editor-surface` (`#0b0c0e`), a hair above `canvas`, for exactly this reason.
+  The terminal's `#1e1e1e` default is the comfortable reference.
+- **Never pure-white text.** A near-white (`ink #f7f8f8`) at ~13–18:1 is the
+  ceiling; literal `#fff` on near-black overshoots into glare. Tone down, don't max out.
+
+**Saturation on dark surfaces:**
+- High-chroma colors *vibrate* against dark backgrounds. Soften toward pastel —
+  this is why the `daruda` syntax palette pulls `function`/`string_special` out of
+  the near-gray band rather than using raw, fully-saturated source-theme values.
+- `accent` (`#5e6ad2`) clears 3:1 as a UI element but only ~4.1:1 as text — **do not
+  use `accent` for small body text** (links, inline labels). Use it for fills, focus
+  rings, icons, and ≥14px-bold emphasis only.
+
+**Contrast is a scarce resource (syntax highlighting):**
+- Don't color every token. Lean on structure (a string's contents can't be confused
+  with code) and spend color only where ambiguity is real. (tonsky, "everyone is
+  getting syntax highlighting wrong".)
+- Carry meaning on **non-color channels** where you can: the `daruda` palette uses
+  keyword **bold**, escape **bold**, comment *italic* so a token stays distinguishable
+  even at low chroma — and stays legible for color-blind users.
+- Comments are intentionally the dimmest token (~4.0:1 on `editor-surface` — riding
+  the floor); that is the *floor*, not a target to push below. Note lifting the editor
+  background off pure-black slightly *lowered* the comment ratio (4.28 → 4.01), so the
+  pair is now tuned to sit right at ~4.0. If a syntax color dips under ~4:1, lift it
+  (see Tokyo Night's `comment` raised to `#6b74a3`).
+
+**When you change a color or background, re-check the pair.** Lifting a dark
+background *lowers* the contrast of every light token on it; darkening text on a
+fixed surface lowers it too. Compute the ratio for the actual fg/bg pair — never
+eyeball it. The four sanctioned text tones (`ink`/`body`/`mute`/`subtle`) are tuned
+against `surface-1`; `subtle` (`#797e86`) sits right at 4.5:1 — don't darken it.
 
 ---
 
@@ -899,6 +954,9 @@ Both badges use `ui-xs` text — not `label`, no ALL-CAPS.
 - Don't use warm-tinted or neutral-gray surfaces — the cool blue-black tone is the identity.
 - Don't borrow the brand accent (or agent-state colors) for syntax tokens, or vice versa — chrome and code legibility are tuned on separate axes.
 - Don't ship a syntax palette that only works on dark — every family pairs a light variant (or falls back to Daruda Light) so light mode stays legible.
+- Don't render code on pure-black `canvas` — use `editor-surface`; pure black halates bright glyphs (see Readability).
+- Don't use pure `#fff` text or `accent` for small body text — both miss the readability band (see Readability).
+- Don't change a text or surface color without re-computing the fg/bg contrast ratio for the affected pair — never eyeball it.
 
 ---
 

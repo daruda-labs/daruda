@@ -62,7 +62,7 @@ fn left_dock_width_clamps_to_range() {
 fn empty_toml_produces_defaults() {
     let cfg: Config = toml::from_str("").unwrap();
     assert_eq!(cfg.font.size, 13.0);
-    assert_eq!(cfg.colors.foreground, HexColor::new(0xC0, 0xC0, 0xC0));
+    assert_eq!(cfg.colors.foreground, HexColor::new(0xD4, 0xD4, 0xD4));
 }
 
 #[test]

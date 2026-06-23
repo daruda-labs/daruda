@@ -61,7 +61,7 @@
     "text_subtle": {
       "description": "Maps to `palette::TEXT_SUBTLE`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#62666dff"
+      "default": "#797e86ff"
     },
     "scrollbar_thumb": {
       "description": "Maps to `palette::SCROLLBAR_THUMB`.",
@@ -249,9 +249,9 @@
       "default": "#141516ff"
     },
     "git_diff_panel_bg": {
-      "description": "Maps to `palette::BG_BASE`.",
+      "description": "Maps to `palette::BG_EDITOR`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#0b0c0eff"
     },
     "git_diff_hunk_bg": {
       "description": "Maps to `palette::BG_RAISED`.",
@@ -314,9 +314,9 @@
       "default": "#141516ff"
     },
     "file_viewer_bg": {
-      "description": "Maps to `palette::BG_BASE`.",
+      "description": "Maps to `palette::BG_EDITOR`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#010102ff"
+      "default": "#0b0c0eff"
     },
     "file_viewer_header_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
@@ -356,7 +356,7 @@
     "file_diff_hunk_text": {
       "description": "Maps to `palette::FILE_DIFF_HUNK_TEXT`.",
       "$ref": "#/$defs/Rgba",
-      "default": "#62666dff"
+      "default": "#797e86ff"
     },
     "file_viewer_scrollbar_thumb_hover": {
       "description": "Maps to `palette::SCROLLBAR_THUMB_HOVER`.",

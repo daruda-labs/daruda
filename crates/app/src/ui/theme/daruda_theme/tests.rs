@@ -76,7 +76,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.text_subtle, palette::TEXT_SUBTLE);
     assert_eq!(t.git_file_row_selected_bg, palette::BG_HOVER);
     assert_eq!(t.git_file_row_hover_bg, palette::BG_HOVER);
-    assert_eq!(t.git_diff_panel_bg, palette::BG_BASE);
+    assert_eq!(t.git_diff_panel_bg, palette::BG_EDITOR);
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.text_subtle, palette::TEXT_SUBTLE);
     assert_eq!(t.git_diff_hunk_bg, palette::BG_RAISED);
@@ -103,7 +103,7 @@ fn default_clones_compile_time_palette() {
     assert_eq!(t.welcome_button_hover_bg, palette::BG_ACTIVE);
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.welcome_recent_hover_bg, palette::BG_HOVER);
-    assert_eq!(t.file_viewer_bg, palette::BG_BASE);
+    assert_eq!(t.file_viewer_bg, palette::BG_EDITOR);
     assert_eq!(t.file_viewer_header_bg, palette::BG_PANEL);
     assert_eq!(t.border, palette::BORDER);
     assert_eq!(t.text_body, palette::TEXT_BODY);

@@ -136,7 +136,7 @@ impl ColorConfig {
 impl Default for ColorConfig {
     fn default() -> Self {
         Self {
-            foreground: HexColor::new(0xC0, 0xC0, 0xC0),
+            foreground: HexColor::new(0xD4, 0xD4, 0xD4),
             background: HexColor::new(0x1E, 0x1E, 0x1E),
             normal: AnsiPalette::default(),
             bright: AnsiPalette {

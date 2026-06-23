@@ -78,6 +78,10 @@ pub const CANVAS: Hsla = hsla(240.0, 0.333, 0.006, 1.0);
 pub const SURFACE_1: Hsla = hsla(210.0, 0.063, 0.063, 1.0);
 pub const SURFACE_2: Hsla = hsla(210.0, 0.048, 0.082, 1.0);
 pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
+/// Code-viewing surface (file viewer + diff). Lifted a hair off the
+/// near-pure-black `CANVAS` so bright glyphs don't halate while the
+/// syntax palette stays above the contrast floor — see DESIGN §Readability.
+pub const EDITOR_SURFACE: Hsla = hsla(220.0, 0.10, 0.05, 1.0);
 
 // Light-theme surface ladder — cool-tinted near-whites (faint blue, never
 // neutral gray), mirroring the dark ladder's cool identity. Used by
@@ -96,7 +100,7 @@ pub const ACCENT: Hsla = hsla(233.8, 0.563, 0.596, 1.0);
 pub const INK: Hsla = hsla(0.0, 0.0, 0.97, 1.0);
 pub const TEXT_BODY: Hsla = hsla(218.0, 0.089, 0.847, 1.0);
 pub const TEXT_MUTE: Hsla = hsla(218.0, 0.064, 0.569, 1.0);
-pub const TEXT_SUBTLE: Hsla = hsla(218.0, 0.053, 0.406, 1.0);
+pub const TEXT_SUBTLE: Hsla = hsla(218.0, 0.053, 0.5, 1.0);
 
 // ============================================================================
 // DESIGN.md color tokens — complete palette (synced from DESIGN.md §Colors)
@@ -158,7 +162,7 @@ pub const DIFF_ADD_BG: Hsla = with_alpha(SUCCESS, 0.12);
 pub const DIFF_ADD_FG: Hsla = SUCCESS;
 pub const DIFF_DEL_BG: Hsla = with_alpha(ERROR, 0.12);
 pub const DIFF_DEL_FG: Hsla = ERROR;
-pub const DIFF_HUNK: Hsla = TEXT_SUBTLE; // #62666d
+pub const DIFF_HUNK: Hsla = TEXT_SUBTLE; // #797e86
 
 // ---------------------------------------------------------------------------
 // Selection
@@ -194,6 +198,9 @@ pub const SIGNAL_RED: Hsla = hsla(4.0, 1.0, 0.62, 1.0);
 
 // Surface roles — elevation ladder (DESIGN §Elevation).
 pub const BG_BASE: Hsla = CANVAS;
+/// Surface for code-rendering panes (file viewer + diff). Distinct from
+/// `BG_BASE` so the editor reads on a gentle dark-gray, not pure black.
+pub const BG_EDITOR: Hsla = EDITOR_SURFACE;
 pub const BG_PANEL: Hsla = SURFACE_1;
 pub const BG_RAISED: Hsla = SURFACE_2;
 pub const BG_HOVER: Hsla = SURFACE_2;
