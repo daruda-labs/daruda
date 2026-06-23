@@ -54,8 +54,9 @@ pub fn apply_event(prev: Option<SessionStatus>, event: &HookEvent) -> FsmAction 
         // explicit `PermissionRequest` above.
         E::Notification { .. } => prev.unwrap_or(SessionStatus::Idle),
 
-        // Turn ended.
-        E::Stop { .. } => SessionStatus::Idle,
+        // Turn ended — clean finish or API-error failure both return the
+        // session to Idle (the turn is over either way).
+        E::Stop { .. } | E::StopFailure { .. } => SessionStatus::Idle,
     };
 
     FsmAction::Update(new_state)
@@ -144,6 +145,9 @@ mod tests {
             common: cf(),
             response: None,
         }
+    }
+    fn stop_failure() -> HookEvent {
+        HookEvent::StopFailure { common: cf() }
     }
 
     #[test]
@@ -269,6 +273,25 @@ mod tests {
             apply_event(Some(SessionStatus::Working), &stop()),
             FsmAction::Update(SessionStatus::Idle)
         );
+    }
+
+    #[test]
+    fn stop_failure_yields_idle() {
+        // A turn that ends due to an API error (`StopFailure`) must still
+        // drop the indicator to Idle, exactly like a clean `Stop`.
+        // Without this the badge stays stuck on Working / ExecutingTool:
+        // in hook-only mode the JSONL fallback is off, so nothing else
+        // ages the state out until the next turn completes normally.
+        for prev in [
+            Some(SessionStatus::Working),
+            Some(SessionStatus::ExecutingTool),
+        ] {
+            assert_eq!(
+                apply_event(prev, &stop_failure()),
+                FsmAction::Update(SessionStatus::Idle),
+                "prev={prev:?}"
+            );
+        }
     }
 
     /// Realistic full-turn sequence.

@@ -1,4 +1,4 @@
-//! Hook event serde models — 9 of Claude Code's 28 events that daruda subscribes to.
+//! Hook event serde models — 10 of Claude Code's 28 events that daruda subscribes to.
 //!
 //! Schema source: <https://code.claude.com/docs/en/hooks.md>.
 
@@ -86,12 +86,13 @@ pub enum NotificationType {
     Unknown,
 }
 
-/// All 9 hook events daruda processes. Tagged on `hook_event_name`,
+/// The hook events daruda processes. Tagged on `hook_event_name`,
 /// which Claude Code includes in every payload.
 ///
-/// Events outside this set (the other 19 of 28) won't deserialize
-/// here — deserialization is fallible and the caller (`hooks::handler`)
-/// just exits 0 on parse errors so unrecognized events are no-ops.
+/// Events outside this set (the rest of Claude Code's hook catalogue)
+/// won't deserialize here — deserialization is fallible and the caller
+/// (`hooks::handler`) just exits 0 on parse errors so unrecognized
+/// events are no-ops.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "hook_event_name")]
 pub enum HookEvent {
@@ -162,6 +163,14 @@ pub enum HookEvent {
         #[serde(default)]
         response: Option<String>,
     },
+    /// Turn ended due to an API error (rather than a clean finish).
+    /// Carries only the common fields; any error detail Claude attaches
+    /// is ignored. Treated like `Stop` for status purposes — the turn is
+    /// over, so the session returns to `Idle`.
+    StopFailure {
+        #[serde(flatten)]
+        common: CommonFields,
+    },
 }
 
 impl HookEvent {
@@ -176,7 +185,8 @@ impl HookEvent {
             | Self::PostToolUseFailure { common, .. }
             | Self::PermissionRequest { common, .. }
             | Self::Notification { common, .. }
-            | Self::Stop { common, .. } => common,
+            | Self::Stop { common, .. }
+            | Self::StopFailure { common, .. } => common,
         }
     }
 
@@ -204,6 +214,7 @@ impl HookEvent {
             Self::PermissionRequest { .. } => "PermissionRequest",
             Self::Notification { .. } => "Notification",
             Self::Stop { .. } => "Stop",
+            Self::StopFailure { .. } => "StopFailure",
         }
     }
 }
@@ -369,6 +380,17 @@ mod tests {
         );
         let ev = parse(&json);
         assert!(matches!(ev, HookEvent::Stop { .. }));
+    }
+
+    #[test]
+    fn stop_failure_parses_and_names() {
+        // `StopFailure` (turn ended due to an API error) carries only the
+        // common fields; any error payload Claude adds is ignored.
+        let json = format!(r#"{{"hook_event_name":"StopFailure",{}}}"#, common_json());
+        let ev = parse(&json);
+        assert!(matches!(ev, HookEvent::StopFailure { .. }));
+        assert_eq!(ev.name(), "StopFailure");
+        assert_eq!(ev.common().session_id, "abc-123");
     }
 
     #[test]

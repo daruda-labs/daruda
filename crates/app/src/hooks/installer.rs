@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use fs4::fs_std::FileExt;
 use serde_json::{Value, json};
 
-/// The 9 hook event names daruda subscribes to.
+/// The hook event names daruda subscribes to.
 pub const SUBSCRIBED_EVENTS: &[&str] = &[
     "SessionStart",
     "SessionEnd",
@@ -35,6 +35,7 @@ pub const SUBSCRIBED_EVENTS: &[&str] = &[
     "PermissionRequest",
     "Notification",
     "Stop",
+    "StopFailure",
 ];
 
 /// Substring used to identify daruda's hook entries inside
@@ -429,6 +430,25 @@ mod tests {
             let cmd = matcher["hooks"][0]["command"].as_str().unwrap();
             assert!(cmd.contains(MARKER_PATH_FRAGMENT), "command={cmd}");
         }
+    }
+
+    #[test]
+    fn install_subscribes_to_stop_failure() {
+        // StopFailure (turn ended by an API error) must be registered, or
+        // the indicator stays stuck on Working/ExecutingTool when a turn
+        // dies on an API error — the JSONL fallback is off in hook mode.
+        // Fires always, so it carries the empty match-all matcher like Stop.
+        assert!(SUBSCRIBED_EVENTS.contains(&"StopFailure"));
+        let home = TempDir::new().unwrap();
+        let paths = paths_in(&home);
+        install(&paths).unwrap();
+        let settings = read_settings(&paths.claude_settings);
+        let array = settings["hooks"]["StopFailure"].as_array().unwrap();
+        assert_eq!(array.len(), 1);
+        let cmd = array[0]["hooks"][0]["command"].as_str().unwrap();
+        assert!(cmd.contains(MARKER_PATH_FRAGMENT), "command={cmd}");
+        let matcher = array[0]["matcher"].as_str().unwrap();
+        assert_eq!(matcher, "");
     }
 
     #[test]
