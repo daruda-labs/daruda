@@ -203,15 +203,22 @@ fn main() {
         watchers_lifecycle::spawn_all(cx);
 
         // `--screenshot <path>`: capture the live window to a PNG, then quit.
+        // `--screenshot-terminal-widen` swaps the restored-workspace capture
+        // for a standalone terminal driven through a narrow→wide reflow — the
+        // widen-reentry scrollback-dedup repro the workspace path can't stage.
         #[cfg(feature = "screenshot")]
         if let Some(path) = screenshot::parse_screenshot_arg() {
-            screenshot::schedule_capture(
-                path,
-                screenshot::parse_scenario_arg(),
-                screenshot::parse_themes_arg(),
-                screenshot::parse_size_arg(),
-                cx,
-            );
+            if screenshot::parse_terminal_widen_flag() {
+                screenshot::schedule_terminal_widen_capture(path, cx);
+            } else {
+                screenshot::schedule_capture(
+                    path,
+                    screenshot::parse_scenario_arg(),
+                    screenshot::parse_themes_arg(),
+                    screenshot::parse_size_arg(),
+                    cx,
+                );
+            }
         }
     });
 }

@@ -226,6 +226,19 @@ impl TerminalView {
         self.state.selection.is_some()
     }
 
+    /// Scroll `lines` rows up from the bottom into scrollback history, so
+    /// the viewport straddles the scrollback↔live-grid seam (top rows from
+    /// the `LineBuffer`, bottom rows from the live grid). Used by the
+    /// `--screenshot-terminal-widen` capture harness to inspect the
+    /// scrollback region rather than the live grid.
+    pub fn scroll_lines_into_history(&mut self, lines: u32, cx: &mut Context<Self>) {
+        // SILENT-OK: diagnostic scroll for the capture harness; a clamp at the
+        // top/bottom is non-fatal and never user-visible outside capture.
+        let _ = self.session.scroll_viewport_bottom();
+        let _ = self.session.scroll_viewport(-(lines as i32));
+        self.schedule_viewport_refresh(cx);
+    }
+
     /// Resolve the current selection to a single-line [`LineRange`].
     ///
     /// Returns `Some(LineRange { start, end })` with both endpoints

@@ -251,6 +251,203 @@ pub(crate) fn schedule_capture(
     .detach();
 }
 
+/// CLI flag selecting the standalone-terminal widen-reflow repro capture.
+const TERMINAL_WIDEN_FLAG: &str = "--screenshot-terminal-widen";
+
+/// Holds the driven terminal view between the open-window closure and the
+/// async capture driver. A global rather than a captured handle so the
+/// `Send` async block can re-acquire it via `cx.global` on the main thread.
+struct ScreenshotTerminal(gpui::Entity<daruda_terminal::view::TerminalView>);
+impl gpui::Global for ScreenshotTerminal {}
+
+/// `true` when `--screenshot-terminal-widen` is present. This drives the
+/// widen-reflow scrollback-dedup repro: it needs a terminal with
+/// soft-wrapped scrollback and a real narrow→wide resize, neither of which
+/// the restored-workspace capture path can produce.
+pub(crate) fn parse_terminal_widen_flag() -> bool {
+    std::env::args().any(|a| a == TERMINAL_WIDEN_FLAG)
+}
+
+/// Open a standalone `TerminalView` and drive it through real
+/// narrow↔wide reflows to capture the scrollback-dedup behavior at the
+/// pixel surface. Writes two PNGs — `<base>.widen.png` (narrow→wide, the
+/// re-entry-duplication case) and `<base>.narrow.png` (wide→narrow).
+///
+/// Two facts shape the sequence:
+///   - **Headless only paints at capture**, so window resizes never run
+///     `resize_to_fit` mid-run. We drive the grid via `resize_terminal`,
+///     which calls `TerminalSession::resize` immediately — the real reflow
+///     + dedup path, no paint required.
+///   - **The reflow seam forms only while the viewport is shorter than the
+///     content.** So we feed and reflow at a short grid (6 rows) to create
+///     the seam, then grow the grid tall purely to bring the whole unified
+///     frame on screen for the capture. Reflowing straight into a tall grid
+///     would let every row fit, dissolving the seam before it is visible.
+///
+/// Each capture also prints a one-line marker-integrity summary (unique
+/// count + any duplicates), so the run self-reports pass/fail next to the
+/// PNG. With the dedup live both cases read 30 unique, 0 duplicated.
+pub(crate) fn schedule_terminal_widen_capture(path: PathBuf, cx: &mut App) {
+    use gpui::{Bounds, Point, WindowBounds, WindowOptions};
+
+    let session = match daruda_terminal::TerminalSession::new(
+        daruda_terminal::TerminalDims::default(),
+        daruda_terminal::TerminalConfig::default(),
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("terminal-widen capture: session init failed: {e}");
+            cx.quit();
+            return;
+        }
+    };
+
+    // Capture-window geometry (harness fixtures, not UI theme values).
+    let (origin, win_w, win_h) = (80.0_f32, 1180.0_f32, 620.0_f32);
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+            Point::new(px(origin), px(origin)),
+            size(px(win_w), px(win_h)),
+        ))),
+        ..Default::default()
+    };
+
+    let opened = cx.open_window(opts, |window, cx| {
+        let view = cx.new(|cx| {
+            let focus = cx.focus_handle();
+            daruda_terminal::view::TerminalView::new(session, focus)
+        });
+        cx.set_global(ScreenshotTerminal(view.clone()));
+        cx.new(|cx| gpui_component::Root::new(view, window, cx))
+    });
+    let window = match opened {
+        Ok(w) => w,
+        Err(e) => {
+            println!("terminal-widen capture: open_window failed: {e:#}");
+            cx.quit();
+            return;
+        }
+    };
+
+    let widen_path = derive_path(&path, "widen");
+    let narrow_path = derive_path(&path, "narrow");
+
+    cx.spawn(async move |cx| {
+        let grid = |cx: &mut gpui::AsyncApp, cols: u16, rows: u16| {
+            cx.update(|cx| {
+                let view = cx.global::<ScreenshotTerminal>().0.clone();
+                view.update(cx, |v, cx| v.resize_terminal(cols, rows, cx));
+            });
+        };
+        let feed = |cx: &mut gpui::AsyncApp, bytes: Vec<u8>| {
+            cx.update(|cx| {
+                let view = cx.global::<ScreenshotTerminal>().0.clone();
+                view.update(cx, |v, cx| v.feed_output_bytes(&bytes, cx));
+            });
+        };
+        // ~156 chars so each line wraps to 2 rows at the narrow width
+        // (≈80 cols) and collapses to 1 row at the wide width (≈220 cols).
+        let lines = |range: std::ops::RangeInclusive<u32>| -> Vec<u8> {
+            let mut out = Vec::new();
+            for i in range {
+                out.extend_from_slice(format!("MK{i:02} {}\r\n", "=".repeat(150)).as_bytes());
+            }
+            out
+        };
+        let settle =
+            |cx: &mut gpui::AsyncApp| cx.background_executor().timer(Duration::from_millis(450));
+        // Position the viewport across the scrollback↔live seam: the top
+        // half shows LineBuffer (scrollback) rows, the bottom half the live
+        // grid. A re-entry duplication shows the same block in both halves.
+        let scroll_seam = |cx: &mut gpui::AsyncApp| {
+            cx.update(|cx| {
+                let view = cx.global::<ScreenshotTerminal>().0.clone();
+                view.update(cx, |v, cx| v.scroll_lines_into_history(8, cx));
+            });
+        };
+        // Scan the whole unified frame and report `MKnn` marker counts: a
+        // duplicated marker means the dedup let a re-entry through, a missing
+        // one means a line was lost.
+        let report = |cx: &mut gpui::AsyncApp, tag: &str| {
+            cx.update(|cx| {
+                let view = cx.global::<ScreenshotTerminal>().0.clone();
+                let v = view.read(cx);
+                let s = v.session();
+                let mut counts: std::collections::BTreeMap<String, u32> = Default::default();
+                for y in 0..s.total_rows() {
+                    let t = s.dump_screen_row(y).unwrap_or_default();
+                    if let Some(mk) = t.get(0..4).filter(|mk| mk.starts_with("MK")) {
+                        *counts.entry(mk.to_string()).or_default() += 1;
+                    }
+                }
+                let dups: Vec<_> = counts
+                    .iter()
+                    .filter(|&(_, &c)| c > 1)
+                    .map(|(k, c)| format!("{k}×{c}"))
+                    .collect();
+                println!(
+                    "[{tag}] unique markers={} duplicated=[{}]",
+                    counts.len(),
+                    dups.join(", ")
+                );
+            });
+        };
+
+        settle(cx).await;
+
+        // ---- WIDEN: feed at narrow+short (lines wrap, several scroll into
+        //      the LineBuffer) → widen at the same short height (re-entry
+        //      seam) → grow tall to bring the whole frame on screen.
+        grid(cx, 80, 6);
+        feed(cx, lines(1..=30));
+        grid(cx, 220, 6);
+        grid(cx, 220, 16);
+        scroll_seam(cx);
+        settle(cx).await;
+        report(cx, "widen");
+        match cx.update(|cx| capture_window(Some(window.into()), &widen_path, cx)) {
+            Ok(()) => println!("screenshot written: {}", widen_path.display()),
+            Err(e) => println!("screenshot failed: {e:#}"),
+        }
+
+        // ---- NARROW: reset (RIS) → feed at wide+short (lines fit one row) →
+        //      narrow at the same short height (lines re-wrap) → grow tall.
+        feed(cx, b"\x1bc".to_vec());
+        grid(cx, 220, 6);
+        feed(cx, lines(1..=30));
+        grid(cx, 80, 6);
+        grid(cx, 80, 16);
+        scroll_seam(cx);
+        settle(cx).await;
+        report(cx, "narrow");
+        match cx.update(|cx| capture_window(Some(window.into()), &narrow_path, cx)) {
+            Ok(()) => println!("screenshot written: {}", narrow_path.display()),
+            Err(e) => println!("screenshot failed: {e:#}"),
+        }
+
+        // ---- ROUND-TRIP: reset → feed wide+short → narrow (shrink) → widen
+        //      back tall (grow), ending wide. The realistic window-drag path;
+        //      ending wide means no straddler at the viewport top, so the
+        //      dedup keeps every line exactly once.
+        feed(cx, b"\x1bc".to_vec());
+        grid(cx, 220, 6);
+        feed(cx, lines(1..=30));
+        grid(cx, 80, 6); // shrink
+        grid(cx, 220, 16); // grow back, ending wide
+        scroll_seam(cx);
+        settle(cx).await;
+        report(cx, "roundtrip");
+        let roundtrip_path = derive_path(&path, "roundtrip");
+        match cx.update(|cx| capture_window(Some(window.into()), &roundtrip_path, cx)) {
+            Ok(()) => println!("screenshot written: {}", roundtrip_path.display()),
+            Err(e) => println!("screenshot failed: {e:#}"),
+        }
+
+        cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
 /// Resize the capture target window (or the first window when `None`) and
 /// force a repaint so the new bounds are reflected in the captured frame.
 fn resize_target(target: Option<AnyWindowHandle>, win_size: Size<Pixels>, cx: &mut App) {
