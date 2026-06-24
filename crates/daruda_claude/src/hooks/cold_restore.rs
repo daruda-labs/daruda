@@ -3,12 +3,12 @@
 //! Age is measured from each file's recorded event `timestamp`, not its
 //! filesystem mtime (see [`run`] for why). Three age buckets:
 //!
-//! - `age <= stale_threshold` → load as-is.
-//! - `stale_threshold < age <= file_ttl` → reset state to `Connecting`,
+//! - `age < stale_threshold` → load as-is.
+//! - `stale_threshold <= age < file_ttl` → reset state to `Connecting`,
 //!   write back, and load the reset version. Catches the case where a
 //!   `SessionEnd` was missed but the session probably isn't really
 //!   active any more.
-//! - `age > file_ttl` → delete the file. Catches orphans from crashes
+//! - `age >= file_ttl` → delete the file. Catches orphans from crashes
 //!   or `kill -9`.
 //!
 //! [`classify`] is pure (no IO, takes timestamps as args) so unit tests
