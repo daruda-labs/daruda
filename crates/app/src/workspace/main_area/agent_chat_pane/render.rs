@@ -19,8 +19,8 @@
 //!   lines using the file-viewer diff palette.
 
 use daruda_acp::{
-    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
-    ToolStatusView,
+    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    ToolCallItem, ToolStatusView,
 };
 use gpui::{AnyElement, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px, relative};
 
@@ -193,6 +193,12 @@ fn assistant_block(
             .child(render_md_blocks_plain(blocks, t))
             .into_any_element(),
         None => {
+            // `md_blocks` absent: a streaming tail (caret), or — only as a
+            // transient before the next `reconcile_markdown` runs — a settled
+            // block not yet parsed. In steady state every event reconciles then
+            // notifies, so a settled assistant block reaches this branch only
+            // momentarily; it renders as plain text until the reconcile fills
+            // the cache and the repaint takes the `Some` branch.
             let body = if streaming {
                 format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
             } else {
@@ -235,6 +241,12 @@ fn thinking_block(
             .child(render_md_blocks_plain(blocks, t))
             .into_any_element(),
         None => {
+            // `md_blocks` absent: a streaming tail (caret), or — only as a
+            // transient before the next `reconcile_markdown` runs — a settled
+            // block not yet parsed. In steady state every event reconciles then
+            // notifies, so a settled thinking block reaches this branch only
+            // momentarily; it renders as plain text until the reconcile fills
+            // the cache and the repaint takes the `Some` branch.
             let body = if streaming {
                 format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
             } else {
@@ -384,6 +396,22 @@ fn diff_block(
         );
     }
 
+    // No editor and the two sides are identical: the diff carries no changes,
+    // so `build_diff_view_model` returned `None` and no editor was built.
+    // Surface that explicitly rather than letting the inline fallback paint the
+    // whole file red-then-green (which would read as a full delete + re-add).
+    if diff.old_text.as_deref() == Some(diff.new_text.as_str()) {
+        return block.child(
+            div()
+                .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+                .py(px(theme::GAP_XS))
+                .bg(t.file_viewer_bg)
+                .text_color(t.text_muted)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::file_viewer_empty_diff())),
+        );
+    }
+
     if let Some(old) = &diff.old_text {
         for line in old.lines() {
             block = block.child(diff_line(
@@ -471,7 +499,7 @@ fn permission_card(
         );
 
     match &card.resolved {
-        Some(option_id) => {
+        Some(PermissionResolution::Chosen(option_id)) => {
             // Resolved: surface the chosen option's name (fall back to its
             // id) instead of the buttons.
             let chosen = card
@@ -489,6 +517,16 @@ fn permission_card(
                         s::agent_chat_permission_resolved_prefix(),
                         chosen
                     ))),
+            );
+        }
+        Some(PermissionResolution::Cancelled) => {
+            // The turn was cancelled before the user decided — drop the
+            // buttons and surface that the request was cancelled.
+            root = root.child(
+                div()
+                    .text_color(t.text_muted)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from(s::agent_chat_permission_cancelled())),
             );
         }
         None => {

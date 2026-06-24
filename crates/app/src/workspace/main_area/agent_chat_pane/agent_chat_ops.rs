@@ -73,7 +73,9 @@ impl Workspace {
         // event-pump task on the now-resolvable pane).
         let status = match &cwd {
             Some(_) => AgentSessionStatus::Connecting,
-            None => AgentSessionStatus::Error(s::agent_chat_error_prefix()),
+            // The status banner re-adds the error prefix, so carry the bare
+            // reason here — not the prefix (which would render doubled).
+            None => AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()),
         };
         Pane {
             id: pane_id,
@@ -241,15 +243,8 @@ impl Workspace {
         }
 
         // Parse params for the Markdown reconcile, read before the mutable
-        // borrow of the pane content. Mirrors the file-viewer loader:
-        // `is_light = !diagram_dark`, where `diagram_dark` comes from the
-        // active theme (default dark when the global is absent).
-        let syntax_theme = self.syntax_theme.clone();
-        let is_light = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(crate::ui::theme::DarudaTheme::is_dark)
-            .map(|dark| !dark)
-            .unwrap_or(false);
+        // borrow of the pane content.
+        let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
 
         let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
             return;
@@ -264,10 +259,15 @@ impl Workspace {
             AcpEvent::TurnEnded { .. } => {
                 finalize_streaming(&mut ac.items);
                 ac.turn_in_flight = false;
+                // A turn only ends with a permission still pending when it was
+                // cancelled / refused mid-request — drain it so no card is
+                // left with live buttons (no-op on a normal turn).
+                cancel_pending_permission(ac);
             }
             AcpEvent::Error(message) => {
                 ac.status = AgentSessionStatus::Error(message);
                 ac.turn_in_flight = false;
+                cancel_pending_permission(ac);
             }
         }
         reconcile_markdown(ac, &syntax_theme, is_light);
@@ -295,17 +295,27 @@ impl Workspace {
             handle.send_prompt(text);
             ac.turn_in_flight = true;
         }
-        let syntax_theme = self.syntax_theme.clone();
+        // Only the echoed `UserText` needs parsing; there is no `ToolCall` at a
+        // prompt-echo, so `reconcile_diff_editors` would always be a no-op here.
+        // Diff editors are reconciled solely on the event-pump path.
+        let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
+        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
+            reconcile_markdown(ac, &syntax_theme, is_light);
+        }
+        cx.notify();
+    }
+
+    /// The (syntax theme, is-light) pair the Markdown / diff reconcilers read
+    /// from the active theme. `is_light = !is_dark`, mirroring the file-viewer
+    /// loader; defaults to dark (`is_light = false`) when the theme global is
+    /// not yet installed.
+    fn agent_chat_theme_params(&self, cx: &Context<Self>) -> (String, bool) {
         let is_light = cx
             .try_global::<crate::ui::theme::DarudaTheme>()
             .map(crate::ui::theme::DarudaTheme::is_dark)
             .map(|dark| !dark)
             .unwrap_or(false);
-        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
-            reconcile_markdown(ac, &syntax_theme, is_light);
-        }
-        self.reconcile_diff_editors(pane_id, &syntax_theme, is_light, cx);
-        cx.notify();
+        (self.syntax_theme.clone(), is_light)
     }
 
     /// True when `pane_id` is an Agent chat pane — lets the bottom-dock
@@ -318,15 +328,20 @@ impl Workspace {
     }
 
     /// Request cancellation of the active turn. View dispatch only.
+    ///
+    /// Sends `session/cancel` and, per ACP, resolves any permission request
+    /// still awaiting the user with a cancelled outcome (so the agent's
+    /// pending request is answered and the inline card stops showing buttons).
     pub(in crate::workspace) fn cancel_agent_turn(
         &mut self,
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id)
-            && let Some(handle) = &ac.handle
-        {
-            handle.cancel();
+        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
+            if let Some(handle) = &ac.handle {
+                handle.cancel();
+            }
+            cancel_pending_permission(ac);
         }
         cx.notify();
     }
@@ -351,13 +366,8 @@ impl Workspace {
 
         // Mark the trailing unresolved permission card resolved so the
         // buttons disable and the choice shows.
-        for item in ac.items.iter_mut().rev() {
-            if let daruda_acp::ChatItem::Permission(card) = item
-                && card.resolved.is_none()
-            {
-                card.resolved = Some(option_id.clone());
-                break;
-            }
+        if let Some(card) = trailing_unresolved_permission(ac) {
+            card.resolved = Some(daruda_acp::PermissionResolution::Chosen(option_id.clone()));
         }
 
         let decision = match kind {
@@ -386,10 +396,12 @@ impl Workspace {
     /// (`InputState::new` / `set_value` need a live `&mut Window`). Entities
     /// are never created in `render`; the renderer only embeds them.
     ///
-    /// Build-once: keys are only filled when absent. A `ToolCallUpdate` that
-    /// replaces a diff's text keeps the original editor — re-streaming a diff
-    /// in place is not observed today; if it becomes necessary, compare the
-    /// stored model and rebuild on change.
+    /// Build-once: keys are only filled when absent. The first `ToolCall` with
+    /// empty `diffs` inserts no key, so a later `ToolCallUpdate` that fills the
+    /// diffs still builds normally. Only an update that *changes the content* of
+    /// an already-built diff would be stale — and the adapter does not emit such
+    /// updates today (if it ever does, add a change check before the
+    /// `contains_key` guard and rebuild on change).
     fn reconcile_diff_editors(
         &mut self,
         pane_id: PaneId,
@@ -408,7 +420,7 @@ impl Workspace {
                 ErrorReport::new("Skipping agent-chat diff editors: theme global absent")
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
-                    .dedup("agent_chat.diff_editor.theme_missing")
+                    .dedup(format!("agent_chat.diff_editor.theme_missing.{pane_id}"))
                     .build(),
             );
             return;
@@ -442,7 +454,7 @@ impl Workspace {
         }
 
         for (key, language, model) in pending {
-            if let Some(editor) = create_diff_editor(cx, &language, model)
+            if let Some(editor) = create_diff_editor(cx, pane_id, &language, model)
                 && let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id)
             {
                 ac.diff_editors.insert(key, editor);
@@ -542,6 +554,7 @@ fn build_diff_view_model(
 /// highlight spans). Returns `None` if the owning window is gone.
 fn create_diff_editor(
     cx: &mut Context<Workspace>,
+    pane_id: PaneId,
     language: &str,
     model: DiffEditorModel,
 ) -> Option<gpui::Entity<gpui_component::input::InputState>> {
@@ -574,7 +587,7 @@ fn create_diff_editor(
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .with_context("error", format!("{e}"))
-                    .dedup("agent_chat.diff_editor.window_gone")
+                    .dedup(format!("agent_chat.diff_editor.window_gone.{pane_id}"))
                     .build(),
             );
             None
@@ -643,10 +656,43 @@ fn reconcile_markdown(ac: &mut AgentChatContent, syntax_theme: &str, is_light: b
     }
 }
 
+/// The trailing not-yet-resolved permission card in `items`, if any. The
+/// agent keeps a single permission request outstanding at a time and it is
+/// always the most recent, so reverse-scan for the first unresolved card.
+fn trailing_unresolved_permission(
+    ac: &mut AgentChatContent,
+) -> Option<&mut daruda_acp::PermissionItem> {
+    ac.items.iter_mut().rev().find_map(|item| match item {
+        daruda_acp::ChatItem::Permission(card) if card.resolved.is_none() => Some(card),
+        _ => None,
+    })
+}
+
+/// Cancel-drain the pane's pending permission request, if any: respond to the
+/// agent with a `Cancelled` outcome and mark the trailing unresolved card
+/// cancelled so its buttons disable. No-op when nothing is pending;
+/// idempotent. ACP requires the client to resolve a pending permission with a
+/// cancelled outcome on `session/cancel`; this also runs when a turn ends or
+/// errors before the user decided, so no card is left stuck with live buttons.
+fn cancel_pending_permission(ac: &mut AgentChatContent) {
+    let Some(id) = ac.pending_permission.take() else {
+        return;
+    };
+    if let Some(handle) = &ac.handle {
+        handle.respond_permission(id, daruda_acp::PermissionDecision::Cancelled);
+    }
+    if let Some(card) = trailing_unresolved_permission(ac) {
+        card.resolved = Some(daruda_acp::PermissionResolution::Cancelled);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use daruda_acp::ChatItem;
+
+    /// A syntax theme id every test reuses for the highlight passes.
+    const TEST_SYNTAX_THEME: &str = "base16-ocean.dark";
 
     /// `reconcile_markdown` parses settled text items and leaves the streaming
     /// tail untouched until it settles. Only the GPUI-bound `focus_handle`
@@ -677,7 +723,7 @@ mod tests {
         });
         let mut ac = ac;
 
-        reconcile_markdown(&mut ac, "base16-ocean.dark", false);
+        reconcile_markdown(&mut ac, TEST_SYNTAX_THEME, false);
         // index 0 (UserText) is settled → cached; index 1 (streaming tail)
         // is not.
         assert!(ac.md_blocks.contains_key(&0));
@@ -687,7 +733,7 @@ mod tests {
         if let ChatItem::AssistantText { streaming, .. } = &mut ac.items[1] {
             *streaming = false;
         }
-        reconcile_markdown(&mut ac, "base16-ocean.dark", false);
+        reconcile_markdown(&mut ac, TEST_SYNTAX_THEME, false);
         assert!(ac.md_blocks.contains_key(&1));
     }
 
@@ -767,7 +813,7 @@ mod tests {
             "fn a() {}\nlet y = 2;\nfn b() {}\n",
             "src/lib.rs",
         );
-        let m = build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors())
+        let m = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
             .expect("a modified file produces hunks");
         // Hunk header row + content rows, no marker prefix on content.
         assert!(m.text.starts_with("@@"), "buffer leads with a hunk header");
@@ -787,7 +833,7 @@ mod tests {
     #[test]
     fn diff_view_model_handles_created_file() {
         let d = diff(None, "line one\nline two\n", "new.txt");
-        let m = build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors())
+        let m = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
             .expect("a created file produces an all-added hunk");
         assert!(m.text.contains("line one"));
         assert!(m.text.contains("line two"));
@@ -798,7 +844,7 @@ mod tests {
     #[test]
     fn diff_view_model_none_when_unchanged() {
         let d = diff(Some("same\n"), "same\n", "same.txt");
-        assert!(build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors()).is_none());
+        assert!(build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors()).is_none());
     }
 
     /// The cache key is per-(tool-call, diff index) so two files in one tool

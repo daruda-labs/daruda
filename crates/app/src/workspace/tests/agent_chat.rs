@@ -106,7 +106,9 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn respond_agent_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
-    use daruda_acp::{ChatItem, PermissionChoice, PermissionItem, PermissionKindView};
+    use daruda_acp::{
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    };
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
@@ -162,13 +164,118 @@ async fn respond_agent_permission_resolves_the_pending_card(cx: &mut TestAppCont
             panic!("expected a permission card");
         };
         assert_eq!(
-            card.resolved.as_deref(),
-            Some("allow_once"),
+            card.resolved,
+            Some(PermissionResolution::Chosen("allow_once".to_string())),
             "the chosen option is recorded on the card"
         );
         assert!(
             ac.pending_permission.is_none(),
             "the pending id is cleared once resolved"
+        );
+    });
+}
+
+#[gpui::test]
+async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppContext) {
+    use crate::surface::strings as s;
+    use crate::workspace::main_area::pane::AgentSessionStatus;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    // No resolvable lane cwd → the pane parks in `Error`. The message must be
+    // the bare reason: the status banner re-adds the error prefix, so storing
+    // the prefix here would render it doubled.
+    let status = cx
+        .update_window(window_handle.into(), |_, _window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(None, cx);
+                match &pane.content {
+                    PaneContent::AgentChat(ac) => ac.status.clone(),
+                    _ => panic!("expected an AgentChat pane"),
+                }
+            })
+        })
+        .unwrap();
+
+    match status {
+        AgentSessionStatus::Error(message) => {
+            assert_eq!(message, s::agent_chat_no_lane_cwd());
+            assert_ne!(
+                message,
+                s::agent_chat_error_prefix(),
+                "payload must be the reason, not the prefix the banner re-adds"
+            );
+        }
+        other => panic!("expected an Error status, got {other:?}"),
+    }
+}
+
+#[gpui::test]
+async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContext) {
+    use daruda_acp::{
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    };
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, _window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), cx);
+                let id = pane.id;
+                ws.main_area.panes.push(pane);
+                // Inject a pending permission card + its pending id, as the
+                // event pump would have on a `PermissionRequested` event.
+                if let Some(ac) = ws
+                    .main_area
+                    .panes
+                    .iter_mut()
+                    .find(|p| p.id == id)
+                    .and_then(|p| p.agent_chat_content_mut())
+                {
+                    ac.items.push(ChatItem::Permission(PermissionItem {
+                        tool_title: Some("Write /tmp/x".to_string()),
+                        options: vec![PermissionChoice {
+                            option_id: "allow_once".to_string(),
+                            name: "Allow".to_string(),
+                            kind: PermissionKindView::AllowOnce,
+                        }],
+                        resolved: None,
+                    }));
+                    ac.pending_permission = Some(7);
+                }
+                // No live handle (offline) — cancel still drains the pending
+                // permission host-side: the card resolves to `Cancelled` and
+                // the pending id clears, so no card is left with live buttons.
+                ws.cancel_agent_turn(id, cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        let ac = ws
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)
+            .and_then(|p| p.agent_chat_content())
+            .expect("agent chat pane present");
+        let ChatItem::Permission(card) = &ac.items[0] else {
+            panic!("expected a permission card");
+        };
+        assert_eq!(
+            card.resolved,
+            Some(PermissionResolution::Cancelled),
+            "cancelling the turn marks the pending card cancelled"
+        );
+        assert!(
+            ac.pending_permission.is_none(),
+            "the pending id is cleared on cancel"
         );
     });
 }

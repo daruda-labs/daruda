@@ -80,8 +80,18 @@ pub struct PermissionItem {
     pub tool_title: Option<String>,
     /// Choices to render as buttons, in the agent's order.
     pub options: Vec<PermissionChoice>,
-    /// The chosen `option_id` once the user decides; `None` while pending.
-    pub resolved: Option<String>,
+    /// How the card was resolved, or `None` while still pending a decision.
+    pub resolved: Option<PermissionResolution>,
+}
+
+/// How a pending permission card was resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionResolution {
+    /// The user chose this option id.
+    Chosen(String),
+    /// The turn was cancelled before the user decided; the agent received a
+    /// `Cancelled` outcome and the card's buttons are disabled.
+    Cancelled,
 }
 
 /// One selectable permission choice.

@@ -911,9 +911,11 @@ pub fn agent_chat_connecting() -> String {
     rust_i18n::t!("agent_chat.connecting").into_owned()
 }
 
-/// Status line copy once the ACP session is live.
-pub fn agent_chat_connected() -> String {
-    rust_i18n::t!("agent_chat.connected").into_owned()
+/// Status-line reason shown when an Agent chat pane has no resolvable lane
+/// working directory to attach a session to. The renderer prepends the error
+/// prefix, so this is the bare reason (not itself prefixed).
+pub fn agent_chat_no_lane_cwd() -> String {
+    rust_i18n::t!("agent_chat.no_lane_cwd").into_owned()
 }
 
 /// Prefix for the connection-error status line.
@@ -924,21 +926,6 @@ pub fn agent_chat_error_prefix() -> String {
 /// Empty-conversation hint shown before the first message.
 pub fn agent_chat_empty() -> String {
     rust_i18n::t!("agent_chat.empty").into_owned()
-}
-
-/// Prompt-input placeholder.
-pub fn agent_chat_input_placeholder() -> String {
-    rust_i18n::t!("agent_chat.input_placeholder").into_owned()
-}
-
-/// Send-prompt button label.
-pub fn agent_chat_send() -> String {
-    rust_i18n::t!("agent_chat.send").into_owned()
-}
-
-/// Cancel / stop in-flight turn button label.
-pub fn agent_chat_cancel() -> String {
-    rust_i18n::t!("agent_chat.cancel").into_owned()
 }
 
 /// Label for a collapsed agent reasoning ("thinking") block.
@@ -981,9 +968,10 @@ pub fn agent_chat_permission_resolved_prefix() -> String {
     rust_i18n::t!("agent_chat.permission_resolved_prefix").into_owned()
 }
 
-/// Action label for opening a new Agent chat pane (command palette).
-pub fn action_new_agent_chat() -> String {
-    rust_i18n::t!("common.new_agent_chat").into_owned()
+/// Shown on a permission card whose turn was cancelled before the user
+/// decided, in place of the chosen-option line.
+pub fn agent_chat_permission_cancelled() -> String {
+    rust_i18n::t!("agent_chat.permission_cancelled").into_owned()
 }
 
 /// Trailing caret appended to a still-streaming assistant / thinking

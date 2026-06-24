@@ -205,12 +205,9 @@ file_viewer:
 agent_chat:
   tab_title: "에이전트"
   connecting: "연결 중…"
-  connected: "연결됨"
   error_prefix: "연결 오류:"
+  no_lane_cwd: "이 레인에 작업 디렉터리가 없습니다."
   empty: "에이전트에게 무엇이든 물어보세요."
-  input_placeholder: "에이전트에게 메시지 보내기…"
-  send: "보내기"
-  cancel: "중지"
   thinking_label: "생각 중"
   tool_output_label: "출력"
   tool_status_pending: "대기 중"
@@ -219,6 +216,7 @@ agent_chat:
   tool_status_failed: "실패"
   permission_title: "권한 필요"
   permission_resolved_prefix: "선택됨:"
+  permission_cancelled: "취소됨."
 
 # Generic UI
 ui:

@@ -52,14 +52,12 @@ pub(in crate::workspace) fn render_md_blocks_plain(
     blocks: &[MdBlock],
     t: &DarudaTheme,
 ) -> impl IntoElement + use<> {
-    // No `.text_size(...)`: inherit the caller's container font size (Agent
-    // chat sets `AGENT_CHAT_MSG_FONT_SIZE`). Per-block sizes (headings, code)
-    // still override locally inside `render_md_block`.
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::MD_BLOCK_GAP))
-        .text_color(t.text_body);
+    // No `.text_size(...)` / `.text_color(...)`: inherit the caller's container
+    // font size and text colour (Agent chat sets `AGENT_CHAT_MSG_FONT_SIZE` plus
+    // a per-role colour — `text_primary` for bubbles, `text_subtle` for the
+    // thinking block). Per-block sizes/colours (headings, code) still override
+    // locally inside `render_md_block`.
+    let mut col = div().flex().flex_col().gap(px(theme::MD_BLOCK_GAP));
     for block in blocks {
         col = col.child(render_md_block(block, t));
     }

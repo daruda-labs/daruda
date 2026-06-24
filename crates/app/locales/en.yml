@@ -205,12 +205,9 @@ file_viewer:
 agent_chat:
   tab_title: "Agent"
   connecting: "Connecting…"
-  connected: "Connected"
   error_prefix: "Connection error:"
+  no_lane_cwd: "No working directory for this lane."
   empty: "Ask the agent anything to get started."
-  input_placeholder: "Send a message to the agent…"
-  send: "Send"
-  cancel: "Stop"
   thinking_label: "Thinking"
   tool_output_label: "Output"
   tool_status_pending: "Pending"
@@ -219,6 +216,7 @@ agent_chat:
   tool_status_failed: "Failed"
   permission_title: "Permission required"
   permission_resolved_prefix: "Selected:"
+  permission_cancelled: "Cancelled."
 
 # Generic UI
 ui:
