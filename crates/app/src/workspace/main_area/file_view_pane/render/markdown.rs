@@ -52,11 +52,13 @@ pub(in crate::workspace) fn render_md_blocks_plain(
     blocks: &[MdBlock],
     t: &DarudaTheme,
 ) -> impl IntoElement + use<> {
+    // No `.text_size(...)`: inherit the caller's container font size (Agent
+    // chat sets `AGENT_CHAT_MSG_FONT_SIZE`). Per-block sizes (headings, code)
+    // still override locally inside `render_md_block`.
     let mut col = div()
         .flex()
         .flex_col()
         .gap(px(theme::MD_BLOCK_GAP))
-        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
         .text_color(t.text_body);
     for block in blocks {
         col = col.child(render_md_block(block, t));

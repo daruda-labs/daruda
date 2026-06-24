@@ -7,15 +7,16 @@
 //! `Workspace` op (`respond_agent_permission`). No state transition lives
 //! here.
 //!
-//! Rendering notes (MVP):
-//! - Assistant / user / thinking text renders as wrapped plain text. Full
-//!   markdown rendering (gpui_component `TextView::markdown`) needs a live
-//!   `&mut Window` threaded through the recursive pane walker, which it is
-//!   not today; that is a deferred follow-up, not a blocker for the MVP.
-//! - Tool-call diffs render as inline old/new colored monospace lines
-//!   using the file-viewer diff palette, rather than a full embedded
-//!   editor entity (one editor per tool call would mean creating entities
-//!   inside `render`, which view purity forbids).
+//! Rendering notes:
+//! - Assistant / user / thinking text: settled messages render as markdown
+//!   via `render_md_blocks_plain` over the `md_blocks` cache that
+//!   `reconcile_markdown` populates in the ops layer; the still-streaming
+//!   tail renders as wrapped plain text until it settles and is parsed.
+//! - Tool-call diffs embed the read-only diff-editor entities that
+//!   `reconcile_diff_editors` builds from the diff ops (the `diff_editors`
+//!   cache); when an editor can't be built (window gone) or the diff is
+//!   identical, the card falls back to inline old/new colored monospace
+//!   lines using the file-viewer diff palette.
 
 use daruda_acp::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,

@@ -401,6 +401,16 @@ impl Workspace {
             .try_global::<crate::ui::theme::DarudaTheme>()
             .map(DiffColors::from_theme)
         else {
+            // Theme global not yet installed (transient cold-start) — skip
+            // editor creation; every diff renders via the inline fallback.
+            // Logged so the blanket fallback isn't a silent no-op.
+            daruda_store::observability::log_writer::LogWriter::log(
+                ErrorReport::new("Skipping agent-chat diff editors: theme global absent")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("agent_chat.diff_editor.theme_missing")
+                    .build(),
+            );
             return;
         };
 
