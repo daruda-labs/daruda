@@ -157,6 +157,18 @@ impl Workspace {
             .map(crate::shell_quote::Shell::detect_from_program)
             .unwrap_or_default();
         let bottom_dock_size = self.bottom_dock.read(cx).size;
+        // When the focused pane is an Agent chat pane mid-turn, the
+        // bottom-input button toggles to "Stop" and cancels that pane's
+        // turn instead of sending. `None` in every other state.
+        let focused_id = self.main_area.focused_pane_id;
+        let agent_stop_pane = self
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == focused_id)
+            .and_then(|p| p.agent_chat_content())
+            .filter(|ac| ac.turn_in_flight)
+            .map(|_| focused_id);
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
@@ -165,6 +177,7 @@ impl Workspace {
             grid_columns: self.mirrors.panels_grid_columns,
             bottom_dock_size,
             terminal_input: self.terminal_input.clone(),
+            agent_stop_pane,
             shell,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }

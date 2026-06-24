@@ -1,0 +1,21 @@
+[package]
+name = "daruda_acp"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "ACP (Agent Client Protocol) client core — spawns an ACP agent adapter and bridges its async connection to daruda (GPUI-free)"
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-client-protocol = "0.15"
+anyhow = { workspace = true }
+futures = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+smol = { workspace = true }
+thiserror = "2"
+
+[dev-dependencies]

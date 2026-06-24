@@ -38,6 +38,10 @@ impl Workspace {
         // color and its former-focused sibling dims (or, after a split /
         // close, the whole tab's dim state is recomputed).
         self.refresh_pane_dimming(cx);
+        // The bottom input's placeholder + panel activation are synced on
+        // the windowed focus path (`focus_pane`), which `set_focused_pane`
+        // is always paired with on interactive entry — `set_placeholder`
+        // needs a live `&mut Window` this site lacks.
     }
 
     /// Push per-pane dim onto the active tab's terminal views: inactive

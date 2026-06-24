@@ -177,6 +177,13 @@ pub enum SerializedLayout {
         /// pane; `Some` means the leaf restores as a `PaneContent::File`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<SerializedFileContent>,
+        /// Agent-chat state for `PaneContent::AgentChat` leaves. `None`
+        /// (the default and the format used before AgentChat panes
+        /// existed) means the leaf restores as a Terminal / File pane;
+        /// `Some` means the leaf restores as a `PaneContent::AgentChat`.
+        /// Mutually exclusive with `file`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_chat: Option<SerializedAgentChatContent>,
     },
     Split {
         direction: SplitDirectionSerde,
@@ -197,6 +204,19 @@ pub struct SerializedFileContent {
     #[serde(default)]
     pub staged: bool,
     pub view_mode: SerializedFileViewMode,
+}
+
+/// Persisted state for a `PaneContent::AgentChat` leaf. The ACP session
+/// and its conversation are *not* persisted — a restart starts a fresh
+/// session — so only the lane working directory the chat is anchored to
+/// is saved, enough to re-attach the pane to the right lane on the next
+/// launch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SerializedAgentChatContent {
+    /// Lane working directory the agent session is rooted at. `None`
+    /// when the pane was opened without a resolvable lane cwd.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

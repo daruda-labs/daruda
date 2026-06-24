@@ -215,6 +215,11 @@ actions!(
         /// Save the currently focused file-view pane to disk.
         /// Wired to `cmd-s` in the `FileViewer` focus scope.
         SaveFilePane,
+        /// Open a fresh Agent chat (ACP) pane in a new tab, anchored at
+        /// the active lane. Wired from the Command Palette
+        /// `new_agent_chat` entry and configurable as a keybinding via
+        /// `[keybindings] new_agent_chat = "…"` in user config.
+        OpenAgentChat,
     ]
 );
 
@@ -1346,6 +1351,7 @@ impl Workspace {
             match id {
                 "new_tab" => self.on_new_tab(&NewTab, window, cx),
                 "new_task" => self.on_new_task(&NewTask, window, cx),
+                "new_agent_chat" => self.on_open_agent_chat(&OpenAgentChat, window, cx),
                 "edit_task" => self.on_edit_task(&EditTask, window, cx),
                 "start_task" => self.open_task_picker_modal(
                     crate::workspace::right_dock::task_picker_modal::TaskPickAction::Start,

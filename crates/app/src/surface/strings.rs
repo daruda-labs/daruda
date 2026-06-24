@@ -896,6 +896,100 @@ pub fn file_viewer_byte_truncated(shown: usize, max_bytes: usize, total_count: u
 pub fn file_viewer_search_placeholder() -> String {
     rust_i18n::t!("file_viewer.search_placeholder").into_owned()
 }
+
+// ============================================================================
+// Agent chat pane (ACP)
+// ============================================================================
+
+/// Tab / pane-header title for an Agent chat pane.
+pub fn agent_chat_tab_title() -> String {
+    rust_i18n::t!("agent_chat.tab_title").into_owned()
+}
+
+/// Placeholder copy shown while the agent session is connecting.
+pub fn agent_chat_connecting() -> String {
+    rust_i18n::t!("agent_chat.connecting").into_owned()
+}
+
+/// Status line copy once the ACP session is live.
+pub fn agent_chat_connected() -> String {
+    rust_i18n::t!("agent_chat.connected").into_owned()
+}
+
+/// Prefix for the connection-error status line.
+pub fn agent_chat_error_prefix() -> String {
+    rust_i18n::t!("agent_chat.error_prefix").into_owned()
+}
+
+/// Empty-conversation hint shown before the first message.
+pub fn agent_chat_empty() -> String {
+    rust_i18n::t!("agent_chat.empty").into_owned()
+}
+
+/// Prompt-input placeholder.
+pub fn agent_chat_input_placeholder() -> String {
+    rust_i18n::t!("agent_chat.input_placeholder").into_owned()
+}
+
+/// Send-prompt button label.
+pub fn agent_chat_send() -> String {
+    rust_i18n::t!("agent_chat.send").into_owned()
+}
+
+/// Cancel / stop in-flight turn button label.
+pub fn agent_chat_cancel() -> String {
+    rust_i18n::t!("agent_chat.cancel").into_owned()
+}
+
+/// Label for a collapsed agent reasoning ("thinking") block.
+pub fn agent_chat_thinking_label() -> String {
+    rust_i18n::t!("agent_chat.thinking_label").into_owned()
+}
+
+/// Label above a tool call's plain-text output.
+pub fn agent_chat_tool_output_label() -> String {
+    rust_i18n::t!("agent_chat.tool_output_label").into_owned()
+}
+
+/// Tool-call status badge — queued, not yet started.
+pub fn agent_chat_tool_status_pending() -> String {
+    rust_i18n::t!("agent_chat.tool_status_pending").into_owned()
+}
+
+/// Tool-call status badge — executing.
+pub fn agent_chat_tool_status_running() -> String {
+    rust_i18n::t!("agent_chat.tool_status_running").into_owned()
+}
+
+/// Tool-call status badge — completed successfully.
+pub fn agent_chat_tool_status_done() -> String {
+    rust_i18n::t!("agent_chat.tool_status_done").into_owned()
+}
+
+/// Tool-call status badge — failed.
+pub fn agent_chat_tool_status_failed() -> String {
+    rust_i18n::t!("agent_chat.tool_status_failed").into_owned()
+}
+
+/// Heading for an inline permission card.
+pub fn agent_chat_permission_title() -> String {
+    rust_i18n::t!("agent_chat.permission_title").into_owned()
+}
+
+/// Prefix shown on a resolved permission card before the chosen option.
+pub fn agent_chat_permission_resolved_prefix() -> String {
+    rust_i18n::t!("agent_chat.permission_resolved_prefix").into_owned()
+}
+
+/// Action label for opening a new Agent chat pane (command palette).
+pub fn action_new_agent_chat() -> String {
+    rust_i18n::t!("common.new_agent_chat").into_owned()
+}
+
+/// Trailing caret appended to a still-streaming assistant / thinking
+/// block so the "typing" affordance is visible. Decorative glyph (locale
+/// independent), kept with the other glyph constants.
+pub const AGENT_CHAT_STREAM_CARET: &str = "▌";
 pub fn file_viewer_search_no_match() -> String {
     rust_i18n::t!("file_viewer.search_no_match").into_owned()
 }
@@ -1124,8 +1218,18 @@ pub fn bottom_input_tab_label() -> String {
 pub fn bottom_input_placeholder() -> String {
     rust_i18n::t!("bottom_dock.input_placeholder").into_owned()
 }
+/// Placeholder shown when the focused pane is an Agent chat — the bottom
+/// input routes prompts to the ACP session rather than a terminal PTY.
+pub fn bottom_input_agent_placeholder() -> String {
+    rust_i18n::t!("bottom_dock.input_agent_placeholder").into_owned()
+}
 pub fn bottom_input_send_button() -> String {
     rust_i18n::t!("common.btn_submit").into_owned()
+}
+/// Bottom-input submit-button label while an Agent chat turn is in flight
+/// — clicking it cancels the turn instead of sending.
+pub fn bottom_input_stop_button() -> String {
+    rust_i18n::t!("common.btn_stop").into_owned()
 }
 
 // ----------------------------------------------------------------
@@ -1911,6 +2015,9 @@ pub fn ctx_move_tab_right() -> String {
 }
 pub fn ctx_new_tab() -> String {
     rust_i18n::t!("common.new_tab").into_owned()
+}
+pub fn ctx_new_agent_chat() -> String {
+    rust_i18n::t!("common.new_agent_chat").into_owned()
 }
 pub fn ctx_split_right() -> String {
     rust_i18n::t!("common.split_right").into_owned()

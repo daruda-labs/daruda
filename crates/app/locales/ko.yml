@@ -11,6 +11,7 @@ common:
   btn_rename: "이름 바꾸기…"
   btn_view: "보기"
   btn_add: "추가"
+  btn_stop: "중지"
   loading: "불러오는 중…"
   refresh: "새로 고침"
   section_project: "프로젝트"
@@ -24,6 +25,7 @@ common:
   field_prompt: "프롬프트"
   field_notes: "노트"
   name_required: "이름은 필수입니다."
+  new_agent_chat: "새 에이전트 채팅"
   new_tab: "새 탭"
   close_tab: "탭 닫기"
   close_pane: "패널 닫기"
@@ -199,6 +201,25 @@ file_viewer:
   search_placeholder: "검색…"
   search_no_match: "일치하는 결과 없음"
 
+# Agent chat pane (ACP)
+agent_chat:
+  tab_title: "에이전트"
+  connecting: "연결 중…"
+  connected: "연결됨"
+  error_prefix: "연결 오류:"
+  empty: "에이전트에게 무엇이든 물어보세요."
+  input_placeholder: "에이전트에게 메시지 보내기…"
+  send: "보내기"
+  cancel: "중지"
+  thinking_label: "생각 중"
+  tool_output_label: "출력"
+  tool_status_pending: "대기 중"
+  tool_status_running: "실행 중"
+  tool_status_done: "완료"
+  tool_status_failed: "실패"
+  permission_title: "권한 필요"
+  permission_resolved_prefix: "선택됨:"
+
 # Generic UI
 ui:
   keystroke_hint_recording: "키를 누르세요…"
@@ -263,6 +284,7 @@ modal:
 bottom_dock:
   input_tab_label: "입력"
   input_placeholder: "터미널로 전송할 내용 입력…"
+  input_agent_placeholder: "에이전트에게 메시지 보내기…"
   row_preset_1: "1줄"
   row_preset_2: "2줄"
   row_preset_3: "3줄"

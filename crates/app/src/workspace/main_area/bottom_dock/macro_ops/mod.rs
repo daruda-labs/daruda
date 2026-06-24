@@ -522,6 +522,18 @@ impl Workspace {
         if trimmed.is_empty() {
             return;
         }
+        // When an Agent chat pane is focused, the bottom-dock input drives
+        // its ACP session as a prompt rather than a terminal's PTY.
+        let focused_id = self.main_area.focused_pane_id;
+        if self.is_agent_chat_pane(focused_id) {
+            let text = trimmed.trim().to_string();
+            if !text.is_empty() {
+                self.send_agent_prompt_text(focused_id, text, cx);
+            }
+            self.terminal_input
+                .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+            return;
+        }
         // Convert embedded newlines to CR so each line is treated as a
         // separate command by the shell's line discipline; then a
         // single trailing `\r` submits the final line.

@@ -32,6 +32,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 ghostty_vt = { path = "../ghostty_vt" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+daruda_acp = { path = "../daruda_acp" }
 daruda_claude = { path = "../daruda_claude" }
 daruda_store = { path = "../daruda_store" }
 daruda_config = { path = "../daruda_config" }

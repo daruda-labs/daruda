@@ -61,13 +61,28 @@ pub(in crate::workspace) fn render_body(
     // `"Input"`). The user must have keyboard focus on the input for
     // the shortcuts to fire — the same constraint every other modal
     // input has.
-    let submit =
-        crate::ui::button_primary("send", crate::surface::strings::bottom_input_send_button())
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
-                }
-            }));
+    // While the focused pane is an Agent chat pane mid-turn, the button
+    // reads "Stop" and cancels that pane's turn; otherwise it reads "Send"
+    // and forwards the input (to the agent session or the terminal PTY,
+    // resolved inside `send_terminal_input`).
+    let submit = match snap.agent_stop_pane {
+        Some(pane_id) => {
+            crate::ui::button_danger("send", crate::surface::strings::bottom_input_stop_button())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.cancel_agent_turn(pane_id, cx));
+                    }
+                }))
+        }
+        None => {
+            crate::ui::button_primary("send", crate::surface::strings::bottom_input_send_button())
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
+                    }
+                }))
+        }
+    };
     // 1-row preset packs everything (tab strip + body padding + chrome)
     // into a height that can't fit a stacked text-area-above / button-
     // below layout without clipping. Swap to a single horizontal row

@@ -183,6 +183,12 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// checkmark without re-reading the dock entity during render.
     pub bottom_dock_size: f32,
     pub terminal_input: gpui::Entity<crate::ui::InputState>,
+    /// Set when the focused pane is an Agent chat pane with a turn in
+    /// flight. Carries that pane's id so the bottom-input submit button
+    /// renders "Stop" and routes its click to `cancel_agent_turn(pane)`
+    /// instead of `send_terminal_input`. `None` for every other focus
+    /// state (terminal focus, idle agent pane), where the button is "Send".
+    pub agent_stop_pane: Option<crate::workspace::main_area::pane_tree::PaneId>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

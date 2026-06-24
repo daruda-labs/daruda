@@ -6,6 +6,7 @@
 //! draggable dividers between siblings of a `Split`. Lives next to
 //! `pane_header` (only called from here) so the two stay in sync.
 
+pub(in crate::workspace) mod agent_chat_pane;
 pub(in crate::workspace) mod bottom_dock;
 pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
@@ -326,6 +327,14 @@ pub(in crate::workspace) fn render_layout(
                         d.track_focus(fh)
                     })
                     .child(self::task_edit_pane::render(id, te, cx)),
+                self::pane::PaneContent::AgentChat(ac) => div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_hidden()
+                    .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
+                        d.track_focus(fh)
+                    })
+                    .child(self::agent_chat_pane::render(id, ac, cx)),
                 self::pane::PaneContent::Terminal(t) => {
                     let view_for_path_drag = t.view.clone();
                     let view_for_external = t.view.clone();

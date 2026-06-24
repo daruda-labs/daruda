@@ -8,11 +8,11 @@ use crate::workspace::{
     FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden, FocusNextPane,
     FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, GitChangesActivate,
     GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, MoveActiveProjectToGroup,
-    MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenCommandHistory,
-    OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject, ShowLeftDockFiles,
-    ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelSkills,
-    SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
-    ToggleCommandPalette, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat,
+    OpenCommandHistory, OpenSettings, PrevTab, PushChanges, RefreshGitStatus, RenameActiveProject,
+    ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
+    SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage,
+    ToggleBottomDock, ToggleCommandPalette, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{CloseProject, OpenFolder, Quit};
 use daruda_terminal::view::{Copy, Paste, SelectAll};
@@ -95,6 +95,7 @@ pub fn apply_keybinding_overrides(
             "switch_right_panel_tasks" => SwitchRightPanelTasks,
             "new_skill" => NewSkill,
             "new_task" => NewTask,
+            "new_agent_chat" => OpenAgentChat,
             "edit_task" => EditTask,
             "refresh_git_status" => RefreshGitStatus,
             "files_toggle_hidden" => FilesToggleHidden,
@@ -181,6 +182,7 @@ fn known_actions() -> Vec<&'static str> {
         "push_changes",
         "open_command_history",
         "new_task",
+        "new_agent_chat",
         "edit_task",
         "open_folder",
         "close_project",

@@ -26,8 +26,8 @@ use super::main_area::pane_drag_ops::PaneHeaderDrag;
 use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
 use super::status_bar::{self, StatusBarData};
 use super::{
-    FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, NewTab, SaveFilePane,
-    TAB_BAR_HEIGHT, TITLE_BAR_HEIGHT, Workspace,
+    FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, SaveFilePane, TAB_BAR_HEIGHT,
+    TITLE_BAR_HEIGHT, Workspace,
 };
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
@@ -360,7 +360,9 @@ impl Render for Workspace {
                 };
                 let (file_path, worktree_root) = match pane.and_then(|p| match &p.content {
                     PaneContent::File(f) => Some((f.view.path.clone(), f.view.lane_id)),
-                    PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
+                    PaneContent::Terminal(_)
+                    | PaneContent::TaskEditPane(_)
+                    | PaneContent::AgentChat(_) => None,
                 }) {
                     Some((path, wt_id)) => {
                         let root = self
@@ -694,7 +696,7 @@ impl Render for Workspace {
                                         CItem::separator(),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::ctx_new_tab(),
+                                            crate::surface::strings::ctx_new_tab(),
                                             false,
                                             |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
@@ -760,8 +762,34 @@ impl Render for Workspace {
                     .hover(move |d| d.text_color(tab_active_text).bg(tab_active_bg))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            this.on_new_tab(&NewTab, window, cx);
+                        cx.listener(|this, ev: &MouseDownEvent, _window, cx| {
+                            // "+" opens a chooser so a new tab can be a
+                            // terminal or an Agent chat pane — same menu
+                            // component as the lane right-click menu.
+                            let ws = cx.entity().downgrade();
+                            let items = vec![
+                                ws_menu_item(
+                                    ws.clone(),
+                                    crate::surface::strings::ctx_new_tab(),
+                                    false,
+                                    |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            ws.add_tab(win, cx);
+                                        });
+                                    },
+                                ),
+                                ws_menu_item(
+                                    ws.clone(),
+                                    crate::surface::strings::ctx_new_agent_chat(),
+                                    false,
+                                    |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            ws.open_agent_chat_pane(win, cx);
+                                        });
+                                    },
+                                ),
+                            ];
+                            this.open_context_menu(ev.position, items, cx);
                         }),
                     )
                     .child("+"),
@@ -1234,6 +1262,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_switch_right_panel_tasks))
             .on_action(cx.listener(Self::on_new_skill))
             .on_action(cx.listener(Self::on_new_task))
+            .on_action(cx.listener(Self::on_open_agent_chat))
             .on_action(cx.listener(Self::on_edit_task))
             .on_action(cx.listener(Self::on_focus_skill_search))
             .on_action(cx.listener(Self::on_invoke_skill_palette))

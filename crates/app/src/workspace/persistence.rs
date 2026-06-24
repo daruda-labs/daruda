@@ -636,7 +636,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<PaneLayout, PaneSpawnError> {
         match slayout {
-            daruda_store::project::SerializedLayout::Leaf { pane_id, cwd, file } => {
+            daruda_store::project::SerializedLayout::Leaf {
+                pane_id,
+                cwd,
+                file,
+                agent_chat,
+            } => {
                 let pane = if let Some(fc) = file {
                     // File pane — `file_status` is not persisted; the
                     // git badge re-derives when the lane's git
@@ -652,13 +657,25 @@ impl Workspace {
                         window,
                         cx,
                     )
+                } else if let Some(ac) = agent_chat {
+                    // AgentChat pane — the ACP session itself is not
+                    // persisted; restore re-opens at the saved lane cwd
+                    // and starts a fresh "Connecting…" session below.
+                    // Items begin empty.
+                    self.create_agent_chat_pane(ac.cwd.clone(), cx)
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
                     self.create_pane_with_cwd(effective, window, cx)?
                 };
                 let new_id = pane.id;
+                // Capture the AgentChat cwd before the pane moves into the
+                // tree so the live session can attach once it is pushed.
+                let agent_chat_cwd = pane.agent_chat_content().and_then(|ac| ac.cwd.clone());
                 id_map.insert(*pane_id, new_id);
                 self.main_area.panes.push(pane);
+                if let Some(cwd) = agent_chat_cwd {
+                    self.connect_agent_chat(new_id, cwd, cx);
+                }
                 Ok(PaneLayout::Pane(new_id))
             }
             daruda_store::project::SerializedLayout::Split {
@@ -824,7 +841,15 @@ fn serialize_layout(
                     view_mode: serialize_view_mode(fv.view_mode),
                 }
             });
-            let cwd = if file.is_some() {
+            // AgentChat panes serialize their anchored lane cwd (the
+            // session + conversation are intentionally not persisted).
+            // Mutually exclusive with `file`.
+            let agent_chat = pane.and_then(|p| p.agent_chat_content()).map(|ac| {
+                daruda_store::project::SerializedAgentChatContent {
+                    cwd: ac.cwd.clone(),
+                }
+            });
+            let cwd = if file.is_some() || agent_chat.is_some() {
                 None
             } else {
                 pane.and_then(|p| p.cwd().map(std::path::Path::to_path_buf))
@@ -833,6 +858,7 @@ fn serialize_layout(
                 pane_id: *id,
                 cwd,
                 file,
+                agent_chat,
             }
         }
         pane_tree::PaneLayout::Split {

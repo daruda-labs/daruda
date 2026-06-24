@@ -104,6 +104,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: "",
     },
     PaletteEntry {
+        id: "new_agent_chat",
+        label: "New Agent Chat",
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "edit_task",
         label: "Edit Task…",
         shortcut: "",

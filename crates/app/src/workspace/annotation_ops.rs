@@ -233,7 +233,7 @@ impl Workspace {
         let pane = self.main_area.panes.iter().find(|p| p.id == pane_id)?;
         match &pane.content {
             PaneContent::Terminal(t) => Some(t.view.clone()),
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => None,
         }
     }
 

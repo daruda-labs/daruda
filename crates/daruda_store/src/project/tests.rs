@@ -28,11 +28,13 @@ fn split_layout_round_trip() {
                 pane_id: 1,
                 cwd: Some(PathBuf::from("/a")),
                 file: None,
+                agent_chat: None,
             },
             SerializedLayout::Leaf {
                 pane_id: 2,
                 cwd: Some(PathBuf::from("/b")),
                 file: None,
+                agent_chat: None,
             },
         ],
         ratios: vec![0.5, 0.5],
@@ -64,6 +66,7 @@ fn file_leaf_round_trip_preserves_viewer_state() {
             staged: false,
             view_mode: SerializedFileViewMode::Raw,
         }),
+        agent_chat: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
@@ -102,12 +105,77 @@ fn file_leaf_skips_serialization_when_terminal() {
         pane_id: 1,
         cwd: Some(PathBuf::from("/tmp")),
         file: None,
+        agent_chat: None,
     };
     let json = serde_json::to_string(&leaf).unwrap();
     assert!(
         !json.contains("\"file\""),
         "terminal leaves must not write a `file` key, got: {json}"
     );
+}
+
+#[test]
+fn agent_chat_leaf_round_trip_preserves_cwd() {
+    // AgentChat panes persist only the anchored lane cwd — the ACP
+    // session and conversation are not saved. A restart restores the
+    // pane kind + cwd, then starts a fresh session on attach.
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 9,
+        cwd: None,
+        file: None,
+        agent_chat: Some(SerializedAgentChatContent {
+            cwd: Some(PathBuf::from("/repo/lane")),
+        }),
+    };
+
+    let json = serde_json::to_string(&leaf).unwrap();
+    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            agent_chat: Some(ac),
+            file,
+            ..
+        } => {
+            assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
+            assert!(file.is_none(), "agent_chat and file are mutually exclusive");
+        }
+        _ => panic!("expected Leaf with agent_chat content"),
+    }
+}
+
+#[test]
+fn agent_chat_leaf_skips_serialization_when_absent() {
+    // A non-AgentChat leaf (`agent_chat: None`) emits no `agent_chat`
+    // key so existing terminal/file state files stay byte-compatible.
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 1,
+        cwd: Some(PathBuf::from("/tmp")),
+        file: None,
+        agent_chat: None,
+    };
+    let json = serde_json::to_string(&leaf).unwrap();
+    assert!(
+        !json.contains("\"agent_chat\""),
+        "non-agent-chat leaves must not write an `agent_chat` key, got: {json}"
+    );
+}
+
+#[test]
+fn legacy_leaf_without_agent_chat_field_loads_as_none() {
+    // Forward-compat: state files written before AgentChat panes
+    // existed omit the `agent_chat` key entirely — they must
+    // deserialize with `agent_chat = None`.
+    let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
+    let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
+    match restored {
+        SerializedLayout::Leaf { agent_chat, .. } => {
+            assert!(
+                agent_chat.is_none(),
+                "missing `agent_chat` defaults to None"
+            );
+        }
+        _ => panic!("expected Leaf"),
+    }
 }
 
 #[test]
@@ -311,6 +379,7 @@ fn serialized_tab_user_label_round_trip() {
             pane_id: 7,
             cwd: None,
             file: None,
+            agent_chat: None,
         },
         last_focused_pane: 7,
         user_label: Some("PR #123 review".into()),
@@ -342,6 +411,7 @@ fn serialized_tab_user_label_none_is_skipped_in_json() {
             pane_id: 1,
             cwd: None,
             file: None,
+            agent_chat: None,
         },
         last_focused_pane: 1,
         user_label: None,

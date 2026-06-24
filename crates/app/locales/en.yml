@@ -11,6 +11,7 @@ common:
   btn_rename: "Rename…"
   btn_view: "View"
   btn_add: "Add"
+  btn_stop: "Stop"
   loading: "Loading…"
   refresh: "Refresh"
   section_project: "Project"
@@ -24,6 +25,7 @@ common:
   field_prompt: "Prompt"
   field_notes: "Notes"
   name_required: "Name is required."
+  new_agent_chat: "New Agent Chat"
   new_tab: "New Tab"
   close_tab: "Close Tab"
   close_pane: "Close Pane"
@@ -199,6 +201,25 @@ file_viewer:
   search_placeholder: "Search…"
   search_no_match: "No matches"
 
+# Agent chat pane (ACP)
+agent_chat:
+  tab_title: "Agent"
+  connecting: "Connecting…"
+  connected: "Connected"
+  error_prefix: "Connection error:"
+  empty: "Ask the agent anything to get started."
+  input_placeholder: "Send a message to the agent…"
+  send: "Send"
+  cancel: "Stop"
+  thinking_label: "Thinking"
+  tool_output_label: "Output"
+  tool_status_pending: "Pending"
+  tool_status_running: "Running"
+  tool_status_done: "Done"
+  tool_status_failed: "Failed"
+  permission_title: "Permission required"
+  permission_resolved_prefix: "Selected:"
+
 # Generic UI
 ui:
   keystroke_hint_recording: "Press keys…"
@@ -263,6 +284,7 @@ modal:
 bottom_dock:
   input_tab_label: "Input"
   input_placeholder: "Type to send to terminal…"
+  input_agent_placeholder: "Send a message to the agent…"
   row_preset_1: "1 row"
   row_preset_2: "2 rows"
   row_preset_3: "3 rows"

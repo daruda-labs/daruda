@@ -1,0 +1,450 @@
+//! Pure view of an `&AgentChatContent` — the scrolling conversation and
+//! inline permission cards. The prompt input lives in the shared bottom
+//! dock (`send_terminal_input` routes to the focused AgentChat pane's
+//! session), so this view carries no input field of its own.
+//!
+//! MVU view purity: every event closure is a one-line dispatch into a
+//! `Workspace` op (`respond_agent_permission`). No state transition lives
+//! here.
+//!
+//! Rendering notes (MVP):
+//! - Assistant / user / thinking text renders as wrapped plain text. Full
+//!   markdown rendering (gpui_component `TextView::markdown`) needs a live
+//!   `&mut Window` threaded through the recursive pane walker, which it is
+//!   not today; that is a deferred follow-up, not a blocker for the MVP.
+//! - Tool-call diffs render as inline old/new colored monospace lines
+//!   using the file-viewer diff palette, rather than a full embedded
+//!   editor entity (one editor per tool call would mean creating entities
+//!   inside `render`, which view purity forbids).
+
+use daruda_acp::{
+    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
+    ToolStatusView,
+};
+use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px, relative};
+
+use crate::surface::strings as s;
+use crate::ui::theme;
+use crate::workspace::Workspace;
+use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
+use crate::workspace::main_area::pane_tree::PaneId;
+
+/// Build the element tree for an Agent chat pane.
+pub(in crate::workspace) fn render(
+    pane_id: PaneId,
+    content: &AgentChatContent,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement {
+    // Clone the palette to an owned value so the render body can use `cx`
+    // mutably (binding listeners) while reading theme colours — `current`
+    // returns a borrow tied to `cx`.
+    let t = theme::current(cx).clone();
+
+    let status_banner = status_banner(&content.status, &t);
+
+    let body: AnyElement = if content.items.is_empty() {
+        div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+            .text_color(t.text_muted)
+            .child(SharedString::from(s::agent_chat_empty()))
+            .into_any_element()
+    } else {
+        let mut list = div()
+            .id(("agent-chat-list", pane_id as usize))
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(theme::AGENT_CHAT_LIST_GAP))
+            .px(px(theme::AGENT_CHAT_PAD_X))
+            .py(px(theme::AGENT_CHAT_PAD_Y));
+        for (ix, item) in content.items.iter().enumerate() {
+            list = list.child(render_item(pane_id, ix, item, &t, cx));
+        }
+        list.into_any_element()
+    };
+
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .bg(t.file_viewer_bg)
+        .children(status_banner)
+        .child(body)
+}
+
+/// The thin top banner — shown while connecting or on error; hidden once
+/// the session is live (the conversation itself signals readiness).
+fn status_banner(
+    status: &AgentSessionStatus,
+    t: &theme::DarudaTheme,
+) -> Option<impl IntoElement + use<>> {
+    let (text, bg, fg): (SharedString, Hsla, Hsla) = match status {
+        AgentSessionStatus::Connecting => (
+            s::agent_chat_connecting().into(),
+            t.banner_info_bg,
+            t.banner_info_text,
+        ),
+        AgentSessionStatus::Connected => return None,
+        AgentSessionStatus::Error(message) => (
+            format!("{} {}", s::agent_chat_error_prefix(), message).into(),
+            t.banner_error_bg,
+            t.banner_error_text,
+        ),
+    };
+    Some(
+        div()
+            .flex_none()
+            .w_full()
+            .px(px(theme::AGENT_CHAT_PAD_X))
+            .py(px(theme::AGENT_CHAT_PAD_Y))
+            .bg(bg)
+            .text_color(fg)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(text),
+    )
+}
+
+/// One conversation row.
+fn render_item(
+    pane_id: PaneId,
+    ix: usize,
+    item: &ChatItem,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    match item {
+        ChatItem::UserText(text) => user_bubble(text, t).into_any_element(),
+        ChatItem::AssistantText { text, streaming } => {
+            assistant_block(text, *streaming, t).into_any_element()
+        }
+        ChatItem::Thinking { text, streaming } => {
+            thinking_block(text, *streaming, t).into_any_element()
+        }
+        ChatItem::ToolCall(tc) => tool_card(tc, t).into_any_element(),
+        ChatItem::Permission(card) => permission_card(pane_id, ix, card, t, cx).into_any_element(),
+        ChatItem::Error(message) => error_block(message, t).into_any_element(),
+    }
+}
+
+/// User prompt — right-aligned accent-tinted bubble.
+fn user_bubble(text: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    div().flex().flex_row().justify_end().child(
+        div()
+            .max_w(relative(0.85))
+            .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+            .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+            .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+            .bg(t.lane_card_active_bg)
+            .text_color(t.text_primary)
+            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+            .child(SharedString::from(text.to_string())),
+    )
+}
+
+/// Assistant response — left-aligned block. A still-streaming block shows
+/// a trailing caret glyph.
+fn assistant_block(
+    text: &str,
+    streaming: bool,
+    t: &theme::DarudaTheme,
+) -> impl IntoElement + use<> {
+    let body = if streaming {
+        format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
+    } else {
+        text.to_string()
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(
+            div()
+                .text_color(t.text_muted)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_label_agent())),
+        )
+        .child(
+            div()
+                .text_color(t.text_primary)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(SharedString::from(body)),
+        )
+}
+
+/// Agent reasoning — dimmed, italicised block under a "Thinking" label.
+fn thinking_block(text: &str, streaming: bool, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    let body = if streaming {
+        format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
+    } else {
+        text.to_string()
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(
+            div()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_thinking_label())),
+        )
+        .child(
+            div()
+                .italic()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(SharedString::from(body)),
+        )
+}
+
+/// Surfaced error item — error-tinted block.
+fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    div()
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.banner_error_bg)
+        .text_color(t.banner_error_text)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .child(SharedString::from(message.to_string()))
+}
+
+/// Tool invocation card — title + status badge, optional diffs, optional
+/// plain-text output.
+fn tool_card(tc: &ToolCallItem, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
+
+    let mut card = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.lane_card_bg)
+        .border_1()
+        .border_color(t.border)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(px(theme::AGENT_CHAT_MSG_GAP))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(t.text_primary)
+                        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                        .child(SharedString::from(tc.title.clone())),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(badge_fg)
+                        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                        .child(badge_text),
+                ),
+        );
+
+    for diff in &tc.diffs {
+        card = card.child(diff_block(diff, t));
+    }
+
+    if !tc.output.is_empty() {
+        card = card.child(
+            div()
+                .text_color(t.text_muted)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_tool_output_label())),
+        );
+        for block in &tc.output {
+            card = card.child(
+                div()
+                    .font_family(theme::FONT_FAMILY_MONOSPACE)
+                    .whitespace_normal()
+                    .text_color(t.text_body)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from(block.clone())),
+            );
+        }
+    }
+
+    card
+}
+
+/// Inline old/new diff for a tool-call file modification. Old lines paint
+/// on the delete background, new lines on the add background, using the
+/// file-viewer diff palette so the treatment matches the diff viewer.
+fn diff_block(diff: &DiffView, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    let mut block = div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .rounded(px(theme::RADIUS_XS))
+        .overflow_hidden()
+        .child(
+            div()
+                .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+                .py(px(theme::GAP_XS))
+                .bg(t.file_diff_hunk_bg)
+                .text_color(t.file_diff_hunk_text)
+                .font_family(theme::FONT_FAMILY_MONOSPACE)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(diff.path.display().to_string())),
+        );
+
+    if let Some(old) = &diff.old_text {
+        for line in old.lines() {
+            block = block.child(diff_line(
+                line,
+                t.file_diff_del_bg,
+                t.file_diff_del_text,
+                '-',
+            ));
+        }
+    }
+    for line in diff.new_text.lines() {
+        block = block.child(diff_line(
+            line,
+            t.file_diff_add_bg,
+            t.file_diff_add_text,
+            '+',
+        ));
+    }
+    block
+}
+
+fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char) -> impl IntoElement + use<> {
+    div()
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .bg(bg)
+        .text_color(fg)
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .whitespace_normal()
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(SharedString::from(format!("{marker} {line}")))
+}
+
+/// Map a tool status to its badge label + colour.
+fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedString, Hsla) {
+    match status {
+        ToolStatusView::Pending => (s::agent_chat_tool_status_pending().into(), t.text_muted),
+        ToolStatusView::InProgress => (s::agent_chat_tool_status_running().into(), t.text_body),
+        ToolStatusView::Completed => (
+            s::agent_chat_tool_status_done().into(),
+            t.file_diff_stat_add,
+        ),
+        ToolStatusView::Failed => (
+            s::agent_chat_tool_status_failed().into(),
+            t.banner_error_text,
+        ),
+    }
+}
+
+/// Inline permission card — title + one button per choice. Once resolved,
+/// the buttons are gone and the chosen option is shown instead.
+fn permission_card(
+    pane_id: PaneId,
+    ix: usize,
+    card: &PermissionItem,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    let title: SharedString = card
+        .tool_title
+        .clone()
+        .unwrap_or_else(s::agent_chat_permission_title)
+        .into();
+
+    let mut root = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.banner_warning_bg)
+        .child(
+            div()
+                .text_color(t.banner_warning_text)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_permission_title())),
+        )
+        .child(
+            div()
+                .text_color(t.text_primary)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(title),
+        );
+
+    match &card.resolved {
+        Some(option_id) => {
+            // Resolved: surface the chosen option's name (fall back to its
+            // id) instead of the buttons.
+            let chosen = card
+                .options
+                .iter()
+                .find(|o| &o.option_id == option_id)
+                .map(|o| o.name.clone())
+                .unwrap_or_else(|| option_id.clone());
+            root = root.child(
+                div()
+                    .text_color(t.text_muted)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from(format!(
+                        "{} {}",
+                        s::agent_chat_permission_resolved_prefix(),
+                        chosen
+                    ))),
+            );
+        }
+        None => {
+            let mut row = div().flex().flex_row().flex_wrap().gap(px(theme::GAP_SM));
+            for (choice_ix, choice) in card.options.iter().enumerate() {
+                row = row.child(permission_button(pane_id, ix, choice_ix, choice, cx));
+            }
+            root = root.child(row);
+        }
+    }
+
+    root
+}
+
+/// One permission choice button. Allow kinds use the accent (primary)
+/// treatment; reject kinds use the danger treatment.
+fn permission_button(
+    pane_id: PaneId,
+    ix: usize,
+    choice_ix: usize,
+    choice: &PermissionChoice,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    let id = ("agent-chat-perm", ix * 16 + choice_ix);
+    let label: SharedString = choice.name.clone().into();
+    let kind = choice.kind;
+    let option_id = choice.option_id.clone();
+
+    let button = match kind {
+        PermissionKindView::AllowOnce | PermissionKindView::AllowAlways => {
+            crate::ui::button_primary(id, label)
+        }
+        PermissionKindView::RejectOnce | PermissionKindView::RejectAlways => {
+            crate::ui::button_danger(id, label)
+        }
+    };
+    button.on_click(cx.listener(move |ws, _, _window, cx| {
+        ws.respond_agent_permission(pane_id, option_id.clone(), kind, cx);
+    }))
+}

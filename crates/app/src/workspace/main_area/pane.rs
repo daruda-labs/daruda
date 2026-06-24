@@ -13,8 +13,8 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::future::Either;
 use gpui::{
-    App, Context, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task, Window,
-    prelude::*,
+    App, Context, Entity, FocusHandle, Focusable as _, ScrollHandle, SharedString, Subscription,
+    Task, Window, prelude::*,
 };
 use portable_pty::MasterPty;
 
@@ -60,6 +60,7 @@ pub(in crate::workspace) enum PaneContent {
     Terminal(TerminalContent),
     File(FileContent),
     TaskEditPane(TaskEditContent),
+    AgentChat(AgentChatContent),
 }
 
 /// PTY-backed terminal content. Owns the `TerminalView` entity, the
@@ -269,6 +270,69 @@ impl TaskEditContent {
     }
 }
 
+/// Connection lifecycle of an [`AgentChatContent`]'s ACP session.
+/// Declared as an enum so the connecting / live / failed states are
+/// distinct variants rather than a `bool` + companion field; the live
+/// `Error` arm carries the failure message it renders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum AgentSessionStatus {
+    /// The ACP adapter has been asked to start but the session is not
+    /// yet ready for prompts (handshake + `session/new` in flight).
+    Connecting,
+    /// `initialize` + `session/new` succeeded — the session accepts
+    /// prompts and the event pump is folding updates into `items`.
+    Connected,
+    /// The connection or protocol failed; the message is surfaced both
+    /// here (status line) and through the error pipeline.
+    Error(String),
+}
+
+/// Native ACP (Agent Client Protocol) chat content. Rendered as a plain
+/// `div()` tree (no inner GPUI `Entity`), so `wrapper_focus_handle`
+/// returns `Some(&focus_handle)`.
+///
+/// Owns the live session: the [`daruda_acp::AcpSessionHandle`] the
+/// workspace ops drive (`send_prompt` / `cancel` / `respond_permission`)
+/// and the GPUI-side event pump that folds [`daruda_acp::AcpEvent`]s into
+/// `items`. Both are dropped with the pane, which tears the connection
+/// down — dropping the handle closes the command channel (the connection
+/// task exits) and dropping the pump task ends the event loop.
+///
+/// MVP simplification: one `connect_session` per pane. A future revision
+/// could share a single window-level adapter across panes.
+pub(in crate::workspace) struct AgentChatContent {
+    /// Pane-level focus handle for `Cmd+W` close routing and key
+    /// handling — the content is a plain div tree with no inner entity.
+    pub(in crate::workspace) focus_handle: FocusHandle,
+    /// Tab / header title.
+    pub(in crate::workspace) cached_title: SharedString,
+    /// Lane working directory the agent session is rooted at. `None`
+    /// when the pane was opened without a resolvable lane cwd.
+    pub(in crate::workspace) cwd: Option<PathBuf>,
+    /// Connection lifecycle state. Drives the status line + input/cancel
+    /// affordance.
+    pub(in crate::workspace) status: AgentSessionStatus,
+    /// Conversation render model, in arrival order. The event pump
+    /// appends/folds into this; the renderer reads it.
+    pub(in crate::workspace) items: Vec<daruda_acp::ChatItem>,
+    /// Live ACP session handle. `None` until `connect_session` resolves;
+    /// stays `None` on a connect failure. Dropping it (pane close) closes
+    /// the command channel and shuts the connection task down.
+    pub(in crate::workspace) handle: Option<daruda_acp::AcpSessionHandle>,
+    /// GPUI-side pump that drains the `AcpEvent` receiver and folds events
+    /// into `items` / `status`. Dropped with the pane, ending the loop.
+    pub(in crate::workspace) _event_pump: Option<Task<()>>,
+    /// The id of the single in-flight permission request awaiting a host
+    /// decision, if any. MVP serialises permissions: a new request
+    /// replaces the previous pending id (the agent only asks one at a
+    /// time within a turn). Cleared once the user responds.
+    pub(in crate::workspace) pending_permission: Option<u64>,
+    /// `true` between submitting a prompt and the matching `TurnEnded`.
+    /// Drives the input affordance (Send ↔ Stop) and disables re-submit
+    /// while the agent is busy.
+    pub(in crate::workspace) turn_in_flight: bool,
+}
+
 pub(in crate::workspace) struct Pane {
     pub(in crate::workspace) id: PaneId,
     pub(in crate::workspace) content: PaneContent,
@@ -319,6 +383,7 @@ impl PaneContent {
             PaneContent::Terminal(_) => None,
             PaneContent::File(f) => Some(&f.focus_handle),
             PaneContent::TaskEditPane(te) => Some(&te.focus_handle),
+            PaneContent::AgentChat(ac) => Some(&ac.focus_handle),
         }
     }
 }
@@ -330,6 +395,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.cached_title.clone(),
             PaneContent::File(f) => f.cached_title.clone(),
             PaneContent::TaskEditPane(te) => te.cached_title.clone(),
+            PaneContent::AgentChat(ac) => ac.cached_title.clone(),
         }
     }
 
@@ -344,6 +410,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
             PaneContent::File(f) => f.view.path.parent(),
             PaneContent::TaskEditPane(_) => None,
+            PaneContent::AgentChat(ac) => ac.cwd.as_deref(),
         }
     }
 
@@ -362,6 +429,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
             PaneContent::TaskEditPane(te) => te.focus_handle.clone(),
+            PaneContent::AgentChat(ac) => ac.focus_handle.clone(),
         }
     }
 
@@ -373,7 +441,7 @@ impl Pane {
     pub(in crate::workspace) fn terminal_view(&self) -> Option<&Entity<TerminalView>> {
         match &self.content {
             PaneContent::Terminal(t) => Some(&t.view),
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => None,
         }
     }
 
@@ -397,7 +465,9 @@ impl Pane {
                 }
                 None => false,
             },
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {
+                false
+            }
         }
     }
 
@@ -405,7 +475,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content(&self) -> Option<&FileContent> {
         match &self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
+            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {
+                None
+            }
         }
     }
 
@@ -415,7 +487,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content_mut(&mut self) -> Option<&mut FileContent> {
         match &mut self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) => None,
+            PaneContent::Terminal(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {
+                None
+            }
         }
     }
 
@@ -425,7 +499,7 @@ impl Pane {
     pub(in crate::workspace) fn task_edit_content(&self) -> Option<&TaskEditContent> {
         match &self.content {
             PaneContent::TaskEditPane(te) => Some(te),
-            PaneContent::Terminal(_) | PaneContent::File(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
         }
     }
 
@@ -436,7 +510,26 @@ impl Pane {
     pub(in crate::workspace) fn task_edit_content_mut(&mut self) -> Option<&mut TaskEditContent> {
         match &mut self.content {
             PaneContent::TaskEditPane(te) => Some(te),
-            PaneContent::Terminal(_) | PaneContent::File(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
+        }
+    }
+
+    /// Immutable accessor for the AgentChat pane state. Used by the
+    /// layout serializer to persist the anchored lane cwd.
+    pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
+        match &self.content {
+            PaneContent::AgentChat(ac) => Some(ac),
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
+        }
+    }
+
+    /// Mutable counterpart to `agent_chat_content`. Used by the ACP event
+    /// pump and the prompt / cancel / permission ops to fold events into
+    /// the conversation and flip the connection status.
+    pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
+        match &mut self.content {
+            PaneContent::AgentChat(ac) => Some(ac),
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
         }
     }
 
@@ -454,6 +547,7 @@ impl Pane {
                     && *f.editor_state.read(cx).text() != f.saved_text
             }
             PaneContent::TaskEditPane(te) => te.is_dirty(cx),
+            PaneContent::AgentChat(_) => false,
         }
     }
 
@@ -471,6 +565,7 @@ impl Pane {
                 !matches!(te.branch_validation, BranchValidation::Invalid { .. })
                     && !te.title_input.read(cx).value().trim().is_empty()
             }
+            PaneContent::AgentChat(_) => false,
         }
     }
 
@@ -502,7 +597,9 @@ impl Pane {
     ) -> bool {
         match &mut self.content {
             PaneContent::Terminal(t) => t.update_cached(new_title, new_cwd),
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => false,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => {
+                false
+            }
         }
     }
 
@@ -523,7 +620,7 @@ impl Pane {
             PaneContent::Terminal(t) => {
                 t.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
             }
-            PaneContent::File(_) | PaneContent::TaskEditPane(_) => true,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => true,
         }
     }
 }
@@ -1120,14 +1217,38 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focus_pane(
-        &self,
+        &mut self,
         pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) {
-            let handle = pane.focus_handle(cx);
-            handle.focus(window, cx);
+        // The bottom input is the shared prompt/command surface for every
+        // pane, so on each (re-)entry surface its panel and sync the
+        // placeholder to the focused pane kind. Done here — the canonical
+        // windowed focus path — so it fires on click, keyboard pane nav,
+        // and tab switch alike (`set_focused_pane` has no `&mut Window`,
+        // which `set_placeholder` requires).
+        let is_agent = self.is_agent_chat_pane(pane_id);
+        self.activate_bottom_input(cx);
+        let placeholder = if is_agent {
+            crate::surface::strings::bottom_input_agent_placeholder()
+        } else {
+            crate::surface::strings::bottom_input_placeholder()
+        };
+        let input = self.terminal_input.clone();
+        input.update(cx, |state, cx| {
+            state.set_placeholder(placeholder, window, cx)
+        });
+
+        if is_agent {
+            // Agent chat panes have no in-pane input; keyboard focus goes
+            // to the shared bottom input so the user can type immediately.
+            self.terminal_input
+                .read(cx)
+                .focus_handle(cx)
+                .focus(window, cx);
+        } else if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) {
+            pane.focus_handle(cx).focus(window, cx);
         }
     }
 }

@@ -24,10 +24,11 @@ use super::{
     FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch, GitChangesActivate,
     GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InstallClaudeHooks,
     InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill, NewTab, NewTask,
-    NextTab, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, PullChanges,
-    RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
-    SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage,
-    ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane, UninstallClaudeHooks, ZoomWindow,
+    NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
+    PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes,
+    SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
+    SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane,
+    UninstallClaudeHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -227,6 +228,19 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_task_edit_pane(None, window, cx);
+    }
+
+    /// Bound to the [`OpenAgentChat`] action — opens a fresh Agent chat
+    /// (ACP) pane in a new tab, anchored at the active lane.
+    pub(in crate::workspace) fn on_open_agent_chat(
+        &mut self,
+        _: &OpenAgentChat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.open_agent_chat_pane(window, cx);
+        });
     }
 
     /// Bound to the [`EditTask`] action — opens the task picker so the
