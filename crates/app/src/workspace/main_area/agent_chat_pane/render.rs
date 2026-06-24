@@ -21,11 +21,16 @@ use daruda_acp::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
     ToolStatusView,
 };
-use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px, relative};
+use gpui::{AnyElement, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px, relative};
+
+/// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
+/// (built in the ops layer; this view only embeds them).
+type DiffEditors = std::collections::HashMap<String, Entity<gpui_component::input::InputState>>;
 
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::diff_editor_key;
 use crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock;
 use crate::workspace::main_area::file_view_pane::render::render_md_blocks_plain;
 use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
@@ -67,7 +72,15 @@ pub(in crate::workspace) fn render(
             .py(px(theme::AGENT_CHAT_PAD_Y));
         for (ix, item) in content.items.iter().enumerate() {
             let blocks = content.md_blocks.get(&ix).map(Vec::as_slice);
-            list = list.child(render_item(pane_id, ix, item, blocks, &t, cx));
+            list = list.child(render_item(
+                pane_id,
+                ix,
+                item,
+                blocks,
+                &content.diff_editors,
+                &t,
+                cx,
+            ));
         }
         list.into_any_element()
     };
@@ -116,11 +129,13 @@ fn status_banner(
 /// One conversation row. `md_blocks` is the parsed Markdown for this item's
 /// text when it has settled (filled by `reconcile_markdown` in the ops layer);
 /// `None` means the text is still streaming and renders as plain wrapped text.
+#[allow(clippy::too_many_arguments)]
 fn render_item(
     pane_id: PaneId,
     ix: usize,
     item: &ChatItem,
     md_blocks: Option<&[MdBlock]>,
+    diff_editors: &DiffEditors,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
@@ -132,7 +147,7 @@ fn render_item(
         ChatItem::Thinking { text, streaming } => {
             thinking_block(text, *streaming, md_blocks, t).into_any_element()
         }
-        ChatItem::ToolCall(tc) => tool_card(tc, t).into_any_element(),
+        ChatItem::ToolCall(tc) => tool_card(tc, diff_editors, t, cx).into_any_element(),
         ChatItem::Permission(card) => permission_card(pane_id, ix, card, t, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t).into_any_element(),
     }
@@ -260,7 +275,12 @@ fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<
 
 /// Tool invocation card — title + status badge, optional diffs, optional
 /// plain-text output.
-fn tool_card(tc: &ToolCallItem, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+fn tool_card(
+    tc: &ToolCallItem,
+    diff_editors: &DiffEditors,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
 
     let mut card = div()
@@ -298,8 +318,9 @@ fn tool_card(tc: &ToolCallItem, t: &theme::DarudaTheme) -> impl IntoElement + us
                 ),
         );
 
-    for diff in &tc.diffs {
-        card = card.child(diff_block(diff, t));
+    for (di, diff) in tc.diffs.iter().enumerate() {
+        let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
+        card = card.child(diff_block(diff, editor, t, cx));
     }
 
     if !tc.output.is_empty() {
@@ -324,10 +345,18 @@ fn tool_card(tc: &ToolCallItem, t: &theme::DarudaTheme) -> impl IntoElement + us
     card
 }
 
-/// Inline old/new diff for a tool-call file modification. Old lines paint
-/// on the delete background, new lines on the add background, using the
-/// file-viewer diff palette so the treatment matches the diff viewer.
-fn diff_block(diff: &DiffView, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+/// Diff for a tool-call file modification. When a read-only diff editor has
+/// been built for this file (in the ops layer), embed it so the treatment
+/// matches the File viewer exactly — gutter + syntax + word-diff backgrounds.
+/// Falls back to inline old/new colored monospace lines when the editor is
+/// absent (e.g. the two sides are identical, or the window was gone at build
+/// time). The path header is shown either way.
+fn diff_block(
+    diff: &DiffView,
+    editor: Option<&Entity<gpui_component::input::InputState>>,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
     let mut block = div()
         .flex()
         .flex_col()
@@ -344,6 +373,15 @@ fn diff_block(diff: &DiffView, t: &theme::DarudaTheme) -> impl IntoElement + use
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(diff.path.display().to_string())),
         );
+
+    if let Some(editor) = editor {
+        return block.child(
+            div()
+                .w_full()
+                .bg(t.file_viewer_bg)
+                .child(crate::ui::file_viewer_editor(editor, cx)),
+        );
+    }
 
     if let Some(old) = &diff.old_text {
         for line in old.lines() {

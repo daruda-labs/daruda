@@ -32,15 +32,19 @@
 //! teardown code is needed.
 
 use daruda_acp::{
-    AcpEvent, AdapterCommand, PermissionDecision, PermissionKindView, apply_update,
+    AcpEvent, AdapterCommand, DiffView, PermissionDecision, PermissionKindView, apply_update,
     connect_session, finalize_streaming, permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use futures::StreamExt as _;
-use gpui::{Context, Window};
+use gpui::{AppContext as _, Context, Window};
 
+use crate::path_ext::PathExt as _;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::diff_editor::{
+    DiffColors, DiffEditorModel, build_diff_editor_model,
+};
 use crate::workspace::main_area::pane::{
     AgentChatContent, AgentSessionStatus, Pane, PaneContent, TabEntry,
 };
@@ -84,6 +88,7 @@ impl Workspace {
                 pending_permission: None,
                 turn_in_flight: false,
                 md_blocks: std::collections::HashMap::new(),
+                diff_editors: std::collections::HashMap::new(),
             }),
         }
     }
@@ -266,6 +271,7 @@ impl Workspace {
             }
         }
         reconcile_markdown(ac, &syntax_theme, is_light);
+        self.reconcile_diff_editors(pane_id, &syntax_theme, is_light, cx);
         cx.notify();
     }
 
@@ -298,6 +304,7 @@ impl Workspace {
         if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
             reconcile_markdown(ac, &syntax_theme, is_light);
         }
+        self.reconcile_diff_editors(pane_id, &syntax_theme, is_light, cx);
         cx.notify();
     }
 
@@ -367,6 +374,81 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Build the read-only diff editor entity for every tool-call file
+    /// modification that does not yet have one. Mirrors `reconcile_markdown`:
+    /// called from the event pump (and the local prompt echo) after `items`
+    /// is mutated, so the (cached) pane subtree shows the diff through the
+    /// same editor the File viewer uses rather than the inline fallback.
+    ///
+    /// Keyed by `"{tool_call_id}#{diff_index}"` — one editor per file. A diff
+    /// is converted to a `DiffEditorModel` purely (no GPUI), then the editor
+    /// entity is created + configured inside a single window re-entry
+    /// (`InputState::new` / `set_value` need a live `&mut Window`). Entities
+    /// are never created in `render`; the renderer only embeds them.
+    ///
+    /// Build-once: keys are only filled when absent. A `ToolCallUpdate` that
+    /// replaces a diff's text keeps the original editor — re-streaming a diff
+    /// in place is not observed today; if it becomes necessary, compare the
+    /// stored model and rebuild on change.
+    fn reconcile_diff_editors(
+        &mut self,
+        pane_id: PaneId,
+        syntax_theme: &str,
+        is_light: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(colors) = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(DiffColors::from_theme)
+        else {
+            return;
+        };
+
+        // Collect the pure work first; entity creation re-enters the window,
+        // which can't happen while the immutable `items` borrow is live.
+        let Some(ac) = self.agent_chat_content_for_pane(pane_id) else {
+            return;
+        };
+        let mut pending: Vec<(String, String, DiffEditorModel)> = Vec::new();
+        for item in &ac.items {
+            let daruda_acp::ChatItem::ToolCall(tc) = item else {
+                continue;
+            };
+            for (di, diff) in tc.diffs.iter().enumerate() {
+                let key = diff_editor_key(&tc.id, di);
+                if ac.diff_editors.contains_key(&key) {
+                    continue;
+                }
+                let Some(model) = build_diff_view_model(diff, syntax_theme, is_light, &colors)
+                else {
+                    continue;
+                };
+                let language = diff_editor_language(diff).to_owned();
+                pending.push((key, language, model));
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+
+        for (key, language, model) in pending {
+            if let Some(editor) = create_diff_editor(cx, &language, model)
+                && let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id)
+            {
+                ac.diff_editors.insert(key, editor);
+            }
+        }
+    }
+
+    /// Immutable lookup of an AgentChat pane's content by id.
+    fn agent_chat_content_for_pane(&self, pane_id: PaneId) -> Option<&AgentChatContent> {
+        self.main_area
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)?
+            .agent_chat_content()
+    }
+
     /// Mutable lookup of an AgentChat pane's content by id. Returns `None`
     /// when the pane is gone or is not an AgentChat pane.
     fn agent_chat_content_mut_for_pane(
@@ -378,6 +460,115 @@ impl Workspace {
             .iter_mut()
             .find(|p| p.id == pane_id)?
             .agent_chat_content_mut()
+    }
+}
+
+/// Cache key for a tool call's `di`-th diff editor: one editor per file.
+/// Shared with the renderer so the embed lookup matches the insert key.
+pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
+    format!("{tool_call_id}#{di}")
+}
+
+/// Language id for an editor's syntax tree, from the diff's file extension.
+/// Empty when unknown (the editor falls back to `"text"`).
+fn diff_editor_language(diff: &DiffView) -> &'static str {
+    match diff.path.extension_str() {
+        "rs" => "rust",
+        "js" | "mjs" | "cjs" => "javascript",
+        "ts" | "mts" | "cts" => "typescript",
+        "jsx" => "jsx",
+        "tsx" => "tsx",
+        "py" => "python",
+        "go" => "go",
+        "toml" => "toml",
+        "json" | "jsonc" => "json",
+        "yaml" | "yml" => "yaml",
+        "md" | "markdown" => "markdown",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "sh" | "bash" | "zsh" => "bash",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
+        _ => "",
+    }
+}
+
+/// Convert a tool-call [`DiffView`] into the editor inputs the shared
+/// diff-through-editor renderer consumes. Pure / GPUI-free: builds the unified
+/// diff from `old_text`/`new_text` (a created file has no `old_text` → empty
+/// old side), syntax-highlights and word-diffs the hunks exactly as the File
+/// viewer's `load_diff` does, then folds them into a [`DiffEditorModel`].
+///
+/// Returns `None` when the two sides are identical (no hunks → nothing to
+/// render), so the caller leaves the inline fallback in place.
+fn build_diff_view_model(
+    diff: &DiffView,
+    syntax_theme: &str,
+    is_light: bool,
+    colors: &DiffColors,
+) -> Option<DiffEditorModel> {
+    use crate::workspace::main_area::file_view_pane::highlighter::highlight_hunks;
+    use crate::workspace::main_area::file_view_pane::line_diff::unified_diff_text;
+    use crate::workspace::main_area::file_view_pane::word_diff::apply_word_diff;
+    use crate::workspace::main_area::file_view_pane::{build_diff_rows, parse_diff_hunks};
+
+    let old = diff.old_text.as_deref().unwrap_or("");
+    let text = unified_diff_text(old, &diff.new_text);
+    let mut hunks = parse_diff_hunks(&text);
+    if hunks.is_empty() {
+        return None;
+    }
+    let ext = diff.path.extension_str();
+    highlight_hunks(&mut hunks, ext, syntax_theme, is_light);
+    apply_word_diff(&mut hunks);
+    let rows = build_diff_rows(&hunks, false);
+    Some(build_diff_editor_model(&rows, colors))
+}
+
+/// Create + configure a read-only diff editor entity inside a single window
+/// re-entry. Mirrors the File viewer's editor construction
+/// (`multi_line` + `soft_wrap(false)` + `code_editor`) and the diff-config
+/// it applies (`set_disabled(true)` for read-only + decorations + injected
+/// highlight spans). Returns `None` if the owning window is gone.
+fn create_diff_editor(
+    cx: &mut Context<Workspace>,
+    language: &str,
+    model: DiffEditorModel,
+) -> Option<gpui::Entity<gpui_component::input::InputState>> {
+    let entity_id = cx.entity_id();
+    let wh = crate::window_registry::WindowRegistry::handle_for_workspace(entity_id, cx)?;
+    let language = language.to_owned();
+    match cx.update_window(wh, move |_, window, cx_w| {
+        cx_w.new(|cx_state| {
+            let mut state = gpui_component::input::InputState::new(window, cx_state)
+                .multi_line(true)
+                .soft_wrap(false);
+            state = if language.is_empty() {
+                state.code_editor("text")
+            } else {
+                state.code_editor(&language)
+            };
+            state.set_value(model.text, window, cx_state);
+            state.set_disabled(true, cx_state);
+            state.set_line_decorations(model.decorations, cx_state);
+            state.set_highlight_override(Some(model.highlights), cx_state);
+            state
+        })
+    }) {
+        Ok(editor) => Some(editor),
+        Err(e) => {
+            // Window gone mid-stream — drop this editor; the inline
+            // fallback renders. Logged so it isn't a silent no-op.
+            daruda_store::observability::log_writer::LogWriter::log(
+                ErrorReport::new("Failed to build agent-chat diff editor")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .with_context("error", format!("{e}"))
+                    .dedup("agent_chat.diff_editor.window_gone")
+                    .build(),
+            );
+            None
+        }
     }
 }
 
@@ -471,6 +662,7 @@ mod tests {
                 pending_permission: None,
                 turn_in_flight: false,
                 md_blocks: std::collections::HashMap::new(),
+                diff_editors: std::collections::HashMap::new(),
             }
         });
         let mut ac = ac;
@@ -521,5 +713,90 @@ mod tests {
     fn item_text_skips_non_text_items() {
         assert!(item_text(&ChatItem::Error("e".to_owned())).is_none());
         assert_eq!(item_text(&ChatItem::UserText("u".to_owned())), Some("u"));
+    }
+
+    /// A flat `DiffColors` fixture so the pure model build is testable
+    /// without a live theme.
+    fn diff_colors() -> DiffColors {
+        let c = |l: f32| gpui::Hsla {
+            h: 0.,
+            s: 0.,
+            l,
+            a: 1.,
+        };
+        DiffColors {
+            add_bg: c(0.1),
+            del_bg: c(0.11),
+            hunk_bg: c(0.12),
+            add_text: c(0.2),
+            del_text: c(0.21),
+            ctx_text: c(0.22),
+            hunk_text: c(0.23),
+            hunk_ctx_text: c(0.24),
+            word_add_bg: c(0.3),
+            word_del_bg: c(0.31),
+        }
+    }
+
+    fn diff(old: Option<&str>, new: &str, path: &str) -> DiffView {
+        DiffView {
+            path: std::path::PathBuf::from(path),
+            old_text: old.map(str::to_owned),
+            new_text: new.to_owned(),
+        }
+    }
+
+    /// `build_diff_view_model` turns a single-line modification into a
+    /// `DiffEditorModel` whose synthetic buffer carries the hunk header plus
+    /// both sides (no `+`/`-` markers — the kind is in the decorations) and
+    /// whose per-row decorations include add/del backgrounds.
+    #[test]
+    fn diff_view_model_builds_rows_and_decorations() {
+        let d = diff(
+            Some("fn a() {}\nlet x = 1;\nfn b() {}\n"),
+            "fn a() {}\nlet y = 2;\nfn b() {}\n",
+            "src/lib.rs",
+        );
+        let m = build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors())
+            .expect("a modified file produces hunks");
+        // Hunk header row + content rows, no marker prefix on content.
+        assert!(m.text.starts_with("@@"), "buffer leads with a hunk header");
+        assert!(m.text.contains("let x = 1;"), "removed line present");
+        assert!(m.text.contains("let y = 2;"), "added line present");
+        // Some rows carry an add/del background (the changed pair).
+        let with_bg = m
+            .decorations
+            .iter()
+            .filter(|d| d.background.is_some())
+            .count();
+        assert!(with_bg >= 2, "at least the changed pair is tinted");
+    }
+
+    /// A newly created file (`old_text == None`) diffs against an empty old
+    /// side — every line is an addition, so the model is built (non-empty).
+    #[test]
+    fn diff_view_model_handles_created_file() {
+        let d = diff(None, "line one\nline two\n", "new.txt");
+        let m = build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors())
+            .expect("a created file produces an all-added hunk");
+        assert!(m.text.contains("line one"));
+        assert!(m.text.contains("line two"));
+    }
+
+    /// Identical sides yield no hunks, so the adapter returns `None` and the
+    /// caller keeps the inline fallback.
+    #[test]
+    fn diff_view_model_none_when_unchanged() {
+        let d = diff(Some("same\n"), "same\n", "same.txt");
+        assert!(build_diff_view_model(&d, "base16-ocean.dark", false, &diff_colors()).is_none());
+    }
+
+    /// The cache key is per-(tool-call, diff index) so two files in one tool
+    /// call get distinct editors.
+    #[test]
+    fn diff_editor_keys_are_per_file() {
+        assert_eq!(diff_editor_key("call-1", 0), "call-1#0");
+        assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-1", 1));
+        assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-2", 0));
     }
 }

@@ -342,6 +342,15 @@ pub(in crate::workspace) struct AgentChatContent {
         usize,
         Vec<crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock>,
     >,
+    /// Read-only diff editor entities for tool-call file modifications,
+    /// keyed by `"{tool_call_id}#{diff_index}"` (one editor per file in a
+    /// tool call). Built once per diff by `reconcile_diff_editors` in the
+    /// ops layer — the same diff-through-editor renderer the File viewer
+    /// uses (synthetic buffer + per-line decorations + injected highlight
+    /// spans). Entities are created in the op, never in `render` (which
+    /// only embeds them), mirroring the File viewer's `editor_state`.
+    pub(in crate::workspace) diff_editors:
+        std::collections::HashMap<String, Entity<gpui_component::input::InputState>>,
 }
 
 pub(in crate::workspace) struct Pane {
