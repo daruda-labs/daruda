@@ -12,6 +12,39 @@ fn append_partial_extends_in_place() {
 }
 
 #[test]
+fn pop_tail_removes_newest_and_rewinds_abs() {
+    let mut b = LineBuffer::new(1024);
+    b.append("a", &[], EolKind::Hard);
+    b.append("b", &[], EolKind::Hard);
+    b.append("c", &[], EolKind::Hard);
+    assert_eq!(b.next_append_abs(), 3);
+
+    let popped = b.pop_tail();
+    assert_eq!(popped.map(|l| l.text), Some("c".to_string()));
+    assert_eq!(b.len(), 2);
+    // overflow is untouched, so next_append_abs rewinds by exactly one.
+    assert_eq!(b.next_append_abs(), 2);
+    assert_eq!(b.get(1).unwrap().text, "b");
+}
+
+#[test]
+fn pop_tail_on_empty_returns_none() {
+    let mut b = LineBuffer::new(1024);
+    assert!(b.pop_tail().is_none());
+    assert_eq!(b.next_append_abs(), 0);
+}
+
+#[test]
+fn last_abs_is_none_when_empty_else_next_minus_one() {
+    let mut b = LineBuffer::new(1024);
+    assert_eq!(b.last_abs(), None);
+    b.append("a", &[], EolKind::Hard);
+    b.append("b", &[], EolKind::Hard);
+    assert_eq!(b.last_abs(), Some(1));
+    assert_eq!(b.last_abs(), b.next_append_abs().checked_sub(1));
+}
+
+#[test]
 fn wrap_visible_handles_cjk_two_cells() {
     let mut b = LineBuffer::new(1024);
     b.append("가나다라마", &[], EolKind::Hard); // 5 chars * 2 cells = 10 cells

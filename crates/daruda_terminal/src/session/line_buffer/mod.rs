@@ -436,6 +436,30 @@ impl LineBuffer {
         self.lines.get(idx)
     }
 
+    /// Remove and return the newest logical line, or `None` when empty.
+    /// The inverse of a single new-line [`Self::append`]: `overflow` is
+    /// left untouched, so [`Self::next_append_abs`] (`overflow + len`)
+    /// rewinds by exactly one. Used to undo tail lines that re-entered the
+    /// live viewport after a widen reflow — see
+    /// `TerminalSession::pop_verified_reentered_lines`. Callers querying
+    /// wrapped row counts afterward must invalidate the wrap cache (the
+    /// resize path already does so globally).
+    pub fn pop_tail(&mut self) -> Option<LogicalLine> {
+        self.lines.pop_back()
+    }
+
+    /// Absolute index of the newest retained logical line, or `None` when
+    /// empty. Equals `next_append_abs() - 1` for a non-empty buffer; the
+    /// stable [`LineBufferPosition`] basis for evicting marks anchored on
+    /// a line about to be popped.
+    pub fn last_abs(&self) -> Option<u64> {
+        if self.lines.is_empty() {
+            None
+        } else {
+            Some(self.next_append_abs() - 1)
+        }
+    }
+
     /// Stable [`LineBufferPosition`] of the oldest still-live line, or
     /// `None` if the buffer is empty. Delegates to `position_at(0)` so
     /// the equivalence is enforced by code rather than comment.

@@ -1568,6 +1568,350 @@ fn line_buffer_survives_resize_widen() {
     );
 }
 
+/// Count how many times each `MKnn` marker appears across the whole
+/// unified frame.
+fn marker_counts(s: &TerminalSession) -> std::collections::HashMap<String, u32> {
+    let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for y in 0..s.total_rows() {
+        let text = s.dump_screen_row(y).unwrap_or_default();
+        if let Some(mk) = text.get(0..4).filter(|mk| mk.starts_with("MK")) {
+            *seen.entry(mk.to_string()).or_default() += 1;
+        }
+    }
+    seen
+}
+
+/// Trimmed text of every unified-frame row, top to bottom.
+fn frame_lines(s: &TerminalSession) -> Vec<String> {
+    (0..s.total_rows())
+        .map(|y| {
+            s.dump_screen_row(y)
+                .unwrap_or_default()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn annotation_survives_widen_reentry_into_viewport() {
+    // The widen mirror of the narrow-detach bug. A buffer line carrying an
+    // annotation (Buffered coord) that a widen reflow un-wraps and pulls back
+    // into the live viewport must keep its annotation — re-anchored from
+    // Buffered to Viewport. Previously `pop_verified_reentered_lines` popped
+    // the re-entered tail and EVICTED its marks instead of re-promoting them,
+    // so the annotation silently vanished.
+    let mut s = session_with(80, 6, 100_000);
+    let mut feed = Vec::new();
+    for i in 1..=30u32 {
+        // 155 chars: two rows at width 80, one row at width 200.
+        feed.extend_from_slice(format!("MK{i:02}-{}\r\n", "a".repeat(150)).as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    // Annotate the NEWEST buffer line (the one nearest the seam, which a widen
+    // pulls back into the viewport first). It is a `LineCoord::Buffered` anchor.
+    let lb_rows = {
+        // First live row's screen index = wrapped-row count of the LineBuffer.
+        s.total_rows() - u32::from(s.rows())
+    };
+    // Walk up from the seam to the last buffer row that starts a logical line.
+    let (target_row, annotated_text) = (0..lb_rows)
+        .rev()
+        .find_map(|y| {
+            let t = s.dump_screen_row(y).unwrap_or_default();
+            t.starts_with("MK")
+                .then(|| (y, t.trim_end().chars().take(4).collect::<String>()))
+        })
+        .expect("a buffer row starts a logical line");
+    let coord = s
+        .screen_row_to_line_coord(target_row)
+        .expect("buffer row resolves to a coord");
+    assert!(
+        matches!(coord, LineCoord::Buffered(_)),
+        "setup: annotated row must start as a Buffered coord, got {coord:?}"
+    );
+    let id = s
+        .add_annotation(LineRange::new(coord, coord), "note".into())
+        .expect("annotation adds");
+
+    s.resize(200, 6).unwrap();
+
+    // The annotated line is now back in the live viewport. It must still carry
+    // its annotation (re-anchored to a Viewport coord).
+    let row = (0..s.total_rows())
+        .find(|&y| {
+            s.dump_screen_row(y)
+                .unwrap_or_default()
+                .starts_with(&annotated_text)
+        })
+        .expect("annotated line still present after widen");
+    let new_coord = s
+        .screen_row_to_line_coord(row)
+        .expect("row resolves after widen");
+    let hit = s.annotation_at_point(new_coord, 0);
+    assert_eq!(
+        hit.map(|(mid, _)| mid),
+        Some(id),
+        "annotation must survive a widen that pulls its line back into the \
+         viewport; new_coord={new_coord:?}"
+    );
+}
+
+#[test]
+fn logical_abs_and_screen_row_are_inverses() {
+    // `screen_row_to_logical_abs` is the inverse of `abs_to_screen_row`; mark
+    // re-anchoring across reflow depends on the round-trip holding. Every
+    // resolvable unified row must map to a logical abs that projects back to a
+    // row resolving to the same abs (continuation rows snap to their head).
+    let mut s = session_with(80, 6, 100_000);
+    let mut feed = Vec::new();
+    for i in 1..=20u32 {
+        feed.extend_from_slice(format!("MK{i:02}-{}\r\n", "a".repeat(150)).as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    for row in 0..s.total_rows() {
+        let Some(abs) = s.screen_row_to_logical_abs(row) else {
+            continue;
+        };
+        let head = s
+            .abs_to_screen_row(abs)
+            .expect("a resolvable abs must project to a row");
+        let abs2 = s
+            .screen_row_to_logical_abs(head)
+            .expect("the projected head row must resolve to an abs");
+        assert_eq!(abs, abs2, "round-trip broke at row {row}");
+    }
+}
+
+#[test]
+fn annotation_survives_narrow_then_widen_roundtrip() {
+    // The live-drag loop shape: a mark migrates Viewport -> Buffered on the
+    // narrow, then Buffered -> Viewport on the widen back. The full cycle must
+    // keep it attached — the most likely regression vector for the migration.
+    let mut s = session_with(200, 6, 100_000);
+    let mut feed = Vec::new();
+    for i in 1..=30u32 {
+        feed.extend_from_slice(format!("MK{i:02}-{}\r\n", "a".repeat(150)).as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    let top_live_row = s.total_rows() - u32::from(s.rows());
+    let coord = s
+        .screen_row_to_line_coord(top_live_row)
+        .expect("top live row resolves");
+    let annotated_text = s
+        .dump_screen_row(top_live_row)
+        .unwrap_or_default()
+        .trim_end()
+        .chars()
+        .take(4)
+        .collect::<String>();
+    let id = s
+        .add_annotation(LineRange::new(coord, coord), "note".into())
+        .expect("annotation adds");
+
+    s.resize(80, 6).unwrap(); // -> pushed into scrollback (Buffered)
+    s.resize(200, 6).unwrap(); // -> pulled back into the viewport (Viewport)
+
+    let row = (0..s.total_rows())
+        .find(|&y| {
+            s.dump_screen_row(y)
+                .unwrap_or_default()
+                .starts_with(&annotated_text)
+        })
+        .expect("annotated line present after roundtrip");
+    let new_coord = s.screen_row_to_line_coord(row).expect("row resolves");
+    assert_eq!(
+        s.annotation_at_point(new_coord, 0).map(|(mid, _)| mid),
+        Some(id),
+        "annotation must survive a narrow->widen roundtrip; new_coord={new_coord:?}"
+    );
+}
+
+#[test]
+fn widen_does_not_duplicate_reentered_scrollback_rows() {
+    // The originally-reported bug: an app emits soft-wrapped output and the
+    // window is then widened. At a narrow width, long lines soft-wrap and
+    // scroll off into the LineBuffer. Widening un-wraps them: ghostty
+    // reflows, the active viewport reaches further back into history, so
+    // lines captured into the LineBuffer re-enter the live viewport. Without
+    // the resize-time dedup, the unified frame (LineBuffer ++ viewport)
+    // renders them twice.
+    let mut s = session_with(20, 4, 1024);
+    let mut feed = Vec::new();
+    for i in 1..=8u32 {
+        feed.extend_from_slice(format!("MK{i:02}-aaaaaaaaaaaaaaaaaaaaaaaa\r\n").as_bytes());
+    }
+    s.feed(&feed).unwrap();
+    assert!(
+        !s.line_buffer().is_empty(),
+        "setup must scroll some lines into the LineBuffer"
+    );
+
+    s.resize(80, 4).unwrap();
+
+    let seen = marker_counts(&s);
+    let duplicated: Vec<_> = seen.iter().filter(|&(_, &c)| c > 1).collect();
+    assert!(
+        duplicated.is_empty(),
+        "widen must not duplicate re-entered scrollback rows; duplicated: {duplicated:?}"
+    );
+    for i in 1..=8u32 {
+        let key = format!("MK{i:02}");
+        assert_eq!(seen.get(&key), Some(&1), "{key} must appear exactly once");
+    }
+}
+
+#[test]
+fn grow_rows_at_narrow_width_does_not_duplicate_complete_lines() {
+    // Growing the viewport height at the *same* wrapping width pulls
+    // scrollback rows back into the active grid — a re-entry with no column
+    // reflow, where the viewport top lands mid-line (a straddler). The
+    // `skip_fragment` guard realigns the comparison so every fully
+    // re-entered complete logical line is popped.
+    let mut s = session_with(20, 4, 1024);
+    let mut feed = Vec::new();
+    for i in 1..=12u32 {
+        feed.extend_from_slice(format!("MK{i:02}-aaaaaaaaaaaaaaaaaaaaaaaa\r\n").as_bytes());
+    }
+    s.feed(&feed).unwrap();
+    assert!(
+        !s.line_buffer().is_empty(),
+        "setup must populate LineBuffer"
+    );
+
+    s.resize(20, 16).unwrap(); // grow rows only
+
+    let seen = marker_counts(&s);
+    let dups: Vec<_> = seen.iter().filter(|&(_, &c)| c > 1).collect();
+    assert!(
+        dups.is_empty(),
+        "growing rows must not duplicate re-entered complete lines; duplicated: {dups:?}"
+    );
+}
+
+#[test]
+fn grow_rows_straddler_tail_row_no_residual_duplicate() {
+    // Each line carries a unique tail token (`ENDnn`) so the straddler's
+    // tail *row* — not just its line start — is detectable. The straddler
+    // heal re-seats the LineBuffer's complete copy as head-only so the
+    // viewport's re-shown tail row is not a second copy.
+    let mut s = session_with(20, 4, 1024);
+    let mut feed = Vec::new();
+    for i in 1..=12u32 {
+        feed.extend_from_slice(format!("L{i:02}{}END{i:02}\r\n", "x".repeat(20)).as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    s.resize(20, 16).unwrap();
+
+    let mut counts: std::collections::HashMap<u32, u32> = Default::default();
+    for y in 0..s.total_rows() {
+        let t = s.dump_screen_row(y).unwrap_or_default();
+        for i in 1..=12u32 {
+            if t.contains(&format!("END{i:02}")) {
+                *counts.entry(i).or_default() += 1;
+            }
+        }
+    }
+    let dups: Vec<_> = counts.iter().filter(|&(_, &c)| c > 1).collect();
+    assert!(
+        dups.is_empty(),
+        "straddler tail row must not duplicate; duplicated: {dups:?}"
+    );
+}
+
+#[test]
+fn resize_dedup_preserves_all_lines_across_narrow_and_repeated_widen() {
+    // Guards against over-popping: narrowing (rows leave the viewport, none
+    // re-enter) and repeated widening (idempotent) must each leave every
+    // unique line present exactly once.
+    let mut s = session_with(20, 4, 1024);
+    let mut feed = Vec::new();
+    for i in 1..=8u32 {
+        feed.extend_from_slice(format!("MK{i:02}-aaaaaaaaaaaaaaaaaaaaaaaa\r\n").as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    for &(c, r) in &[(80u16, 4u16), (30, 4), (80, 4)] {
+        s.resize(c, r).unwrap();
+        let seen = marker_counts(&s);
+        for i in 1..=8u32 {
+            let key = format!("MK{i:02}");
+            assert_eq!(
+                seen.get(&key),
+                Some(&1),
+                "{key} must appear exactly once after resize to {c}x{r}; counts={seen:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn shrink_then_widen_roundtrip_preserves_lines() {
+    // Shrink (narrow) then grow back (widen) at a fixed height. The narrow
+    // reflows lines to wrap; the widen un-wraps and re-enters them. Every
+    // line must survive exactly once: no duplicate from the widen, no loss
+    // from the narrow.
+    let mut s = session_with(80, 4, 1024);
+    let mut feed = Vec::new();
+    for i in 1..=10u32 {
+        feed.extend_from_slice(format!("MK{i:02}-aaaaaaaaaaaaaaaaaaaaaaaa\r\n").as_bytes());
+    }
+    s.feed(&feed).unwrap();
+
+    s.resize(20, 4).unwrap();
+    s.resize(80, 4).unwrap();
+
+    let seen = marker_counts(&s);
+    for i in 1..=10u32 {
+        let key = format!("MK{i:02}");
+        assert_eq!(
+            seen.get(&key),
+            Some(&1),
+            "{key} must appear exactly once after shrink→widen; counts={seen:?}"
+        );
+    }
+}
+
+#[test]
+fn widen_dedup_handles_cjk_wide_char_straddle() {
+    // CJK syllables are 2 cells wide, so one straddles the right margin and
+    // ghostty marks that row's eol `Dwc`. The captured LineBuffer tail is a
+    // Dwc partial, which the dedup must treat like a Soft head (prefix match)
+    // on widen — without duplicating, losing, or corrupting the wide content.
+    let mut s = session_with(20, 4, 1024);
+    let suffix = "가나다라마바사아자차가나";
+    let mut feed = Vec::new();
+    for i in 1..=8u32 {
+        feed.extend_from_slice(format!("MK{i:02}X{suffix}\r\n").as_bytes());
+    }
+    s.feed(&feed).unwrap();
+    assert!(
+        !s.line_buffer().is_empty(),
+        "setup must populate LineBuffer"
+    );
+
+    s.resize(80, 4).unwrap();
+
+    let seen = marker_counts(&s);
+    for i in 1..=8u32 {
+        let key = format!("MK{i:02}");
+        assert_eq!(seen.get(&key), Some(&1), "{key} must appear exactly once");
+    }
+    let expected = format!("MK03X{suffix}");
+    let hits = frame_lines(&s)
+        .into_iter()
+        .filter(|l| *l == expected)
+        .count();
+    assert_eq!(
+        hits, 1,
+        "MK03 wide-char line must reflow intact exactly once"
+    );
+}
+
 #[test]
 fn alt_screen_seals_partial_tail() {
     let mut s = session_with(80, 3, 1024);

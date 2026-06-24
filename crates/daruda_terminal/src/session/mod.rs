@@ -1201,52 +1201,11 @@ impl TerminalSession {
         if start >= viewport_top {
             return;
         }
-        // Anchor the append loop in LineBuffer abs space rather than
-        // ghostty row space: `intended` advances by one logical line per
-        // appended row (modulo soft-tail extension), so a producer-side
-        // glitch — phantom `take_scrolled_rows` spike, stale tracked
-        // pin, RIS-induced active_row slip — is caught at the first
-        // mismatched row instead of silently re-appending. Pre-Step 3
-        // the loop simply called `append` without any such cross-check.
-        let mut intended = self.line_buffer.next_append_abs();
-        for y in start..viewport_top {
-            // Empty text on dump failure (e.g., row evicted from ghostty
-            // scrollback); preserves line numbering.
-            let text = self.terminal.dump_screen_row(y).unwrap_or_default();
-            let runs = self
-                .terminal
-                .dump_screen_row_style_runs(y)
-                .unwrap_or_default();
-            let url_ids = self.terminal.dump_screen_row_url_ids(y).unwrap_or_default();
-            let eol = match self.terminal.row_wrap_kind(y) {
-                ghostty_vt::WrapKind::Soft => EolKind::Soft,
-                ghostty_vt::WrapKind::Hard => EolKind::Hard,
-            };
-            match self
-                .line_buffer
-                .append_at_or_after(intended, &text, &runs, eol)
-            {
-                Ok(next) => {
-                    self.line_buffer.attach_url_ids_to_tail(&url_ids);
-                    intended = next;
-                }
-                Err(err) => {
-                    LogWriter::log(
-                        ErrorReport::new("LineBuffer capture desync — append refused")
-                            .severity(ErrorSeverity::Warning)
-                            .with_context("detail", err.to_string())
-                            .at(file!(), line!())
-                            .dedup("session.capture.desync")
-                            .build(),
-                    );
-                    // Resync the local cursor to the buffer's own tail so
-                    // subsequent rows in this loop don't fire the same
-                    // error repeatedly. Skip `attach_url_ids_to_tail` —
-                    // there is no fresh tail to attach to.
-                    intended = self.line_buffer.next_append_abs();
-                }
-            }
-        }
+        // Append the scrolled-out rows. The shared helper anchors the loop
+        // in LineBuffer abs space so a producer-side glitch — phantom
+        // `take_scrolled_rows` spike, stale tracked pin — is caught at the
+        // first mismatched row instead of silently re-appending.
+        self.append_ghostty_rows(start..viewport_top, "session.capture.desync");
         self.last_captured_lb_abs = Some(self.line_buffer.next_append_abs());
         // Rebind viewport-resident marks whose row has just been
         // captured into LineBuffer. A mark registered with
@@ -1914,6 +1873,112 @@ impl TerminalSession {
         None
     }
 
+    /// Inverse of [`Self::abs_to_screen_row`]: map a unified-frame row
+    /// (`dump_screen_row` space) to the wrap-invariant logical-line abs of
+    /// the line it sits on. Used at resize entry to convert a width-dependent
+    /// `LineCoord::Viewport` anchor into a logical-line abs that survives the
+    /// reflow, then re-project it via `abs_to_screen_row` at the new width.
+    /// Returns `None` in alt-screen or when the row sits past the live frame.
+    ///
+    /// Mirrors `abs_to_screen_row`'s two branches inversely — keep the two in
+    /// sync: the LineBuffer branch reads a buffer position whose `abs_index`
+    /// *is* the logical-line abs; the grid branch counts Hard EOLs in ghostty
+    /// screen space (NOT LineBuffer abs).
+    ///
+    /// NOTE: a soft-wrap *continuation* row maps to its logical line's abs
+    /// (no Hard EOL fires before it), so a mark on a continuation row snaps to
+    /// the line's head row after re-projection. This matches `abs_to_screen_row`'s
+    /// head-row contract and the SP-1 "one annotation box per logical line" goal.
+    fn screen_row_to_logical_abs(&self, unified_row: u32) -> Option<LogicalLineAbs> {
+        let cols = self.dims.cols;
+        let overflow = self.line_buffer.overflow();
+        let lb_visual = self.line_buffer.wrapped_row_count(cols);
+        if unified_row < lb_visual {
+            let (pos, _, _) = self
+                .line_buffer
+                .position_for_visual_row(unified_row, cols)?;
+            return Some(LogicalLineAbs(pos.abs_index));
+        }
+        if self.alt_screen {
+            return None;
+        }
+        let scrolled = self.terminal.peek_scrolled_rows();
+        let viewport_top = self.terminal.viewport_row_offset();
+        let frame_start = viewport_top.saturating_sub(scrolled);
+        let frame_end = viewport_top.saturating_add(self.dims.rows as u32);
+        let target_y = frame_start.saturating_add(unified_row - lb_visual);
+        if target_y >= frame_end {
+            return None;
+        }
+        let base = overflow.saturating_add(self.line_buffer.len() as u64);
+        let grid_logical = self.count_hard_eols_in_ghostty_range(frame_start, target_y);
+        Some(LogicalLineAbs(base.saturating_add(grid_logical)))
+    }
+
+    /// Snapshot every single-line mark as its wrap-invariant logical-line
+    /// abs, taken at the **old** width before a resize reflow moves lines
+    /// across the LineBuffer↔grid seam (a narrow pushes grid lines into the
+    /// buffer; a widen pulls buffer lines back into the grid). A `Viewport`
+    /// coord (width-dependent visual-row) converts via
+    /// `screen_row_to_logical_abs`; a `Buffered` coord on a real buffer line
+    /// already holds the logical-line abs in its `abs_index`. Paired with
+    /// [`Self::reproject_marks`], which re-anchors them once the buffer
+    /// settles — capturing both sides is what lets a mark migrate
+    /// Viewport↔Buffered in either resize direction without being lost.
+    fn snapshot_marks_logical_abs(&self) -> Vec<(MarkId, LogicalLineAbs)> {
+        if self.alt_screen {
+            return Vec::new();
+        }
+        let overflow = self.line_buffer.overflow();
+        self.interval_tree
+            .iter()
+            .filter_map(|m| match (m.range.start, m.range.end) {
+                _ if m.range.start != m.range.end => None,
+                (LineCoord::Viewport { abs_y: s }, _) => {
+                    let unified_row = u32::try_from(s.checked_sub(overflow)?).ok()?;
+                    Some((m.id, self.screen_row_to_logical_abs(unified_row)?))
+                }
+                (LineCoord::Buffered(pos), _) => {
+                    // Only snapshot marks on a real buffer line. A degenerate
+                    // abs at/past the tail (or on an empty buffer) is not a
+                    // live line and must not be reinterpreted as a grid row;
+                    // leave it untouched.
+                    let k = pos.abs_index.checked_sub(overflow)?;
+                    (k < self.line_buffer.len() as u64)
+                        .then_some((m.id, LogicalLineAbs(pos.abs_index)))
+                }
+            })
+            .collect()
+    }
+
+    /// Re-project marks snapshotted by [`Self::snapshot_marks_logical_abs`]
+    /// onto their post-reflow coords at the **new** width. A line now in the
+    /// LineBuffer becomes `Buffered`; one now in the live grid becomes
+    /// `Viewport` at its new visual row; one evicted or past the frame is
+    /// dropped. Run after the LineBuffer is in its final post-resize state.
+    fn reproject_marks(&mut self, snapshot: Vec<(MarkId, LogicalLineAbs)>) {
+        for (id, abs) in snapshot {
+            match self
+                .abs_to_screen_row(abs)
+                .and_then(|row| self.screen_row_to_line_coord(row))
+            {
+                Some(coord) => {
+                    // Skip the update when the coord is unchanged — a mark
+                    // whose line did not cross the seam re-projects to its
+                    // existing position, and a no-op `update_payload_range`
+                    // would still churn the tree and emit a record.
+                    let new_range = LineRange::new(coord, coord);
+                    if self.interval_tree.range_of(id) != Some(new_range) {
+                        self.interval_tree.update_payload_range(id, new_range);
+                    }
+                }
+                None => {
+                    self.interval_tree.remove_payload(id);
+                }
+            }
+        }
+    }
+
     /// Absolute row index at the top of the visible viewport.
     /// `scroll_offset == 0` pins the viewport to the bottom; positive
     /// `scroll_offset` walks back into `line_buffer` scrollback.
@@ -2013,9 +2078,25 @@ impl TerminalSession {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
+        // Snapshot all marks as wrap-invariant logical-line abs at the OLD
+        // width, before the reflow moves lines across the LineBuffer↔grid
+        // seam. Re-projected at the new width once the LineBuffer settles
+        // (see `reproject_marks` below).
+        let marks_snapshot = self.snapshot_marks_logical_abs();
         self.dims.cols = cols;
         self.dims.rows = rows;
         let result = self.terminal.resize(cols, rows);
+        // Widening un-wraps soft-wrapped rows: ghostty reflows its own pages
+        // and pulls history rows back into the active viewport, but those
+        // rows are still mirrored in the LineBuffer tail, so the unified
+        // frame (LineBuffer rows ++ viewport rows) would render the overlap
+        // twice — and re-capture it on the next scroll, leaving a permanent
+        // duplicated block in scrollback. Pop the re-entered tail lines,
+        // gated on content equality so nothing is lost. Must run before the
+        // watermark re-anchor below so it anchors to the post-pop tail.
+        if !self.alt_screen && std::env::var_os("DARUDA_NO_SEAM_DEDUP").is_none() {
+            self.pop_verified_reentered_lines();
+        }
         // Ghostty reflows soft-wrapped rows on resize, so
         // `viewport_row_offset` may drop (widen) or rise (narrow) by an
         // unpredictable amount. Re-anchor the capture cursor against
@@ -2069,7 +2150,183 @@ impl TerminalSession {
         // narrowing does not leave stale start/end column pairs pointing
         // past the right margin.
         self.interval_tree.clamp_payload_cols(cols);
+        // Re-anchor marks snapshotted above: the LineBuffer and grid are now
+        // in their final post-resize state, so each logical abs re-projects to
+        // its correct new row/coord (Viewport↔Buffered as the line moved).
+        self.reproject_marks(marks_snapshot);
         result
+    }
+
+    /// Content-verified dedup of complete logical lines that re-entered the
+    /// live viewport after a widen reflow. ghostty reflows its own pages on
+    /// resize, pulling history rows back into the active area, but the
+    /// LineBuffer mirror keeps its pre-reflow copy of those rows; without
+    /// this they render and re-capture twice (see the call site in
+    /// [`Self::resize`]).
+    ///
+    /// Re-derive the ring's complete logical lines downward from the viewport
+    /// top, then pop the longest run of LineBuffer tail lines that equals
+    /// them in order (the newest buffered line pairs with the deepest matched
+    /// ring line). Every pop is equality-gated — a mismatch stops the walk —
+    /// so an unmatched residue is left duplicated but content is never lost.
+    /// O(viewport rows); only on resize.
+    fn pop_verified_reentered_lines(&mut self) {
+        let v1 = self.terminal.viewport_row_offset();
+        let end = v1.saturating_add(u32::from(self.dims.rows));
+        // When the viewport top sits *mid-line* — the row just above it ended
+        // Soft, so `v1` is a wrap continuation — the first run is the tail
+        // fragment of a straddling line whose head is below the viewport
+        // (still in the LineBuffer as a complete line). That fragment is not
+        // a complete logical line; recording it would shift every subsequent
+        // line by one and break the alignment with the LineBuffer's complete
+        // tail. Skip it.
+        let mut skip_fragment = v1 > 0 && !is_hard_eol(self.terminal.row_wrap_kind(v1 - 1));
+        let mut ring_lines: Vec<String> = Vec::new();
+        let mut y = v1;
+        while y < end {
+            let mut text = String::new();
+            let mut complete = false;
+            while y < end {
+                text.push_str(&self.terminal.dump_screen_row(y).unwrap_or_default());
+                let hard = is_hard_eol(self.terminal.row_wrap_kind(y));
+                y = y.saturating_add(1);
+                if hard {
+                    complete = true;
+                    break;
+                }
+            }
+            if !complete {
+                break;
+            }
+            if skip_fragment {
+                skip_fragment = false;
+                continue;
+            }
+            ring_lines.push(text);
+        }
+        // Longest `m` where the LineBuffer's last `m` lines equal the ring's
+        // first `m` lines in order. A Hard line must match a complete ring
+        // line exactly; the buffer's *newest* line may be a Soft/Dwc partial
+        // (only a straddling line's head was captured before its tail
+        // scrolled), so it matches when the ring's complete line *starts
+        // with* the captured head.
+        let lb_len = self.line_buffer.len();
+        let max_m = ring_lines.len().min(lb_len);
+        let mut m = 0usize;
+        for cand in (1..=max_m).rev() {
+            let matches = (0..cand).all(|i| {
+                let is_newest = i == cand - 1;
+                self.line_buffer.get(lb_len - cand + i).is_some_and(|l| {
+                    // Trim trailing blanks on both sides: the LineBuffer text
+                    // was joined from rows wrapped at the *old* width and the
+                    // ring row is padded at the *new* width, so the trailing
+                    // padding differs even for identical content.
+                    let lt = l.text.trim_end();
+                    let rt = ring_lines[i].trim_end();
+                    match l.eol {
+                        EolKind::Hard => lt == rt,
+                        EolKind::Soft | EolKind::Dwc => {
+                            is_newest && !lt.is_empty() && rt.starts_with(lt)
+                        }
+                    }
+                })
+            });
+            if matches {
+                m = cand;
+                break;
+            }
+        }
+        for _ in 0..m {
+            self.pop_reentered_tail_line();
+        }
+
+        // Residual straddler heal. When the viewport top sits mid-line, the
+        // logical line whose head is below the viewport is held *complete* in
+        // the LineBuffer while the viewport re-shows its tail (the fragment
+        // skipped above) — so that tail row renders twice. Re-seat the
+        // LineBuffer's copy as head-only (Soft), re-derived from ghostty's
+        // rows above the viewport, so `LineBuffer(head) + viewport(tail)`
+        // render the straddler exactly once. Content-gated.
+        if v1 > 0 && !is_hard_eol(self.terminal.row_wrap_kind(v1 - 1)) {
+            let mut b = v1;
+            while b > 0 && !is_hard_eol(self.terminal.row_wrap_kind(b - 1)) {
+                b -= 1;
+            }
+            let head: String = (b..v1)
+                .map(|y| self.terminal.dump_screen_row(y).unwrap_or_default())
+                .collect();
+            let head_trim = head.trim_end();
+            let tail_holds_straddler = !head_trim.is_empty()
+                && self
+                    .line_buffer
+                    .get(self.line_buffer.len().wrapping_sub(1))
+                    .is_some_and(|l| {
+                        l.eol == EolKind::Hard && l.text.trim_end().starts_with(head_trim)
+                    });
+            if tail_holds_straddler {
+                self.pop_reentered_tail_line();
+                self.append_ghostty_rows(b..v1, "session.resize.seam_heal");
+            }
+        }
+    }
+
+    /// Append ghostty screen rows `range` into the LineBuffer, folding
+    /// soft-wrapped rows into one logical line. Anchors the loop in
+    /// LineBuffer abs space (`append_at_or_after`) so a producer-side glitch
+    /// is caught at the first mismatched row rather than silently
+    /// re-appended; `site` tags the desync log. Shared by
+    /// [`Self::capture_scrolled_out`] and the straddler heal in
+    /// [`Self::pop_verified_reentered_lines`].
+    fn append_ghostty_rows(&mut self, range: std::ops::Range<u32>, site: &'static str) {
+        let mut intended = self.line_buffer.next_append_abs();
+        for y in range {
+            // Empty text on dump failure (e.g., row evicted from ghostty
+            // scrollback); preserves line numbering.
+            let text = self.terminal.dump_screen_row(y).unwrap_or_default();
+            let runs = self
+                .terminal
+                .dump_screen_row_style_runs(y)
+                .unwrap_or_default();
+            let url_ids = self.terminal.dump_screen_row_url_ids(y).unwrap_or_default();
+            let eol = match self.terminal.row_wrap_kind(y) {
+                ghostty_vt::WrapKind::Soft => EolKind::Soft,
+                ghostty_vt::WrapKind::Hard => EolKind::Hard,
+            };
+            match self
+                .line_buffer
+                .append_at_or_after(intended, &text, &runs, eol)
+            {
+                Ok(next) => {
+                    self.line_buffer.attach_url_ids_to_tail(&url_ids);
+                    intended = next;
+                }
+                Err(err) => {
+                    LogWriter::log(
+                        ErrorReport::new("LineBuffer append refused")
+                            .severity(ErrorSeverity::Warning)
+                            .with_context("detail", err.to_string())
+                            .at(file!(), line!())
+                            .dedup(site)
+                            .build(),
+                    );
+                    // Resync the local cursor to the buffer's own tail so
+                    // subsequent rows don't fire the same error repeatedly.
+                    intended = self.line_buffer.next_append_abs();
+                }
+            }
+        }
+    }
+
+    /// Drop the newest LineBuffer line because it re-entered the live
+    /// viewport on a widen reflow. Marks on it are **not** dropped here —
+    /// `resize` snapshots every mark's logical abs before the reflow and
+    /// `reproject_marks` re-anchors them (Buffered → Viewport for a line that
+    /// re-entered the grid) once the buffer settles. Evicting here instead
+    /// would silently detach an annotation on a re-entered line.
+    fn pop_reentered_tail_line(&mut self) {
+        if self.line_buffer.last_abs().is_some() {
+            self.line_buffer.pop_tail();
+        }
     }
 
     pub fn take_dirty_viewport_rows(&mut self) -> Vec<u16> {

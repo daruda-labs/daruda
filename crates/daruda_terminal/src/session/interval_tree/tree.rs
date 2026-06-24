@@ -304,6 +304,15 @@ impl<P> IntervalTree<P> {
         self.nodes.get(idx)?.as_ref().map(|n| &n.payload)
     }
 
+    /// O(1) lookup of a mark's current range by id via the `by_id` index.
+    /// Returns `None` if the id has been removed or never existed. Lets a
+    /// caller skip a no-op `update_range` (and its delete+re-insert + record
+    /// emit) when re-anchoring to an unchanged range.
+    pub fn range_of(&self, id: MarkId) -> Option<LineRange> {
+        let idx = *self.by_id.get(&id)?;
+        self.nodes.get(idx)?.as_ref().map(|n| n.range)
+    }
+
     /// In-order iterator over all marks, yielding `MarkRef`s in ascending
     /// `(range.start, id)` order.
     pub fn iter(&self) -> InOrderIter<'_, P> {
