@@ -528,6 +528,18 @@ impl Pane {
     }
 }
 
+/// Live-drag coalescing gate (cmux `shouldApplySurfacePixelSizeChange`
+/// analog): whether a freshly-computed grid should be forwarded to the PTY
+/// and terminal view, given the grid already applied. A live drag emits a
+/// bounds notification per pixel, but daruda's grid is cell-quantized, so most
+/// notifications recompute the *same* `(cols, rows)`. Forwarding those fires a
+/// redundant PTY SIGWINCH — the child app repaints over itself — plus a
+/// ghostty reflow on every frame. Skip when the grid is unchanged; the next
+/// real cell-boundary crossing differs and is forwarded.
+fn grid_resize_needed(current: (u16, u16), computed: (u16, u16)) -> bool {
+    current != computed
+}
+
 impl TerminalContent {
     /// Update OSC-derived title / cwd in place. Returns `true` iff a
     /// field actually changed, so the caller can scope `cx.notify` to
@@ -570,6 +582,19 @@ impl TerminalContent {
         // (mirrors Zed's `cell_width * 2` minimum guard).
         let cols = layout.cols((avail_w - inset_x * 2.0).max(1.0)).max(2);
         let rows = layout.rows((avail_h - pane_header_h - inset_y * 2.0).max(1.0));
+
+        // Live-drag coalescing gate: skip when the recomputed grid equals the
+        // grid already applied (sub-cell pixel churn during a drag). Avoids a
+        // redundant PTY SIGWINCH + ghostty reflow on every bounds notification.
+        // Counts as "measured" — the grid is already correct — so the caller
+        // does not mark the resize pending.
+        let current_grid = {
+            let view = self.view.read(cx);
+            (view.session().cols(), view.session().rows())
+        };
+        if !grid_resize_needed(current_grid, (cols, rows)) {
+            return true;
+        }
 
         if let Some(master) = &self.master {
             let _ = master.resize(portable_pty::PtySize {
@@ -1197,5 +1222,17 @@ mod tests {
             stdout_poll_interval(cap, 0, IDLE_GRACE_TICKS + 1),
             Duration::from_millis(16)
         );
+    }
+
+    #[test]
+    fn grid_resize_skips_unchanged_grid() {
+        // Live-drag coalescing gate: a recomputed grid equal to the applied
+        // grid must NOT be forwarded — skips the redundant PTY SIGWINCH +
+        // ghostty reflow that sub-cell pixel churn fires on every bounds
+        // notification during a drag (Retina: 1pt = 2px).
+        assert!(!grid_resize_needed((80, 24), (80, 24)));
+        // A real cell-boundary crossing in either dimension is forwarded.
+        assert!(grid_resize_needed((80, 24), (81, 24)));
+        assert!(grid_resize_needed((80, 24), (80, 25)));
     }
 }
