@@ -331,6 +331,17 @@ pub(in crate::workspace) struct AgentChatContent {
     /// Drives the input affordance (Send ↔ Stop) and disables re-submit
     /// while the agent is busy.
     pub(in crate::workspace) turn_in_flight: bool,
+    /// Parsed Markdown blocks for settled text items, keyed by their index
+    /// in `items`. Filled once per message by `reconcile_markdown` after the
+    /// event pump folds an event — parsing happens in the op, never in
+    /// `render` (which only reads this cache). The streaming tail item is
+    /// left out until it settles, so it renders as plain wrapped text. Safe
+    /// to key by index because `items` is append-only: only the tail mutates,
+    /// and a settled item's text never changes again.
+    pub(in crate::workspace) md_blocks: std::collections::HashMap<
+        usize,
+        Vec<crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock>,
+    >,
 }
 
 pub(in crate::workspace) struct Pane {

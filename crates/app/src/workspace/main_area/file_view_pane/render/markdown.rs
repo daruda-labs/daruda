@@ -43,6 +43,27 @@ pub(super) fn render_md_body(
     col
 }
 
+/// Render a flat block list as a plain column, without the file-viewer's
+/// block-level selection wiring or outer body padding. Reused by the Agent
+/// chat pane to render settled message text through the same block renderer
+/// as the file-viewer Markdown preview. Pure `(&[MdBlock], &DarudaTheme)` —
+/// no `cx`, so it can be called from any render context.
+pub(in crate::workspace) fn render_md_blocks_plain(
+    blocks: &[MdBlock],
+    t: &DarudaTheme,
+) -> impl IntoElement + use<> {
+    let mut col = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::MD_BLOCK_GAP))
+        .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
+        .text_color(t.text_body);
+    for block in blocks {
+        col = col.child(render_md_block(block, t));
+    }
+    col
+}
+
 fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
     match block {
         MdBlock::Heading { level, spans } => {

@@ -83,6 +83,7 @@ impl Workspace {
                 _event_pump: None,
                 pending_permission: None,
                 turn_in_flight: false,
+                md_blocks: std::collections::HashMap::new(),
             }),
         }
     }
@@ -234,6 +235,17 @@ impl Workspace {
             self.report_error(report, cx);
         }
 
+        // Parse params for the Markdown reconcile, read before the mutable
+        // borrow of the pane content. Mirrors the file-viewer loader:
+        // `is_light = !diagram_dark`, where `diagram_dark` comes from the
+        // active theme (default dark when the global is absent).
+        let syntax_theme = self.syntax_theme.clone();
+        let is_light = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(crate::ui::theme::DarudaTheme::is_dark)
+            .map(|dark| !dark)
+            .unwrap_or(false);
+
         let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
             return;
         };
@@ -253,6 +265,7 @@ impl Workspace {
                 ac.turn_in_flight = false;
             }
         }
+        reconcile_markdown(ac, &syntax_theme, is_light);
         cx.notify();
     }
 
@@ -275,6 +288,15 @@ impl Workspace {
         if let Some(handle) = &ac.handle {
             handle.send_prompt(text);
             ac.turn_in_flight = true;
+        }
+        let syntax_theme = self.syntax_theme.clone();
+        let is_light = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(crate::ui::theme::DarudaTheme::is_dark)
+            .map(|dark| !dark)
+            .unwrap_or(false);
+        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
+            reconcile_markdown(ac, &syntax_theme, is_light);
         }
         cx.notify();
     }
@@ -356,5 +378,148 @@ impl Workspace {
             .iter_mut()
             .find(|p| p.id == pane_id)?
             .agent_chat_content_mut()
+    }
+}
+
+/// Markdown-parse text of `item` if it carries any; tool-call / permission /
+/// error items have no Markdown body and return `None`.
+fn item_text(item: &daruda_acp::ChatItem) -> Option<&str> {
+    use daruda_acp::ChatItem;
+    match item {
+        ChatItem::UserText(text)
+        | ChatItem::AssistantText { text, .. }
+        | ChatItem::Thinking { text, .. } => Some(text.as_str()),
+        ChatItem::ToolCall(_) | ChatItem::Permission(_) | ChatItem::Error(_) => None,
+    }
+}
+
+/// Whether the text item at `idx` has settled — its text will no longer
+/// change, so it is safe to parse once and cache.
+///
+/// Rule: every text item *except the last* is settled (the agent never
+/// re-streams an earlier message). The last item is settled only when it is a
+/// finished text item — `UserText` (always complete) or a non-streaming
+/// `AssistantText` / `Thinking`. A streaming tail is left unsettled so it
+/// renders as plain wrapped text until `TurnEnded` flips `streaming` off.
+fn item_settled(items: &[daruda_acp::ChatItem], idx: usize) -> bool {
+    use daruda_acp::ChatItem;
+    if idx + 1 < items.len() {
+        return true;
+    }
+    matches!(
+        items.get(idx),
+        Some(
+            ChatItem::UserText(_)
+                | ChatItem::AssistantText {
+                    streaming: false,
+                    ..
+                }
+                | ChatItem::Thinking {
+                    streaming: false,
+                    ..
+                }
+        )
+    )
+}
+
+/// Parse-and-cache Markdown for every settled text item that is not already
+/// cached. Called from the event pump (and the local prompt echo) after
+/// `items` is mutated. `items` is append-only with only the tail mutating, so
+/// index keys stay stable and no cache invalidation is needed.
+fn reconcile_markdown(ac: &mut AgentChatContent, syntax_theme: &str, is_light: bool) {
+    use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
+    for idx in 0..ac.items.len() {
+        if ac.md_blocks.contains_key(&idx) {
+            continue;
+        }
+        if !item_settled(&ac.items, idx) {
+            continue;
+        }
+        if let Some(text) = item_text(&ac.items[idx]) {
+            ac.md_blocks
+                .insert(idx, parse_markdown(text, syntax_theme, is_light));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use daruda_acp::ChatItem;
+
+    /// `reconcile_markdown` parses settled text items and leaves the streaming
+    /// tail untouched until it settles. Only the GPUI-bound `focus_handle`
+    /// needs a live context; the rest is plain data.
+    #[gpui::test]
+    fn reconcile_caches_settled_text_only(cx: &mut gpui::TestAppContext) {
+        let ac = cx.update(|cx| {
+            let focus_handle = cx.focus_handle();
+            AgentChatContent {
+                focus_handle,
+                cached_title: "t".into(),
+                cwd: None,
+                status: AgentSessionStatus::Connected,
+                items: vec![
+                    ChatItem::UserText("# hello".to_owned()),
+                    ChatItem::AssistantText {
+                        text: "world".to_owned(),
+                        streaming: true,
+                    },
+                ],
+                handle: None,
+                _event_pump: None,
+                pending_permission: None,
+                turn_in_flight: false,
+                md_blocks: std::collections::HashMap::new(),
+            }
+        });
+        let mut ac = ac;
+
+        reconcile_markdown(&mut ac, "base16-ocean.dark", false);
+        // index 0 (UserText) is settled → cached; index 1 (streaming tail)
+        // is not.
+        assert!(ac.md_blocks.contains_key(&0));
+        assert!(!ac.md_blocks.contains_key(&1));
+
+        // Flip the tail to settled → it now parses on the next reconcile.
+        if let ChatItem::AssistantText { streaming, .. } = &mut ac.items[1] {
+            *streaming = false;
+        }
+        reconcile_markdown(&mut ac, "base16-ocean.dark", false);
+        assert!(ac.md_blocks.contains_key(&1));
+    }
+
+    #[test]
+    fn item_settled_rules() {
+        // A non-tail item is always settled.
+        let items = vec![
+            ChatItem::AssistantText {
+                text: "a".to_owned(),
+                streaming: true,
+            },
+            ChatItem::UserText("b".to_owned()),
+        ];
+        assert!(item_settled(&items, 0)); // not the tail → settled even if streaming
+        assert!(item_settled(&items, 1)); // UserText tail → settled
+
+        // Streaming tail → unsettled.
+        let items = vec![ChatItem::Thinking {
+            text: "x".to_owned(),
+            streaming: true,
+        }];
+        assert!(!item_settled(&items, 0));
+
+        // Non-streaming tail → settled.
+        let items = vec![ChatItem::AssistantText {
+            text: "x".to_owned(),
+            streaming: false,
+        }];
+        assert!(item_settled(&items, 0));
+    }
+
+    #[test]
+    fn item_text_skips_non_text_items() {
+        assert!(item_text(&ChatItem::Error("e".to_owned())).is_none());
+        assert_eq!(item_text(&ChatItem::UserText("u".to_owned())), Some("u"));
     }
 }

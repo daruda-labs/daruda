@@ -26,6 +26,8 @@ use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px, rel
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock;
+use crate::workspace::main_area::file_view_pane::render::render_md_blocks_plain;
 use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -64,7 +66,8 @@ pub(in crate::workspace) fn render(
             .px(px(theme::AGENT_CHAT_PAD_X))
             .py(px(theme::AGENT_CHAT_PAD_Y));
         for (ix, item) in content.items.iter().enumerate() {
-            list = list.child(render_item(pane_id, ix, item, &t, cx));
+            let blocks = content.md_blocks.get(&ix).map(Vec::as_slice);
+            list = list.child(render_item(pane_id, ix, item, blocks, &t, cx));
         }
         list.into_any_element()
     };
@@ -110,21 +113,24 @@ fn status_banner(
     )
 }
 
-/// One conversation row.
+/// One conversation row. `md_blocks` is the parsed Markdown for this item's
+/// text when it has settled (filled by `reconcile_markdown` in the ops layer);
+/// `None` means the text is still streaming and renders as plain wrapped text.
 fn render_item(
     pane_id: PaneId,
     ix: usize,
     item: &ChatItem,
+    md_blocks: Option<&[MdBlock]>,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(text, t).into_any_element(),
+        ChatItem::UserText(text) => user_bubble(text, md_blocks, t).into_any_element(),
         ChatItem::AssistantText { text, streaming } => {
-            assistant_block(text, *streaming, t).into_any_element()
+            assistant_block(text, *streaming, md_blocks, t).into_any_element()
         }
         ChatItem::Thinking { text, streaming } => {
-            thinking_block(text, *streaming, t).into_any_element()
+            thinking_block(text, *streaming, md_blocks, t).into_any_element()
         }
         ChatItem::ToolCall(tc) => tool_card(tc, t).into_any_element(),
         ChatItem::Permission(card) => permission_card(pane_id, ix, card, t, cx).into_any_element(),
@@ -132,32 +138,56 @@ fn render_item(
     }
 }
 
-/// User prompt — right-aligned accent-tinted bubble.
-fn user_bubble(text: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
-    div().flex().flex_row().justify_end().child(
-        div()
-            .max_w(relative(0.85))
-            .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-            .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
-            .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-            .bg(t.lane_card_active_bg)
-            .text_color(t.text_primary)
-            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-            .child(SharedString::from(text.to_string())),
-    )
+/// User prompt — right-aligned accent-tinted bubble. Renders Markdown once the
+/// text has settled (it always has, for `UserText`); falls back to plain text
+/// if the cache is somehow absent.
+fn user_bubble(
+    text: &str,
+    md_blocks: Option<&[MdBlock]>,
+    t: &theme::DarudaTheme,
+) -> impl IntoElement + use<> {
+    let inner = div()
+        .max_w(relative(0.85))
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.lane_card_active_bg)
+        .text_color(t.text_primary)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE));
+    let inner = match md_blocks {
+        Some(blocks) => inner.child(render_md_blocks_plain(blocks, t)),
+        None => inner.child(SharedString::from(text.to_string())),
+    };
+    div().flex().flex_row().justify_end().child(inner)
 }
 
-/// Assistant response — left-aligned block. A still-streaming block shows
-/// a trailing caret glyph.
+/// Assistant response — left-aligned block. A still-streaming block renders as
+/// plain text with a trailing caret glyph; once it settles, `md_blocks` is
+/// present and the body renders as Markdown.
 fn assistant_block(
     text: &str,
     streaming: bool,
+    md_blocks: Option<&[MdBlock]>,
     t: &theme::DarudaTheme,
 ) -> impl IntoElement + use<> {
-    let body = if streaming {
-        format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
-    } else {
-        text.to_string()
+    let body_el = match md_blocks {
+        Some(blocks) => div()
+            .text_color(t.text_primary)
+            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+            .child(render_md_blocks_plain(blocks, t))
+            .into_any_element(),
+        None => {
+            let body = if streaming {
+                format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
+            } else {
+                text.to_string()
+            };
+            div()
+                .text_color(t.text_primary)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(SharedString::from(body))
+                .into_any_element()
+        }
     };
     div()
         .flex()
@@ -169,20 +199,38 @@ fn assistant_block(
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(s::agent_chat_label_agent())),
         )
-        .child(
-            div()
-                .text_color(t.text_primary)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(SharedString::from(body)),
-        )
+        .child(body_el)
 }
 
 /// Agent reasoning — dimmed, italicised block under a "Thinking" label.
-fn thinking_block(text: &str, streaming: bool, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
-    let body = if streaming {
-        format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
-    } else {
-        text.to_string()
+/// Streaming text stays plain (with a caret); a settled block renders as
+/// Markdown, still dimmed and italicised.
+fn thinking_block(
+    text: &str,
+    streaming: bool,
+    md_blocks: Option<&[MdBlock]>,
+    t: &theme::DarudaTheme,
+) -> impl IntoElement + use<> {
+    let body_el = match md_blocks {
+        Some(blocks) => div()
+            .italic()
+            .text_color(t.text_subtle)
+            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+            .child(render_md_blocks_plain(blocks, t))
+            .into_any_element(),
+        None => {
+            let body = if streaming {
+                format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
+            } else {
+                text.to_string()
+            };
+            div()
+                .italic()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(SharedString::from(body))
+                .into_any_element()
+        }
     };
     div()
         .flex()
@@ -194,13 +242,7 @@ fn thinking_block(text: &str, streaming: bool, t: &theme::DarudaTheme) -> impl I
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(s::agent_chat_thinking_label())),
         )
-        .child(
-            div()
-                .italic()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(SharedString::from(body)),
-        )
+        .child(body_el)
 }
 
 /// Surfaced error item — error-tinted block.
