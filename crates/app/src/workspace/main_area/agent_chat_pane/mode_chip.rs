@@ -48,6 +48,7 @@ pub(in crate::workspace) fn mode_chip(
         .iter()
         .map(|v| (v.id.clone(), v.name.clone()))
         .collect();
+    let current = modes.current.clone();
     let ws = cx.weak_entity();
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
@@ -55,7 +56,9 @@ pub(in crate::workspace) fn mode_chip(
     button(chip_id, label)
         .ghost()
         .xsmall()
-        .dropdown_menu(move |menu, _window, _cx| build_mode_menu(&available, pane_id, &ws, menu))
+        .dropdown_menu(move |menu, _window, _cx| {
+            build_mode_menu(&available, &current, pane_id, &ws, menu)
+        })
 }
 
 /// Build the mode selection popup menu. One item per available mode; the
@@ -63,6 +66,7 @@ pub(in crate::workspace) fn mode_chip(
 /// into `set_agent_mode` (render purity; no logic here).
 fn build_mode_menu(
     available: &[(String, String)],
+    current: &str,
     pane_id: PaneId,
     workspace: &gpui::WeakEntity<Workspace>,
     menu: PopupMenu,
@@ -70,15 +74,16 @@ fn build_mode_menu(
     available.iter().fold(menu, |m, (id, name)| {
         let ws = workspace.clone();
         let mode_id = id.clone();
+        let is_current = id == current;
         m.item(
-            PopupMenuItem::new(SharedString::from(name.clone())).on_click(
-                move |_, _window, app| {
+            PopupMenuItem::new(SharedString::from(name.clone()))
+                .checked(is_current)
+                .on_click(move |_, _window, app| {
                     if let Some(w) = ws.upgrade() {
                         let mode_id = mode_id.clone();
                         w.update(app, |this, cx| this.set_agent_mode(pane_id, mode_id, cx));
                     }
-                },
-            ),
+                }),
         )
     })
 }

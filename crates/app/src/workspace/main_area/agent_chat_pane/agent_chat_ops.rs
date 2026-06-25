@@ -10,7 +10,10 @@
 //!
 //! ```text
 //!   create_agent_chat_pane
-//!         │  builds Pane (status = Connecting, handle = None)
+//!         │  builds Pane (status = Idle, handle = None) — no session yet
+//!         ▼
+//!   focus_pane → maybe_connect_agent_chat
+//!         │  first focus only: status Idle → Connecting
 //!         ▼
 //!   connect_agent_chat (cx.spawn)
 //!         │  connect_session on bg executor → (handle, rx)
@@ -22,7 +25,7 @@
 //!           Update(u)            → apply_update(items, u)
 //!           PermissionRequested  → items.push(permission_item); pending = Some(id)
 //!           TurnEnded            → finalize_streaming(items)
-//!           Error(e)             → status = Error; report_error
+//!           Error(e)             → status = Error (inline banner); log only
 //!         each arm: cx.notify(workspace) so the cached pane subtree repaints
 //! ```
 //!
@@ -56,11 +59,12 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 impl Workspace {
     /// Construct an Agent chat `Pane` (no tab side-effects). Allocates
     /// the pane id and a focus handle, seeds the conversation as empty,
-    /// parks the session in `Connecting`, and kicks off
-    /// [`Self::connect_agent_chat`] so the live ACP session attaches in
-    /// the background. The prompt input is the shared bottom-dock input,
-    /// not a per-pane field. Used by [`Self::open_agent_chat_pane`] and
-    /// by session restore.
+    /// and parks the session in `Idle`. The live ACP session is *not*
+    /// started here — [`Self::focus_pane`] connects it lazily on first
+    /// focus (via [`Self::maybe_connect_agent_chat`]), so cold restore
+    /// doesn't spin up an agent process per pane. The prompt input is the
+    /// shared bottom-dock input, not a per-pane field. Used by
+    /// [`Self::open_agent_chat_pane`] and by session restore.
     pub(in crate::workspace) fn create_agent_chat_pane(
         &mut self,
         cwd: Option<std::path::PathBuf>,
@@ -70,12 +74,10 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         // The connection roots at the lane cwd; without one there is no
         // working directory to attach the agent to. Park such a pane in
-        // an error state rather than a perpetual "Connecting…". The cwd
-        // case stays `Connecting` until the caller pushes the pane and
-        // calls `connect_agent_chat` (which stores the live handle + the
-        // event-pump task on the now-resolvable pane).
+        // an error state rather than a dormant `Idle` that could never
+        // connect. The cwd case stays `Idle` until first focus.
         let status = match &cwd {
-            Some(_) => AgentSessionStatus::Connecting,
+            Some(_) => AgentSessionStatus::Idle,
             // The status banner re-adds the error prefix, so carry the bare
             // reason here — not the prefix (which would render doubled).
             None => AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()),
@@ -120,7 +122,7 @@ impl Workspace {
             return;
         }
         let cwd = self.active_lane().map(|w| w.path.clone());
-        let pane = self.create_agent_chat_pane(cwd.clone(), cx);
+        let pane = self.create_agent_chat_pane(cwd, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.main_area.panes.push(pane);
@@ -134,11 +136,9 @@ impl Workspace {
             .tab_history
             .push(self.main_area.active_tab_index);
         self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
-        // Pane is now in `self.panes` — start the live session so the
-        // event pump can find it by id.
-        if let Some(cwd) = cwd {
-            self.connect_agent_chat(pane_id, cwd, cx);
-        }
+        // The live session is not started here — `focus_pane` below
+        // connects it lazily (`maybe_connect_agent_chat`), the same path a
+        // restored pane takes on first focus.
         // The prompt input lives in the bottom dock, not the pane. Open the
         // dock first so the input is visible before `focus_pane` (the shared
         // focus path) activates the input panel, syncs the placeholder, and
@@ -156,6 +156,35 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
+    }
+
+    /// Lazy-connect entry point: start the ACP session for `pane_id` iff it
+    /// is an Agent chat pane still parked in [`AgentSessionStatus::Idle`]
+    /// with a working directory. Called from [`Self::focus_pane`] so the
+    /// session attaches on first focus and never twice (the `Idle` guard
+    /// short-circuits once a connect is in flight or has resolved). A
+    /// no-cwd pane is already parked in `Error`, so it is skipped here.
+    pub(in crate::workspace) fn maybe_connect_agent_chat(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = {
+            let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+                return;
+            };
+            if !matches!(ac.status, AgentSessionStatus::Idle) {
+                return;
+            }
+            let Some(cwd) = ac.cwd.clone() else {
+                return;
+            };
+            // Flip to `Connecting` before spawning so a second focus during
+            // the handshake doesn't start a duplicate session.
+            ac.status = AgentSessionStatus::Connecting;
+            cwd
+        };
+        self.connect_agent_chat(pane_id, cwd, cx);
     }
 
     /// Open the live ACP session for an already-pushed Agent chat pane and
@@ -241,8 +270,11 @@ impl Workspace {
     /// then notify so the (cached) pane subtree repaints. The pump calls
     /// this on the foreground for every event.
     fn apply_agent_event(&mut self, pane_id: PaneId, event: AcpEvent, cx: &mut Context<Self>) {
-        // Connection-fatal errors are reported through the pipeline in
-        // addition to being shown inline, so split that out first.
+        // Session errors surface inline in the pane's status banner (the
+        // `AcpEvent::Error` match arm below sets `status`), so this only
+        // records to the NDJSON log — no toast. A toast here is pure noise:
+        // it duplicates the banner, and on cold restore the auto-connect of
+        // any errored session would pop one per pane on startup.
         if let AcpEvent::Error(message) = &event {
             let report = ErrorReport::new("ACP session error")
                 .severity(ErrorSeverity::Error)
@@ -250,7 +282,7 @@ impl Workspace {
                 .at(file!(), line!())
                 .dedup("agent_chat.session_error")
                 .build();
-            self.report_error(report, cx);
+            daruda_store::observability::log_writer::LogWriter::log(report);
         }
 
         // Theme params for the diff reconcile, read before the mutable
@@ -270,7 +302,6 @@ impl Workspace {
                     if m.available.iter().any(|v| v.id == mode_id) {
                         m.current = mode_id;
                     } else {
-                        // unknown mode id; ignored
                         daruda_store::observability::log_writer::LogWriter::log(
                             ErrorReport::new(
                                 "ACP session: received ModeChanged for unknown mode id",
@@ -492,7 +523,7 @@ impl Workspace {
     /// Switch the active session mode. Optimistically updates `modes.current` so
     /// the chip reflects the selection immediately; the adapter reconciles via a
     /// `ModeChanged` event if it disagrees. Sends `session/set_mode` over the live
-    /// handle (no-op when the handle is absent). View dispatch only.
+    /// handle (no-op when the handle is absent).
     pub(in crate::workspace) fn set_agent_mode(
         &mut self,
         pane_id: PaneId,
