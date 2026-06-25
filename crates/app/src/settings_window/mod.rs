@@ -85,6 +85,8 @@ pub struct SettingsWindow {
     // Cursor
     cursor_style_select: Entity<SelectState>,
     cursor_blinking: bool,
+    // Agent
+    default_permission_mode_select: Entity<SelectState>,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -303,6 +305,25 @@ impl SettingsWindow {
             )
         });
 
+        let permission_mode_str: SharedString =
+            config.agent.default_permission_mode.mode_id().into();
+        let default_permission_mode_select = cx.new(|cx| {
+            use daruda_config::DefaultPermissionMode as M;
+            let opts = M::ALL
+                .into_iter()
+                .map(|m| {
+                    let label = match m {
+                        M::Default => s::settings_agent_mode_default(),
+                        M::AcceptEdits => s::settings_agent_mode_accept_edits(),
+                        M::Plan => s::settings_agent_mode_plan(),
+                        M::BypassPermissions => s::settings_agent_mode_bypass(),
+                    };
+                    SelectOption::new(m.mode_id(), label)
+                })
+                .collect();
+            select::state_with_options(opts, Some(&permission_mode_str), window, cx)
+        });
+
         let max_fps_str: SharedString = config.render.max_fps.to_string().into();
         let max_fps_select = cx.new(|cx| {
             let opts = daruda_config::ALLOWED_MAX_FPS
@@ -428,6 +449,7 @@ impl SettingsWindow {
             horizontal_spacing_input,
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
+            default_permission_mode_select,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -607,6 +629,13 @@ impl SettingsWindow {
         };
         config.cursor.blinking = self.cursor_blinking;
 
+        config.agent.default_permission_mode = self
+            .default_permission_mode_select
+            .read(cx)
+            .selected_value()
+            .and_then(|s| daruda_config::DefaultPermissionMode::from_mode_id(s.as_ref()))
+            .unwrap_or_default();
+
         config.render.max_fps = self
             .max_fps_select
             .read(cx)
@@ -756,6 +785,7 @@ impl SettingsWindow {
             | BuiltinSection::Cursor
             | BuiltinSection::Shell
             | BuiltinSection::LeftDock
+            | BuiltinSection::Agent
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Notifications
             | BuiltinSection::Keymap

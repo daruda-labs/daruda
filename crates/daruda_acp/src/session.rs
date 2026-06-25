@@ -113,6 +113,10 @@ pub enum AcpEvent {
     /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
     /// `set_mode` request was confirmed. `mode_id` is the new active mode.
     ModeChanged { mode_id: String },
+    /// A non-fatal advisory message (e.g. set_mode on connect was rejected
+    /// by the adapter). The session remains live; the host should log this
+    /// at Warning severity without changing the session status.
+    Notice(String),
     /// A connection or protocol failure. Terminal: the connection task is
     /// ending (or has ended) when this is emitted.
     Error(String),
@@ -186,6 +190,13 @@ impl AcpSessionHandle {
 
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
+/// `initial_mode` is an optional ACP mode id (e.g. `"bypassPermissions"`) to
+/// apply right after `session/new` via `session/set_mode`. The mode is applied
+/// only when the adapter advertises it in the session's available modes and it
+/// differs from the session's current mode; if the adapter does not support
+/// modes or the id is not in the advertised list, `Connected` is emitted
+/// unchanged. Pass `None` to keep whatever mode the adapter defaults to.
+///
 /// Spawns the protocol connection as a detached smol task and returns a handle
 /// plus the event receiver. The task runs until the handle is dropped (command
 /// channel closes) or the connection fails; either way the event stream then
@@ -194,6 +205,7 @@ impl AcpSessionHandle {
 pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
+    initial_mode: Option<String>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent =
         AcpAgent::from_str(&command.0).map_err(|e| AcpClientError::Command(format!("{e:?}")))?;
@@ -212,6 +224,7 @@ pub fn connect_session(
         if let Err(err) = run_connection(
             agent,
             cwd,
+            initial_mode,
             command_rx,
             task_event_tx.clone(),
             permission_parks,
@@ -233,6 +246,7 @@ pub fn connect_session(
 async fn run_connection(
     agent: AcpAgent,
     cwd: PathBuf,
+    initial_mode: Option<String>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
     permission_parks: PermissionParks,
@@ -298,7 +312,39 @@ async fn run_connection(
                 .block_task()
                 .await?;
             let session_id = new_session.session_id.clone();
-            let modes = new_session.modes.as_ref().map(Into::into);
+            let mut modes: Option<ModeStateView> = new_session.modes.as_ref().map(Into::into);
+
+            // Apply the configured initial mode when the adapter advertised it,
+            // the requested id is in the available list, and it differs from
+            // the session's current mode. Skipped silently when any condition
+            // is false so a misconfigured or non-advertising adapter is
+            // forward-compatible.
+            //
+            // A set_mode failure is NON-FATAL: the session/new already
+            // succeeded and the session is usable. Leave mode_state.current
+            // at the adapter's real current mode (the chip will reflect that),
+            // emit a Notice so the host can log it, and continue to Connected.
+            if let (Some(id), Some(ref mut mode_state)) = (initial_mode, modes.as_mut()) {
+                let available = mode_state.available.iter().any(|m| m.id == id);
+                if available && mode_state.current != id {
+                    match connection
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), id.clone()))
+                        .block_task()
+                        .await
+                    {
+                        Ok(_) => {
+                            mode_state.current = id;
+                        }
+                        Err(e) => {
+                            let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
+                                "set_mode({id}) on connect failed — session is active in the \
+                                 adapter's default mode: {e:?}"
+                            )));
+                        }
+                    }
+                }
+            }
+
             let _ = event_tx.unbounded_send(AcpEvent::Connected { modes });
 
             prompt_loop(&connection, session_id, command_rx, &event_tx).await?;

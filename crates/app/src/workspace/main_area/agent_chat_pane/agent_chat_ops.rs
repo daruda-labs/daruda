@@ -202,6 +202,7 @@ impl Workspace {
         cwd: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
+        let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
         let pump = cx.spawn(async move |this, cx| {
             // `connect_session` itself is synchronous (it parses the
             // command and spawns the connection task); run it on the
@@ -209,7 +210,7 @@ impl Workspace {
             // worker thread rather than the main loop.
             let connected = cx
                 .background_executor()
-                .spawn(async move { connect_session(AdapterCommand::default(), cwd) })
+                .spawn(async move { connect_session(AdapterCommand::default(), cwd, initial_mode) })
                 .await;
 
             match connected {
@@ -284,6 +285,16 @@ impl Workspace {
                 .build();
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
+        // Non-fatal advisory: log at Warning severity; session stays live.
+        if let AcpEvent::Notice(message) = &event {
+            let report = ErrorReport::new("ACP session notice")
+                .severity(ErrorSeverity::Warning)
+                .with_context("detail", message.clone())
+                .at(file!(), line!())
+                .dedup(format!("agent_chat.notice.{pane_id}"))
+                .build();
+            daruda_store::observability::log_writer::LogWriter::log(report);
+        }
 
         // Theme params for the diff reconcile, read before the mutable
         // borrow of the pane content.
@@ -327,6 +338,9 @@ impl Workspace {
                 // cancelled / refused mid-request — drain it so no card is
                 // left with live buttons (no-op on a normal turn).
                 cancel_pending_permission(ac);
+            }
+            AcpEvent::Notice(_) => {
+                // Logged above before the mutable borrow; no status change.
             }
             AcpEvent::Error(message) => {
                 ac.status = AgentSessionStatus::Error(message);

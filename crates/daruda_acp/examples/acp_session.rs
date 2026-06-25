@@ -24,7 +24,7 @@ fn main() {
     let cwd = std::env::current_dir().expect("current dir");
 
     smol::block_on(async move {
-        let (handle, mut events) = match connect_session(Default::default(), cwd) {
+        let (handle, mut events) = match connect_session(Default::default(), cwd, None) {
             Ok(pair) => pair,
             Err(err) => {
                 eprintln!("connect failed: {err}");
@@ -77,6 +77,9 @@ fn main() {
                 }
                 AcpEvent::ModeChanged { mode_id } => {
                     eprintln!("[mode-changed] mode_id={mode_id}");
+                }
+                AcpEvent::Notice(msg) => {
+                    eprintln!("[notice] {msg}");
                 }
                 AcpEvent::Error(err) => {
                     eprintln!("[error] {err}");

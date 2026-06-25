@@ -410,6 +410,8 @@ pub struct Workspace {
     /// Clipboard write limits — caps streaming OSC 1337 `Copy=` /
     /// `EndCopy` payloads so a runaway shell cannot exhaust memory.
     pub(in crate::workspace) clipboard: daruda_config::ClipboardConfig,
+    /// Agent chat configuration — permission mode applied on connect.
+    pub(in crate::workspace) agent: daruda_config::AgentConfig,
     /// True while a git commit or push operation is running. Prevents
     /// duplicate submissions when the user double-clicks Commit/Push.
     pub(in crate::workspace) git_op_in_flight: bool,
@@ -849,6 +851,7 @@ impl Workspace {
             file_viewer_preview_tab: config.file_viewer.preview_tab,
             notifications: config.notifications.clone(),
             clipboard: config.clipboard.clone(),
+            agent: config.agent.clone(),
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,

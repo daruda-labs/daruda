@@ -48,6 +48,7 @@ impl Workspace {
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.notifications = config.notifications.clone();
         self.clipboard = config.clipboard.clone();
+        self.agent = config.agent.clone();
         self.claude.usage_poll = config.usage.poll.clone();
 
         // Patch all existing pane views: font + colors + opacity.

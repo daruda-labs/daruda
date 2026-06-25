@@ -4,6 +4,7 @@
 //! `~/Library/Application Support/daruda/config.toml` (macOS fallback).
 //! Missing file or parse errors fall back to defaults silently.
 
+pub mod agent;
 pub mod claude_status;
 pub mod clipboard;
 pub mod colors;
@@ -32,6 +33,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub use agent::{AgentConfig, DefaultPermissionMode};
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
@@ -107,6 +109,7 @@ pub struct Config {
     pub panels: PanelsConfig,
     pub logs: LogsConfig,
     pub render: RenderConfig,
+    pub agent: AgentConfig,
 }
 
 impl Config {

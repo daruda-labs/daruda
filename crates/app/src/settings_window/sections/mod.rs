@@ -286,6 +286,26 @@ impl SettingsWindow {
             .into_any_element()
     }
 
+    pub(super) fn render_agent(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        let description_color = theme::current(cx).text_muted;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::MODAL_PANEL_GAP))
+            .child(Self::section_label(s::settings_section_agent(), cx))
+            .child(field_row(
+                s::settings_label_agent_mode(),
+                crate::ui::select::select(&self.default_permission_mode_select, cx, ()),
+            ))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings_agent_mode_description()),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_claude_status(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         let claude_status_enable = self.claude_status_enable;
         div()

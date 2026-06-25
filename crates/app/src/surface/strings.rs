@@ -1839,6 +1839,9 @@ pub fn settings_nav_keymap() -> String {
 pub fn settings_nav_plugin() -> String {
     rust_i18n::t!("settings.nav_plugin").into_owned()
 }
+pub fn settings_nav_agent() -> String {
+    rust_i18n::t!("settings.nav_agent").into_owned()
+}
 
 // New body-section headers (Phase 1 additions)
 pub fn settings_section_general() -> String {
@@ -1861,6 +1864,9 @@ pub fn settings_section_keymap() -> String {
 }
 pub fn settings_section_plugin() -> String {
     rust_i18n::t!("settings.section_plugin").into_owned()
+}
+pub fn settings_section_agent() -> String {
+    rust_i18n::t!("settings.section_agent").into_owned()
 }
 
 // New labels / actions for Phase 1 sections
@@ -1887,6 +1893,26 @@ pub fn settings_placeholder_keymap() -> String {
 }
 pub fn settings_placeholder_notifications() -> String {
     rust_i18n::t!("settings.placeholder_notifications").into_owned()
+}
+
+// Agent section — default permission mode dropdown
+pub fn settings_label_agent_mode() -> String {
+    rust_i18n::t!("settings.label_agent_mode").into_owned()
+}
+pub fn settings_agent_mode_default() -> String {
+    rust_i18n::t!("settings.agent_mode_default").into_owned()
+}
+pub fn settings_agent_mode_accept_edits() -> String {
+    rust_i18n::t!("settings.agent_mode_accept_edits").into_owned()
+}
+pub fn settings_agent_mode_plan() -> String {
+    rust_i18n::t!("settings.agent_mode_plan").into_owned()
+}
+pub fn settings_agent_mode_bypass() -> String {
+    rust_i18n::t!("settings.agent_mode_bypass").into_owned()
+}
+pub fn settings_agent_mode_description() -> String {
+    rust_i18n::t!("settings.agent_mode_description").into_owned()
 }
 
 // Plugin section — install / uninstall UI labels

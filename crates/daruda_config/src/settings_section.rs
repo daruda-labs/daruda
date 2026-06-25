@@ -55,6 +55,7 @@ pub enum BuiltinSection {
     LeftDock,
     Clipboard,
     Panels,
+    Agent,
     ClaudeStatus,
     Notifications,
     Keymap,
@@ -73,6 +74,7 @@ impl BuiltinSection {
         Self::LeftDock,
         Self::Clipboard,
         Self::Panels,
+        Self::Agent,
         Self::ClaudeStatus,
         Self::Notifications,
         Self::Keymap,
@@ -94,6 +96,7 @@ impl BuiltinSection {
             Self::LeftDock => "left_dock",
             Self::Clipboard => "clipboard",
             Self::Panels => "panels",
+            Self::Agent => "agent",
             Self::ClaudeStatus => "claude_status",
             Self::Notifications => "notifications",
             Self::Keymap => "keymap",
@@ -167,6 +170,6 @@ mod tests {
         // added or removed. There is no `strum::EnumCount`-style helper
         // in this crate; the count exists precisely to force a manual
         // sync of `ALL` with the enum.
-        assert_eq!(BuiltinSection::ALL.len(), 13);
+        assert_eq!(BuiltinSection::ALL.len(), 14);
     }
 }
