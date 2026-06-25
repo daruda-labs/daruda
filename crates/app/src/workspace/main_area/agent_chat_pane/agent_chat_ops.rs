@@ -489,6 +489,28 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Switch the active session mode. Optimistically updates `modes.current` so
+    /// the chip reflects the selection immediately; the adapter reconciles via a
+    /// `ModeChanged` event if it disagrees. Sends `session/set_mode` over the live
+    /// handle (no-op when the handle is absent). View dispatch only.
+    pub(in crate::workspace) fn set_agent_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+            return;
+        };
+        if let Some(m) = &mut ac.modes {
+            m.current = mode_id.clone();
+        }
+        if let Some(h) = &ac.handle {
+            h.set_mode(mode_id);
+        }
+        cx.notify();
+    }
+
     /// Jump the conversation list to the bottom and re-engage follow mode.
     /// Backs the floating scroll-to-bottom button. View dispatch only.
     pub(in crate::workspace) fn agent_chat_scroll_to_bottom(

@@ -8,6 +8,7 @@
 //! itself open a connection), so no `npx` adapter is ever spawned —
 //! `handle` stays `None` and the host-side state transitions still run.
 
+use daruda_acp::{ModeStateView, SessionModeView};
 use gpui::{AppContext as _, TestAppContext};
 
 use super::build_workspace;
@@ -209,6 +210,62 @@ async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppC
         }
         other => panic!("expected an Error status, got {other:?}"),
     }
+}
+
+/// `set_agent_mode` immediately updates `modes.current` (optimistic update) and
+/// is idempotent when the handle is absent (no live ACP session required).
+#[gpui::test]
+async fn set_agent_mode_updates_current_optimistically(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, _window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let mut pane = ws.create_agent_chat_pane(Some(tmp.clone()), cx);
+                // Inject a ModeStateView with two modes so `set_agent_mode` has
+                // something to flip. No live handle (handle stays `None`).
+                if let PaneContent::AgentChat(ref mut ac) = pane.content {
+                    ac.modes = Some(ModeStateView {
+                        available: vec![
+                            SessionModeView {
+                                id: "auto".to_string(),
+                                name: "Auto".to_string(),
+                                description: None,
+                            },
+                            SessionModeView {
+                                id: "plan".to_string(),
+                                name: "Plan".to_string(),
+                                description: Some("Plan mode".to_string()),
+                            },
+                        ],
+                        current: "auto".to_string(),
+                    });
+                }
+                let id = pane.id;
+                ws.main_area.panes.push(pane);
+                ws.set_agent_mode(id, "plan".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        let ac = ws
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)
+            .and_then(|p| p.agent_chat_content())
+            .expect("agent chat pane present");
+        let modes = ac.modes.as_ref().expect("modes were injected");
+        assert_eq!(
+            modes.current, "plan",
+            "set_agent_mode flips current immediately (optimistic)"
+        );
+    });
 }
 
 #[gpui::test]

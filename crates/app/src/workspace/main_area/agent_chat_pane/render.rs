@@ -38,12 +38,18 @@ type DiffEditors = std::collections::HashMap<String, Entity<crate::ui::InputStat
 /// diff summary).
 type DiffStats = std::collections::HashMap<String, DiffStat>;
 
-/// Rasterized mermaid diagrams keyed by source hash (built in the ops layer;
-/// this view only embeds them). Values are `Arc` so the `code_block_render`
-/// closure can capture a cheap map clone without cloning the rgba bytes.
-type MermaidRasters = std::collections::HashMap<
-    u64,
-    std::sync::Arc<crate::workspace::main_area::file_view_pane::visual::RasterImage>,
+/// Rendered mermaid diagrams (GPU-ready [`CachedImage`]) keyed by source hash
+/// (filled async in the ops layer). Shared `Arc<Mutex<…>>` so the
+/// `code_block_render` closure — bound into `TextView`'s cached parse — reads
+/// the *live* cache, not a snapshot (the image lands after parse; see
+/// `AgentChatContent::mermaid_images`).
+type MermaidImages = std::sync::Arc<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            u64,
+            crate::workspace::main_area::file_view_pane::render::CachedImage,
+        >,
+    >,
 >;
 
 use crate::surface::strings as s;
@@ -54,7 +60,6 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
     DiffStat, diff_editor_key, is_active, mermaid_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
-use crate::workspace::main_area::file_view_pane::render::raster_block_image;
 use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -73,8 +78,8 @@ pub(in crate::workspace) fn render(
 
     // Expand-all / collapse-all chrome sits between the banner and the list,
     // but only once there is a conversation to fold.
-    let fold_toolbar: Option<AnyElement> =
-        (!content.items.is_empty()).then(|| fold_toolbar(pane_id, &t, cx).into_any_element());
+    let fold_toolbar: Option<AnyElement> = (!content.items.is_empty())
+        .then(|| fold_toolbar(pane_id, content.modes.as_ref(), &t, cx).into_any_element());
 
     let body: AnyElement = if content.items.is_empty() {
         div()
@@ -89,8 +94,7 @@ pub(in crate::workspace) fn render(
     } else {
         let mut list = div()
             .id(("agent-chat-list", pane_id as usize))
-            .flex_1()
-            .min_h(px(0.))
+            .size_full()
             .overflow_y_scroll()
             .track_scroll(&content.scroll_handle)
             .on_scroll_wheel(
@@ -108,13 +112,22 @@ pub(in crate::workspace) fn render(
                 item,
                 &content.diff_editors,
                 &content.diff_stats,
-                &content.mermaid_rasters,
+                &content.mermaid_images,
                 &content.fold,
                 &t,
                 cx,
             ));
         }
-        list.into_any_element()
+        // Wrap the scroll region so the live-tracking scrollbar overlay can
+        // sit over it: the overlay is absolute-fill, so its parent must be
+        // `relative` and sized to the viewport (this `flex_1` body slot).
+        div()
+            .relative()
+            .flex_1()
+            .min_h(px(0.))
+            .child(list)
+            .children(agent_chat_scrollbar(pane_id, &content.scroll_handle, &t))
+            .into_any_element()
     };
 
     // The scroll-to-bottom button overlays the list when the user has scrolled
@@ -155,13 +168,40 @@ fn scroll_to_bottom_button(
         )
 }
 
-/// A thin right-aligned toolbar row with "Expand all" / "Collapse all"
-/// buttons. Dev-tool chrome that should recede: ghost, `xsmall`, muted until
-/// hover. Each button is a one-line dispatch into `set_all_agent_folds`
-/// (render purity — no fold logic lives here). Shown only when the
-/// conversation is non-empty (the caller gates on `content.items`).
+/// daruda's thin scrollbar thumb for the conversation list — same chrome as the
+/// files / git / file-viewer panes (`crate::ui::scrollbar::vertical_thumb`), so
+/// it reads as one widget across the app rather than a stray gpui_component bar.
+/// Geometry is read from the `ScrollHandle` at *render* time, so it only tracks
+/// because `agent_chat_on_scroll` notifies on scroll. `None` when the content
+/// fits (no thumb). Positioned `.right(..)`; the caller's parent is `.relative()`.
+fn agent_chat_scrollbar(
+    pane_id: PaneId,
+    handle: &gpui::ScrollHandle,
+    t: &theme::DarudaTheme,
+) -> Option<AnyElement> {
+    let viewport_h = handle.bounds().size.height;
+    let content_h = viewport_h + handle.max_offset().y;
+    crate::ui::scrollbar::vertical_thumb(
+        ("agent-chat-scrollbar", pane_id as usize),
+        viewport_h,
+        content_h,
+        handle.offset().y,
+        px(0.),
+        t.scrollbar_thumb,
+        t.file_viewer_scrollbar_thumb_hover,
+    )
+}
+
+/// A toolbar row with "Expand all" / "Collapse all" buttons on the right and
+/// an optional mode-selector chip on the left. Dev-tool chrome that should
+/// recede: ghost, `xsmall`, muted until hover. Each button / chip is a
+/// one-line dispatch into a `Workspace` op (render purity — no logic here).
+/// `justify_between` pushes the mode chip left and the fold controls right.
+/// Shown only when the conversation is non-empty (the caller gates on
+/// `content.items`).
 fn fold_toolbar(
     pane_id: PaneId,
+    modes: Option<&daruda_acp::ModeStateView>,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
@@ -180,19 +220,36 @@ fn fold_toolbar(
     .xsmall()
     .on_click(cx.listener(move |ws, _ev, _window, cx| ws.set_all_agent_folds(pane_id, false, cx)));
 
+    // Left slot: the mode chip when modes are advertised and non-empty;
+    // an empty div otherwise so `justify_between` still pushes the fold
+    // controls to the right.
+    let left: AnyElement = if let Some(m) = modes.filter(|m| !m.available.is_empty()) {
+        super::mode_chip::mode_chip(pane_id, m, cx).into_any_element()
+    } else {
+        div().into_any_element()
+    };
+
+    // Right slot: expand / collapse fold controls.
+    let right = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(expand)
+        .child(collapse);
+
     div()
         .flex_none()
         .w_full()
         .flex()
         .flex_row()
-        .justify_end()
+        .justify_between()
         .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .px(px(theme::AGENT_CHAT_PAD_X))
         .py(px(theme::AGENT_CHAT_PAD_Y))
         .text_color(t.text_muted)
-        .child(expand)
-        .child(collapse)
+        .child(left)
+        .child(right)
 }
 
 /// The thin top banner — shown while connecting or on error; hidden once
@@ -241,23 +298,23 @@ fn render_item(
     item: &ChatItem,
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
-    mermaid_rasters: &MermaidRasters,
+    mermaid_images: &MermaidImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_rasters, t).into_any_element(),
+        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, t).into_any_element(),
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            assistant_block(pane_id, ix, key, expanded, text, mermaid_rasters, t, cx)
+            assistant_block(pane_id, ix, key, expanded, text, mermaid_images, t, cx)
                 .into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            thinking_block(pane_id, ix, key, expanded, text, mermaid_rasters, t, cx)
+            thinking_block(pane_id, ix, key, expanded, text, mermaid_images, t, cx)
                 .into_any_element()
         }
         ChatItem::ToolCall(tc) => {
@@ -373,21 +430,52 @@ fn collapsed_text_summary(text: &str, italic: bool, t: &theme::DarudaTheme) -> O
 /// The `code_block_render` hook for a chat markdown body: replace a
 /// ` ```mermaid ` fence with its cached diagram bitmap, leaving every other code
 /// block (and a not-yet-rasterized mermaid fence) to the default code rendering
-/// by returning `None`. Captures a cheap clone of the rasters map (`Arc` values)
+/// by returning `None`. Captures a cheap clone of the images map (`Arc` values)
 /// so the closure stays `Send + Sync + 'static` (the `TextView` requirement)
-/// without borrowing or cloning the rgba bytes.
+/// without borrowing or cloning the image bytes.
 fn mermaid_code_block_render(
-    mermaid_rasters: &MermaidRasters,
+    mermaid_images: &MermaidImages,
 ) -> impl Fn(&str, &str, &mut gpui::Window, &mut gpui::App) -> Option<AnyElement> + Send + Sync + 'static
 {
-    let rasters = mermaid_rasters.clone();
+    let images = mermaid_images.clone();
     move |lang, source, _window, _cx| {
         if lang != "mermaid" {
             return None;
         }
-        rasters
-            .get(&mermaid_key(source))
-            .and_then(|raster| raster_block_image(raster))
+        // Read the live shared cache (not a snapshot) — see `MermaidImages`.
+        // Cloning the cached `CachedImage` is an `Arc` bump, so gpui reuses the
+        // already-uploaded texture instead of re-uploading the bitmap.
+        let image = images.lock().ok()?.get(&mermaid_key(source)).cloned()?;
+        let diagram = image.block();
+        // The diagram is a bitmap (not selectable), so overlay a hover-revealed
+        // button that copies the mermaid source to the clipboard.
+        let key = mermaid_key(source);
+        let group = SharedString::from(format!("mermaid-{key}"));
+        let src = source.to_string();
+        Some(
+            div()
+                .relative()
+                .group(group.clone())
+                .child(diagram)
+                .child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .right_1()
+                        .invisible()
+                        .group_hover(group, |s| s.visible())
+                        .child(
+                            button_bare(SharedString::from(format!("mermaid-copy-{key}")))
+                                .icon(IconName::Copy)
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                        src.clone(),
+                                    ));
+                                }),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 }
 
@@ -398,14 +486,14 @@ fn mermaid_code_block_render(
 fn user_bubble(
     ix: usize,
     text: &str,
-    mermaid_rasters: &MermaidRasters,
+    mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
 ) -> impl IntoElement + use<> {
     let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
         .color(t.text_primary)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
         .full_width(false)
-        .code_block_render(mermaid_code_block_render(mermaid_rasters));
+        .code_block_render(mermaid_code_block_render(mermaid_images));
     let inner = div()
         .max_w(relative(0.85))
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -431,14 +519,14 @@ fn assistant_block(
     key: FoldKey,
     expanded: bool,
     text: &str,
-    mermaid_rasters: &MermaidRasters,
+    mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
         .color(t.text_body)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-        .code_block_render(mermaid_code_block_render(mermaid_rasters))
+        .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element();
     let header = div()
         .flex_none()
@@ -479,14 +567,14 @@ fn thinking_block(
     key: FoldKey,
     expanded: bool,
     text: &str,
-    mermaid_rasters: &MermaidRasters,
+    mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
         .color(t.text_subtle)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-        .code_block_render(mermaid_code_block_render(mermaid_rasters))
+        .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element();
     let header = div()
         .flex_none()
