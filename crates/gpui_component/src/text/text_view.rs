@@ -72,6 +72,11 @@ impl RenderOnce for TextViewElement {
 pub(crate) type CodeBlockActionsFn =
     dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+/// Type for a code-block render override. Returns `Some(element)` to replace
+/// the default rendering of a code block, or `None` to fall back to default.
+pub(crate) type CodeBlockRenderFn =
+    dyn Fn(&CodeBlock, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync;
+
 /// A text view that can render Markdown or HTML.
 ///
 /// ## Goals
@@ -98,6 +103,7 @@ pub struct TextView {
     selectable: bool,
     scrollable: bool,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    code_block_render: Option<Arc<CodeBlockRenderFn>>,
 }
 
 #[derive(PartialEq)]
@@ -130,6 +136,7 @@ struct UpdateFuture {
     tx_result: smol::channel::Sender<Result<ParsedContent, SharedString>>,
     delay: Duration,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    code_block_render: Option<Arc<CodeBlockRenderFn>>,
 }
 
 impl UpdateFuture {
@@ -143,6 +150,7 @@ impl UpdateFuture {
         tx_result: smol::channel::Sender<Result<ParsedContent, SharedString>>,
         delay: Duration,
         code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+        code_block_render: Option<Arc<CodeBlockRenderFn>>,
     ) -> Self {
         Self {
             type_,
@@ -154,6 +162,7 @@ impl UpdateFuture {
             tx_result,
             delay,
             code_block_actions,
+            code_block_render,
         }
     }
 }
@@ -194,6 +203,7 @@ impl Future for UpdateFuture {
                         self.current_style.clone(),
                         &self.highlight_theme,
                         &self.code_block_actions.clone(),
+                        &self.code_block_render.clone(),
                     );
                     _ = self.tx_result.try_send(res);
                     continue;
@@ -432,6 +442,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            code_block_render: None,
         }
     }
 
@@ -463,6 +474,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            code_block_render: None,
         }
     }
 
@@ -539,6 +551,19 @@ impl TextView {
         }));
         self
     }
+
+    /// Override how code blocks render. The closure receives the [`CodeBlock`];
+    /// return `Some(element)` to replace the default rendering, or `None` to keep it.
+    pub fn code_block_render<F, E>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> Option<E> + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.code_block_render = Some(Arc::new(move |code_block, window, cx| {
+            f(code_block, window, cx).map(IntoElement::into_any_element)
+        }));
+        self
+    }
 }
 
 impl IntoElement for TextView {
@@ -578,6 +603,7 @@ impl Element for TextView {
             let style = *style;
             let highlight_theme = highlight_theme.clone();
             let code_block_actions = self.code_block_actions.clone();
+            let code_block_render = self.code_block_render.clone();
             let (tx, rx) = smol::channel::unbounded::<Update>();
             let (tx_result, rx_result) =
                 smol::channel::unbounded::<Result<ParsedContent, SharedString>>();
@@ -587,6 +613,7 @@ impl Element for TextView {
                 style.clone(),
                 &highlight_theme,
                 &code_block_actions,
+                &code_block_render,
             );
 
             self.state.update(cx, {
@@ -628,6 +655,7 @@ impl Element for TextView {
                 tx_result,
                 Duration::from_millis(200),
                 code_block_actions,
+                code_block_render,
             ))
             .detach();
 
@@ -782,10 +810,12 @@ fn parse_content(
     style: TextViewStyle,
     highlight_theme: &HighlightTheme,
     code_block_actions: &Option<Arc<CodeBlockActionsFn>>,
+    code_block_render: &Option<Arc<CodeBlockRenderFn>>,
 ) -> Result<ParsedContent, SharedString> {
     let mut node_cx = NodeContext {
         style: style.clone(),
         code_block_actions: code_block_actions.clone(),
+        code_block_render: code_block_render.clone(),
         ..NodeContext::default()
     };
 

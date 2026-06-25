@@ -17,7 +17,7 @@ use crate::{
     ActiveTheme as _, Icon, IconName, StyledExt, h_flex,
     highlighter::{HighlightTheme, SyntaxHighlighter},
     text::{
-        CodeBlockActionsFn,
+        CodeBlockActionsFn, CodeBlockRenderFn,
         inline::{Inline, InlineState},
     },
     tooltip::Tooltip,
@@ -370,6 +370,12 @@ impl CodeBlock {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
+        if let Some(render) = node_cx.code_block_render.as_ref()
+            && let Some(el) = render(self, window, cx)
+        {
+            return el;
+        }
+
         let style = &node_cx.style;
 
         div()
@@ -412,6 +418,7 @@ pub(crate) struct NodeContext {
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
     pub(crate) style: TextViewStyle,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    pub(crate) code_block_render: Option<Arc<CodeBlockRenderFn>>,
 }
 
 impl NodeContext {
