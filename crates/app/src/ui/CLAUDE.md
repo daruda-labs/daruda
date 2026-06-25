@@ -55,10 +55,12 @@ ui/
 ├── chart.rs        # BarChart re-export over gpui_component::chart (Plot-backed; caller wraps in a fixed-height container)
 ├── checkbox.rs     # checkbox(id, label)
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
+├── disclosure.rs   # disclosure(id, is_open) — stateless chevron toggle (ChevronDown open / ChevronRight closed; .color()/.size()/.on_toggle()); caller owns fold state
 ├── group_box.rs    # group_box() factory over gpui_component::GroupBox (.outline()/.fill()/title)
 ├── highlighter.rs  # LanguageRegistry / LanguageConfig re-export (tree-sitter language data; GPUI-free, used by the file-viewer highlighter)
 ├── divider.rs      # Divider re-export
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
+├── markdown.rs     # markdown(id, text) — rendered, drag-selectable/copyable markdown over gpui_component::text::TextView (RenderOnce; .selectable()/.color()/.text_size()/.full_width())
 ├── menu.rs         # ContextMenuExt / DropdownMenu / PopupMenu / PopupMenuItem re-exports
 ├── progress.rs     # progress(value) factory over gpui_component::Progress (Styled fill bar)
 ├── select.rs       # SelectOption + state_with_options + select(&state)
@@ -301,6 +303,7 @@ gap / height control working. Re-apply on rev bump:
 | Editor diff/read-only support | `src/input/state.rs` (`highlight_override` field + `set_highlight_override` + `set_disabled` + `scroll_handle` getter), `src/input/element.rs` (`highlight_lines` override short-circuit), `src/input/input.rs` (`Input::show_scrollbar` field + builder + gate in `render_editor`) | render the diff *through* the editor (3b). `set_highlight_override(Vec<(Range, HighlightStyle)>)` replaces the tree-sitter highlighter (a synthetic +/- diff buffer isn't valid source — fg = syntax, bg = word-diff). `set_disabled` toggles read-only (blocks edit/IME, keeps selection/copy). `show_scrollbar(false)` + the public `scroll_handle()` let the file viewer suppress the built-in 16px bar and overlay its thin 4px daruda thumb so raw and diff match the other viewer modes. |
 | Optional inner padding | `src/input/input.rs` (`Input::input_padding` field + builder + `.when(self.input_padding, …)` gate around `input_px`/`input_py` in `render`) | `appearance(false)` strips chrome but **not** the size-derived `input_px`/`input_py`, so a borderless editor still inherits `Size::Medium`'s 12px/8px gap before the line-number gutter. `input_padding(false)` zeroes it so the file-viewer raw/diff editor sits flush left like the markdown-raw / preview renderers; the host (body frame) owns any surrounding spacing. Default `true` — other `appearance(false)` call sites (`ui/input.rs` chrome cells) keep their `small` padding. |
 | Single-line newline guard | `src/input/state.rs` (`replace_text_in_range` single-line branch) | strip `\n` from `new_text` for non-multi-line inputs at the one mutation entry point, so every path (`set_value`, programmatic `insert`, the search panel's selection pre-fill) honours the invariant the paste path already enforced. A single-line value reaches `TextElement::layout_lines`' single-line branch, which feeds the whole string to gpui's `shape_line` — and `shape_line` panics on an embedded newline. Repro: open the file-viewer editor search (Cmd+F) with a multi-line selection; `on_action_search` pre-fills the single-line search input with the selection → panic on next prepaint. |
+| TextView list-item wrap | `src/text/node.rs` (`Node::ListItem` render) | wrap the list-item content div in `flex_1().min_w_0()` (was a bare `div().overflow_hidden()`) so item text wraps to the available width instead of laying out at its intrinsic max-content width and clipping the wrapped continuation. Without it, agent-chat markdown list items (`crate::ui::markdown`) overflow the pane — no wrap, second line cut off — until the pane is narrowed. |
 
 Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).
@@ -317,6 +320,7 @@ rev bump if the re-vendor trims them again):
 | `progress` | `src/lib.rs` | `crate::ui::progress` → Usage tab gauge bars |
 | `group_box` | `src/lib.rs` | `crate::ui::group_box` → Usage tab gauge cards (`.outline()`) + totals (`.normal()`) |
 | `chart` + `plot` | `src/lib.rs` | `crate::ui::chart::BarChart` — chart widgets. `chart` pulls in `plot` (axis/grid/scale/shape) as its rendering backend. |
+| `text` | `src/lib.rs` (already declared) | `crate::ui::markdown` → agent chat selectable/copyable markdown (`TextView`: markdown render + char drag-select + copy + code highlight). |
 
 The patches live directly in the vendored tree (not in
 `patches/<name>.patch`) because `crates/gpui_component/` is an

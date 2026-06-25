@@ -8,10 +8,13 @@
 //! here.
 //!
 //! Rendering notes:
-//! - Assistant / user / thinking text: settled messages render as markdown
-//!   via `render_md_blocks_plain` over the `md_blocks` cache that
-//!   `reconcile_markdown` populates in the ops layer; the still-streaming
-//!   tail renders as wrapped plain text until it settles and is parsed.
+//! - Assistant / user / thinking text: every message body renders as
+//!   rendered, drag-selectable / copyable markdown via `crate::ui::markdown`
+//!   (a `TextView` wrapper). Selection state is GPUI keyed-state, so each
+//!   body's id is keyed by the item's index — stable because `items` is
+//!   append-only. The collapsed summary stays plain text. Streaming bodies
+//!   render their partial markdown fine; the streaming signal lives on the
+//!   input dock, so no per-message caret is shown.
 //! - Tool-call diffs embed the read-only diff-editor entities that
 //!   `reconcile_diff_editors` builds from the diff ops (the `diff_editors`
 //!   cache); when an editor can't be built (window gone) or the diff is
@@ -22,18 +25,27 @@ use daruda_acp::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
     ToolCallItem, ToolStatusView,
 };
-use gpui::{AnyElement, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px, relative};
+use gpui::{
+    AnyElement, ElementId, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px, relative,
+};
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
 /// (built in the ops layer; this view only embeds them).
-type DiffEditors = std::collections::HashMap<String, Entity<gpui_component::input::InputState>>;
+type DiffEditors = std::collections::HashMap<String, Entity<crate::ui::InputState>>;
+
+/// Per-diff `+N −M` line counts keyed by `"{tool_call_id}#{diff_index}"`
+/// (built in the ops layer; this view only reads them for the collapsed
+/// diff summary).
+type DiffStats = std::collections::HashMap<String, DiffStat>;
 
 use crate::surface::strings as s;
 use crate::ui::theme;
+use crate::ui::{ButtonVariants as _, Disclosure, IconName, Sizable as _, button_bare, disclosure};
 use crate::workspace::Workspace;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::diff_editor_key;
-use crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock;
-use crate::workspace::main_area::file_view_pane::render::render_md_blocks_plain;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
+    DiffStat, diff_editor_key, is_active,
+};
+use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -49,6 +61,11 @@ pub(in crate::workspace) fn render(
     let t = theme::current(cx).clone();
 
     let status_banner = status_banner(&content.status, &t);
+
+    // Expand-all / collapse-all chrome sits between the banner and the list,
+    // but only once there is a conversation to fold.
+    let fold_toolbar: Option<AnyElement> =
+        (!content.items.is_empty()).then(|| fold_toolbar(pane_id, &t, cx).into_any_element());
 
     let body: AnyElement = if content.items.is_empty() {
         div()
@@ -66,19 +83,23 @@ pub(in crate::workspace) fn render(
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .track_scroll(&content.scroll_handle)
+            .on_scroll_wheel(
+                cx.listener(move |ws, _ev, _window, cx| ws.agent_chat_on_scroll(pane_id, cx)),
+            )
             .flex()
             .flex_col()
             .gap(px(theme::AGENT_CHAT_LIST_GAP))
             .px(px(theme::AGENT_CHAT_PAD_X))
             .py(px(theme::AGENT_CHAT_PAD_Y));
         for (ix, item) in content.items.iter().enumerate() {
-            let blocks = content.md_blocks.get(&ix).map(Vec::as_slice);
             list = list.child(render_item(
                 pane_id,
                 ix,
                 item,
-                blocks,
                 &content.diff_editors,
+                &content.diff_stats,
+                &content.fold,
                 &t,
                 cx,
             ));
@@ -86,13 +107,82 @@ pub(in crate::workspace) fn render(
         list.into_any_element()
     };
 
+    // The scroll-to-bottom button overlays the list when the user has scrolled
+    // up (follow mode released); the pane root's `relative` anchors it.
+    let scroll_btn: Option<AnyElement> = (!content.stick_to_bottom && !content.items.is_empty())
+        .then(|| scroll_to_bottom_button(pane_id, cx).into_any_element());
+
     div()
         .size_full()
+        .relative()
         .flex()
         .flex_col()
         .bg(t.file_viewer_bg)
         .children(status_banner)
+        .children(fold_toolbar)
         .child(body)
+        .children(scroll_btn)
+}
+
+/// Floating "jump to bottom" affordance shown over the list when the user has
+/// scrolled up (follow mode released). One-line dispatch into
+/// `agent_chat_scroll_to_bottom` (render purity); positioned bottom-right via
+/// the pane root's `relative`.
+fn scroll_to_bottom_button(
+    pane_id: PaneId,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    div()
+        .absolute()
+        .bottom(px(theme::AGENT_CHAT_SCROLL_BTN_INSET))
+        .right(px(theme::AGENT_CHAT_SCROLL_BTN_INSET))
+        .child(
+            button_bare(("agent-chat-scroll-bottom", pane_id as usize))
+                .icon(IconName::ArrowDown)
+                .on_click(cx.listener(move |ws, _ev, _window, cx| {
+                    ws.agent_chat_scroll_to_bottom(pane_id, cx)
+                })),
+        )
+}
+
+/// A thin right-aligned toolbar row with "Expand all" / "Collapse all"
+/// buttons. Dev-tool chrome that should recede: ghost, `xsmall`, muted until
+/// hover. Each button is a one-line dispatch into `set_all_agent_folds`
+/// (render purity — no fold logic lives here). Shown only when the
+/// conversation is non-empty (the caller gates on `content.items`).
+fn fold_toolbar(
+    pane_id: PaneId,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    let expand = crate::ui::button(
+        ("agent-chat-expand-all", pane_id as usize),
+        SharedString::from(s::agent_chat_expand_all()),
+    )
+    .ghost()
+    .xsmall()
+    .on_click(cx.listener(move |ws, _ev, _window, cx| ws.set_all_agent_folds(pane_id, true, cx)));
+    let collapse = crate::ui::button(
+        ("agent-chat-collapse-all", pane_id as usize),
+        SharedString::from(s::agent_chat_collapse_all()),
+    )
+    .ghost()
+    .xsmall()
+    .on_click(cx.listener(move |ws, _ev, _window, cx| ws.set_all_agent_folds(pane_id, false, cx)));
+
+    div()
+        .flex_none()
+        .w_full()
+        .flex()
+        .flex_row()
+        .justify_end()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .px(px(theme::AGENT_CHAT_PAD_X))
+        .py(px(theme::AGENT_CHAT_PAD_Y))
+        .text_color(t.text_muted)
+        .child(expand)
+        .child(collapse)
 }
 
 /// The thin top banner — shown while connecting or on error; hidden once
@@ -127,41 +217,154 @@ fn status_banner(
     )
 }
 
-/// One conversation row. `md_blocks` is the parsed Markdown for this item's
-/// text when it has settled (filled by `reconcile_markdown` in the ops layer);
-/// `None` means the text is still streaming and renders as plain wrapped text.
+/// One conversation row. Message bodies render as selectable markdown via
+/// `crate::ui::markdown`, keyed by `ix` for stable selection identity.
+///
+/// `fold` / `diff_stats` are read-only here (render purity): the foldable kinds
+/// derive their expanded state purely via `fold.is_expanded(&key, active)` and
+/// read the collapsed diff summary from `diff_stats`. Toggling routes through
+/// `Workspace::toggle_agent_fold`, never mutating `content` in render.
 #[allow(clippy::too_many_arguments)]
 fn render_item(
     pane_id: PaneId,
     ix: usize,
     item: &ChatItem,
-    md_blocks: Option<&[MdBlock]>,
     diff_editors: &DiffEditors,
+    diff_stats: &DiffStats,
+    fold: &FoldState,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(text, md_blocks, t).into_any_element(),
-        ChatItem::AssistantText { text, streaming } => {
-            assistant_block(text, *streaming, md_blocks, t).into_any_element()
+        ChatItem::UserText(text) => user_bubble(ix, text, t).into_any_element(),
+        ChatItem::AssistantText { text, .. } => {
+            let key = FoldKey::Assistant(ix);
+            let expanded = fold.is_expanded(&key, is_active(item));
+            assistant_block(pane_id, ix, key, expanded, text, t, cx).into_any_element()
         }
-        ChatItem::Thinking { text, streaming } => {
-            thinking_block(text, *streaming, md_blocks, t).into_any_element()
+        ChatItem::Thinking { text, .. } => {
+            let key = FoldKey::Thinking(ix);
+            let expanded = fold.is_expanded(&key, is_active(item));
+            thinking_block(pane_id, ix, key, expanded, text, t, cx).into_any_element()
         }
-        ChatItem::ToolCall(tc) => tool_card(tc, diff_editors, t, cx).into_any_element(),
+        ChatItem::ToolCall(tc) => {
+            let key = FoldKey::Tool(tc.id.clone());
+            let expanded = fold.is_expanded(&key, is_active(item));
+            tool_card(
+                pane_id,
+                key,
+                expanded,
+                tc,
+                diff_editors,
+                diff_stats,
+                fold,
+                t,
+                cx,
+            )
+            .into_any_element()
+        }
         ChatItem::Permission(card) => permission_card(pane_id, ix, card, t, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t).into_any_element(),
     }
 }
 
-/// User prompt — right-aligned accent-tinted bubble. Renders Markdown once the
-/// text has settled (it always has, for `UserText`); falls back to plain text
-/// if the cache is somehow absent.
-fn user_bubble(
-    text: &str,
-    md_blocks: Option<&[MdBlock]>,
+/// Shared assembly for the four foldable block kinds (treatment C): a left
+/// chevron + clickable header row, an optional dimmed inline summary shown only
+/// when collapsed, and a body shown only when expanded. The whole header row is
+/// the click target (generous hit area); the [`disclosure`] chevron renders as
+/// a pure indicator glyph with no click handler of its own, so it never
+/// double-dispatches (a `disclosure` without `.on_toggle()` registers no click
+/// listener — see gpui `paint_mouse_listeners`).
+///
+/// `header_chrome` styles the header row itself — `|row| row` for the bare
+/// assistant / thinking / tool headers, or a closure that adds the diff's
+/// hunk-bg + padding. Each kind owns its outer chrome (assistant / thinking:
+/// none; tool: card border + bg; diff: hunk-bg header) by wrapping this output
+/// and/or styling the header row through `header_chrome`.
+#[allow(clippy::too_many_arguments)]
+fn foldable_block<
+    Id: Into<ElementId>,
+    F: FnOnce(gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div>,
+>(
+    id: Id,
+    pane_id: PaneId,
+    key: FoldKey,
+    expanded: bool,
+    header: AnyElement,
+    summary: Option<AnyElement>,
+    body: AnyElement,
+    header_chrome: F,
     t: &theme::DarudaTheme,
-) -> impl IntoElement + use<> {
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<Id, F> {
+    // One base id yields both the row's click target and the chevron glyph's
+    // identity, so the two stay distinct yet stable across renders.
+    let base: ElementId = id.into();
+    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded).color(t.text_subtle);
+
+    let mut header_row = div()
+        .id((base, "row"))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .cursor_pointer()
+        .on_click(
+            cx.listener(move |ws, _ev, _window, cx| ws.toggle_agent_fold(pane_id, key.clone(), cx)),
+        )
+        .child(chevron)
+        .child(header);
+    // The collapsed-only inline summary sits after the header content, on the
+    // same row, and is dropped entirely when expanded (the body carries the
+    // detail then).
+    if !expanded && let Some(summary) = summary {
+        header_row = header_row.child(summary);
+    }
+    let header_row = header_chrome(header_row);
+
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(header_row)
+        .when(expanded, move |this| this.child(body))
+}
+
+/// The collapsed-only inline summary for a text block (assistant / thinking):
+/// the first non-empty line of `text`, dimmed (`t.text_subtle`) and
+/// single-line ellipsized via `flex_1().min_w_0()` + `overflow_hidden()` — the
+/// same truncation idiom the path / title elements use, so layout (not a
+/// hardcoded char limit) does the ellipsizing. `italic` matches the thinking
+/// block's treatment. `None` when the text has no non-empty line (nothing to
+/// summarize).
+fn collapsed_text_summary(text: &str, italic: bool, t: &theme::DarudaTheme) -> Option<AnyElement> {
+    let line = text.lines().find(|l| !l.trim().is_empty())?;
+    Some(
+        div()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .when(italic, |el| el.italic())
+            .text_color(t.text_subtle)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(SharedString::from(line.to_string()))
+            .into_any_element(),
+    )
+}
+
+/// User prompt — right-aligned accent-tinted bubble. The body renders as
+/// selectable markdown via `crate::ui::markdown` inside the bubble chrome
+/// (bg / padding / rounded), keyed by `ix` for stable selection identity.
+fn user_bubble(ix: usize, text: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
+        .color(t.text_primary)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .full_width(false);
     let inner = div()
         .max_w(relative(0.85))
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -169,108 +372,95 @@ fn user_bubble(
         .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
         .bg(t.lane_card_active_bg)
         .text_color(t.text_primary)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE));
-    let inner = match md_blocks {
-        Some(blocks) => inner.child(render_md_blocks_plain(blocks, t)),
-        None => inner.child(SharedString::from(text.to_string())),
-    };
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .child(body);
     div().flex().flex_row().justify_end().child(inner)
 }
 
-/// Assistant response — left-aligned block. A still-streaming block renders as
-/// plain text with a trailing caret glyph; once it settles, `md_blocks` is
-/// present and the body renders as Markdown.
+/// Assistant response — left-aligned, foldable block (default expanded). The
+/// body renders as rendered, drag-selectable markdown via `crate::ui::markdown`
+/// (keyed by `ix` for stable selection identity); a still-streaming block shows
+/// its partial markdown fine (no per-message caret — the streaming signal lives
+/// on the input dock). Collapsed, the header shows the first non-empty line of
+/// `text`, dimmed and single-line ellipsized.
 fn assistant_block(
+    pane_id: PaneId,
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
     text: &str,
-    streaming: bool,
-    md_blocks: Option<&[MdBlock]>,
     t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
-    let body_el = match md_blocks {
-        Some(blocks) => div()
-            .text_color(t.text_primary)
-            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-            .child(render_md_blocks_plain(blocks, t))
-            .into_any_element(),
-        None => {
-            // `md_blocks` absent: a streaming tail (caret), or — only as a
-            // transient before the next `reconcile_markdown` runs — a settled
-            // block not yet parsed. In steady state every event reconciles then
-            // notifies, so a settled assistant block reaches this branch only
-            // momentarily; it renders as plain text until the reconcile fills
-            // the cache and the repaint takes the `Some` branch.
-            let body = if streaming {
-                format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
-            } else {
-                text.to_string()
-            };
-            div()
-                .text_color(t.text_primary)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(SharedString::from(body))
-                .into_any_element()
-        }
-    };
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(
-            div()
-                .text_color(t.text_muted)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(s::agent_chat_label_agent())),
-        )
-        .child(body_el)
+    let body_el = crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
+        .color(t.text_body)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .into_any_element();
+    let header = div()
+        .flex_none()
+        .text_color(t.text_body)
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(SharedString::from(s::agent_chat_label_agent()))
+        .into_any_element();
+    let summary = collapsed_text_summary(text, false, t);
+    foldable_block(
+        ("agent-chat-assistant", ix),
+        pane_id,
+        key,
+        expanded,
+        header,
+        summary,
+        body_el,
+        |row| row,
+        t,
+        cx,
+    )
 }
 
-/// Agent reasoning — dimmed, italicised block under a "Thinking" label.
-/// Streaming text stays plain (with a caret); a settled block renders as
-/// Markdown, still dimmed and italicised.
+/// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
+/// collapsed once settled, expanded while streaming, handled by the fold
+/// derivation). The body renders as rendered, drag-selectable markdown via
+/// `crate::ui::markdown` (keyed by `ix`), dimmed via `t.text_subtle`. Collapsed,
+/// the header shows the first non-empty line of `text`, dimmed italic.
+//
+// NOTE: the previous italic treatment of the body is not preserved —
+// `crate::ui::markdown` (TextView) owns its own typography. The "Thinking"
+// label plus the dimmer `text_subtle` colour still distinguish reasoning from
+// the assistant body.
 fn thinking_block(
+    pane_id: PaneId,
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
     text: &str,
-    streaming: bool,
-    md_blocks: Option<&[MdBlock]>,
     t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
-    let body_el = match md_blocks {
-        Some(blocks) => div()
-            .italic()
-            .text_color(t.text_subtle)
-            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-            .child(render_md_blocks_plain(blocks, t))
-            .into_any_element(),
-        None => {
-            // `md_blocks` absent: a streaming tail (caret), or — only as a
-            // transient before the next `reconcile_markdown` runs — a settled
-            // block not yet parsed. In steady state every event reconciles then
-            // notifies, so a settled thinking block reaches this branch only
-            // momentarily; it renders as plain text until the reconcile fills
-            // the cache and the repaint takes the `Some` branch.
-            let body = if streaming {
-                format!("{text}{}", s::AGENT_CHAT_STREAM_CARET)
-            } else {
-                text.to_string()
-            };
-            div()
-                .italic()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(SharedString::from(body))
-                .into_any_element()
-        }
-    };
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(
-            div()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(s::agent_chat_thinking_label())),
-        )
-        .child(body_el)
+    let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
+        .color(t.text_subtle)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .into_any_element();
+    let header = div()
+        .flex_none()
+        .text_color(t.text_body)
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(SharedString::from(s::agent_chat_thinking_label()))
+        .into_any_element();
+    let summary = collapsed_text_summary(text, true, t);
+    foldable_block(
+        ("agent-chat-thinking", ix),
+        pane_id,
+        key,
+        expanded,
+        header,
+        summary,
+        body_el,
+        |row| row,
+        t,
+        cx,
+    )
 }
 
 /// Surfaced error item — error-tinted block.
@@ -286,65 +476,70 @@ fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<
         .child(SharedString::from(message.to_string()))
 }
 
-/// Tool invocation card — title + status badge, optional diffs, optional
-/// plain-text output.
+/// Tool invocation card — foldable (default collapsed once done, expanded while
+/// in progress). The header is the existing title + status-badge row, which
+/// already reads as the summary, so no extra inline summary line is added. The
+/// body (diffs + plain-text output) shows only when expanded; the card's
+/// border / bg chrome wraps the fold assembly either way. The nested diffs are
+/// independently foldable.
+#[allow(clippy::too_many_arguments)]
 fn tool_card(
+    pane_id: PaneId,
+    key: FoldKey,
+    expanded: bool,
     tc: &ToolCallItem,
     diff_editors: &DiffEditors,
+    diff_stats: &DiffStats,
+    fold: &FoldState,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
 
-    let mut card = div()
+    // Title + status badge: the header IS the summary, so the title fills the
+    // row and the badge pins to the right.
+    let header = div()
+        .flex_1()
+        .min_w_0()
         .flex()
-        .flex_col()
+        .flex_row()
+        .items_center()
+        .justify_between()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .w_full()
-        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
-        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        .bg(t.lane_card_bg)
-        .border_1()
-        .border_color(t.border)
         .child(
             div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_color(t.text_primary)
-                        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                        .child(SharedString::from(tc.title.clone())),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(badge_fg)
-                        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                        .child(badge_text),
-                ),
-        );
+                .flex_1()
+                .min_w_0()
+                .text_color(t.text_primary)
+                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .child(SharedString::from(tc.title.clone())),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(badge_fg)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(badge_text),
+        )
+        .into_any_element();
 
+    // Body: nested diffs (each independently foldable) then plain-text output.
+    let mut body = div().flex().flex_col().gap(px(theme::AGENT_CHAT_MSG_GAP));
     for (di, diff) in tc.diffs.iter().enumerate() {
         let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
-        card = card.child(diff_block(diff, editor, t, cx));
+        body = body.child(diff_block(
+            pane_id, &tc.id, di, diff, editor, diff_stats, fold, t, cx,
+        ));
     }
-
     if !tc.output.is_empty() {
-        card = card.child(
+        body = body.child(
             div()
                 .text_color(t.text_muted)
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(s::agent_chat_tool_output_label())),
         );
         for block in &tc.output {
-            card = card.child(
+            body = body.child(
                 div()
                     .font_family(theme::FONT_FAMILY_MONOSPACE)
                     .whitespace_normal()
@@ -355,37 +550,110 @@ fn tool_card(
         }
     }
 
-    card
+    // Card chrome (border + bg) wraps the fold assembly; the header IS the
+    // summary, so no separate inline summary line.
+    div()
+        .w_full()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
+        .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
+        .bg(t.lane_card_bg)
+        .border_1()
+        .border_color(t.border)
+        .child(foldable_block(
+            SharedString::from(format!("agent-chat-tool-{}", tc.id)),
+            pane_id,
+            key,
+            expanded,
+            header,
+            None,
+            body.into_any_element(),
+            |row| row,
+            t,
+            cx,
+        ))
 }
 
-/// Diff for a tool-call file modification. When a read-only diff editor has
-/// been built for this file (in the ops layer), embed it so the treatment
-/// matches the File viewer exactly — gutter + syntax + word-diff backgrounds.
-/// Falls back to inline old/new colored monospace lines when the editor is
-/// absent (e.g. the two sides are identical, or the window was gone at build
-/// time). The path header is shown either way.
+/// Diff for a tool-call file modification — foldable (default collapsed),
+/// nested inside the tool card body. The header is the chevron + the file path
+/// (single-line ellipsized), on the hunk-header bg chrome. Collapsed, the
+/// summary shows `+N −M` from `diff_stats` (green added / red removed); a diff
+/// with no stat entry (a no-change diff) shows nothing. Expanded body: when a
+/// read-only diff editor has been built for this file (in the ops layer), embed
+/// it so the treatment matches the File viewer exactly — gutter + syntax +
+/// word-diff backgrounds. Falls back to inline old/new colored monospace lines
+/// when the editor is absent (the two sides are identical, or the window was
+/// gone at build time).
+#[allow(clippy::too_many_arguments)]
 fn diff_block(
+    pane_id: PaneId,
+    tool_id: &str,
+    di: usize,
     diff: &DiffView,
-    editor: Option<&Entity<gpui_component::input::InputState>>,
+    editor: Option<&Entity<crate::ui::InputState>>,
+    diff_stats: &DiffStats,
+    fold: &FoldState,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
-    let mut block = div()
-        .flex()
-        .flex_col()
+    let diff_key = diff_editor_key(tool_id, di);
+    let key = FoldKey::Diff(diff_key.clone());
+    // Diff policy is DefaultCollapsed → derivation ignores `active`.
+    let expanded = fold.is_expanded(&key, false);
+
+    let header = div()
+        .flex_1()
+        .min_w_0()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_color(t.file_diff_hunk_text)
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(SharedString::from(diff.path.display().to_string()))
+        .into_any_element();
+
+    // Collapsed summary: `+N −M`. Absent entry ≡ no changes → show nothing.
+    let summary = diff_stats
+        .get(&diff_key)
+        .map(|stat| diff_stat_summary(stat, t));
+
+    let body = diff_body(diff, editor, t, cx).into_any_element();
+
+    // The hunk-bg + padding chrome lives on the header row; the rounded /
+    // overflow-hidden container wraps the whole foldable block. The body's own
+    // backgrounds paint over the container, so only the header carries hunk-bg.
+    div()
         .w_full()
         .rounded(px(theme::RADIUS_XS))
         .overflow_hidden()
-        .child(
-            div()
-                .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-                .py(px(theme::GAP_XS))
-                .bg(t.file_diff_hunk_bg)
-                .text_color(t.file_diff_hunk_text)
-                .font_family(theme::FONT_FAMILY_MONOSPACE)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(diff.path.display().to_string())),
-        );
+        .child(foldable_block(
+            SharedString::from(format!("agent-chat-diff-{diff_key}")),
+            pane_id,
+            key,
+            expanded,
+            header,
+            summary,
+            body,
+            |row| {
+                row.px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+                    .py(px(theme::GAP_XS))
+                    .bg(t.file_diff_hunk_bg)
+            },
+            t,
+            cx,
+        ))
+}
+
+/// The expanded body of a diff block: the embedded read-only editor when one
+/// was built, an explicit "no changes" line when both sides are identical, or
+/// the inline old/new colored monospace fallback otherwise.
+fn diff_body(
+    diff: &DiffView,
+    editor: Option<&Entity<crate::ui::InputState>>,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement + use<> {
+    let mut block = div().flex().flex_col().w_full();
 
     if let Some(editor) = editor {
         return block.child(
@@ -431,6 +699,32 @@ fn diff_block(
         ));
     }
     block
+}
+
+/// The collapsed diff summary `+N −M`: added count in `file_diff_add_text`
+/// (green), removed count in `file_diff_del_text` (red). Built from the
+/// [`DiffStat`] the ops layer caches alongside the editor (absent ≡ `0/0`, in
+/// which case the caller shows no summary at all).
+fn diff_stat_summary(stat: &DiffStat, t: &theme::DarudaTheme) -> AnyElement {
+    div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(
+            div()
+                .text_color(t.file_diff_add_text)
+                .child(SharedString::from(format!("+{}", stat.added))),
+        )
+        .child(
+            div()
+                .text_color(t.file_diff_del_text)
+                .child(SharedString::from(format!("−{}", stat.removed))),
+        )
+        .into_any_element()
 }
 
 fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char) -> impl IntoElement + use<> {

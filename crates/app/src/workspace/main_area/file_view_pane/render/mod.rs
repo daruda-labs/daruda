@@ -26,7 +26,6 @@ use crate::ui::theme;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 
 use self::body::render_file_viewer_body;
-pub(in crate::workspace) use self::markdown::render_md_blocks_plain;
 use self::scrollbar::file_viewer_scrollbar;
 use self::search_panel::render_search_panel;
 use self::toolbar::render_file_viewer_toolbar;

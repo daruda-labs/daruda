@@ -928,6 +928,16 @@ pub fn agent_chat_empty() -> String {
     rust_i18n::t!("agent_chat.empty").into_owned()
 }
 
+/// Toolbar button: expand every foldable block in the conversation.
+pub fn agent_chat_expand_all() -> String {
+    rust_i18n::t!("agent_chat.expand_all").into_owned()
+}
+
+/// Toolbar button: collapse every foldable block in the conversation.
+pub fn agent_chat_collapse_all() -> String {
+    rust_i18n::t!("agent_chat.collapse_all").into_owned()
+}
+
 /// Label for a collapsed agent reasoning ("thinking") block.
 pub fn agent_chat_thinking_label() -> String {
     rust_i18n::t!("agent_chat.thinking_label").into_owned()
@@ -974,10 +984,6 @@ pub fn agent_chat_permission_cancelled() -> String {
     rust_i18n::t!("agent_chat.permission_cancelled").into_owned()
 }
 
-/// Trailing caret appended to a still-streaming assistant / thinking
-/// block so the "typing" affordance is visible. Decorative glyph (locale
-/// independent), kept with the other glyph constants.
-pub const AGENT_CHAT_STREAM_CARET: &str = "▌";
 pub fn file_viewer_search_no_match() -> String {
     rust_i18n::t!("file_viewer.search_no_match").into_owned()
 }

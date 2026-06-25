@@ -23,6 +23,7 @@ pub mod checkbox;
 pub mod code_editor;
 pub mod context_menu;
 pub mod dialog;
+pub mod disclosure;
 pub mod divider;
 pub mod form_helpers;
 pub mod group_box;
@@ -32,6 +33,7 @@ pub mod input_panel;
 pub mod label;
 pub mod list;
 pub mod macro_key;
+pub mod markdown;
 pub mod menu;
 pub mod placeholder;
 pub mod progress;
@@ -57,6 +59,7 @@ pub use code_editor::{
     markdown_editor,
 };
 pub use context_menu::{ContextMenu, ContextMenuCorner, ContextMenuItem};
+pub use disclosure::{Disclosure, disclosure};
 pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
@@ -68,6 +71,7 @@ pub use input_panel::{
 };
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
+pub use markdown::{Markdown, markdown};
 pub use menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder};
 pub use placeholder::placeholder_text;
 pub use progress::{Progress, progress};

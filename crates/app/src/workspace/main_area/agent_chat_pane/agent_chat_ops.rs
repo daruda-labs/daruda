@@ -39,6 +39,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use futures::StreamExt as _;
 use gpui::{AppContext as _, Context, Window};
 
+use super::fold::{FoldKey, FoldState};
 use crate::path_ext::PathExt as _;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -89,8 +90,11 @@ impl Workspace {
                 _event_pump: None,
                 pending_permission: None,
                 turn_in_flight: false,
-                md_blocks: std::collections::HashMap::new(),
                 diff_editors: std::collections::HashMap::new(),
+                diff_stats: std::collections::HashMap::new(),
+                fold: FoldState::default(),
+                scroll_handle: gpui::ScrollHandle::new(),
+                stick_to_bottom: true,
             }),
         }
     }
@@ -242,7 +246,7 @@ impl Workspace {
             self.report_error(report, cx);
         }
 
-        // Parse params for the Markdown reconcile, read before the mutable
+        // Theme params for the diff reconcile, read before the mutable
         // borrow of the pane content.
         let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
 
@@ -270,8 +274,15 @@ impl Workspace {
                 cancel_pending_permission(ac);
             }
         }
-        reconcile_markdown(ac, &syntax_theme, is_light);
         self.reconcile_diff_editors(pane_id, &syntax_theme, is_light, cx);
+        // Auto-follow: while pinned to the bottom, keep the view there as new
+        // content folds in. `scroll_to_bottom` sets a flag resolved at the next
+        // prepaint, so it accounts for the content appended above.
+        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id)
+            && ac.stick_to_bottom
+        {
+            ac.scroll_handle.scroll_to_bottom();
+        }
         cx.notify();
     }
 
@@ -295,12 +306,16 @@ impl Workspace {
             handle.send_prompt(text);
             ac.turn_in_flight = true;
         }
-        // Only the echoed `UserText` needs parsing; there is no `ToolCall` at a
-        // prompt-echo, so `reconcile_diff_editors` would always be a no-op here.
-        // Diff editors are reconciled solely on the event-pump path.
-        let (syntax_theme, is_light) = self.agent_chat_theme_params(cx);
+        // There is no `ToolCall` at a prompt-echo, so `reconcile_diff_editors`
+        // would always be a no-op here; diff editors are reconciled solely on
+        // the event-pump path. The echoed `UserText` renders its markdown
+        // directly in the view via `crate::ui::markdown`, so no parse pass is
+        // needed here either.
         if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
-            reconcile_markdown(ac, &syntax_theme, is_light);
+            // Submitting a prompt jumps the view to the bottom so the user sees
+            // their message and the streaming response.
+            ac.stick_to_bottom = true;
+            ac.scroll_handle.scroll_to_bottom();
         }
         cx.notify();
     }
@@ -384,11 +399,105 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Toggle the fold state of one block in an Agent chat pane. View
+    /// dispatch only: the disclosure chevron / header click routes here.
+    ///
+    /// Resolves the `active` flag the same way `render` derives it, so the
+    /// first click flips the *visible* state rather than re-deriving from a
+    /// stale default. `Tool` is matched by id (active = `InProgress`); `Diff`
+    /// is always `DefaultCollapsed`, so its derivation ignores `active` and we
+    /// pass `false`.
+    pub(in crate::workspace) fn toggle_agent_fold(
+        &mut self,
+        pane_id: PaneId,
+        key: FoldKey,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+            return;
+        };
+        let active = match &key {
+            FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => {
+                ac.items.get(*ix).map(is_active).unwrap_or(false)
+            }
+            FoldKey::Tool(id) => ac
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    daruda_acp::ChatItem::ToolCall(tc) if tc.id == *id => Some(is_active(item)),
+                    _ => None,
+                })
+                .unwrap_or(false),
+            // Diff policy is DefaultCollapsed → derivation ignores `active`.
+            FoldKey::Diff(_) => false,
+        };
+        ac.fold.toggle(key, active);
+        cx.notify();
+    }
+
+    /// Expand or collapse every currently-visible foldable block in an Agent
+    /// chat pane at once (the pane header's expand-all / collapse-all). View
+    /// dispatch only.
+    ///
+    /// Builds the visible key set from `items`: each assistant / thinking item
+    /// by index, each tool call by id plus one `Diff` key per diff it carries
+    /// (the same `diff_editor_key` the renderer embeds with). User / permission
+    /// / error items are not foldable and are skipped.
+    pub(in crate::workspace) fn set_all_agent_folds(
+        &mut self,
+        pane_id: PaneId,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+            return;
+        };
+        let keys = collect_foldable_keys(&ac.items);
+        ac.fold.set_all(keys, expanded);
+        cx.notify();
+    }
+
+    /// Jump the conversation list to the bottom and re-engage follow mode.
+    /// Backs the floating scroll-to-bottom button. View dispatch only.
+    pub(in crate::workspace) fn agent_chat_scroll_to_bottom(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+            return;
+        };
+        ac.scroll_handle.scroll_to_bottom();
+        ac.stick_to_bottom = true;
+        cx.notify();
+    }
+
+    /// Recompute follow mode after the user scrolls the conversation list
+    /// (wired to the list's `on_scroll_wheel`). Pins to the bottom when the user
+    /// is at/near the live edge, releases otherwise — so streaming output
+    /// auto-follows only while the user is already at the bottom, and the
+    /// scroll-to-bottom button appears once they scroll up. Notifies only on a
+    /// change so a scroll that stays in the same zone is cheap.
+    pub(in crate::workspace) fn agent_chat_on_scroll(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
+            return;
+        };
+        let now_at_bottom = at_bottom(&ac.scroll_handle);
+        if ac.stick_to_bottom != now_at_bottom {
+            ac.stick_to_bottom = now_at_bottom;
+            cx.notify();
+        }
+    }
+
     /// Build the read-only diff editor entity for every tool-call file
-    /// modification that does not yet have one. Mirrors `reconcile_markdown`:
-    /// called from the event pump (and the local prompt echo) after `items`
-    /// is mutated, so the (cached) pane subtree shows the diff through the
-    /// same editor the File viewer uses rather than the inline fallback.
+    /// modification that does not yet have one. Called from the event pump
+    /// after `items` is mutated, so the (cached) pane subtree shows the diff
+    /// through the same editor the File viewer uses rather than the inline
+    /// fallback.
     ///
     /// Keyed by `"{tool_call_id}#{diff_index}"` — one editor per file. A diff
     /// is converted to a `DiffEditorModel` purely (no GPUI), then the editor
@@ -431,7 +540,7 @@ impl Workspace {
         let Some(ac) = self.agent_chat_content_for_pane(pane_id) else {
             return;
         };
-        let mut pending: Vec<(String, String, DiffEditorModel)> = Vec::new();
+        let mut pending: Vec<(String, String, DiffEditorModel, DiffStat)> = Vec::new();
         for item in &ac.items {
             let daruda_acp::ChatItem::ToolCall(tc) = item else {
                 continue;
@@ -441,22 +550,28 @@ impl Workspace {
                 if ac.diff_editors.contains_key(&key) {
                     continue;
                 }
-                let Some(model) = build_diff_view_model(diff, syntax_theme, is_light, &colors)
+                let Some((model, stat)) =
+                    build_diff_view_model(diff, syntax_theme, is_light, &colors)
                 else {
                     continue;
                 };
                 let language = diff_editor_language(diff).to_owned();
-                pending.push((key, language, model));
+                pending.push((key, language, model, stat));
             }
         }
         if pending.is_empty() {
             return;
         }
 
-        for (key, language, model) in pending {
+        for (key, language, model, stat) in pending {
             if let Some(editor) = create_diff_editor(cx, pane_id, &language, model)
                 && let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id)
             {
+                // Cache the stat under the same key as the editor so the fold
+                // summary (`+N −M`, Task 5) reads it back via `diff_editor_key`.
+                // Stored only when the editor builds — a no-change diff yields
+                // no editor and no stat (absent ≡ `0/0`).
+                ac.diff_stats.insert(key.clone(), stat);
                 ac.diff_editors.insert(key, editor);
             }
         }
@@ -485,10 +600,47 @@ impl Workspace {
     }
 }
 
+/// The visible foldable-key set for a conversation: each assistant / thinking
+/// item by index, each tool call by id plus one `Diff` key per diff it carries
+/// (the same `diff_editor_key` the renderer embeds with). User / permission /
+/// error items are not foldable and contribute none. Single source of truth for
+/// expand-all / collapse-all (`set_all_agent_folds`) and the coverage test.
+fn collect_foldable_keys(items: &[daruda_acp::ChatItem]) -> Vec<FoldKey> {
+    let mut keys: Vec<FoldKey> = Vec::new();
+    for (ix, item) in items.iter().enumerate() {
+        match item {
+            daruda_acp::ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
+            daruda_acp::ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
+            daruda_acp::ChatItem::ToolCall(tc) => {
+                keys.push(FoldKey::Tool(tc.id.clone()));
+                for di in 0..tc.diffs.len() {
+                    keys.push(FoldKey::Diff(diff_editor_key(&tc.id, di)));
+                }
+            }
+            daruda_acp::ChatItem::UserText(_)
+            | daruda_acp::ChatItem::Permission(_)
+            | daruda_acp::ChatItem::Error(_) => {}
+        }
+    }
+    keys
+}
+
 /// Cache key for a tool call's `di`-th diff editor: one editor per file.
 /// Shared with the renderer so the embed lookup matches the insert key.
 pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
     format!("{tool_call_id}#{di}")
+}
+
+/// Added / removed line counts for one tool-call diff, used by the fold
+/// summary (`+N −M`) shown when the diff editor is collapsed. Counted from
+/// the *same* hunks that build the diff editor (see [`build_diff_view_model`]),
+/// so the numbers match what the editor renders exactly — an edit reports the
+/// changed lines, not a full delete-then-re-add. Cached alongside the editor in
+/// `AgentChatContent.diff_stats`, keyed by [`diff_editor_key`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::workspace) struct DiffStat {
+    pub(in crate::workspace) added: usize,
+    pub(in crate::workspace) removed: usize,
 }
 
 /// Language id for an editor's syntax tree, from the diff's file extension.
@@ -516,19 +668,25 @@ fn diff_editor_language(diff: &DiffView) -> &'static str {
 }
 
 /// Convert a tool-call [`DiffView`] into the editor inputs the shared
-/// diff-through-editor renderer consumes. Pure / GPUI-free: builds the unified
-/// diff from `old_text`/`new_text` (a created file has no `old_text` → empty
-/// old side), syntax-highlights and word-diffs the hunks exactly as the File
-/// viewer's `load_diff` does, then folds them into a [`DiffEditorModel`].
+/// diff-through-editor renderer consumes, plus the [`DiffStat`] for the same
+/// diff. Pure / GPUI-free: builds the unified diff from `old_text`/`new_text`
+/// (a created file has no `old_text` → empty old side), syntax-highlights and
+/// word-diffs the hunks exactly as the File viewer's `load_diff` does, then
+/// folds them into a [`DiffEditorModel`].
+///
+/// The stat is counted from those *same* hunks (via [`diff_stat_from_hunks`]),
+/// so it matches the rendered editor line-for-line — a one-line edit reports
+/// `added = 1, removed = 1`, never the full old/new line totals.
 ///
 /// Returns `None` when the two sides are identical (no hunks → nothing to
-/// render), so the caller leaves the inline fallback in place.
+/// render), so the caller leaves the inline fallback in place and records no
+/// stat entry (absent ≡ `0/0`).
 fn build_diff_view_model(
     diff: &DiffView,
     syntax_theme: &str,
     is_light: bool,
     colors: &DiffColors,
-) -> Option<DiffEditorModel> {
+) -> Option<(DiffEditorModel, DiffStat)> {
     use crate::workspace::main_area::file_view_pane::highlighter::highlight_hunks;
     use crate::workspace::main_area::file_view_pane::line_diff::unified_diff_text;
     use crate::workspace::main_area::file_view_pane::word_diff::apply_word_diff;
@@ -540,11 +698,28 @@ fn build_diff_view_model(
     if hunks.is_empty() {
         return None;
     }
+    // Count add/remove from the parsed hunks before they are highlighted /
+    // word-diffed (those passes only annotate, never reclassify lines), so the
+    // stat is from the exact same diff that builds the editor below.
+    let stat = diff_stat_from_hunks(&hunks);
     let ext = diff.path.extension_str();
     highlight_hunks(&mut hunks, ext, syntax_theme, is_light);
     apply_word_diff(&mut hunks);
     let rows = build_diff_rows(&hunks, false);
-    Some(build_diff_editor_model(&rows, colors))
+    Some((build_diff_editor_model(&rows, colors), stat))
+}
+
+/// Tally a [`DiffStat`] from parsed diff hunks. Pure / GPUI-free wrapper over
+/// the File viewer's [`count_diff_stats`], which counts `DiffLine::Added` vs
+/// `DiffLine::Removed` across the hunks — the same line classification the
+/// editor rows are built from. A created file's hunks are all-added, so this
+/// naturally yields `removed = 0`; a no-change diff produces no hunks and never
+/// reaches here.
+fn diff_stat_from_hunks(
+    hunks: &[crate::workspace::main_area::file_view_pane::DiffHunk],
+) -> DiffStat {
+    let (added, removed) = crate::workspace::main_area::file_view_pane::count_diff_stats(hunks);
+    DiffStat { added, removed }
 }
 
 /// Create + configure a read-only diff editor entity inside a single window
@@ -595,65 +770,41 @@ fn create_diff_editor(
     }
 }
 
-/// Markdown-parse text of `item` if it carries any; tool-call / permission /
-/// error items have no Markdown body and return `None`.
-fn item_text(item: &daruda_acp::ChatItem) -> Option<&str> {
-    use daruda_acp::ChatItem;
+/// Whether a chat block is currently streaming / in progress — the `active`
+/// input the fold derivation reads. A streaming text or thinking block, or a
+/// tool call still `InProgress`, is active; everything else (settled text,
+/// finished/failed tool calls, user / permission / error items) is not. Shared
+/// by [`Workspace::toggle_agent_fold`] and the renderer so both derive the same
+/// effective fold state.
+pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
+    use daruda_acp::{ChatItem, ToolStatusView};
     match item {
-        ChatItem::UserText(text)
-        | ChatItem::AssistantText { text, .. }
-        | ChatItem::Thinking { text, .. } => Some(text.as_str()),
-        ChatItem::ToolCall(_) | ChatItem::Permission(_) | ChatItem::Error(_) => None,
+        ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } => {
+            *streaming
+        }
+        ChatItem::ToolCall(tc) => tc.status == ToolStatusView::InProgress,
+        ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Error(_) => false,
     }
 }
 
-/// Whether the text item at `idx` has settled — its text will no longer
-/// change, so it is safe to parse once and cache.
-///
-/// Rule: every text item *except the last* is settled (the agent never
-/// re-streams an earlier message). The last item is settled only when it is a
-/// finished text item — `UserText` (always complete) or a non-streaming
-/// `AssistantText` / `Thinking`. A streaming tail is left unsettled so it
-/// renders as plain wrapped text until `TurnEnded` flips `streaming` off.
-fn item_settled(items: &[daruda_acp::ChatItem], idx: usize) -> bool {
-    use daruda_acp::ChatItem;
-    if idx + 1 < items.len() {
-        return true;
-    }
-    matches!(
-        items.get(idx),
-        Some(
-            ChatItem::UserText(_)
-                | ChatItem::AssistantText {
-                    streaming: false,
-                    ..
-                }
-                | ChatItem::Thinking {
-                    streaming: false,
-                    ..
-                }
-        )
+/// Whether a scroll view is at (or within `slack` of) the bottom. `offset_y`
+/// is the scroll handle's current y offset (`<= 0`; more negative = scrolled
+/// further down); `max_y` is the maximum scroll distance (`>= 0`). Content that
+/// fits without scrolling (`max_y <= 0`) is trivially at the bottom. Pure so it
+/// is unit-testable without a laid-out handle.
+fn scroll_at_bottom(offset_y: f32, max_y: f32, slack: f32) -> bool {
+    max_y <= 0.0 || (max_y + offset_y) <= slack
+}
+
+/// [`scroll_at_bottom`] applied to a live [`gpui::ScrollHandle`] with the
+/// agent-chat slack. `offset().y` is negative when scrolled down and
+/// `max_offset().y` is the bottom extent, so at the bottom `max + offset ≈ 0`.
+fn at_bottom(handle: &gpui::ScrollHandle) -> bool {
+    scroll_at_bottom(
+        f32::from(handle.offset().y),
+        f32::from(handle.max_offset().y),
+        crate::ui::theme::AGENT_CHAT_SCROLL_BOTTOM_SLACK,
     )
-}
-
-/// Parse-and-cache Markdown for every settled text item that is not already
-/// cached. Called from the event pump (and the local prompt echo) after
-/// `items` is mutated. `items` is append-only with only the tail mutating, so
-/// index keys stay stable and no cache invalidation is needed.
-fn reconcile_markdown(ac: &mut AgentChatContent, syntax_theme: &str, is_light: bool) {
-    use crate::workspace::main_area::file_view_pane::markdown_viewer::parse_markdown;
-    for idx in 0..ac.items.len() {
-        if ac.md_blocks.contains_key(&idx) {
-            continue;
-        }
-        if !item_settled(&ac.items, idx) {
-            continue;
-        }
-        if let Some(text) = item_text(&ac.items[idx]) {
-            ac.md_blocks
-                .insert(idx, parse_markdown(text, syntax_theme, is_light));
-        }
-    }
 }
 
 /// The trailing not-yet-resolved permission card in `items`, if any. The
@@ -689,86 +840,23 @@ fn cancel_pending_permission(ac: &mut AgentChatContent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_acp::ChatItem;
+    use daruda_acp::{ChatItem, ToolCallItem};
 
     /// A syntax theme id every test reuses for the highlight passes.
     const TEST_SYNTAX_THEME: &str = "base16-ocean.dark";
 
-    /// `reconcile_markdown` parses settled text items and leaves the streaming
-    /// tail untouched until it settles. Only the GPUI-bound `focus_handle`
-    /// needs a live context; the rest is plain data.
-    #[gpui::test]
-    fn reconcile_caches_settled_text_only(cx: &mut gpui::TestAppContext) {
-        let ac = cx.update(|cx| {
-            let focus_handle = cx.focus_handle();
-            AgentChatContent {
-                focus_handle,
-                cached_title: "t".into(),
-                cwd: None,
-                status: AgentSessionStatus::Connected,
-                items: vec![
-                    ChatItem::UserText("# hello".to_owned()),
-                    ChatItem::AssistantText {
-                        text: "world".to_owned(),
-                        streaming: true,
-                    },
-                ],
-                handle: None,
-                _event_pump: None,
-                pending_permission: None,
-                turn_in_flight: false,
-                md_blocks: std::collections::HashMap::new(),
-                diff_editors: std::collections::HashMap::new(),
-            }
-        });
-        let mut ac = ac;
-
-        reconcile_markdown(&mut ac, TEST_SYNTAX_THEME, false);
-        // index 0 (UserText) is settled → cached; index 1 (streaming tail)
-        // is not.
-        assert!(ac.md_blocks.contains_key(&0));
-        assert!(!ac.md_blocks.contains_key(&1));
-
-        // Flip the tail to settled → it now parses on the next reconcile.
-        if let ChatItem::AssistantText { streaming, .. } = &mut ac.items[1] {
-            *streaming = false;
-        }
-        reconcile_markdown(&mut ac, TEST_SYNTAX_THEME, false);
-        assert!(ac.md_blocks.contains_key(&1));
-    }
-
     #[test]
-    fn item_settled_rules() {
-        // A non-tail item is always settled.
-        let items = vec![
-            ChatItem::AssistantText {
-                text: "a".to_owned(),
-                streaming: true,
-            },
-            ChatItem::UserText("b".to_owned()),
-        ];
-        assert!(item_settled(&items, 0)); // not the tail → settled even if streaming
-        assert!(item_settled(&items, 1)); // UserText tail → settled
-
-        // Streaming tail → unsettled.
-        let items = vec![ChatItem::Thinking {
-            text: "x".to_owned(),
-            streaming: true,
-        }];
-        assert!(!item_settled(&items, 0));
-
-        // Non-streaming tail → settled.
-        let items = vec![ChatItem::AssistantText {
-            text: "x".to_owned(),
-            streaming: false,
-        }];
-        assert!(item_settled(&items, 0));
-    }
-
-    #[test]
-    fn item_text_skips_non_text_items() {
-        assert!(item_text(&ChatItem::Error("e".to_owned())).is_none());
-        assert_eq!(item_text(&ChatItem::UserText("u".to_owned())), Some("u"));
+    fn scroll_at_bottom_detects_bottom_top_and_slack() {
+        // Content fits (no scroll) → trivially at bottom.
+        assert!(scroll_at_bottom(0.0, 0.0, 24.0));
+        // At the very bottom: max + offset == 0.
+        assert!(scroll_at_bottom(-100.0, 100.0, 24.0));
+        // Within slack of the bottom (10px from the edge, slack 24).
+        assert!(scroll_at_bottom(-90.0, 100.0, 24.0));
+        // At the top of a scrollable view → not at bottom.
+        assert!(!scroll_at_bottom(0.0, 100.0, 24.0));
+        // Scrolled up beyond slack (90px from the edge) → not at bottom.
+        assert!(!scroll_at_bottom(-10.0, 100.0, 24.0));
     }
 
     /// A flat `DiffColors` fixture so the pure model build is testable
@@ -813,7 +901,7 @@ mod tests {
             "fn a() {}\nlet y = 2;\nfn b() {}\n",
             "src/lib.rs",
         );
-        let m = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
+        let (m, _) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
             .expect("a modified file produces hunks");
         // Hunk header row + content rows, no marker prefix on content.
         assert!(m.text.starts_with("@@"), "buffer leads with a hunk header");
@@ -833,7 +921,7 @@ mod tests {
     #[test]
     fn diff_view_model_handles_created_file() {
         let d = diff(None, "line one\nline two\n", "new.txt");
-        let m = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
+        let (m, _) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
             .expect("a created file produces an all-added hunk");
         assert!(m.text.contains("line one"));
         assert!(m.text.contains("line two"));
@@ -847,6 +935,69 @@ mod tests {
         assert!(build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors()).is_none());
     }
 
+    /// A simple one-line modification must report the *changed* line on each
+    /// side — `added = 1, removed = 1` — not the file's total line counts
+    /// (which would be 3/3 here). This is the whole point of counting from the
+    /// diff hunks rather than `new.lines() vs old.lines()`.
+    #[test]
+    fn diff_stat_counts_changed_lines_not_totals() {
+        let d = diff(
+            Some("fn a() {}\nlet x = 1;\nfn b() {}\n"),
+            "fn a() {}\nlet y = 2;\nfn b() {}\n",
+            "src/lib.rs",
+        );
+        let (_, stat) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
+            .expect("a modified file produces hunks");
+        assert_eq!(
+            stat,
+            DiffStat {
+                added: 1,
+                removed: 1
+            }
+        );
+    }
+
+    /// A newly created file (`old_text == None`) diffs against an empty old
+    /// side, so every line is an addition: `added = N, removed = 0`.
+    #[test]
+    fn diff_stat_new_file_is_all_added() {
+        let d = diff(None, "line one\nline two\nline three\n", "new.txt");
+        let (_, stat) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
+            .expect("a created file produces an all-added hunk");
+        assert_eq!(
+            stat,
+            DiffStat {
+                added: 3,
+                removed: 0
+            }
+        );
+    }
+
+    /// A pure deletion — the new side drops every line of the old — reports
+    /// `added = 0, removed = N`, the mirror of the all-added created-file case.
+    #[test]
+    fn diff_stat_deleted_lines_are_all_removed() {
+        let d = diff(Some("first\nsecond\n"), "", "old.rs");
+        let (_, stat) = build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors())
+            .expect("a fully-deleted file produces an all-removed hunk");
+        assert_eq!(
+            stat,
+            DiffStat {
+                added: 0,
+                removed: 2
+            }
+        );
+    }
+
+    /// Identical sides produce no hunks → no editor and no stat. The cache
+    /// simply has no entry (absent ≡ `0/0` for the fold summary), so there is
+    /// nothing to assert beyond the `None` already covered above; this pins the
+    /// pure tally directly on empty hunks for clarity.
+    #[test]
+    fn diff_stat_unchanged_is_zero() {
+        assert_eq!(diff_stat_from_hunks(&[]), DiffStat::default());
+    }
+
     /// The cache key is per-(tool-call, diff index) so two files in one tool
     /// call get distinct editors.
     #[test]
@@ -854,5 +1005,97 @@ mod tests {
         assert_eq!(diff_editor_key("call-1", 0), "call-1#0");
         assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-1", 1));
         assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-2", 0));
+    }
+
+    /// A tool-call item with a given status and diff list, for `is_active`
+    /// and key-collection coverage.
+    fn tool_call(id: &str, status: daruda_acp::ToolStatusView, diffs: usize) -> ToolCallItem {
+        ToolCallItem {
+            id: id.to_owned(),
+            title: "t".to_owned(),
+            kind: daruda_acp::ToolKindView::Edit,
+            status,
+            diffs: (0..diffs)
+                .map(|i| DiffView {
+                    path: std::path::PathBuf::from(format!("f{i}.rs")),
+                    old_text: None,
+                    new_text: "x".to_owned(),
+                })
+                .collect(),
+            output: Vec::new(),
+            raw_input: None,
+        }
+    }
+
+    /// `is_active` is true exactly while a block is streaming / in progress:
+    /// streaming text & thinking, and an `InProgress` tool call. Everything
+    /// else (settled text, finished/failed tool calls, user / permission /
+    /// error items) is inactive — this drives the auto-collapse derivation.
+    #[test]
+    fn is_active_matches_streaming_and_in_progress() {
+        use daruda_acp::ToolStatusView::*;
+        assert!(is_active(&ChatItem::AssistantText {
+            text: "a".to_owned(),
+            streaming: true,
+        }));
+        assert!(!is_active(&ChatItem::AssistantText {
+            text: "a".to_owned(),
+            streaming: false,
+        }));
+        assert!(is_active(&ChatItem::Thinking {
+            text: "t".to_owned(),
+            streaming: true,
+        }));
+        assert!(!is_active(&ChatItem::Thinking {
+            text: "t".to_owned(),
+            streaming: false,
+        }));
+        assert!(is_active(&ChatItem::ToolCall(tool_call(
+            "c1", InProgress, 0
+        ))));
+        assert!(!is_active(&ChatItem::ToolCall(tool_call("c1", Pending, 0))));
+        assert!(!is_active(&ChatItem::ToolCall(tool_call(
+            "c1", Completed, 0
+        ))));
+        assert!(!is_active(&ChatItem::ToolCall(tool_call("c1", Failed, 0))));
+        // Non-foldable / inactive items.
+        assert!(!is_active(&ChatItem::UserText("u".to_owned())));
+        assert!(!is_active(&ChatItem::Error("e".to_owned())));
+    }
+
+    /// The visible foldable-key set the expand-all / collapse-all op builds:
+    /// assistant & thinking by index, each tool call by id plus one diff key
+    /// per diff it carries; user / permission / error items contribute none.
+    /// (Mirrors `set_all_agent_folds`'s key collection.)
+    #[test]
+    fn visible_fold_keys_cover_text_tools_and_diffs() {
+        use daruda_acp::ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("u".to_owned()),
+            ChatItem::AssistantText {
+                text: "a".to_owned(),
+                streaming: false,
+            },
+            ChatItem::Thinking {
+                text: "t".to_owned(),
+                streaming: false,
+            },
+            ChatItem::ToolCall(tool_call("c1", Completed, 2)),
+            ChatItem::Error("e".to_owned()),
+        ];
+        // Exercise the same collection the expand-all / collapse-all op uses, so
+        // a new foldable kind is covered here automatically once the helper
+        // handles it.
+        let keys = collect_foldable_keys(&items);
+        assert_eq!(
+            keys,
+            vec![
+                FoldKey::Assistant(1),
+                FoldKey::Thinking(2),
+                FoldKey::Tool("c1".to_owned()),
+                FoldKey::Diff("c1#0".to_owned()),
+                FoldKey::Diff("c1#1".to_owned()),
+            ]
+        );
     }
 }

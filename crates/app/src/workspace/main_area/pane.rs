@@ -314,6 +314,13 @@ pub(in crate::workspace) struct AgentChatContent {
     pub(in crate::workspace) status: AgentSessionStatus,
     /// Conversation render model, in arrival order. The event pump
     /// appends/folds into this; the renderer reads it.
+    //
+    // INVARIANT: `FoldKey::Assistant`/`Thinking` and the per-message markdown
+    // selection ids (`("agent-chat-md-*", ix)`) are keyed by item index; this
+    // is valid only because `items` is append-only (only the tail mutates in
+    // place; no item is removed or reordered). Any future feature that removes
+    // or reorders items MUST clear `FoldState` (its index-keyed overrides would
+    // otherwise mis-target) and would also break markdown selection identity.
     pub(in crate::workspace) items: Vec<daruda_acp::ChatItem>,
     /// Live ACP session handle. `None` until `connect_session` resolves;
     /// stays `None` on a connect failure. Dropping it (pane close) closes
@@ -331,17 +338,6 @@ pub(in crate::workspace) struct AgentChatContent {
     /// Drives the input affordance (Send ↔ Stop) and disables re-submit
     /// while the agent is busy.
     pub(in crate::workspace) turn_in_flight: bool,
-    /// Parsed Markdown blocks for settled text items, keyed by their index
-    /// in `items`. Filled once per message by `reconcile_markdown` after the
-    /// event pump folds an event — parsing happens in the op, never in
-    /// `render` (which only reads this cache). The streaming tail item is
-    /// left out until it settles, so it renders as plain wrapped text. Safe
-    /// to key by index because `items` is append-only: only the tail mutates,
-    /// and a settled item's text never changes again.
-    pub(in crate::workspace) md_blocks: std::collections::HashMap<
-        usize,
-        Vec<crate::workspace::main_area::file_view_pane::markdown_viewer::MdBlock>,
-    >,
     /// Read-only diff editor entities for tool-call file modifications,
     /// keyed by `"{tool_call_id}#{diff_index}"` (one editor per file in a
     /// tool call). Built once per diff by `reconcile_diff_editors` in the
@@ -351,6 +347,31 @@ pub(in crate::workspace) struct AgentChatContent {
     /// only embeds them), mirroring the File viewer's `editor_state`.
     pub(in crate::workspace) diff_editors:
         std::collections::HashMap<String, Entity<gpui_component::input::InputState>>,
+    /// Added / removed line counts per tool-call diff, keyed by the same
+    /// `"{tool_call_id}#{diff_index}"` as `diff_editors`. Filled in the same
+    /// pass `reconcile_diff_editors` builds each editor, from the very hunks
+    /// that editor renders, so the fold summary's `+N −M` matches the diff
+    /// exactly. Runtime cache like `diff_editors` — never serialized (the
+    /// conversation itself is not persisted, only `cwd`).
+    pub(in crate::workspace) diff_stats: std::collections::HashMap<
+        String,
+        crate::workspace::main_area::agent_chat_pane::agent_chat_ops::DiffStat,
+    >,
+    /// Per-conversation fold state — which blocks the user has explicitly
+    /// expanded / collapsed. Transient / session-only: derived defaults
+    /// handle the rest, and like `diff_editors` it is never serialized (the
+    /// conversation itself is not persisted, only `cwd`).
+    pub(in crate::workspace) fold: crate::workspace::main_area::agent_chat_pane::fold::FoldState,
+    /// Scroll handle for the conversation list. Lets the ops layer pin the view
+    /// to the bottom (auto-follow while streaming) and the scroll-to-bottom
+    /// button jump down. Transient / session-only, never serialized.
+    pub(in crate::workspace) scroll_handle: gpui::ScrollHandle,
+    /// Whether the list is pinned to the bottom (follow mode). True while the
+    /// user is at/near the bottom; flipped false when they scroll up (so
+    /// streaming output doesn't yank them) and true again when they scroll back.
+    /// Drives auto-follow and the scroll-to-bottom button's visibility.
+    /// Transient / session-only.
+    pub(in crate::workspace) stick_to_bottom: bool,
 }
 
 pub(in crate::workspace) struct Pane {

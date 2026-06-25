@@ -208,6 +208,8 @@ agent_chat:
   error_prefix: "Connection error:"
   no_lane_cwd: "No working directory for this lane."
   empty: "Ask the agent anything to get started."
+  expand_all: "Expand all"
+  collapse_all: "Collapse all"
   thinking_label: "Thinking"
   tool_output_label: "Output"
   tool_status_pending: "Pending"

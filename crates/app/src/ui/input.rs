@@ -81,12 +81,18 @@ pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> i
     tab.apply(state, cx, inner)
 }
 
-/// Chrome-cell input variant that hosts an action element inline,
-/// right-aligned along the bottom edge of the cell. Same daruda
-/// tokens as [`input`] (`MODAL_INPUT_BG` / border / radius) so the
-/// two read as the same widget family. Used by the bottom-dock
-/// terminal input where the Submit button lives inside the chrome
-/// instead of beside it.
+/// Chrome-cell input variant that hosts an action element overlaid
+/// at the bottom-right corner of the cell. Same daruda tokens as
+/// [`input`] (`MODAL_INPUT_BG` / border / radius) so the two read
+/// as the same widget family. Used by the bottom-dock terminal
+/// input where the Submit button lives inside the chrome instead of
+/// beside it.
+///
+/// The action floats over the text area via absolute positioning
+/// (same pattern as [`InputPanelLayout::ActionsFloating`]), so the
+/// input text can use the full cell height while the button sits on
+/// top. Bottom padding reserves space so the last line of text
+/// doesn't hide behind the button.
 ///
 /// `action` is any [`IntoElement`] — typically `crate::ui::button_*`
 /// for a single button, but a `DropdownButton` split or a small
@@ -112,6 +118,7 @@ pub fn input_with_action<T: InputTabSpec>(
     let focus_handle = state.read(cx).focus_handle(cx);
     div()
         .track_focus(&focus_handle)
+        .relative()
         .flex()
         .flex_col()
         .w_full()
@@ -120,20 +127,23 @@ pub fn input_with_action<T: InputTabSpec>(
         .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
-        // Text region fills the top — `flex_1` claims the vertical
-        // space above the action bar; the inner flex propagates
-        // stretch to the `Input`'s multi-line `h_auto` body.
-        .child(div().flex_1().flex().child(inner))
-        // Action bar — right-aligned along the bottom.
+        // Text region fills the full height — `pb` reserves space at
+        // the bottom so the last line of text stays above the
+        // overlaid action button.
         .child(
             div()
-                .flex_none()
+                .flex_1()
                 .flex()
-                .flex_row()
-                .justify_end()
-                .items_center()
-                .px(px(d::INPUT_PANEL_BUTTON_GAP))
-                .pb(px(d::INPUT_PANEL_BUTTON_GAP))
+                .pb(px(d::INPUT_PANEL_FLOATING_BAR_H))
+                .child(inner),
+        )
+        // Action button — absolutely positioned at bottom-right,
+        // floating over the text region.
+        .child(
+            div()
+                .absolute()
+                .bottom(px(d::INPUT_PANEL_BUTTON_GAP))
+                .right(px(d::INPUT_PANEL_BUTTON_GAP))
                 .child(action),
         )
 }

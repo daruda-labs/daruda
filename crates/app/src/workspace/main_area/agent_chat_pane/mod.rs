@@ -10,6 +10,7 @@
 //!   closures one-line dispatch into the ops above.
 
 pub(in crate::workspace) mod agent_chat_ops;
+pub(in crate::workspace) mod fold;
 pub(in crate::workspace) mod render;
 
 pub(in crate::workspace) use render::render;

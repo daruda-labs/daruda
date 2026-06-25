@@ -688,6 +688,9 @@ pub const FILES_ROW_PAD_X: f32 = PAD_STANDARD;
 pub const FILES_INDENT_PX: f32 = PAD_XL;
 /// Width of the chevron column (px).
 pub const FILES_CHEVRON_W: f32 = 14.0;
+/// Hitbox width of the reusable `Disclosure` chevron (px). Decoupled from the
+/// file-tree column so the two can diverge later; initially equal.
+pub const DISCLOSURE_CHEVRON_W: f32 = FILES_CHEVRON_W;
 /// Width of the icon column to the right of the chevron (px).
 pub const FILES_ICON_W: f32 = 16.0;
 /// Gap between chevron / icon / name (px).
@@ -817,6 +820,12 @@ pub const AGENT_CHAT_INPUT_INNER_PAD_X: f32 = PAD_STANDARD;
 pub const AGENT_CHAT_INPUT_INNER_PAD_Y: f32 = PAD_XS;
 /// Agent chat input box corner radius (px).
 pub const AGENT_CHAT_INPUT_RADIUS: f32 = RADIUS_SM;
+/// Slack (px) for "is the agent chat scrolled to the bottom?" — within this
+/// distance of the live edge still counts as at-bottom (follow mode stays on).
+pub const AGENT_CHAT_SCROLL_BOTTOM_SLACK: f32 = 24.0;
+/// Inset (px) of the floating scroll-to-bottom button from the pane's
+/// bottom-right corner.
+pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
 /// Agent task list entry font size (px).
 pub const AGENT_TASK_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Agent task list icon column width (px).
