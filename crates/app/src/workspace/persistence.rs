@@ -659,23 +659,19 @@ impl Workspace {
                     )
                 } else if let Some(ac) = agent_chat {
                     // AgentChat pane — the ACP session itself is not
-                    // persisted; restore re-opens at the saved lane cwd
-                    // and starts a fresh "Connecting…" session below.
-                    // Items begin empty.
+                    // persisted; restore re-opens at the saved lane cwd in
+                    // the dormant `Idle` state. The live session is *not*
+                    // started here — `focus_pane` connects it lazily on
+                    // first focus, so cold restore doesn't spin up an agent
+                    // process per restored pane. Items begin empty.
                     self.create_agent_chat_pane(ac.cwd.clone(), cx)
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
                     self.create_pane_with_cwd(effective, window, cx)?
                 };
                 let new_id = pane.id;
-                // Capture the AgentChat cwd before the pane moves into the
-                // tree so the live session can attach once it is pushed.
-                let agent_chat_cwd = pane.agent_chat_content().and_then(|ac| ac.cwd.clone());
                 id_map.insert(*pane_id, new_id);
                 self.main_area.panes.push(pane);
-                if let Some(cwd) = agent_chat_cwd {
-                    self.connect_agent_chat(new_id, cwd, cx);
-                }
                 Ok(PaneLayout::Pane(new_id))
             }
             daruda_store::project::SerializedLayout::Split {

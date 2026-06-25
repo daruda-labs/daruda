@@ -259,6 +259,11 @@ fn status_banner(
     t: &theme::DarudaTheme,
 ) -> Option<impl IntoElement + use<>> {
     let (text, bg, fg): (SharedString, Hsla, Hsla) = match status {
+        AgentSessionStatus::Idle => (
+            s::agent_chat_idle().into(),
+            t.banner_info_bg,
+            t.banner_info_text,
+        ),
         AgentSessionStatus::Connecting => (
             s::agent_chat_connecting().into(),
             t.banner_info_bg,

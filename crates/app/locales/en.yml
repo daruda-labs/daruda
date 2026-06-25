@@ -204,6 +204,7 @@ file_viewer:
 # Agent chat pane (ACP)
 agent_chat:
   tab_title: "Agent"
+  idle: "Idle — focus this pane to start the agent."
   connecting: "Connecting…"
   error_prefix: "Connection error:"
   no_lane_cwd: "No working directory for this lane."

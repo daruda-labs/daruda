@@ -204,6 +204,7 @@ file_viewer:
 # Agent chat pane (ACP)
 agent_chat:
   tab_title: "에이전트"
+  idle: "유휴 — 이 패널을 포커스하면 에이전트가 시작됩니다."
   connecting: "연결 중…"
   error_prefix: "연결 오류:"
   no_lane_cwd: "이 레인에 작업 디렉터리가 없습니다."

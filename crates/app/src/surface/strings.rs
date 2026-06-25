@@ -906,6 +906,13 @@ pub fn agent_chat_tab_title() -> String {
     rust_i18n::t!("agent_chat.tab_title").into_owned()
 }
 
+/// Banner copy for a dormant (restored, not-yet-connected) Agent chat pane.
+/// The session starts on first focus, so this shows only for a visible but
+/// unfocused pane.
+pub fn agent_chat_idle() -> String {
+    rust_i18n::t!("agent_chat.idle").into_owned()
+}
+
 /// Placeholder copy shown while the agent session is connecting.
 pub fn agent_chat_connecting() -> String {
     rust_i18n::t!("agent_chat.connecting").into_owned()

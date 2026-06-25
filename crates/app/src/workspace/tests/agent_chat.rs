@@ -212,6 +212,37 @@ async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppC
     }
 }
 
+/// A pane with a working directory parks in `Idle`, not `Connecting`: the
+/// live ACP session is started lazily on first focus, not at construction.
+/// This is what keeps cold restore from spinning up an agent process per
+/// restored pane.
+#[gpui::test]
+async fn agent_chat_pane_with_cwd_is_idle_until_focus(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::AgentSessionStatus;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let status = cx
+        .update_window(window_handle.into(), |_, _window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), cx);
+                match &pane.content {
+                    PaneContent::AgentChat(ac) => ac.status.clone(),
+                    _ => panic!("expected an AgentChat pane"),
+                }
+            })
+        })
+        .unwrap();
+
+    assert_eq!(
+        status,
+        AgentSessionStatus::Idle,
+        "a pane with a cwd must stay dormant until first focus, got {status:?}"
+    );
+}
+
 /// `set_agent_mode` immediately updates `modes.current` (optimistic update) and
 /// is idempotent when the handle is absent (no live ACP session required).
 #[gpui::test]

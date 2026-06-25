@@ -9,9 +9,9 @@
 //! daruda inputs sit on `MODAL_INPUT_BG`, not `gpui_component`'s
 //! default `theme.background`. Plain `input` keeps the inner `Input`'s
 //! own chrome (bg + border + 1px accent focus border) and just
-//! overrides the bg via `.bg()`. The `*_with_action` variants host the
-//! action in an outer div, so they keep the inner `Input` borderless
-//! and draw the bg / border / focus-within accent on that div.
+//! overrides the bg via `.bg()`. [`input_with_action`] hosts the action
+//! in an outer div, so it keeps the inner `Input` borderless and draws
+//! the bg / border / focus-within accent on that div.
 //!
 //! Tab participation is the same `XxxTabSpec` polymorphism used by
 //! `checkbox` / `radio` / `select`: pass an `isize` to slot the input
@@ -81,121 +81,71 @@ pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> i
     tab.apply(state, cx, inner)
 }
 
-/// Chrome-cell input variant that hosts an action element overlaid
-/// at the bottom-right corner of the cell. Same daruda tokens as
-/// [`input`] (`MODAL_INPUT_BG` / border / radius) so the two read
-/// as the same widget family. Used by the bottom-dock terminal
-/// input where the Submit button lives inside the chrome instead of
-/// beside it.
+/// Chrome-cell input variant that hosts an action element beside the
+/// text on the right. Same daruda tokens as [`input`] (`MODAL_INPUT_BG`
+/// / border / radius) so the two read as the same widget family. Used
+/// by the bottom-dock terminal input, where the Submit button lives
+/// inside the chrome.
 ///
-/// The action floats over the text area via absolute positioning
-/// (same pattern as [`InputPanelLayout::ActionsFloating`]), so the
-/// input text can use the full cell height while the button sits on
-/// top. Bottom padding reserves space so the last line of text
-/// doesn't hide behind the button.
+/// The action sits in its own full-height column to the right of the
+/// text (not floating over it), so the text uses the cell's full height
+/// at every dock size — no bottom strip is reserved. The earlier
+/// floating variant reserved a full-width bottom band for a button that
+/// only occupied the bottom-right corner, blanking ~1.5 lines of text on
+/// short docks; this layout avoids that.
 ///
 /// `action` is any [`IntoElement`] — typically `crate::ui::button_*`
 /// for a single button, but a `DropdownButton` split or a small
 /// `flex_row` of multiple buttons works just as well. Variant /
 /// disabled / on_click choices stay at the call site.
 ///
-/// Height is left to the caller — wrap with `div().flex_1().min_h(...)`
-/// (or any sized container) when the cell should grow with its
-/// parent. The wrapper itself only commits to chrome + layout.
+/// Caller controls width via the surrounding container; the wrapper
+/// commits only to chrome + the row layout.
 pub fn input_with_action<T: InputTabSpec>(
     state: &Entity<InputState>,
     action: impl IntoElement,
     cx: &App,
     tab: T,
 ) -> impl IntoElement {
-    let inner = Input::new(state).small().appearance(false);
+    // `h_full()` fills the text column's (definite) height and scrolls
+    // internally instead of auto-growing past it. The row is left at the
+    // default cross-axis `stretch`, so the `flex_1` text column inherits the
+    // row's full height — that definite height is what `h_full`'s
+    // `relative(1.)` resolves against. Single-line states ignore it.
+    let inner = Input::new(state).small().appearance(false).h_full();
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
-    // Inner Input is borderless, so the focus-within accent border
-    // lives on this outer div (track_focus + in_focus). The inner Input
-    // track_focus'es the same handle; the duplicate collapses to one
-    // tab stop by FocusId — don't add a `tab_index` here (real 2nd stop).
-    let focus_handle = state.read(cx).focus_handle(cx);
-    div()
-        .track_focus(&focus_handle)
-        .relative()
-        .flex()
-        .flex_col()
-        .w_full()
-        .bg(t.modal_input_bg)
-        .border_1()
-        .border_color(t.border)
-        .in_focus(|s| s.border_color(d::PRIMARY))
-        .rounded(px(d::MODAL_BUTTON_RADIUS))
-        // Text region fills the full height — `pb` reserves space at
-        // the bottom so the last line of text stays above the
-        // overlaid action button.
-        .child(
-            div()
-                .flex_1()
-                .flex()
-                .pb(px(d::INPUT_PANEL_FLOATING_BAR_H))
-                .child(inner),
-        )
-        // Action button — absolutely positioned at bottom-right,
-        // floating over the text region.
-        .child(
-            div()
-                .absolute()
-                .bottom(px(d::INPUT_PANEL_BUTTON_GAP))
-                .right(px(d::INPUT_PANEL_BUTTON_GAP))
-                .child(action),
-        )
-}
-
-/// Inline (single-row) chrome-cell input variant. Same daruda tokens
-/// as [`input`] / [`input_with_action`] (`MODAL_INPUT_BG` / border /
-/// radius) so the three read as the same widget family, but the
-/// layout is a single horizontal row — the input fills the available
-/// width while `action` sits right-aligned beside it on the same line.
-/// Used by the bottom-dock terminal input when the dock height is
-/// compacted to the 1-row preset, where the vertical layout used by
-/// [`input_with_action`] would clip both the text region and the
-/// inline Submit button.
-///
-/// Caller controls width via the surrounding container; the wrapper
-/// commits only to chrome + the row layout.
-pub fn input_with_action_inline<T: InputTabSpec>(
-    state: &Entity<InputState>,
-    action: impl IntoElement,
-    cx: &App,
-    tab: T,
-) -> impl IntoElement {
-    let inner = Input::new(state).small().appearance(false);
-    let inner = tab.apply(state, cx, inner);
-    let t = d::current(cx);
-    // Focus-within accent border, same as `input_with_action`.
+    // Focus-within accent border.
     let focus_handle = state.read(cx).focus_handle(cx);
     div()
         .track_focus(&focus_handle)
         .flex()
         .flex_row()
-        .items_center()
         .w_full()
         .bg(t.modal_input_bg)
         .border_1()
         .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
         .rounded(px(d::MODAL_BUTTON_RADIUS))
-        // Text region claims the row's free width — `flex_1` lets the
-        // input stretch while the action chip on the right keeps its
-        // intrinsic width.
+        // Text region claims the row's free width and full height — `flex_1`
+        // takes the free width, the row's `stretch` gives it the full height,
+        // and the inner `h_full` editor scrolls within it.
         .child(div().flex_1().flex().min_w_0().child(inner))
-        // Action — right-aligned on the same row, with a small gap to
-        // the input and the chrome edge.
+        // Action — beside the text on the right in its own full-height
+        // column, bottom-aligned (composer feel). No vertical reservation is
+        // taken from the text (the button sits in a separate column, not over
+        // the text), so the text uses the cell's full height at every dock
+        // size. On a 1-row dock the column is ~one line tall, so bottom and
+        // center coincide.
         .child(
             div()
                 .flex_none()
                 .flex()
-                .flex_row()
-                .items_center()
+                .flex_col()
+                .justify_end()
                 .pr(px(d::INPUT_PANEL_BUTTON_GAP))
                 .pl(px(d::INPUT_PANEL_BUTTON_GAP))
+                .pb(px(d::INPUT_PANEL_BUTTON_GAP))
                 .child(action),
         )
 }

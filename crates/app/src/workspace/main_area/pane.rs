@@ -276,6 +276,11 @@ impl TaskEditContent {
 /// `Error` arm carries the failure message it renders.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum AgentSessionStatus {
+    /// Restored (or freshly created) but no session has been started —
+    /// the ACP session is not persisted, so a restored pane stays dormant
+    /// (no agent process) until the user focuses it. `focus_pane` then
+    /// transitions it to `Connecting` via `maybe_connect_agent_chat`.
+    Idle,
     /// The ACP adapter has been asked to start but the session is not
     /// yet ready for prompts (handshake + `session/new` in flight).
     Connecting,
@@ -1310,6 +1315,11 @@ impl Workspace {
         });
 
         if is_agent {
+            // Lazy connect: a restored Agent chat pane stays `Idle` (no
+            // session) until first focus. This is that trigger — connect
+            // only the pane the user actually opens, so cold restore no
+            // longer spins up an agent process per pane.
+            self.maybe_connect_agent_chat(pane_id, cx);
             // Agent chat panes have no in-pane input; keyboard focus goes
             // to the shared bottom input so the user can type immediately.
             self.terminal_input
