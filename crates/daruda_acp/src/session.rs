@@ -47,7 +47,8 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, TextContent,
+    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
+    SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo};
 use futures::FutureExt;
@@ -56,6 +57,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::channel::oneshot;
 
 use crate::connection::{AcpClientError, AdapterCommand};
+use crate::model::ModeStateView;
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -94,7 +96,9 @@ impl PermissionDecision {
 #[derive(Debug)]
 pub enum AcpEvent {
     /// `initialize` + `session/new` succeeded; the session is ready for prompts.
-    Connected,
+    /// `modes` carries the advertised session-mode state when the agent supports
+    /// modes; `None` otherwise.
+    Connected { modes: Option<ModeStateView> },
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
     Update(Box<SessionUpdate>),
@@ -106,6 +110,9 @@ pub enum AcpEvent {
     },
     /// A `session/prompt` turn completed; carries the protocol stop reason.
     TurnEnded { stop_reason: String },
+    /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
+    /// `set_mode` request was confirmed. `mode_id` is the new active mode.
+    ModeChanged { mode_id: String },
     /// A connection or protocol failure. Terminal: the connection task is
     /// ending (or has ended) when this is emitted.
     Error(String),
@@ -118,6 +125,8 @@ enum Command {
     Prompt(String),
     /// Send a `session/cancel` notification for the active turn.
     Cancel,
+    /// Send a `session/set_mode` request to switch the agent to the named mode.
+    SetMode(String),
 }
 
 /// Host-side handle to a live ACP session. Cloning is intentionally not derived
@@ -144,6 +153,17 @@ impl AcpSessionHandle {
     /// surfaced as a normal [`AcpEvent::TurnEnded`].
     pub fn cancel(&self) {
         let _ = self.commands.unbounded_send(Command::Cancel);
+    }
+
+    /// Request a mode switch via `session/set_mode`. Returns immediately; the
+    /// connection task issues the request on the next idle cycle. The agent
+    /// confirms by emitting a `CurrentModeUpdate` notification, which surfaces
+    /// as [`AcpEvent::ModeChanged`].
+    ///
+    /// A send failure means the connection task has already ended; the error is
+    /// dropped because the host learns of termination via the event stream.
+    pub fn set_mode(&self, mode_id: String) {
+        let _ = self.commands.unbounded_send(Command::SetMode(mode_id));
     }
 
     /// Resolve a parked permission request the host received as
@@ -225,8 +245,16 @@ async fn run_connection(
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                // The host owns the mapping into its chat model; forward raw.
-                let _ = notif_tx.unbounded_send(AcpEvent::Update(Box::new(notification.update)));
+                // Intercept `CurrentModeUpdate` so the host sees a typed
+                // `ModeChanged` event rather than the raw update. All other
+                // updates are forwarded as `AcpEvent::Update`.
+                let event = match notification.update {
+                    SessionUpdate::CurrentModeUpdate(u) => AcpEvent::ModeChanged {
+                        mode_id: u.current_mode_id.to_string(),
+                    },
+                    update => AcpEvent::Update(Box::new(update)),
+                };
+                let _ = notif_tx.unbounded_send(event);
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -269,8 +297,9 @@ async fn run_connection(
                 .send_request(NewSessionRequest::new(cwd))
                 .block_task()
                 .await?;
-            let session_id = new_session.session_id;
-            let _ = event_tx.unbounded_send(AcpEvent::Connected);
+            let session_id = new_session.session_id.clone();
+            let modes = new_session.modes.as_ref().map(Into::into);
+            let _ = event_tx.unbounded_send(AcpEvent::Connected { modes });
 
             prompt_loop(&connection, session_id, command_rx, &event_tx).await?;
             Ok(())
@@ -304,6 +333,15 @@ async fn prompt_loop(
                 Some(Command::Prompt(text)) => text,
                 // A cancel with no active turn has nothing to cancel; ignore.
                 Some(Command::Cancel) => continue,
+                // A mode switch while idle: issue the request and wait for the
+                // next command (the agent confirms via CurrentModeUpdate).
+                Some(Command::SetMode(id)) => {
+                    connection
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), id))
+                        .block_task()
+                        .await?;
+                    continue;
+                }
                 None => return Ok(()),
             },
         };
@@ -358,6 +396,15 @@ async fn run_turn(
                 Some(Command::Prompt(queued)) => {
                     // Sessions are single-turn; run it after this turn ends.
                     stash.push_back(queued);
+                }
+                Some(Command::SetMode(id)) => {
+                    // Mode switch mid-turn: send the request and keep awaiting
+                    // the prompt response; the confirmation arrives via
+                    // CurrentModeUpdate notification.
+                    connection
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), id))
+                        .block_task()
+                        .await?;
                 }
                 None => {
                     // Handle dropped mid-turn: cancel and let the turn wind

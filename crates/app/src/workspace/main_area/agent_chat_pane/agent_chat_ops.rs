@@ -94,11 +94,14 @@ impl Workspace {
                 turn_in_flight: false,
                 diff_editors: std::collections::HashMap::new(),
                 diff_stats: std::collections::HashMap::new(),
-                mermaid_rasters: std::collections::HashMap::new(),
+                mermaid_images: std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::HashMap::new(),
+                )),
                 mermaid_inflight: std::collections::HashSet::new(),
                 fold: FoldState::default(),
                 scroll_handle: gpui::ScrollHandle::new(),
                 stick_to_bottom: true,
+                modes: None,
             }),
         }
     }
@@ -258,7 +261,29 @@ impl Workspace {
             return;
         };
         match event {
-            AcpEvent::Connected => ac.status = AgentSessionStatus::Connected,
+            AcpEvent::Connected { modes } => {
+                ac.status = AgentSessionStatus::Connected;
+                ac.modes = modes;
+            }
+            AcpEvent::ModeChanged { mode_id } => {
+                if let Some(m) = &mut ac.modes {
+                    if m.available.iter().any(|v| v.id == mode_id) {
+                        m.current = mode_id;
+                    } else {
+                        // unknown mode id; ignored
+                        daruda_store::observability::log_writer::LogWriter::log(
+                            ErrorReport::new(
+                                "ACP session: received ModeChanged for unknown mode id",
+                            )
+                            .severity(ErrorSeverity::Warning)
+                            .at(file!(), line!())
+                            .with_context("mode_id", mode_id)
+                            .dedup(format!("agent_chat.unknown_mode.{pane_id}"))
+                            .build(),
+                        );
+                    }
+                }
+            }
             AcpEvent::Update(update) => apply_update(&mut ac.items, &update),
             AcpEvent::PermissionRequested { id, request } => {
                 ac.items.push(permission_item(&request));
@@ -483,8 +508,13 @@ impl Workspace {
     /// (wired to the list's `on_scroll_wheel`). Pins to the bottom when the user
     /// is at/near the live edge, releases otherwise — so streaming output
     /// auto-follows only while the user is already at the bottom, and the
-    /// scroll-to-bottom button appears once they scroll up. Notifies only on a
-    /// change so a scroll that stays in the same zone is cheap.
+    /// scroll-to-bottom button appears once they scroll up.
+    ///
+    /// Notifies on every scroll, not just on a follow-mode change: the daruda
+    /// scrollbar thumb is positioned at render time from the handle offset, so
+    /// it only tracks the scroll if the pane re-renders each frame. (The thumb
+    /// reads as the same widget as the rest of the app — the trade is a
+    /// per-scroll repaint of this pane subtree.)
     pub(in crate::workspace) fn agent_chat_on_scroll(
         &mut self,
         pane_id: PaneId,
@@ -493,11 +523,8 @@ impl Workspace {
         let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) else {
             return;
         };
-        let now_at_bottom = at_bottom(&ac.scroll_handle);
-        if ac.stick_to_bottom != now_at_bottom {
-            ac.stick_to_bottom = now_at_bottom;
-            cx.notify();
-        }
+        ac.stick_to_bottom = at_bottom(&ac.scroll_handle);
+        cx.notify();
     }
 
     /// Build the read-only diff editor entity for every tool-call file
@@ -611,7 +638,7 @@ impl Workspace {
             };
             for source in mermaid_sources(text) {
                 let key = mermaid_key(&source);
-                if ac.mermaid_rasters.contains_key(&key)
+                if ac.mermaid_images.lock().unwrap().contains_key(&key)
                     || ac.mermaid_inflight.contains(&key)
                     || pending.iter().any(|(k, _)| *k == key)
                 {
@@ -657,8 +684,16 @@ impl Workspace {
                         return;
                     };
                     ac.mermaid_inflight.remove(&key);
-                    if let Some(raster) = raster {
-                        ac.mermaid_rasters.insert(key, std::sync::Arc::new(raster));
+                    // Convert the raster to a GPU-ready image once, here, so the
+                    // render hook clones the same `CachedImage` each frame and
+                    // gpui reuses the uploaded texture (a fresh `RenderImage`
+                    // per render re-uploads the bitmap every frame).
+                    if let Some(image) = raster.and_then(|r| {
+                        crate::workspace::main_area::file_view_pane::render::CachedImage::from_raster(
+                            &r,
+                        )
+                    }) {
+                        ac.mermaid_images.lock().unwrap().insert(key, image);
                         cx.notify();
                     }
                 });

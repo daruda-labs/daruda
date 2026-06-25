@@ -41,8 +41,8 @@ fn main() {
 
         while let Some(event) = events.next().await {
             match event {
-                AcpEvent::Connected => {
-                    eprintln!("[connected] sending prompt 1");
+                AcpEvent::Connected { modes } => {
+                    eprintln!("[connected] modes={modes:?} sending prompt 1");
                     handle.send_prompt(prompts[next_prompt].to_string());
                     next_prompt += 1;
                 }
@@ -74,6 +74,9 @@ fn main() {
                         drop(handle);
                         break;
                     }
+                }
+                AcpEvent::ModeChanged { mode_id } => {
+                    eprintln!("[mode-changed] mode_id={mode_id}");
                 }
                 AcpEvent::Error(err) => {
                     eprintln!("[error] {err}");

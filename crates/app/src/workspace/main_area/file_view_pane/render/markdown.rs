@@ -465,45 +465,74 @@ fn render_md_image(
         ImageLayout::Block => raster_block_image(raster)
             .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
         // Sized to the text line; gpui derives width from the aspect ratio.
-        ImageLayout::Inline => match render_image_source(raster) {
-            Some(source) => img(source)
-                .h(px(theme::MD_INLINE_IMAGE_HEIGHT))
-                .into_any_element(),
-            None => div().child(format!("[{alt}]")).into_any_element(),
-        },
+        ImageLayout::Inline => {
+            let mut bgra = raster.rgba.clone();
+            for pixel in bgra.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            match image::RgbaImage::from_raw(raster.width, raster.height, bgra)
+                .map(|buf| std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
+            {
+                Some(render_image) => img(ImageSource::Render(render_image))
+                    .h(px(theme::MD_INLINE_IMAGE_HEIGHT))
+                    .into_any_element(),
+                None => div().child(format!("[{alt}]")).into_any_element(),
+            }
+        }
     }
 }
 
-/// Convert a [`RasterImage`] into a GPUI [`ImageSource`]: swap RGBA→BGRA (gpui's
-/// `RenderImage` is BGRA with straight alpha, matching gpui's own decoder, which
-/// only swaps channels and does not premultiply) and wrap it. `None` only when
-/// the buffer dimensions don't match the byte length (a corrupt raster).
-fn render_image_source(raster: &RasterImage) -> Option<ImageSource> {
-    let mut bgra = raster.rgba.clone();
-    for pixel in bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-    let buffer = image::RgbaImage::from_raw(raster.width, raster.height, bgra)?;
-    let render_image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
-    Some(ImageSource::Render(render_image))
+/// A rasterized diagram/image converted to a GPUI-ready image **once**.
+///
+/// The `Arc<RenderImage>` carries a stable image id, so reusing the *same*
+/// instance across renders lets gpui's texture cache hit. Building a fresh
+/// `RenderImage` every render instead forces a per-frame GPU re-upload
+/// (`Window::paint_image` → Metal `replaceRegion`), which dominates paint cost
+/// in an image-heavy view that re-renders each frame (e.g. the agent chat
+/// scrolling with mermaid diagrams). Callers cache this and clone it (cheap —
+/// an `Arc` bump) per render rather than re-converting the raster.
+#[derive(Clone)]
+pub(in crate::workspace) struct CachedImage {
+    image: std::sync::Arc<RenderImage>,
+    logical_w: f32,
 }
 
-/// Block-layout element for a rasterized diagram/image: displayed at its logical
-/// (1×) size so a 2× HiDPI bitmap stays crisp but shows at its natural size;
-/// `max_w_full` shrinks anything wider than the container and `MD_IMAGE_MAX_HEIGHT`
-/// caps the height. Shared by the Markdown preview (`render_md_image`) and the
-/// agent-chat mermaid renderer so both size diagrams identically. `None` only on
-/// a corrupt raster (dimension/byte-length mismatch).
-pub(in crate::workspace) fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
-    let source = render_image_source(raster)?;
-    let (logical_w, _) = raster.logical_size();
-    Some(
-        img(source)
-            .w(px(logical_w))
+impl CachedImage {
+    /// Convert a raster once: swap RGBA→BGRA (gpui's `RenderImage` is BGRA with
+    /// straight alpha, matching gpui's own decoder, which only swaps channels
+    /// and does not premultiply). `None` only when the buffer dimensions don't
+    /// match the byte length (a corrupt raster).
+    pub(in crate::workspace) fn from_raster(raster: &RasterImage) -> Option<Self> {
+        let mut bgra = raster.rgba.clone();
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let buffer = image::RgbaImage::from_raw(raster.width, raster.height, bgra)?;
+        let image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+        let (logical_w, _) = raster.logical_size();
+        Some(Self { image, logical_w })
+    }
+
+    /// Block-layout element for the diagram, displayed at its logical (1×) size
+    /// so a 2× HiDPI bitmap stays crisp but shows at its natural size;
+    /// `max_w_full` shrinks anything wider than the container and
+    /// `MD_IMAGE_MAX_HEIGHT` caps the height. Cloning the inner image source is
+    /// an `Arc` bump, so gpui sees the same id and reuses the uploaded texture.
+    pub(in crate::workspace) fn block(&self) -> AnyElement {
+        img(ImageSource::Render(self.image.clone()))
+            .w(px(self.logical_w))
             .max_w_full()
             .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
-            .into_any_element(),
-    )
+            .into_any_element()
+    }
+}
+
+/// Block-layout element for a raster, converting it fresh. Shared by the
+/// Markdown preview (`render_md_image`); the agent chat instead caches a
+/// [`CachedImage`] so it does not re-convert (and re-upload) per render.
+/// `None` only on a corrupt raster (dimension/byte-length mismatch).
+pub(in crate::workspace) fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
+    Some(CachedImage::from_raster(raster)?.block())
 }
 
 /// Returns true when `block_idx` falls within the char-selection row range.

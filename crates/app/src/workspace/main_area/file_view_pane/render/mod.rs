@@ -22,9 +22,10 @@ mod search_panel;
 mod toolbar;
 mod virtual_list;
 
-/// Shared raster → block-sized image element. Re-exported so the agent-chat
-/// mermaid renderer sizes diagrams identically to the Markdown preview.
-pub(in crate::workspace) use self::markdown::raster_block_image;
+/// Cacheable GPU-ready diagram image. Re-exported so the agent-chat mermaid
+/// renderer caches the converted image across renders (sizing matches the
+/// Markdown preview, which builds its own per render via `raster_block_image`).
+pub(in crate::workspace) use self::markdown::CachedImage;
 
 use crate::ui::theme;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};

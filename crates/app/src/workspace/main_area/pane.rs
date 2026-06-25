@@ -357,25 +357,28 @@ pub(in crate::workspace) struct AgentChatContent {
         String,
         crate::workspace::main_area::agent_chat_pane::agent_chat_ops::DiffStat,
     >,
-    /// Rasterized mermaid diagrams keyed by a stable hash of the fence source.
-    /// Filled asynchronously by `reconcile_mermaid` (selkie → SVG → raster on
-    /// the background executor); the markdown `code_block_render` hook reads it
-    /// to replace a ` ```mermaid ` fence with the diagram bitmap, falling back
-    /// to the default code rendering until the raster lands. The value is an
-    /// `Arc` so the render closure can capture a cheap clone of the map without
-    /// cloning the (large) rgba bytes per render. Runtime cache like
-    /// `diff_editors` — never serialized (the conversation itself is not
-    /// persisted, only `cwd`).
-    pub(in crate::workspace) mermaid_rasters: std::collections::HashMap<
-        u64,
-        std::sync::Arc<crate::workspace::main_area::file_view_pane::visual::RasterImage>,
+    /// Rendered mermaid diagrams keyed by fence-source hash, filled async by
+    /// `reconcile_mermaid`. Stored as a GPU-ready [`CachedImage`] (converted
+    /// once at insert) so each render clones the same image — gpui's texture
+    /// cache hits instead of re-uploading the bitmap every frame. Shared
+    /// `Arc<Mutex<…>>` so the `code_block_render` hook reads the live cache (the
+    /// image lands after `TextView`'s parse, which doesn't re-run on unchanged
+    /// text — a snapshot would stay empty). Runtime cache like `diff_editors`;
+    /// never serialized.
+    pub(in crate::workspace) mermaid_images: std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                u64,
+                crate::workspace::main_area::file_view_pane::render::CachedImage,
+            >,
+        >,
     >,
     /// Source hashes with a rasterization currently spawned, so `reconcile_mermaid`
     /// doesn't re-spawn the same diagram on every event while it is still being
     /// rendered on the background executor. A key is added when the task is
-    /// spawned and removed when it resolves (success → moves to `mermaid_rasters`;
+    /// spawned and removed when it resolves (success → moves to `mermaid_images`;
     /// failure → simply removed, leaving the code fallback). Runtime cache like
-    /// `mermaid_rasters` — never serialized.
+    /// `mermaid_images` — never serialized.
     pub(in crate::workspace) mermaid_inflight: std::collections::HashSet<u64>,
     /// Per-conversation fold state — which blocks the user has explicitly
     /// expanded / collapsed. Transient / session-only: derived defaults
@@ -392,6 +395,11 @@ pub(in crate::workspace) struct AgentChatContent {
     /// Drives auto-follow and the scroll-to-bottom button's visibility.
     /// Transient / session-only.
     pub(in crate::workspace) stick_to_bottom: bool,
+    /// Session-mode state advertised by the agent at `session/new` time and
+    /// updated on `CurrentModeUpdate` notifications. `None` until the session
+    /// connects, or when the agent does not advertise modes. The UI layer reads
+    /// this to render the mode chip (Task 2); the ops layer writes it here.
+    pub(in crate::workspace) modes: Option<daruda_acp::ModeStateView>,
 }
 
 pub(in crate::workspace) struct Pane {

@@ -17,7 +17,7 @@ pub mod session;
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
 pub use mapping::{apply_update, finalize_streaming, permission_item};
 pub use model::{
-    ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
-    ToolCallItem, ToolKindView, ToolStatusView,
+    ChatItem, DiffView, ModeStateView, PermissionChoice, PermissionItem, PermissionKindView,
+    PermissionResolution, SessionModeView, ToolCallItem, ToolKindView, ToolStatusView,
 };
 pub use session::{AcpEvent, AcpSessionHandle, PermissionDecision, connect_session};

@@ -110,3 +110,97 @@ pub enum PermissionKindView {
     RejectOnce,
     RejectAlways,
 }
+
+/// One advertised session mode (mirror of the protocol's `SessionMode`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionModeView {
+    /// Stable identifier used to switch into this mode via `set_mode`.
+    pub id: String,
+    /// Human-readable label shown in the mode chip.
+    pub name: String,
+    /// Optional longer description, shown in a tooltip or mode picker.
+    pub description: Option<String>,
+}
+
+/// Mode state advertised at session-connect time and updated by
+/// `CurrentModeUpdate` notifications (mirror of the protocol's
+/// `SessionModeState`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModeStateView {
+    /// The modes the agent supports.
+    pub available: Vec<SessionModeView>,
+    /// `id` of the mode the agent is currently in.
+    pub current: String,
+}
+
+impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateView {
+    fn from(s: &agent_client_protocol::schema::v1::SessionModeState) -> Self {
+        ModeStateView {
+            available: s
+                .available_modes
+                .iter()
+                .map(|m| SessionModeView {
+                    id: m.id.to_string(),
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                })
+                .collect(),
+            current: s.current_mode_id.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_client_protocol::schema::v1::{SessionMode, SessionModeState};
+
+    use super::*;
+
+    #[test]
+    fn mode_state_view_from_session_mode_state_maps_fields() {
+        let protocol_state = SessionModeState::new(
+            "acceptEdits",
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits")
+                    .description("Automatically accept file edits"),
+            ],
+        );
+
+        let view = ModeStateView::from(&protocol_state);
+
+        assert_eq!(view.current, "acceptEdits");
+        assert_eq!(view.available.len(), 2);
+
+        let first = &view.available[0];
+        assert_eq!(first.id, "default");
+        assert_eq!(first.name, "Default");
+        assert_eq!(first.description, None);
+
+        let second = &view.available[1];
+        assert_eq!(second.id, "acceptEdits");
+        assert_eq!(second.name, "Accept Edits");
+        assert_eq!(
+            second.description.as_deref(),
+            Some("Automatically accept file edits")
+        );
+    }
+
+    #[test]
+    fn mode_state_view_from_empty_available_modes() {
+        let protocol_state = SessionModeState::new("default", vec![]);
+        let view = ModeStateView::from(&protocol_state);
+        assert_eq!(view.current, "default");
+        assert!(view.available.is_empty());
+    }
+
+    #[test]
+    fn into_on_option_ref_matches_from() {
+        // Verify the `Into` blanket impl — used in session.rs as
+        // `new_session.modes.as_ref().map(Into::into)`.
+        let state = SessionModeState::new("plan", vec![SessionMode::new("plan", "Plan")]);
+        let via_into: ModeStateView = (&state).into();
+        let via_from = ModeStateView::from(&state);
+        assert_eq!(via_into, via_from);
+    }
+}
