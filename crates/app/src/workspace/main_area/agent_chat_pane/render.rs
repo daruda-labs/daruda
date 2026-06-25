@@ -38,14 +38,23 @@ type DiffEditors = std::collections::HashMap<String, Entity<crate::ui::InputStat
 /// diff summary).
 type DiffStats = std::collections::HashMap<String, DiffStat>;
 
+/// Rasterized mermaid diagrams keyed by source hash (built in the ops layer;
+/// this view only embeds them). Values are `Arc` so the `code_block_render`
+/// closure can capture a cheap map clone without cloning the rgba bytes.
+type MermaidRasters = std::collections::HashMap<
+    u64,
+    std::sync::Arc<crate::workspace::main_area::file_view_pane::visual::RasterImage>,
+>;
+
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Disclosure, IconName, Sizable as _, button_bare, disclosure};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
-    DiffStat, diff_editor_key, is_active,
+    DiffStat, diff_editor_key, is_active, mermaid_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::file_view_pane::render::raster_block_image;
 use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -99,6 +108,7 @@ pub(in crate::workspace) fn render(
                 item,
                 &content.diff_editors,
                 &content.diff_stats,
+                &content.mermaid_rasters,
                 &content.fold,
                 &t,
                 cx,
@@ -231,21 +241,24 @@ fn render_item(
     item: &ChatItem,
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
+    mermaid_rasters: &MermaidRasters,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(ix, text, t).into_any_element(),
+        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_rasters, t).into_any_element(),
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            assistant_block(pane_id, ix, key, expanded, text, t, cx).into_any_element()
+            assistant_block(pane_id, ix, key, expanded, text, mermaid_rasters, t, cx)
+                .into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            thinking_block(pane_id, ix, key, expanded, text, t, cx).into_any_element()
+            thinking_block(pane_id, ix, key, expanded, text, mermaid_rasters, t, cx)
+                .into_any_element()
         }
         ChatItem::ToolCall(tc) => {
             let key = FoldKey::Tool(tc.id.clone());
@@ -357,14 +370,42 @@ fn collapsed_text_summary(text: &str, italic: bool, t: &theme::DarudaTheme) -> O
     )
 }
 
+/// The `code_block_render` hook for a chat markdown body: replace a
+/// ` ```mermaid ` fence with its cached diagram bitmap, leaving every other code
+/// block (and a not-yet-rasterized mermaid fence) to the default code rendering
+/// by returning `None`. Captures a cheap clone of the rasters map (`Arc` values)
+/// so the closure stays `Send + Sync + 'static` (the `TextView` requirement)
+/// without borrowing or cloning the rgba bytes.
+fn mermaid_code_block_render(
+    mermaid_rasters: &MermaidRasters,
+) -> impl Fn(&str, &str, &mut gpui::Window, &mut gpui::App) -> Option<AnyElement> + Send + Sync + 'static
+{
+    let rasters = mermaid_rasters.clone();
+    move |lang, source, _window, _cx| {
+        if lang != "mermaid" {
+            return None;
+        }
+        rasters
+            .get(&mermaid_key(source))
+            .and_then(|raster| raster_block_image(raster))
+    }
+}
+
 /// User prompt — right-aligned accent-tinted bubble. The body renders as
 /// selectable markdown via `crate::ui::markdown` inside the bubble chrome
 /// (bg / padding / rounded), keyed by `ix` for stable selection identity.
-fn user_bubble(ix: usize, text: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+/// Mermaid fences render as diagrams via the `code_block_render` hook.
+fn user_bubble(
+    ix: usize,
+    text: &str,
+    mermaid_rasters: &MermaidRasters,
+    t: &theme::DarudaTheme,
+) -> impl IntoElement + use<> {
     let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
         .color(t.text_primary)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-        .full_width(false);
+        .full_width(false)
+        .code_block_render(mermaid_code_block_render(mermaid_rasters));
     let inner = div()
         .max_w(relative(0.85))
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -383,18 +424,21 @@ fn user_bubble(ix: usize, text: &str, t: &theme::DarudaTheme) -> impl IntoElemen
 /// its partial markdown fine (no per-message caret — the streaming signal lives
 /// on the input dock). Collapsed, the header shows the first non-empty line of
 /// `text`, dimmed and single-line ellipsized.
+#[allow(clippy::too_many_arguments)]
 fn assistant_block(
     pane_id: PaneId,
     ix: usize,
     key: FoldKey,
     expanded: bool,
     text: &str,
+    mermaid_rasters: &MermaidRasters,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
         .color(t.text_body)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .code_block_render(mermaid_code_block_render(mermaid_rasters))
         .into_any_element();
     let header = div()
         .flex_none()
@@ -428,18 +472,21 @@ fn assistant_block(
 // `crate::ui::markdown` (TextView) owns its own typography. The "Thinking"
 // label plus the dimmer `text_subtle` colour still distinguish reasoning from
 // the assistant body.
+#[allow(clippy::too_many_arguments)]
 fn thinking_block(
     pane_id: PaneId,
     ix: usize,
     key: FoldKey,
     expanded: bool,
     text: &str,
+    mermaid_rasters: &MermaidRasters,
     t: &theme::DarudaTheme,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
         .color(t.text_subtle)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .code_block_render(mermaid_code_block_render(mermaid_rasters))
         .into_any_element();
     let header = div()
         .flex_none()

@@ -18,11 +18,23 @@
 //! — valid only while the item list is append-only (see the agent-chat fold
 //! INVARIANT).
 
+use std::sync::Arc;
+
 use gpui::{
-    App, ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _, Window,
+    AnyElement, App, ElementId, Hsla, IntoElement, Pixels, RenderOnce, SharedString, Styled as _,
+    Window,
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::text::TextView;
+
+/// Host hook to replace a code block's rendering with a custom element,
+/// keyed off the fence's `(lang, source)`. Returns `Some(el)` to override,
+/// `None` to keep the default code rendering. `Send + Sync + 'static` because
+/// `TextView` threads it through its async parse. Domain-free: the closure
+/// takes/returns only primitives + `AnyElement`, so this module stays free of
+/// any workspace / raster types.
+type CodeBlockRender =
+    Arc<dyn Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync>;
 
 #[derive(IntoElement)]
 pub struct Markdown {
@@ -32,6 +44,7 @@ pub struct Markdown {
     color: Option<Hsla>,
     text_size: Option<Pixels>,
     full_width: bool,
+    code_block_render: Option<CodeBlockRender>,
 }
 
 impl Markdown {
@@ -65,6 +78,19 @@ impl Markdown {
         self.text_size = Some(size);
         self
     }
+
+    /// Override how fenced code blocks render. The closure receives the fence
+    /// language (empty string when none) and raw source, and returns
+    /// `Some(element)` to replace the default code rendering or `None` to keep
+    /// it. Must be `Send + Sync + 'static` — `TextView` threads it through its
+    /// async parse. Domain-free: only `&str` in / `AnyElement` out.
+    pub fn code_block_render<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync + 'static,
+    {
+        self.code_block_render = Some(Arc::new(f));
+        self
+    }
 }
 
 impl RenderOnce for Markdown {
@@ -88,6 +114,16 @@ impl RenderOnce for Markdown {
         if let Some(size) = self.text_size {
             view = view.text_size(size);
         }
+        // Adapt the domain-free `(lang, source)` hook to TextView's
+        // `CodeBlock`-shaped one: extract lang + raw source and forward.
+        if let Some(cbr) = self.code_block_render {
+            view = view.code_block_render(move |cb, window, cx| {
+                let lang = cb.lang();
+                let lang = lang.as_deref().unwrap_or("");
+                let source = cb.code();
+                cbr(lang, source.as_ref(), window, cx)
+            });
+        }
         view
     }
 }
@@ -102,5 +138,6 @@ pub fn markdown(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Mark
         color: None,
         text_size: None,
         full_width: true,
+        code_block_render: None,
     }
 }

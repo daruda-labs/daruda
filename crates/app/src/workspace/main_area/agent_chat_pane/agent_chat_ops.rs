@@ -46,6 +46,8 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, DiffEditorModel, build_diff_editor_model,
 };
+use crate::workspace::main_area::file_view_pane::markdown_viewer::mermaid_with_theme;
+use crate::workspace::main_area::file_view_pane::visual;
 use crate::workspace::main_area::pane::{
     AgentChatContent, AgentSessionStatus, Pane, PaneContent, TabEntry,
 };
@@ -92,6 +94,8 @@ impl Workspace {
                 turn_in_flight: false,
                 diff_editors: std::collections::HashMap::new(),
                 diff_stats: std::collections::HashMap::new(),
+                mermaid_rasters: std::collections::HashMap::new(),
+                mermaid_inflight: std::collections::HashSet::new(),
                 fold: FoldState::default(),
                 scroll_handle: gpui::ScrollHandle::new(),
                 stick_to_bottom: true,
@@ -275,6 +279,7 @@ impl Workspace {
             }
         }
         self.reconcile_diff_editors(pane_id, &syntax_theme, is_light, cx);
+        self.reconcile_mermaid(pane_id, !is_light, cx);
         // Auto-follow: while pinned to the bottom, keep the view there as new
         // content folds in. `scroll_to_bottom` sets a flag resolved at the next
         // prepaint, so it accounts for the content appended above.
@@ -309,8 +314,10 @@ impl Workspace {
         // There is no `ToolCall` at a prompt-echo, so `reconcile_diff_editors`
         // would always be a no-op here; diff editors are reconciled solely on
         // the event-pump path. The echoed `UserText` renders its markdown
-        // directly in the view via `crate::ui::markdown`, so no parse pass is
-        // needed here either.
+        // directly in the view via `crate::ui::markdown`; a prompt may carry a
+        // ` ```mermaid ` fence, so rasterize those (no-op when there are none).
+        let (_, is_light) = self.agent_chat_theme_params(cx);
+        self.reconcile_mermaid(pane_id, !is_light, cx);
         if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
             // Submitting a prompt jumps the view to the bottom so the user sees
             // their message and the streaming response.
@@ -577,6 +584,89 @@ impl Workspace {
         }
     }
 
+    /// Rasterize every ` ```mermaid ` fence in the conversation that does not
+    /// yet have a cached bitmap (and isn't already being rendered). Mirrors
+    /// [`Self::reconcile_diff_editors`]: collect the pure work first, then spawn
+    /// each rasterization on the background executor (selkie is CPU-heavy and can
+    /// panic), and re-enter the workspace to fill the cache + `cx.notify()` when
+    /// it lands. Until then the fence renders via the default code block (the
+    /// `code_block_render` hook returns `None` for an absent key).
+    ///
+    /// `dark` matches the diagram theme to the host appearance (dark UI → dark
+    /// diagram) so edges stay visible; the caller derives it from the active
+    /// theme (`dark = !is_light`). Theme-switch staleness — a cached raster keeps
+    /// its original colour after a light/dark toggle — is out of scope here (no
+    /// re-raster on theme change); the cache is only ever added to.
+    fn reconcile_mermaid(&mut self, pane_id: PaneId, dark: bool, cx: &mut Context<Self>) {
+        // Collect the not-yet-cached, not-in-flight sources first; the spawn
+        // re-enters the workspace, which can't happen while the `items` borrow
+        // is live.
+        let Some(ac) = self.agent_chat_content_for_pane(pane_id) else {
+            return;
+        };
+        let mut pending: Vec<(u64, String)> = Vec::new();
+        for item in &ac.items {
+            let Some(text) = chat_item_markdown(item) else {
+                continue;
+            };
+            for source in mermaid_sources(text) {
+                let key = mermaid_key(&source);
+                if ac.mermaid_rasters.contains_key(&key)
+                    || ac.mermaid_inflight.contains(&key)
+                    || pending.iter().any(|(k, _)| *k == key)
+                {
+                    continue;
+                }
+                pending.push((key, source));
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+
+        // Mark all pending keys in-flight before spawning so a second event
+        // arriving before any task resolves doesn't re-spawn the same source.
+        if let Some(ac) = self.agent_chat_content_mut_for_pane(pane_id) {
+            for (key, _) in &pending {
+                ac.mermaid_inflight.insert(*key);
+            }
+        }
+
+        for (key, source) in pending {
+            cx.spawn(async move |this, cx| {
+                let raster = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let themed = mermaid_with_theme(&source, dark);
+                        // selkie is a young reimplementation; guard against a
+                        // panic on malformed input so one bad diagram can't take
+                        // the executor down — on panic / error we drop it and the
+                        // fence keeps the default code rendering.
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            selkie::render::render_text(&themed)
+                                .ok()
+                                .and_then(|svg| visual::rasterize_svg(&svg).ok())
+                        }))
+                        .ok()
+                        .flatten()
+                    })
+                    .await;
+                // SILENT-OK: workspace/window dropped before the raster resolved — nothing left to cache it on.
+                let _ = this.update(cx, |ws, cx| {
+                    let Some(ac) = ws.agent_chat_content_mut_for_pane(pane_id) else {
+                        return;
+                    };
+                    ac.mermaid_inflight.remove(&key);
+                    if let Some(raster) = raster {
+                        ac.mermaid_rasters.insert(key, std::sync::Arc::new(raster));
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+    }
+
     /// Immutable lookup of an AgentChat pane's content by id.
     fn agent_chat_content_for_pane(&self, pane_id: PaneId) -> Option<&AgentChatContent> {
         self.main_area
@@ -629,6 +719,64 @@ fn collect_foldable_keys(items: &[daruda_acp::ChatItem]) -> Vec<FoldKey> {
 /// Shared with the renderer so the embed lookup matches the insert key.
 pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
     format!("{tool_call_id}#{di}")
+}
+
+/// The markdown body of a chat item that can carry a ` ```mermaid ` fence —
+/// assistant / thinking / user text. Tool / permission / error items carry no
+/// markdown body and contribute none. Drives the mermaid scan.
+fn chat_item_markdown(item: &daruda_acp::ChatItem) -> Option<&str> {
+    match item {
+        daruda_acp::ChatItem::AssistantText { text, .. }
+        | daruda_acp::ChatItem::Thinking { text, .. } => Some(text),
+        daruda_acp::ChatItem::UserText(text) => Some(text),
+        daruda_acp::ChatItem::ToolCall(_)
+        | daruda_acp::ChatItem::Permission(_)
+        | daruda_acp::ChatItem::Error(_) => None,
+    }
+}
+
+/// Stable cache key for a mermaid fence's source, shared between the rasterizer
+/// (insert) and the renderer (lookup) so the embed matches what was cached.
+/// `DefaultHasher` is process-stable, which is all the in-memory cache needs.
+pub(in crate::workspace) fn mermaid_key(source: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Extract the source of every **closed** ` ```mermaid ` fence in `text`, in
+/// document order. Only closed fences are returned: a still-streaming (never
+/// terminated) trailing `mermaid` fence is skipped so a half-arrived diagram
+/// isn't rasterized until it completes. Non-mermaid fences are ignored.
+///
+/// A mermaid fence opens on a line whose trimmed content is exactly ```` ```mermaid ````
+/// (optionally with trailing spaces) and closes on the next line whose trimmed
+/// content is ```` ``` ````. Leading indentation on the fence lines is tolerated;
+/// the captured source keeps the lines between the fences verbatim.
+fn mermaid_sources(text: &str) -> Vec<String> {
+    let mut sources = Vec::new();
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        if line.trim() != "```mermaid" {
+            continue;
+        }
+        // Inside a mermaid fence — collect until the closing ``` line. If the
+        // text ends first the fence is unterminated (still streaming): drop it.
+        let mut body: Vec<&str> = Vec::new();
+        let mut closed = false;
+        for inner in lines.by_ref() {
+            if inner.trim() == "```" {
+                closed = true;
+                break;
+            }
+            body.push(inner);
+        }
+        if closed {
+            sources.push(body.join("\n"));
+        }
+    }
+    sources
 }
 
 /// Added / removed line counts for one tool-call diff, used by the fold
@@ -1061,6 +1209,53 @@ mod tests {
         // Non-foldable / inactive items.
         assert!(!is_active(&ChatItem::UserText("u".to_owned())));
         assert!(!is_active(&ChatItem::Error("e".to_owned())));
+    }
+
+    /// A single closed mermaid fence yields its verbatim body.
+    #[test]
+    fn mermaid_sources_extracts_a_closed_fence() {
+        let text = "intro\n```mermaid\ngraph TD\nA-->B\n```\noutro";
+        assert_eq!(mermaid_sources(text), vec!["graph TD\nA-->B".to_string()]);
+    }
+
+    /// Multiple closed fences are returned in document order.
+    #[test]
+    fn mermaid_sources_extracts_multiple_fences() {
+        let text = "```mermaid\nA\n```\nmid\n```mermaid\nB\n```";
+        assert_eq!(
+            mermaid_sources(text),
+            vec!["A".to_string(), "B".to_string()]
+        );
+    }
+
+    /// An unterminated trailing fence (still streaming) is skipped — only the
+    /// already-closed fence before it is returned.
+    #[test]
+    fn mermaid_sources_skips_unterminated_trailing_fence() {
+        let text = "```mermaid\nA\n```\n```mermaid\nstill streaming";
+        assert_eq!(mermaid_sources(text), vec!["A".to_string()]);
+        // A lone unterminated fence yields nothing.
+        assert!(mermaid_sources("```mermaid\ngraph TD").is_empty());
+    }
+
+    /// Non-mermaid fences (other languages, or none) are ignored.
+    #[test]
+    fn mermaid_sources_ignores_non_mermaid_fences() {
+        let text = "```rust\nfn main() {}\n```\n```\nplain\n```";
+        assert!(mermaid_sources(text).is_empty());
+    }
+
+    /// The cache key is stable per source and distinct across sources.
+    #[test]
+    fn mermaid_key_is_stable_and_distinct() {
+        assert_eq!(
+            mermaid_key("graph TD\nA-->B"),
+            mermaid_key("graph TD\nA-->B")
+        );
+        assert_ne!(
+            mermaid_key("graph TD\nA-->B"),
+            mermaid_key("graph LR\nA-->B")
+        );
     }
 
     /// The visible foldable-key set the expand-all / collapse-all op builds:

@@ -22,6 +22,10 @@ mod search_panel;
 mod toolbar;
 mod virtual_list;
 
+/// Shared raster → block-sized image element. Re-exported so the agent-chat
+/// mermaid renderer sizes diagrams identically to the Markdown preview.
+pub(in crate::workspace) use self::markdown::raster_block_image;
+
 use crate::ui::theme;
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
 

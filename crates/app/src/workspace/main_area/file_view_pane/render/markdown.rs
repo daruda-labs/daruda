@@ -460,31 +460,50 @@ fn render_md_image(
             .child(format!("[{alt}]"))
             .into_any_element();
     };
-    // gpui's `RenderImage` is BGRA with straight alpha (matches gpui's own
-    // decoder, which only swaps channels and does not premultiply).
+    match layout {
+        // Block-sized: shared with the agent-chat mermaid renderer.
+        ImageLayout::Block => raster_block_image(raster)
+            .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
+        // Sized to the text line; gpui derives width from the aspect ratio.
+        ImageLayout::Inline => match render_image_source(raster) {
+            Some(source) => img(source)
+                .h(px(theme::MD_INLINE_IMAGE_HEIGHT))
+                .into_any_element(),
+            None => div().child(format!("[{alt}]")).into_any_element(),
+        },
+    }
+}
+
+/// Convert a [`RasterImage`] into a GPUI [`ImageSource`]: swap RGBA→BGRA (gpui's
+/// `RenderImage` is BGRA with straight alpha, matching gpui's own decoder, which
+/// only swaps channels and does not premultiply) and wrap it. `None` only when
+/// the buffer dimensions don't match the byte length (a corrupt raster).
+fn render_image_source(raster: &RasterImage) -> Option<ImageSource> {
     let mut bgra = raster.rgba.clone();
     for pixel in bgra.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
-    let Some(buffer) = image::RgbaImage::from_raw(raster.width, raster.height, bgra) else {
-        return div().child(format!("[{alt}]")).into_any_element();
-    };
+    let buffer = image::RgbaImage::from_raw(raster.width, raster.height, bgra)?;
     let render_image = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
-    let el = img(ImageSource::Render(render_image));
-    match layout {
-        // Display at logical (1×) size — a 2× HiDPI bitmap stays crisp but shows
-        // at its natural size. Setting width alone lets gpui derive height from
-        // the aspect ratio; `max_w_full` shrinks anything wider than the pane.
-        ImageLayout::Block => {
-            let (logical_w, _) = raster.logical_size();
-            el.w(px(logical_w))
-                .max_w_full()
-                .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
-        }
-        // Sized to the text line; gpui derives width from the aspect ratio.
-        ImageLayout::Inline => el.h(px(theme::MD_INLINE_IMAGE_HEIGHT)),
-    }
-    .into_any_element()
+    Some(ImageSource::Render(render_image))
+}
+
+/// Block-layout element for a rasterized diagram/image: displayed at its logical
+/// (1×) size so a 2× HiDPI bitmap stays crisp but shows at its natural size;
+/// `max_w_full` shrinks anything wider than the container and `MD_IMAGE_MAX_HEIGHT`
+/// caps the height. Shared by the Markdown preview (`render_md_image`) and the
+/// agent-chat mermaid renderer so both size diagrams identically. `None` only on
+/// a corrupt raster (dimension/byte-length mismatch).
+pub(in crate::workspace) fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
+    let source = render_image_source(raster)?;
+    let (logical_w, _) = raster.logical_size();
+    Some(
+        img(source)
+            .w(px(logical_w))
+            .max_w_full()
+            .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
+            .into_any_element(),
+    )
 }
 
 /// Returns true when `block_idx` falls within the char-selection row range.
