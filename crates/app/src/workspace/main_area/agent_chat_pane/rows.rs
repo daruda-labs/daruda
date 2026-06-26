@@ -270,11 +270,18 @@ fn project_run(
                 });
             }
         } else {
-            // The conclusion item stays visible even when the response is
-            // collapsed; every other block hides with the fold. Under a response
-            // bar it becomes a `ConclusionItem` (its own fold toggle); at the top
-            // level (no bar) a plain assistant block already carries one.
+            // Two kinds of block stay visible even when the response is
+            // collapsed; every other block hides with the fold:
+            //   - the conclusion (run's last assistant text), and
+            //   - a still-pending permission request — it is actionable, so
+            //     folding away its Allow/Reject buttons would strand the user.
+            // The conclusion under a response bar becomes a `ConclusionItem`
+            // (its own fold toggle); at the top level a plain assistant block
+            // already carries one.
             let is_conclusion = Some(k) == conclusion_ix;
+            let pending_permission =
+                matches!(&items[k], ChatItem::Permission(c) if c.resolved.is_none());
+            let force_visible = is_conclusion || pending_permission;
             let kind = if is_conclusion && base_indent > 0 {
                 RowKind::ConclusionItem(k)
             } else {
@@ -282,7 +289,7 @@ fn project_run(
             };
             rows.push(RenderRow {
                 kind,
-                hidden: response_collapsed && !is_conclusion,
+                hidden: response_collapsed && !force_visible,
                 indent: base_indent,
             });
             k += 1;
@@ -302,7 +309,9 @@ fn tool_id(item: &ChatItem) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
+    use daruda_acp::{
+        PermissionItem, PermissionResolution, ToolCallItem, ToolKindView, ToolStatusView,
+    };
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
@@ -313,6 +322,14 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+        })
+    }
+    /// A permission card — `resolved=false` makes it pending (actionable).
+    fn perm(resolved: bool) -> ChatItem {
+        ChatItem::Permission(PermissionItem {
+            tool_title: Some("Write /tmp/x".to_owned()),
+            options: Vec::new(),
+            resolved: resolved.then_some(PermissionResolution::Cancelled),
         })
     }
     fn asst(s: &str) -> ChatItem {
@@ -648,6 +665,57 @@ mod tests {
                 ("item", true),
                 ("item", true),
             ]
+        );
+    }
+
+    #[test]
+    fn pending_permission_stays_visible_when_response_collapsed() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            tool("b", Completed),
+            perm(false), // pending → actionable
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true); // collapse the response
+        let rows = project(&items, &fold, false);
+        let perm_row = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
+            .expect("permission row present");
+        assert!(
+            !perm_row.hidden,
+            "a pending permission is never folded away"
+        );
+        // The process (the tool group) is still hidden.
+        assert!(
+            rows.iter()
+                .filter(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+                .all(|r| r.hidden),
+            "the tool group still folds"
+        );
+    }
+
+    #[test]
+    fn resolved_permission_folds_with_the_response() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            tool("b", Completed),
+            perm(true), // resolved → no longer actionable
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true);
+        let rows = project(&items, &fold, false);
+        let perm_row = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
+            .expect("permission row present");
+        assert!(
+            perm_row.hidden,
+            "a resolved permission folds with the process"
         );
     }
 

@@ -379,6 +379,7 @@ impl CodeBlock {
         let style = &node_cx.style;
 
         div()
+            .when(!options.is_first, |this| this.pt(rems(0.5)))
             .when(!options.is_last, |this| this.pb(style.paragraph_gap))
             .child(
                 div()
@@ -386,6 +387,8 @@ impl CodeBlock {
                     .p_3()
                     .rounded(cx.theme().radius)
                     .bg(cx.theme().muted)
+                    .border_1()
+                    .border_color(cx.theme().border)
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
                     .relative()
@@ -701,10 +704,16 @@ struct NodeRenderOptions {
     todo: bool,
     ordered: bool,
     depth: usize,
+    is_first: bool,
     is_last: bool,
 }
 
 impl NodeRenderOptions {
+    fn is_first(mut self, is_first: bool) -> Self {
+        self.is_first = is_first;
+        self
+    }
+
     fn is_last(mut self, is_last: bool) -> Self {
         self.is_last = is_last;
         self
@@ -1156,17 +1165,28 @@ impl Node {
         };
 
         match self {
-            Node::Root { children } => div()
-                .id("div")
-                .children(
-                    children
-                        .into_iter()
-                        .map(move |node| node.render_block(options, node_cx, window, cx)),
-                )
-                .into_any_element(),
+            Node::Root { children } => {
+                let children_len = children.len();
+                div()
+                    .id("div")
+                    .children(children.into_iter().enumerate().map(
+                        move |(index, node)| {
+                            node.render_block(
+                                options
+                                    .is_first(index == 0)
+                                    .is_last(index == children_len - 1),
+                                node_cx,
+                                window,
+                                cx,
+                            )
+                        },
+                    ))
+                    .into_any_element()
+            }
             Node::Paragraph(paragraph) => div()
                 .id("p")
                 .pb(mb)
+                .line_height(rems(1.3))
                 .child(paragraph.render(node_cx, window, cx))
                 .into_any_element(),
             Node::Heading { level, children } => {
@@ -1187,7 +1207,8 @@ impl Node {
 
                 h_flex()
                     .id(("h", *level as usize))
-                    .pb(rems(0.3))
+                    .when(!options.is_first, |this| this.pt(node_cx.style.paragraph_gap))
+                    .pb(rems(0.5))
                     .whitespace_normal()
                     .text_size(text_size)
                     .font_weight(font_weight)
@@ -1208,8 +1229,14 @@ impl Node {
                         .children({
                             let children_len = children.len();
                             children.into_iter().enumerate().map(move |(index, c)| {
-                                let is_last = index == children_len - 1;
-                                c.render_block(options.is_last(is_last), node_cx, window, cx)
+                                c.render_block(
+                                    options
+                                        .is_first(index == 0)
+                                        .is_last(index == children_len - 1),
+                                    node_cx,
+                                    window,
+                                    cx,
+                                )
                             })
                         }),
                 )
@@ -1245,8 +1272,9 @@ impl Node {
             Node::CodeBlock(code_block) => code_block.render(&options, node_cx, window, cx),
             Node::Table { .. } => Self::render_table(self, node_cx, window, cx).into_any_element(),
             Node::Divider => div()
-                .pb(mb)
-                .child(div().id("divider").bg(cx.theme().border).h(px(2.)))
+                .pt(rems(0.5))
+                .when(!options.is_last, |this| this.pb(rems(0.5)))
+                .child(div().id("divider").bg(cx.theme().border).h(px(1.)))
                 .into_any_element(),
             Node::Break { .. } => div().id("break").into_any_element(),
             Node::Unknown | Node::Definition { .. } => div().into_any_element(),

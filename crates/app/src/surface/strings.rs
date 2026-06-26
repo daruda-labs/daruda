@@ -995,11 +995,6 @@ pub fn agent_chat_awaiting_permission() -> String {
     rust_i18n::t!("agent_chat.awaiting_permission").into_owned()
 }
 
-/// Working-footer button that cancels the in-flight turn.
-pub fn agent_chat_stop() -> String {
-    rust_i18n::t!("agent_chat.stop").into_owned()
-}
-
 /// Heading for an inline permission card.
 pub fn agent_chat_permission_title() -> String {
     rust_i18n::t!("agent_chat.permission_title").into_owned()

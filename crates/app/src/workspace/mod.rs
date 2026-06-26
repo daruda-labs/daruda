@@ -1204,15 +1204,30 @@ impl Workspace {
         self.active
     }
 
-    /// `true` when at least one lane has a PID-confirmed Claude session in
-    /// an animating status (anything but `Idle`). Gates the status-pulse
-    /// pump so the shared `StatusPulseClock` only repaints windows that
-    /// actually show motion — idle windows stay at zero redraws.
-    pub(crate) fn has_animating_claude_status(&self) -> bool {
+    /// `true` when at least one lane has a Claude session (PTY-bound or
+    /// ACP agent chat) in an animating status (anything but `Idle`). Gates
+    /// the status-pulse pump so the shared `StatusPulseClock` only
+    /// repaints windows that actually show motion — idle windows stay at
+    /// zero redraws.
+    pub(crate) fn has_animating_claude_status(&self, cx: &gpui::App) -> bool {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        if self.claude.pty_claude_bindings.is_empty() {
+        // Collect ACP pane statuses (agent chat sessions).
+        let acp_statuses: Vec<(
+            crate::workspace::main_area::pane_tree::PaneId,
+            daruda_claude::SessionStatus,
+        )> = self
+            .main_area
+            .panes
+            .iter()
+            .filter_map(|p| {
+                let view = p.agent_chat_view()?;
+                let status = view.read(cx).to_session_status()?;
+                Some((p.id, status))
+            })
+            .collect();
+        if self.claude.pty_claude_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }
         // Per-session, not per-lane-aggregate: the aggregate's
@@ -1226,6 +1241,7 @@ impl Workspace {
             &index,
             &self.claude.pty_claude_bindings,
             &self.claude.claude_status,
+            &acp_statuses,
         )
     }
 

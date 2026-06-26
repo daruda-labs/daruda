@@ -356,6 +356,103 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
     });
 }
 
+/// A pending permission surfaces out of a collapsed response (it is
+/// actionable), and resolving it folds it straight back into the process —
+/// `respond_permission` reprojects the rows so the fold-back is immediate, not
+/// deferred to the next agent event.
+#[gpui::test]
+async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
+    use daruda_acp::{
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
+        ToolKindView, ToolStatusView,
+    };
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let tool = |id: &str| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_owned(),
+            title: format!("Tool {id}"),
+            kind: ToolKindView::Edit,
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+        })
+    };
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.main_area.panes.push(pane);
+                agent_view(ws, id).update(cx, |v, cx| {
+                    v.items = vec![
+                        ChatItem::UserText("q".into()),
+                        tool("a"),
+                        tool("b"),
+                        ChatItem::Permission(PermissionItem {
+                            tool_title: Some("Write /tmp/x".to_string()),
+                            options: vec![PermissionChoice {
+                                option_id: "allow_once".to_string(),
+                                name: "Allow".to_string(),
+                                kind: PermissionKindView::AllowOnce,
+                            }],
+                            resolved: None,
+                        }),
+                    ];
+                    v.pending_permission = Some(7);
+                    // Collapse the response — the pending card must still surface.
+                    v.set_all_folds(false, cx);
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let perm_hidden = |ws: &Workspace, cx: &gpui::App| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        view.rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::AgentItem(3)))
+            .expect("permission row present")
+            .hidden
+    };
+
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            !perm_hidden(ws, cx),
+            "a pending permission stays visible under a collapsed response"
+        );
+    });
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            agent_view(ws, pane_id).update(cx, |v, cx| {
+                v.respond_permission(
+                    "allow_once".to_string(),
+                    PermissionKindView::AllowOnce,
+                    cx,
+                );
+            });
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            perm_hidden(ws, cx),
+            "a resolved permission folds back into the collapsed response immediately"
+        );
+    });
+}
+
 #[gpui::test]
 async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppContext) {
     use crate::surface::strings as s;

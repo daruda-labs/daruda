@@ -118,7 +118,7 @@ fn spawn_status_pulse(cx: &mut App) {
                 clock.tick = clock.tick.wrapping_add(1);
             }
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-                if ws.has_animating_claude_status() {
+                if ws.has_animating_claude_status(cx) {
                     cx.notify();
                     // Right and left docks are `.cached()`; animated
                     // status badges live in both (Tasks tab in the right

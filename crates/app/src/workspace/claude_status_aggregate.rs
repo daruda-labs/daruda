@@ -48,6 +48,11 @@ pub(in crate::workspace) type LaneSessionsMap =
 /// (one session bound to two panes, e.g. `claude --resume` of a running
 /// session) counts once at its first pane's position.
 ///
+/// `acp_statuses` carries agent chat pane statuses (pane_id + status),
+/// contributed alongside PTY-bound sessions so the lane indicator
+/// reflects ACP sessions as well. Each entry uses a synthetic session id
+/// (`"acp:{pane_id}"`) to stay distinguishable in the sub-row badges.
+///
 /// Returns:
 /// - per-lane leading indicator: [`SessionStatus::aggregate`] over the
 ///   lane's sessions (only lanes with ≥ 1 session appear). Equal-priority
@@ -60,24 +65,36 @@ pub(in crate::workspace) fn aggregate_over_panes(
     pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
     bindings: &HashMap<PaneId, PtyBinding>,
     store: &daruda_claude::ClaudeStatusStore,
+    acp_statuses: &[(PaneId, SessionStatus)],
 ) -> (LaneStatusMap, LaneSessionsMap) {
-    let mut per_lane: HashMap<daruda_store::project::LaneRef, Vec<(&str, SessionStatus)>> =
+    let mut per_lane: HashMap<daruda_store::project::LaneRef, Vec<(String, SessionStatus)>> =
         HashMap::new();
+
+    // Build a quick lookup for ACP pane statuses.
+    let acp_map: HashMap<PaneId, SessionStatus> = acp_statuses.iter().copied().collect();
+
     for (pane_id, lane_ref) in pane_lane {
-        let Some(binding) = bindings.get(pane_id) else {
-            continue;
-        };
-        let Some(file) = store.get(&binding.session_id) else {
-            continue;
-        };
-        let sessions = per_lane.entry(*lane_ref).or_default();
-        // One session, one entry — the same session bound to a second
-        // pane (e.g. `claude --resume` of a running session) keeps its
-        // first-pane position and must not inflate the sub-row count.
-        if sessions.iter().any(|(sid, _)| *sid == binding.session_id) {
+        // Try PTY-bound session first.
+        if let Some(binding) = bindings.get(pane_id)
+            && let Some(file) = store.get(&binding.session_id)
+        {
+            let sessions = per_lane.entry(*lane_ref).or_default();
+            // One session, one entry — the same session bound to a second
+            // pane (e.g. `claude --resume` of a running session) keeps its
+            // first-pane position and must not inflate the sub-row count.
+            if !sessions.iter().any(|(sid, _)| *sid == binding.session_id) {
+                sessions.push((binding.session_id.clone(), file.status));
+            }
             continue;
         }
-        sessions.push((binding.session_id.as_str(), file.status));
+        // Try ACP (agent chat) session for this pane.
+        if let Some(&status) = acp_map.get(pane_id) {
+            let synthetic_id = format!("acp:{pane_id}");
+            let sessions = per_lane.entry(*lane_ref).or_default();
+            if !sessions.iter().any(|(sid, _)| *sid == synthetic_id) {
+                sessions.push((synthetic_id, status));
+            }
+        }
     }
 
     let per_lane_status = per_lane
@@ -90,36 +107,36 @@ pub(in crate::workspace) fn aggregate_over_panes(
     let per_lane_sessions = per_lane
         .into_iter()
         .filter(|(_, sessions)| sessions.len() >= 2)
-        .map(|(lane_ref, sessions)| {
-            (
-                lane_ref,
-                sessions
-                    .into_iter()
-                    .map(|(sid, status)| (sid.to_string(), status))
-                    .collect(),
-            )
-        })
         .collect();
 
     (per_lane_status, per_lane_sessions)
 }
 
-/// `true` when any pane's bound session is in a non-`Idle` status.
-/// The status-pulse gate reads this instead of the per-lane aggregate:
-/// the aggregate's max-priority collapse would hide a `Connecting`
-/// session (priority 0) behind an `Idle` sibling (priority 1) even
-/// though its sub-row badge animates. Short-circuits without
+/// `true` when any pane's bound session (PTY or ACP) is in a non-`Idle`
+/// status. The status-pulse gate reads this instead of the per-lane
+/// aggregate: the aggregate's max-priority collapse would hide a
+/// `Connecting` session (priority 0) behind an `Idle` sibling (priority 1)
+/// even though its sub-row badge animates. Short-circuits without
 /// allocating, so it is cheap on the pulse tick.
 pub(in crate::workspace) fn any_pane_session_animating(
     pane_lane: &[(PaneId, daruda_store::project::LaneRef)],
     bindings: &HashMap<PaneId, PtyBinding>,
     store: &daruda_claude::ClaudeStatusStore,
+    acp_statuses: &[(PaneId, SessionStatus)],
 ) -> bool {
     pane_lane.iter().any(|(pane_id, _)| {
-        bindings
+        // PTY-bound session.
+        let pty_animating = bindings
             .get(pane_id)
             .and_then(|binding| store.get(&binding.session_id))
-            .is_some_and(|file| !matches!(file.status, SessionStatus::Idle))
+            .is_some_and(|file| !matches!(file.status, SessionStatus::Idle));
+        if pty_animating {
+            return true;
+        }
+        // ACP (agent chat) session.
+        acp_statuses
+            .iter()
+            .any(|(pid, status)| pid == pane_id && !matches!(status, SessionStatus::Idle))
     })
 }
 
@@ -200,10 +217,14 @@ impl Workspace {
         let index = self.pane_lane_index();
         let (pane_id, lane_ref) = self.session_pane_lane(session_id, &index);
         let aggregate = lane_ref.and_then(|lane_ref| {
+            // ACP (agent chat) statuses are not included in the probe
+            // because this path only triggers for PTY-bound session
+            // transitions (hook / JSONL watcher).
             let (per_lane, _) = aggregate_over_panes(
                 &index,
                 &self.claude.pty_claude_bindings,
                 &self.claude.claude_status,
+                &[],
             );
             // `None` when no pane in the lane has a store entry yet
             // (e.g. a brand-new session before its first hook write) —
@@ -414,7 +435,7 @@ mod tests {
             entry("b", "/nowhere", SessionStatus::NeedsAttention),
         ]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::NeedsAttention));
         let sessions = per_session.get(&lane).expect("two-pane lane has sub-rows");
@@ -435,7 +456,7 @@ mod tests {
             entry("b", "/y", SessionStatus::NeedsAttention),
         ]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane_a), Some(&SessionStatus::Working));
         assert_eq!(per_lane.get(&lane_b), Some(&SessionStatus::NeedsAttention));
@@ -451,7 +472,7 @@ mod tests {
         let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "a")].into_iter().collect();
         let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
         // Only one bound session → not a multi-session lane.
@@ -468,7 +489,7 @@ mod tests {
             [binding(10, "a"), binding(20, "b")].into_iter().collect();
         let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
         // 'b' dropped, so only one effective session → no sub-rows.
@@ -479,7 +500,7 @@ mod tests {
     fn aggregate_empty_when_no_panes() {
         let store = daruda_claude::ClaudeStatusStore::new();
         let bindings: HashMap<PaneId, PtyBinding> = HashMap::new();
-        let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&[], &bindings, &store, &[]);
         assert!(per_lane.is_empty());
         assert!(per_session.is_empty());
     }
@@ -495,7 +516,7 @@ mod tests {
             [binding(10, "s"), binding(20, "s")].into_iter().collect();
         let store = store_with(vec![entry("s", "/x", SessionStatus::Working)]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::Working));
         assert!(
@@ -519,7 +540,7 @@ mod tests {
             entry("b", "/y", SessionStatus::NeedsAttention),
         ]);
 
-        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store);
+        let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
 
         assert_eq!(per_lane.get(&lane), Some(&SessionStatus::NeedsAttention));
         let ids: Vec<&str> = per_session
@@ -545,7 +566,7 @@ mod tests {
             entry("a", "/x", SessionStatus::Idle),
             entry("b", "/x", SessionStatus::Connecting),
         ]);
-        assert!(any_pane_session_animating(&pane_lane, &bindings, &store));
+        assert!(any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
     }
 
     #[test]
@@ -558,7 +579,7 @@ mod tests {
             entry("a", "/x", SessionStatus::Idle),
             entry("b", "/y", SessionStatus::Idle),
         ]);
-        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store));
+        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
     }
 
     #[test]
@@ -569,7 +590,7 @@ mod tests {
         let pane_lane = vec![(10u64, lane), (20u64, lane)];
         let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "ghost")].into_iter().collect();
         let store = daruda_claude::ClaudeStatusStore::new();
-        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store));
+        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
     }
 
     #[cfg(debug_assertions)]

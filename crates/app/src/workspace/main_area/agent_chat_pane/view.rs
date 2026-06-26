@@ -188,6 +188,29 @@ pub(in crate::workspace) struct AgentChatView {
 }
 
 impl AgentChatView {
+    /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
+    /// the lane indicator aggregation. Returns `None` for states that should
+    /// not contribute an indicator (dormant `Idle` — session not yet started —
+    /// and `Error` — broken session).
+    pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_claude::SessionStatus> {
+        use daruda_claude::SessionStatus;
+        match &self.status {
+            AgentSessionStatus::Idle | AgentSessionStatus::Error(_) => None,
+            AgentSessionStatus::Connecting => Some(SessionStatus::Connecting),
+            AgentSessionStatus::Connected => {
+                if self.turn_in_flight {
+                    if self.pending_permission.is_some() {
+                        Some(SessionStatus::NeedsAttention)
+                    } else {
+                        Some(SessionStatus::Working)
+                    }
+                } else {
+                    Some(SessionStatus::Idle)
+                }
+            }
+        }
+    }
+
     /// Build a fresh view. The session is *not* started here — the Workspace
     /// connects it lazily on first focus (`maybe_connect_agent_chat`), so cold
     /// restore doesn't spin up an agent process per pane. `status` is decided
@@ -422,8 +445,11 @@ impl AgentChatView {
             handle.cancel();
         }
         cancel_pending_permission(self);
-        // A drained permission card swaps its buttons for a one-line outcome —
-        // its height changed, so remeasure (the item count is unchanged).
+        // Resolving the card flips it from pending → resolved, so its row no
+        // longer force-stays-visible under a collapsed response: reproject so it
+        // folds back into the process immediately. A drained card also swaps its
+        // buttons for a one-line outcome (height change), so remeasure too.
+        self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();
     }
@@ -456,8 +482,11 @@ impl AgentChatView {
         if let Some(handle) = &self.handle {
             handle.respond_permission(id, decision);
         }
-        // The resolved card renders shorter (buttons → outcome line); remeasure
-        // so the list reflows (item count unchanged).
+        // The card is now resolved, so it no longer force-stays-visible under a
+        // collapsed response: reproject so it folds back into the process
+        // immediately. It also renders shorter (buttons → outcome line), so
+        // remeasure for the reflow (item count unchanged).
+        self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();
     }

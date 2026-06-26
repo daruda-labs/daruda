@@ -58,7 +58,7 @@ type MermaidImages = std::sync::Arc<
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, Disclosure, IconName, Sizable as _, StatusPulseClock, button, button_bare,
+    ButtonVariants as _, Disclosure, IconName, Sizable as _, StatusPulseClock, button_bare,
     disclosure,
 };
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
@@ -151,10 +151,6 @@ pub(in crate::workspace) fn render(
             .into_any_element()
     };
 
-    // Pinned "agent is working" strip — flex_none, so it sits at the very bottom
-    // of the column and stays visible while reading scrollback during a turn.
-    let working = working_footer(content, &t, cx);
-
     div()
         .size_full()
         .relative()
@@ -168,7 +164,6 @@ pub(in crate::workspace) fn render(
         .children(status_banner)
         .children(fold_toolbar)
         .child(body)
-        .children(working)
 }
 
 /// Render one projected row: an item, a synthetic fold header, or — when
@@ -233,20 +228,15 @@ fn render_row(
     } else {
         theme::AGENT_CHAT_LIST_GAP
     };
-    // A new turn (a `User` row past the first) gets a hairline + extra top space
-    // so consecutive turns read as distinct exchanges, not one running column.
+    // A new turn (a `User` row past the first) gets extra top space so
+    // consecutive turns read as distinct exchanges, not one running column.
     let turn_break = ix != 0 && matches!(row.kind, RowKind::User(_));
     div()
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
         .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
-        .when(turn_break, |d| {
-            d.mt(px(theme::AGENT_CHAT_TURN_GAP))
-                .pt(px(theme::AGENT_CHAT_TURN_GAP))
-                .border_t_1()
-                .border_color(t.border)
-        })
+        .when(turn_break, |d| d.mt(px(theme::AGENT_CHAT_TURN_GAP)))
         .pb(px(bottom))
         // Nest one content-pad unit per level (group members sit under the ⚙ bar).
         .when(row.indent > 0, |d| {
@@ -287,18 +277,68 @@ fn disclosure_row(
 }
 
 /// The status-rollup glyph trailing a section header: ● running (in progress /
-/// streaming), ✗ a failure occurred, else ✓ all done. Single source for the
-/// response bar and the tool-group bar so the two never disagree on treatment.
-fn rollup_glyph(running: bool, failed: bool, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
-    let (glyph, color) = if running {
-        ("●", t.text_body)
-    } else if failed {
-        ("✗", t.banner_error_text)
+/// streaming, blinking), ⚠ partial (some failed, some succeeded), ✗ all failed,
+/// else ✓ all done. Single source for the response bar and the tool-group bar
+/// so the two never disagree on treatment.
+/// The outcome a section header's rollup glyph summarizes over its run.
+enum Rollup {
+    /// At least one child still in progress / streaming (not settled).
+    Running,
+    /// All children succeeded.
+    Ok,
+    /// A mix — at least one failure alongside at least one success.
+    Partial,
+    /// Everything failed; nothing succeeded.
+    Failed,
+}
+
+/// Classify a run from whether anything is active, anything failed, and anything
+/// succeeded. `Running` wins (not settled yet); otherwise a failure mixed with a
+/// success is `Partial`, all-failure is `Failed`, no failure is `Ok`.
+fn rollup_of(running: bool, any_failed: bool, any_ok: bool) -> Rollup {
+    if running {
+        Rollup::Running
+    } else if !any_failed {
+        Rollup::Ok
+    } else if any_ok {
+        Rollup::Partial
     } else {
-        ("✓", t.file_diff_stat_add)
+        Rollup::Failed
+    }
+}
+
+fn rollup_glyph(
+    rollup: Rollup,
+    t: &theme::DarudaTheme,
+    cx: &gpui::App,
+) -> impl IntoElement + use<> {
+    let (glyph, color) = match rollup {
+        // Amber "executing tool" accent so an in-progress run reads stronger
+        // than a settled glyph instead of fading into body grey.
+        Rollup::Running => ("●", t.status_executing_tool_dark),
+        Rollup::Ok => ("✓", t.file_diff_stat_add),
+        // Partial = some failed, some succeeded → warning, not a hard failure.
+        Rollup::Partial => ("⚠", t.banner_warning_text),
+        Rollup::Failed => ("✗", t.banner_error_text),
+    };
+    // Blink the running dot (1.0 ↔ MIN on the shared 2-tick pulse) so an
+    // in-progress run reads as live; the settled glyphs stay solid.
+    let opacity = if matches!(rollup, Rollup::Running) {
+        let tick = cx
+            .try_global::<StatusPulseClock>()
+            .map(|c| c.tick)
+            .unwrap_or(0);
+        if (tick / 2).is_multiple_of(2) {
+            1.0
+        } else {
+            theme::STATUS_INDICATOR_PULSE_OPACITY_MIN
+        }
+    } else {
+        1.0
     };
     div()
         .flex_none()
+        .opacity(opacity)
         .text_color(color)
         .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
         .child(SharedString::from(glyph))
@@ -307,7 +347,7 @@ fn rollup_glyph(running: bool, failed: bool, t: &theme::DarudaTheme) -> impl Int
 /// Collapsible header for an agent response (the run of agent items under a
 /// user message). The whole row toggles `FoldKey::Response`; shows a chevron +
 /// "Agent" label, and — when collapsed — the response's first line, a tool
-/// count, and a status-rollup glyph (● streaming / ✗ a failure / ✓ done). The
+/// count, and a status-rollup glyph (see [`rollup_glyph`]). The
 /// user prompt stays visible above, so the summary doesn't repeat it.
 fn response_bar(
     this: &AgentChatView,
@@ -318,7 +358,7 @@ fn response_bar(
 ) -> impl IntoElement + use<> {
     let mut tools = 0usize;
     let mut first_line: Option<String> = None;
-    let (mut running, mut failed) = (false, false);
+    let (mut running, mut failed, mut any_ok) = (false, false, false);
     for item in this.items.iter().skip(anchor + 1) {
         match item {
             ChatItem::UserText(_) => break,
@@ -327,7 +367,7 @@ fn response_bar(
                 match tc.status {
                     ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                     ToolStatusView::Failed => failed = true,
-                    ToolStatusView::Completed => {}
+                    ToolStatusView::Completed => any_ok = true,
                 }
             }
             ChatItem::AssistantText {
@@ -342,12 +382,19 @@ fn response_bar(
                         .find(|l| !l.trim().is_empty())
                         .map(str::to_owned);
                 }
+                // Produced assistant output counts as a success for the rollup,
+                // so a response that answered *and* hit a tool failure reads as
+                // partial (⚠), not a hard failure (✗).
+                if !text.trim().is_empty() {
+                    any_ok = true;
+                }
                 running |= *streaming;
             }
             ChatItem::Error(_) => failed = true,
             ChatItem::Permission(_) => {}
         }
     }
+    let rollup = rollup_of(running, failed, any_ok);
     // Borderless disclosure row (shared `disclosure_row`) — matches the
     // assistant / thinking block headers, so a single-block reply and a
     // multi-block / tool response share one header style. Only content cards
@@ -395,13 +442,12 @@ fn response_bar(
         row = row.child(div().flex_1());
     }
 
-    row.child(rollup_glyph(running, failed, t))
+    row.child(rollup_glyph(rollup, t, cx))
 }
 
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
 /// the group's fold (`FoldKey::ToolGroup`); shows a chevron, a ⚙ marker, the
-/// "N tool calls" count, and a status-rollup glyph (● running / ✗ a failure /
-/// ✓ all done).
+/// "N tool calls" count, and a status-rollup glyph (see [`rollup_glyph`]).
 fn tool_group_bar(
     this: &AgentChatView,
     gid: &str,
@@ -411,16 +457,17 @@ fn tool_group_bar(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let (mut running, mut failed) = (false, false);
+    let (mut running, mut failed, mut any_ok) = (false, false, false);
     for k in first_ix..(first_ix + count).min(this.items.len()) {
         if let ChatItem::ToolCall(tc) = &this.items[k] {
             match tc.status {
                 ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                 ToolStatusView::Failed => failed = true,
-                ToolStatusView::Completed => {}
+                ToolStatusView::Completed => any_ok = true,
             }
         }
     }
+    let rollup = rollup_of(running, failed, any_ok);
     // Borderless disclosure row (shared `disclosure_row`), same as the response
     // bar — section headers stay light; only `tool_card` (content) carries box
     // chrome.
@@ -446,7 +493,7 @@ fn tool_group_bar(
             .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
             .child(SharedString::from(s::agent_chat_tool_group_count(count))),
     )
-    .child(rollup_glyph(running, failed, t))
+    .child(rollup_glyph(rollup, t, cx))
 }
 
 /// Floating "jump to bottom" affordance shown over the list when the user has
@@ -577,10 +624,22 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     })
 }
 
+/// Animated trailing dots (".", "..", "...") for any "in progress" label. Cycles
+/// off the shared, CPU-gated `StatusPulseClock` — the pulse pump dirties the
+/// in-flight agent chat view each tick (`Workspace::notify_in_flight_agent_chats`),
+/// so callers advance without a per-frame animation. Shared by the working
+/// footer / indicator and the running tool-call badge.
+fn pulse_dots(cx: &gpui::App) -> String {
+    let tick = cx
+        .try_global::<StatusPulseClock>()
+        .map(|c| c.tick)
+        .unwrap_or(0);
+    ".".repeat((tick % 3) as usize + 1)
+}
+
 /// The live activity label this turn: blocked on a permission prompt, running a
-/// named tool, or otherwise generating prose. Single source for both the pinned
-/// [`working_footer`] and the inline [`working_indicator`] so they never
-/// disagree. The animated trailing dots are appended by [`working_row`].
+/// named tool, or otherwise generating prose. The animated trailing dots are
+/// appended by [`working_indicator`].
 fn working_status(content: &AgentChatView) -> SharedString {
     if content.pending_permission.is_some() {
         s::agent_chat_awaiting_permission().into()
@@ -591,26 +650,23 @@ fn working_status(content: &AgentChatView) -> SharedString {
     }
 }
 
-/// Activity label with animated trailing dots — the shared core of the pinned
-/// [`working_footer`] and the inline [`working_indicator`]. The dots (".", "..",
-/// "...") cycle off the shared `StatusPulseClock`, the same CPU-gated tick the
-/// status badges use; the pulse pump dirties this view while the turn is in
-/// flight (`Workspace::notify_in_flight_agent_chats`), so they advance without a
-/// per-frame animation. Only the label tone differs between the two callers (the
-/// footer reads stronger, the inline gap dimmer); the footer also wraps this
-/// with chrome + a Stop button.
-fn working_row(
+/// Inline "agent is working" indicator, projected as the tail row of the last
+/// turn while a turn is in flight but nothing is streaming yet (the gap after a
+/// tool group settles, before the next assistant text). It lives *in* the
+/// conversation flow, so the progress signal sits where the next response will
+/// appear. The label gets animated trailing dots (".", "..", "...") off the
+/// shared `StatusPulseClock` — the pulse pump dirties this view while the turn
+/// is in flight (`Workspace::notify_in_flight_agent_chats`), so they advance
+/// without a per-frame animation. Cancelling is the bottom-dock Stop button.
+fn working_indicator(
     content: &AgentChatView,
-    label_color: gpui::Hsla,
+    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
-) -> gpui::Div {
+) -> impl IntoElement + use<> {
     let base = working_status(content);
-    let tick = cx
-        .try_global::<StatusPulseClock>()
-        .map(|c| c.tick)
-        .unwrap_or(0);
-    let dots = ".".repeat((tick % 3) as usize + 1);
+    let dots = pulse_dots(cx);
     div()
+        .w_full()
         .min_w_0()
         .flex()
         .flex_row()
@@ -622,61 +678,10 @@ fn working_row(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_color(label_color)
+                .text_color(t.text_subtle)
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(format!("{base}{dots}"))),
         )
-}
-
-/// Inline "agent is working" indicator, projected as the tail row of the last
-/// turn while a turn is in flight but nothing is streaming yet (the gap after a
-/// tool group settles, before the next assistant text). Unlike the pinned
-/// [`working_footer`], it lives *in* the conversation flow, so the progress
-/// signal sits where the next response will appear. Reuses the same animated
-/// [`working_row`] (cycling dots) and label source as the footer; no Stop
-/// button (the footer owns that).
-fn working_indicator(
-    content: &AgentChatView,
-    t: &theme::DarudaTheme,
-    cx: &mut Context<AgentChatView>,
-) -> impl IntoElement + use<> {
-    working_row(content, t.text_subtle, cx).w_full()
-}
-
-/// Live "agent is working" strip, pinned at the bottom of the conversation
-/// while a turn is in flight. The animated dots ([`working_row`]) cycle off the
-/// shared, CPU-gated `StatusPulseClock` (the status-pulse pump dirties this view
-/// while it is in flight — see `watchers_lifecycle::spawn_status_pulse` +
-/// `Workspace::notify_in_flight_agent_chats`). It disappears the instant the
-/// turn settles (`turn_in_flight` flips false), making done-vs-generating
-/// unmistakable. The Stop button cancels the turn in place.
-fn working_footer(
-    content: &AgentChatView,
-    t: &theme::DarudaTheme,
-    cx: &mut Context<AgentChatView>,
-) -> Option<impl IntoElement + use<>> {
-    if !content.turn_in_flight {
-        return None;
-    }
-    // Same `working_row` core as the inline indicator, wrapped with the pinned
-    // strip's chrome (top border + bg) and a Stop button.
-    Some(
-        working_row(content, t.text_body, cx)
-            .flex_none()
-            .w_full()
-            .px(px(theme::AGENT_CHAT_PAD_X))
-            .py(px(theme::AGENT_CHAT_PAD_Y))
-            .border_t_1()
-            .border_color(t.border)
-            .bg(t.file_viewer_bg)
-            .child(
-                button(
-                    ("agent-chat-stop", content.pane_id as usize),
-                    s::agent_chat_stop(),
-                )
-                .on_click(cx.listener(|this, _ev, _window, cx| this.cancel_turn(cx))),
-            ),
-    )
 }
 
 /// One conversation row. Message bodies render as selectable markdown via
@@ -1037,6 +1042,13 @@ fn tool_card(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
+    // A running tool gets animated trailing dots (Running. / .. / ...) so the
+    // in-progress state reads as live, not just a static amber label.
+    let badge_text = if matches!(tc.status, ToolStatusView::InProgress) {
+        SharedString::from(format!("{badge_text}{}", pulse_dots(cx)))
+    } else {
+        badge_text
+    };
 
     // Title + status badge: the header IS the summary, so the title fills the
     // row and the badge pins to the right.
@@ -1282,7 +1294,12 @@ fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char) -> impl IntoElement +
 fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedString, Hsla) {
     match status {
         ToolStatusView::Pending => (s::agent_chat_tool_status_pending().into(), t.text_muted),
-        ToolStatusView::InProgress => (s::agent_chat_tool_status_running().into(), t.text_body),
+        // Amber accent so a running tool reads stronger than a settled
+        // green ✓ / red ✗; `tool_card` appends animated dots to the label.
+        ToolStatusView::InProgress => (
+            s::agent_chat_tool_status_running().into(),
+            t.status_executing_tool_dark,
+        ),
         ToolStatusView::Completed => (
             s::agent_chat_tool_status_done().into(),
             t.file_diff_stat_add,

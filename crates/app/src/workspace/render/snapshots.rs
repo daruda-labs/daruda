@@ -15,24 +15,32 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> LeftDockSnapshot {
         // Aggregate Claude status over every pane once per frame, keyed by
-        // the lane that owns each pane. Sessions are surfaced only once the
-        // PtyTracker has bound a live PID to a pane daruda owns — a
-        // session_id can sit in `claude_status` (hook write or jsonl tail)
-        // without belonging to any pane here (a stale status file from a
-        // crashed run, or `claude` running outside daruda). Binding-gated
-        // attribution keeps the indicator a faithful "this Workspace owns a
-        // live claude in this lane" signal.
-        //
-        // Trade-off: there's a ~3 s window after `claude` starts before
-        // PtyTracker's next poll lands the binding, so the indicator
-        // appears slightly later than the first hook event. Acceptable for
-        // the correctness it buys.
+        // the lane that owns each pane. PTY-bound sessions are surfaced
+        // once the PtyTracker has bound a live PID to a pane daruda owns.
+        // Agent chat (ACP) panes contribute their own session status
+        // directly, so the lane indicator reflects both PTY and ACP
+        // sessions.
         let pane_lane = self.pane_lane_index();
+        // Collect agent chat pane statuses for the aggregation. Reading
+        // each view registers a GPUI entity dependency so `cx.notify()`
+        // on the view dirties this snapshot — the same pattern the
+        // bottom-dock snapshot uses for `turn_in_flight`.
+        let acp_statuses: Vec<(crate::workspace::main_area::pane_tree::PaneId, daruda_claude::SessionStatus)> = self
+            .main_area
+            .panes
+            .iter()
+            .filter_map(|p| {
+                let view = p.agent_chat_view()?;
+                let status = view.read(cx).to_session_status()?;
+                Some((p.id, status))
+            })
+            .collect();
         let (claude_status_per_lane, claude_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
                 &self.claude.pty_claude_bindings,
                 &self.claude.claude_status,
+                &acp_statuses,
             );
         LeftDockSnapshot {
             left_dock_view: self.left_dock_view,
@@ -116,7 +124,16 @@ impl Workspace {
                 .claude
                 .pty_claude_bindings
                 .get(&self.main_area.focused_pane_id)
-                .map(|b| b.session_id.clone()),
+                .map(|b| b.session_id.clone())
+                .or_else(|| {
+                    // If the focused pane is an agent chat with a live session,
+                    // use its synthetic ACP id so the sub-row badge highlights.
+                    let focused = self.main_area.focused_pane_id;
+                    acp_statuses
+                        .iter()
+                        .find(|(pid, _)| *pid == focused)
+                        .map(|(pid, _)| format!("acp:{pid}"))
+                }),
             claude_install_banner_visible: self.claude.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
             workspace: self.left_dock.read(cx).workspace.clone(),

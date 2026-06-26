@@ -221,10 +221,9 @@ agent_chat:
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."
   tool_group_count: "툴 %{count}개"
-  working: "응답 생성 중"
+  working: "작업 중"
   working_tool: "%{name} 실행 중"
   awaiting_permission: "승인을 기다리는 중"
-  stop: "중지"
 
 # Generic UI
 ui:
