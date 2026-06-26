@@ -366,7 +366,12 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         match &row.kind {
             RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
-            RowKind::User(_) | RowKind::AgentItem(_) | RowKind::WorkingIndicator => {}
+            // The conclusion's own `FoldKey::Assistant` is added by the per-block
+            // loop below (it is not in `inline_assistant`), so nothing to do here.
+            RowKind::User(_)
+            | RowKind::AgentItem(_)
+            | RowKind::ConclusionItem(_)
+            | RowKind::WorkingIndicator => {}
         }
     }
     // Per-block fold levels (assistant / thinking by index, tool + its diffs by
@@ -819,18 +824,22 @@ mod tests {
         assert!(is_active(&ChatItem::AssistantText {
             text: "a".to_owned(),
             streaming: true,
+            message_id: None,
         }));
         assert!(!is_active(&ChatItem::AssistantText {
             text: "a".to_owned(),
             streaming: false,
+            message_id: None,
         }));
         assert!(is_active(&ChatItem::Thinking {
             text: "t".to_owned(),
             streaming: true,
+            message_id: None,
         }));
         assert!(!is_active(&ChatItem::Thinking {
             text: "t".to_owned(),
             streaming: false,
+            message_id: None,
         }));
         assert!(is_active(&ChatItem::ToolCall(tool_call(
             "c1", InProgress, 0
@@ -901,10 +910,12 @@ mod tests {
             ChatItem::AssistantText {
                 text: "a".to_owned(),
                 streaming: false,
+                message_id: None,
             },
             ChatItem::Thinking {
                 text: "t".to_owned(),
                 streaming: false,
+                message_id: None,
             },
             ChatItem::ToolCall(tool_call("c1", Completed, 2)),
             ChatItem::Error("e".to_owned()),
@@ -912,12 +923,14 @@ mod tests {
         let keys = collect_foldable_keys(&items);
         // Structural header keys (the response — non-trivial run) first, then
         // the per-block keys. The single tool call is not a group (run < 2). The
-        // assistant prose (item 1) renders inline under the response bar, so it
-        // contributes no `Assistant` key; thinking keeps its own fold.
+        // assistant text (item 1) is the run's conclusion, which carries its own
+        // fold toggle, so it contributes an `Assistant` key; thinking keeps its
+        // own fold.
         assert_eq!(
             keys,
             vec![
                 FoldKey::Response(0),
+                FoldKey::Assistant(1),
                 FoldKey::Thinking(2),
                 FoldKey::Tool("c1".to_owned()),
                 FoldKey::Diff("c1#0".to_owned()),
@@ -936,6 +949,7 @@ mod tests {
             ChatItem::AssistantText {
                 text: "a".to_owned(),
                 streaming: false,
+                message_id: None,
             },
         ];
         assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Assistant(1)]);

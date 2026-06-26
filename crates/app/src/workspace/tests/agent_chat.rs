@@ -151,6 +151,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
                         ChatItem::AssistantText {
                             text: "a".into(),
                             streaming: false,
+                            message_id: None,
                         },
                         tool("c1"),
                         tool("c2"),
@@ -166,7 +167,10 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
-        let run_all_hidden = view
+        // The run's only assistant text ("a", items index 1) is the turn's
+        // conclusion: it projects as a ConclusionItem and stays visible even
+        // under collapse-all. The process (other agent rows + tool group) hides.
+        let process_all_hidden = view
             .rows
             .iter()
             .filter(|r| {
@@ -176,7 +180,13 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
                 )
             })
             .all(|r| r.hidden);
-        assert!(run_all_hidden, "collapse-all hides the whole response run");
+        assert!(process_all_hidden, "collapse-all hides the process");
+        assert!(
+            view.rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::ConclusionItem(1)) && !r.hidden),
+            "the conclusion (run's last assistant text) stays visible"
+        );
         assert!(
             view.rows
                 .iter()

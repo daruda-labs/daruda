@@ -13,9 +13,26 @@ pub enum ChatItem {
     /// A user prompt (echoed locally on send, or streamed back by the agent).
     UserText(String),
     /// Assistant response text. `streaming` is true while chunks still arrive.
-    AssistantText { text: String, streaming: bool },
-    /// Agent internal reasoning. `streaming` mirrors [`ChatItem::AssistantText`].
-    Thinking { text: String, streaming: bool },
+    ///
+    /// `message_id` is the ACP message this text belongs to (when the agent
+    /// supplies one): consecutive chunks sharing it accrue into this one item,
+    /// and a change in `message_id` starts a new item — so distinct agent
+    /// messages within a turn stay separate even with no tool call between
+    /// them. `None` when the agent omits it; then chunks merge by adjacency
+    /// (legacy behaviour). The renderer uses the last `AssistantText` of a
+    /// response run as the turn's "conclusion".
+    AssistantText {
+        text: String,
+        streaming: bool,
+        message_id: Option<String>,
+    },
+    /// Agent internal reasoning. `streaming` / `message_id` mirror
+    /// [`ChatItem::AssistantText`].
+    Thinking {
+        text: String,
+        streaming: bool,
+        message_id: Option<String>,
+    },
     /// A tool invocation and its evolving status/output.
     ToolCall(ToolCallItem),
     /// A pending or resolved tool-permission request.

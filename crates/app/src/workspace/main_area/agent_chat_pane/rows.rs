@@ -49,6 +49,13 @@ pub(in crate::workspace) enum RowKind {
         count: usize,
         collapsed: bool,
     },
+    /// The turn's conclusion — the run's final assistant-text block, when it
+    /// sits under a response bar. Keyed by its `items` index. Unlike the inline
+    /// process prose (a plain `AgentItem` at indent > 0, hidden when the
+    /// response folds), the conclusion stays visible when the response is
+    /// collapsed *and* carries its own fold toggle (`FoldKey::Assistant`), so it
+    /// can be collapsed to a one-line summary independently of the process.
+    ConclusionItem(usize),
     /// Synthetic "agent is working" indicator, appended at the tail of the last
     /// turn's run while a turn is in flight but no block is actively streaming —
     /// i.e. the gap after a tool group settles and before the next assistant
@@ -85,6 +92,7 @@ impl RenderRow {
             (RowKind::ToolGroupHeader { gid: a, .. }, RowKind::ToolGroupHeader { gid: b, .. }) => {
                 a == b
             }
+            (RowKind::ConclusionItem(a), RowKind::ConclusionItem(b)) => a == b,
             // At most one indicator exists (always the tail), so any two occupy
             // the same logical slot.
             (RowKind::WorkingIndicator, RowKind::WorkingIndicator) => true,
@@ -158,6 +166,12 @@ pub(in crate::workspace) fn project(
             .count();
         let non_trivial = anchor.is_some() && (tools >= 1 || run.len() >= RESPONSE_MIN_BLOCKS);
         let run_active = run.clone().any(|k| is_active(&items[k]));
+        // The run's final assistant-text block is the turn's conclusion: it
+        // stays visible when the response is collapsed (see `project_run`).
+        let conclusion_ix = run
+            .clone()
+            .rev()
+            .find(|&k| matches!(items[k], ChatItem::AssistantText { .. }));
 
         // Indent + collapsed state of this turn's run, reused to place the
         // trailing working indicator inside the same fold scope.
@@ -171,10 +185,18 @@ pub(in crate::workspace) fn project(
                 hidden: false,
                 indent: 0,
             });
-            project_run(items, fold, run.clone(), 1, collapsed, &mut rows);
+            project_run(
+                items,
+                fold,
+                run.clone(),
+                1,
+                collapsed,
+                conclusion_ix,
+                &mut rows,
+            );
             (1u8, collapsed)
         } else {
-            project_run(items, fold, run.clone(), 0, false, &mut rows);
+            project_run(items, fold, run.clone(), 0, false, conclusion_ix, &mut rows);
             (0u8, false)
         };
 
@@ -197,12 +219,18 @@ pub(in crate::workspace) fn project(
 /// `base_indent`, grouping consecutive tool-call runs. `response_collapsed`
 /// hides every row in the run (the response is folded); a settled tool group
 /// additionally hides its own members.
+///
+/// `conclusion_ix`, when set, is the run's final assistant-text item — the
+/// turn's conclusion. It stays visible even while the response is collapsed, so
+/// a folded turn reads as "user question → conclusion" with the intermediate
+/// process tucked behind the response bar.
 fn project_run(
     items: &[ChatItem],
     fold: &FoldState,
     run: std::ops::Range<usize>,
     base_indent: u8,
     response_collapsed: bool,
+    conclusion_ix: Option<usize>,
     rows: &mut Vec<RenderRow>,
 ) {
     let mut k = run.start;
@@ -242,9 +270,19 @@ fn project_run(
                 });
             }
         } else {
+            // The conclusion item stays visible even when the response is
+            // collapsed; every other block hides with the fold. Under a response
+            // bar it becomes a `ConclusionItem` (its own fold toggle); at the top
+            // level (no bar) a plain assistant block already carries one.
+            let is_conclusion = Some(k) == conclusion_ix;
+            let kind = if is_conclusion && base_indent > 0 {
+                RowKind::ConclusionItem(k)
+            } else {
+                RowKind::AgentItem(k)
+            };
             rows.push(RenderRow {
-                kind: RowKind::AgentItem(k),
-                hidden: response_collapsed,
+                kind,
+                hidden: response_collapsed && !is_conclusion,
                 indent: base_indent,
             });
             k += 1;
@@ -281,6 +319,7 @@ mod tests {
         ChatItem::AssistantText {
             text: s.to_owned(),
             streaming: false,
+            message_id: None,
         }
     }
     fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
@@ -289,7 +328,9 @@ mod tests {
                 let k = match r.kind {
                     RowKind::User(_) => "user",
                     RowKind::ResponseHeader { .. } => "response",
-                    RowKind::AgentItem(_) => "item",
+                    // The conclusion is still an item row for visibility tests;
+                    // its distinct variant is asserted directly where it matters.
+                    RowKind::AgentItem(_) | RowKind::ConclusionItem(_) => "item",
                     RowKind::ToolGroupHeader { .. } => "group",
                     RowKind::WorkingIndicator => "working",
                 };
@@ -353,14 +394,15 @@ mod tests {
             tool("t4", Completed),
         ];
         let rows = project(&items, &FoldState::default(), false);
-        // Past response (first turn, settled, not last) collapses → its run is
-        // hidden; current response (last turn) expands → its run visible.
+        // Past response (first turn, settled, not last) collapses → its process
+        // hides but its conclusion (a1, the run's last assistant text) stays
+        // visible; current response (last turn) expands → its run visible.
         assert_eq!(
             kinds(&rows),
             vec![
                 ("user", false),     // first
                 ("response", false), // header always shown
-                ("item", true),      // a1 hidden (response collapsed)
+                ("item", false),     // a1 = conclusion, stays visible
                 ("group", true),
                 ("item", true),
                 ("item", true),
@@ -413,6 +455,7 @@ mod tests {
             ChatItem::AssistantText {
                 text: "answer".into(),
                 streaming: true,
+                message_id: None,
             },
         ];
         let rows = project(&items, &FoldState::default(), true);
@@ -466,6 +509,145 @@ mod tests {
         assert!(
             working.hidden,
             "a manually-collapsed response hides its working indicator too"
+        );
+    }
+
+    #[test]
+    fn conclusion_stays_visible_when_response_collapsed() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("let me look"),
+            tool("a", Completed),
+            tool("b", Completed),
+            asst("done: fixed it"),
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true); // collapse the response
+        let rows = project(&items, &fold, false);
+        assert_eq!(
+            kinds(&rows),
+            vec![
+                ("user", false),
+                ("response", false),
+                ("item", true), // "let me look" process → hidden
+                ("group", true),
+                ("item", true),
+                ("item", true),
+                ("item", false), // "done: fixed it" conclusion → visible
+            ]
+        );
+    }
+
+    #[test]
+    fn conclusion_under_a_response_is_a_separately_foldable_item() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("let me look"),
+            tool("a", Completed),
+            tool("b", Completed),
+            asst("done"),
+        ];
+        let rows = project(&items, &FoldState::default(), false);
+        // The final assistant block projects as a ConclusionItem (its own fold
+        // toggle); the earlier prose stays a plain AgentItem.
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r.kind, RowKind::ConclusionItem(4))),
+            "the run's last assistant text is a ConclusionItem"
+        );
+        assert!(
+            rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
+            "earlier prose stays a plain AgentItem"
+        );
+    }
+
+    #[test]
+    fn trivial_reply_is_not_a_conclusion_item() {
+        // A lone reply has no response bar, so it renders as the normal
+        // (labeled) foldable assistant block, not a bare-chevron ConclusionItem.
+        let items = [ChatItem::UserText("hi".into()), asst("hello")];
+        let rows = project(&items, &FoldState::default(), false);
+        assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::ConclusionItem(_)))
+        );
+    }
+
+    #[test]
+    fn only_the_last_assistant_message_is_the_conclusion() {
+        // Two distinct agent messages (mapping split them by messageId) with no
+        // tool between → only the last is the conclusion; the earlier one folds
+        // into the process.
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("first message"),
+            asst("second message"),
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true);
+        let rows = project(&items, &fold, false);
+        assert_eq!(
+            kinds(&rows),
+            vec![
+                ("user", false),
+                ("response", false),
+                ("item", true),  // first message → process
+                ("item", false), // last message → conclusion
+            ]
+        );
+    }
+
+    #[test]
+    fn conclusion_is_last_assistant_even_before_trailing_tool() {
+        // The run ends with tools and no final text; the last assistant text
+        // (mid-run) is still treated as the conclusion and stays visible.
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("answer"),
+            tool("a", Completed),
+            tool("b", Completed),
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true);
+        let rows = project(&items, &fold, false);
+        assert_eq!(
+            kinds(&rows),
+            vec![
+                ("user", false),
+                ("response", false),
+                ("item", false), // "answer" = last assistant text → visible
+                ("group", true),
+                ("item", true),
+                ("item", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_conclusion_row_when_run_has_no_assistant_text() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            tool("b", Completed),
+        ];
+        let mut fold = FoldState::default();
+        fold.toggle(FoldKey::Response(0), true);
+        let rows = project(&items, &fold, false);
+        assert_eq!(
+            kinds(&rows),
+            vec![
+                ("user", false),
+                ("response", false),
+                ("group", true), // no assistant text → nothing stays visible
+                ("item", true),
+                ("item", true),
+            ]
         );
     }
 

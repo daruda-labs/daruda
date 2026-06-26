@@ -58,8 +58,8 @@ type MermaidImages = std::sync::Arc<
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{
-    AgentStatusBadge, ButtonVariants as _, Disclosure, IconName, IndicatorSize, Sizable as _,
-    button, button_bare, disclosure,
+    ButtonVariants as _, Disclosure, IconName, Sizable as _, StatusPulseClock, button, button_bare,
+    disclosure,
 };
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
     DiffStat, diff_editor_key, is_active, mermaid_key,
@@ -68,7 +68,6 @@ use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
-use daruda_claude::SessionStatus;
 
 /// Build the element tree for an Agent chat pane. Takes the view by shared
 /// reference (field reads) plus its own `Context` (listener binding); the two
@@ -218,6 +217,15 @@ fn render_row(
             count,
             collapsed,
         } => tool_group_bar(this, gid, *first_ix, *count, *collapsed, t, cx).into_any_element(),
+        RowKind::ConclusionItem(i) => match this.items.get(*i) {
+            Some(item @ ChatItem::AssistantText { text, .. }) => {
+                let key = FoldKey::Assistant(*i);
+                let expanded = this.fold.is_expanded(&key, is_active(item));
+                conclusion_block(*i, key, expanded, text, &this.mermaid_images, t, cx)
+                    .into_any_element()
+            }
+            _ => gpui::Empty.into_any_element(),
+        },
         RowKind::WorkingIndicator => working_indicator(this, t, cx).into_any_element(),
     };
     let bottom = if ix == last_visible {
@@ -322,8 +330,12 @@ fn response_bar(
                     ToolStatusView::Completed => {}
                 }
             }
-            ChatItem::AssistantText { text, streaming }
-            | ChatItem::Thinking { text, streaming } => {
+            ChatItem::AssistantText {
+                text, streaming, ..
+            }
+            | ChatItem::Thinking {
+                text, streaming, ..
+            } => {
                 if first_line.is_none() {
                     first_line = text
                         .lines()
@@ -565,47 +577,45 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     })
 }
 
-/// The live activity the agent is engaged in this turn: blocked on a permission
-/// prompt, running a named tool, or otherwise generating prose. Single source
-/// for both the pinned [`working_footer`] and the inline [`working_indicator`]
-/// so the two never disagree.
-fn working_status(content: &AgentChatView) -> (SessionStatus, SharedString) {
+/// The live activity label this turn: blocked on a permission prompt, running a
+/// named tool, or otherwise generating prose. Single source for both the pinned
+/// [`working_footer`] and the inline [`working_indicator`] so they never
+/// disagree. The animated trailing dots are appended by [`working_row`].
+fn working_status(content: &AgentChatView) -> SharedString {
     if content.pending_permission.is_some() {
-        (
-            SessionStatus::NeedsAttention,
-            s::agent_chat_awaiting_permission().into(),
-        )
+        s::agent_chat_awaiting_permission().into()
     } else if let Some(title) = running_tool_title(&content.items) {
-        (
-            SessionStatus::ExecutingTool,
-            s::agent_chat_working_tool(&title).into(),
-        )
+        s::agent_chat_working_tool(&title).into()
     } else {
-        (SessionStatus::Working, s::agent_chat_working().into())
+        s::agent_chat_working().into()
     }
 }
 
-/// Animated status badge + activity label — the shared core of the pinned
-/// [`working_footer`] and the inline [`working_indicator`]. Layout + badge are
-/// identical; only the label tone differs (the footer reads stronger, the
-/// inline gap dimmer) and the footer wraps this with chrome + a Stop button.
+/// Activity label with animated trailing dots — the shared core of the pinned
+/// [`working_footer`] and the inline [`working_indicator`]. The dots (".", "..",
+/// "...") cycle off the shared `StatusPulseClock`, the same CPU-gated tick the
+/// status badges use; the pulse pump dirties this view while the turn is in
+/// flight (`Workspace::notify_in_flight_agent_chats`), so they advance without a
+/// per-frame animation. Only the label tone differs between the two callers (the
+/// footer reads stronger, the inline gap dimmer); the footer also wraps this
+/// with chrome + a Stop button.
 fn working_row(
     content: &AgentChatView,
     label_color: gpui::Hsla,
     cx: &mut Context<AgentChatView>,
 ) -> gpui::Div {
-    let (status, label) = working_status(content);
+    let base = working_status(content);
+    let tick = cx
+        .try_global::<StatusPulseClock>()
+        .map(|c| c.tick)
+        .unwrap_or(0);
+    let dots = ".".repeat((tick % 3) as usize + 1);
     div()
         .min_w_0()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(AgentStatusBadge::for_status(
-            status,
-            IndicatorSize::Badge,
-            cx,
-        ))
         .child(
             div()
                 .flex_1()
@@ -614,7 +624,7 @@ fn working_row(
                 .whitespace_nowrap()
                 .text_color(label_color)
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(label),
+                .child(SharedString::from(format!("{base}{dots}"))),
         )
 }
 
@@ -623,8 +633,8 @@ fn working_row(
 /// tool group settles, before the next assistant text). Unlike the pinned
 /// [`working_footer`], it lives *in* the conversation flow, so the progress
 /// signal sits where the next response will appear. Reuses the same animated
-/// [`AgentStatusBadge`] (CPU-gated pulse) and label source as the footer; no
-/// Stop button (the footer owns that).
+/// [`working_row`] (cycling dots) and label source as the footer; no Stop
+/// button (the footer owns that).
 fn working_indicator(
     content: &AgentChatView,
     t: &theme::DarudaTheme,
@@ -634,9 +644,9 @@ fn working_indicator(
 }
 
 /// Live "agent is working" strip, pinned at the bottom of the conversation
-/// while a turn is in flight. The animated [`AgentStatusBadge`] reuses the
-/// shared, CPU-gated `StatusPulseClock` (the status-pulse pump dirties this
-/// view while it is in flight — see `watchers_lifecycle::spawn_status_pulse` +
+/// while a turn is in flight. The animated dots ([`working_row`]) cycle off the
+/// shared, CPU-gated `StatusPulseClock` (the status-pulse pump dirties this view
+/// while it is in flight — see `watchers_lifecycle::spawn_status_pulse` +
 /// `Workspace::notify_in_flight_agent_chats`). It disappears the instant the
 /// turn settles (`turn_in_flight` flips false), making done-vs-generating
 /// unmistakable. The Stop button cancels the turn in place.
@@ -884,7 +894,7 @@ fn assistant_markdown(
     t: &theme::DarudaTheme,
 ) -> AnyElement {
     crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(t.text_body)
+        .color(t.text_primary)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
         .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element()
@@ -913,6 +923,35 @@ fn assistant_block(
         key,
         expanded,
         header,
+        summary,
+        body_el,
+        |row| row,
+        t,
+        cx,
+    )
+}
+
+/// The turn's conclusion — the run's final assistant message rendered under a
+/// response bar. Same drag-selectable markdown body as [`assistant_block`] but
+/// with no "Agent" label (the response bar above already names the speaker):
+/// just the bare disclosure chevron, so the conclusion folds to its first-line
+/// summary independently of the response's process fold.
+fn conclusion_block(
+    ix: usize,
+    key: FoldKey,
+    expanded: bool,
+    text: &str,
+    mermaid_images: &MermaidImages,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let body_el = assistant_markdown(ix, text, mermaid_images, t);
+    let summary = collapsed_text_summary(text, false, t);
+    foldable_block(
+        ("agent-chat-conclusion", ix),
+        key,
+        expanded,
+        gpui::Empty.into_any_element(),
         summary,
         body_el,
         |row| row,
@@ -1383,6 +1422,7 @@ mod tests {
             ChatItem::AssistantText {
                 text: "a".into(),
                 streaming: true,
+                message_id: None,
             },
             tool("c1", ToolStatusView::Completed),
         ];

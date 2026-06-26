@@ -6,8 +6,8 @@
 //! and usage updates are intentionally ignored.
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, PermissionOption, PermissionOptionKind, RequestPermissionRequest, SessionUpdate,
-    ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionRequest,
+    SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 
 use crate::model::{
@@ -19,10 +19,20 @@ use crate::model::{
 pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) {
     match update {
         SessionUpdate::AgentMessageChunk(chunk) => {
-            append_streaming(items, &text_of(&chunk.content), StreamKind::Assistant);
+            append_streaming(
+                items,
+                &text_of(&chunk.content),
+                msg_id(chunk),
+                StreamKind::Assistant,
+            );
         }
         SessionUpdate::AgentThoughtChunk(chunk) => {
-            append_streaming(items, &text_of(&chunk.content), StreamKind::Thinking);
+            append_streaming(
+                items,
+                &text_of(&chunk.content),
+                msg_id(chunk),
+                StreamKind::Thinking,
+            );
         }
         SessionUpdate::UserMessageChunk(chunk) => {
             items.push(ChatItem::UserText(text_of(&chunk.content)));
@@ -60,36 +70,61 @@ enum StreamKind {
     Thinking,
 }
 
-/// Append streamed text, extending the trailing item when it is the same
-/// still-streaming kind, otherwise starting a new one. Empty chunks (the agent
-/// emits a leading empty chunk per message) start the item without text.
-fn append_streaming(items: &mut Vec<ChatItem>, text: &str, kind: StreamKind) {
-    match (items.last_mut(), kind) {
-        (
-            Some(ChatItem::AssistantText {
-                text: prev,
-                streaming: true,
-            }),
-            StreamKind::Assistant,
-        ) => {
-            prev.push_str(text);
+/// Append streamed text, extending the trailing item only when it is the same
+/// still-streaming kind **and** the same message (matching `message_id`, or both
+/// absent); otherwise a new message has started, so finalize the previous
+/// streaming block and start a fresh item. A change in `message_id` therefore
+/// splits two agent messages into separate items even with no tool call between
+/// them — the protocol's "a change in messageId indicates a new message"
+/// (`ContentChunk::message_id`). When the agent omits `message_id`, chunks merge
+/// by adjacency (legacy behaviour). Empty chunks (the agent emits a leading
+/// empty chunk per message) start the item without text.
+fn append_streaming(
+    items: &mut Vec<ChatItem>,
+    text: &str,
+    message_id: Option<String>,
+    kind: StreamKind,
+) {
+    if let Some(last) = items.last_mut() {
+        match (last, kind) {
+            (
+                ChatItem::AssistantText {
+                    text: prev,
+                    streaming: true,
+                    message_id: mid,
+                },
+                StreamKind::Assistant,
+            ) if *mid == message_id => {
+                prev.push_str(text);
+                return;
+            }
+            (
+                ChatItem::Thinking {
+                    text: prev,
+                    streaming: true,
+                    message_id: mid,
+                },
+                StreamKind::Thinking,
+            ) if *mid == message_id => {
+                prev.push_str(text);
+                return;
+            }
+            _ => {}
         }
-        (
-            Some(ChatItem::Thinking {
-                text: prev,
-                streaming: true,
-            }),
-            StreamKind::Thinking,
-        ) => {
-            prev.push_str(text);
-        }
-        (_, StreamKind::Assistant) => items.push(ChatItem::AssistantText {
+    }
+    // A new message (different id, or a kind switch) begins: the previous
+    // streaming block, if any, is now complete.
+    finalize_streaming(items);
+    match kind {
+        StreamKind::Assistant => items.push(ChatItem::AssistantText {
             text: text.to_string(),
             streaming: true,
+            message_id,
         }),
-        (_, StreamKind::Thinking) => items.push(ChatItem::Thinking {
+        StreamKind::Thinking => items.push(ChatItem::Thinking {
             text: text.to_string(),
             streaming: true,
+            message_id,
         }),
     }
 }
@@ -169,6 +204,13 @@ fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<String>) {
     (diffs, output)
 }
 
+/// The owned `message_id` of a streamed content chunk, if the agent supplied
+/// one. `MessageId` wraps an `Arc<str>`; we copy it into a `String` so the
+/// GPUI-free model carries no protocol type.
+fn msg_id(chunk: &ContentChunk) -> Option<String> {
+    chunk.message_id.as_ref().map(|m| m.0.to_string())
+}
+
 /// Extract renderable text from a content block. Non-text blocks (image,
 /// audio, resource) collapse to empty for the MVP text view.
 fn text_of(block: &ContentBlock) -> String {
@@ -230,6 +272,10 @@ mod tests {
         ContentChunk::new(ContentBlock::Text(TextContent::new(s.to_string())))
     }
 
+    fn text_chunk_id(s: &str, id: &str) -> ContentChunk {
+        ContentChunk::new(ContentBlock::Text(TextContent::new(s.to_string()))).message_id(id)
+    }
+
     #[test]
     fn agent_chunks_accumulate_into_one_streaming_item() {
         let mut items = Vec::new();
@@ -246,7 +292,61 @@ mod tests {
             items[0],
             ChatItem::AssistantText {
                 text: "2 + 2 is 4.".to_string(),
-                streaming: true
+                streaming: true,
+                message_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn chunks_with_same_message_id_merge() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("Hello ", "m1")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("world", "m1")),
+        );
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0],
+            ChatItem::AssistantText {
+                text: "Hello world".to_string(),
+                streaming: true,
+                message_id: Some("m1".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn message_id_change_splits_and_finalizes_previous() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("first", "m1")),
+        );
+        // A new messageId means a new message started — the previous one is done.
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk_id("second", "m2")),
+        );
+        assert_eq!(items.len(), 2, "different messageId starts a new item");
+        assert_eq!(
+            items[0],
+            ChatItem::AssistantText {
+                text: "first".to_string(),
+                streaming: false, // finalized when the next message began
+                message_id: Some("m1".to_string()),
+            }
+        );
+        assert_eq!(
+            items[1],
+            ChatItem::AssistantText {
+                text: "second".to_string(),
+                streaming: true,
+                message_id: Some("m2".to_string()),
             }
         );
     }
@@ -262,7 +362,30 @@ mod tests {
             items[0],
             ChatItem::Thinking {
                 text: "hmm".to_string(),
-                streaming: true
+                streaming: true,
+                message_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn thinking_is_finalized_when_assistant_text_follows() {
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentThoughtChunk(text_chunk("reasoning")),
+        );
+        apply_update(
+            &mut items,
+            &SessionUpdate::AgentMessageChunk(text_chunk("answer")),
+        );
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0],
+            ChatItem::Thinking {
+                text: "reasoning".to_string(),
+                streaming: false, // kind switch finalizes the thinking block
+                message_id: None,
             }
         );
     }
@@ -272,13 +395,15 @@ mod tests {
         let mut items = vec![ChatItem::AssistantText {
             text: "done".to_string(),
             streaming: true,
+            message_id: None,
         }];
         finalize_streaming(&mut items);
         assert_eq!(
             items[0],
             ChatItem::AssistantText {
                 text: "done".to_string(),
-                streaming: false
+                streaming: false,
+                message_id: None,
             }
         );
     }
