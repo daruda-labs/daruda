@@ -9,7 +9,7 @@
 //! those are the parameters. Callers keep their handle-extraction code
 //! (handle types differ) and pass plain pixels in.
 
-use gpui::{AnyElement, ElementId, Hsla, Pixels, div, prelude::*, px};
+use gpui::{AnyElement, ElementId, Hsla, ListState, Pixels, div, prelude::*, px};
 
 use crate::ui::theme;
 
@@ -73,10 +73,72 @@ fn thumb_geometry(
     Some((top_offset + track_h * scroll_frac, thumb_h))
 }
 
+/// [`vertical_thumb`] for a virtualized [`gpui::list`] / [`ListState`]. Derives
+/// the viewport / content / offset geometry from the list state's scrollbar API
+/// (the method names — `viewport_bounds`, `max_offset_for_scrollbar`,
+/// `scroll_px_offset_for_scrollbar` — are non-obvious) so every gpui-`list` pane
+/// gets the same display-only daruda thumb without re-deriving it. The geometry
+/// reflects the previous frame's layout, which is fine for a thumb; read it at
+/// *render* time. `None` until the first layout or when the content fits.
+pub fn vertical_thumb_for_list(
+    id: impl Into<ElementId>,
+    list_state: &ListState,
+    top_offset: Pixels,
+    thumb_bg: Hsla,
+    thumb_hover_bg: Hsla,
+) -> Option<AnyElement> {
+    let viewport_h = list_state.viewport_bounds().size.height;
+    let content_h = viewport_h + list_state.max_offset_for_scrollbar().y;
+    vertical_thumb(
+        id,
+        viewport_h,
+        content_h,
+        list_state.scroll_px_offset_for_scrollbar().y,
+        top_offset,
+        thumb_bg,
+        thumb_hover_bg,
+    )
+}
+
+/// Whether a virtualized [`ListState`] is scrolled to (within `slack` px of) the
+/// bottom — drives a scroll-to-bottom affordance's visibility (read at render
+/// time). Before the first layout both extents are zero, so this returns `true`
+/// (no overflow yet → the affordance stays hidden, the desired first-frame
+/// state).
+pub fn list_at_bottom(list_state: &ListState, slack: f32) -> bool {
+    scroll_at_bottom(
+        f32::from(list_state.scroll_px_offset_for_scrollbar().y),
+        f32::from(list_state.max_offset_for_scrollbar().y),
+        slack,
+    )
+}
+
+/// Pure: is a scroll region within `slack` of the bottom? `offset_y <= 0` (more
+/// negative = scrolled further down) and `max_y >= 0` is the bottom extent, so
+/// at the bottom `max_y + offset_y ≈ 0`. Content that fits (`max_y <= 0`) is
+/// trivially at the bottom. Split out so it is testable without a laid-out list.
+fn scroll_at_bottom(offset_y: f32, max_y: f32, slack: f32) -> bool {
+    max_y <= 0.0 || (max_y + offset_y) <= slack
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gpui::px;
+
+    #[test]
+    fn scroll_at_bottom_detects_bottom_top_and_slack() {
+        // Content fits (no scroll) → trivially at bottom.
+        assert!(scroll_at_bottom(0.0, 0.0, 24.0));
+        // At the very bottom: max + offset == 0.
+        assert!(scroll_at_bottom(-100.0, 100.0, 24.0));
+        // Within slack of the bottom (10px from the edge, slack 24).
+        assert!(scroll_at_bottom(-90.0, 100.0, 24.0));
+        // At the top of a scrollable view → not at bottom.
+        assert!(!scroll_at_bottom(0.0, 100.0, 24.0));
+        // Scrolled up beyond slack (90px from the edge) → not at bottom.
+        assert!(!scroll_at_bottom(-10.0, 100.0, 24.0));
+    }
 
     #[test]
     fn content_fits_viewport_draws_no_thumb() {

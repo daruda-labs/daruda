@@ -664,7 +664,7 @@ impl Workspace {
                     // started here — `focus_pane` connects it lazily on
                     // first focus, so cold restore doesn't spin up an agent
                     // process per restored pane. Items begin empty.
-                    self.create_agent_chat_pane(ac.cwd.clone(), cx)
+                    self.create_agent_chat_pane(ac.cwd.clone(), window, cx)
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
                     self.create_pane_with_cwd(effective, window, cx)?

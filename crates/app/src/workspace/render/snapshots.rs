@@ -160,14 +160,23 @@ impl Workspace {
         // When the focused pane is an Agent chat pane mid-turn, the
         // bottom-input button toggles to "Stop" and cancels that pane's
         // turn instead of sending. `None` in every other state.
+        //
+        // Reading the `AgentChatView` entity here registers it in the
+        // Workspace window's `tracked_entities`, so the bottom-dock snapshot
+        // (and the Stop/Send button) refreshes when `turn_in_flight` flips.
+        // This does NOT widen the scroll-repaint cost: the embedded view is an
+        // element-tree descendant of the Workspace, so its `cx.notify()`
+        // already marks the Workspace dirty via ancestor propagation
+        // (`mark_view_dirty`) regardless of this read — and that propagation
+        // walks ancestors only, so sibling docks / terminals stay cached.
         let focused_id = self.main_area.focused_pane_id;
         let agent_stop_pane = self
             .main_area
             .panes
             .iter()
             .find(|p| p.id == focused_id)
-            .and_then(|p| p.agent_chat_content())
-            .filter(|ac| ac.turn_in_flight)
+            .and_then(|p| p.agent_chat_view())
+            .filter(|view| view.read(cx).turn_in_flight)
             .map(|_| focused_id);
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,

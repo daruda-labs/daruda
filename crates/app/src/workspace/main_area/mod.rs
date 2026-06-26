@@ -331,10 +331,17 @@ pub(in crate::workspace) fn render_layout(
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_hidden()
-                    .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
-                        d.track_focus(fh)
-                    })
-                    .child(self::agent_chat_pane::render(id, ac, cx)),
+                    // Embed the view as a cached element, exactly like the
+                    // Terminal arm: when only a sibling dirties the Workspace,
+                    // the chat view isn't in `dirty_views`, so GPUI reuses its
+                    // prior paint instead of re-laying-out the conversation.
+                    // The view's own `cx.notify()` (scroll, fold, streaming)
+                    // marks it dirty and forces a re-render. The view tracks its
+                    // own focus handle, so no `track_focus` on this wrapper.
+                    .child(
+                        AnyView::from(ac.view.clone())
+                            .cached(StyleRefinement::default().size_full().flex()),
+                    ),
                 self::pane::PaneContent::Terminal(t) => {
                     let view_for_path_drag = t.view.clone();
                     let view_for_external = t.view.clone();

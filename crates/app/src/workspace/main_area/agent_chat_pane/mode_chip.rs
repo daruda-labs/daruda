@@ -2,8 +2,8 @@
 //!
 //! Renders the current session mode as a ghost `xsmall` button with a
 //! chevron; clicking it opens a dropdown listing every advertised mode.
-//! Selecting a mode dispatches `Workspace::set_agent_mode` (one-line
-//! dispatch — no state logic in this builder, MVU view purity).
+//! Selecting a mode dispatches `AgentChatView::set_mode` (one-line dispatch —
+//! no state logic in this builder, MVU view purity).
 //!
 //! Only rendered when `modes.available` is non-empty (the caller gates).
 
@@ -14,7 +14,7 @@ use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
 };
-use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Build the mode chip element. The caller is responsible for only
@@ -24,11 +24,11 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// display name (looked up from `available`; falls back to `current` id if
 /// the id is not listed) with a chevron appended. Clicking it opens a
 /// dropdown with one item per available mode; each item one-line dispatches
-/// into `Workspace::set_agent_mode`.
+/// into `AgentChatView::set_mode`.
 pub(in crate::workspace) fn mode_chip(
     pane_id: PaneId,
     modes: &ModeStateView,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     // Look up the current mode's display name; fall back to the id itself.
     let display_name = modes
@@ -49,39 +49,36 @@ pub(in crate::workspace) fn mode_chip(
         .map(|v| (v.id.clone(), v.name.clone()))
         .collect();
     let current = modes.current.clone();
-    let ws = cx.weak_entity();
+    let view = cx.weak_entity();
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
 
     button(chip_id, label)
         .ghost()
         .xsmall()
-        .dropdown_menu(move |menu, _window, _cx| {
-            build_mode_menu(&available, &current, pane_id, &ws, menu)
-        })
+        .dropdown_menu(move |menu, _window, _cx| build_mode_menu(&available, &current, &view, menu))
 }
 
 /// Build the mode selection popup menu. One item per available mode; the
 /// currently-active mode gets a checkmark. Each item is a one-line dispatch
-/// into `set_agent_mode` (render purity; no logic here).
+/// into `AgentChatView::set_mode` (render purity; no logic here).
 fn build_mode_menu(
     available: &[(String, String)],
     current: &str,
-    pane_id: PaneId,
-    workspace: &gpui::WeakEntity<Workspace>,
+    view: &gpui::WeakEntity<AgentChatView>,
     menu: PopupMenu,
 ) -> PopupMenu {
     available.iter().fold(menu, |m, (id, name)| {
-        let ws = workspace.clone();
+        let view = view.clone();
         let mode_id = id.clone();
         let is_current = id == current;
         m.item(
             PopupMenuItem::new(SharedString::from(name.clone()))
                 .checked(is_current)
                 .on_click(move |_, _window, app| {
-                    if let Some(w) = ws.upgrade() {
+                    if let Some(v) = view.upgrade() {
                         let mode_id = mode_id.clone();
-                        w.update(app, |this, cx| this.set_agent_mode(pane_id, mode_id, cx));
+                        v.update(app, |this, cx| this.set_mode(mode_id, cx));
                     }
                 }),
         )

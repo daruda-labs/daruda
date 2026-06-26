@@ -18,6 +18,7 @@ use gpui::{
 };
 use portable_pty::MasterPty;
 
+use super::agent_chat_pane::view::AgentChatView;
 use super::file_view_pane::PaneFileView;
 use crate::path_ext::PathExt;
 use crate::workspace::Workspace;
@@ -270,141 +271,27 @@ impl TaskEditContent {
     }
 }
 
-/// Connection lifecycle of an [`AgentChatContent`]'s ACP session.
-/// Declared as an enum so the connecting / live / failed states are
-/// distinct variants rather than a `bool` + companion field; the live
-/// `Error` arm carries the failure message it renders.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum AgentSessionStatus {
-    /// Restored (or freshly created) but no session has been started —
-    /// the ACP session is not persisted, so a restored pane stays dormant
-    /// (no agent process) until the user focuses it. `focus_pane` then
-    /// transitions it to `Connecting` via `maybe_connect_agent_chat`.
-    Idle,
-    /// The ACP adapter has been asked to start but the session is not
-    /// yet ready for prompts (handshake + `session/new` in flight).
-    Connecting,
-    /// `initialize` + `session/new` succeeded — the session accepts
-    /// prompts and the event pump is folding updates into `items`.
-    Connected,
-    /// The connection or protocol failed; the message is surfaced both
-    /// here (status line) and through the error pipeline.
-    Error(String),
-}
-
-/// Native ACP (Agent Client Protocol) chat content. Rendered as a plain
-/// `div()` tree (no inner GPUI `Entity`), so `wrapper_focus_handle`
-/// returns `Some(&focus_handle)`.
+/// Pane-level handle to an Agent chat pane. A thin wrapper over the
+/// self-owned [`AgentChatView`] entity (which holds the model + UI state and
+/// renders itself), mirroring how [`TerminalContent`] wraps `TerminalView`.
 ///
-/// Owns the live session: the [`daruda_acp::AcpSessionHandle`] the
-/// workspace ops drive (`send_prompt` / `cancel` / `respond_permission`)
-/// and the GPUI-side event pump that folds [`daruda_acp::AcpEvent`]s into
-/// `items`. Both are dropped with the pane, which tears the connection
-/// down — dropping the handle closes the command channel (the connection
-/// task exits) and dropping the pump task ends the event loop.
-///
-/// MVP simplification: one `connect_session` per pane. A future revision
-/// could share a single window-level adapter across panes.
+/// The wrapper caches the (static) `cached_title` and the `cwd` so the cx-free
+/// pane accessors (`Pane::title` / `Pane::cwd`) can read them without a `&App`
+/// — the same reason `TerminalContent` caches its OSC-derived title/cwd. The
+/// live session, conversation, and all transient UI state live on the entity;
+/// dropping the view (pane close) tears the connection down.
 pub(in crate::workspace) struct AgentChatContent {
-    /// Pane-level focus handle for `Cmd+W` close routing and key
-    /// handling — the content is a plain div tree with no inner entity.
-    pub(in crate::workspace) focus_handle: FocusHandle,
-    /// Tab / header title.
+    /// The self-owned chat view entity. Embedded by the pane walker via
+    /// `AnyView::cached(..)`, so its `cx.notify()` dirties only its subtree.
+    pub(in crate::workspace) view: Entity<AgentChatView>,
+    /// Tab / header title. Static for AgentChat panes; cached here so
+    /// `Pane::title()` stays cx-free.
     pub(in crate::workspace) cached_title: SharedString,
-    /// Lane working directory the agent session is rooted at. `None`
-    /// when the pane was opened without a resolvable lane cwd.
+    /// Lane working directory the agent session is rooted at. `None` when the
+    /// pane was opened without a resolvable lane cwd. Cached here (it never
+    /// changes after construction) so `Pane::cwd()` stays cx-free and can hand
+    /// back a borrow; the view holds its own copy for connect / persistence.
     pub(in crate::workspace) cwd: Option<PathBuf>,
-    /// Connection lifecycle state. Drives the status line + input/cancel
-    /// affordance.
-    pub(in crate::workspace) status: AgentSessionStatus,
-    /// Conversation render model, in arrival order. The event pump
-    /// appends/folds into this; the renderer reads it.
-    //
-    // INVARIANT: `FoldKey::Assistant`/`Thinking` and the per-message markdown
-    // selection ids (`("agent-chat-md-*", ix)`) are keyed by item index; this
-    // is valid only because `items` is append-only (only the tail mutates in
-    // place; no item is removed or reordered). Any future feature that removes
-    // or reorders items MUST clear `FoldState` (its index-keyed overrides would
-    // otherwise mis-target) and would also break markdown selection identity.
-    pub(in crate::workspace) items: Vec<daruda_acp::ChatItem>,
-    /// Live ACP session handle. `None` until `connect_session` resolves;
-    /// stays `None` on a connect failure. Dropping it (pane close) closes
-    /// the command channel and shuts the connection task down.
-    pub(in crate::workspace) handle: Option<daruda_acp::AcpSessionHandle>,
-    /// GPUI-side pump that drains the `AcpEvent` receiver and folds events
-    /// into `items` / `status`. Dropped with the pane, ending the loop.
-    pub(in crate::workspace) _event_pump: Option<Task<()>>,
-    /// The id of the single in-flight permission request awaiting a host
-    /// decision, if any. MVP serialises permissions: a new request
-    /// replaces the previous pending id (the agent only asks one at a
-    /// time within a turn). Cleared once the user responds.
-    pub(in crate::workspace) pending_permission: Option<u64>,
-    /// `true` between submitting a prompt and the matching `TurnEnded`.
-    /// Drives the input affordance (Send ↔ Stop) and disables re-submit
-    /// while the agent is busy.
-    pub(in crate::workspace) turn_in_flight: bool,
-    /// Read-only diff editor entities for tool-call file modifications,
-    /// keyed by `"{tool_call_id}#{diff_index}"` (one editor per file in a
-    /// tool call). Built once per diff by `reconcile_diff_editors` in the
-    /// ops layer — the same diff-through-editor renderer the File viewer
-    /// uses (synthetic buffer + per-line decorations + injected highlight
-    /// spans). Entities are created in the op, never in `render` (which
-    /// only embeds them), mirroring the File viewer's `editor_state`.
-    pub(in crate::workspace) diff_editors:
-        std::collections::HashMap<String, Entity<gpui_component::input::InputState>>,
-    /// Added / removed line counts per tool-call diff, keyed by the same
-    /// `"{tool_call_id}#{diff_index}"` as `diff_editors`. Filled in the same
-    /// pass `reconcile_diff_editors` builds each editor, from the very hunks
-    /// that editor renders, so the fold summary's `+N −M` matches the diff
-    /// exactly. Runtime cache like `diff_editors` — never serialized (the
-    /// conversation itself is not persisted, only `cwd`).
-    pub(in crate::workspace) diff_stats: std::collections::HashMap<
-        String,
-        crate::workspace::main_area::agent_chat_pane::agent_chat_ops::DiffStat,
-    >,
-    /// Rendered mermaid diagrams keyed by fence-source hash, filled async by
-    /// `reconcile_mermaid`. Stored as a GPU-ready [`CachedImage`] (converted
-    /// once at insert) so each render clones the same image — gpui's texture
-    /// cache hits instead of re-uploading the bitmap every frame. Shared
-    /// `Arc<Mutex<…>>` so the `code_block_render` hook reads the live cache (the
-    /// image lands after `TextView`'s parse, which doesn't re-run on unchanged
-    /// text — a snapshot would stay empty). Runtime cache like `diff_editors`;
-    /// never serialized.
-    pub(in crate::workspace) mermaid_images: std::sync::Arc<
-        std::sync::Mutex<
-            std::collections::HashMap<
-                u64,
-                crate::workspace::main_area::file_view_pane::render::CachedImage,
-            >,
-        >,
-    >,
-    /// Source hashes with a rasterization currently spawned, so `reconcile_mermaid`
-    /// doesn't re-spawn the same diagram on every event while it is still being
-    /// rendered on the background executor. A key is added when the task is
-    /// spawned and removed when it resolves (success → moves to `mermaid_images`;
-    /// failure → simply removed, leaving the code fallback). Runtime cache like
-    /// `mermaid_images` — never serialized.
-    pub(in crate::workspace) mermaid_inflight: std::collections::HashSet<u64>,
-    /// Per-conversation fold state — which blocks the user has explicitly
-    /// expanded / collapsed. Transient / session-only: derived defaults
-    /// handle the rest, and like `diff_editors` it is never serialized (the
-    /// conversation itself is not persisted, only `cwd`).
-    pub(in crate::workspace) fold: crate::workspace::main_area::agent_chat_pane::fold::FoldState,
-    /// Scroll handle for the conversation list. Lets the ops layer pin the view
-    /// to the bottom (auto-follow while streaming) and the scroll-to-bottom
-    /// button jump down. Transient / session-only, never serialized.
-    pub(in crate::workspace) scroll_handle: gpui::ScrollHandle,
-    /// Whether the list is pinned to the bottom (follow mode). True while the
-    /// user is at/near the bottom; flipped false when they scroll up (so
-    /// streaming output doesn't yank them) and true again when they scroll back.
-    /// Drives auto-follow and the scroll-to-bottom button's visibility.
-    /// Transient / session-only.
-    pub(in crate::workspace) stick_to_bottom: bool,
-    /// Session-mode state advertised by the agent at `session/new` time and
-    /// updated on `CurrentModeUpdate` notifications. `None` until the session
-    /// connects, or when the agent does not advertise modes. The UI layer reads
-    /// this to render the mode chip (Task 2); the ops layer writes it here.
-    pub(in crate::workspace) modes: Option<daruda_acp::ModeStateView>,
 }
 
 pub(in crate::workspace) struct Pane {
@@ -457,7 +344,10 @@ impl PaneContent {
             PaneContent::Terminal(_) => None,
             PaneContent::File(f) => Some(&f.focus_handle),
             PaneContent::TaskEditPane(te) => Some(&te.focus_handle),
-            PaneContent::AgentChat(ac) => Some(&ac.focus_handle),
+            // The `AgentChatView` entity tracks its own focus handle in its
+            // `Render` impl (like `Terminal` via `TerminalView`), so the
+            // wrapper div must not double-track it.
+            PaneContent::AgentChat(_) => None,
         }
     }
 }
@@ -503,7 +393,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
             PaneContent::TaskEditPane(te) => te.focus_handle.clone(),
-            PaneContent::AgentChat(ac) => ac.focus_handle.clone(),
+            PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle.clone(),
         }
     }
 
@@ -588,8 +478,8 @@ impl Pane {
         }
     }
 
-    /// Immutable accessor for the AgentChat pane state. Used by the
-    /// layout serializer to persist the anchored lane cwd.
+    /// Immutable accessor for the AgentChat pane wrapper. Used by the layout
+    /// serializer to persist the anchored lane cwd (cx-free).
     pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
         match &self.content {
             PaneContent::AgentChat(ac) => Some(ac),
@@ -597,12 +487,13 @@ impl Pane {
         }
     }
 
-    /// Mutable counterpart to `agent_chat_content`. Used by the ACP event
-    /// pump and the prompt / cancel / permission ops to fold events into
-    /// the conversation and flip the connection status.
-    pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
-        match &mut self.content {
-            PaneContent::AgentChat(ac) => Some(ac),
+    /// The AgentChat pane's view entity. Used by the Workspace ops + pump (via
+    /// `Workspace::agent_chat_view`) to drive the session, and by the snapshot
+    /// builder to read `turn_in_flight`. Mutation goes through `view.update`,
+    /// which notifies the view's own cached subtree.
+    pub(in crate::workspace) fn agent_chat_view(&self) -> Option<&Entity<AgentChatView>> {
+        match &self.content {
+            PaneContent::AgentChat(ac) => Some(&ac.view),
             PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
         }
     }

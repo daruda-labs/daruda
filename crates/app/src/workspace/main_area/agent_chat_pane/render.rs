@@ -1,11 +1,13 @@
-//! Pure view of an `&AgentChatContent` — the scrolling conversation and
-//! inline permission cards. The prompt input lives in the shared bottom
-//! dock (`send_terminal_input` routes to the focused AgentChat pane's
-//! session), so this view carries no input field of its own.
+//! Pure view of an `&AgentChatView` — the scrolling conversation and inline
+//! permission cards. Built under the view's own `Context<AgentChatView>` (the
+//! view embeds this via `AnyView::cached(..)`). The prompt input lives in the
+//! shared bottom dock (`send_terminal_input` routes to the focused AgentChat
+//! pane's session), so this view carries no input field of its own.
 //!
-//! MVU view purity: every event closure is a one-line dispatch into a
-//! `Workspace` op (`respond_agent_permission`). No state transition lives
-//! here.
+//! MVU view purity: every event closure is a one-line dispatch into an
+//! `AgentChatView` op (`this.respond_permission`, `this.toggle_fold`,
+//! `this.on_scroll`, …) — each notifies the view itself, so a scroll / fold
+//! dirties only this cached subtree. No state transition lives here.
 //!
 //! Rendering notes:
 //! - Assistant / user / thinking text: every message body renders as
@@ -26,7 +28,8 @@ use daruda_acp::{
     ToolCallItem, ToolStatusView,
 };
 use gpui::{
-    AnyElement, ElementId, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px, relative,
+    AnyElement, ElementId, Entity, Hsla, IntoElement, ListSizingBehavior, SharedString, div, list,
+    prelude::*, px, relative,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -55,20 +58,22 @@ type MermaidImages = std::sync::Arc<
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Disclosure, IconName, Sizable as _, button_bare, disclosure};
-use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
     DiffStat, diff_editor_key, is_active, mermaid_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
-use crate::workspace::main_area::pane::{AgentChatContent, AgentSessionStatus};
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Build the element tree for an Agent chat pane.
+/// Build the element tree for an Agent chat pane. Takes the view by shared
+/// reference (field reads) plus its own `Context` (listener binding); the two
+/// are distinct borrows, so reading `view` while `cx` is mutably held is fine.
 pub(in crate::workspace) fn render(
-    pane_id: PaneId,
-    content: &AgentChatContent,
-    cx: &mut Context<Workspace>,
+    view: &AgentChatView,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement {
+    let pane_id = view.pane_id;
+    let content = view;
     // Clone the palette to an owned value so the render body can use `cx`
     // mutably (binding listeners) while reading theme colours — `current`
     // returns a borrow tied to `cx`.
@@ -92,54 +97,86 @@ pub(in crate::workspace) fn render(
             .child(SharedString::from(s::agent_chat_empty()))
             .into_any_element()
     } else {
-        let mut list = div()
-            .id(("agent-chat-list", pane_id as usize))
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&content.scroll_handle)
-            .on_scroll_wheel(
-                cx.listener(move |ws, _ev, _window, cx| ws.agent_chat_on_scroll(pane_id, cx)),
-            )
-            .flex()
-            .flex_col()
-            .gap(px(theme::AGENT_CHAT_LIST_GAP))
-            .px(px(theme::AGENT_CHAT_PAD_X))
-            .py(px(theme::AGENT_CHAT_PAD_Y));
-        for (ix, item) in content.items.iter().enumerate() {
-            list = list.child(render_item(
-                pane_id,
-                ix,
-                item,
-                &content.diff_editors,
-                &content.diff_stats,
-                &content.mermaid_images,
-                &content.fold,
-                &t,
-                cx,
-            ));
-        }
-        // Wrap the scroll region so the live-tracking scrollbar overlay can
-        // sit over it: the overlay is absolute-fill, so its parent must be
-        // `relative` and sized to the viewport (this `flex_1` body slot).
+        // Virtualized conversation: `list` renders only the visible items (+
+        // overdraw), so draw cost is bounded by the viewport, not the
+        // conversation length. The per-item closure re-fetches the view (`this`)
+        // because `list`'s render fn is `'static` — it can't borrow `view`.
+        // `list` does no inter-item spacing of its own, so each item carries the
+        // padding the old flex column applied: `PAD_Y` top on the first item,
+        // `LIST_GAP` between items (as each item's bottom pad), and `PAD_Y` on
+        // the last item's bottom — reproducing the old `gap + py` exactly.
+        let t_items = t.clone();
+        let last_ix = content.items.len().saturating_sub(1);
+        let list_el = list(
+            content.list_state.clone(),
+            cx.processor(move |this, ix, _window, cx| {
+                let Some(item) = this.items.get(ix) else {
+                    return gpui::Empty.into_any_element();
+                };
+                let row = render_item(
+                    ix,
+                    item,
+                    &this.diff_editors,
+                    &this.diff_stats,
+                    &this.mermaid_images,
+                    &this.fold,
+                    &t_items,
+                    cx,
+                );
+                let bottom = if ix == last_ix {
+                    theme::AGENT_CHAT_PAD_Y
+                } else {
+                    theme::AGENT_CHAT_LIST_GAP
+                };
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px(px(theme::AGENT_CHAT_PAD_X))
+                    .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
+                    .pb(px(bottom))
+                    .child(row)
+                    .into_any_element()
+            }),
+        )
+        .with_sizing_behavior(ListSizingBehavior::Auto)
+        .size_full();
+        // Wrap the list so the live-tracking scrollbar overlay can sit over it:
+        // the overlay is absolute-fill, so its parent must be `relative` and
+        // sized to the viewport (this `flex_1` body slot).
         div()
             .relative()
             .flex_1()
             .min_h(px(0.))
-            .child(list)
-            .children(agent_chat_scrollbar(pane_id, &content.scroll_handle, &t))
+            .child(list_el)
+            .children(crate::ui::scrollbar::vertical_thumb_for_list(
+                ("agent-chat-scrollbar", pane_id as usize),
+                &content.list_state,
+                px(0.),
+                t.scrollbar_thumb,
+                t.file_viewer_scrollbar_thumb_hover,
+            ))
             .into_any_element()
     };
 
     // The scroll-to-bottom button overlays the list when the user has scrolled
-    // up (follow mode released); the pane root's `relative` anchors it.
-    let scroll_btn: Option<AnyElement> = (!content.stick_to_bottom && !content.items.is_empty())
-        .then(|| scroll_to_bottom_button(pane_id, cx).into_any_element());
+    // up off the bottom (tail-follow released); the pane root's `relative`
+    // anchors it. At-bottom is read from the list geometry at render time.
+    let scroll_btn: Option<AnyElement> = (!content.items.is_empty()
+        && !crate::ui::scrollbar::list_at_bottom(
+            &content.list_state,
+            theme::AGENT_CHAT_SCROLL_BOTTOM_SLACK,
+        ))
+    .then(|| scroll_to_bottom_button(pane_id, cx).into_any_element());
 
     div()
         .size_full()
         .relative()
         .flex()
         .flex_col()
+        // The view owns its focus handle and tracks it here (like
+        // `TerminalView`), so the pane walker embeds it as a plain cached
+        // `AnyView` and `wrapper_focus_handle` returns `None` for this kind.
+        .track_focus(&content.focus_handle)
         .bg(t.file_viewer_bg)
         .children(status_banner)
         .children(fold_toolbar)
@@ -148,12 +185,12 @@ pub(in crate::workspace) fn render(
 }
 
 /// Floating "jump to bottom" affordance shown over the list when the user has
-/// scrolled up (follow mode released). One-line dispatch into
-/// `agent_chat_scroll_to_bottom` (render purity); positioned bottom-right via
+/// scrolled up (tail-follow released). One-line dispatch into
+/// `this.scroll_to_bottom(cx)` (render purity); positioned bottom-right via
 /// the pane root's `relative`.
 fn scroll_to_bottom_button(
     pane_id: PaneId,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     div()
         .absolute()
@@ -162,34 +199,8 @@ fn scroll_to_bottom_button(
         .child(
             button_bare(("agent-chat-scroll-bottom", pane_id as usize))
                 .icon(IconName::ArrowDown)
-                .on_click(cx.listener(move |ws, _ev, _window, cx| {
-                    ws.agent_chat_scroll_to_bottom(pane_id, cx)
-                })),
+                .on_click(cx.listener(move |this, _ev, _window, cx| this.scroll_to_bottom(cx))),
         )
-}
-
-/// daruda's thin scrollbar thumb for the conversation list — same chrome as the
-/// files / git / file-viewer panes (`crate::ui::scrollbar::vertical_thumb`), so
-/// it reads as one widget across the app rather than a stray gpui_component bar.
-/// Geometry is read from the `ScrollHandle` at *render* time, so it only tracks
-/// because `agent_chat_on_scroll` notifies on scroll. `None` when the content
-/// fits (no thumb). Positioned `.right(..)`; the caller's parent is `.relative()`.
-fn agent_chat_scrollbar(
-    pane_id: PaneId,
-    handle: &gpui::ScrollHandle,
-    t: &theme::DarudaTheme,
-) -> Option<AnyElement> {
-    let viewport_h = handle.bounds().size.height;
-    let content_h = viewport_h + handle.max_offset().y;
-    crate::ui::scrollbar::vertical_thumb(
-        ("agent-chat-scrollbar", pane_id as usize),
-        viewport_h,
-        content_h,
-        handle.offset().y,
-        px(0.),
-        t.scrollbar_thumb,
-        t.file_viewer_scrollbar_thumb_hover,
-    )
 }
 
 /// A toolbar row with "Expand all" / "Collapse all" buttons on the right and
@@ -203,7 +214,7 @@ fn fold_toolbar(
     pane_id: PaneId,
     modes: Option<&daruda_acp::ModeStateView>,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let expand = crate::ui::button(
         ("agent-chat-expand-all", pane_id as usize),
@@ -211,14 +222,14 @@ fn fold_toolbar(
     )
     .ghost()
     .xsmall()
-    .on_click(cx.listener(move |ws, _ev, _window, cx| ws.set_all_agent_folds(pane_id, true, cx)));
+    .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(true, cx)));
     let collapse = crate::ui::button(
         ("agent-chat-collapse-all", pane_id as usize),
         SharedString::from(s::agent_chat_collapse_all()),
     )
     .ghost()
     .xsmall()
-    .on_click(cx.listener(move |ws, _ev, _window, cx| ws.set_all_agent_folds(pane_id, false, cx)));
+    .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(false, cx)));
 
     // Left slot: the mode chip when modes are advertised and non-empty;
     // an empty div otherwise so `justify_between` still pushes the fold
@@ -295,10 +306,9 @@ fn status_banner(
 /// `fold` / `diff_stats` are read-only here (render purity): the foldable kinds
 /// derive their expanded state purely via `fold.is_expanded(&key, active)` and
 /// read the collapsed diff summary from `diff_stats`. Toggling routes through
-/// `Workspace::toggle_agent_fold`, never mutating `content` in render.
+/// `AgentChatView::toggle_fold`, never mutating the view in render.
 #[allow(clippy::too_many_arguments)]
 fn render_item(
-    pane_id: PaneId,
     ix: usize,
     item: &ChatItem,
     diff_editors: &DiffEditors,
@@ -306,39 +316,26 @@ fn render_item(
     mermaid_images: &MermaidImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, t).into_any_element(),
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            assistant_block(pane_id, ix, key, expanded, text, mermaid_images, t, cx)
-                .into_any_element()
+            assistant_block(ix, key, expanded, text, mermaid_images, t, cx).into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            thinking_block(pane_id, ix, key, expanded, text, mermaid_images, t, cx)
-                .into_any_element()
+            thinking_block(ix, key, expanded, text, mermaid_images, t, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => {
             let key = FoldKey::Tool(tc.id.clone());
             let expanded = fold.is_expanded(&key, is_active(item));
-            tool_card(
-                pane_id,
-                key,
-                expanded,
-                tc,
-                diff_editors,
-                diff_stats,
-                fold,
-                t,
-                cx,
-            )
-            .into_any_element()
+            tool_card(key, expanded, tc, diff_editors, diff_stats, fold, t, cx).into_any_element()
         }
-        ChatItem::Permission(card) => permission_card(pane_id, ix, card, t, cx).into_any_element(),
+        ChatItem::Permission(card) => permission_card(ix, card, t, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t).into_any_element(),
     }
 }
@@ -362,7 +359,6 @@ fn foldable_block<
     F: FnOnce(gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div>,
 >(
     id: Id,
-    pane_id: PaneId,
     key: FoldKey,
     expanded: bool,
     header: AnyElement,
@@ -370,7 +366,7 @@ fn foldable_block<
     body: AnyElement,
     header_chrome: F,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<Id, F> {
     // One base id yields both the row's click target and the chevron glyph's
     // identity, so the two stay distinct yet stable across renders.
@@ -386,9 +382,7 @@ fn foldable_block<
         .items_center()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .cursor_pointer()
-        .on_click(
-            cx.listener(move |ws, _ev, _window, cx| ws.toggle_agent_fold(pane_id, key.clone(), cx)),
-        )
+        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
         .child(chevron)
         .child(header);
     // The collapsed-only inline summary sits after the header content, on the
@@ -519,14 +513,13 @@ fn user_bubble(
 /// `text`, dimmed and single-line ellipsized.
 #[allow(clippy::too_many_arguments)]
 fn assistant_block(
-    pane_id: PaneId,
     ix: usize,
     key: FoldKey,
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
         .color(t.text_body)
@@ -543,7 +536,6 @@ fn assistant_block(
     let summary = collapsed_text_summary(text, false, t);
     foldable_block(
         ("agent-chat-assistant", ix),
-        pane_id,
         key,
         expanded,
         header,
@@ -567,14 +559,13 @@ fn assistant_block(
 // the assistant body.
 #[allow(clippy::too_many_arguments)]
 fn thinking_block(
-    pane_id: PaneId,
     ix: usize,
     key: FoldKey,
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
         .color(t.text_subtle)
@@ -591,7 +582,6 @@ fn thinking_block(
     let summary = collapsed_text_summary(text, true, t);
     foldable_block(
         ("agent-chat-thinking", ix),
-        pane_id,
         key,
         expanded,
         header,
@@ -624,7 +614,6 @@ fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<
 /// independently foldable.
 #[allow(clippy::too_many_arguments)]
 fn tool_card(
-    pane_id: PaneId,
     key: FoldKey,
     expanded: bool,
     tc: &ToolCallItem,
@@ -632,7 +621,7 @@ fn tool_card(
     diff_stats: &DiffStats,
     fold: &FoldState,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
 
@@ -668,7 +657,7 @@ fn tool_card(
     for (di, diff) in tc.diffs.iter().enumerate() {
         let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
         body = body.child(diff_block(
-            pane_id, &tc.id, di, diff, editor, diff_stats, fold, t, cx,
+            &tc.id, di, diff, editor, diff_stats, fold, t, cx,
         ));
     }
     if !tc.output.is_empty() {
@@ -702,7 +691,6 @@ fn tool_card(
         .border_color(t.border)
         .child(foldable_block(
             SharedString::from(format!("agent-chat-tool-{}", tc.id)),
-            pane_id,
             key,
             expanded,
             header,
@@ -726,7 +714,6 @@ fn tool_card(
 /// gone at build time).
 #[allow(clippy::too_many_arguments)]
 fn diff_block(
-    pane_id: PaneId,
     tool_id: &str,
     di: usize,
     diff: &DiffView,
@@ -734,7 +721,7 @@ fn diff_block(
     diff_stats: &DiffStats,
     fold: &FoldState,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let diff_key = diff_editor_key(tool_id, di);
     let key = FoldKey::Diff(diff_key.clone());
@@ -768,7 +755,6 @@ fn diff_block(
         .overflow_hidden()
         .child(foldable_block(
             SharedString::from(format!("agent-chat-diff-{diff_key}")),
-            pane_id,
             key,
             expanded,
             header,
@@ -791,7 +777,7 @@ fn diff_body(
     diff: &DiffView,
     editor: Option<&Entity<crate::ui::InputState>>,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let mut block = div().flex().flex_col().w_full();
 
@@ -898,11 +884,10 @@ fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedS
 /// Inline permission card — title + one button per choice. Once resolved,
 /// the buttons are gone and the chosen option is shown instead.
 fn permission_card(
-    pane_id: PaneId,
     ix: usize,
     card: &PermissionItem,
     t: &theme::DarudaTheme,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let title: SharedString = card
         .tool_title
@@ -966,7 +951,7 @@ fn permission_card(
         None => {
             let mut row = div().flex().flex_row().flex_wrap().gap(px(theme::GAP_SM));
             for (choice_ix, choice) in card.options.iter().enumerate() {
-                row = row.child(permission_button(pane_id, ix, choice_ix, choice, cx));
+                row = row.child(permission_button(ix, choice_ix, choice, cx));
             }
             root = root.child(row);
         }
@@ -978,11 +963,10 @@ fn permission_card(
 /// One permission choice button. Allow kinds use the accent (primary)
 /// treatment; reject kinds use the danger treatment.
 fn permission_button(
-    pane_id: PaneId,
     ix: usize,
     choice_ix: usize,
     choice: &PermissionChoice,
-    cx: &mut Context<Workspace>,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let id = ("agent-chat-perm", ix * 16 + choice_ix);
     let label: SharedString = choice.name.clone().into();
@@ -997,7 +981,7 @@ fn permission_button(
             crate::ui::button_danger(id, label)
         }
     };
-    button.on_click(cx.listener(move |ws, _, _window, cx| {
-        ws.respond_agent_permission(pane_id, option_id.clone(), kind, cx);
+    button.on_click(cx.listener(move |this, _, _window, cx| {
+        this.respond_permission(option_id.clone(), kind, cx);
     }))
 }
