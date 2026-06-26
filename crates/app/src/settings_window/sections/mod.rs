@@ -287,7 +287,24 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_agent(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        use daruda_config::DefaultPermissionMode as M;
         let description_color = theme::current(cx).text_muted;
+        let use_modifier_to_send = self.agent_use_modifier_to_send;
+        // The dropdown shows the bare mode id; this blurb explains the
+        // currently selected mode and updates on each pick (the window
+        // re-renders via the select's Confirm subscription).
+        let selected_mode = self
+            .default_permission_mode_select
+            .read(cx)
+            .selected_value()
+            .and_then(|v| M::from_mode_id(v.as_ref()))
+            .unwrap_or_default();
+        let mode_description = match selected_mode {
+            M::Default => s::settings_agent_mode_default(),
+            M::AcceptEdits => s::settings_agent_mode_accept_edits(),
+            M::Plan => s::settings_agent_mode_plan(),
+            M::BypassPermissions => s::settings_agent_mode_bypass(),
+        };
         div()
             .flex()
             .flex_col()
@@ -301,7 +318,25 @@ impl SettingsWindow {
                 div()
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
-                    .child(s::settings_agent_mode_description()),
+                    .child(mode_description),
+            )
+            .child(checkbox_row(
+                checkbox(
+                    "settings-agent-use-modifier-to-send",
+                    s::settings_label_agent_use_modifier_to_send(),
+                    (),
+                )
+                .checked(use_modifier_to_send)
+                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                    this.agent_use_modifier_to_send = *checked;
+                    cx.notify();
+                })),
+            ))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings_agent_use_modifier_to_send_description()),
             )
             .into_any_element()
     }

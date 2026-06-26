@@ -128,6 +128,11 @@ fn spawn_status_pulse(cx: &mut App) {
                     ws.notify_right_dock(cx);
                     ws.notify_left_dock(cx);
                 }
+                // AgentChat panes are separately-cached main-area entities, so
+                // their in-flight Working-footer badge needs its own dirty.
+                if ws.has_in_flight_agent_chat(cx) {
+                    ws.notify_in_flight_agent_chats(cx);
+                }
             });
         },
         cx,

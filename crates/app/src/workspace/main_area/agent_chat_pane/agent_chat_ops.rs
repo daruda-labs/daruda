@@ -348,7 +348,9 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     // projection the renderer uses, so expand/collapse-all covers exactly the
     // headers on screen. The fold state doesn't affect which headers exist, so
     // project against the default.
-    let rows = project(items, &FoldState::default());
+    // Fold coverage is independent of live progress, so project with no
+    // in-flight turn (the working indicator carries no fold key).
+    let rows = project(items, &FoldState::default(), false);
     // Assistant prose rendered under a response bar is inline (no per-block
     // header/fold — the response bar owns the speaker label), so its
     // `FoldKey::Assistant` would be a dead toggle. Such rows are `AgentItem`s at
@@ -364,7 +366,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         match &row.kind {
             RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
             RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
-            RowKind::User(_) | RowKind::AgentItem(_) => {}
+            RowKind::User(_) | RowKind::AgentItem(_) | RowKind::WorkingIndicator => {}
         }
     }
     // Per-block fold levels (assistant / thinking by index, tool + its diffs by

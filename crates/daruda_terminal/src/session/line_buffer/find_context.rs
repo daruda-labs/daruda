@@ -176,8 +176,9 @@ impl FindContext {
             // ring-local line `cursor_line + i` begins (after the partial
             // prefix skip on i == 0).
             let mut stream = String::new();
-            let mut line_starts: Vec<usize> = Vec::with_capacity(buf.len() - cursor_line);
-            for local in 0..(buf.len() - cursor_line) {
+            let remaining = buf.len().saturating_sub(cursor_line);
+            let mut line_starts: Vec<usize> = Vec::with_capacity(remaining);
+            for local in 0..remaining {
                 line_starts.push(stream.len());
                 let line = buf.get(cursor_line + local)?;
                 let text = if local == 0 {

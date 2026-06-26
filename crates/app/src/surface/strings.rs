@@ -980,6 +980,26 @@ pub fn agent_chat_tool_status_failed() -> String {
     rust_i18n::t!("agent_chat.tool_status_failed").into_owned()
 }
 
+/// Pinned working-footer label while the agent is generating a response.
+pub fn agent_chat_working() -> String {
+    rust_i18n::t!("agent_chat.working").into_owned()
+}
+
+/// Pinned working-footer label while a named tool call is in progress.
+pub fn agent_chat_working_tool(name: &str) -> String {
+    rust_i18n::t!("agent_chat.working_tool", name = name).into_owned()
+}
+
+/// Pinned working-footer label while the turn is blocked on a permission prompt.
+pub fn agent_chat_awaiting_permission() -> String {
+    rust_i18n::t!("agent_chat.awaiting_permission").into_owned()
+}
+
+/// Working-footer button that cancels the in-flight turn.
+pub fn agent_chat_stop() -> String {
+    rust_i18n::t!("agent_chat.stop").into_owned()
+}
+
 /// Heading for an inline permission card.
 pub fn agent_chat_permission_title() -> String {
     rust_i18n::t!("agent_chat.permission_title").into_owned()
@@ -1916,8 +1936,11 @@ pub fn settings_agent_mode_plan() -> String {
 pub fn settings_agent_mode_bypass() -> String {
     rust_i18n::t!("settings.agent_mode_bypass").into_owned()
 }
-pub fn settings_agent_mode_description() -> String {
-    rust_i18n::t!("settings.agent_mode_description").into_owned()
+pub fn settings_label_agent_use_modifier_to_send() -> String {
+    rust_i18n::t!("settings.label_agent_use_modifier_to_send").into_owned()
+}
+pub fn settings_agent_use_modifier_to_send_description() -> String {
+    rust_i18n::t!("settings.agent_use_modifier_to_send_description").into_owned()
 }
 
 // Plugin section — install / uninstall UI labels

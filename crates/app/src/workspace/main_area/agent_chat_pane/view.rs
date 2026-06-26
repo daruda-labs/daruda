@@ -347,7 +347,10 @@ impl AgentChatView {
     ///   drifts (a full `remeasure()` would re-anchor proportionally).
     fn rebuild_rows(&mut self) {
         let old = std::mem::take(&mut self.rows);
-        self.rows = project(&self.items, &self.fold);
+        // The inline working indicator means "answering" — suppress it while
+        // blocked on a permission prompt (the card + footer already say so).
+        let awaiting_response = self.turn_in_flight && self.pending_permission.is_none();
+        self.rows = project(&self.items, &self.fold, awaiting_response);
 
         if let Some(at) = old
             .iter()

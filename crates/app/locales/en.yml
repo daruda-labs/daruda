@@ -221,6 +221,10 @@ agent_chat:
   permission_resolved_prefix: "Selected:"
   permission_cancelled: "Cancelled."
   tool_group_count: "%{count} tool calls"
+  working: "Generating…"
+  working_tool: "Running %{name}…"
+  awaiting_permission: "Waiting for your approval…"
+  stop: "Stop"
 
 # Generic UI
 ui:
@@ -470,11 +474,12 @@ settings:
   placeholder_keymap: "Keymap GUI editor coming soon. For now, edit the [keybindings] section of your config file directly."
   placeholder_notifications: "Notifications UI coming soon. For now, edit the [notifications] section of your config file directly."
   label_agent_mode: "Default permission mode"
-  agent_mode_default: "default — reads only; edits and commands prompt each time"
-  agent_mode_accept_edits: "acceptEdits — reads, file edits, and common filesystem commands run without asking"
-  agent_mode_plan: "plan — reads only; analyzes and proposes changes without making them"
-  agent_mode_bypass: "bypassPermissions — every tool call runs without asking; for isolated containers/VMs"
-  agent_mode_description: "Controls what the agent is allowed to do without prompting. “bypassPermissions” disables all safety checks and is intended only for isolated containers or VMs."
+  agent_mode_default: "Reads only; edits and commands prompt each time."
+  agent_mode_accept_edits: "Reads, file edits, and common filesystem commands in the working directory run without asking; other commands prompt."
+  agent_mode_plan: "Reads only; analyzes and proposes changes without making them."
+  agent_mode_bypass: "Every tool call runs without asking — all safety checks disabled. Intended only for isolated containers or VMs."
+  label_agent_use_modifier_to_send: "Use modifier key to send"
+  agent_use_modifier_to_send_description: "When on, Enter inserts a newline and Cmd+Enter sends the message. When off (default), Enter sends and Shift+Enter inserts a newline. Applies to the input while an agent chat pane is focused."
   plugin_installed_header: "Installed"
   plugin_available_header: "Available from marketplace"
   plugin_none_installed: "No plugins installed. Browse the list below to add one."

@@ -56,6 +56,13 @@ impl DefaultPermissionMode {
 pub struct AgentConfig {
     /// Permission mode applied when an agent chat session connects.
     pub default_permission_mode: DefaultPermissionMode,
+    /// How the agent chat input submits a message. When `false` (the
+    /// default), plain Enter sends and Shift+Enter inserts a newline —
+    /// matching Zed's agent panel default. When `true`, Enter inserts a
+    /// newline and Cmd+Enter (Ctrl+Enter on Linux/Windows) sends. Only
+    /// affects the bottom input while an agent chat pane is focused; the
+    /// terminal input always uses Cmd+Enter to send.
+    pub use_modifier_to_send: bool,
 }
 
 #[cfg(test)]
@@ -122,6 +129,7 @@ mod tests {
         for (variant, expected_str) in cases {
             let cfg = AgentConfig {
                 default_permission_mode: variant,
+                ..AgentConfig::default()
             };
             let toml_str = toml::to_string(&cfg).expect("serialize");
             assert!(
@@ -140,5 +148,24 @@ mod tests {
             cfg.default_permission_mode,
             DefaultPermissionMode::BypassPermissions
         );
+    }
+
+    #[test]
+    fn use_modifier_to_send_defaults_false_and_round_trips() {
+        // Default matches Zed's agent panel: Enter sends, Shift+Enter newline.
+        assert!(!AgentConfig::default().use_modifier_to_send);
+
+        let cfg = AgentConfig {
+            use_modifier_to_send: true,
+            ..AgentConfig::default()
+        };
+        let toml_str = toml::to_string(&cfg).expect("serialize");
+        let back: AgentConfig = toml::from_str(&toml_str).expect("deserialize");
+        assert!(back.use_modifier_to_send);
+
+        // A config that omits the key keeps the default.
+        let omitted: AgentConfig =
+            toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
+        assert!(!omitted.use_modifier_to_send);
     }
 }

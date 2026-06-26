@@ -41,6 +41,10 @@ use crate::{highlighter::DiagnosticSet, input::text_wrapper::LineItem};
 pub struct Enter {
     /// Is confirm with secondary.
     pub secondary: bool,
+    /// Force a newline in multi-line mode regardless of the
+    /// "submit on enter" predicate (bound to Shift+Enter).
+    #[serde(default)]
+    pub newline: bool,
 }
 
 actions!(
@@ -116,8 +120,30 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("alt-delete", DeleteToNextWordEnd, Some(CONTEXT)),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-delete", DeleteToNextWordEnd, Some(CONTEXT)),
-        KeyBinding::new("enter", Enter { secondary: false }, Some(CONTEXT)),
-        KeyBinding::new("secondary-enter", Enter { secondary: true }, Some(CONTEXT)),
+        KeyBinding::new(
+            "enter",
+            Enter {
+                secondary: false,
+                newline: false,
+            },
+            Some(CONTEXT),
+        ),
+        KeyBinding::new(
+            "shift-enter",
+            Enter {
+                secondary: false,
+                newline: true,
+            },
+            Some(CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-enter",
+            Enter {
+                secondary: true,
+                newline: false,
+            },
+            Some(CONTEXT),
+        ),
         KeyBinding::new("escape", Escape, Some(CONTEXT)),
         KeyBinding::new("up", MoveUp, Some(CONTEXT)),
         KeyBinding::new("down", MoveDown, Some(CONTEXT)),
@@ -305,6 +331,12 @@ pub struct InputState {
     pub(super) soft_wrap: bool,
     pub(super) pattern: Option<regex::Regex>,
     pub(super) validate: Option<Box<dyn Fn(&str, &mut Context<Self>) -> bool + 'static>>,
+    /// Optional predicate consulted on a plain Enter in multi-line mode. When
+    /// it returns `true`, Enter submits (emits [`InputEvent::PressEnter`])
+    /// instead of inserting a newline; Shift+Enter still inserts a newline.
+    /// `None` keeps the default behaviour (Enter inserts a newline, the host
+    /// submits on Cmd+Enter). Used to implement chat-style "Enter to send".
+    pub(super) submit_on_enter: Option<Box<dyn Fn(&App) -> bool + 'static>>,
     pub(crate) scroll_handle: ScrollHandle,
     /// The deferred scroll offset to apply on next layout.
     pub(crate) deferred_scroll_offset: Option<Point<Pixels>>,
@@ -401,6 +433,7 @@ impl InputState {
             loading: false,
             pattern: None,
             validate: None,
+            submit_on_enter: None,
             mode: InputMode::default(),
             last_layout: None,
             last_bounds: None,
@@ -433,6 +466,17 @@ impl InputState {
     /// Default rows is 2.
     pub fn multi_line(mut self, multi_line: bool) -> Self {
         self.mode = self.mode.multi_line(multi_line);
+        self
+    }
+
+    /// Install a predicate that decides, at the moment Enter is pressed, whether
+    /// a plain Enter in multi-line mode should submit (emit
+    /// [`InputEvent::PressEnter`]) instead of inserting a newline. Shift+Enter
+    /// always inserts a newline. The predicate is evaluated live so it can
+    /// reflect external state (e.g. which pane is focused); see
+    /// [`Self::submit_on_enter`] field docs.
+    pub fn submit_on_enter(mut self, predicate: impl Fn(&App) -> bool + 'static) -> Self {
+        self.submit_on_enter = Some(Box::new(predicate));
         self
     }
 
@@ -1206,6 +1250,21 @@ impl InputState {
         }
 
         if self.mode.is_multi_line() {
+            // Cmd+Enter (`secondary`) always submits. A plain Enter submits
+            // only when the host installed a `submit_on_enter` predicate that
+            // is currently true. Shift+Enter (`newline`) always inserts a
+            // newline. A submit emits `PressEnter` without inserting a newline.
+            let submit = action.secondary
+                || (!action.newline
+                    && self
+                        .submit_on_enter
+                        .as_ref()
+                        .is_some_and(|predicate| predicate(cx)));
+            if submit {
+                cx.emit(InputEvent::PressEnter { secondary: true });
+                return;
+            }
+
             // Get current line indent
             let indent = if self.mode.is_code_editor() {
                 self.indent_of_next_line()

@@ -49,6 +49,13 @@ pub(in crate::workspace) enum RowKind {
         count: usize,
         collapsed: bool,
     },
+    /// Synthetic "agent is working" indicator, appended at the tail of the last
+    /// turn's run while a turn is in flight but no block is actively streaming —
+    /// i.e. the gap after a tool group settles and before the next assistant
+    /// text arrives. Carries no payload; at most one exists (always the last
+    /// row). Gives the conversation flow a live in-place progress signal that
+    /// the pinned working footer (which sits outside the timeline) can't.
+    WorkingIndicator,
 }
 
 /// One row in the projected, renderable sequence.
@@ -78,6 +85,9 @@ impl RenderRow {
             (RowKind::ToolGroupHeader { gid: a, .. }, RowKind::ToolGroupHeader { gid: b, .. }) => {
                 a == b
             }
+            // At most one indicator exists (always the tail), so any two occupy
+            // the same logical slot.
+            (RowKind::WorkingIndicator, RowKind::WorkingIndicator) => true,
             _ => false,
         }
     }
@@ -101,7 +111,19 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 /// Defaults via `ExpandedWhileActive`: the last turn / a streaming response is
 /// expanded, settled past responses collapse; a settled tool group collapses.
 /// Pure and total.
-pub(in crate::workspace) fn project(items: &[ChatItem], fold: &FoldState) -> Vec<RenderRow> {
+///
+/// `awaiting_response` (the view's "a turn is in flight and not blocked on user
+/// input" flag — `turn_in_flight && pending_permission.is_none()`) drives a
+/// trailing [`RowKind::WorkingIndicator`]: emitted on the last turn only when it
+/// is set *and* the run has no actively-streaming block — the gap after a tool
+/// group settles and before the next assistant text streams. While a block is
+/// streaming the growing text already signals progress, so no indicator is added
+/// then (and the pinned footer covers tool execution / permission waits).
+pub(in crate::workspace) fn project(
+    items: &[ChatItem],
+    fold: &FoldState,
+    awaiting_response: bool,
+) -> Vec<RenderRow> {
     let mut rows = Vec::with_capacity(items.len() + 4);
     let mut i = 0;
     while i < items.len() {
@@ -135,10 +157,12 @@ pub(in crate::workspace) fn project(items: &[ChatItem], fold: &FoldState) -> Vec
             .filter(|&k| matches!(items[k], ChatItem::ToolCall(_)))
             .count();
         let non_trivial = anchor.is_some() && (tools >= 1 || run.len() >= RESPONSE_MIN_BLOCKS);
+        let run_active = run.clone().any(|k| is_active(&items[k]));
 
-        if let (true, Some(a)) = (non_trivial, anchor) {
-            let streaming = run.clone().any(|k| is_active(&items[k]));
-            let collapsed = !fold.is_expanded(&FoldKey::Response(a), is_last_turn || streaming);
+        // Indent + collapsed state of this turn's run, reused to place the
+        // trailing working indicator inside the same fold scope.
+        let (run_indent, run_collapsed) = if let (true, Some(a)) = (non_trivial, anchor) {
+            let collapsed = !fold.is_expanded(&FoldKey::Response(a), is_last_turn || run_active);
             rows.push(RenderRow {
                 kind: RowKind::ResponseHeader {
                     anchor: a,
@@ -147,9 +171,23 @@ pub(in crate::workspace) fn project(items: &[ChatItem], fold: &FoldState) -> Vec
                 hidden: false,
                 indent: 0,
             });
-            project_run(items, fold, run, 1, collapsed, &mut rows);
+            project_run(items, fold, run.clone(), 1, collapsed, &mut rows);
+            (1u8, collapsed)
         } else {
-            project_run(items, fold, run, 0, false, &mut rows);
+            project_run(items, fold, run.clone(), 0, false, &mut rows);
+            (0u8, false)
+        };
+
+        // The agent is working but nothing is streaming yet (tool group settled,
+        // awaiting the next text) → an in-place progress indicator at the run's
+        // tail. Last turn only, and hidden with the run when the response is
+        // collapsed so a manually-folded turn stays quiet (the footer covers it).
+        if awaiting_response && is_last_turn && !run_active {
+            rows.push(RenderRow {
+                kind: RowKind::WorkingIndicator,
+                hidden: run_collapsed,
+                indent: run_indent,
+            });
         }
     }
     rows
@@ -253,6 +291,7 @@ mod tests {
                     RowKind::ResponseHeader { .. } => "response",
                     RowKind::AgentItem(_) => "item",
                     RowKind::ToolGroupHeader { .. } => "group",
+                    RowKind::WorkingIndicator => "working",
                 };
                 (k, r.hidden)
             })
@@ -270,7 +309,7 @@ mod tests {
             tool("c", Completed),
             asst("done"),
         ];
-        let rows = project(&items, &FoldState::default());
+        let rows = project(&items, &FoldState::default(), false);
         // user anchor, response header (last turn → expanded), then the run at
         // indent 1: assistant, tool-group header, 3 settled tool members
         // (group collapsed → hidden), trailing assistant.
@@ -296,7 +335,7 @@ mod tests {
     fn trivial_response_has_no_bar() {
         // One short assistant reply, no tools → inline (no response header).
         let items = [ChatItem::UserText("hi".into()), asst("hello")];
-        let rows = project(&items, &FoldState::default());
+        let rows = project(&items, &FoldState::default(), false);
         assert_eq!(kinds(&rows), vec![("user", false), ("item", false)]);
     }
 
@@ -313,7 +352,7 @@ mod tests {
             tool("t3", Completed),
             tool("t4", Completed),
         ];
-        let rows = project(&items, &FoldState::default());
+        let rows = project(&items, &FoldState::default(), false);
         // Past response (first turn, settled, not last) collapses → its run is
         // hidden; current response (last turn) expands → its run visible.
         assert_eq!(
@@ -336,9 +375,104 @@ mod tests {
     }
 
     #[test]
+    fn working_indicator_fills_gap_after_tool_group_settles() {
+        use ToolStatusView::Completed;
+        // A turn whose tools have all settled but the next assistant text has
+        // not arrived yet, with a turn still in flight → trailing indicator.
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("planning"),
+            tool("a", Completed),
+            tool("b", Completed),
+        ];
+        let rows = project(&items, &FoldState::default(), true);
+        assert_eq!(
+            kinds(&rows),
+            vec![
+                ("user", false),
+                ("response", false),
+                ("item", false),  // assistant prose
+                ("group", false), // tool group header
+                ("item", true),   // settled members collapsed
+                ("item", true),
+                ("working", false), // gap indicator at the run tail
+            ]
+        );
+        // The indicator nests inside the response (indent 1), not at top level.
+        assert_eq!(rows.last().unwrap().indent, 1);
+    }
+
+    #[test]
+    fn working_indicator_absent_while_streaming() {
+        use ToolStatusView::Completed;
+        // The tail block is still streaming (active) → the growing text already
+        // signals progress, so no indicator even though a turn is in flight.
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("a", Completed),
+            ChatItem::AssistantText {
+                text: "answer".into(),
+                streaming: true,
+            },
+        ];
+        let rows = project(&items, &FoldState::default(), true);
+        assert!(
+            !kinds(&rows).iter().any(|(k, _)| *k == "working"),
+            "a streaming run shows no separate working indicator"
+        );
+    }
+
+    #[test]
+    fn working_indicator_only_when_turn_in_flight() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("planning"),
+            tool("a", Completed),
+            tool("b", Completed),
+        ];
+        // Settled turn, nothing in flight → no indicator.
+        let rows = project(&items, &FoldState::default(), false);
+        assert!(!kinds(&rows).iter().any(|(k, _)| *k == "working"));
+    }
+
+    #[test]
+    fn working_indicator_on_first_token_wait() {
+        // Prompt sent, no agent output yet, turn in flight → indicator under the
+        // user message at top level (no response bar for an empty run).
+        let items = [ChatItem::UserText("q".into())];
+        let rows = project(&items, &FoldState::default(), true);
+        assert_eq!(kinds(&rows), vec![("user", false), ("working", false)]);
+        assert_eq!(rows.last().unwrap().indent, 0);
+    }
+
+    #[test]
+    fn working_indicator_hidden_when_response_collapsed() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            asst("planning"),
+            tool("a", Completed),
+            tool("b", Completed),
+        ];
+        let mut fold = FoldState::default();
+        // User manually collapses the (last, in-flight) response.
+        fold.toggle(FoldKey::Response(0), true);
+        let rows = project(&items, &fold, true);
+        let working = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::WorkingIndicator))
+            .expect("indicator still projected");
+        assert!(
+            working.hidden,
+            "a manually-collapsed response hides its working indicator too"
+        );
+    }
+
+    #[test]
     fn lone_tool_call_is_not_grouped() {
         let items = [asst("x"), tool("a", ToolStatusView::Completed), asst("y")];
-        let rows = project(&items, &FoldState::default());
+        let rows = project(&items, &FoldState::default(), false);
         assert_eq!(
             kinds(&rows),
             vec![("item", false), ("item", false), ("item", false)],
@@ -350,7 +484,7 @@ mod tests {
     fn in_progress_group_defaults_expanded() {
         use ToolStatusView::{Completed, InProgress};
         let items = [tool("a", Completed), tool("b", InProgress)];
-        let rows = project(&items, &FoldState::default());
+        let rows = project(&items, &FoldState::default(), false);
         // group active (one tool in progress) → members visible.
         assert_eq!(
             kinds(&rows),
@@ -365,7 +499,7 @@ mod tests {
         let mut fold = FoldState::default();
         // Force-expand the (otherwise collapsed) settled group.
         fold.toggle(FoldKey::ToolGroup("a".into()), false);
-        let rows = project(&items, &fold);
+        let rows = project(&items, &fold, false);
         assert_eq!(
             kinds(&rows),
             vec![("group", false), ("item", false), ("item", false)],

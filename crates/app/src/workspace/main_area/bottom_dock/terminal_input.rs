@@ -3,11 +3,14 @@
 //! Renders the `crate::ui::input_with_action` wrapper — a chrome cell
 //! (`MODAL_INPUT_BG` + border + radius) with the Submit button in its
 //! own column beside the text, so the text uses the cell's full height
-//! at every dock size. Cmd+Enter or the button click forwards the
-//! current text to the focused terminal pane followed by `\r`, then
-//! clears the field. The keyboard path lives in `workspace::mod.rs`
-//! via `subscribe_in` on the `InputState`; this file owns the visual
-//! layout + the button-click handler.
+//! at every dock size. Enter or the button click forwards the current
+//! text to the focused terminal pane followed by `\r`, then clears the
+//! field. The send key depends on context: a focused agent chat pane
+//! sends on Enter (Shift+Enter for a newline) unless the
+//! `agent.use_modifier_to_send` config is on, in which case — and for
+//! terminal panes — Cmd+Enter sends. The keyboard path lives in
+//! `workspace::mod.rs` via `subscribe_in` on the `InputState`; this file
+//! owns the visual layout + the button-click handler.
 //!
 //! Layout sketch (every dock height):
 //!

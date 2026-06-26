@@ -87,6 +87,7 @@ pub struct SettingsWindow {
     cursor_blinking: bool,
     // Agent
     default_permission_mode_select: Entity<SelectState>,
+    agent_use_modifier_to_send: bool,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -309,17 +310,12 @@ impl SettingsWindow {
             config.agent.default_permission_mode.mode_id().into();
         let default_permission_mode_select = cx.new(|cx| {
             use daruda_config::DefaultPermissionMode as M;
+            // The dropdown shows just the bare mode id; the human-readable
+            // explanation for the selected mode is rendered below the field
+            // (see `render_agent`).
             let opts = M::ALL
                 .into_iter()
-                .map(|m| {
-                    let label = match m {
-                        M::Default => s::settings_agent_mode_default(),
-                        M::AcceptEdits => s::settings_agent_mode_accept_edits(),
-                        M::Plan => s::settings_agent_mode_plan(),
-                        M::BypassPermissions => s::settings_agent_mode_bypass(),
-                    };
-                    SelectOption::new(m.mode_id(), label)
-                })
+                .map(|m| SelectOption::new(m.mode_id(), m.mode_id()))
                 .collect();
             select::state_with_options(opts, Some(&permission_mode_str), window, cx)
         });
@@ -421,6 +417,18 @@ impl SettingsWindow {
                     }
                 },
             ),
+            // The permission-mode dropdown is persisted on Save (not live), but
+            // the explanatory text below it tracks the selection — repaint the
+            // window on each pick so `render_agent` shows the matching blurb.
+            cx.subscribe_in(
+                &default_permission_mode_select,
+                window,
+                |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        cx.notify();
+                    }
+                },
+            ),
         ];
 
         // Map each section to the focus target it should land on when
@@ -450,6 +458,7 @@ impl SettingsWindow {
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
             default_permission_mode_select,
+            agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -635,6 +644,7 @@ impl SettingsWindow {
             .selected_value()
             .and_then(|s| daruda_config::DefaultPermissionMode::from_mode_id(s.as_ref()))
             .unwrap_or_default();
+        config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
 
         config.render.max_fps = self
             .max_fps_select

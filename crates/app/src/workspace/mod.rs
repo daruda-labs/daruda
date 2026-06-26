@@ -693,8 +693,21 @@ impl Workspace {
             },
         );
 
+        let ws_for_input = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
-            let mut state = crate::ui::InputState::new(window, cx_state).multi_line(true);
+            let mut state = crate::ui::InputState::new(window, cx_state)
+                .multi_line(true)
+                // While an agent chat pane is focused and the user hasn't opted
+                // into modifier-to-send, plain Enter submits and Shift+Enter
+                // inserts a newline (Zed's agent-panel default). Evaluated live
+                // on each Enter so it tracks focus + config without any sync.
+                .submit_on_enter(move |app| {
+                    ws_for_input.upgrade().is_some_and(|ws| {
+                        let ws = ws.read(app);
+                        ws.is_agent_chat_pane(ws.main_area.focused_pane_id)
+                            && !ws.agent.use_modifier_to_send
+                    })
+                });
             state.set_placeholder(
                 crate::surface::strings::bottom_input_placeholder(),
                 window,
@@ -702,10 +715,11 @@ impl Workspace {
             );
             state
         });
-        // Cmd+Enter (`secondary: true`) submits; plain Enter inserts
-        // a newline (multi-line mode). The bottom-dock body itself
-        // wires the Submit-button click → `send_terminal_input` —
-        // this subscription only covers the keyboard path.
+        // The bottom-dock body wires the Submit-button click →
+        // `send_terminal_input`; this subscription covers the keyboard path.
+        // `PressEnter { secondary: true }` is emitted on every *submit* —
+        // Cmd+Enter always, plus a plain Enter when the `submit_on_enter`
+        // predicate above is active (agent pane focused, modifier-to-send off).
         let terminal_input_sub = cx.subscribe_in(
             &terminal_input,
             window,
@@ -1327,6 +1341,35 @@ impl Workspace {
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
         let dock_id = self.left_dock.entity_id();
         gpui::App::notify(cx, dock_id);
+    }
+
+    /// `true` when any AgentChat pane has a turn in flight. Gates the
+    /// status-pulse pump so its Working footer's animated badge keeps ticking
+    /// (the pump only runs for windows that actually show motion).
+    pub(crate) fn has_in_flight_agent_chat(&self, cx: &gpui::App) -> bool {
+        self.main_area
+            .panes
+            .iter()
+            .filter_map(|p| p.agent_chat_view())
+            .any(|v| v.read(cx).turn_in_flight)
+    }
+
+    /// Dirty every in-flight AgentChat view so its `.cached()` subtree
+    /// re-renders on each status-pulse tick — otherwise the Working footer's
+    /// badge animation freezes (root CLAUDE.md Pitfall #10). Lease-free
+    /// (`App::notify` by id), like the dock notifiers.
+    pub(crate) fn notify_in_flight_agent_chats(&self, cx: &mut Context<Self>) {
+        let ids: Vec<_> = self
+            .main_area
+            .panes
+            .iter()
+            .filter_map(|p| p.agent_chat_view())
+            .filter(|v| v.read(cx).turn_in_flight)
+            .map(|v| v.entity_id())
+            .collect();
+        for id in ids {
+            gpui::App::notify(cx, id);
+        }
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

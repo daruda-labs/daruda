@@ -806,6 +806,9 @@ pub const AGENT_CHAT_MSG_FONT_SIZE: f32 = FONT_SIZE_LG;
 pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;
 /// Agent chat message list gap (px).
 pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
+/// Agent chat turn-boundary gap (px) — extra space above a new user message,
+/// paired with a hairline, so consecutive turns read as distinct exchanges.
+pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;
 /// Agent chat container padding X (px).
 pub const AGENT_CHAT_PAD_X: f32 = PAD_STANDARD;
 /// Agent chat container padding Y (px).

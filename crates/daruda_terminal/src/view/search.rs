@@ -169,7 +169,8 @@ pub(super) fn scan_search_matches(
     // does not carry cross-row continuation state, so multi-line
     // patterns can only match in scrollback for now.
     if total_rows > lb_rows {
-        let mut viewport_lines: Vec<String> = Vec::with_capacity((total_rows - lb_rows) as usize);
+        let viewport_count = total_rows.saturating_sub(lb_rows) as usize;
+        let mut viewport_lines: Vec<String> = Vec::with_capacity(viewport_count);
         for y in lb_rows..total_rows {
             let line = match session.dump_screen_row(y) {
                 Ok(s) => s.strip_suffix('\n').unwrap_or(s.as_str()).to_string(),

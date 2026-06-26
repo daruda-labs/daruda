@@ -57,7 +57,10 @@ type MermaidImages = std::sync::Arc<
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Disclosure, IconName, Sizable as _, button_bare, disclosure};
+use crate::ui::{
+    AgentStatusBadge, ButtonVariants as _, Disclosure, IconName, IndicatorSize, Sizable as _,
+    button, button_bare, disclosure,
+};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
     DiffStat, diff_editor_key, is_active, mermaid_key,
 };
@@ -65,6 +68,7 @@ use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_claude::SessionStatus;
 
 /// Build the element tree for an Agent chat pane. Takes the view by shared
 /// reference (field reads) plus its own `Context` (listener binding); the two
@@ -86,6 +90,17 @@ pub(in crate::workspace) fn render(
     // but only once there is a conversation to fold.
     let fold_toolbar: Option<AnyElement> = (!content.items.is_empty())
         .then(|| fold_toolbar(pane_id, content.modes.as_ref(), &t, cx).into_any_element());
+
+    // The scroll-to-bottom button overlays the list when the user has scrolled
+    // up off the bottom (tail-follow released). It anchors to the body slot
+    // (below), not the pane root, so it floats just above the working footer
+    // instead of colliding with it. At-bottom is read from the list geometry.
+    let scroll_btn: Option<AnyElement> = (!content.items.is_empty()
+        && !crate::ui::scrollbar::list_at_bottom(
+            &content.list_state,
+            theme::AGENT_CHAT_SCROLL_BOTTOM_SLACK,
+        ))
+    .then(|| scroll_to_bottom_button(pane_id, cx).into_any_element());
 
     let body: AnyElement = if content.items.is_empty() {
         div()
@@ -119,7 +134,8 @@ pub(in crate::workspace) fn render(
         .size_full();
         // Wrap the list so the live-tracking scrollbar overlay can sit over it:
         // the overlay is absolute-fill, so its parent must be `relative` and
-        // sized to the viewport (this `flex_1` body slot).
+        // sized to the viewport (this `flex_1` body slot). The scroll-to-bottom
+        // button also anchors here so it stays above the working footer.
         div()
             .relative()
             .flex_1()
@@ -132,18 +148,13 @@ pub(in crate::workspace) fn render(
                 t.scrollbar_thumb,
                 t.file_viewer_scrollbar_thumb_hover,
             ))
+            .children(scroll_btn)
             .into_any_element()
     };
 
-    // The scroll-to-bottom button overlays the list when the user has scrolled
-    // up off the bottom (tail-follow released); the pane root's `relative`
-    // anchors it. At-bottom is read from the list geometry at render time.
-    let scroll_btn: Option<AnyElement> = (!content.items.is_empty()
-        && !crate::ui::scrollbar::list_at_bottom(
-            &content.list_state,
-            theme::AGENT_CHAT_SCROLL_BOTTOM_SLACK,
-        ))
-    .then(|| scroll_to_bottom_button(pane_id, cx).into_any_element());
+    // Pinned "agent is working" strip — flex_none, so it sits at the very bottom
+    // of the column and stays visible while reading scrollback during a turn.
+    let working = working_footer(content, &t, cx);
 
     div()
         .size_full()
@@ -158,7 +169,7 @@ pub(in crate::workspace) fn render(
         .children(status_banner)
         .children(fold_toolbar)
         .child(body)
-        .children(scroll_btn)
+        .children(working)
 }
 
 /// Render one projected row: an item, a synthetic fold header, or — when
@@ -207,17 +218,27 @@ fn render_row(
             count,
             collapsed,
         } => tool_group_bar(this, gid, *first_ix, *count, *collapsed, t, cx).into_any_element(),
+        RowKind::WorkingIndicator => working_indicator(this, t, cx).into_any_element(),
     };
     let bottom = if ix == last_visible {
         theme::AGENT_CHAT_PAD_Y
     } else {
         theme::AGENT_CHAT_LIST_GAP
     };
+    // A new turn (a `User` row past the first) gets a hairline + extra top space
+    // so consecutive turns read as distinct exchanges, not one running column.
+    let turn_break = ix != 0 && matches!(row.kind, RowKind::User(_));
     div()
         .w_full()
         .min_w_0()
         .px(px(theme::AGENT_CHAT_PAD_X))
         .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
+        .when(turn_break, |d| {
+            d.mt(px(theme::AGENT_CHAT_TURN_GAP))
+                .pt(px(theme::AGENT_CHAT_TURN_GAP))
+                .border_t_1()
+                .border_color(t.border)
+        })
         .pb(px(bottom))
         // Nest one content-pad unit per level (group members sit under the ⚙ bar).
         .when(row.indent > 0, |d| {
@@ -225,6 +246,54 @@ fn render_row(
         })
         .child(inner)
         .into_any_element()
+}
+
+/// The shared scaffold for every collapsible header in the pane: a full-width,
+/// borderless clickable row that toggles `key` and leads with the disclosure
+/// chevron. Callers append their own label / summary / trailing glyph. One
+/// source for the row's layout + click target, so the section bars
+/// (`response_bar` / `tool_group_bar`) and the inline blocks (`foldable_block`)
+/// can never drift apart — e.g. one growing box chrome the others lack.
+fn disclosure_row(
+    base: impl Into<ElementId>,
+    key: FoldKey,
+    expanded: bool,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> gpui::Stateful<gpui::Div> {
+    // One base id yields both the row's click target and the chevron glyph's
+    // identity, so the two stay distinct yet stable across renders.
+    let base: ElementId = base.into();
+    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded).color(t.text_subtle);
+    div()
+        .id((base, "row"))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
+        .child(chevron)
+}
+
+/// The status-rollup glyph trailing a section header: ● running (in progress /
+/// streaming), ✗ a failure occurred, else ✓ all done. Single source for the
+/// response bar and the tool-group bar so the two never disagree on treatment.
+fn rollup_glyph(running: bool, failed: bool, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+    let (glyph, color) = if running {
+        ("●", t.text_body)
+    } else if failed {
+        ("✗", t.banner_error_text)
+    } else {
+        ("✓", t.file_diff_stat_add)
+    };
+    div()
+        .flex_none()
+        .text_color(color)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .child(SharedString::from(glyph))
 }
 
 /// Collapsible header for an agent response (the run of agent items under a
@@ -267,47 +336,25 @@ fn response_bar(
             ChatItem::Permission(_) => {}
         }
     }
-    let (glyph, glyph_fg) = if running {
-        ("●", t.text_body)
-    } else if failed {
-        ("✗", t.banner_error_text)
-    } else {
-        ("✓", t.file_diff_stat_add)
-    };
-
-    let mut row = div()
-        .id(SharedString::from(format!("agent-chat-response-{anchor}")))
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .cursor_pointer()
-        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-        .py(px(theme::GAP_XS))
-        .rounded(px(theme::RADIUS_XS))
-        .bg(t.lane_card_bg)
-        .border_1()
-        .border_color(t.border)
-        .on_click(cx.listener(move |this, _ev, _window, cx| {
-            this.toggle_fold(FoldKey::Response(anchor), cx)
-        }))
-        .child(
-            disclosure(
-                SharedString::from(format!("agent-chat-response-chev-{anchor}")),
-                !collapsed,
-            )
-            .color(t.text_subtle),
-        )
-        .child(
-            div()
-                .flex_none()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(t.text_body)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(s::agent_chat_label_agent())),
-        );
+    // Borderless disclosure row (shared `disclosure_row`) — matches the
+    // assistant / thinking block headers, so a single-block reply and a
+    // multi-block / tool response share one header style. Only content cards
+    // (`tool_card`) carry box chrome; section headers stay light.
+    let mut row = disclosure_row(
+        SharedString::from(format!("agent-chat-response-{anchor}")),
+        FoldKey::Response(anchor),
+        !collapsed,
+        t,
+        cx,
+    )
+    .child(
+        div()
+            .flex_none()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(t.text_body)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(SharedString::from(s::agent_chat_label_agent())),
+    );
 
     // Collapsed: the response's first line (ellipsized) + tool count fill the
     // row before the status glyph. Expanded: just push the glyph to the right.
@@ -336,13 +383,7 @@ fn response_bar(
         row = row.child(div().flex_1());
     }
 
-    row.child(
-        div()
-            .flex_none()
-            .text_color(glyph_fg)
-            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-            .child(SharedString::from(glyph)),
-    )
+    row.child(rollup_glyph(running, failed, t))
 }
 
 /// Collapsible header for a consecutive tool-call group. The whole row toggles
@@ -368,61 +409,32 @@ fn tool_group_bar(
             }
         }
     }
-    let (glyph, glyph_fg) = if running {
-        ("●", t.text_body)
-    } else if failed {
-        ("✗", t.banner_error_text)
-    } else {
-        ("✓", t.file_diff_stat_add)
-    };
-    let gid_owned = gid.to_string();
-    div()
-        .id(SharedString::from(format!("agent-chat-toolgroup-{gid}")))
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .cursor_pointer()
-        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
-        .py(px(theme::GAP_XS))
-        .rounded(px(theme::RADIUS_XS))
-        .bg(t.lane_card_bg)
-        .border_1()
-        .border_color(t.border)
-        .on_click(cx.listener(move |this, _ev, _window, cx| {
-            this.toggle_fold(FoldKey::ToolGroup(gid_owned.clone()), cx)
-        }))
-        .child(
-            disclosure(
-                SharedString::from(format!("agent-chat-toolgroup-chev-{gid}")),
-                !collapsed,
-            )
-            .color(t.text_subtle),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from("⚙")),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .text_color(t.text_muted)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(s::agent_chat_tool_group_count(count))),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_color(glyph_fg)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(glyph)),
-        )
+    // Borderless disclosure row (shared `disclosure_row`), same as the response
+    // bar — section headers stay light; only `tool_card` (content) carries box
+    // chrome.
+    disclosure_row(
+        SharedString::from(format!("agent-chat-toolgroup-{gid}")),
+        FoldKey::ToolGroup(gid.to_string()),
+        !collapsed,
+        t,
+        cx,
+    )
+    .child(
+        div()
+            .flex_none()
+            .text_color(t.text_subtle)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(SharedString::from("⚙")),
+    )
+    .child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .text_color(t.text_muted)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(SharedString::from(s::agent_chat_tool_group_count(count))),
+    )
+    .child(rollup_glyph(running, failed, t))
 }
 
 /// Floating "jump to bottom" affordance shown over the list when the user has
@@ -541,6 +553,122 @@ fn status_banner(
     )
 }
 
+/// Title of the tool call currently in progress, if any — drives the
+/// ExecutingTool footer label. The agent runs calls sequentially, so the last
+/// `InProgress` call is the live one.
+fn running_tool_title(items: &[ChatItem]) -> Option<String> {
+    items.iter().rev().find_map(|item| match item {
+        ChatItem::ToolCall(tc) if matches!(tc.status, ToolStatusView::InProgress) => {
+            Some(tc.title.clone())
+        }
+        _ => None,
+    })
+}
+
+/// The live activity the agent is engaged in this turn: blocked on a permission
+/// prompt, running a named tool, or otherwise generating prose. Single source
+/// for both the pinned [`working_footer`] and the inline [`working_indicator`]
+/// so the two never disagree.
+fn working_status(content: &AgentChatView) -> (SessionStatus, SharedString) {
+    if content.pending_permission.is_some() {
+        (
+            SessionStatus::NeedsAttention,
+            s::agent_chat_awaiting_permission().into(),
+        )
+    } else if let Some(title) = running_tool_title(&content.items) {
+        (
+            SessionStatus::ExecutingTool,
+            s::agent_chat_working_tool(&title).into(),
+        )
+    } else {
+        (SessionStatus::Working, s::agent_chat_working().into())
+    }
+}
+
+/// Animated status badge + activity label — the shared core of the pinned
+/// [`working_footer`] and the inline [`working_indicator`]. Layout + badge are
+/// identical; only the label tone differs (the footer reads stronger, the
+/// inline gap dimmer) and the footer wraps this with chrome + a Stop button.
+fn working_row(
+    content: &AgentChatView,
+    label_color: gpui::Hsla,
+    cx: &mut Context<AgentChatView>,
+) -> gpui::Div {
+    let (status, label) = working_status(content);
+    div()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(AgentStatusBadge::for_status(
+            status,
+            IndicatorSize::Badge,
+            cx,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_color(label_color)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(label),
+        )
+}
+
+/// Inline "agent is working" indicator, projected as the tail row of the last
+/// turn while a turn is in flight but nothing is streaming yet (the gap after a
+/// tool group settles, before the next assistant text). Unlike the pinned
+/// [`working_footer`], it lives *in* the conversation flow, so the progress
+/// signal sits where the next response will appear. Reuses the same animated
+/// [`AgentStatusBadge`] (CPU-gated pulse) and label source as the footer; no
+/// Stop button (the footer owns that).
+fn working_indicator(
+    content: &AgentChatView,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    working_row(content, t.text_subtle, cx).w_full()
+}
+
+/// Live "agent is working" strip, pinned at the bottom of the conversation
+/// while a turn is in flight. The animated [`AgentStatusBadge`] reuses the
+/// shared, CPU-gated `StatusPulseClock` (the status-pulse pump dirties this
+/// view while it is in flight — see `watchers_lifecycle::spawn_status_pulse` +
+/// `Workspace::notify_in_flight_agent_chats`). It disappears the instant the
+/// turn settles (`turn_in_flight` flips false), making done-vs-generating
+/// unmistakable. The Stop button cancels the turn in place.
+fn working_footer(
+    content: &AgentChatView,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> Option<impl IntoElement + use<>> {
+    if !content.turn_in_flight {
+        return None;
+    }
+    // Same `working_row` core as the inline indicator, wrapped with the pinned
+    // strip's chrome (top border + bg) and a Stop button.
+    Some(
+        working_row(content, t.text_body, cx)
+            .flex_none()
+            .w_full()
+            .px(px(theme::AGENT_CHAT_PAD_X))
+            .py(px(theme::AGENT_CHAT_PAD_Y))
+            .border_t_1()
+            .border_color(t.border)
+            .bg(t.file_viewer_bg)
+            .child(
+                button(
+                    ("agent-chat-stop", content.pane_id as usize),
+                    s::agent_chat_stop(),
+                )
+                .on_click(cx.listener(|this, _ev, _window, cx| this.cancel_turn(cx))),
+            ),
+    )
+}
+
 /// One conversation row. Message bodies render as selectable markdown via
 /// `crate::ui::markdown`, keyed by `ix` for stable selection identity.
 ///
@@ -616,23 +744,9 @@ fn foldable_block<
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<Id, F> {
-    // One base id yields both the row's click target and the chevron glyph's
-    // identity, so the two stay distinct yet stable across renders.
-    let base: ElementId = id.into();
-    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded).color(t.text_subtle);
-
-    let mut header_row = div()
-        .id((base, "row"))
-        .w_full()
-        .min_w_0()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
-        .child(chevron)
-        .child(header);
+    // Same `disclosure_row` scaffold as the section bars (chevron + click), then
+    // append this block's own header content.
+    let mut header_row = disclosure_row(id, key, expanded, t, cx).child(header);
     // The collapsed-only inline summary sits after the header content, on the
     // same row, and is dropped entirely when expanded (the body carries the
     // detail then).
@@ -1244,4 +1358,45 @@ fn permission_button(
     button.on_click(cx.listener(move |this, _, _window, cx| {
         this.respond_permission(option_id.clone(), kind, cx);
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::running_tool_title;
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    fn tool(id: &str, status: ToolStatusView) -> ChatItem {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_owned(),
+            title: format!("Tool {id}"),
+            kind: ToolKindView::Edit,
+            status,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+        })
+    }
+
+    #[test]
+    fn running_tool_title_is_none_without_an_in_progress_call() {
+        let items = [
+            ChatItem::AssistantText {
+                text: "a".into(),
+                streaming: true,
+            },
+            tool("c1", ToolStatusView::Completed),
+        ];
+        assert_eq!(running_tool_title(&items), None);
+    }
+
+    #[test]
+    fn running_tool_title_picks_the_last_in_progress_call() {
+        // Completed earlier calls are skipped; the latest in-progress one wins.
+        let items = [
+            tool("c1", ToolStatusView::Completed),
+            tool("c2", ToolStatusView::InProgress),
+            tool("c3", ToolStatusView::Pending),
+        ];
+        assert_eq!(running_tool_title(&items), Some("Tool c2".to_owned()));
+    }
 }

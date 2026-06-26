@@ -221,7 +221,10 @@ impl CodeActionMenu {
         }
 
         cx.propagate();
-        if action.partial_eq(&input::Enter { secondary: false }) {
+        if action.partial_eq(&input::Enter {
+            secondary: false,
+            newline: false,
+        }) {
             self.on_action_enter(window, cx);
         } else if action.partial_eq(&input::Escape) {
             self.on_action_escape(window, cx);
