@@ -54,6 +54,7 @@ use super::agent_chat_ops::{
     mermaid_key, mermaid_sources, trailing_unresolved_permission,
 };
 use super::fold::{FoldKey, FoldState};
+use super::rows::{RenderRow, project};
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
 use crate::workspace::main_area::file_view_pane::markdown_viewer::mermaid_with_theme;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
@@ -169,6 +170,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// replaces the old `stick_to_bottom` flag). Item count is kept in sync with
     /// `items` via [`Self::sync_list_after`]. Transient / session-only.
     pub(in crate::workspace) list_state: ListState,
+    /// Render-row projection of `items` under `fold` (turns / tool groups /
+    /// items, with `hidden` flags), recomputed by [`Self::rebuild_rows`] on
+    /// every items/fold change. The virtualized `list` indexes over this, and
+    /// the render processor reads `rows[ix]`. Derived cache — single rebuild
+    /// site. Transient / session-only.
+    pub(in crate::workspace) rows: Vec<RenderRow>,
     /// Session-mode state advertised by the agent at `session/new` time and
     /// updated on `CurrentModeUpdate` notifications. `None` until the session
     /// connects, or when the agent does not advertise modes.
@@ -218,6 +225,7 @@ impl AgentChatView {
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
+            rows: Vec::new(),
             modes: None,
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
@@ -270,7 +278,6 @@ impl AgentChatView {
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
 
-        let old_len = self.items.len();
         match event {
             AcpEvent::Connected { modes } => {
                 self.status = AgentSessionStatus::Connected;
@@ -318,36 +325,61 @@ impl AgentChatView {
         }
         self.reconcile_diff_editors(syntax_theme, is_light, cx);
         self.reconcile_mermaid(!is_light, cx);
-        // Keep the virtualized list in sync with the item mutation above.
-        // `FollowMode::Tail` handles staying pinned to the bottom while
-        // streaming — no manual scroll needed.
-        self.sync_list_after(old_len);
+        // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
+        // the bottom pinned while streaming — no manual scroll needed.
+        self.rebuild_rows();
         cx.notify();
     }
 
-    /// Keep the virtualized `list_state` in sync with `items` after a mutation.
-    /// `items` is append-only (see the INVARIANT on `items`), so the count only
-    /// grows: a larger length means items were appended (splice them in,
-    /// preserving scroll position + the measurements of prior items); an
-    /// unchanged length means the tail item's content changed in place
-    /// (streaming chunk grew it, or `finalize_streaming` settled it), so
-    /// remeasure just that item — `Absolute` anchor, which keeps the exact
-    /// scroll position so reading history during streaming doesn't drift (a full
-    /// `remeasure()` would re-anchor proportionally and scroll under the reader).
+    /// Recompute the projected render rows from `items` + `fold` and sync the
+    /// virtualized `list` to them. The single rebuild site; call after any
+    /// `items` or `fold` mutation.
     ///
-    /// LIMITATION: a `ToolCallUpdate` that grows a *non-tail* tool call's height
-    /// is only fully covered when it adds diffs (`reconcile_diff_editors`
-    /// remeasures the whole list) — a mid-list output/status-only growth is not
-    /// remeasured here and self-corrects on the next event/relayout. The plan's
-    /// `ChatUpdateEffect` (precise changed-index) would close this; deferred to
-    /// keep `daruda_acp` untouched, since updates target the most recent (≈ tail)
-    /// tool call in practice.
-    fn sync_list_after(&mut self, old_len: usize) {
-        let new_len = self.items.len();
-        if new_len > old_len {
-            self.list_state.splice(old_len..old_len, new_len - old_len);
-        } else if new_len > 0 {
-            self.list_state.remeasure_items(new_len - 1..new_len);
+    /// Rows include synthetic headers (tool-group, later response), and folding
+    /// flips `hidden` without changing the row set — so we diff old vs new by
+    /// `same_slot`:
+    /// - **structural** (slot divergence / count change = an append, or a run
+    ///   becoming a group): `splice` from the first divergent slot — scroll
+    ///   above it is preserved.
+    /// - **same slots & count** (a fold toggle flipping `hidden`, or a streamed
+    ///   chunk growing the tail): `remeasure_items` over just the changed span
+    ///   with the `Absolute` anchor, so reading history during streaming never
+    ///   drifts (a full `remeasure()` would re-anchor proportionally).
+    fn rebuild_rows(&mut self) {
+        let old = std::mem::take(&mut self.rows);
+        self.rows = project(&self.items, &self.fold);
+
+        if let Some(at) = old
+            .iter()
+            .zip(&self.rows)
+            .position(|(a, b)| !a.same_slot(b))
+        {
+            self.list_state.splice(at..old.len(), self.rows.len() - at);
+            return;
+        }
+        if old.len() != self.rows.len() {
+            let at = old.len().min(self.rows.len());
+            self.list_state.splice(at..old.len(), self.rows.len() - at);
+            return;
+        }
+        // Same slots & count: only `hidden` flipped or item content grew.
+        // Remeasure the span whose `hidden` changed; if none did, a streamed
+        // tail grow → remeasure the last row.
+        let (lo, hi) = old
+            .iter()
+            .zip(&self.rows)
+            .enumerate()
+            .filter(|(_, (a, b))| a.hidden != b.hidden)
+            .fold((usize::MAX, 0usize), |(lo, hi), (i, _)| {
+                (lo.min(i), hi.max(i))
+            });
+        if lo == usize::MAX {
+            let n = self.rows.len();
+            if n > 0 {
+                self.list_state.remeasure_items(n - 1..n);
+            }
+        } else {
+            self.list_state.remeasure_items(lo..hi + 1);
         }
     }
 
@@ -355,7 +387,6 @@ impl AgentChatView {
     /// and mark a turn in flight. Driven by the bottom-dock input via the
     /// Workspace shim (`send_agent_prompt_text`).
     pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
-        let old_len = self.items.len();
         // Echo locally so the prompt shows immediately even before the agent
         // streams it back as a user-message chunk.
         self.items.push(ChatItem::UserText(text.clone()));
@@ -370,7 +401,7 @@ impl AgentChatView {
         // there are none).
         let dark = Self::host_is_dark(cx);
         self.reconcile_mermaid(dark, cx);
-        self.sync_list_after(old_len);
+        self.rebuild_rows();
         // Submitting a prompt jumps the view to the bottom so the user sees their
         // message and the streaming response. `scroll_to_end` only repositions
         // the viewport; `FollowMode::Tail` re-engages on the first layout pass
@@ -444,13 +475,44 @@ impl AgentChatView {
                     _ => None,
                 })
                 .unwrap_or(false),
+            // A response is active while it is the last turn or its run is
+            // still streaming — matching `rows::project`'s default derivation.
+            FoldKey::Response(anchor) => {
+                let start = anchor + 1;
+                let end = self
+                    .items
+                    .iter()
+                    .skip(start)
+                    .position(|it| matches!(it, ChatItem::UserText(_)))
+                    .map(|off| start + off)
+                    .unwrap_or(self.items.len());
+                let is_last = end >= self.items.len();
+                let streaming = self
+                    .items
+                    .get(start..end)
+                    .is_some_and(|run| run.iter().any(is_active));
+                is_last || streaming
+            }
+            // The group is the consecutive tool-call run beginning at `gid`;
+            // active while any tool in it is still running.
+            FoldKey::ToolGroup(gid) => self
+                .items
+                .iter()
+                .position(|item| matches!(item, ChatItem::ToolCall(tc) if tc.id == *gid))
+                .map(|s| {
+                    self.items[s..]
+                        .iter()
+                        .take_while(|item| matches!(item, ChatItem::ToolCall(_)))
+                        .any(is_active)
+                })
+                .unwrap_or(false),
             // Diff policy is DefaultCollapsed → derivation ignores `active`.
             FoldKey::Diff(_) => false,
         };
         self.fold.toggle(key, active);
-        // Expand/collapse changes the block's rendered height; remeasure so the
-        // virtualized list reflows (item count unchanged).
-        self.list_state.remeasure();
+        // A fold change flips row `hidden` flags (and may collapse a group):
+        // reproject + reflow the affected span.
+        self.rebuild_rows();
         cx.notify();
     }
 
@@ -459,9 +521,8 @@ impl AgentChatView {
     pub(in crate::workspace) fn set_all_folds(&mut self, expanded: bool, cx: &mut Context<Self>) {
         let keys = collect_foldable_keys(&self.items);
         self.fold.set_all(keys, expanded);
-        // Bulk expand/collapse changes many block heights; remeasure so the
-        // virtualized list reflows (item count unchanged).
-        self.list_state.remeasure();
+        // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
+        self.rebuild_rows();
         cx.notify();
     }
 

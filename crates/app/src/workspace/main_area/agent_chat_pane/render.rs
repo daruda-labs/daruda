@@ -62,6 +62,7 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
     DiffStat, diff_editor_key, is_active, mermaid_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -97,45 +98,21 @@ pub(in crate::workspace) fn render(
             .child(SharedString::from(s::agent_chat_empty()))
             .into_any_element()
     } else {
-        // Virtualized conversation: `list` renders only the visible items (+
+        // Virtualized conversation: `list` renders only the visible rows (+
         // overdraw), so draw cost is bounded by the viewport, not the
-        // conversation length. The per-item closure re-fetches the view (`this`)
-        // because `list`'s render fn is `'static` — it can't borrow `view`.
-        // `list` does no inter-item spacing of its own, so each item carries the
-        // padding the old flex column applied: `PAD_Y` top on the first item,
-        // `LIST_GAP` between items (as each item's bottom pad), and `PAD_Y` on
-        // the last item's bottom — reproducing the old `gap + py` exactly.
+        // conversation length. The `'static` closure re-fetches the view
+        // (`this`) and indexes the projected `rows` (see `rows::project`), which
+        // interleaves synthetic fold headers with item rows; `render_row`
+        // dispatches by kind and applies per-row padding + nesting rail.
         let t_items = t.clone();
-        let last_ix = content.items.len().saturating_sub(1);
+        // The last *visible* row gets bottom `PAD_Y` (vs `LIST_GAP` between
+        // rows); collapsed rows are zero-height so they don't count.
+        let last_visible = content.rows.iter().rposition(|r| !r.hidden).unwrap_or(0);
         let list_el = list(
             content.list_state.clone(),
-            cx.processor(move |this, ix, _window, cx| {
-                let Some(item) = this.items.get(ix) else {
-                    return gpui::Empty.into_any_element();
-                };
-                let row = render_item(
-                    ix,
-                    item,
-                    &this.diff_editors,
-                    &this.diff_stats,
-                    &this.mermaid_images,
-                    &this.fold,
-                    &t_items,
-                    cx,
-                );
-                let bottom = if ix == last_ix {
-                    theme::AGENT_CHAT_PAD_Y
-                } else {
-                    theme::AGENT_CHAT_LIST_GAP
-                };
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .px(px(theme::AGENT_CHAT_PAD_X))
-                    .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
-                    .pb(px(bottom))
-                    .child(row)
-                    .into_any_element()
+            cx.processor(move |this, ix, _window, cx| match this.rows.get(ix) {
+                Some(row) => render_row(this, ix, row, last_visible, &t_items, cx),
+                None => gpui::Empty.into_any_element(),
             }),
         )
         .with_sizing_behavior(ListSizingBehavior::Auto)
@@ -182,6 +159,270 @@ pub(in crate::workspace) fn render(
         .children(fold_toolbar)
         .child(body)
         .children(scroll_btn)
+}
+
+/// Render one projected row: an item, a synthetic fold header, or — when
+/// collapsed under an ancestor fold — a zero-height `Empty` (the row stays in
+/// the sequence so the count is fold-stable). Applies per-row padding (top on
+/// the first row, `PAD_Y` on the last visible row, `LIST_GAP` between) and a
+/// left indent per nesting level.
+fn render_row(
+    this: &AgentChatView,
+    ix: usize,
+    row: &RenderRow,
+    last_visible: usize,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    if row.hidden {
+        return gpui::Empty.into_any_element();
+    }
+    let inner: AnyElement = match &row.kind {
+        RowKind::User(i) => match this.items.get(*i) {
+            Some(ChatItem::UserText(text)) => {
+                user_bubble(*i, text, &this.mermaid_images, t).into_any_element()
+            }
+            _ => gpui::Empty.into_any_element(),
+        },
+        RowKind::ResponseHeader { anchor, collapsed } => {
+            response_bar(this, *anchor, *collapsed, t, cx).into_any_element()
+        }
+        RowKind::AgentItem(i) => match this.items.get(*i) {
+            Some(item) => render_item(
+                *i,
+                item,
+                row.indent > 0,
+                &this.diff_editors,
+                &this.diff_stats,
+                &this.mermaid_images,
+                &this.fold,
+                t,
+                cx,
+            ),
+            None => gpui::Empty.into_any_element(),
+        },
+        RowKind::ToolGroupHeader {
+            gid,
+            first_ix,
+            count,
+            collapsed,
+        } => tool_group_bar(this, gid, *first_ix, *count, *collapsed, t, cx).into_any_element(),
+    };
+    let bottom = if ix == last_visible {
+        theme::AGENT_CHAT_PAD_Y
+    } else {
+        theme::AGENT_CHAT_LIST_GAP
+    };
+    div()
+        .w_full()
+        .min_w_0()
+        .px(px(theme::AGENT_CHAT_PAD_X))
+        .when(ix == 0, |d| d.pt(px(theme::AGENT_CHAT_PAD_Y)))
+        .pb(px(bottom))
+        // Nest one content-pad unit per level (group members sit under the ⚙ bar).
+        .when(row.indent > 0, |d| {
+            d.pl(px(theme::AGENT_CHAT_PAD_X * (row.indent as f32 + 1.0)))
+        })
+        .child(inner)
+        .into_any_element()
+}
+
+/// Collapsible header for an agent response (the run of agent items under a
+/// user message). The whole row toggles `FoldKey::Response`; shows a chevron +
+/// "Agent" label, and — when collapsed — the response's first line, a tool
+/// count, and a status-rollup glyph (● streaming / ✗ a failure / ✓ done). The
+/// user prompt stays visible above, so the summary doesn't repeat it.
+fn response_bar(
+    this: &AgentChatView,
+    anchor: usize,
+    collapsed: bool,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let mut tools = 0usize;
+    let mut first_line: Option<String> = None;
+    let (mut running, mut failed) = (false, false);
+    for item in this.items.iter().skip(anchor + 1) {
+        match item {
+            ChatItem::UserText(_) => break,
+            ChatItem::ToolCall(tc) => {
+                tools += 1;
+                match tc.status {
+                    ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
+                    ToolStatusView::Failed => failed = true,
+                    ToolStatusView::Completed => {}
+                }
+            }
+            ChatItem::AssistantText { text, streaming }
+            | ChatItem::Thinking { text, streaming } => {
+                if first_line.is_none() {
+                    first_line = text
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .map(str::to_owned);
+                }
+                running |= *streaming;
+            }
+            ChatItem::Error(_) => failed = true,
+            ChatItem::Permission(_) => {}
+        }
+    }
+    let (glyph, glyph_fg) = if running {
+        ("●", t.text_body)
+    } else if failed {
+        ("✗", t.banner_error_text)
+    } else {
+        ("✓", t.file_diff_stat_add)
+    };
+
+    let mut row = div()
+        .id(SharedString::from(format!("agent-chat-response-{anchor}")))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .cursor_pointer()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::GAP_XS))
+        .rounded(px(theme::RADIUS_XS))
+        .bg(t.lane_card_bg)
+        .border_1()
+        .border_color(t.border)
+        .on_click(cx.listener(move |this, _ev, _window, cx| {
+            this.toggle_fold(FoldKey::Response(anchor), cx)
+        }))
+        .child(
+            disclosure(
+                SharedString::from(format!("agent-chat-response-chev-{anchor}")),
+                !collapsed,
+            )
+            .color(t.text_subtle),
+        )
+        .child(
+            div()
+                .flex_none()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(t.text_body)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_label_agent())),
+        );
+
+    // Collapsed: the response's first line (ellipsized) + tool count fill the
+    // row before the status glyph. Expanded: just push the glyph to the right.
+    if collapsed {
+        let line = first_line.unwrap_or_default();
+        row = row.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(line)),
+        );
+        if tools > 0 {
+            row = row.child(
+                div()
+                    .flex_none()
+                    .text_color(t.text_subtle)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from(s::agent_chat_tool_group_count(tools))),
+            );
+        }
+    } else {
+        row = row.child(div().flex_1());
+    }
+
+    row.child(
+        div()
+            .flex_none()
+            .text_color(glyph_fg)
+            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .child(SharedString::from(glyph)),
+    )
+}
+
+/// Collapsible header for a consecutive tool-call group. The whole row toggles
+/// the group's fold (`FoldKey::ToolGroup`); shows a chevron, a ⚙ marker, the
+/// "N tool calls" count, and a status-rollup glyph (● running / ✗ a failure /
+/// ✓ all done).
+fn tool_group_bar(
+    this: &AgentChatView,
+    gid: &str,
+    first_ix: usize,
+    count: usize,
+    collapsed: bool,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
+    let (mut running, mut failed) = (false, false);
+    for k in first_ix..(first_ix + count).min(this.items.len()) {
+        if let ChatItem::ToolCall(tc) = &this.items[k] {
+            match tc.status {
+                ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
+                ToolStatusView::Failed => failed = true,
+                ToolStatusView::Completed => {}
+            }
+        }
+    }
+    let (glyph, glyph_fg) = if running {
+        ("●", t.text_body)
+    } else if failed {
+        ("✗", t.banner_error_text)
+    } else {
+        ("✓", t.file_diff_stat_add)
+    };
+    let gid_owned = gid.to_string();
+    div()
+        .id(SharedString::from(format!("agent-chat-toolgroup-{gid}")))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .cursor_pointer()
+        .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
+        .py(px(theme::GAP_XS))
+        .rounded(px(theme::RADIUS_XS))
+        .bg(t.lane_card_bg)
+        .border_1()
+        .border_color(t.border)
+        .on_click(cx.listener(move |this, _ev, _window, cx| {
+            this.toggle_fold(FoldKey::ToolGroup(gid_owned.clone()), cx)
+        }))
+        .child(
+            disclosure(
+                SharedString::from(format!("agent-chat-toolgroup-chev-{gid}")),
+                !collapsed,
+            )
+            .color(t.text_subtle),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from("⚙")),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(t.text_muted)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_tool_group_count(count))),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(glyph_fg)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(glyph)),
+        )
 }
 
 /// Floating "jump to bottom" affordance shown over the list when the user has
@@ -311,6 +552,7 @@ fn status_banner(
 fn render_item(
     ix: usize,
     item: &ChatItem,
+    under_response: bool,
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
     mermaid_images: &MermaidImages,
@@ -320,6 +562,12 @@ fn render_item(
 ) -> AnyElement {
     match item {
         ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, t).into_any_element(),
+        // Under a response bar the speaker is already labeled "Agent"; render the
+        // prose inline with no redundant per-block header/fold. A trivial / top-
+        // level reply (no response bar) keeps the labeled, foldable block.
+        ChatItem::AssistantText { text, .. } if under_response => {
+            assistant_markdown(ix, text, mermaid_images, t)
+        }
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
@@ -512,6 +760,22 @@ fn user_bubble(
 /// on the input dock). Collapsed, the header shows the first non-empty line of
 /// `text`, dimmed and single-line ellipsized.
 #[allow(clippy::too_many_arguments)]
+/// The assistant prose body — drag-selectable rendered markdown with mermaid
+/// fences rasterized. Shared by the labeled [`assistant_block`] (trivial /
+/// top-level reply) and the header-less inline render used under a response bar.
+fn assistant_markdown(
+    ix: usize,
+    text: &str,
+    mermaid_images: &MermaidImages,
+    t: &theme::DarudaTheme,
+) -> AnyElement {
+    crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
+        .color(t.text_body)
+        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .code_block_render(mermaid_code_block_render(mermaid_images))
+        .into_any_element()
+}
+
 fn assistant_block(
     ix: usize,
     key: FoldKey,
@@ -521,11 +785,7 @@ fn assistant_block(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body_el = crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(t.text_body)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-        .code_block_render(mermaid_code_block_render(mermaid_images))
-        .into_any_element();
+    let body_el = assistant_markdown(ix, text, mermaid_images, t);
     let header = div()
         .flex_none()
         .text_color(t.text_body)

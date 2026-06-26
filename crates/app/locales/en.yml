@@ -220,6 +220,7 @@ agent_chat:
   permission_title: "Permission required"
   permission_resolved_prefix: "Selected:"
   permission_cancelled: "Cancelled."
+  tool_group_count: "%{count} tool calls"
 
 # Generic UI
 ui:

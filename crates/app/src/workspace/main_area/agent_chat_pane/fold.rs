@@ -33,6 +33,11 @@ pub(in crate::workspace) enum FoldKey {
     Tool(String),
     /// Diff inside a tool call, keyed by `"{tool_id}#{diff_index}"`.
     Diff(String),
+    /// A consecutive tool-call group, keyed by the group's first tool-call id.
+    ToolGroup(String),
+    /// An agent response (the run of agent items under a user message), keyed by
+    /// the anchoring `UserText` index.
+    Response(usize),
 }
 
 /// How a block kind defaults — behavior expressed as data rather than
@@ -50,7 +55,10 @@ impl FoldKey {
     fn policy(&self) -> FoldPolicy {
         match self {
             FoldKey::Assistant(_) => FoldPolicy::DefaultExpanded,
-            FoldKey::Thinking(_) | FoldKey::Tool(_) => FoldPolicy::ExpandedWhileActive,
+            FoldKey::Thinking(_)
+            | FoldKey::Tool(_)
+            | FoldKey::ToolGroup(_)
+            | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
             FoldKey::Diff(_) => FoldPolicy::DefaultCollapsed,
         }
     }

@@ -220,6 +220,7 @@ agent_chat:
   permission_title: "권한 필요"
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."
+  tool_group_count: "툴 %{count}개"
 
 # Generic UI
 ui:

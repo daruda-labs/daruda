@@ -13,6 +13,7 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
 use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -92,7 +93,7 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
                 let id = pane.id;
                 ws.main_area.panes.push(pane);
                 // Each prompt echoes one `UserText` item (no live handle, so no
-                // turn) and routes through `send_prompt_text` → `sync_list_after`.
+                // turn) and routes through `send_prompt_text` → `rebuild_rows`.
                 for n in 0..3 {
                     ws.send_agent_prompt_text(id, format!("prompt {n}"), cx);
                 }
@@ -106,10 +107,98 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert_eq!(view.items.len(), 3, "three prompts were echoed");
-        assert_eq!(
-            view.list_state.item_count(),
-            view.items.len(),
-            "the virtualized list count must track items exactly"
+        // The virtualized list indexes over projected rows, so its count must
+        // track `rows`, not `items` (here they match: 3 bare user messages, no
+        // agent responses → no synthetic headers).
+        assert_eq!(view.list_state.item_count(), view.rows.len());
+        assert_eq!(view.rows.len(), 3);
+    });
+}
+
+/// Collapse-all hides every agent row of a response (the header stays visible);
+/// expand-all shows them again. Exercises `set_all_folds` → `collect_foldable_keys`
+/// → `rebuild_rows` across the response + tool-group levels.
+#[gpui::test]
+async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let tool = |id: &str| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: id.to_owned(),
+            title: format!("Tool {id}"),
+            kind: ToolKindView::Edit,
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+        })
+    };
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.main_area.panes.push(pane);
+                let view = agent_view(ws, id);
+                view.update(cx, |v, cx| {
+                    v.items = vec![
+                        ChatItem::UserText("q".into()),
+                        ChatItem::AssistantText {
+                            text: "a".into(),
+                            streaming: false,
+                        },
+                        tool("c1"),
+                        tool("c2"),
+                    ];
+                    v.set_all_folds(false, cx);
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        let run_all_hidden = view
+            .rows
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    RowKind::AgentItem(_) | RowKind::ToolGroupHeader { .. }
+                )
+            })
+            .all(|r| r.hidden);
+        assert!(run_all_hidden, "collapse-all hides the whole response run");
+        assert!(
+            view.rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::ResponseHeader { .. }) && !r.hidden),
+            "the response header itself stays visible (it is the toggle)"
+        );
+    });
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            agent_view(ws, pane_id).update(cx, |v, cx| v.set_all_folds(true, cx));
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        assert!(
+            view.rows.iter().all(|r| !r.hidden),
+            "expand-all shows every row"
         );
     });
 }

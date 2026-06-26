@@ -38,7 +38,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use futures::StreamExt as _;
 use gpui::{AnyWindowHandle, AppContext as _, Context, Entity, Window};
 
-use super::fold::FoldKey;
+use super::fold::{FoldKey, FoldState};
+use super::rows::{RowKind, project};
 use super::view::{AgentChatView, AgentSessionStatus};
 use crate::path_ext::PathExt as _;
 use crate::surface::strings as s;
@@ -343,8 +344,34 @@ impl Workspace {
 /// test.
 pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]) -> Vec<FoldKey> {
     let mut keys: Vec<FoldKey> = Vec::new();
+    // Structural fold levels (response / tool-group) come from the same row
+    // projection the renderer uses, so expand/collapse-all covers exactly the
+    // headers on screen. The fold state doesn't affect which headers exist, so
+    // project against the default.
+    let rows = project(items, &FoldState::default());
+    // Assistant prose rendered under a response bar is inline (no per-block
+    // header/fold — the response bar owns the speaker label), so its
+    // `FoldKey::Assistant` would be a dead toggle. Such rows are `AgentItem`s at
+    // indent > 0; skip their keys so the fold set matches the on-screen headers.
+    let inline_assistant: std::collections::HashSet<usize> = rows
+        .iter()
+        .filter_map(|row| match row.kind {
+            RowKind::AgentItem(ix) if row.indent > 0 => Some(ix),
+            _ => None,
+        })
+        .collect();
+    for row in &rows {
+        match &row.kind {
+            RowKind::ResponseHeader { anchor, .. } => keys.push(FoldKey::Response(*anchor)),
+            RowKind::ToolGroupHeader { gid, .. } => keys.push(FoldKey::ToolGroup(gid.clone())),
+            RowKind::User(_) | RowKind::AgentItem(_) => {}
+        }
+    }
+    // Per-block fold levels (assistant / thinking by index, tool + its diffs by
+    // id).
     for (ix, item) in items.iter().enumerate() {
         match item {
+            daruda_acp::ChatItem::AssistantText { .. } if inline_assistant.contains(&ix) => {}
             daruda_acp::ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
             daruda_acp::ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
             daruda_acp::ChatItem::ToolCall(tc) => {
@@ -881,14 +908,55 @@ mod tests {
             ChatItem::Error("e".to_owned()),
         ];
         let keys = collect_foldable_keys(&items);
+        // Structural header keys (the response — non-trivial run) first, then
+        // the per-block keys. The single tool call is not a group (run < 2). The
+        // assistant prose (item 1) renders inline under the response bar, so it
+        // contributes no `Assistant` key; thinking keeps its own fold.
         assert_eq!(
             keys,
             vec![
-                FoldKey::Assistant(1),
+                FoldKey::Response(0),
                 FoldKey::Thinking(2),
                 FoldKey::Tool("c1".to_owned()),
                 FoldKey::Diff("c1#0".to_owned()),
                 FoldKey::Diff("c1#1".to_owned()),
+            ]
+        );
+    }
+
+    /// A trivial single-block reply has no response bar, so its assistant prose
+    /// keeps the labeled, foldable block — its `Assistant` key is still
+    /// collected. Guards the inline-vs-block split in `collect_foldable_keys`.
+    #[test]
+    fn trivial_reply_keeps_assistant_fold_key() {
+        let items = [
+            ChatItem::UserText("u".to_owned()),
+            ChatItem::AssistantText {
+                text: "a".to_owned(),
+                streaming: false,
+            },
+        ];
+        assert_eq!(collect_foldable_keys(&items), vec![FoldKey::Assistant(1)]);
+    }
+
+    /// A consecutive tool-call run (≥ 2) contributes a `ToolGroup` key on top
+    /// of the per-tool keys, so expand/collapse-all reaches the group level.
+    #[test]
+    fn fold_keys_include_response_and_tool_group() {
+        use daruda_acp::ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("u".to_owned()),
+            ChatItem::ToolCall(tool_call("c1", Completed, 0)),
+            ChatItem::ToolCall(tool_call("c2", Completed, 0)),
+        ];
+        let keys = collect_foldable_keys(&items);
+        assert_eq!(
+            keys,
+            vec![
+                FoldKey::Response(0),
+                FoldKey::ToolGroup("c1".to_owned()),
+                FoldKey::Tool("c1".to_owned()),
+                FoldKey::Tool("c2".to_owned()),
             ]
         );
     }
