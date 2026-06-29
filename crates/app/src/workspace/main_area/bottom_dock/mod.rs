@@ -11,6 +11,7 @@
 pub(in crate::workspace) mod macro_edit_modal;
 pub(in crate::workspace) mod macro_key;
 pub(in crate::workspace) mod macro_ops;
+pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
 pub(in crate::workspace) mod terminal_input;
 

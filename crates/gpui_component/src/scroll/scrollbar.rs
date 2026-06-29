@@ -34,13 +34,18 @@ use serde::{Deserialize, Serialize};
 const WIDTH: Pixels = px(4. * 2. + 8.);
 const MIN_THUMB_SIZE: f32 = 48.;
 
-const THUMB_WIDTH: Pixels = px(6.);
-const THUMB_RADIUS: Pixels = px(6. / 2.);
-const THUMB_INSET: Pixels = px(4.);
+// Visible thumb is 4px to match daruda's app-side custom scrollbar
+// (`crate::ui::scrollbar`, SCROLLBAR_W = 4) used by the panes; the wider
+// `WIDTH` clickable hitbox is kept so the thin thumb stays easy to grab.
+const THUMB_WIDTH: Pixels = px(4.);
+const THUMB_RADIUS: Pixels = px(4. / 2.);
+// 2px inset (= daruda's SCROLLBAR_MARGIN_R / GAP_XS) so the thumb sits tight to
+// the right edge like the app-side custom scrollbar, not 4px inset.
+const THUMB_INSET: Pixels = px(2.);
 
-const THUMB_ACTIVE_WIDTH: Pixels = px(8.);
-const THUMB_ACTIVE_RADIUS: Pixels = px(8. / 2.);
-const THUMB_ACTIVE_INSET: Pixels = px(4.);
+const THUMB_ACTIVE_WIDTH: Pixels = px(4.);
+const THUMB_ACTIVE_RADIUS: Pixels = px(4. / 2.);
+const THUMB_ACTIVE_INSET: Pixels = px(2.);
 
 const FADE_OUT_DURATION: f32 = 3.0;
 const FADE_OUT_DELAY: f32 = 2.0;

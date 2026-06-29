@@ -78,6 +78,9 @@ fn main() {
                 AcpEvent::ModeChanged { mode_id } => {
                     eprintln!("[mode-changed] mode_id={mode_id}");
                 }
+                AcpEvent::AvailableCommandsChanged(cmds) => {
+                    eprintln!("[commands] {} available", cmds.len());
+                }
                 AcpEvent::Notice(msg) => {
                     eprintln!("[notice] {msg}");
                 }

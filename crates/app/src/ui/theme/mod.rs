@@ -274,9 +274,18 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // ---------------------------------------------------------------
     // Scrollbar / progress / skeleton
     // ---------------------------------------------------------------
-    t.scrollbar = d.modal_panel_bg;
+    // Transparent track: daruda's design draws a thumb only (the app-side
+    // custom scrollbar `crate::ui::scrollbar` has no track), so the built-in
+    // gpui_component scrollbar's track bar must not paint a background.
+    t.scrollbar = gpui::transparent_black();
     t.scrollbar_thumb = d.button_widget_bg;
-    t.scrollbar_thumb_hover = d.button_widget_bg_hover;
+    // Match the app-side custom scrollbar's hover (white-45%) so the built-in
+    // scrollbar reads the same on hover as the panes' thumb.
+    t.scrollbar_thumb_hover = d.file_viewer_scrollbar_thumb_hover;
+    // Always-visible thumb (no idle fade) like the panes' persistent custom
+    // scrollbar. The renderer still hides the thumb when content fits (scroll
+    // area <= container), so short, non-scrollable lists show nothing.
+    t.scrollbar_show = gpui_component::scroll::ScrollbarShow::Always;
     t.skeleton = d.button_widget_bg;
     t.progress_bar = PRIMARY;
 

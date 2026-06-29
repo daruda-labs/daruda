@@ -11,6 +11,7 @@ use gpui::{
     Styled as _, Subscription, Task, UTF16Selection, Window, actions, div, point,
     prelude::FluentBuilder as _, px,
 };
+use lsp_types::CompletionItem;
 use ropey::{Rope, RopeSlice};
 use serde::Deserialize;
 use std::ops::Range;
@@ -337,6 +338,13 @@ pub struct InputState {
     /// `None` keeps the default behaviour (Enter inserts a newline, the host
     /// submits on Cmd+Enter). Used to implement chat-style "Enter to send".
     pub(super) submit_on_enter: Option<Box<dyn Fn(&App) -> bool + 'static>>,
+    /// Invoked when the user accepts a completion item from the completion menu.
+    /// `Rc` (not `Box` like `submit_on_enter`) so the consumer can clone the
+    /// handler out and move it into a deferred closure — the accept fires inside
+    /// the menu's `editor.update_in`, so the host must defer any `InputState`
+    /// mutation (e.g. clearing the input) to avoid a re-entrant update.
+    pub(super) on_completion_accept:
+        Option<Rc<dyn Fn(&CompletionItem, &mut Window, &mut Context<InputState>) + 'static>>,
     pub(crate) scroll_handle: ScrollHandle,
     /// The deferred scroll offset to apply on next layout.
     pub(crate) deferred_scroll_offset: Option<Point<Pixels>>,
@@ -434,6 +442,7 @@ impl InputState {
             pattern: None,
             validate: None,
             submit_on_enter: None,
+            on_completion_accept: None,
             mode: InputMode::default(),
             last_layout: None,
             last_bounds: None,
@@ -477,6 +486,15 @@ impl InputState {
     /// [`Self::submit_on_enter`] field docs.
     pub fn submit_on_enter(mut self, predicate: impl Fn(&App) -> bool + 'static) -> Self {
         self.submit_on_enter = Some(Box::new(predicate));
+        self
+    }
+
+    /// Install a handler invoked when a completion item is accepted from the menu.
+    pub fn on_completion_accept(
+        mut self,
+        handler: impl Fn(&CompletionItem, &mut Window, &mut Context<InputState>) + 'static,
+    ) -> Self {
+        self.on_completion_accept = Some(Rc::new(handler));
         self
     }
 

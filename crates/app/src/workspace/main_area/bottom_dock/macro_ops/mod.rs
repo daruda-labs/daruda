@@ -547,6 +547,44 @@ impl Workspace {
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
     }
 
+    /// Finalize an accepted slash-command completion from the bottom-dock
+    /// input. The menu has already inserted the command text; this decides
+    /// whether to send immediately.
+    ///
+    /// `NoInput` commands take no argument, so the completed `/name` is sent
+    /// right away by reusing [`Self::send_terminal_input`] (which reads the
+    /// input, routes it to the focused agent pane's session, and clears the
+    /// field — no duplication). `FreeText` commands leave `"/name "` in the
+    /// input for the user to type the argument; Enter-to-send (already active
+    /// for agent panes) submits it later.
+    pub(in crate::workspace) fn complete_slash_command(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Resolve the command kind to a plain bool first so the `&self`/`cx`
+        // read borrow ends before the `&mut self` `send_terminal_input` call.
+        let focused = self.main_area.focused_pane_id;
+        let is_no_input = self
+            .agent_chat_view(focused)
+            .and_then(|v| {
+                v.read(cx)
+                    .available_commands
+                    .iter()
+                    .find(|c| c.name == name)
+                    .map(|c| matches!(c.input, daruda_acp::SlashCommandInput::NoInput))
+            })
+            .unwrap_or(false);
+        // No-op for FreeText commands (the inserted "/name " awaits the user's
+        // argument) and for the rare case where the command is gone / focus changed
+        // between menu build and accept — the "/name" text is already in the input,
+        // so the user can still submit with Enter. Only NoInput auto-sends.
+        if is_no_input {
+            self.send_terminal_input(window, cx);
+        }
+    }
+
     /// Click handler for a widget — dispatches based on the widget
     /// kind. Today only `Button` is implemented; unknown / future
     /// types are silent no-ops (the JSON survives via

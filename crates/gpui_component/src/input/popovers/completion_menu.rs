@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
 use gpui::{
-    Action, AnyElement, App, AppContext, Bounds, Context, DismissEvent, Empty, Entity,
+    Action, Anchor, AnyElement, App, AppContext, Bounds, Context, DismissEvent, Empty, Entity,
     EventEmitter, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels,
-    Point, Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, canvas,
-    deferred, div, prelude::FluentBuilder, px, relative,
+    Point, Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, anchored,
+    canvas, deferred, div, prelude::FluentBuilder, px, relative,
 };
 use lsp_types::{CompletionItem, CompletionTextEdit};
 
-const MAX_MENU_WIDTH: Pixels = px(320.);
+const MAX_MENU_WIDTH: Pixels = px(480.);
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
@@ -102,17 +102,22 @@ impl RenderOnce for CompletionMenuItem {
 
         h_flex()
             .id(self.ix)
+            // Fill the row so the hover / selected background is a full-width
+            // bar — otherwise it only paints behind the (short) label text and
+            // reads as "no selection", especially in a wide menu.
+            .w_full()
             .gap_2()
             .p_1()
             .text_xs()
             .line_height(relative(1.))
             .rounded_sm()
             .when(item.deprecated.unwrap_or(false), |this| this.line_through())
-            .hover(|this| this.bg(cx.theme().accent.opacity(0.8)))
-            .when(self.selected, |this| {
-                this.bg(cx.theme().accent)
-                    .text_color(cx.theme().accent_foreground)
-            })
+            // Selected / hover use the defined accent-28% `selection` tint as a
+            // full-row background bar (no left border, per request). Text keeps
+            // its default color so the label highlight and muted detail stay
+            // readable.
+            .hover(|this| this.bg(cx.theme().accent.opacity(0.10)))
+            .when(self.selected, |this| this.bg(cx.theme().selection))
             .child(div().child(StyledText::new(item.label.clone()).with_highlights(highlights)))
             .when(item.detail.is_some(), |this| {
                 this.child(
@@ -265,6 +270,10 @@ impl CompletionMenu {
                 editor.completion_inserting = false;
                 // FIXME: Input not get the focus
                 editor.focus(window, cx);
+
+                if let Some(handler) = editor.on_completion_accept.clone() {
+                    handler(&item, window, cx);
+                }
             })
         })
         .detach();
@@ -414,57 +423,71 @@ impl Render for CompletionMenu {
             .selected_item()
             .and_then(|item| item.documentation.clone());
 
-        let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - pos.x);
         let abs_pos = self.editor.read(cx).input_bounds.origin + pos;
+        let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - abs_pos.x);
         let vertical_layout =
             abs_pos.x + MAX_MENU_WIDTH + POPOVER_GAP + MAX_MENU_WIDTH + POPOVER_GAP
                 > window.bounds().size.width;
 
         deferred(
-            div()
-                .absolute()
-                .left(pos.x)
-                .top(pos.y)
-                .flex()
-                .flex_row()
-                .gap(POPOVER_GAP)
-                .items_start()
-                .when(vertical_layout, |this| this.flex_col())
+            anchored()
+                // Default `AnchoredFitMode::SwitchAnchor` flips the menu above the
+                // cursor when it would overflow the window bottom (needed for the
+                // bottom-of-window AgentChat input). `position()` takes window
+                // coordinates; `abs_pos` is the cursor in window space.
+                .anchor(Anchor::TopLeft)
+                .position(abs_pos)
                 .child(
-                    editor_popover("completion-menu", cx)
-                        .max_w(max_width)
-                        .min_w(px(120.))
-                        .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(POPOVER_GAP)
+                        .items_start()
+                        .when(vertical_layout, |this| this.flex_col())
                         .child(
-                            canvas(
-                                move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
-                                |_, _, _, _| {},
-                            )
-                            .absolute()
-                            .size_full(),
-                        ),
-                )
-                .when_some(selected_documentation, |this, documentation| {
-                    let mut doc = match documentation {
-                        lsp_types::Documentation::String(s) => s.clone(),
-                        lsp_types::Documentation::MarkupContent(mc) => mc.value.clone(),
-                    };
-                    if vertical_layout {
-                        doc = doc.split("\n").next().unwrap_or_default().to_string();
-                    }
-
-                    this.child(
-                        div().child(
                             editor_popover("completion-menu", cx)
-                                .w(MAX_MENU_WIDTH)
-                                .px_2()
-                                .child(render_markdown("doc", doc, window, cx)),
-                        ),
-                    )
-                })
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    this.hide(cx);
-                })),
+                                // `List` renders `size_full`, contributing no
+                                // intrinsic width, so a content-sized popover
+                                // (`flex_none` + `max_w`) collapses to `min_w`.
+                                // Pin the width to the available space (capped at
+                                // `MAX_MENU_WIDTH` by `max_width`) so the menu is
+                                // usable; `min_w` is only a floor near the window edge.
+                                .w(max_width)
+                                .min_w(px(120.))
+                                .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
+                                .child(
+                                    canvas(
+                                        move |bounds, _, cx| {
+                                            view.update(cx, |r, _| r.bounds = bounds)
+                                        },
+                                        |_, _, _, _| {},
+                                    )
+                                    .absolute()
+                                    .size_full(),
+                                ),
+                        )
+                        .when_some(selected_documentation, |this, documentation| {
+                            let mut doc = match documentation {
+                                lsp_types::Documentation::String(s) => s.clone(),
+                                lsp_types::Documentation::MarkupContent(mc) => mc.value.clone(),
+                            };
+                            if vertical_layout {
+                                doc = doc.split("\n").next().unwrap_or_default().to_string();
+                            }
+
+                            this.child(
+                                div().child(
+                                    editor_popover("completion-menu", cx)
+                                        .w(MAX_MENU_WIDTH)
+                                        .px_2()
+                                        .child(render_markdown("doc", doc, window, cx)),
+                                ),
+                            )
+                        })
+                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                            this.hide(cx);
+                        })),
+                ),
         )
         .into_any_element()
     }

@@ -43,6 +43,7 @@ gpui_component = { workspace = true }
 gpui_component_assets = { workspace = true }
 ignore = "0.4"
 imara-diff = "0.2"
+lsp-types = { workspace = true }
 notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }

@@ -150,6 +150,47 @@ pub struct ModeStateView {
     pub current: String,
 }
 
+/// A slash command the agent advertises via `AvailableCommandsUpdate`
+/// (mirror of the protocol's `AvailableCommand`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlashCommand {
+    pub name: String,
+    pub description: String,
+    pub input: SlashCommandInput,
+}
+
+/// Whether a command takes an argument. Mirrors the protocol's
+/// `Option<AvailableCommandInput>` as an explicit enum so the no-arg case is
+/// not a `None` sentinel (makes the invalid state unrepresentable).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlashCommandInput {
+    /// Command takes no argument — sending `/name` is complete.
+    NoInput,
+    /// Command takes free-text after the name; `hint` is shown as guidance.
+    FreeText { hint: String },
+}
+
+impl From<&agent_client_protocol::schema::v1::AvailableCommand> for SlashCommand {
+    fn from(c: &agent_client_protocol::schema::v1::AvailableCommand) -> Self {
+        use agent_client_protocol::schema::v1::AvailableCommandInput;
+        let input = match &c.input {
+            None => SlashCommandInput::NoInput,
+            Some(AvailableCommandInput::Unstructured(u)) => SlashCommandInput::FreeText {
+                hint: u.hint.clone(),
+            },
+            // Forward-compat fallback: unknown future variants map to NoInput so
+            // the host is not broken by a protocol extension it doesn't know about.
+            #[allow(unreachable_patterns)]
+            Some(_) => SlashCommandInput::NoInput,
+        };
+        SlashCommand {
+            name: c.name.clone(),
+            description: c.description.clone(),
+            input,
+        }
+    }
+}
+
 impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateView {
     fn from(s: &agent_client_protocol::schema::v1::SessionModeState) -> Self {
         ModeStateView {
@@ -169,9 +210,57 @@ impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateVie
 
 #[cfg(test)]
 mod tests {
-    use agent_client_protocol::schema::v1::{SessionMode, SessionModeState};
+    use agent_client_protocol::schema::v1::{
+        AvailableCommand, SessionMode, SessionModeState, UnstructuredCommandInput,
+    };
 
     use super::*;
+
+    #[test]
+    fn slash_command_from_no_input() {
+        let cmd = AvailableCommand::new("compact", "Compact conversation history");
+        let view = SlashCommand::from(&cmd);
+        assert_eq!(view.name, "compact");
+        assert_eq!(view.description, "Compact conversation history");
+        assert_eq!(view.input, SlashCommandInput::NoInput);
+    }
+
+    #[test]
+    fn slash_command_from_unstructured_input() {
+        use agent_client_protocol::schema::v1::AvailableCommandInput;
+        let cmd = AvailableCommand::new("search", "Search the codebase").input(
+            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("search query")),
+        );
+        let view = SlashCommand::from(&cmd);
+        assert_eq!(view.name, "search");
+        assert_eq!(view.description, "Search the codebase");
+        assert_eq!(
+            view.input,
+            SlashCommandInput::FreeText {
+                hint: "search query".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn slash_command_free_text_preserves_name_description_and_hint() {
+        // Verifies that a FreeText command round-trips all three fields
+        // (name, description, hint) together — not covered by the NoInput
+        // or unstructured-input tests which check fields in isolation.
+        use agent_client_protocol::schema::v1::AvailableCommandInput;
+        let cmd = AvailableCommand::new("explain", "Explain selected code").input(
+            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("what to explain")),
+        );
+        let view = SlashCommand::from(&cmd);
+        assert_eq!(view.name, "explain");
+        assert_eq!(view.description, "Explain selected code");
+        assert_eq!(
+            view.input,
+            SlashCommandInput::FreeText {
+                hint: "what to explain".to_string()
+            }
+        );
+    }
 
     #[test]
     fn mode_state_view_from_session_mode_state_maps_fields() {

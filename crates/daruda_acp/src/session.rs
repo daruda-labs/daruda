@@ -113,6 +113,9 @@ pub enum AcpEvent {
     /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
     /// `set_mode` request was confirmed. `mode_id` is the new active mode.
     ModeChanged { mode_id: String },
+    /// The agent advertised or updated its available slash commands
+    /// (`AvailableCommandsUpdate`). Replaces the host's cached command list.
+    AvailableCommandsChanged(Vec<crate::model::SlashCommand>),
     /// A non-fatal advisory message (e.g. set_mode on connect was rejected
     /// by the adapter). The session remains live; the host should log this
     /// at Warning severity without changing the session status.
@@ -266,6 +269,14 @@ async fn run_connection(
                     SessionUpdate::CurrentModeUpdate(u) => AcpEvent::ModeChanged {
                         mode_id: u.current_mode_id.to_string(),
                     },
+                    SessionUpdate::AvailableCommandsUpdate(u) => {
+                        AcpEvent::AvailableCommandsChanged(
+                            u.available_commands
+                                .iter()
+                                .map(crate::model::SlashCommand::from)
+                                .collect(),
+                        )
+                    }
                     update => AcpEvent::Update(Box::new(update)),
                 };
                 let _ = notif_tx.unbounded_send(event);

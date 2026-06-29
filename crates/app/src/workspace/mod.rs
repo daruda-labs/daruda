@@ -694,6 +694,8 @@ impl Workspace {
         );
 
         let ws_for_input = ws_weak.clone();
+        let ws_for_accept = ws_weak.clone();
+        let ws_for_provider = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
             let mut state = crate::ui::InputState::new(window, cx_state)
                 .multi_line(true)
@@ -707,12 +709,38 @@ impl Workspace {
                         ws.is_agent_chat_pane(ws.main_area.focused_pane_id)
                             && !ws.agent.use_modifier_to_send
                     })
+                })
+                // Accepting a slash-command completion routes through the
+                // workspace for the adaptive send. The accept hook fires inside
+                // this `InputState`'s update (the menu has already inserted the
+                // text). `cx.defer_in` would *re-lease this same InputState* to
+                // run its closure, so `complete_slash_command` ->
+                // `send_terminal_input` (which reads/clears `terminal_input`,
+                // this very entity) would still re-enter and panic. Defer at the
+                // window/app level instead: that closure gets `&mut Window,
+                // &mut App` with no entity re-lease, so the deferred work can
+                // safely touch `terminal_input` (CLAUDE.md pitfall #5).
+                .on_completion_accept(move |item, window, cx| {
+                    let name = item.label.clone();
+                    let ws = ws_for_accept.clone();
+                    window.defer(cx, move |window, cx| {
+                        if let Some(ws) = ws.upgrade() {
+                            ws.update(cx, |ws, cx| ws.complete_slash_command(name, window, cx));
+                        }
+                    });
                 });
             state.set_placeholder(
                 crate::surface::strings::bottom_input_placeholder(),
                 window,
                 cx_state,
             );
+            // Feed the native completion menu with ACP slash commands when a
+            // chat pane is focused and a `/`-token is being typed.
+            state.lsp.completion_provider = Some(std::rc::Rc::new(
+                crate::workspace::main_area::bottom_dock::slash_command::SlashCommandProvider {
+                    workspace: ws_for_provider,
+                },
+            ));
             state
         });
         // The bottom-dock body wires the Submit-button click →

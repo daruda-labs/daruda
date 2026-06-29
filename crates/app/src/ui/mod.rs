@@ -63,7 +63,9 @@ pub use disclosure::{Disclosure, disclosure};
 pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
-pub use input::{Input, InputEvent, InputState, input, input_with_action};
+pub use input::{
+    CompletionProvider, Input, InputEvent, InputState, Rope, RopeExt, input, input_with_action,
+};
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,
 };

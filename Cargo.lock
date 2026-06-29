@@ -1327,6 +1327,7 @@ dependencies = [
  "ignore",
  "image",
  "imara-diff",
+ "lsp-types",
  "notify",
  "nucleo-matcher",
  "objc2-app-kit",

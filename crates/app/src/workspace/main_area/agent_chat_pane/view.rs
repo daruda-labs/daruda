@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ModeStateView, PermissionDecision, PermissionKindView,
-    apply_update, finalize_streaming, permission_item,
+    SlashCommand, apply_update, finalize_streaming, permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -180,6 +180,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// updated on `CurrentModeUpdate` notifications. `None` until the session
     /// connects, or when the agent does not advertise modes.
     pub(in crate::workspace) modes: Option<ModeStateView>,
+    /// Slash commands advertised by the agent via `AvailableCommandsChanged`.
+    /// Runtime-only; never serialized. Consumed by the slash-command
+    /// autocomplete provider (later task).
+    pub(in crate::workspace) available_commands: Vec<SlashCommand>,
     /// Test-only render counter, asserted by the cache-scoping regression test
     /// (`notify_rerenders_cached_agent_view`) to confirm a `cx.notify()` on this
     /// view actually re-renders it.
@@ -250,6 +254,7 @@ impl AgentChatView {
             },
             rows: Vec::new(),
             modes: None,
+            available_commands: Vec::new(),
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
@@ -336,6 +341,9 @@ impl AgentChatView {
                 // cancelled / refused mid-request — drain it so no card is left
                 // with live buttons (no-op on a normal turn).
                 cancel_pending_permission(self);
+            }
+            AcpEvent::AvailableCommandsChanged(commands) => {
+                self.available_commands = commands;
             }
             AcpEvent::Notice(_) => {
                 // Logged above; no status change.
