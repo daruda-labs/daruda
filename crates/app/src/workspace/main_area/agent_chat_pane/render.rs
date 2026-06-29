@@ -782,7 +782,6 @@ fn plan_region(
                     // In-progress row: accent-28% tint + slight rounding so the
                     // highlight reads as a bar (mirrors the selection token used
                     // by the completion menu and text selection).
-                    .px(px(theme::GAP_SM))
                     .when(in_progress, |row| row.bg(theme::SELECTION_BG).rounded_sm())
                     .child(
                         div()
@@ -1792,6 +1791,11 @@ mod tests {
     #[test]
     fn format_elapsed_sixty_five_seconds() {
         assert_eq!(format_elapsed(std::time::Duration::from_secs(65)), "1m05s");
+    }
+
+    #[test]
+    fn format_elapsed_at_one_minute_boundary() {
+        assert_eq!(format_elapsed(std::time::Duration::from_secs(60)), "1m00s");
     }
 
     #[test]
