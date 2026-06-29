@@ -324,6 +324,22 @@ fn rollup_of(running: bool, any_failed: bool, any_ok: bool) -> Rollup {
     }
 }
 
+/// The blink opacity for the shared 2-tick `StatusPulseClock` pulse:
+/// `1.0` on even half-ticks (bright), `STATUS_INDICATOR_PULSE_OPACITY_MIN`
+/// on odd half-ticks (dim). Used by [`rollup_glyph`] for the Running dot
+/// and by the plan in-progress glyph so both pulse in lockstep.
+fn pulse_opacity(cx: &gpui::App) -> f32 {
+    let tick = cx
+        .try_global::<StatusPulseClock>()
+        .map(|c| c.tick)
+        .unwrap_or(0);
+    if (tick / 2).is_multiple_of(2) {
+        1.0
+    } else {
+        theme::STATUS_INDICATOR_PULSE_OPACITY_MIN
+    }
+}
+
 fn rollup_glyph(
     rollup: Rollup,
     t: &theme::DarudaTheme,
@@ -341,15 +357,7 @@ fn rollup_glyph(
     // Blink the running dot (1.0 ↔ MIN on the shared 2-tick pulse) so an
     // in-progress run reads as live; the settled glyphs stay solid.
     let opacity = if matches!(rollup, Rollup::Running) {
-        let tick = cx
-            .try_global::<StatusPulseClock>()
-            .map(|c| c.tick)
-            .unwrap_or(0);
-        if (tick / 2).is_multiple_of(2) {
-            1.0
-        } else {
-            theme::STATUS_INDICATOR_PULSE_OPACITY_MIN
-        }
+        pulse_opacity(cx)
     } else {
         1.0
     };
@@ -612,16 +620,17 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
     (done, plan.len())
 }
 
-/// The status glyph + its colour for one plan entry: ● done (green), ◐ in
-/// progress (running amber), ○ pending (muted). Mirrors [`rollup_glyph`]'s
-/// `(glyph, color)` shape; the completed green reuses the diff-stat add colour
-/// (there is no dedicated `success` theme token).
+/// The status glyph + its colour for one plan entry: ● done (green),
+/// ● in progress (running amber), ● pending (muted). All three states share
+/// the filled ● glyph and are distinguished by colour alone. Mirrors
+/// [`rollup_glyph`]'s `(glyph, color)` shape; the completed green reuses
+/// the diff-stat add colour (there is no dedicated `success` theme token).
 fn plan_status_glyph(status: PlanStatus, t: &theme::DarudaTheme) -> (&'static str, Hsla) {
     match status {
         // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
         PlanStatus::Completed => ("●", t.file_diff_stat_add),
-        PlanStatus::InProgress => ("◐", t.status_executing_tool_dark),
-        PlanStatus::Pending => ("○", t.text_muted),
+        PlanStatus::InProgress => ("●", t.status_executing_tool_dark),
+        PlanStatus::Pending => ("●", t.text_muted),
     }
 }
 
@@ -702,19 +711,29 @@ fn plan_region(
 
     // Collapsed: trail the current in-progress entry's content (muted,
     // ellipsized) after a `·` separator, so a folded plan still hints at the
-    // live step. Nothing trails when no entry is in progress.
+    // live step. A pulsing ● glyph precedes the separator so a folded plan
+    // still shows the live pulse. Nothing trails when no entry is in progress.
     if collapsed && let Some(active) = plan.iter().find(|e| e.status == PlanStatus::InProgress) {
-        header = header.child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .child(SharedString::from(format!("· {}", active.content))),
-        );
+        header = header
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(pulse_opacity(cx))
+                    .text_color(t.status_executing_tool_dark)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from("●")),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_color(t.text_subtle)
+                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .child(SharedString::from(format!("· {}", active.content))),
+            );
     }
 
     let mut region = div()
@@ -724,6 +743,10 @@ fn plan_region(
         .flex_col()
         .border_t_1()
         .border_color(t.border)
+        // surface-1 panel background so the plan region reads as a distinct
+        // panel stepped above the conversation (DESIGN.md: depth via the
+        // surface ladder; `dock_bg` == BG_PANEL == SURFACE_1 == #0f1011).
+        .bg(t.dock_bg)
         .child(header);
 
     if !collapsed {
@@ -745,6 +768,7 @@ fn plan_region(
             .pb(px(theme::AGENT_CHAT_PAD_Y));
         for entry in plan {
             let (glyph, glyph_color) = plan_status_glyph(entry.status, t);
+            let in_progress = entry.status == PlanStatus::InProgress;
             list = list.child(
                 div()
                     .w_full()
@@ -753,11 +777,19 @@ fn plan_region(
                     .flex_row()
                     .items_baseline()
                     .gap(px(theme::AGENT_CHAT_MSG_GAP))
+                    // In-progress row: accent-28% tint + slight rounding so the
+                    // highlight reads as a bar (mirrors the selection token used
+                    // by the completion menu and text selection).
+                    .px(px(theme::GAP_SM))
+                    .when(in_progress, |row| row.bg(theme::SELECTION_BG).rounded_sm())
                     .child(
                         div()
                             .flex_none()
                             .text_color(glyph_color)
                             .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                            // In-progress glyph pulses in lockstep with the section
+                            // header rollup dot; settled glyphs stay solid.
+                            .when(in_progress, |g| g.opacity(pulse_opacity(cx)))
                             .child(SharedString::from(glyph)),
                     )
                     .child(
