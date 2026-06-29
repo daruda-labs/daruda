@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ModeStateView, PermissionDecision, PermissionKindView,
-    SlashCommand, apply_update, finalize_streaming, permission_item,
+    PlanEntryView, SlashCommand, apply_update, finalize_streaming, permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -184,6 +184,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// Runtime-only; never serialized. Consumed by the slash-command
     /// autocomplete provider (later task).
     pub(in crate::workspace) available_commands: Vec<SlashCommand>,
+    /// The agent's live execution plan (`PlanChanged`); full-replaced each update.
+    /// Runtime-only; never serialized.
+    pub(in crate::workspace) plan: Vec<PlanEntryView>,
+    /// Agent-provided session title (`SessionTitleChanged`); `None` = fallback label.
+    pub(in crate::workspace) session_title: Option<String>,
+    /// Whether the bottom plan region is collapsed to its header. Transient /
+    /// session-only; defaults to `false` (expanded) so a fresh plan shows its
+    /// checklist. Toggled by the header click via [`Self::toggle_plan_collapsed`].
+    pub(in crate::workspace) plan_collapsed: bool,
     /// Test-only render counter, asserted by the cache-scoping regression test
     /// (`notify_rerenders_cached_agent_view`) to confirm a `cx.notify()` on this
     /// view actually re-renders it.
@@ -255,6 +264,9 @@ impl AgentChatView {
             rows: Vec::new(),
             modes: None,
             available_commands: Vec::new(),
+            plan: Vec::new(),
+            session_title: None,
+            plan_collapsed: false,
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
@@ -310,6 +322,11 @@ impl AgentChatView {
             AcpEvent::Connected { modes } => {
                 self.status = AgentSessionStatus::Connected;
                 self.modes = modes;
+                // Clear stale plan/title from a previous session so they don't
+                // flash before the new agent sends its first updates.
+                self.plan.clear();
+                self.session_title = None;
+                self.plan_collapsed = false;
             }
             AcpEvent::ModeChanged { mode_id } => {
                 if let Some(m) = &mut self.modes {
@@ -344,6 +361,16 @@ impl AgentChatView {
             }
             AcpEvent::AvailableCommandsChanged(commands) => {
                 self.available_commands = commands;
+            }
+            // Full-replace the plan; `plan_collapsed` is intentionally preserved — the
+            // agent updates the plan frequently mid-turn, so auto-expanding on every
+            // update would fight the user. First arrival shows expanded via the
+            // `plan_collapsed: false` default.
+            AcpEvent::PlanChanged(entries) => {
+                self.plan = entries;
+            }
+            AcpEvent::SessionTitleChanged(title) => {
+                self.session_title = title;
             }
             AcpEvent::Notice(_) => {
                 // Logged above; no status change.
@@ -563,6 +590,14 @@ impl AgentChatView {
         self.fold.set_all(keys, expanded);
         // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
         self.rebuild_rows();
+        cx.notify();
+    }
+
+    /// Collapse / expand the bottom plan region. The plan is a derived render
+    /// of `plan` (full-replaced by the agent), so this only flips the local
+    /// presentation flag and notifies — no model rebuild needed.
+    pub(in crate::workspace) fn toggle_plan_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.plan_collapsed = !self.plan_collapsed;
         cx.notify();
     }
 

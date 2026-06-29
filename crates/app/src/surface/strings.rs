@@ -945,6 +945,17 @@ pub fn agent_chat_collapse_all() -> String {
     rust_i18n::t!("agent_chat.collapse_all").into_owned()
 }
 
+/// Fallback title for the activity bar when no session title is set.
+/// Separate from [`agent_chat_tab_title`] so the two can diverge later.
+pub fn agent_chat_activity_bar_title() -> String {
+    rust_i18n::t!("agent_chat.activity_bar_title").into_owned()
+}
+
+/// Section label for the bottom plan region.
+pub fn agent_chat_plan_label() -> String {
+    rust_i18n::t!("agent_chat.plan_label").into_owned()
+}
+
 /// Label for a collapsed agent reasoning ("thinking") block.
 pub fn agent_chat_thinking_label() -> String {
     rust_i18n::t!("agent_chat.thinking_label").into_owned()

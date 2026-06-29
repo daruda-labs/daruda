@@ -25,7 +25,7 @@
 
 use daruda_acp::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
-    ToolCallItem, ToolStatusView,
+    PlanEntryView, PlanStatus, ToolCallItem, ToolStatusView,
 };
 use gpui::{
     AnyElement, ElementId, Entity, Hsla, IntoElement, ListSizingBehavior, SharedString, div, list,
@@ -85,10 +85,16 @@ pub(in crate::workspace) fn render(
 
     let status_banner = status_banner(&content.status, &t);
 
-    // Expand-all / collapse-all chrome sits between the banner and the list,
-    // but only once there is a conversation to fold.
-    let fold_toolbar: Option<AnyElement> =
-        (!content.items.is_empty()).then(|| fold_toolbar(pane_id, &t, cx).into_any_element());
+    // Activity bar: session title on the left, fold buttons on the right.
+    // Always visible — it holds the title even while the conversation is empty
+    // or still connecting. Fold buttons appear only once there are items.
+    let bar = activity_bar(
+        pane_id,
+        content.session_title.as_deref(),
+        !content.items.is_empty(),
+        &t,
+        cx,
+    );
 
     // The scroll-to-bottom button overlays the list when the user has scrolled
     // up off the bottom (tail-follow released). It anchors to the body slot
@@ -162,8 +168,19 @@ pub(in crate::workspace) fn render(
         .track_focus(&content.focus_handle)
         .bg(t.file_viewer_bg)
         .children(status_banner)
-        .children(fold_toolbar)
+        .child(bar)
         .child(body)
+        // The plan region is a flex-none sibling BELOW the body: because `body`
+        // is `flex_1` and this is `flex_none`, the region claims its own space
+        // and the conversation shrinks to fit. Absent (`None`) when the agent
+        // has published no plan, so it costs no vertical space then.
+        .children(plan_region(
+            pane_id,
+            &content.plan,
+            content.plan_collapsed,
+            &t,
+            cx,
+        ))
 }
 
 /// Render one projected row: an item, a synthetic fold header, or — when
@@ -515,17 +532,22 @@ fn scroll_to_bottom_button(
         )
 }
 
-/// A toolbar row with "Expand all" / "Collapse all" buttons on the right.
-/// Dev-tool chrome that should recede: ghost, `xsmall`, muted until hover. Each
-/// button is a one-line dispatch into a `Workspace` op (render purity — no logic
-/// here). Shown only when the conversation is non-empty (the caller gates on
-/// `content.items`). The session mode-selector chip lives in the bottom-dock
-/// input (left of Submit), not here.
-fn fold_toolbar(
+/// Pane activity bar: session title on the LEFT, "Expand all" / "Collapse all"
+/// ghost buttons on the RIGHT. Always rendered — it holds the title even while
+/// the conversation is empty or still connecting. The fold buttons appear only
+/// when `has_items` is true (render purity: no logic here, just `.when()`).
+/// A bottom hairline separates the bar from the conversation body.
+fn activity_bar(
     pane_id: PaneId,
+    session_title: Option<&str>,
+    has_items: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
+    let title: SharedString = session_title
+        .map(|s| SharedString::from(s.to_string()))
+        .unwrap_or_else(|| SharedString::from(s::agent_chat_activity_bar_title()));
+
     let expand = crate::ui::button(
         ("agent-chat-expand-all", pane_id as usize),
         SharedString::from(s::agent_chat_expand_all()),
@@ -546,14 +568,212 @@ fn fold_toolbar(
         .w_full()
         .flex()
         .flex_row()
-        .justify_end()
+        .justify_between()
         .items_center()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .px(px(theme::AGENT_CHAT_PAD_X))
         .py(px(theme::AGENT_CHAT_PAD_Y))
-        .text_color(t.text_muted)
-        .child(expand)
-        .child(collapse)
+        .border_b_1()
+        .border_color(t.border)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_color(t.text_primary)
+                .child(title),
+        )
+        .when(has_items, |row| {
+            row.child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::AGENT_CHAT_MSG_GAP))
+                    .text_color(t.text_muted)
+                    .child(expand)
+                    .child(collapse),
+            )
+        })
+}
+
+/// `(completed, total)` over the plan entries.  Returns `(0, 0)` for an empty
+/// plan — callers must guard on `plan.is_empty()` before using the ratio for
+/// colour logic (0 == 0 would otherwise read as "all done").
+fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
+    let done = plan
+        .iter()
+        .filter(|e| e.status == PlanStatus::Completed)
+        .count();
+    (done, plan.len())
+}
+
+/// The status glyph + its colour for one plan entry: ● done (green), ◐ in
+/// progress (running amber), ○ pending (muted). Mirrors [`rollup_glyph`]'s
+/// `(glyph, color)` shape; the completed green reuses the diff-stat add colour
+/// (there is no dedicated `success` theme token).
+fn plan_status_glyph(status: PlanStatus, t: &theme::DarudaTheme) -> (&'static str, Hsla) {
+    match status {
+        // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
+        PlanStatus::Completed => ("●", t.file_diff_stat_add),
+        PlanStatus::InProgress => ("◐", t.status_executing_tool_dark),
+        PlanStatus::Pending => ("○", t.text_muted),
+    }
+}
+
+/// The content text colour for one plan entry: completed dims (muted, no
+/// strikethrough), in-progress emphasizes (primary), pending stays body.
+fn plan_entry_color(status: PlanStatus, t: &theme::DarudaTheme) -> Hsla {
+    match status {
+        PlanStatus::Completed => t.text_muted,
+        PlanStatus::InProgress => t.text_primary,
+        PlanStatus::Pending => t.text_body,
+    }
+}
+
+/// Dedicated bottom region rendering the agent's live execution plan as a
+/// collapsible checklist. `None` (no element, no space) when the plan is empty.
+/// A top hairline separates it from the conversation above (the region sits
+/// below the body). The header — a disclosure row mirroring the section bars —
+/// shows a chevron, the "Plan" label, and the `{done}/{total}` count; collapsed
+/// it also trails the current in-progress entry's content. Clicking the header
+/// toggles [`AgentChatView::toggle_plan_collapsed`]. Expanded, the checklist
+/// lists each entry (status glyph + content) and scrolls internally past
+/// `AGENT_CHAT_PLAN_MAX_H`.
+fn plan_region(
+    pane_id: PaneId,
+    plan: &[PlanEntryView],
+    collapsed: bool,
+    t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
+) -> Option<AnyElement> {
+    if plan.is_empty() {
+        return None;
+    }
+    let (done, total) = plan_progress(plan);
+    // All-done reads green (the run finished); otherwise the count stays muted.
+    let count_color = if done == total {
+        t.file_diff_stat_add
+    } else {
+        t.text_muted
+    };
+
+    // Header: same chevron + clickable-row scaffold as the section bars, but the
+    // click routes to the plan toggle (not a `FoldKey`), so it's built inline
+    // rather than via `disclosure_row`. The chevron carries no `on_toggle` — it's
+    // a pure indicator; the whole row is the click target.
+    let chevron: Disclosure = disclosure(
+        SharedString::from(format!("agent-chat-plan-chevron-{pane_id}")),
+        !collapsed,
+    )
+    .color(t.text_subtle);
+    let mut header = div()
+        .id(("agent-chat-plan-header", pane_id as usize))
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .px(px(theme::AGENT_CHAT_PAD_X))
+        .py(px(theme::AGENT_CHAT_PAD_Y))
+        .cursor_pointer()
+        .on_click(cx.listener(|this, _ev, _window, cx| this.toggle_plan_collapsed(cx)))
+        .child(chevron)
+        .child(
+            div()
+                .flex_none()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(t.text_body)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(s::agent_chat_plan_label())),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(count_color)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(format!("{done}/{total}"))),
+        );
+
+    // Collapsed: trail the current in-progress entry's content (muted,
+    // ellipsized) after a `·` separator, so a folded plan still hints at the
+    // live step. Nothing trails when no entry is in progress.
+    if collapsed && let Some(active) = plan.iter().find(|e| e.status == PlanStatus::InProgress) {
+        header = header.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_color(t.text_subtle)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(format!("· {}", active.content))),
+        );
+    }
+
+    let mut region = div()
+        .flex_none()
+        .w_full()
+        .flex()
+        .flex_col()
+        .border_t_1()
+        .border_color(t.border)
+        .child(header);
+
+    if !collapsed {
+        let mut list = div()
+            .id(("agent-chat-plan-list", pane_id as usize))
+            .flex()
+            .flex_col()
+            .gap(px(theme::AGENT_CHAT_MSG_GAP))
+            .max_h(px(theme::AGENT_CHAT_PLAN_MAX_H))
+            // WORKAROUND: plan list uses a plain Div (not `list()`) — no virtualisation.
+            // Root cause: `list()` requires an `Entity<ListState>` and row-count wiring
+            // that adds complexity for a typically small dataset (< 50 entries).
+            // Acceptable while agent plans stay in that range; if 100+ entries become
+            // common, migrate to `list()` to avoid full-tree repaint cost.
+            // The Div also lacks the project's 4px daruda thumb (`vertical_thumb_for_list`
+            // doesn't apply); deferred — small surface (max 168px).
+            .overflow_y_scroll()
+            .px(px(theme::AGENT_CHAT_PAD_X))
+            .pb(px(theme::AGENT_CHAT_PAD_Y));
+        for entry in plan {
+            let (glyph, glyph_color) = plan_status_glyph(entry.status, t);
+            list = list.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_row()
+                    .items_baseline()
+                    .gap(px(theme::AGENT_CHAT_MSG_GAP))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(glyph_color)
+                            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                            .child(SharedString::from(glyph)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_color(plan_entry_color(entry.status, t))
+                            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                            .child(SharedString::from(entry.content.clone())),
+                    ),
+            );
+        }
+        region = region.child(list);
+    }
+
+    Some(region.into_any_element())
 }
 
 /// The thin top banner — shown while connecting or on error; hidden once
@@ -1399,8 +1619,45 @@ fn permission_button(
 
 #[cfg(test)]
 mod tests {
-    use super::running_tool_title;
-    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+    use super::{plan_progress, running_tool_title};
+    use daruda_acp::{
+        ChatItem, PlanEntryView, PlanPriority, PlanStatus, ToolCallItem, ToolKindView,
+        ToolStatusView,
+    };
+
+    fn plan_entry(status: PlanStatus) -> PlanEntryView {
+        PlanEntryView {
+            content: "step".into(),
+            priority: PlanPriority::Medium,
+            status,
+        }
+    }
+
+    #[test]
+    fn plan_progress_empty_is_zero_over_zero() {
+        assert_eq!(plan_progress(&[]), (0, 0));
+    }
+
+    #[test]
+    fn plan_progress_counts_only_completed() {
+        let plan = [
+            plan_entry(PlanStatus::Completed),
+            plan_entry(PlanStatus::InProgress),
+            plan_entry(PlanStatus::Pending),
+            plan_entry(PlanStatus::Completed),
+        ];
+        assert_eq!(plan_progress(&plan), (2, 4));
+    }
+
+    #[test]
+    fn plan_progress_all_completed_is_total_over_total() {
+        let plan = [
+            plan_entry(PlanStatus::Completed),
+            plan_entry(PlanStatus::Completed),
+            plan_entry(PlanStatus::Completed),
+        ];
+        assert_eq!(plan_progress(&plan), (3, 3));
+    }
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {

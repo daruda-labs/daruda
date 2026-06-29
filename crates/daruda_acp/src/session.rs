@@ -116,6 +116,10 @@ pub enum AcpEvent {
     /// The agent advertised or updated its available slash commands
     /// (`AvailableCommandsUpdate`). Replaces the host's cached command list.
     AvailableCommandsChanged(Vec<crate::model::SlashCommand>),
+    /// The agent's execution plan changed (`SessionUpdate::Plan`). Full replacement.
+    PlanChanged(Vec<crate::model::PlanEntryView>),
+    /// The session title changed (`SessionInfoUpdate.title`). `None` = cleared.
+    SessionTitleChanged(Option<String>),
     /// A non-fatal advisory message (e.g. set_mode on connect was rejected
     /// by the adapter). The session remains live; the host should log this
     /// at Warning severity without changing the session status.
@@ -276,6 +280,25 @@ async fn run_connection(
                                 .map(crate::model::SlashCommand::from)
                                 .collect(),
                         )
+                    }
+                    SessionUpdate::Plan(p) => AcpEvent::PlanChanged(
+                        p.entries
+                            .iter()
+                            .map(crate::model::PlanEntryView::from)
+                            .collect(),
+                    ),
+                    // title == Undefined: no title change. A timestamp-only update
+                    // (updated_at == Value) is forwarded as a raw Update, which
+                    // apply_update drops (catch-all) — daruda does not consume
+                    // updated_at yet.
+                    // TODO(acp): consume `updated_at` for last-activity display.
+                    SessionUpdate::SessionInfoUpdate(u) if u.title.is_undefined() => {
+                        AcpEvent::Update(Box::new(SessionUpdate::SessionInfoUpdate(u)))
+                    }
+                    // Not undefined here: Null → take() = None (clear),
+                    // Value(s) → Some(s) (set).
+                    SessionUpdate::SessionInfoUpdate(u) => {
+                        AcpEvent::SessionTitleChanged(u.title.take())
                     }
                     update => AcpEvent::Update(Box::new(update)),
                 };

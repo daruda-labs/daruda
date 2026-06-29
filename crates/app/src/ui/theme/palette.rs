@@ -829,6 +829,9 @@ pub const AGENT_CHAT_SCROLL_BOTTOM_SLACK: f32 = 24.0;
 /// Inset (px) of the floating scroll-to-bottom button from the pane's
 /// bottom-right corner.
 pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
+/// Max height (px) of the bottom plan region's expanded checklist before it
+/// scrolls internally, so a long plan can't crowd out the conversation above.
+pub const AGENT_CHAT_PLAN_MAX_H: f32 = 168.0;
 /// Agent task list entry font size (px).
 pub const AGENT_TASK_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Agent task list icon column width (px).

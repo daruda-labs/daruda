@@ -81,6 +81,12 @@ fn main() {
                 AcpEvent::AvailableCommandsChanged(cmds) => {
                     eprintln!("[commands] {} available", cmds.len());
                 }
+                AcpEvent::PlanChanged(entries) => {
+                    eprintln!("[plan] {} entries", entries.len());
+                }
+                AcpEvent::SessionTitleChanged(title) => {
+                    eprintln!("[title] {title:?}");
+                }
                 AcpEvent::Notice(msg) => {
                     eprintln!("[notice] {msg}");
                 }

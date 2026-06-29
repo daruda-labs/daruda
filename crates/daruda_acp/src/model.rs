@@ -128,6 +128,64 @@ pub enum PermissionKindView {
     RejectAlways,
 }
 
+/// A single entry of the agent's execution plan (mirror of the protocol's
+/// `PlanEntry`). The agent replaces the whole plan on each update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanEntryView {
+    pub content: String,
+    /// Mapped from protocol but not yet consumed by the UI — kept for future
+    /// priority-based sorting or visual differentiation.
+    pub priority: PlanPriority,
+    pub status: PlanStatus,
+}
+
+/// Execution status of a plan entry (mirror of the protocol's
+/// `PlanEntryStatus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// Priority level of a plan entry (mirror of the protocol's
+/// `PlanEntryPriority`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanPriority {
+    High,
+    Medium,
+    Low,
+}
+
+impl From<&agent_client_protocol::schema::v1::PlanEntry> for PlanEntryView {
+    fn from(e: &agent_client_protocol::schema::v1::PlanEntry) -> Self {
+        use agent_client_protocol::schema::v1::{PlanEntryPriority, PlanEntryStatus};
+        let priority = match &e.priority {
+            PlanEntryPriority::High => PlanPriority::High,
+            PlanEntryPriority::Medium => PlanPriority::Medium,
+            PlanEntryPriority::Low => PlanPriority::Low,
+            // `PlanEntryPriority` is `#[non_exhaustive]` — the wildcard is required
+            // for forward-compat with future variants added upstream.
+            #[allow(unreachable_patterns)]
+            _ => PlanPriority::Medium,
+        };
+        let status = match &e.status {
+            PlanEntryStatus::Pending => PlanStatus::Pending,
+            PlanEntryStatus::InProgress => PlanStatus::InProgress,
+            PlanEntryStatus::Completed => PlanStatus::Completed,
+            // `PlanEntryStatus` is `#[non_exhaustive]` — the wildcard is required
+            // for forward-compat with future variants added upstream.
+            #[allow(unreachable_patterns)]
+            _ => PlanStatus::Pending,
+        };
+        PlanEntryView {
+            content: e.content.clone(),
+            priority,
+            status,
+        }
+    }
+}
+
 /// One advertised session mode (mirror of the protocol's `SessionMode`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionModeView {
@@ -211,10 +269,37 @@ impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateVie
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
-        AvailableCommand, SessionMode, SessionModeState, UnstructuredCommandInput,
+        AvailableCommand, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionMode,
+        SessionModeState, UnstructuredCommandInput,
     };
 
     use super::*;
+
+    #[test]
+    fn plan_entry_view_maps_all_statuses_and_a_priority() {
+        let pending = PlanEntry::new("task A", PlanEntryPriority::High, PlanEntryStatus::Pending);
+        let view = PlanEntryView::from(&pending);
+        assert_eq!(view.content, "task A");
+        assert_eq!(view.priority, PlanPriority::High);
+        assert_eq!(view.status, PlanStatus::Pending);
+
+        let in_progress = PlanEntry::new(
+            "task B",
+            PlanEntryPriority::Medium,
+            PlanEntryStatus::InProgress,
+        );
+        let view = PlanEntryView::from(&in_progress);
+        assert_eq!(view.content, "task B");
+        assert_eq!(view.priority, PlanPriority::Medium);
+        assert_eq!(view.status, PlanStatus::InProgress);
+
+        let completed =
+            PlanEntry::new("task C", PlanEntryPriority::Low, PlanEntryStatus::Completed);
+        let view = PlanEntryView::from(&completed);
+        assert_eq!(view.content, "task C");
+        assert_eq!(view.priority, PlanPriority::Low);
+        assert_eq!(view.status, PlanStatus::Completed);
+    }
 
     #[test]
     fn slash_command_from_no_input() {
