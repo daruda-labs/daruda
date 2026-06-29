@@ -54,13 +54,22 @@ pub fn permission_item(request: &RequestPermissionRequest) -> ChatItem {
     })
 }
 
-/// Stop the streaming flag on the trailing assistant/thinking item — called
-/// when a prompt turn completes so the view drops any "typing" affordance.
+/// Clear the streaming flag on **every** assistant/thinking item — called when
+/// a prompt turn completes so the view drops any "typing" affordance.
+///
+/// Clearing only the tail is wrong: a streamed text block followed by a tool
+/// call (the common "let me look" → tool pattern) is no longer the last item,
+/// so its `streaming` flag would stay `true` forever. That makes the turn's
+/// rollup read `Running` (a perpetually blinking dot) and keeps the turn
+/// expanded (`is_active`) long after it ended — and since most turns interleave
+/// text and tools, *every* past turn would blink in lockstep. Settle them all.
 pub fn finalize_streaming(items: &mut [ChatItem]) {
-    if let Some(ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. }) =
-        items.last_mut()
-    {
-        *streaming = false;
+    for item in items.iter_mut() {
+        if let ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } =
+            item
+        {
+            *streaming = false;
+        }
     }
 }
 
@@ -405,6 +414,49 @@ mod tests {
                 streaming: false,
                 message_id: None,
             }
+        );
+    }
+
+    #[test]
+    fn finalize_settles_every_streaming_block_not_just_the_last() {
+        // Real shape: the agent streams "let me look", then starts a tool call,
+        // then streams a conclusion. The first text block is no longer the tail,
+        // so clearing only the last item would leave it `streaming: true` —
+        // making the turn's rollup blink and stay expanded after the turn ends.
+        let mut items = vec![
+            ChatItem::AssistantText {
+                text: "let me look".to_string(),
+                streaming: true,
+                message_id: Some("m1".to_string()),
+            },
+            ChatItem::ToolCall(ToolCallItem {
+                id: "t1".to_string(),
+                title: "Read".to_string(),
+                kind: ToolKindView::Read,
+                status: ToolStatusView::Completed,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: None,
+            }),
+            ChatItem::AssistantText {
+                text: "done".to_string(),
+                streaming: true,
+                message_id: Some("m2".to_string()),
+            },
+        ];
+        finalize_streaming(&mut items);
+        assert!(
+            !items.iter().any(|i| matches!(
+                i,
+                ChatItem::AssistantText {
+                    streaming: true,
+                    ..
+                } | ChatItem::Thinking {
+                    streaming: true,
+                    ..
+                }
+            )),
+            "every streamed block settles when the turn ends, not just the tail"
         );
     }
 
