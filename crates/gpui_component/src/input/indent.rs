@@ -239,6 +239,15 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // When the host installed an `on_secondary_tab` handler and it consumes
+        // the key (returns true), Shift+Tab is theirs — skip the default outdent.
+        if self
+            .on_secondary_tab
+            .as_ref()
+            .is_some_and(|h| h(window, cx))
+        {
+            return;
+        }
         self.outdent(false, window, cx);
     }
 

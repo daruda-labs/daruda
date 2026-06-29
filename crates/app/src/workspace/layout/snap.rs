@@ -189,6 +189,15 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// instead of `send_terminal_input`. `None` for every other focus
     /// state (terminal focus, idle agent pane), where the button is "Send".
     pub agent_stop_pane: Option<crate::workspace::main_area::pane_tree::PaneId>,
+    /// Set when the focused pane is an Agent chat pane that advertises session
+    /// modes. Carries that pane's id + its mode state so the bottom-input
+    /// renders the mode chip to the left of the Submit button. `None` for a
+    /// terminal-pane focus (or an agent pane the adapter gave no modes), where
+    /// only the Submit button shows.
+    pub agent_mode: Option<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        daruda_acp::ModeStateView,
+    )>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.
@@ -297,13 +306,13 @@ pub(in crate::workspace) struct RightDockSnapshot {
 /// corresponding to its `DockPosition`. Initialized to `None` and
 /// overwritten by `Workspace::render` before `Dock::render` is invoked.
 ///
-/// `Left` and `Right` are `Box`ed because `LeftDockSnapshot` (~416 B)
-/// and `RightDockSnapshot` (~776 B) dwarf the other variants — leaving
-/// them inline would inflate every `DockSnapshot` slot, including the
-/// cleared `None` state, well past clippy's variant-size threshold.
+/// All payload variants are `Box`ed: `LeftDockSnapshot` (~416 B),
+/// `RightDockSnapshot` (~776 B), and `BottomDockSnapshot` dwarf the
+/// cleared `None` state — leaving them inline would inflate every
+/// `DockSnapshot` slot well past clippy's variant-size threshold.
 pub(in crate::workspace) enum DockSnapshot {
     Left(Box<LeftDockSnapshot>),
-    Bottom(BottomDockSnapshot),
+    Bottom(Box<BottomDockSnapshot>),
     Right(Box<RightDockSnapshot>),
     /// Initial / cleared state — `Dock::render` returns an empty
     /// element when the snap is absent (first frame safety net).

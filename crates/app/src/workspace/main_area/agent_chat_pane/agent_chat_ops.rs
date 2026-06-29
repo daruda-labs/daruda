@@ -296,6 +296,41 @@ impl Workspace {
         }
     }
 
+    /// Switch the active session mode of an Agent chat pane. Shim for the
+    /// bottom-dock mode chip: routes the chosen mode id into the focused pane's
+    /// view, which optimistically updates the chip and sends `session/set_mode`.
+    /// No-op when `pane_id` is gone or is not an Agent chat pane.
+    pub(in crate::workspace) fn set_agent_mode(
+        &mut self,
+        pane_id: PaneId,
+        mode_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.set_mode(mode_id, cx));
+        }
+    }
+
+    /// Advance an Agent chat pane's session mode to the next advertised mode,
+    /// wrapping at the end. Backs the bottom-input Shift+Tab shortcut (mirrors
+    /// Claude Code's permission-mode cycle). Returns `true` when it switched the
+    /// mode; `false` (no switch) when `pane_id` is not an Agent chat pane or it
+    /// advertises fewer than two modes — the caller then lets Shift+Tab outdent.
+    pub(in crate::workspace) fn cycle_agent_mode(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return false;
+        };
+        let Some(next) = view.read(cx).modes.as_ref().and_then(next_mode_id) else {
+            return false;
+        };
+        view.update(cx, |v, cx| v.set_mode(next, cx));
+        true
+    }
+
     /// The (syntax theme, is-light) pair the Markdown / diff reconcilers read
     /// from the active theme. `is_light = !is_dark`, mirroring the file-viewer
     /// loader; defaults to dark (`is_light = false`) when the theme global is
@@ -334,6 +369,23 @@ impl Workspace {
             .find(|p| p.id == pane_id)?
             .agent_chat_view()
     }
+}
+
+/// The id of the mode after `modes.current` in advertised order, wrapping at
+/// the end. `None` when fewer than two modes are advertised (nothing to cycle).
+/// If `current` is not in the list, cycling starts from the first mode. Pure
+/// logic for `Workspace::cycle_agent_mode` (Shift+Tab).
+fn next_mode_id(modes: &daruda_acp::ModeStateView) -> Option<String> {
+    if modes.available.len() < 2 {
+        return None;
+    }
+    let current = modes
+        .available
+        .iter()
+        .position(|m| m.id == modes.current)
+        .unwrap_or(0);
+    let next = (current + 1) % modes.available.len();
+    Some(modes.available[next].id.clone())
 }
 
 /// The visible foldable-key set for a conversation: each assistant / thinking
@@ -648,7 +700,51 @@ pub(in crate::workspace) fn cancel_pending_permission(view: &mut AgentChatView) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_acp::{ChatItem, ToolCallItem};
+    use daruda_acp::{ChatItem, ModeStateView, SessionModeView, ToolCallItem};
+
+    fn modes(ids: &[&str], current: &str) -> ModeStateView {
+        ModeStateView {
+            available: ids
+                .iter()
+                .map(|id| SessionModeView {
+                    id: (*id).to_string(),
+                    name: (*id).to_string(),
+                    description: None,
+                })
+                .collect(),
+            current: current.to_string(),
+        }
+    }
+
+    #[test]
+    fn next_mode_id_wraps_through_advertised_order() {
+        let m = modes(&["default", "acceptEdits", "bypassPermissions"], "default");
+        assert_eq!(next_mode_id(&m).as_deref(), Some("acceptEdits"));
+        let m = modes(
+            &["default", "acceptEdits", "bypassPermissions"],
+            "acceptEdits",
+        );
+        assert_eq!(next_mode_id(&m).as_deref(), Some("bypassPermissions"));
+        // Wrap: last → first.
+        let m = modes(
+            &["default", "acceptEdits", "bypassPermissions"],
+            "bypassPermissions",
+        );
+        assert_eq!(next_mode_id(&m).as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn next_mode_id_none_when_not_cyclable() {
+        // Zero or one advertised mode → nothing to cycle.
+        assert_eq!(next_mode_id(&modes(&[], "")), None);
+        assert_eq!(next_mode_id(&modes(&["default"], "default")), None);
+    }
+
+    #[test]
+    fn next_mode_id_starts_from_first_when_current_unknown() {
+        let m = modes(&["default", "acceptEdits"], "stale-id");
+        assert_eq!(next_mode_id(&m).as_deref(), Some("acceptEdits"));
+    }
 
     /// A syntax theme id every test reuses for the highlight passes.
     const TEST_SYNTAX_THEME: &str = "base16-ocean.dark";

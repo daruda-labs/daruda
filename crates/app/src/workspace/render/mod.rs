@@ -422,9 +422,9 @@ impl Render for Workspace {
         // by repainting on every 250 ms status-pulse tick (which leaves
         // this snapshot identical). Per root CLAUDE.md Pitfall #10.
         self.bottom_dock.update(cx, |d, cx| {
-            let unchanged = matches!(&d.snap, DockSnapshot::Bottom(old) if *old == bottom_snap);
+            let unchanged = matches!(&d.snap, DockSnapshot::Bottom(old) if **old == bottom_snap);
             if !unchanged {
-                d.snap = DockSnapshot::Bottom(bottom_snap);
+                d.snap = DockSnapshot::Bottom(Box::new(bottom_snap));
                 cx.notify();
             }
         });

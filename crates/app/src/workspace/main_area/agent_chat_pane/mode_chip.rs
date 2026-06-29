@@ -1,20 +1,23 @@
-//! Mode-selector chip for the Agent chat fold toolbar.
+//! Mode-selector chip for the bottom-dock terminal input.
 //!
-//! Renders the current session mode as a ghost `xsmall` button with a
-//! chevron; clicking it opens a dropdown listing every advertised mode.
-//! Selecting a mode dispatches `AgentChatView::set_mode` (one-line dispatch —
-//! no state logic in this builder, MVU view purity).
+//! Renders the focused Agent chat pane's current session mode as a ghost
+//! `xsmall` button with a chevron; clicking it opens a dropdown listing every
+//! advertised mode. Selecting a mode dispatches `Workspace::set_agent_mode`
+//! for that pane (one-line dispatch — no state logic in this builder, MVU view
+//! purity + one-way data flow: the dock view dispatches through `Workspace`,
+//! which owns the mutation).
 //!
-//! Only rendered when `modes.available` is non-empty (the caller gates).
+//! Only rendered when the focused pane is an Agent chat pane whose
+//! `modes.available` is non-empty (the caller gates).
 
 use daruda_acp::ModeStateView;
-use gpui::{IntoElement, SharedString, prelude::*};
+use gpui::{IntoElement, SharedString, WeakEntity};
 
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
 };
-use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
+use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Build the mode chip element. The caller is responsible for only
@@ -24,11 +27,11 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// display name (looked up from `available`; falls back to `current` id if
 /// the id is not listed) with a chevron appended. Clicking it opens a
 /// dropdown with one item per available mode; each item one-line dispatches
-/// into `AgentChatView::set_mode`.
+/// into `Workspace::set_agent_mode(pane_id, mode_id)`.
 pub(in crate::workspace) fn mode_chip(
     pane_id: PaneId,
     modes: &ModeStateView,
-    cx: &mut Context<AgentChatView>,
+    workspace: WeakEntity<Workspace>,
 ) -> impl IntoElement + use<> {
     // Look up the current mode's display name; fall back to the id itself.
     let display_name = modes
@@ -49,36 +52,38 @@ pub(in crate::workspace) fn mode_chip(
         .map(|v| (v.id.clone(), v.name.clone()))
         .collect();
     let current = modes.current.clone();
-    let view = cx.weak_entity();
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
 
     button(chip_id, label)
         .ghost()
         .xsmall()
-        .dropdown_menu(move |menu, _window, _cx| build_mode_menu(&available, &current, &view, menu))
+        .dropdown_menu(move |menu, _window, _cx| {
+            build_mode_menu(pane_id, &available, &current, &workspace, menu)
+        })
 }
 
 /// Build the mode selection popup menu. One item per available mode; the
 /// currently-active mode gets a checkmark. Each item is a one-line dispatch
-/// into `AgentChatView::set_mode` (render purity; no logic here).
+/// into `Workspace::set_agent_mode` (render purity; no logic here).
 fn build_mode_menu(
+    pane_id: PaneId,
     available: &[(String, String)],
     current: &str,
-    view: &gpui::WeakEntity<AgentChatView>,
+    workspace: &WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
     available.iter().fold(menu, |m, (id, name)| {
-        let view = view.clone();
+        let workspace = workspace.clone();
         let mode_id = id.clone();
         let is_current = id == current;
         m.item(
             PopupMenuItem::new(SharedString::from(name.clone()))
                 .checked(is_current)
                 .on_click(move |_, _window, app| {
-                    if let Some(v) = view.upgrade() {
+                    if let Some(ws) = workspace.upgrade() {
                         let mode_id = mode_id.clone();
-                        v.update(app, |this, cx| this.set_mode(mode_id, cx));
+                        ws.update(app, |ws, cx| ws.set_agent_mode(pane_id, mode_id, cx));
                     }
                 }),
         )

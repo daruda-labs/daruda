@@ -694,6 +694,7 @@ impl Workspace {
         );
 
         let ws_for_input = ws_weak.clone();
+        let ws_for_tab = ws_weak.clone();
         let ws_for_accept = ws_weak.clone();
         let ws_for_provider = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
@@ -708,6 +709,17 @@ impl Workspace {
                         let ws = ws.read(app);
                         ws.is_agent_chat_pane(ws.main_area.focused_pane_id)
                             && !ws.agent.use_modifier_to_send
+                    })
+                })
+                // Shift+Tab cycles the focused agent pane's session mode (Claude
+                // Code's permission-mode cycle). `cycle_agent_mode` returns true
+                // only when it actually switched (agent pane focused with ≥2
+                // modes); the input then skips outdent. Otherwise it falls
+                // through to the default outdent. Evaluated live on each press.
+                .on_secondary_tab(move |_window, app| {
+                    ws_for_tab.upgrade().is_some_and(|ws| {
+                        let focused = ws.read(app).main_area.focused_pane_id;
+                        ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
                     })
                 })
                 // Accepting a slash-command completion routes through the
@@ -748,6 +760,8 @@ impl Workspace {
         // `PressEnter { secondary: true }` is emitted on every *submit* —
         // Cmd+Enter always, plus a plain Enter when the `submit_on_enter`
         // predicate above is active (agent pane focused, modifier-to-send off).
+        // Shift+Tab mode cycling is handled directly by the `on_secondary_tab`
+        // handler installed above (no event round-trip needed).
         let terminal_input_sub = cx.subscribe_in(
             &terminal_input,
             window,

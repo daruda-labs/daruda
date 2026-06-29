@@ -8,17 +8,21 @@
 //! field. The send key depends on context: a focused agent chat pane
 //! sends on Enter (Shift+Enter for a newline) unless the
 //! `agent.use_modifier_to_send` config is on, in which case — and for
-//! terminal panes — Cmd+Enter sends. The keyboard path lives in
-//! `workspace::mod.rs` via `subscribe_in` on the `InputState`; this file
-//! owns the visual layout + the button-click handler.
+//! terminal panes — Cmd+Enter sends. While an agent chat pane that
+//! advertises ≥2 session modes is focused, Shift+Tab cycles the mode
+//! (Claude Code's permission-mode cycle) instead of outdenting. The
+//! keyboard path lives in `workspace::mod.rs` via `subscribe_in` on the
+//! `InputState`; this file owns the visual layout + the button-click handler.
 //!
-//! Layout sketch (every dock height):
+//! Layout sketch (every dock height). The mode chip only appears when the
+//! focused pane is an Agent chat pane that advertises session modes; a
+//! terminal-pane focus shows the Submit button alone:
 //!
 //! ```text
-//! ┌──────────────────────────┐
-//! │ text                     │
-//! │ ...              [Submit]│
-//! └──────────────────────────┘
+//! ┌──────────────────────────────┐
+//! │ text                         │
+//! │ ...        [Mode ▾][Submit]  │
+//! └──────────────────────────────┘
 //! ```
 //!
 //! Drop handling — dropped paths are quoted with [`shell_quote`] using
@@ -74,13 +78,36 @@ pub(in crate::workspace) fn render_body(
                 }))
         }
     };
-    // The Submit button sits beside the text in its own column (see
+    // When the focused pane is an Agent chat pane that advertises modes, a
+    // mode-selector chip sits to the left of the Submit button (both in the
+    // input's right-hand action column). It is agent-only: a terminal-pane
+    // focus carries `None`, so only Submit shows. Selecting a mode dispatches
+    // through `Workspace::set_agent_mode` (one-way data flow).
+    let action: AnyElement = match &snap.agent_mode {
+        Some((pane_id, modes)) => {
+            let chip = super::super::agent_chat_pane::mode_chip::mode_chip(
+                *pane_id,
+                modes,
+                snap.workspace.clone(),
+            );
+            div()
+                .flex()
+                .flex_row()
+                .items_end()
+                .gap(gpui::px(theme::AGENT_CHAT_MSG_GAP))
+                .child(chip)
+                .child(submit)
+                .into_any_element()
+        }
+        None => submit.into_any_element(),
+    };
+    // The action column sits beside the text in its own column (see
     // `input_with_action`), so the text uses the cell's full height at
     // every dock size — no row-preset branch is needed.
     let cell = div()
         .flex_1()
         .flex()
-        .child(crate::ui::input_with_action(&state, submit, cx, 0_isize));
+        .child(crate::ui::input_with_action(&state, action, cx, 0_isize));
     super::bottom_panel_body()
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)

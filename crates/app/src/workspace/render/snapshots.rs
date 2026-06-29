@@ -195,6 +195,20 @@ impl Workspace {
             .and_then(|p| p.agent_chat_view())
             .filter(|view| view.read(cx).turn_in_flight)
             .map(|_| focused_id);
+        // The mode chip shows in the bottom input only when the focused pane is
+        // an Agent chat pane that advertises modes — independent of
+        // `turn_in_flight`, so the mode can be set before the first prompt. A
+        // terminal-pane focus yields `None` (the input is shared across pane
+        // kinds, so the chip must stay agent-only).
+        let agent_mode = self
+            .main_area
+            .panes
+            .iter()
+            .find(|p| p.id == focused_id)
+            .and_then(|p| p.agent_chat_view())
+            .and_then(|view| view.read(cx).modes.clone())
+            .filter(|m| !m.available.is_empty())
+            .map(|m| (focused_id, m));
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
@@ -204,6 +218,7 @@ impl Workspace {
             bottom_dock_size,
             terminal_input: self.terminal_input.clone(),
             agent_stop_pane,
+            agent_mode,
             shell,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }

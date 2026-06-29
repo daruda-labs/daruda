@@ -87,8 +87,8 @@ pub(in crate::workspace) fn render(
 
     // Expand-all / collapse-all chrome sits between the banner and the list,
     // but only once there is a conversation to fold.
-    let fold_toolbar: Option<AnyElement> = (!content.items.is_empty())
-        .then(|| fold_toolbar(pane_id, content.modes.as_ref(), &t, cx).into_any_element());
+    let fold_toolbar: Option<AnyElement> =
+        (!content.items.is_empty()).then(|| fold_toolbar(pane_id, &t, cx).into_any_element());
 
     // The scroll-to-bottom button overlays the list when the user has scrolled
     // up off the bottom (tail-follow released). It anchors to the body slot
@@ -515,16 +515,14 @@ fn scroll_to_bottom_button(
         )
 }
 
-/// A toolbar row with "Expand all" / "Collapse all" buttons on the right and
-/// an optional mode-selector chip on the left. Dev-tool chrome that should
-/// recede: ghost, `xsmall`, muted until hover. Each button / chip is a
-/// one-line dispatch into a `Workspace` op (render purity — no logic here).
-/// `justify_between` pushes the mode chip left and the fold controls right.
-/// Shown only when the conversation is non-empty (the caller gates on
-/// `content.items`).
+/// A toolbar row with "Expand all" / "Collapse all" buttons on the right.
+/// Dev-tool chrome that should recede: ghost, `xsmall`, muted until hover. Each
+/// button is a one-line dispatch into a `Workspace` op (render purity — no logic
+/// here). Shown only when the conversation is non-empty (the caller gates on
+/// `content.items`). The session mode-selector chip lives in the bottom-dock
+/// input (left of Submit), not here.
 fn fold_toolbar(
     pane_id: PaneId,
-    modes: Option<&daruda_acp::ModeStateView>,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
@@ -543,36 +541,19 @@ fn fold_toolbar(
     .xsmall()
     .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(false, cx)));
 
-    // Left slot: the mode chip when modes are advertised and non-empty;
-    // an empty div otherwise so `justify_between` still pushes the fold
-    // controls to the right.
-    let left: AnyElement = if let Some(m) = modes.filter(|m| !m.available.is_empty()) {
-        super::mode_chip::mode_chip(pane_id, m, cx).into_any_element()
-    } else {
-        div().into_any_element()
-    };
-
-    // Right slot: expand / collapse fold controls.
-    let right = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(expand)
-        .child(collapse);
-
     div()
         .flex_none()
         .w_full()
         .flex()
         .flex_row()
-        .justify_between()
+        .justify_end()
         .items_center()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .px(px(theme::AGENT_CHAT_PAD_X))
         .py(px(theme::AGENT_CHAT_PAD_Y))
         .text_color(t.text_muted)
-        .child(left)
-        .child(right)
+        .child(expand)
+        .child(collapse)
 }
 
 /// The thin top banner — shown while connecting or on error; hidden once

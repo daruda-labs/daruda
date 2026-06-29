@@ -338,6 +338,13 @@ pub struct InputState {
     /// `None` keeps the default behaviour (Enter inserts a newline, the host
     /// submits on Cmd+Enter). Used to implement chat-style "Enter to send".
     pub(super) submit_on_enter: Option<Box<dyn Fn(&App) -> bool + 'static>>,
+    /// Optional handler invoked on Shift+Tab in multi-line mode. It performs
+    /// the host's custom action and returns `true` when it handled the key —
+    /// in which case the input skips its default outdent. Returning `false`
+    /// (or `None` here) leaves Shift+Tab to outdent as usual. daruda uses it to
+    /// cycle the focused agent pane's session mode. Unlike `submit_on_enter`
+    /// (a pure predicate), this does work, so it takes `&mut Window, &mut App`.
+    pub(super) on_secondary_tab: Option<Box<dyn Fn(&mut Window, &mut App) -> bool + 'static>>,
     /// Invoked when the user accepts a completion item from the completion menu.
     /// `Rc` (not `Box` like `submit_on_enter`) so the consumer can clone the
     /// handler out and move it into a deferred closure — the accept fires inside
@@ -442,6 +449,7 @@ impl InputState {
             pattern: None,
             validate: None,
             submit_on_enter: None,
+            on_secondary_tab: None,
             on_completion_accept: None,
             mode: InputMode::default(),
             last_layout: None,
@@ -486,6 +494,19 @@ impl InputState {
     /// [`Self::submit_on_enter`] field docs.
     pub fn submit_on_enter(mut self, predicate: impl Fn(&App) -> bool + 'static) -> Self {
         self.submit_on_enter = Some(Box::new(predicate));
+        self
+    }
+
+    /// Install a handler invoked when Shift+Tab is pressed in a multi-line
+    /// input. It runs the host's custom action and returns `true` to consume
+    /// the key (the input then skips its default outdent), `false` to fall
+    /// through to outdent. Evaluated live so it can reflect external state
+    /// (e.g. which pane is focused); see [`Self::on_secondary_tab`] field docs.
+    pub fn on_secondary_tab(
+        mut self,
+        handler: impl Fn(&mut Window, &mut App) -> bool + 'static,
+    ) -> Self {
+        self.on_secondary_tab = Some(Box::new(handler));
         self
     }
 
