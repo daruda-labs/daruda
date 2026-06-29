@@ -1268,10 +1268,20 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        // Collect ACP pane statuses (agent chat sessions) across all lanes —
-        // active and parked — so a backgrounded lane's animating agent chat
-        // still keeps the pulse pump alive.
-        let acp_statuses = self.acp_pane_statuses(cx);
+        // Collect ACP pane statuses (agent chat sessions).
+        let acp_statuses: Vec<(
+            crate::workspace::main_area::pane_tree::PaneId,
+            daruda_claude::SessionStatus,
+        )> = self
+            .main_area
+            .panes
+            .iter()
+            .filter_map(|p| {
+                let view = p.agent_chat_view()?;
+                let status = view.read(cx).to_session_status()?;
+                Some((p.id, status))
+            })
+            .collect();
         if self.claude.pty_claude_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }

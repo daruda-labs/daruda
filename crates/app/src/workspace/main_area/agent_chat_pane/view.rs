@@ -40,7 +40,8 @@ use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ModeStateView, PermissionDecision, PermissionKindView,
-    PlanEntryView, SlashCommand, apply_update, finalize_streaming, permission_item,
+    PlanEntryView, SlashCommand, apply_update, cancel_pending_tools, finalize_streaming,
+    permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -493,18 +494,30 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Request cancellation of the active turn. Sends `session/cancel` and, per
-    /// ACP, resolves any permission request still awaiting the user with a
-    /// cancelled outcome.
+    /// Stop the active turn. Sends `session/cancel` *and* ends the turn locally,
+    /// right now — it does not wait for the agent's stop reason.
+    ///
+    /// `session/cancel` is only cooperative: a hung or dead agent may never
+    /// return a `Cancelled` stop reason, and `AcpEvent::TurnEnded` (the sole
+    /// other place `turn_in_flight` clears) would then never arrive — leaving
+    /// the turn pulsing forever with the input stuck on "Stop". So Stop is
+    /// authoritative here: clear the in-flight state, settle streaming text and
+    /// still-running tool calls, and drain any pending permission. A later
+    /// `TurnEnded` for this turn is idempotent. Mirrors zed's
+    /// `AcpThread::cancel`, which takes `running_turn` and marks pending tools
+    /// cancelled without awaiting the agent.
     pub(in crate::workspace) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = &self.handle {
             handle.cancel();
         }
+        self.turn_in_flight = false;
+        self.turn_started_at = None;
+        finalize_streaming(&mut self.items);
+        cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);
-        // Resolving the card flips it from pending → resolved, so its row no
-        // longer force-stays-visible under a collapsed response: reproject so it
-        // folds back into the process immediately. A drained card also swaps its
-        // buttons for a one-line outcome (height change), so remeasure too.
+        // The above settle items (streaming → done, running tools → cancelled,
+        // pending card → resolved), changing both fold visibility and row
+        // heights, so reproject and remeasure before notifying.
         self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();

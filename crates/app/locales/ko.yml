@@ -219,6 +219,7 @@ agent_chat:
   tool_status_running: "실행 중"
   tool_status_done: "완료"
   tool_status_failed: "실패"
+  tool_status_cancelled: "취소됨"
   permission_title: "권한 필요"
   permission_resolved_prefix: "선택됨:"
   permission_cancelled: "취소됨."

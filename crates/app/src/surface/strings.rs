@@ -991,6 +991,11 @@ pub fn agent_chat_tool_status_failed() -> String {
     rust_i18n::t!("agent_chat.tool_status_failed").into_owned()
 }
 
+/// Tool-call status badge — cancelled (the turn was stopped before it settled).
+pub fn agent_chat_tool_status_cancelled() -> String {
+    rust_i18n::t!("agent_chat.tool_status_cancelled").into_owned()
+}
+
 /// Pinned working-footer label while the agent is generating a response.
 pub fn agent_chat_working() -> String {
     rust_i18n::t!("agent_chat.working").into_owned()

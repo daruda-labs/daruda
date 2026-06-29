@@ -73,6 +73,25 @@ pub fn finalize_streaming(items: &mut [ChatItem]) {
     }
 }
 
+/// Settle every still-running tool call as [`ToolStatusView::Cancelled`].
+///
+/// Called when the user stops a turn so `Pending` / `InProgress` tool cards
+/// stop reading as live (the tool-group rollup keys its blinking ● off
+/// `InProgress`). The counterpart to [`finalize_streaming`] for tool calls;
+/// terminal `Completed` / `Failed` calls keep their status.
+pub fn cancel_pending_tools(items: &mut [ChatItem]) {
+    for item in items.iter_mut() {
+        if let ChatItem::ToolCall(tc) = item
+            && matches!(
+                tc.status,
+                ToolStatusView::Pending | ToolStatusView::InProgress
+            )
+        {
+            tc.status = ToolStatusView::Cancelled;
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum StreamKind {
     Assistant,
@@ -458,6 +477,44 @@ mod tests {
             )),
             "every streamed block settles when the turn ends, not just the tail"
         );
+    }
+
+    #[test]
+    fn cancel_pending_tools_settles_only_unfinished_calls() {
+        let tool = |id: &str, status| {
+            ChatItem::ToolCall(ToolCallItem {
+                id: id.to_string(),
+                title: id.to_string(),
+                kind: ToolKindView::Read,
+                status,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: None,
+            })
+        };
+        let mut items = vec![
+            tool("pending", ToolStatusView::Pending),
+            tool("running", ToolStatusView::InProgress),
+            tool("done", ToolStatusView::Completed),
+            tool("failed", ToolStatusView::Failed),
+        ];
+        cancel_pending_tools(&mut items);
+        let status = |ix: usize| match &items[ix] {
+            ChatItem::ToolCall(tc) => tc.status,
+            _ => panic!("expected a tool call"),
+        };
+        assert_eq!(status(0), ToolStatusView::Cancelled, "pending → cancelled");
+        assert_eq!(
+            status(1),
+            ToolStatusView::Cancelled,
+            "in-progress → cancelled"
+        );
+        assert_eq!(
+            status(2),
+            ToolStatusView::Completed,
+            "completed is terminal"
+        );
+        assert_eq!(status(3), ToolStatusView::Failed, "failed is terminal");
     }
 
     #[test]

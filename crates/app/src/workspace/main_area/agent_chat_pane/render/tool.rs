@@ -137,6 +137,9 @@ fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedS
             s::agent_chat_tool_status_failed().into(),
             t.banner_error_text,
         ),
+        // Stopped before settling — muted like Pending (no error red, no
+        // success green): it neither failed nor completed.
+        ToolStatusView::Cancelled => (s::agent_chat_tool_status_cancelled().into(), t.text_muted),
     }
 }
 

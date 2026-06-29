@@ -399,6 +399,8 @@ fn response_bar(
                     ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                     ToolStatusView::Failed => failed = true,
                     ToolStatusView::Completed => any_ok = true,
+                    // Settled, neither success nor failure — sets no flag.
+                    ToolStatusView::Cancelled => {}
                 }
             }
             ChatItem::AssistantText {
@@ -495,6 +497,10 @@ fn tool_group_bar(
                 ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                 ToolStatusView::Failed => failed = true,
                 ToolStatusView::Completed => any_ok = true,
+                // Cancelled is settled but neither a success nor a failure, so
+                // it sets no flag — it stops the run pulsing without turning
+                // the rollup glyph red.
+                ToolStatusView::Cancelled => {}
             }
         }
     }

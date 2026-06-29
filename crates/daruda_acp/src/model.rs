@@ -73,6 +73,10 @@ pub enum ToolStatusView {
     InProgress,
     Completed,
     Failed,
+    /// The turn was stopped before this tool call settled. Set host-side by
+    /// [`crate::cancel_pending_tools`] when the user cancels — agents never
+    /// emit it, so it has no `ToolCallStatus` mapping.
+    Cancelled,
 }
 
 /// Tool category (mirror of the protocol's `ToolKind`) — drives icon/treatment.
