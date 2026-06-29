@@ -1,9 +1,8 @@
 # Agent Workflow Notes
 
-Supplements `CLAUDE.md` with workflow-level rules for automated agents.
-Project conventions (crate layout, code style, error handling, pitfall
-rules) live in `CLAUDE.md` — this file covers only how to move work
-through the repo.
+Workflow-level rules for automated agents. Project conventions (crate
+layout, code style, error handling, pitfall rules) live in the project
+guide — this file covers only how to move work through the repo.
 
 ## Branch & commit
 
@@ -37,6 +36,30 @@ the user explicitly asks).
 - Don't leave half-finished code paths in the repo; if a change cannot
   land end-to-end, pause and surface the blocker instead.
 
+## Change-impact discipline
+
+Before editing a shared or public type, decide the *extension point* — not
+just the change — and pick the one with the smallest blast radius.
+
+- Before changing any shared/public type, function signature, or enum,
+  grep all usages and call sites first. Don't assume isolated impact;
+  state the blast radius (how many sites this forces you to touch).
+- Prefer additive, backward-compatible changes (a new optional field /
+  parameter, a new opt-in hook) over invasive ones (a new enum variant, a
+  changed signature). A host-specific behavior belongs in an opt-in
+  callback installed where it's needed — not in a shared enum that every
+  exhaustive `match` must now grow an arm for.
+- If a single logical change forces the *same mechanical edit* across many
+  unrelated files (Shotgun Surgery — e.g. an identical no-op `match` arm
+  added in N places), stop: the seam is wrong, redesign rather than push
+  the churn through. Copy-pasting the same edit a second time is the tell.
+- Look for an existing precedent in the same module before inventing a new
+  mechanism, and mirror it only after checking *why* it's shaped that way
+  (an existing enum variant is cheap to match; a *new* one is a breaking
+  change to every consumer).
+- When two designs are equally correct, the one that touches fewer sites on
+  the next change wins (Correctness > Maintainability).
+
 ## Verification
 
 - Provide explicit verification steps (commands + expected outcomes)
@@ -49,8 +72,8 @@ the user explicitly asks).
 
 ## Documentation
 
-- Follow the in-progress-docs rule in `CLAUDE.md`: session handoffs,
-  progress reports, and other short-lived notes do not belong in git.
+- In-progress docs stay out of the repo: session handoffs, progress
+  reports, and other short-lived notes do not belong in git.
 - Design notes, plans, ADRs, and session handoffs go to a personal
   document store outside the repository, not `docs/` or anywhere in the
   repo.
@@ -60,6 +83,5 @@ the user explicitly asks).
 
 ## Language
 
-- Code, identifiers, comments, and Markdown documents: English only
-  (matches `CLAUDE.md`).
+- Code, identifiers, comments, and Markdown documents: English only.
 - Discussion with the user: whatever language the user uses.
