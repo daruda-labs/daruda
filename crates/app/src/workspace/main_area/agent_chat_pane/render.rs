@@ -178,6 +178,7 @@ pub(in crate::workspace) fn render(
             pane_id,
             &content.plan,
             content.plan_collapsed,
+            &content.plan_scroll,
             &t,
             cx,
         ))
@@ -657,6 +658,7 @@ fn plan_region(
     pane_id: PaneId,
     plan: &[PlanEntryView],
     collapsed: bool,
+    plan_scroll: &gpui::ScrollHandle,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> Option<AnyElement> {
@@ -750,20 +752,20 @@ fn plan_region(
         .child(header);
 
     if !collapsed {
+        // The plan list is a plain `Div` (not `list()`) — no virtualisation, which
+        // is fine for a typically small dataset (< 50 entries). It still gets the
+        // project's 4px daruda thumb via the `Div`/`ScrollHandle` variant
+        // (`vertical_thumb`), tracked through `plan_scroll`, matching the file
+        // viewer and conversation. If 100+ entries become common, migrate to
+        // `list()` to bound full-tree repaint cost.
         let mut list = div()
             .id(("agent-chat-plan-list", pane_id as usize))
             .flex()
             .flex_col()
             .gap(px(theme::AGENT_CHAT_MSG_GAP))
             .max_h(px(theme::AGENT_CHAT_PLAN_MAX_H))
-            // WORKAROUND: plan list uses a plain Div (not `list()`) — no virtualisation.
-            // Root cause: `list()` requires an `Entity<ListState>` and row-count wiring
-            // that adds complexity for a typically small dataset (< 50 entries).
-            // Acceptable while agent plans stay in that range; if 100+ entries become
-            // common, migrate to `list()` to avoid full-tree repaint cost.
-            // The Div also lacks the project's 4px daruda thumb (`vertical_thumb_for_list`
-            // doesn't apply); deferred — small surface (max 168px).
             .overflow_y_scroll()
+            .track_scroll(plan_scroll)
             .px(px(theme::AGENT_CHAT_PAD_X))
             .pb(px(theme::AGENT_CHAT_PAD_Y));
         for entry in plan {
@@ -802,7 +804,32 @@ fn plan_region(
                     ),
             );
         }
-        region = region.child(list);
+        // The thumb sources its geometry from `plan_scroll`: the viewport height
+        // from the scroll container's bounds, the total content height as
+        // `viewport_h + max_offset().y` (the `ScrollHandle` convention noted in
+        // `crate::ui::scrollbar::vertical_thumb`), and the offset from
+        // `offset().y`. `top_offset` is `px(0.)` — the list starts at the
+        // relative wrapper's origin. The wrapper is `.relative()` so the absolute
+        // thumb (`.right(...)`) positions against it.
+        let viewport_h = plan_scroll.bounds().size.height;
+        let content_h = viewport_h + plan_scroll.max_offset().y;
+        let thumb = crate::ui::scrollbar::vertical_thumb(
+            ("agent-chat-plan-scrollbar", pane_id as usize),
+            viewport_h,
+            content_h,
+            plan_scroll.offset().y,
+            px(0.),
+            t.scrollbar_thumb,
+            t.file_viewer_scrollbar_thumb_hover,
+        );
+        region = region.child(
+            div()
+                .relative()
+                .flex_none()
+                .w_full()
+                .child(list)
+                .children(thumb),
+        );
     }
 
     Some(region.into_any_element())

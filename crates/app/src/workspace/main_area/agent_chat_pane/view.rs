@@ -45,7 +45,7 @@ use daruda_acp::{
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
     AnyWindowHandle, App, Context, Entity, FocusHandle, Focusable, FollowMode, ListAlignment,
-    ListState, Task, Window, prelude::*, px,
+    ListState, ScrollHandle, Task, Window, prelude::*, px,
 };
 
 use super::agent_chat_ops::{
@@ -193,6 +193,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// session-only; defaults to `false` (expanded) so a fresh plan shows its
     /// checklist. Toggled by the header click via [`Self::toggle_plan_collapsed`].
     pub(in crate::workspace) plan_collapsed: bool,
+    /// Scroll position of the expanded plan checklist (a plain `Div`, not a
+    /// `list()`), backing the region's 4px daruda thumb overlay. Runtime-only;
+    /// never serialized.
+    pub(in crate::workspace) plan_scroll: ScrollHandle,
     /// Test-only render counter, asserted by the cache-scoping regression test
     /// (`notify_rerenders_cached_agent_view`) to confirm a `cx.notify()` on this
     /// view actually re-renders it.
@@ -267,6 +271,7 @@ impl AgentChatView {
             plan: Vec::new(),
             session_title: None,
             plan_collapsed: false,
+            plan_scroll: ScrollHandle::new(),
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
@@ -358,15 +363,24 @@ impl AgentChatView {
                 // cancelled / refused mid-request — drain it so no card is left
                 // with live buttons (no-op on a normal turn).
                 cancel_pending_permission(self);
+                // Auto-collapse the plan region so the completed checklist
+                // recedes to a one-line summary. The next `PlanChanged` will
+                // re-expand it (see below).
+                if !self.plan.is_empty() {
+                    self.plan_collapsed = true;
+                }
             }
             AcpEvent::AvailableCommandsChanged(commands) => {
                 self.available_commands = commands;
             }
-            // Full-replace the plan; `plan_collapsed` is intentionally preserved — the
-            // agent updates the plan frequently mid-turn, so auto-expanding on every
-            // update would fight the user. First arrival shows expanded via the
-            // `plan_collapsed: false` default.
+            // Full-replace the plan. Auto-expand when the plan content actually
+            // changes (new turn's plan arrived) so the user sees the fresh
+            // checklist. Mid-turn re-deliveries of the same entries keep the
+            // current collapsed/expanded state to avoid fighting the user.
             AcpEvent::PlanChanged(entries) => {
+                if self.plan != entries {
+                    self.plan_collapsed = false;
+                }
                 self.plan = entries;
             }
             AcpEvent::SessionTitleChanged(title) => {
