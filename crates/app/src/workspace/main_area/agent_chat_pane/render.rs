@@ -884,6 +884,17 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     })
 }
 
+/// Human-readable elapsed time for the working indicator.
+/// Formats as `"5s"` under a minute, `"1m05s"` at or over a minute.
+fn format_elapsed(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    }
+}
+
 /// Animated trailing dots (".", "..", "...") for any "in progress" label. Cycles
 /// off the shared, CPU-gated `StatusPulseClock` — the pulse pump dirties the
 /// in-flight agent chat view each tick (`Workspace::notify_in_flight_agent_chats`),
@@ -925,7 +936,10 @@ fn working_indicator(
 ) -> impl IntoElement + use<> {
     let base = working_status(content);
     let dots = pulse_dots(cx);
-    div()
+    let elapsed_label = content
+        .turn_started_at
+        .map(|start| format_elapsed(start.elapsed()));
+    let row = div()
         .w_full()
         .min_w_0()
         .flex()
@@ -941,7 +955,18 @@ fn working_indicator(
                 .text_color(t.text_subtle)
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(format!("{base}{dots}"))),
+        );
+    if let Some(elapsed) = elapsed_label {
+        row.child(
+            div()
+                .flex_none()
+                .text_color(t.text_muted)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .child(SharedString::from(elapsed)),
         )
+    } else {
+        row
+    }
 }
 
 /// One conversation row. Message bodies render as selectable markdown via
@@ -1678,7 +1703,7 @@ fn permission_button(
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_progress, running_tool_title};
+    use super::{format_elapsed, plan_progress, running_tool_title};
     use daruda_acp::{
         ChatItem, PlanEntryView, PlanPriority, PlanStatus, ToolCallItem, ToolKindView,
         ToolStatusView,
@@ -1752,5 +1777,28 @@ mod tests {
             tool("c3", ToolStatusView::Pending),
         ];
         assert_eq!(running_tool_title(&items), Some("Tool c2".to_owned()));
+    }
+
+    #[test]
+    fn format_elapsed_zero_seconds() {
+        assert_eq!(format_elapsed(std::time::Duration::from_secs(0)), "0s");
+    }
+
+    #[test]
+    fn format_elapsed_five_seconds() {
+        assert_eq!(format_elapsed(std::time::Duration::from_secs(5)), "5s");
+    }
+
+    #[test]
+    fn format_elapsed_sixty_five_seconds() {
+        assert_eq!(format_elapsed(std::time::Duration::from_secs(65)), "1m05s");
+    }
+
+    #[test]
+    fn format_elapsed_six_hundred_seconds() {
+        assert_eq!(
+            format_elapsed(std::time::Duration::from_secs(600)),
+            "10m00s"
+        );
     }
 }

@@ -137,6 +137,9 @@ pub(in crate::workspace) struct AgentChatView {
     /// the input affordance (Send ↔ Stop) and disables re-submit while the
     /// agent is busy.
     pub(in crate::workspace) turn_in_flight: bool,
+    /// Wall-clock instant when the current turn started; `None` when idle.
+    /// Runtime-only — not persisted.
+    pub(in crate::workspace) turn_started_at: Option<std::time::Instant>,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
     /// Built once per diff by `reconcile_diff_editors` — the same
@@ -250,6 +253,7 @@ impl AgentChatView {
             _event_pump: None,
             pending_permission: None,
             turn_in_flight: false,
+            turn_started_at: None,
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
@@ -359,6 +363,7 @@ impl AgentChatView {
             AcpEvent::TurnEnded { .. } => {
                 finalize_streaming(&mut self.items);
                 self.turn_in_flight = false;
+                self.turn_started_at = None;
                 // A turn only ends with a permission still pending when it was
                 // cancelled / refused mid-request — drain it so no card is left
                 // with live buttons (no-op on a normal turn).
@@ -392,6 +397,7 @@ impl AgentChatView {
             AcpEvent::Error(message) => {
                 self.status = AgentSessionStatus::Error(message);
                 self.turn_in_flight = false;
+                self.turn_started_at = None;
                 cancel_pending_permission(self);
             }
         }
@@ -468,6 +474,7 @@ impl AgentChatView {
         if let Some(handle) = &self.handle {
             handle.send_prompt(text);
             self.turn_in_flight = true;
+            self.turn_started_at = Some(std::time::Instant::now());
         }
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
         // be a no-op here; diff editors are reconciled solely on the event-pump
