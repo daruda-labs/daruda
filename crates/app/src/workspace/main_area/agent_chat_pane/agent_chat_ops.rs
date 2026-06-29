@@ -378,8 +378,18 @@ impl Workspace {
             .any(|p| p.id == pane_id && p.agent_chat_view().is_some())
     }
 
-    /// Look up an AgentChat pane's view entity by id. Returns `None` when the
-    /// pane is gone or is not an AgentChat pane.
+    /// Look up an AgentChat pane's view entity by id — across the active lane's
+    /// live panes **and** every inactive lane's parked panes. Returns `None`
+    /// when the pane is gone or is not an AgentChat pane.
+    ///
+    /// Scanning the inactive lanes is essential, not a convenience: the view's
+    /// event pump looks the view up by id on every ACP event, and switching
+    /// lanes moves the pane out of `main_area.panes` into
+    /// `inactive_lane_runtimes` (`activate_lane`'s `mem::take`). A main-area-only
+    /// lookup would then return `None`, the pump would treat it as "view gone"
+    /// and break its loop, and the session's remaining responses would be
+    /// dropped forever — even after switching back. Pane ids are
+    /// workspace-global, so scanning both sets is unambiguous.
     pub(in crate::workspace) fn agent_chat_view(
         &self,
         pane_id: PaneId,
@@ -387,6 +397,12 @@ impl Workspace {
         self.main_area
             .panes
             .iter()
+            .chain(
+                self.main_area
+                    .inactive_lane_runtimes
+                    .values()
+                    .flat_map(|rt| rt.panes.iter()),
+            )
             .find(|p| p.id == pane_id)?
             .agent_chat_view()
     }

@@ -732,3 +732,48 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
     })
     .unwrap();
 }
+
+#[gpui::test]
+async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let id = pane.id;
+            ws.main_area.panes.push(pane);
+            assert!(
+                ws.agent_chat_view(id).is_some(),
+                "found while live in the active lane"
+            );
+
+            // Simulate a lane switch: `activate_lane` freezes the active lane's
+            // panes into `inactive_lane_runtimes` via mem::take, so the pane
+            // leaves `main_area.panes`. (The map key is arbitrary here — the
+            // lookup scans every inactive runtime.)
+            let parked = ws.main_area.panes.pop().expect("the pane we just pushed");
+            let key = ws.active;
+            ws.main_area.inactive_lane_runtimes.insert(
+                key,
+                crate::workspace::LaneRuntime {
+                    tabs: Vec::new(),
+                    panes: vec![parked],
+                    active_tab_index: 0,
+                    tab_history: Vec::new(),
+                    focused_pane_id: id,
+                },
+            );
+
+            // The event pump looks the view up by id on every ACP event; it must
+            // still resolve while the lane is parked, or the pump breaks and the
+            // session's responses are dropped after a lane switch.
+            assert!(
+                ws.agent_chat_view(id).is_some(),
+                "agent_chat_view must find a pane parked in an inactive lane"
+            );
+        });
+    })
+    .unwrap();
+}
