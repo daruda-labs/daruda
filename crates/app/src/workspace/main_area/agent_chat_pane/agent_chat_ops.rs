@@ -296,6 +296,27 @@ impl Workspace {
         }
     }
 
+    /// Cancel `pane_id`'s turn only when one is actually in flight. Backs the
+    /// Escape shortcut (the keyboard counterpart of the "Stop" button): returns
+    /// `true` when it cancelled, `false` when `pane_id` is not an Agent chat
+    /// pane or has no turn running — in which case the caller lets Escape
+    /// propagate as usual. Mirrors the `agent_stop_pane` snapshot condition that
+    /// shows the Stop button.
+    pub(in crate::workspace) fn cancel_agent_turn_if_in_flight(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return false;
+        };
+        if !view.read(cx).turn_in_flight {
+            return false;
+        }
+        view.update(cx, |v, cx| v.cancel_turn(cx));
+        true
+    }
+
     /// Switch the active session mode of an Agent chat pane. Shim for the
     /// bottom-dock mode chip: routes the chosen mode id into the focused pane's
     /// view, which optimistically updates the chip and sends `session/set_mode`.

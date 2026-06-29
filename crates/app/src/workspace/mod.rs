@@ -695,6 +695,7 @@ impl Workspace {
 
         let ws_for_input = ws_weak.clone();
         let ws_for_tab = ws_weak.clone();
+        let ws_for_escape = ws_weak.clone();
         let ws_for_accept = ws_weak.clone();
         let ws_for_provider = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
@@ -720,6 +721,18 @@ impl Workspace {
                     ws_for_tab.upgrade().is_some_and(|ws| {
                         let focused = ws.read(app).main_area.focused_pane_id;
                         ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
+                    })
+                })
+                // Escape cancels the focused agent pane's in-flight turn — the
+                // keyboard counterpart of the bottom-dock "Stop" button. Returns
+                // true only when a turn was actually running (so Escape keeps
+                // propagating normally otherwise). Fires only as a fallback after
+                // the input's own Escape handling (see `InputState::on_escape`),
+                // so an open completion menu still closes on the first Escape.
+                .on_escape(move |_window, app| {
+                    ws_for_escape.upgrade().is_some_and(|ws| {
+                        let focused = ws.read(app).main_area.focused_pane_id;
+                        ws.update(app, |ws, cx| ws.cancel_agent_turn_if_in_flight(focused, cx))
                     })
                 })
                 // Accepting a slash-command completion routes through the
@@ -1255,20 +1268,10 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        // Collect ACP pane statuses (agent chat sessions).
-        let acp_statuses: Vec<(
-            crate::workspace::main_area::pane_tree::PaneId,
-            daruda_claude::SessionStatus,
-        )> = self
-            .main_area
-            .panes
-            .iter()
-            .filter_map(|p| {
-                let view = p.agent_chat_view()?;
-                let status = view.read(cx).to_session_status()?;
-                Some((p.id, status))
-            })
-            .collect();
+        // Collect ACP pane statuses (agent chat sessions) across all lanes —
+        // active and parked — so a backgrounded lane's animating agent chat
+        // still keeps the pulse pump alive.
+        let acp_statuses = self.acp_pane_statuses(cx);
         if self.claude.pty_claude_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }

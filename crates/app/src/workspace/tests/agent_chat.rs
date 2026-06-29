@@ -363,8 +363,8 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
     use daruda_acp::{
-        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
-        ToolKindView, ToolStatusView,
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem, ToolKindView,
+        ToolStatusView,
     };
 
     let (window_handle, workspace) = build_workspace(cx);
@@ -434,11 +434,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
             agent_view(ws, pane_id).update(cx, |v, cx| {
-                v.respond_permission(
-                    "allow_once".to_string(),
-                    PermissionKindView::AllowOnce,
-                    cx,
-                );
+                v.respond_permission("allow_once".to_string(), PermissionKindView::AllowOnce, cx);
             });
         });
     })
@@ -622,6 +618,135 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
         assert!(
             view.pending_permission.is_none(),
             "the pending id is cleared on cancel"
+        );
+    });
+}
+
+#[gpui::test]
+async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let id = pane.id;
+            ws.main_area.panes.push(pane);
+
+            // No turn running yet → the Escape shim is a no-op and reports it
+            // did not handle the key, so Escape can propagate normally.
+            assert!(
+                !ws.cancel_agent_turn_if_in_flight(id, cx),
+                "no-op when no turn is in flight"
+            );
+
+            // Simulate a turn in flight, as `send_prompt` would.
+            agent_view(ws, id).update(cx, |v, _| v.turn_in_flight = true);
+            assert!(
+                ws.cancel_agent_turn_if_in_flight(id, cx),
+                "cancels and reports handled when a turn is in flight"
+            );
+
+            // An id that is not an agent chat pane reports not-handled, so
+            // Escape keeps propagating to ancestors.
+            let bogus: PaneId = id + 999;
+            assert!(
+                !ws.cancel_agent_turn_if_in_flight(bogus, cx),
+                "no-op for an id that is not an agent chat pane"
+            );
+        });
+    })
+    .unwrap();
+}
+
+/// Regression: an agent chat (ACP) session's lane indicator must survive a
+/// lane switch. ACP view entities are parked in `inactive_lane_runtimes` when
+/// their lane is deactivated, so the status collection must scan the inactive
+/// lanes too — not only the active lane's live `main_area.panes`. Before the
+/// fix, switching away from a lane blanked its agent-chat indicator (PTY
+/// sessions were unaffected because their bindings live in the workspace-wide
+/// `pty_claude_bindings`, which is why "the indicator used to always show").
+#[gpui::test]
+async fn acp_status_survives_lane_switch(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    // Both lane roots must exist on disk so activation classifies them as
+    // present and the swap proceeds.
+    let root_a = std::path::PathBuf::from("/tmp/test_acp_switch_a");
+    let root_b = std::path::PathBuf::from("/tmp/test_acp_switch_b");
+    let _ = std::fs::create_dir_all(&root_a);
+    let _ = std::fs::create_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
+    let window_handle = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            super::fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let workspace = window_handle.root(cx).unwrap();
+
+    // Seed a second lane to switch into.
+    workspace.update(cx, |ws, _cx| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
+        }
+    });
+
+    // Create an agent chat pane in the active lane (lane 0). `create_agent_chat_pane`
+    // opens no connection, so force it to `Connected` — `to_session_status` then
+    // reports `Some(_)`, i.e. a visible indicator.
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(root_a.clone()), window, cx);
+                let pane_id = pane.id;
+                let view = pane
+                    .agent_chat_view()
+                    .expect("agent chat view present")
+                    .clone();
+                ws.main_area.panes.push(pane);
+                view.update(cx, |v, _| v.status = AgentSessionStatus::Connected);
+                pane_id
+            })
+        })
+        .unwrap();
+
+    // Sanity: the status is collected while its lane is active.
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            ws.acp_pane_statuses(cx).iter().any(|(p, _)| *p == pane_id),
+            "ACP status is collected while its lane is active"
+        );
+    });
+
+    // Switch to lane 1 → lane 0's runtime (carrying the agent chat pane) parks
+    // in `inactive_lane_runtimes`.
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let proj = ws.active_ref().project;
+            ws.activate_lane(
+                daruda_store::project::LaneRef {
+                    project: proj,
+                    lane: 1,
+                },
+                window,
+                cx,
+            );
+            assert_eq!(ws.active.lane, 1);
+        });
+    })
+    .unwrap();
+
+    // The parked lane's agent chat must STILL report its status — otherwise its
+    // leading indicator vanishes the moment the user looks at another lane.
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            ws.acp_pane_statuses(cx).iter().any(|(p, _)| *p == pane_id),
+            "ACP status must survive a lane switch (pane parked in inactive runtime)"
         );
     });
 }

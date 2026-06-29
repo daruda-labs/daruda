@@ -345,6 +345,16 @@ pub struct InputState {
     /// cycle the focused agent pane's session mode. Unlike `submit_on_enter`
     /// (a pure predicate), this does work, so it takes `&mut Window, &mut App`.
     pub(super) on_secondary_tab: Option<Box<dyn Fn(&mut Window, &mut App) -> bool + 'static>>,
+    /// Optional handler invoked on Escape, but only as a *fallback* — after the
+    /// input's own Escape behaviours (dismiss an open completion/context menu,
+    /// clear an inline completion, abort an IME composition, `clean_on_escape`)
+    /// have had their turn. It performs the host's custom action and returns
+    /// `true` when it handled the key, in which case the input consumes the
+    /// Escape; returning `false` lets it propagate to ancestors as usual. Like
+    /// [`Self::on_secondary_tab`] it does work, so it takes `&mut Window,
+    /// &mut App`. daruda uses it to cancel the focused agent pane's in-flight
+    /// turn (the keyboard counterpart of the bottom-dock "Stop" button).
+    pub(super) on_escape: Option<Box<dyn Fn(&mut Window, &mut App) -> bool + 'static>>,
     /// Invoked when the user accepts a completion item from the completion menu.
     /// `Rc` (not `Box` like `submit_on_enter`) so the consumer can clone the
     /// handler out and move it into a deferred closure — the accept fires inside
@@ -450,6 +460,7 @@ impl InputState {
             validate: None,
             submit_on_enter: None,
             on_secondary_tab: None,
+            on_escape: None,
             on_completion_accept: None,
             mode: InputMode::default(),
             last_layout: None,
@@ -507,6 +518,18 @@ impl InputState {
         handler: impl Fn(&mut Window, &mut App) -> bool + 'static,
     ) -> Self {
         self.on_secondary_tab = Some(Box::new(handler));
+        self
+    }
+
+    /// Install a fallback handler invoked when Escape is pressed and the input
+    /// itself has nothing left to do with it (no open menu, no inline
+    /// completion, no IME composition, no `clean_on_escape`). It runs the host's
+    /// custom action and returns `true` to consume the key, `false` to let the
+    /// Escape propagate to ancestors. Evaluated live so it can reflect external
+    /// state (e.g. whether the focused pane has a turn in flight); see
+    /// [`Self::on_escape`] field docs.
+    pub fn on_escape(mut self, handler: impl Fn(&mut Window, &mut App) -> bool + 'static) -> Self {
+        self.on_escape = Some(Box::new(handler));
         self
     }
 
@@ -1342,12 +1365,21 @@ impl InputState {
             return; // Consume the escape, don't propagate
         }
 
-        if self.ime_marked_range.is_some() {
+        let ime_was_marked = self.ime_marked_range.is_some();
+        if ime_was_marked {
             self.unmark_text(window, cx);
         }
 
         if self.clean_on_escape {
             return self.clean(window, cx);
+        }
+
+        // Fallback host handler (daruda: cancel the in-flight agent turn). Fires
+        // only for a "bare" Escape — nothing above claimed it. Skipped right
+        // after an IME abort so a single Escape doesn't both cancel composition
+        // and run the host action.
+        if !ime_was_marked && self.on_escape.as_ref().is_some_and(|h| h(window, cx)) {
+            return;
         }
 
         cx.propagate();
