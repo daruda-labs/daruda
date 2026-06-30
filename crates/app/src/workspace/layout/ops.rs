@@ -50,14 +50,28 @@ pub(in crate::workspace) struct DockDrag {
 /// Pure height formula for the bottom dock auto-grow path.
 ///
 /// Given a display-row count (already clamped to `max_rows`) returns the
-/// desired dock height in pixels. First row is covered by
-/// `DOCK_BOTTOM_ROW_PRESET_1_H`; every additional display row adds
-/// `DOCK_BOTTOM_INPUT_EXTRA_LINE_H` (= `Rems(1.25) × rem_size(16px) = 20px`).
+/// desired dock height in pixels. The layout is stacked (`flex_col`):
+/// text area on top (full-width) + action row below (mode chip + Submit).
+///
+/// Formula: `TAB_BAR_HEIGHT + 2*PANEL_BODY_PAD_Y + DOCK_BOTTOM_INPUT_TEXT_PAD_H +
+///           rows * DOCK_BOTTOM_INPUT_EXTRA_LINE_H + DOCK_BOTTOM_INPUT_ACTION_ROW_H`
+///
+/// Each display row (soft-wrapped or hard-newline) contributes
+/// `DOCK_BOTTOM_INPUT_EXTRA_LINE_H` (20 px = `Rems(1.25) × 16 px`).
+/// The action row (`DOCK_BOTTOM_INPUT_ACTION_ROW_H`) is a fixed addend
+/// outside the per-row loop — it is not repeated with more lines.
 ///
 /// Extracted as a free function so it can be unit-tested without a GPUI context.
 pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
-    use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
-    DOCK_BOTTOM_ROW_PRESET_1_H + (rows.saturating_sub(1) as f32) * DOCK_BOTTOM_INPUT_EXTRA_LINE_H
+    use crate::ui::theme::{
+        DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+        DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y, TAB_BAR_HEIGHT,
+    };
+    TAB_BAR_HEIGHT
+        + 2.0 * PANEL_BODY_PAD_Y
+        + DOCK_BOTTOM_INPUT_TEXT_PAD_H
+        + rows as f32 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H
+        + DOCK_BOTTOM_INPUT_ACTION_ROW_H
 }
 
 impl Workspace {
@@ -316,9 +330,13 @@ impl Workspace {
 
         let desired = bottom_dock_height_for_rows(clamped);
 
-        // Only resize when the size actually changes to avoid notify storms.
+        // Grow-only: auto-height may enlarge the dock to fit more lines, but
+        // never shrinks it. The user manually dragged the dock to its current
+        // height; reducing it (e.g. after clearing the input on submit) would
+        // undo that intentional action. A smaller `desired` is silently
+        // ignored; only when `desired > current` do we invoke the resize path.
         let current = self.bottom_dock.read(cx).size;
-        if (desired - current).abs() < f32::EPSILON {
+        if desired <= current {
             return;
         }
 
@@ -375,28 +393,46 @@ mod tests {
 
     #[test]
     fn bottom_dock_height_arithmetic() {
-        use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
+        use crate::ui::theme::{
+            DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y, TAB_BAR_HEIGHT,
+        };
 
-        // 1 row — base height only; no extra-line addition.
+        // Stacked layout base (shared fixed overhead):
+        //   TAB_BAR_HEIGHT + 2*PANEL_BODY_PAD_Y + DOCK_BOTTOM_INPUT_TEXT_PAD_H
+        //   + DOCK_BOTTOM_INPUT_ACTION_ROW_H
+        let fixed = TAB_BAR_HEIGHT
+            + 2.0 * PANEL_BODY_PAD_Y
+            + DOCK_BOTTOM_INPUT_TEXT_PAD_H
+            + DOCK_BOTTOM_INPUT_ACTION_ROW_H;
+
+        // 1 row — fixed overhead + 1 line.
         assert_eq!(
             bottom_dock_height_for_rows(1),
-            DOCK_BOTTOM_ROW_PRESET_1_H,
-            "1 row should equal the preset-1 base"
+            fixed + DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "1 row should be fixed overhead + one line step"
         );
 
-        // 2 rows — base + one extra-line step (20 px).
+        // 2 rows — fixed overhead + 2 line steps.
         assert_eq!(
             bottom_dock_height_for_rows(2),
-            DOCK_BOTTOM_ROW_PRESET_1_H + DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
-            "2 rows should be base + one extra-line step"
+            fixed + 2.0 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "2 rows should be fixed overhead + two line steps"
         );
 
-        // At max cap (8 rows by default config) — base + 7 extra-line steps.
+        // At max cap (8 rows by default config) — fixed + 8 line steps.
         let max_rows = 8_usize;
         assert_eq!(
             bottom_dock_height_for_rows(max_rows),
-            DOCK_BOTTOM_ROW_PRESET_1_H + 7.0 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
-            "8 rows (max cap) should be base + 7 extra-line steps"
+            fixed + max_rows as f32 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "8 rows (max cap) should be fixed overhead + 8 line steps"
+        );
+
+        // Delta between adjacent row counts must equal exactly one extra-line step.
+        assert_eq!(
+            bottom_dock_height_for_rows(3) - bottom_dock_height_for_rows(2),
+            DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "each additional row adds exactly one extra-line step"
         );
 
         // Regression guard: extra-line step must be 20 px (Rems(1.25) × 16px),
@@ -404,6 +440,19 @@ mod tests {
         assert_eq!(
             DOCK_BOTTOM_INPUT_EXTRA_LINE_H, 20.0,
             "extra-line step must be 20 px (Rems(1.25) × rem_size(16 px))"
+        );
+
+        // Grow-only invariant: a smaller row count must produce a smaller or
+        // equal desired height, never larger. This ensures the grow-only guard
+        // in `adapt_dock_to_input_lines` correctly returns early when line
+        // count drops.
+        assert!(
+            bottom_dock_height_for_rows(1) < bottom_dock_height_for_rows(2),
+            "height must be strictly monotone: fewer rows → smaller desired"
+        );
+        assert!(
+            bottom_dock_height_for_rows(2) < bottom_dock_height_for_rows(3),
+            "height must be strictly monotone: fewer rows → smaller desired"
         );
     }
 }

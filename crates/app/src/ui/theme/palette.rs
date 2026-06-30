@@ -890,9 +890,20 @@ pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 /// resolved against the global `rem_size` (16 px) — 1.25 × 16 = 20 px,
 /// independent of the terminal font size. `TextElement::request_layout`
 /// sets `min_size.height = rows * window.line_height()` = `rows * 20 px`.
-/// The first row is already covered by `DOCK_BOTTOM_ROW_PRESET_1_H`; this
-/// constant covers display rows 2…N (soft-wrapped).
+/// One line height per row — display rows 1…N (soft-wrapped), each
+/// contributing one 20 px step.
 pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
+/// Total vertical padding around the text area inside the input chrome
+/// (top + bottom, px). Derived from `INPUT_TEXTAREA_PAD_Y * 2`; lifted
+/// as a named constant so `bottom_dock_height_for_rows` can reference it
+/// without inline arithmetic.
+pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = INPUT_TEXTAREA_PAD_Y * 2.0;
+/// Height contributed by the stacked action row (mode chip + Submit/Stop
+/// button) inside the bottom-dock input chrome, after the layout change to
+/// `flex_col` (text above, action row below). Equals `BUTTON_HEIGHT +
+/// INPUT_PANEL_BUTTON_GAP` (button height + bottom gap from input chrome
+/// edge).
+pub const DOCK_BOTTOM_INPUT_ACTION_ROW_H: f32 = BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without

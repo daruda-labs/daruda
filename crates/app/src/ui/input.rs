@@ -28,8 +28,8 @@
 
 use crate::ui::theme as d;
 use gpui::{
-    App, Entity, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
-    Styled as _, div, px,
+    AnyElement, App, Element as _, Entity, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, Styled as _, div, px,
 };
 use gpui_component::Sizable as _;
 
@@ -83,26 +83,28 @@ pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> i
     tab.apply(state, cx, inner)
 }
 
-/// Chrome-cell input variant that hosts an action element beside the
-/// text on the right. Same daruda tokens as [`input`] (`MODAL_INPUT_BG`
+/// Chrome-cell input variant that hosts an action element (mode chip +
+/// Submit/Stop button). Same daruda tokens as [`input`] (`MODAL_INPUT_BG`
 /// / border / radius) so the two read as the same widget family. Used
-/// by the bottom-dock terminal input, where the Submit button lives
-/// inside the chrome.
+/// by the bottom-dock terminal input.
 ///
-/// The action sits in its own full-height column to the right of the
-/// text (not floating over it), so the text uses the cell's full height
-/// at every dock size — no bottom strip is reserved. The earlier
-/// floating variant reserved a full-width bottom band for a button that
-/// only occupied the bottom-right corner, blanking ~1.5 lines of text on
-/// short docks; this layout avoids that.
+/// In `AutoGrow` mode the layout is **stacked** (`flex_col`): the text
+/// area occupies the full width on the top row, and the action row sits
+/// on its own row below, right-aligned. This mirrors Zed's composer
+/// design where text and buttons never share a horizontal row. The
+/// earlier side-by-side layout clipped long lines behind the button
+/// column; the stacked layout eliminates that overlap at any dock height.
 ///
-/// `action` is any [`IntoElement`] — typically `crate::ui::button_*`
-/// for a single button, but a `DropdownButton` split or a small
-/// `flex_row` of multiple buttons works just as well. Variant /
-/// disabled / on_click choices stay at the call site.
+/// In `Fill` mode the classic side-by-side layout is kept (`flex_row
+/// [text|buttons]`) — this path has no live callers in the bottom dock
+/// but is preserved for completeness.
+///
+/// `action` is any [`IntoElement`] — typically a `flex_row` of a mode
+/// chip plus a `button_primary` / `button_danger`. Variant / disabled /
+/// on_click choices stay at the call site.
 ///
 /// Caller controls width via the surrounding container; the wrapper
-/// commits only to chrome + the row layout.
+/// commits only to chrome + layout.
 pub enum InputGrowMode {
     /// Classic mode: editor fills the available height and scrolls.
     Fill,
@@ -119,7 +121,7 @@ pub fn input_with_action<T: InputTabSpec>(
     action: impl IntoElement,
     cx: &App,
     tab: T,
-) -> impl IntoElement {
+) -> AnyElement {
     input_with_action_grow(state, action, cx, tab, InputGrowMode::Fill)
 }
 
@@ -132,32 +134,30 @@ pub fn input_with_action_grow<T: InputTabSpec>(
     cx: &App,
     tab: T,
     grow_mode: InputGrowMode,
-) -> impl IntoElement {
-    // In `Fill` mode `h_full()` fills the text column's (definite) height
-    // and scrolls internally instead of auto-growing past it. The row is
-    // left at the default cross-axis `stretch`, so the `flex_1` text column
-    // inherits the row's full height — that definite height is what
-    // `h_full`'s `relative(1.)` resolves against. Single-line states ignore
-    // it.
-    //
-    // In `AutoGrow` mode the inner editor self-sizes to N lines (already
-    // configured via `InputState::auto_grow`); `h_full` is omitted so the
-    // column shrinks to the editor's natural height instead of stretching to
-    // fill the parent. The auto-grow cap is owned by `InputState` (set at
-    // construction via `auto_grow(1, max_rows)` and updated on live config
-    // reload via `set_auto_grow`).
-    //
+) -> AnyElement {
     // Disable the size-derived inner padding (`input_px`/`input_py`) on the
     // Input itself so the text column wrapper can apply the DESIGN.md spec:
     // `padding: sm md (8px 12px)` — `INPUT_TEXTAREA_PAD_X` horizontal,
     // `INPUT_TEXTAREA_PAD_Y` vertical. Without `input_padding(false)` the
     // `Small` defaults (px=8, py=2) would contradict the spec.
     let inner = match grow_mode {
+        // In `Fill` mode `h_full()` fills the text column's (definite) height
+        // and scrolls internally instead of auto-growing past it. The row is
+        // left at the default cross-axis `stretch`, so the `flex_1` text column
+        // inherits the row's full height — that definite height is what
+        // `h_full`'s `relative(1.)` resolves against. Single-line states ignore
+        // it.
         InputGrowMode::Fill => Input::new(state)
             .small()
             .appearance(false)
             .input_padding(false)
             .h_full(),
+        // In `AutoGrow` mode the inner editor self-sizes to N lines (already
+        // configured via `InputState::auto_grow`); `h_full` is omitted so the
+        // column shrinks to the editor's natural height instead of stretching
+        // to fill the parent. The auto-grow cap is owned by `InputState` (set
+        // at construction via `auto_grow(1, max_rows)` and updated on live
+        // config reload via `set_auto_grow`).
         InputGrowMode::AutoGrow => Input::new(state)
             .small()
             .appearance(false)
@@ -167,46 +167,88 @@ pub fn input_with_action_grow<T: InputTabSpec>(
     let t = d::current(cx);
     // Focus-within accent border.
     let focus_handle = state.read(cx).focus_handle(cx);
-    div()
-        .track_focus(&focus_handle)
-        .flex()
-        .flex_row()
-        .w_full()
-        .bg(t.modal_input_bg)
-        .border_1()
-        .border_color(t.border)
-        .in_focus(|s| s.border_color(d::PRIMARY))
-        .rounded(px(d::RADIUS_MD))
-        // Text region claims the row's free width and full height — `flex_1`
-        // takes the free width, the row's `stretch` gives it the full height,
-        // and the inner `h_full` editor scrolls within it. Padding follows
-        // DESIGN.md TerminalInputDock spec: `sm md (8px 12px)`.
-        .child(
+
+    match grow_mode {
+        InputGrowMode::Fill => {
+            // Fill: classic side-by-side layout — text flex_1 on the left,
+            // action column flex_none on the right, both in a flex_row.
             div()
-                .flex_1()
+                .track_focus(&focus_handle)
                 .flex()
-                .min_w_0()
-                .px(px(d::INPUT_TEXTAREA_PAD_X))
-                .py(px(d::INPUT_TEXTAREA_PAD_Y))
-                .child(inner),
-        )
-        // Action — beside the text on the right in its own full-height
-        // column, bottom-aligned (composer feel). No vertical reservation is
-        // taken from the text (the button sits in a separate column, not over
-        // the text), so the text uses the cell's full height at every dock
-        // size. On a 1-row dock the column is ~one line tall, so bottom and
-        // center coincide.
-        .child(
+                .flex_row()
+                .w_full()
+                .bg(t.modal_input_bg)
+                .border_1()
+                .border_color(t.border)
+                .in_focus(|s| s.border_color(d::PRIMARY))
+                .rounded(px(d::RADIUS_MD))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .min_w_0()
+                        .px(px(d::INPUT_TEXTAREA_PAD_X))
+                        .py(px(d::INPUT_TEXTAREA_PAD_Y))
+                        .child(inner),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .justify_end()
+                        .pr(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .pl(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .pb(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .child(action),
+                )
+                .into_any()
+        }
+        InputGrowMode::AutoGrow => {
+            // AutoGrow: stacked layout — text area full-width on top, action
+            // row right-aligned on its own row below. This mirrors Zed's
+            // composer where text and buttons never share a horizontal row,
+            // eliminating the clip of long lines behind the button column.
+            // The dock height formula (`bottom_dock_height_for_rows`) accounts
+            // for the action row's fixed height (`DOCK_BOTTOM_INPUT_ACTION_ROW_H`)
+            // as a constant addend over the per-line text area.
             div()
-                .flex_none()
+                .track_focus(&focus_handle)
                 .flex()
                 .flex_col()
-                .justify_end()
-                .pr(px(d::INPUT_PANEL_BUTTON_GAP))
-                .pl(px(d::INPUT_PANEL_BUTTON_GAP))
-                .pb(px(d::INPUT_PANEL_BUTTON_GAP))
-                .child(action),
-        )
+                .w_full()
+                .bg(t.modal_input_bg)
+                .border_1()
+                .border_color(t.border)
+                .in_focus(|s| s.border_color(d::PRIMARY))
+                .rounded(px(d::RADIUS_MD))
+                // Text area — full width, auto-sized to content row count.
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .min_w_0()
+                        .px(px(d::INPUT_TEXTAREA_PAD_X))
+                        .pt(px(d::INPUT_TEXTAREA_PAD_Y))
+                        .child(inner),
+                )
+                // Action row — right-aligned below the text, with gap to the
+                // chrome edge. Matches `DOCK_BOTTOM_INPUT_ACTION_ROW_H` in
+                // the height formula: `BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP`.
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_row()
+                        .justify_end()
+                        .pr(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .pl(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .pb(px(d::INPUT_PANEL_BUTTON_GAP))
+                        .child(action),
+                )
+                .into_any()
+        }
+    }
 }
 
 #[cfg(test)]
