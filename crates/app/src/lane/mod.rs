@@ -9,6 +9,7 @@
 
 pub mod availability;
 pub mod git;
+pub mod history;
 pub mod paths;
 
 use std::path::PathBuf;

@@ -550,6 +550,14 @@ pub struct Workspace {
     /// re-enter the window via `cx.update_window` when they need to
     /// update widgets whose setters require `&mut Window`.
     pub(in crate::workspace) window_handle: gpui::AnyWindowHandle,
+    /// Per-lane bottom-dock input history. Keyed by `LaneId`; each
+    /// buffer holds submitted prompts and terminal commands in order.
+    /// Populated by `send_terminal_input`; navigated via the ↑/↓
+    /// `on_history_navigate` hook installed on `terminal_input`.
+    pub(in crate::workspace) input_history: std::collections::HashMap<
+        daruda_store::project::LaneId,
+        crate::lane::history::HistoryBuffer,
+    >,
 }
 
 impl Workspace {
@@ -704,6 +712,7 @@ impl Workspace {
         let ws_for_escape = ws_weak.clone();
         let ws_for_accept = ws_weak.clone();
         let ws_for_provider = ws_weak.clone();
+        let ws_for_history = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
             let max_rows = usize::from(config.agent.input_max_rows);
             let mut state = crate::ui::InputState::new(window, cx_state)
@@ -741,6 +750,34 @@ impl Workspace {
                         let focused = ws.read(app).active_runtime().focused_pane_id;
                         ws.update(app, |ws, cx| ws.cancel_agent_turn_if_in_flight(focused, cx))
                     })
+                })
+                // ↑/↓ at the boundary of the multi-line input navigates the
+                // per-lane history buffer (shell-style). The hook checks whether
+                // navigation is possible (entries exist / cursor is active), then
+                // defers the actual `set_value` call. Deferring is the same re-
+                // entry guard as `on_completion_accept`: the hook fires inside
+                // `InputState`'s update, so we cannot call `terminal_input.update`
+                // or `terminal_input.read` synchronously (CLAUDE.md pitfall #5).
+                // Reading `ws.read(app).input_history` is fine — Workspace is a
+                // different entity from terminal_input.
+                .on_history_navigate(move |dir, window, app| {
+                    let Some(ws) = ws_for_history.upgrade() else {
+                        return false;
+                    };
+                    // Decide whether to consume before mutating any state.
+                    // Reading ws (Workspace) is safe here: we're inside
+                    // terminal_input's update, but Workspace is a different entity.
+                    if !ws.read(app).history_navigate_possible(dir) {
+                        return false;
+                    }
+                    let ws_deferred = ws.downgrade();
+                    window.defer(app, move |window, cx| {
+                        // SILENT-OK: workspace dropped between key press and defer
+                        if let Some(ws) = ws_deferred.upgrade() {
+                            ws.update(cx, |ws, cx| ws.do_history_navigate(dir, window, cx));
+                        }
+                    });
+                    true
                 })
                 // Accepting a slash-command completion routes through the
                 // workspace for the adaptive send. The accept hook fires inside
@@ -1002,6 +1039,7 @@ impl Workspace {
                     ws.apply_config(&effective, cx);
                 }),
             window_handle: window.window_handle(),
+            input_history: std::collections::HashMap::new(),
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

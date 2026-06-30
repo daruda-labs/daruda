@@ -33,7 +33,9 @@ use gpui::{
 };
 use gpui_component::Sizable as _;
 
-pub use gpui_component::input::{CompletionProvider, Input, InputEvent, InputState, Rope, RopeExt};
+pub use gpui_component::input::{
+    CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
+};
 
 /// Tab-participation specifier for [`input`]. Mirrors `CheckboxTabSpec`
 /// / `RadioTabSpec` / `SelectTabSpec` — `isize` slots the input at

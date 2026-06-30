@@ -1,8 +1,8 @@
-use gpui::{Context, Point, Window};
+use gpui::{App, Context, Point, Window};
 
 use crate::input::{
-    InputState, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
-    MoveToEnd, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveUp, RopeExt as _,
+    HistoryDir, InputState, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp,
+    MoveRight, MoveToEnd, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveUp, RopeExt as _,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -134,12 +134,49 @@ impl InputState {
         }
     }
 
+    /// If an `on_history_navigate` hook is installed and the cursor is at the
+    /// boundary for `dir`, call the hook. Returns `true` when the hook consumed
+    /// the key so the caller should skip default cursor movement.
+    ///
+    /// Uses `text_wrapper` to derive the cursor's display row; bails if the
+    /// wrapper has not been prepared yet (no layout painted — same guard as
+    /// `move_vertical`).
+    fn try_history_navigate(&mut self, dir: HistoryDir, window: &mut Window, cx: &mut App) -> bool {
+        if self.on_history_navigate.is_none() {
+            return false;
+        }
+        let total = self.text_wrapper.len();
+        if total == 0 {
+            // Wrapper not prepared yet — bail, consistent with move_vertical.
+            return false;
+        }
+        let cursor = self.cursor();
+        let row = self.text_wrapper.offset_to_display_point(cursor).row;
+        let at_boundary = match dir {
+            HistoryDir::Up => row == 0,
+            HistoryDir::Down => row == total.saturating_sub(1),
+        };
+        if !at_boundary {
+            return false;
+        }
+        self.on_history_navigate
+            .as_ref()
+            .is_some_and(|h| h(dir, window, cx))
+    }
+
     pub(super) fn up(&mut self, action: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
         if self.handle_action_for_context_menu(Box::new(action.clone()), window, cx) {
             return;
         }
 
         if self.mode.is_single_line() {
+            return;
+        }
+
+        // When the cursor is on the first display line and the host installed an
+        // `on_history_navigate` handler that consumes the key, skip cursor
+        // movement so the input doesn't jump to the start of the text.
+        if self.try_history_navigate(HistoryDir::Up, window, cx) {
             return;
         }
 
@@ -160,6 +197,13 @@ impl InputState {
         }
 
         if self.mode.is_single_line() {
+            return;
+        }
+
+        // When the cursor is on the last display line and the host installed an
+        // `on_history_navigate` handler that consumes the key, skip cursor
+        // movement so the input doesn't jump to the end of the text.
+        if self.try_history_navigate(HistoryDir::Down, window, cx) {
             return;
         }
 

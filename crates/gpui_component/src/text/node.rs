@@ -1169,18 +1169,16 @@ impl Node {
                 let children_len = children.len();
                 div()
                     .id("div")
-                    .children(children.into_iter().enumerate().map(
-                        move |(index, node)| {
-                            node.render_block(
-                                options
-                                    .is_first(index == 0)
-                                    .is_last(index == children_len - 1),
-                                node_cx,
-                                window,
-                                cx,
-                            )
-                        },
-                    ))
+                    .children(children.into_iter().enumerate().map(move |(index, node)| {
+                        node.render_block(
+                            options
+                                .is_first(index == 0)
+                                .is_last(index == children_len - 1),
+                            node_cx,
+                            window,
+                            cx,
+                        )
+                    }))
                     .into_any_element()
             }
             Node::Paragraph(paragraph) => div()
@@ -1207,7 +1205,9 @@ impl Node {
 
                 h_flex()
                     .id(("h", *level as usize))
-                    .when(!options.is_first, |this| this.pt(node_cx.style.paragraph_gap))
+                    .when(!options.is_first, |this| {
+                        this.pt(node_cx.style.paragraph_gap)
+                    })
                     .pb(rems(0.5))
                     .whitespace_normal()
                     .text_size(text_size)
