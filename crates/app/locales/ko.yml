@@ -291,8 +291,11 @@ modal:
 # Bottom dock
 bottom_dock:
   input_tab_label: "입력"
+  input_agent_mode_modifier_placeholder: "에이전트 메시지 · %{mode} · ⌘↵ 전송"
+  input_agent_mode_placeholder: "에이전트 메시지 · %{mode} · Enter 전송"
+  input_agent_modifier_placeholder: "에이전트 메시지 · ⌘↵ 전송"
+  input_agent_placeholder: "에이전트 메시지 · Enter 전송"
   input_placeholder: "터미널로 전송할 내용 입력…"
-  input_agent_placeholder: "에이전트에게 메시지 보내기…"
   row_preset_1: "1줄"
   row_preset_2: "2줄"
   row_preset_3: "3줄"

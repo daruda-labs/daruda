@@ -1255,10 +1255,54 @@ pub fn bottom_input_tab_label() -> String {
 pub fn bottom_input_placeholder() -> String {
     rust_i18n::t!("bottom_dock.input_placeholder").into_owned()
 }
-/// Placeholder shown when the focused pane is an Agent chat — the bottom
-/// input routes prompts to the ACP session rather than a terminal PTY.
+/// Placeholder shown when the focused pane is an Agent chat with no active
+/// mode and plain-Enter submit — "Message agent · Enter to send".
 pub fn bottom_input_agent_placeholder() -> String {
     rust_i18n::t!("bottom_dock.input_agent_placeholder").into_owned()
+}
+/// Placeholder shown when the focused pane is an Agent chat with no active
+/// mode and modifier-to-send on — "Message agent · ⌘↵ to send".
+pub fn bottom_input_agent_modifier_placeholder() -> String {
+    rust_i18n::t!("bottom_dock.input_agent_modifier_placeholder").into_owned()
+}
+/// Placeholder shown when the focused Agent chat pane has an active mode
+/// and plain-Enter submit — "Message agent · <mode> · Enter to send".
+pub fn bottom_input_agent_mode_placeholder(mode: &str) -> String {
+    rust_i18n::t!("bottom_dock.input_agent_mode_placeholder", mode = mode).into_owned()
+}
+/// Placeholder shown when the focused Agent chat pane has an active mode
+/// and modifier-to-send on — "Message agent · <mode> · ⌘↵ to send".
+pub fn bottom_input_agent_mode_modifier_placeholder(mode: &str) -> String {
+    rust_i18n::t!(
+        "bottom_dock.input_agent_mode_modifier_placeholder",
+        mode = mode
+    )
+    .into_owned()
+}
+
+/// Derive the bottom-input placeholder string from focused-pane context.
+///
+/// Pure function — no side effects, unit-testable.
+///
+/// - `is_agent` — the focused pane is an Agent chat pane.
+/// - `mode_name` — the human-readable label of the agent's current mode
+///   (`SessionModeView::name`), when the session advertises modes.
+/// - `use_modifier_to_send` — `AgentConfig::use_modifier_to_send`; when
+///   `true` the submit key is ⌘↵, otherwise plain Enter.
+pub fn bottom_input_placeholder_for_context(
+    is_agent: bool,
+    mode_name: Option<&str>,
+    use_modifier_to_send: bool,
+) -> String {
+    if !is_agent {
+        return bottom_input_placeholder();
+    }
+    match (mode_name, use_modifier_to_send) {
+        (Some(name), false) => bottom_input_agent_mode_placeholder(name),
+        (Some(name), true) => bottom_input_agent_mode_modifier_placeholder(name),
+        (None, false) => bottom_input_agent_placeholder(),
+        (None, true) => bottom_input_agent_modifier_placeholder(),
+    }
 }
 pub fn bottom_input_send_button() -> String {
     rust_i18n::t!("common.btn_submit").into_owned()
@@ -2881,5 +2925,54 @@ mod tests {
             fetched_at: None,
         };
         assert_eq!(service_status_label(&s), "Status unavailable");
+    }
+
+    // ----------------------------------------------------------------
+    // bottom_input_placeholder_for_context
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn placeholder_terminal_pane() {
+        // Terminal focus always returns the terminal placeholder regardless
+        // of the modifier-to-send flag.
+        assert_eq!(
+            bottom_input_placeholder_for_context(false, None, false),
+            bottom_input_placeholder(),
+        );
+        assert_eq!(
+            bottom_input_placeholder_for_context(false, None, true),
+            bottom_input_placeholder(),
+        );
+        // mode_name is ignored for terminal panes.
+        assert_eq!(
+            bottom_input_placeholder_for_context(false, Some("Auto"), false),
+            bottom_input_placeholder(),
+        );
+    }
+
+    #[test]
+    fn placeholder_agent_no_modes() {
+        // Agent focus without mode info: hint the submit key only.
+        assert_eq!(
+            bottom_input_placeholder_for_context(true, None, false),
+            bottom_input_agent_placeholder(),
+        );
+        assert_eq!(
+            bottom_input_placeholder_for_context(true, None, true),
+            bottom_input_agent_modifier_placeholder(),
+        );
+    }
+
+    #[test]
+    fn placeholder_agent_with_mode() {
+        // Agent focus with an active mode: hint mode name + submit key.
+        assert_eq!(
+            bottom_input_placeholder_for_context(true, Some("Auto"), false),
+            bottom_input_agent_mode_placeholder("Auto"),
+        );
+        assert_eq!(
+            bottom_input_placeholder_for_context(true, Some("Auto"), true),
+            bottom_input_agent_mode_modifier_placeholder("Auto"),
+        );
     }
 }

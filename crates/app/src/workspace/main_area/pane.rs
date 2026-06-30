@@ -1193,17 +1193,14 @@ impl Workspace {
         // windowed focus path — so it fires on click, keyboard pane nav,
         // and tab switch alike (`set_focused_pane` has no `&mut Window`,
         // which `set_placeholder` requires).
+        //
+        // `apply_input_placeholder` reads mode state and modifier policy
+        // and writes to `terminal_input` using the live `window` — avoids
+        // nested `update_window` re-entry that the windowless
+        // `refresh_terminal_input_placeholder` path would trigger.
         let is_agent = self.is_agent_chat_pane(pane_id);
         self.activate_bottom_input(cx);
-        let placeholder = if is_agent {
-            crate::surface::strings::bottom_input_agent_placeholder()
-        } else {
-            crate::surface::strings::bottom_input_placeholder()
-        };
-        let input = self.terminal_input.clone();
-        input.update(cx, |state, cx| {
-            state.set_placeholder(placeholder, window, cx)
-        });
+        self.apply_input_placeholder(window, cx);
 
         if is_agent {
             // Lazy connect: a restored Agent chat pane stays `Idle` (no

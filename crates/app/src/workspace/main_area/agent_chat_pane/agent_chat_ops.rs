@@ -239,11 +239,27 @@ impl Workspace {
                             // frame once the pulse stops. Gated on change so
                             // token-streaming events don't repaint the docks.
                             let before = view.read(cx).to_session_status();
+                            // Capture current mode before the event so we can
+                            // detect `Connected` (modes arriving) and
+                            // `ModeChanged` (current switching) and refresh the
+                            // bottom-input placeholder when either fires.
+                            let mode_before =
+                                view.read(cx).modes.as_ref().map(|m| m.current.clone());
                             view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
                             if view.read(cx).to_session_status() != before {
                                 ws.notify_status_docks(cx);
+                            }
+                            // Refresh placeholder when the active mode changed or
+                            // modes became available (Connected). Only fires for
+                            // the focused pane to avoid redundant work on parked
+                            // lane views.
+                            let mode_after =
+                                view.read(cx).modes.as_ref().map(|m| m.current.clone());
+                            let focused_id = ws.active_runtime().focused_pane_id;
+                            if mode_before != mode_after && focused_id == pane_id {
+                                ws.refresh_terminal_input_placeholder(cx);
                             }
                             true
                         });
@@ -350,6 +366,9 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.set_mode(mode_id, cx));
         }
+        // The bottom-input placeholder includes the current mode name;
+        // refresh it now that the mode has changed.
+        self.refresh_terminal_input_placeholder(cx);
     }
 
     /// Advance an Agent chat pane's session mode to the next advertised mode,
@@ -369,6 +388,9 @@ impl Workspace {
             return false;
         };
         view.update(cx, |v, cx| v.set_mode(next, cx));
+        // The bottom-input placeholder includes the current mode name;
+        // refresh it now that the mode has cycled.
+        self.refresh_terminal_input_placeholder(cx);
         true
     }
 
