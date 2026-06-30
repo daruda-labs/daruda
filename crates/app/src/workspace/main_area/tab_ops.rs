@@ -26,14 +26,13 @@ impl Workspace {
     /// Focus-change chokepoint for `main_area.focused_pane_id`. The left
     /// dock derives `focused_file_selection` and `claude_active_session_id`
     /// from the focused pane and is `.cached()`, so every focus change must
-    /// dirty it (Pitfall #10). Bulk context swaps (lane activation,
-    /// project close) carry their own left-dock notify via `mutate_durable`.
-    /// `restore_from_disk` writes the field directly during initial
+    /// render the workspace; the render staging diff then invalidates the
+    /// dock. `restore_from_disk` writes the field directly during initial
     /// construction (`cx.new`) — no prior cache exists at that point, so
     /// no explicit notify is needed.
     pub(in crate::workspace) fn set_focused_pane(&mut self, id: PaneId, cx: &mut Context<Self>) {
         self.active_runtime_mut().focused_pane_id = id;
-        self.notify_left_dock(cx);
+        cx.notify();
         // Re-evaluate inactive-pane dim: the focused pane drops to full
         // color and its former-focused sibling dims (or, after a split /
         // close, the whole tab's dim state is recomputed).

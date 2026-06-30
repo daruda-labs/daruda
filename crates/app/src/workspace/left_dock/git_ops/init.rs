@@ -29,7 +29,6 @@ impl Workspace {
         let path = wt.path.clone();
         self.git_op_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -40,9 +39,10 @@ impl Workspace {
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
                 // `git_op_in_flight` drives the Git view's disabled/loading
-                // state and the dock is `.cached()`; the `Ok(None)` / `Err`
-                // arms below have no other left-dock notify (Pitfall #10).
-                ws.notify_left_dock(cx);
+                // state; the `Ok(None)` / `Err` arms below have no other
+                // workspace notify, so render the workspace here and let the
+                // left-dock staging diff invalidate the `.cached()` dock.
+                cx.notify();
                 match result {
                     Ok(Some(probe)) => {
                         // Pick the matching lane entry's branch from

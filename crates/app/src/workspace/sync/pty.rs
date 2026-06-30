@@ -74,10 +74,6 @@ impl Workspace {
                 };
                 if changed {
                     cx.notify();
-                    // `pty_claude_bindings` change → `claude_active_session_id`
-                    // in the left dock snapshot changes. Left dock is `.cached()`,
-                    // so dirty it explicitly (Pitfall #10).
-                    self.notify_left_dock(cx);
                 }
             }
             PtyTrackerEvent::DeadSession { session_id } => {
@@ -97,7 +93,6 @@ impl Workspace {
                     }
                     cx.notify();
                     self.notify_right_dock(cx);
-                    self.notify_left_dock(cx);
                 }
             }
         }

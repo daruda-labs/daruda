@@ -1107,11 +1107,6 @@ impl Workspace {
         // Keep notify here so every call site (group/project CRUD,
         // lane DnD, policy updates) gets a render for free.
         cx.notify();
-        // Left dock is `.cached()` and renders the project/group/lane
-        // tree from Workspace fields. Durable mutations always change
-        // that tree, so dirty the dock entity here to invalidate the
-        // cache for every call site (Pitfall #10).
-        self.notify_left_dock(cx);
     }
 
     fn alloc_id(&mut self) -> u64 {
@@ -1136,7 +1131,6 @@ impl Workspace {
             self.refresh_git_status(target, cx);
         }
         cx.notify();
-        self.notify_left_dock(cx);
     }
 
     /// Human-readable name for this workspace in the recent list.
@@ -1398,15 +1392,13 @@ impl Workspace {
         gpui::App::notify(cx, dock_id);
     }
 
-    /// Invalidate the left dock's `.cached()` element so it re-renders
-    /// from the freshly staged snapshot. The left dock renders the
-    /// Worktrees/Git-changes/Files views from `Workspace` fields
-    /// (projects, groups, lanes, git status, file tree, claude status)
-    /// and never self-notifies for Workspace-owned state, so every
-    /// mutation site of a left-dock source must call this — otherwise
-    /// the cache shows stale data (root CLAUDE.md Pitfall #10).
-    /// Embedded input entities (`git_commit_input`) self-notify and
-    /// dirty this dock as an ancestor, so they need no explicit call.
+    /// Invalidate the left dock's `.cached()` element directly, bypassing
+    /// the render staging diff. Source mutations no longer need this: a
+    /// workspace `cx.notify()` re-stages the `LeftDockSnapshot` and
+    /// `content_differs` invalidates the cached dock on a real change. The
+    /// sole remaining caller is the status pulse, which must advance badge
+    /// animation frames that are *not* part of the snapshot (so the staging
+    /// diff reports no change and would not refresh the dock).
     /// Lease-free (`App::notify`) — dock event listeners run inside a
     /// `Context<Dock>` lease, so leasing the dock here would double-lease.
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
@@ -1425,7 +1417,11 @@ impl Workspace {
     /// push. Mirrors the PTY pump (`sync/pty.rs`), which already notifies
     /// the docks on every status-file change.
     pub(crate) fn notify_status_docks(&self, cx: &mut Context<Self>) {
-        self.notify_left_dock(cx);
+        // The left dock's `.cached()` snapshot carries per-lane Claude
+        // status, so a workspace render re-stages it and the staging diff
+        // invalidates the dock. The right dock has no such diff yet, so it
+        // still needs its explicit notify.
+        cx.notify();
         self.notify_right_dock(cx);
     }
 

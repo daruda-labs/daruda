@@ -601,13 +601,6 @@ impl Workspace {
             self.reconcile_right_dock_for_inaccessible_lane(window, cx);
         }
         cx.notify();
-        // `recompute_availability_for` changed `lane.availability` /
-        // `project.availability`; both appear in `LeftDockSnapshot` through
-        // `ProjectSnapshot`. Left dock is `.cached()`, so dirty it here for
-        // both branches (the `now_present` branch covered by `mutate_durable`
-        // above, but the else branch has no `mutate_durable` — call here
-        // covers both safely) (Pitfall #10).
-        self.notify_left_dock(cx);
     }
 
     /// Spawn one pane rooted at `target`'s path when the live runtime has

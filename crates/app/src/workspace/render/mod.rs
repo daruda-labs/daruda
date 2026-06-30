@@ -6,8 +6,6 @@
 //!   • Pane header (per pane)     — built by `pane_header()`, only in split mode.
 //!                                   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`.
 
-use super::main_area::render_layout;
-
 use crate::ui::theme;
 use gpui::{
     ClickEvent, ClipboardItem, Context, CursorStyle, Focusable as _, IntoElement, KeyContext,
@@ -23,7 +21,7 @@ use super::layout::DockPosition;
 use super::layout::DockSnapshot;
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_drag_ops::PaneHeaderDrag;
-use super::main_area::pane_tree::{DIVIDER_PX, PaneLayout, SplitDirection};
+use super::main_area::pane_tree::{DIVIDER_PX, SplitDirection};
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, SaveFilePane, TAB_BAR_HEIGHT,
@@ -32,6 +30,7 @@ use super::{
 #[allow(unused_imports)]
 use super::{FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp};
 
+mod center;
 mod snapshots;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;
@@ -193,71 +192,6 @@ fn backdrop() -> gpui::Div {
 /// with the state message and a Remove affordance. The Remove button is
 /// a one-line dispatch into `request_remove_inaccessible_active`
 /// (one-way data flow).
-fn inaccessible_empty_state(
-    availability: crate::lane::availability::LaneAvailability,
-    cx: &mut Context<Workspace>,
-) -> gpui::AnyElement {
-    use crate::lane::availability::LaneAvailability;
-    use crate::surface::strings as s;
-    use crate::ui::{Icon, IconName, Sizable as _, button_danger};
-
-    let t = theme::current(cx);
-    let (icon, title, body) = match availability {
-        // The caller filters `Present` before reaching here. Render
-        // nothing rather than panic if that invariant ever slips — an
-        // explicit arm keeps the match exhaustive so a future variant
-        // is a compile error, not a silent fall-through.
-        LaneAvailability::Present => return div().into_any_element(),
-        LaneAvailability::Missing => (
-            IconName::TriangleAlert,
-            s::projects_empty_missing_title(),
-            s::projects_empty_missing_body(),
-        ),
-        LaneAvailability::AccessDenied => (
-            IconName::EyeOff,
-            s::projects_empty_denied_title(),
-            s::projects_empty_denied_body(),
-        ),
-    };
-
-    div()
-        .flex_1()
-        .w_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(px(theme::MAIN_EMPTY_STATE_GAP))
-        .bg(t.file_viewer_bg)
-        .child(
-            Icon::new(icon)
-                .with_size(px(theme::MAIN_EMPTY_STATE_ICON_SIZE))
-                .text_color(theme::WARNING),
-        )
-        .child(
-            div()
-                .text_size(px(theme::MAIN_EMPTY_STATE_TITLE_FONT_SIZE))
-                .text_color(t.text_primary)
-                .child(SharedString::from(title)),
-        )
-        .child(
-            div()
-                .max_w(px(theme::MAIN_EMPTY_STATE_BODY_MAX_W))
-                .text_size(px(theme::MAIN_EMPTY_STATE_BODY_FONT_SIZE))
-                .text_color(t.text_muted)
-                .text_center()
-                .child(SharedString::from(body)),
-        )
-        .child(
-            button_danger("inaccessible-remove", s::ctx_remove()).on_click(cx.listener(
-                |this, _, window, cx| {
-                    this.request_remove_inaccessible_active(window, cx);
-                },
-            )),
-        )
-        .into_any_element()
-}
-
 /// Amount each inactive split pane's terminal colors blend toward
 /// mid-gray (iTerm2's default dim, `colorDimmedBy:0.4`). Pushed onto the
 /// pane's `TerminalView` by `refresh_pane_dimming`; alpha is preserved so
@@ -413,8 +347,23 @@ impl Render for Workspace {
         let right_snap = self.prepare_right_dock_snapshot(cx);
 
         // — Publish snapshots to docks ————————————————————————————————
-        self.left_dock
-            .update(cx, |d, _| d.snap = DockSnapshot::Left(Box::new(left_snap)));
+        // Left dock is wrapped in `.cached()` too (see `body` below), so it
+        // is marked dirty only when its snapshot content actually changes —
+        // an absent / non-Left prior snapshot counts as changed. This is the
+        // sole left-dock invalidation path: any workspace render re-stages
+        // the snapshot and `content_differs` decides whether to dirty the
+        // dock, so source mutations only need a workspace `cx.notify()` (no
+        // manual per-site `notify_left_dock()`). The lone exception is the
+        // status pulse, which advances badge animation frames not present in
+        // the snapshot and so keeps its explicit notify. Per Pitfall #10.
+        self.left_dock.update(cx, |d, cx| {
+            let changed =
+                !matches!(&d.snap, DockSnapshot::Left(old) if !left_snap.content_differs(old));
+            if changed {
+                d.snap = DockSnapshot::Left(Box::new(left_snap));
+                cx.notify();
+            }
+        });
         // Bottom dock is wrapped in `.cached()` (see `body`/`main_area`
         // below), so it must be marked dirty only when its snapshot
         // content actually changes — otherwise the cached view shows
@@ -804,83 +753,10 @@ impl Render for Workspace {
                     .border_color(tab_bar_border),
             );
 
-        // Content area — render active tab's pane layout. The walker
-        // dispatches per-pane on PaneContent: terminal panes embed
-        // TerminalView, file panes embed `render_pane_file_viewer`
-        // driven by their own per-pane scroll handle and find input.
-        //
-        // When a pane is zoomed, render only that leaf at full size.
-        // has_splits = true so the pane header is visible, giving the
-        // user access to the right-click Unzoom menu. Inactive-pane dim
-        // is driven separately by `refresh_pane_dimming`, which skips
-        // dimming entirely while a pane is zoomed.
-        let center_content = if let Some(availability) = self
-            .active_lane()
-            .map(|l| l.availability)
-            .filter(|a| *a != crate::lane::availability::LaneAvailability::Present)
-        {
-            // Availability gate runs FIRST, before any tab lookup. An
-            // inaccessible active lane must show the empty-state even
-            // when `tabs` is non-empty — a lane whose runtime entry still
-            // holds tabs from when it was last `Present`, or a mid-session
-            // vanish that never cleared tabs, would otherwise render a
-            // stale terminal against a dead cwd. `availability` is
-            // precomputed (recompute on
-            // restore / activate / load-failure); reading it here keeps
-            // `render()` pure.
-            inaccessible_empty_state(availability, cx)
-        } else if let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-        {
-            let actual_has_splits = tab.layout.leaf_count() > 1;
-            if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
-                if tab.layout.pane_ids().contains(&zoomed_id) {
-                    let leaf = PaneLayout::Pane(zoomed_id);
-                    render_layout(
-                        &leaf,
-                        &self.active_runtime().panes,
-                        zoomed_id,
-                        true,
-                        SharedString::from(self.font_family.clone()),
-                        None,
-                        self.main_area.pane_drop_hover,
-                        cx,
-                    )
-                } else {
-                    render_layout(
-                        &tab.layout,
-                        &self.active_runtime().panes,
-                        self.active_runtime().focused_pane_id,
-                        actual_has_splits,
-                        SharedString::from(self.font_family.clone()),
-                        self.main_area.zoomed_pane_id,
-                        self.main_area.pane_drop_hover,
-                        cx,
-                    )
-                }
-            } else {
-                render_layout(
-                    &tab.layout,
-                    &self.active_runtime().panes,
-                    self.active_runtime().focused_pane_id,
-                    actual_has_splits,
-                    SharedString::from(self.font_family.clone()),
-                    None,
-                    self.main_area.pane_drop_hover,
-                    cx,
-                )
-            }
-        } else {
-            // No tab for the active lane, and the lane is `Present`
-            // (the inaccessible case is handled by the availability
-            // gate above). The legitimate "Present lane with no tabs"
-            // case is healed by the restore fallback / `add_tab`; a
-            // truly empty workspace (no projects, no active lane) also
-            // lands here. Either way, fall through to a blank element.
-            div().flex_1().w_full().into_any_element()
-        };
+        // Content area — the active tab's pane layout, the inaccessible-
+        // lane empty state, or a blank fallback. Built in `center.rs` so
+        // this method stays focused on top-level layout assembly.
+        let center_content = center::render_center_content(self, cx);
 
         // BodyLayout: [LeftDock] [MainArea] [RightDock]
         // Resize handles are absolutely positioned overlays centered
@@ -929,16 +805,18 @@ impl Render for Workspace {
             .flex_row()
             .relative()
             .overflow_hidden()
-            // `.cached()`: the left dock re-renders only when one of its
-            // sources notifies it (`Workspace::notify_left_dock` — wired
-            // at `mark_dirty_and_save` (covers all project/group/lane/dnd
-            // CRUD), `set_left_dock_view`, git ops, file-tree ops, claude
-            // status, and the status + task-live pulses). On unrelated
-            // parent repaints (terminal output) the cached layout + paint
-            // is recycled instead of rebuilding the entire Worktrees /
-            // Git-changes / Files tree. Embedded `git_commit_input` and
-            // focus/scroll handles self-notify and dirty the dock as an
-            // ancestor (Pitfall #10).
+            // `.cached()`: the left dock re-renders only when its staged
+            // snapshot content changes. The staging path above diffs each
+            // frame's `LeftDockSnapshot` (`content_differs`) and dirties the
+            // dock only on a real change, so any workspace `cx.notify()`
+            // (source mutations, lane/project/group CRUD, git ops, file-tree
+            // ops, claude status) refreshes it for free. On unrelated parent
+            // repaints (terminal output) the cached layout + paint is recycled
+            // instead of rebuilding the entire Worktrees / Git-changes / Files
+            // tree. The status pulse still dirties the dock directly to
+            // advance badge animation (its frames aren't in the snapshot).
+            // Embedded `git_commit_input` and focus/scroll handles self-notify
+            // and dirty the dock as an ancestor (Pitfall #10).
             .when(left_dock_open, |el| {
                 el.child(
                     gpui::AnyView::from(self.left_dock.clone()).cached(

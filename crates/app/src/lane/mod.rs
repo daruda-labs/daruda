@@ -18,7 +18,7 @@ use daruda_store::project::{LaneId, LaneKind, LaneStatus, SerializedLane};
 
 use self::availability::LaneAvailability;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Lane {
     pub id: LaneId,
     pub kind: LaneKind,

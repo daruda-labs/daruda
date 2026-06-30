@@ -45,7 +45,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -70,7 +69,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -101,7 +99,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -126,7 +123,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -155,7 +151,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -180,7 +175,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -209,7 +203,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -234,7 +227,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -257,7 +249,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -280,7 +271,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -303,7 +293,6 @@ impl Workspace {
         };
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = wt_top.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
@@ -326,7 +315,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -419,7 +407,6 @@ impl Workspace {
         let wt_rel_path = paths.to_wt_relative(&abs).unwrap_or(path);
         self.git_stage_in_flight = true;
         cx.notify();
-        self.notify_left_dock(cx);
         let path_for_report = wt_path.clone();
         let rel_for_report = wt_rel_path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -453,7 +440,6 @@ impl Workspace {
                             .build();
                         ws.report_error(report, cx);
                         cx.notify();
-                        ws.notify_left_dock(cx);
                     }
                 }
             },

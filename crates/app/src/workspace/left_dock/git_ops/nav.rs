@@ -43,7 +43,6 @@ impl Workspace {
         };
         self.git_changes_cursor.insert(target, path);
         cx.notify();
-        self.notify_left_dock(cx);
     }
 
     /// Move the Git Changes keyboard cursor to the next or previous row.
@@ -75,7 +74,6 @@ impl Workspace {
         self.git_changes_cursor
             .insert(active_ref, visible[new_idx].clone());
         cx.notify();
-        self.notify_left_dock(cx);
     }
 
     /// Toggle the staged/unstaged state of the file under the keyboard
@@ -150,6 +148,5 @@ impl Workspace {
             set.insert(dir);
         }
         cx.notify();
-        self.notify_left_dock(cx);
     }
 }

@@ -31,7 +31,7 @@ pub struct GitFileEntry {
 }
 
 /// Staged + unstaged file sets from `git status --porcelain=v1 --branch`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GitStatusData {
     /// Files with a staged change (X != ' ' && X != '?' && X != '!').
     pub staged: Vec<GitFileEntry>,
