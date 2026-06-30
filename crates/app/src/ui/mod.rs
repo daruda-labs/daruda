@@ -82,5 +82,73 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
+pub use gpui_component::text_selection::{CharType, word_range};
 pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};
+
+#[cfg(test)]
+mod word_range_tests {
+    use super::{CharType, word_range};
+
+    /// Byte-offset `char_at` for a plain &str.
+    fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
+        if byte_offset >= s.len() || !s.is_char_boundary(byte_offset) {
+            return None;
+        }
+        s[byte_offset..].chars().next()
+    }
+
+    fn word(s: &str, offset: usize) -> Option<String> {
+        let range = word_range(s.len(), |i| str_char_at(s, i), offset)?;
+        Some(s[range].to_string())
+    }
+
+    #[test]
+    fn word_range_ascii_word() {
+        let s = "hello world";
+        assert_eq!(word(s, 0).as_deref(), Some("hello"));
+        assert_eq!(word(s, 4).as_deref(), Some("hello"));
+        assert_eq!(word(s, 6).as_deref(), Some("world"));
+    }
+
+    #[test]
+    fn word_range_underscore_connects() {
+        let s = "foo_bar baz";
+        assert_eq!(word(s, 2).as_deref(), Some("foo_bar"));
+        assert_eq!(word(s, 7).as_deref(), Some(" "));
+        assert_eq!(word(s, 8).as_deref(), Some("baz"));
+    }
+
+    #[test]
+    fn word_range_punctuation_is_single() {
+        let s = "a.b[c]";
+        assert_eq!(word(s, 1).as_deref(), Some("."));
+        assert_eq!(word(s, 3).as_deref(), Some("["));
+        assert_eq!(word(s, 5).as_deref(), Some("]"));
+    }
+
+    #[test]
+    fn word_range_multibyte_cjk() {
+        // "中文" — each char is 3 bytes.
+        let s = "中文";
+        assert_eq!(word(s, 0).as_deref(), Some("中"));
+        assert_eq!(word(s, 3).as_deref(), Some("文"));
+    }
+
+    #[test]
+    fn word_range_out_of_bounds_is_none() {
+        let s = "hi";
+        assert_eq!(word(s, 2), None); // offset == len
+        assert_eq!(word(s, 99), None);
+    }
+
+    #[test]
+    fn char_type_classification() {
+        assert_eq!(CharType::from_char('a'), CharType::Word);
+        assert_eq!(CharType::from_char('_'), CharType::Word);
+        assert_eq!(CharType::from_char(' '), CharType::Whitespace);
+        assert_eq!(CharType::from_char('\n'), CharType::Newline);
+        assert_eq!(CharType::from_char('.'), CharType::Other);
+        assert_eq!(CharType::from_char('中'), CharType::Other);
+    }
+}

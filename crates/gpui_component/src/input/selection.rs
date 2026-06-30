@@ -1,46 +1,10 @@
-use std::{char, ops::Range};
+use std::ops::Range;
 
 use gpui::{Context, Window};
 use ropey::Rope;
 use sum_tree::Bias;
 
-use crate::{RopeExt as _, input::InputState};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CharType {
-    /// a-z, A-Z, 0-9, _
-    Word,
-    /// '\t', ' ', '\u{00A0}' etc.
-    Whitespace,
-    /// \n, \r
-    Newline,
-    /// . , ; : ( ) [ ] { } ... or CJK characters: `汉`, `🎉` etc.
-    Other,
-}
-
-impl From<char> for CharType {
-    fn from(c: char) -> Self {
-        match c {
-            '_' => CharType::Word,
-            c if c.is_ascii_alphanumeric() => CharType::Word,
-            c if c == '\n' || c == '\r' => CharType::Newline,
-            c if c.is_whitespace() => CharType::Whitespace,
-            _ => CharType::Other,
-        }
-    }
-}
-
-impl CharType {
-    /// Check if two CharTypes are connectable
-    fn is_connectable(self, c: char) -> bool {
-        let other = CharType::from(c);
-        match (self, other) {
-            (CharType::Word, CharType::Word) => true,
-            (CharType::Whitespace, CharType::Whitespace) => true,
-            _ => false,
-        }
-    }
-}
+use crate::{RopeExt as _, input::InputState, text_selection};
 
 impl InputState {
     /// Select the word at the given offset on double-click.
@@ -61,44 +25,19 @@ struct TextSelector;
 impl TextSelector {
     /// Select a word in the given text at the specified offset.
     ///
-    /// The offset is the UTF-8 offset.
+    /// The offset is the UTF-8 byte offset.
     ///
-    /// Returns the start and end offsets of the selected word.
+    /// Returns the start and end byte offsets of the selected word.
     pub fn word_range(text: &Rope, offset: usize) -> Option<Range<usize>> {
         let offset = text.clip_offset(offset, Bias::Left);
-        let Some(char) = text.char_at(offset) else {
-            return None;
-        };
-
-        let char_type = CharType::from(char);
-        let mut start = offset;
-        let mut end = offset + char.len_utf8();
-        let prev_chars = text.chars_at(start).reversed().take(128);
-        let next_chars = text.chars_at(end).take(128);
-
-        for ch in prev_chars {
-            if char_type.is_connectable(ch) {
-                start -= ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        for ch in next_chars {
-            if char_type.is_connectable(ch) {
-                end += ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        Some(start..end)
+        text_selection::word_range(text.len(), |i| text.char_at(i), offset)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text_selection::CharType;
     use ropey::Rope;
 
     #[test]

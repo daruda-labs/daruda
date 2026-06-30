@@ -295,6 +295,27 @@ impl LastLayout {
     }
 }
 
+/// Click-drag selection granularity: what unit each mouse-drag step extends.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SelectMode {
+    /// Extend by individual characters (single-click drag).
+    Character,
+    /// Extend by word boundaries; anchor holds the word range from the
+    /// initial double-click.
+    Word(std::ops::Range<usize>),
+    /// Extend by logical (newline-delimited) lines; anchor holds the line
+    /// range from the initial triple-click.
+    Line(std::ops::Range<usize>),
+    /// Select all — set on quad-click.
+    All,
+}
+
+impl Default for SelectMode {
+    fn default() -> Self {
+        SelectMode::Character
+    }
+}
+
 /// InputState to keep editing state of the [`super::Input`].
 pub struct InputState {
     pub(super) focus_handle: FocusHandle,
@@ -324,6 +345,12 @@ pub struct InputState {
     pub(super) last_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<Selection>,
     pub(super) selecting: bool,
+    /// Granularity used while the mouse button is held for click-drag selection.
+    pub(super) select_mode: SelectMode,
+    /// Anchor range captured at the start of a multi-click drag. For
+    /// `SelectMode::Word` this is the word range from the double-click; for
+    /// `SelectMode::Line` it is the logical-line range from the triple-click.
+    pub(super) select_anchor: std::ops::Range<usize>,
     pub(super) size: Size,
     pub(super) disabled: bool,
     /// Per-row visual decorations (background + custom gutter) for
@@ -469,6 +496,8 @@ impl InputState {
             ime_marked_range: None,
             input_bounds: Bounds::default(),
             selecting: false,
+            select_mode: SelectMode::default(),
+            select_anchor: 0..0,
             disabled: false,
             line_decorations: Vec::new(),
             highlight_override: None,
@@ -1209,6 +1238,41 @@ impl InputState {
         self.text.line_end_offset(row)
     }
 
+    /// Return the byte range of the word at `offset`, or `None` if the offset
+    /// is past the end of the text.
+    pub(super) fn word_range_at(&self, offset: usize) -> Option<std::ops::Range<usize>> {
+        crate::text_selection::word_range(self.text.len(), |i| self.text.char_at(i), offset)
+    }
+
+    /// Return the byte range of the logical (newline-delimited) line that
+    /// contains `offset`.  For single-line mode this always returns `0..len`.
+    pub(super) fn line_range_at(&self, offset: usize) -> std::ops::Range<usize> {
+        if self.mode.is_single_line() {
+            return 0..self.text.len();
+        }
+        let len = self.text.len();
+        // Walk backward to find the line start (byte after the preceding '\n').
+        let start = if offset == 0 {
+            0
+        } else {
+            let mut pos = offset;
+            loop {
+                if pos == 0 {
+                    break 0;
+                }
+                pos -= 1;
+                if self.text.char_at(pos) == Some('\n') {
+                    break pos + 1;
+                }
+            }
+        };
+        // Walk forward to find the line end (the '\n' itself, exclusive).
+        let end = (offset..len)
+            .find(|&i| self.text.char_at(i) == Some('\n'))
+            .unwrap_or(len);
+        start..end
+    }
+
     /// Get start line of selection start or end (The min value).
     ///
     /// This is means is always get the first line of selection.
@@ -1493,9 +1557,32 @@ impl InputState {
             return;
         }
 
+        // Quad-click = select all
+        if event.button == MouseButton::Left && event.click_count >= 4 {
+            let end = self.text.len();
+            self.selected_range = (0..end).into();
+            self.select_mode = SelectMode::All;
+            self.select_anchor = 0..end;
+            cx.notify();
+            return;
+        }
+
+        // Triple-click = select logical line
+        if event.button == MouseButton::Left && event.click_count == 3 {
+            let range = self.line_range_at(offset);
+            self.selected_range = range.clone().into();
+            self.select_mode = SelectMode::Line(range.clone());
+            self.select_anchor = range;
+            cx.notify();
+            return;
+        }
+
         // Double click to select word
         if event.button == MouseButton::Left && event.click_count == 2 {
             self.select_word(offset, window, cx);
+            let anchor = self.word_range_at(offset).unwrap_or(offset..offset);
+            self.select_mode = SelectMode::Word(anchor.clone());
+            self.select_anchor = anchor;
             return;
         }
 
@@ -1504,6 +1591,10 @@ impl InputState {
             self.handle_right_click_menu(event, offset, window, cx);
             return;
         }
+
+        // Single-click: reset to character mode
+        self.select_mode = SelectMode::Character;
+        self.select_anchor = offset..offset;
 
         if event.modifiers.shift {
             self.select_to(offset, cx);
@@ -2029,7 +2120,25 @@ impl InputState {
         }
 
         let offset = self.index_for_mouse_position(event.position);
-        self.select_to(offset, cx);
+        match self.select_mode.clone() {
+            SelectMode::Character | SelectMode::All => {
+                self.select_to(offset, cx);
+            }
+            SelectMode::Word(anchor) => {
+                let word = self.word_range_at(offset).unwrap_or(offset..offset);
+                let start = anchor.start.min(word.start);
+                let end = anchor.end.max(word.end);
+                self.selected_range = (start..end).into();
+                cx.notify();
+            }
+            SelectMode::Line(anchor) => {
+                let line = self.line_range_at(offset);
+                let start = anchor.start.min(line.start);
+                let end = anchor.end.max(line.end);
+                self.selected_range = (start..end).into();
+                cx.notify();
+            }
+        }
     }
 
     fn is_valid_input(&self, new_text: &str, cx: &mut Context<Self>) -> bool {
