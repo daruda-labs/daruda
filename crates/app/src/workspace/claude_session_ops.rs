@@ -183,7 +183,6 @@ impl Workspace {
                     if self.claude.claude_status.update(file) {
                         cx.notify();
                         self.notify_right_dock(cx);
-                        self.notify_left_dock(cx);
                         #[cfg(debug_assertions)]
                         {
                             let (sid, cwd, event, source) = dbg_fields;
@@ -226,7 +225,6 @@ impl Workspace {
                 if self.claude.claude_status.remove(&session_id).is_some() {
                     cx.notify();
                     self.notify_right_dock(cx);
-                    self.notify_left_dock(cx);
                     #[cfg(debug_assertions)]
                     if let (Some((cwd, source)), Some(probe)) = (dbg_entry, dbg_probe) {
                         self.log_lane_status_change(probe, &session_id, &cwd, "removed", source);
@@ -432,7 +430,8 @@ impl Workspace {
             self.claude.pty_claude_bindings.remove(id);
         }
         // Dropped bindings feed the left-dock per-lane agent badges and
-        // `agent_active_session_id`; the dock is `.cached()` (Pitfall #10).
-        self.notify_left_dock(cx);
+        // `agent_active_session_id`; a workspace render re-stages the dock
+        // snapshot and the staging diff invalidates the `.cached()` dock.
+        cx.notify();
     }
 }

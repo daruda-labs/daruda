@@ -195,7 +195,6 @@ impl Workspace {
         // Trigger #1 — expand toggle.
         self.invalidate_visible_files_cache(wt_ref);
         cx.notify();
-        self.notify_left_dock(cx);
         if let Some(abs_path) = to_load {
             self.kick_dir_load(wt_ref, entry_id, abs_path, cx);
         }
@@ -234,7 +233,6 @@ impl Workspace {
                 ws.file_tree.files_gitignore_index.insert(wt_ref, gi_set);
                 ws.invalidate_visible_files_cache(wt_ref);
                 cx.notify();
-                ws.notify_left_dock(cx);
             },
         )
         .detach();
@@ -367,7 +365,6 @@ impl Workspace {
                 // lanes, so this direct tree mutation needs its own
                 // left-dock notify (Pitfall #10).
                 cx.notify();
-                self.notify_left_dock(cx);
             }
             DebouncedEvent::Removed { .. } => {}
             DebouncedEvent::Changed { paths } if !bulk_pending => {
@@ -754,7 +751,6 @@ impl Workspace {
         // Trigger #2 — load result (success or revert-on-error).
         self.invalidate_visible_files_cache(wt_ref);
         cx.notify();
-        self.notify_left_dock(cx);
     }
 
     // ------------------------------------------------------------
@@ -825,7 +821,6 @@ impl Workspace {
             self.invalidate_visible_files_cache(wt_ref);
         }
         cx.notify();
-        self.notify_left_dock(cx);
     }
 
     // ------------------------------------------------------------
@@ -872,7 +867,6 @@ impl Workspace {
                 .files_scroll_handle
                 .scroll_to_item(new_index, ScrollStrategy::Nearest);
             cx.notify();
-            self.notify_left_dock(cx);
         }
     }
 
@@ -985,7 +979,6 @@ impl Workspace {
         if invalidated {
             self.invalidate_visible_files_cache(wt_ref);
             cx.notify();
-            self.notify_left_dock(cx);
         }
     }
 }

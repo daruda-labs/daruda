@@ -100,9 +100,9 @@ impl Workspace {
         }
         if filter_changed || icon_changed {
             // `files_show_hidden` / `files_use_gitignore` / `files_icon_color_mode`
-            // are `LeftDockSnapshot` sources; left dock is `.cached()` and won't
-            // re-render on `cx.notify()` alone (Pitfall #10).
-            self.notify_left_dock(cx);
+            // are `LeftDockSnapshot` sources; the render staging diff picks them
+            // up on the next workspace render, so a plain `cx.notify()` suffices.
+            cx.notify();
         }
         // File-viewer editor font size (config `font.editor_size`),
         // independent of the terminal font. Mirror it to the GPUI-side
@@ -143,8 +143,6 @@ impl Workspace {
         if new_enabled != self.claude.claude_status_enabled {
             self.claude.claude_status_enabled = new_enabled;
             self.refresh_jsonl_watcher(cx);
-            // `claude_status_enabled` gates the left-dock install banner (Pitfall #10).
-            self.notify_left_dock(cx);
         }
         // Refresh locale-dependent widget strings. `apply_locale_str` in
         // `globals::register_settings_observer` runs before this method, so

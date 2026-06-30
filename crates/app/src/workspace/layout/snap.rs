@@ -30,7 +30,7 @@ use crate::workspace::Workspace;
 /// tree. Mirrors the runtime [`crate::project::Project`] fields the
 /// render needs, plus the lanes list copied by value so dock
 /// render can iterate without re-entering the workspace entity.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct ProjectSnapshot {
     pub id: daruda_store::project::ProjectId,
     pub name: gpui::SharedString,
@@ -67,7 +67,7 @@ pub(in crate::workspace) struct ProjectSnapshot {
 /// Drives the accordion header rendered in the Lanes view: caret
 /// flips on `is_collapsed`, optional color dot keyed off `color`, and
 /// member projects fold/unfold based on the same flag.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct GroupSnapshot {
     pub id: daruda_store::project::GroupId,
     pub name: gpui::SharedString,
@@ -153,6 +153,52 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// hooks aren't yet installed in `~/.claude/settings.json`.
     pub agent_install_banner_visible: bool,
     pub workspace: WeakEntity<Workspace>,
+}
+
+impl LeftDockSnapshot {
+    /// True when the left-dock-relevant *content* differs from `prev`.
+    ///
+    /// Hand-written (rather than a derived `PartialEq` like
+    /// `BottomDockSnapshot`) for two reasons:
+    /// - `cached_visible` is a stable `Arc` (see `cached_or_rebuild_visible`,
+    ///   which clones the cached `Arc` until invalidated) so it is compared
+    ///   by `Arc::ptr_eq` — O(1), with no need for `VisibleEntry: PartialEq`.
+    /// - GPUI handles (`FocusHandle` / `ScrollHandle` /
+    ///   `UniformListScrollHandle` / `Entity` / `WeakEntity`) are the same
+    ///   instance for the workspace's lifetime, so they are
+    ///   content-irrelevant and intentionally EXCLUDED: `git_changes_panel_focus`,
+    ///   `git_changes_scroll_handle`, `git_commit_input`, `files_panel_focus`,
+    ///   `files_scroll_handle`, `workspace`. `active_project_name` is also
+    ///   excluded — it is `#[allow(dead_code)]`, unused by the render.
+    ///
+    /// Wired into left-dock render staging (`render/mod.rs`) as the
+    /// notify-on-change comparator: the cached dock is marked dirty only
+    /// when this reports a content difference. This is now the sole
+    /// left-dock invalidation mechanism — the manual `notify_left_dock()`
+    /// calls are gone; a plain workspace `cx.notify()` re-stages the
+    /// snapshot and lets this diff decide. (The status pulse is the one
+    /// exception: it dirties the dock directly to animate badges, whose
+    /// frames are not part of this snapshot.)
+    pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
+        !std::sync::Arc::ptr_eq(&self.cached_visible, &prev.cached_visible)
+            || self.left_dock_view != prev.left_dock_view
+            || self.active != prev.active
+            || self.lanes != prev.lanes
+            || self.projects != prev.projects
+            || self.groups != prev.groups
+            || self.git_status_cache != prev.git_status_cache
+            || self.git_stage_in_flight != prev.git_stage_in_flight
+            || self.git_op_in_flight != prev.git_op_in_flight
+            || self.git_collapsed_dirs != prev.git_collapsed_dirs
+            || self.git_changes_cursor != prev.git_changes_cursor
+            || self.focused_file_selection != prev.focused_file_selection
+            || self.files_icon_color_mode != prev.files_icon_color_mode
+            || self.root_kind != prev.root_kind
+            || self.agent_status_per_lane != prev.agent_status_per_lane
+            || self.agent_per_session_per_lane != prev.agent_per_session_per_lane
+            || self.agent_active_session_id != prev.agent_active_session_id
+            || self.agent_install_banner_visible != prev.agent_install_banner_visible
+    }
 }
 
 // ----------------------------------------------------------------
@@ -317,4 +363,143 @@ pub(in crate::workspace) enum DockSnapshot {
     /// Initial / cleared state — `Dock::render` returns an empty
     /// element when the snap is absent (first frame safety net).
     None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use gpui::{AppContext as _, ScrollHandle, TestAppContext, Window};
+
+    /// Build a minimal but real `LeftDockSnapshot` inside a live window so
+    /// the excluded GPUI handle fields (`FocusHandle` / `ScrollHandle` /
+    /// `Entity<InputPanel>` / `WeakEntity<Workspace>`) are valid instances.
+    /// The data fields default to empty/false so individual tests mutate
+    /// only the field under examination.
+    fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
+        let git_commit_input = cx.new(|cx| {
+            crate::ui::InputPanel::new(crate::ui::InputPanelLayout::ActionsBelow, window, cx)
+        });
+        LeftDockSnapshot {
+            left_dock_view: daruda_store::project::LeftDockView::default(),
+            active_project_name: None,
+            lanes: Vec::new(),
+            projects: Vec::new(),
+            groups: Vec::new(),
+            active: daruda_store::project::LaneRef::default(),
+            git_status_cache: std::collections::HashMap::new(),
+            git_stage_in_flight: false,
+            git_op_in_flight: false,
+            git_collapsed_dirs: std::collections::HashSet::new(),
+            git_changes_cursor: None,
+            git_changes_panel_focus: cx.focus_handle(),
+            focused_file_selection: None,
+            git_changes_scroll_handle: ScrollHandle::new(),
+            git_commit_input,
+            files_panel_focus: cx.focus_handle(),
+            files_scroll_handle: UniformListScrollHandle::new(),
+            files_icon_color_mode: daruda_config::IconColorMode::default(),
+            cached_visible: Arc::new(Vec::new()),
+            root_kind: None,
+            agent_status_per_lane: std::collections::HashMap::new(),
+            agent_per_session_per_lane: std::collections::HashMap::new(),
+            agent_active_session_id: None,
+            agent_install_banner_visible: false,
+            workspace: WeakEntity::new_invalid(),
+        }
+    }
+
+    #[gpui::test]
+    fn identical_content_does_not_differ(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = fixture(window, cx);
+            let b = fixture(window, cx);
+            // Distinct handle instances (separate `cx.focus_handle()` /
+            // `InputPanel` entities) must NOT trip the diff — only content
+            // matters. `cached_visible` shares the same `Arc` only when one
+            // is cloned from the other, so clone `b`'s into a copy to model
+            // the "cache reused" path.
+            let b = LeftDockSnapshot {
+                cached_visible: a.cached_visible.clone(),
+                ..b
+            };
+            assert!(
+                !a.content_differs(&b),
+                "identical content (modulo handles + shared cache Arc) must not differ"
+            );
+            gpui::Empty
+        });
+    }
+
+    #[gpui::test]
+    fn claude_status_change_differs(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = fixture(window, cx);
+            let mut b = fixture(window, cx);
+            b.cached_visible = a.cached_visible.clone();
+            b.agent_status_per_lane.insert(
+                daruda_store::project::LaneRef::default(),
+                daruda_claude::SessionStatus::Working,
+            );
+            assert!(
+                a.content_differs(&b),
+                "a changed agent_status_per_lane must trip content_differs"
+            );
+            gpui::Empty
+        });
+    }
+
+    #[gpui::test]
+    fn git_field_change_differs(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = fixture(window, cx);
+            let mut b = fixture(window, cx);
+            b.cached_visible = a.cached_visible.clone();
+            b.git_op_in_flight = true;
+            assert!(
+                a.content_differs(&b),
+                "a changed git field must trip content_differs"
+            );
+            gpui::Empty
+        });
+    }
+
+    #[gpui::test]
+    fn lanes_change_differs(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            let a = fixture(window, cx);
+            let mut b = fixture(window, cx);
+            b.cached_visible = a.cached_visible.clone();
+            b.lanes.push(crate::lane::Lane::default_for_project(
+                0,
+                std::path::PathBuf::from("/tmp/scratch"),
+            ));
+            assert!(
+                a.content_differs(&b),
+                "a changed lanes vec must trip content_differs"
+            );
+            gpui::Empty
+        });
+    }
+
+    #[gpui::test]
+    fn distinct_cache_arc_differs(cx: &mut TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            // Two independently-allocated empty `Arc`s have equal content
+            // but distinct pointers — `Arc::ptr_eq` (intentionally) reports
+            // them as a difference, modeling a cache rebuild.
+            let a = fixture(window, cx);
+            let b = fixture(window, cx);
+            assert!(
+                a.content_differs(&b),
+                "distinct cached_visible Arc must trip content_differs (ptr_eq)"
+            );
+            gpui::Empty
+        });
+    }
 }

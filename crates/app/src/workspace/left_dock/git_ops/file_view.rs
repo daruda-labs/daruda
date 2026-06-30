@@ -142,7 +142,6 @@ impl Workspace {
                 lane: lane_id,
             });
             cx.notify();
-            self.notify_left_dock(cx);
             let owner = daruda_store::project::LaneRef {
                 project,
                 lane: lane_id,
@@ -186,7 +185,6 @@ impl Workspace {
             lane: lane_id,
         });
         cx.notify();
-        self.notify_left_dock(cx);
 
         let owner = daruda_store::project::LaneRef {
             project: self.active.project,
@@ -277,7 +275,6 @@ impl Workspace {
             lane: lane_id,
         });
         cx.notify();
-        self.notify_left_dock(cx);
 
         let owner = daruda_store::project::LaneRef {
             project: self.active.project,

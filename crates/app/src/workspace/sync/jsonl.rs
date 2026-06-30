@@ -101,7 +101,6 @@ impl Workspace {
             }
             cx.notify();
             self.notify_right_dock(cx);
-            self.notify_left_dock(cx);
         }
     }
 }

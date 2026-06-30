@@ -90,7 +90,6 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                ws.notify_left_dock(cx);
                 // Drain the repeat slot — re-fire once to capture
                 // events that landed while the previous run was busy.
                 if ws.git_status_pending_repeat.remove(&target) {

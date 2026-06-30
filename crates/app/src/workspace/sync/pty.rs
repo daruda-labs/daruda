@@ -73,11 +73,11 @@ impl Workspace {
                     None => self.claude.pty_claude_bindings.remove(&pane_id).is_some(),
                 };
                 if changed {
-                    cx.notify();
                     // `pty_claude_bindings` change → `agent_active_session_id`
-                    // in the left dock snapshot changes. Left dock is `.cached()`,
-                    // so dirty it explicitly (Pitfall #10).
-                    self.notify_left_dock(cx);
+                    // in the left dock snapshot changes; a workspace render
+                    // re-stages the dock and the staging diff invalidates the
+                    // `.cached()` left dock.
+                    cx.notify();
                 }
             }
             PtyTrackerEvent::DeadSession { session_id } => {
@@ -97,7 +97,6 @@ impl Workspace {
                     }
                     cx.notify();
                     self.notify_right_dock(cx);
-                    self.notify_left_dock(cx);
                 }
             }
         }
