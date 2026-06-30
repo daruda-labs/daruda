@@ -1,8 +1,8 @@
 /// Shared text-selection primitives used by both the input widget
 /// (ropey::Rope, byte offsets) and future plain-text consumers (&str).
 ///
-/// **Scope**: word-boundary logic only.  SelectMode, mouse branching, line
-/// range, drag extension, and selection state remain per-widget.
+/// **Scope**: word-boundary and logical-line-range logic.  SelectMode, mouse
+/// branching, drag extension, and selection state remain per-widget.
 use std::ops::Range;
 
 /// Category of a character for word-boundary detection.
@@ -119,6 +119,46 @@ pub fn word_range(
     }
 
     Some(start..end)
+}
+
+/// Return the byte range of the logical (newline-delimited) line that
+/// contains `offset`.
+///
+/// # Parameters
+/// - `len`     – total byte length of the text.
+/// - `char_at` – closure that maps a byte offset to the `char` starting
+///               there, or `None` when the offset is out of range or not a
+///               UTF-8 character boundary.
+/// - `offset`  – byte offset inside the line to locate.
+///
+/// Always returns a valid `Range<usize>` within `0..len`.  When the text
+/// has no newlines the whole range `0..len` is returned.
+pub fn logical_line_range(
+    len: usize,
+    char_at: impl Fn(usize) -> Option<char>,
+    offset: usize,
+) -> Range<usize> {
+    let offset = offset.min(len);
+    // Walk backward to find the start (byte after the preceding '\n').
+    let start = if offset == 0 {
+        0
+    } else {
+        let mut pos = offset;
+        loop {
+            if pos == 0 {
+                break 0;
+            }
+            pos -= 1;
+            if char_at(pos) == Some('\n') {
+                break pos + 1;
+            }
+        }
+    };
+    // Walk forward to find the end (the '\n' itself, exclusive; or `len`).
+    let end = (offset..len)
+        .find(|&i| char_at(i) == Some('\n'))
+        .unwrap_or(len);
+    start..end
 }
 
 #[cfg(test)]

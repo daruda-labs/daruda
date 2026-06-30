@@ -1250,27 +1250,7 @@ impl InputState {
         if self.mode.is_single_line() {
             return 0..self.text.len();
         }
-        let len = self.text.len();
-        // Walk backward to find the line start (byte after the preceding '\n').
-        let start = if offset == 0 {
-            0
-        } else {
-            let mut pos = offset;
-            loop {
-                if pos == 0 {
-                    break 0;
-                }
-                pos -= 1;
-                if self.text.char_at(pos) == Some('\n') {
-                    break pos + 1;
-                }
-            }
-        };
-        // Walk forward to find the line end (the '\n' itself, exclusive).
-        let end = (offset..len)
-            .find(|&i| self.text.char_at(i) == Some('\n'))
-            .unwrap_or(len);
-        start..end
+        crate::text_selection::logical_line_range(self.text.len(), |i| self.text.char_at(i), offset)
     }
 
     /// Get start line of selection start or end (The min value).
@@ -2121,9 +2101,12 @@ impl InputState {
 
         let offset = self.index_for_mouse_position(event.position);
         match self.select_mode.clone() {
-            SelectMode::Character | SelectMode::All => {
+            SelectMode::Character => {
                 self.select_to(offset, cx);
             }
+            // Quad-click selects all; dragging after quad-click does not shrink
+            // the full selection — the entire text stays selected.
+            SelectMode::All => {}
             SelectMode::Word(anchor) => {
                 let word = self.word_range_at(offset).unwrap_or(offset..offset);
                 let start = anchor.start.min(word.start);

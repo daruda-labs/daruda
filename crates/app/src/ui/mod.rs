@@ -82,8 +82,8 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
-pub use gpui_component::text::SelectMode;
-pub use gpui_component::text_selection::{CharType, word_range};
+pub use gpui_component::text::{SelectMode, select_mode_for_click_count};
+pub use gpui_component::text_selection::{CharType, logical_line_range, word_range};
 pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};
 
@@ -156,8 +156,7 @@ mod word_range_tests {
 
 #[cfg(test)]
 mod text_view_select_mode_tests {
-    use super::{SelectMode, word_range};
-    use gpui::{point, px};
+    use super::{SelectMode, logical_line_range, select_mode_for_click_count, word_range};
 
     fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
         if byte_offset >= s.len() || !s.is_char_boundary(byte_offset) {
@@ -167,46 +166,29 @@ mod text_view_select_mode_tests {
     }
 
     /// SelectMode variants must match their click counts.
+    /// Calls the real `select_mode_for_click_count` production function.
     #[test]
     fn select_mode_from_click_count() {
-        let p = point(px(10.0_f32), px(20.0_f32));
-
-        let mode_for = |click_count: usize| -> SelectMode {
-            match click_count {
-                2 => SelectMode::Word(p),
-                3 => SelectMode::Line(p),
-                c if c >= 4 => SelectMode::All,
-                _ => SelectMode::Character,
-            }
-        };
-
-        assert_eq!(mode_for(1), SelectMode::Character);
-        assert_eq!(mode_for(2), SelectMode::Word(p));
-        assert_eq!(mode_for(3), SelectMode::Line(p));
-        assert_eq!(mode_for(4), SelectMode::All);
-        assert_eq!(mode_for(10), SelectMode::All);
+        assert_eq!(select_mode_for_click_count(1), SelectMode::Character);
+        assert_eq!(select_mode_for_click_count(2), SelectMode::Word);
+        assert_eq!(select_mode_for_click_count(3), SelectMode::Line);
+        assert_eq!(select_mode_for_click_count(4), SelectMode::All);
+        assert_eq!(select_mode_for_click_count(10), SelectMode::All);
     }
 
-    /// has_selection logic: Word/Line/All return true even with same start==end.
+    /// Word/Line/All modes signal "has selection" even without a drag.
+    /// Verified via select_mode_for_click_count — same mapping used at runtime.
     #[test]
-    fn has_selection_word_mode_without_drag() {
-        let p = point(px(10.0_f32), px(20.0_f32));
-
-        let has_selection = |mode: SelectMode, has_start: bool| -> bool {
-            match mode {
-                SelectMode::Word(_) | SelectMode::Line(_) | SelectMode::All => has_start,
-                SelectMode::Character => false,
-            }
-        };
-
-        assert!(!has_selection(SelectMode::Character, true));
-        assert!(has_selection(SelectMode::Word(p), true));
-        assert!(has_selection(SelectMode::Line(p), true));
-        assert!(has_selection(SelectMode::All, true));
-        assert!(!has_selection(SelectMode::All, false));
+    fn word_line_all_expand_without_drag() {
+        let expands = |n: usize| !matches!(select_mode_for_click_count(n), SelectMode::Character);
+        assert!(!expands(1)); // Character — only expands on drag
+        assert!(expands(2)); // Word
+        assert!(expands(3)); // Line
+        assert!(expands(4)); // All
     }
 
     /// Word expansion: raw byte range is expanded to word boundaries.
+    /// Calls the real `word_range` function from production.
     #[test]
     fn word_expansion_expands_to_boundaries() {
         let text = "hello world foo";
@@ -230,91 +212,57 @@ mod text_view_select_mode_tests {
         assert_eq!(&text[r], " ");
     }
 
-    /// Visual line expansion: characters on the same Y row are selected.
-    ///
-    /// Simulates a 2-line layout: "hello " on row y=0, "world" on row y=20.
+    /// Logical line range: `logical_line_range` returns the full newline-
+    /// delimited line containing `offset`.  Calls the real production function.
     #[test]
-    fn visual_line_expansion_covers_full_row() {
-        use gpui::Pixels;
+    fn logical_line_range_returns_correct_line() {
+        let text = "hello\nworld\nfoo";
+        let char_at = |i: usize| str_char_at(text, i);
+        let len = text.len();
 
+        // Offset 2 in "hello" → line 0..5.
+        assert_eq!(logical_line_range(len, char_at, 2), 0..5);
+        // Offset 0 (start of text) → line 0..5.
+        assert_eq!(logical_line_range(len, char_at, 0), 0..5);
+        // Offset 7 in "world" → line 6..11.
+        assert_eq!(logical_line_range(len, char_at, 7), 6..11);
+        // Offset 12 in "foo" → line 12..15.
+        assert_eq!(logical_line_range(len, char_at, 12), 12..15);
+        // End of text (last line, no trailing newline) → line 12..15.
+        assert_eq!(logical_line_range(len, char_at, 14), 12..15);
+    }
+
+    /// On text with no newlines `logical_line_range` always returns 0..len.
+    #[test]
+    fn logical_line_range_single_line_text() {
         let text = "hello world";
-        let line_height = px(20.0_f32);
+        let char_at = |i: usize| str_char_at(text, i);
+        assert_eq!(logical_line_range(text.len(), char_at, 0), 0..11);
+        assert_eq!(logical_line_range(text.len(), char_at, 5), 0..11);
+    }
 
-        // Fake position_for_index: first 6 bytes (0..6) on y=0, rest on y=20.
-        let position_for_index = |offset: usize| -> Option<gpui::Point<Pixels>> {
-            if offset > text.len() {
-                return None;
-            }
-            let y = if offset < 6 { 0.0_f32 } else { 20.0_f32 };
-            Some(point(px(offset as f32 * 8.0), px(y)))
-        };
+    /// Line drag union: dragging from one line into another extends the
+    /// selection to cover both whole lines.
+    /// Uses real `logical_line_range` calls to mirror `on_drag_move` Line arm.
+    #[test]
+    fn line_drag_union_covers_both_lines() {
+        let text = "hello\nworld\nfoo";
+        let char_at = |i: usize| str_char_at(text, i);
+        let len = text.len();
 
-        // Simulate a narrow pixel selection inside line 1 (y=20): offsets 6..8.
-        let raw_start = 6usize;
-        let raw_end = 8usize;
-        let raw_top = position_for_index(raw_start)
-            .map(|p| p.y)
-            .unwrap_or_default();
-        let raw_bottom = position_for_index(raw_end.saturating_sub(1))
-            .map(|p| p.y + line_height)
-            .unwrap_or(raw_top + line_height);
+        // Triple-click anchor on line 0 (offset 2) → 0..5.
+        let anchor = logical_line_range(len, char_at, 2);
 
-        let (line_start, line_end) = {
-            let mut ls: Option<usize> = None;
-            let mut le: Option<usize> = None;
-            let mut off = 0;
-            for c in text.chars() {
-                if let Some(pos) = position_for_index(off)
-                    && pos.y < raw_bottom
-                    && pos.y + line_height > raw_top
-                {
-                    if ls.is_none() {
-                        ls = Some(off);
-                    }
-                    le = Some(off + c.len_utf8());
-                }
-                off += c.len_utf8();
-            }
-            (ls, le)
-        };
+        // Drag cursor into line 1 (offset 7) → line1 = 6..11.
+        let line_at_cursor = logical_line_range(len, char_at, 7);
+        let union_start = anchor.start.min(line_at_cursor.start);
+        let union_end = anchor.end.max(line_at_cursor.end);
+        assert_eq!(&text[union_start..union_end], "hello\nworld");
 
-        // Entire "world" (6..11) should be selected.
-        assert_eq!(line_start, Some(6));
-        assert_eq!(line_end, Some(11));
-        assert_eq!(&text[line_start.unwrap()..line_end.unwrap()], "world");
-
-        // Simulate a narrow selection inside line 0 (y=0): offsets 1..3.
-        let raw_start0 = 1usize;
-        let raw_end0 = 3usize;
-        let raw_top0 = position_for_index(raw_start0)
-            .map(|p| p.y)
-            .unwrap_or_default();
-        let raw_bottom0 = position_for_index(raw_end0.saturating_sub(1))
-            .map(|p| p.y + line_height)
-            .unwrap_or(raw_top0 + line_height);
-
-        let (ls0, le0) = {
-            let mut ls: Option<usize> = None;
-            let mut le: Option<usize> = None;
-            let mut off = 0;
-            for c in text.chars() {
-                if let Some(pos) = position_for_index(off)
-                    && pos.y < raw_bottom0
-                    && pos.y + line_height > raw_top0
-                {
-                    if ls.is_none() {
-                        ls = Some(off);
-                    }
-                    le = Some(off + c.len_utf8());
-                }
-                off += c.len_utf8();
-            }
-            (ls, le)
-        };
-
-        // Entire "hello " (0..6) should be selected.
-        assert_eq!(ls0, Some(0));
-        assert_eq!(le0, Some(6));
-        assert_eq!(&text[ls0.unwrap()..le0.unwrap()], "hello ");
+        // Drag cursor back within line 0 (offset 3) — union stays at line 0.
+        let line_at_cursor2 = logical_line_range(len, char_at, 3);
+        let s2 = anchor.start.min(line_at_cursor2.start);
+        let e2 = anchor.end.max(line_at_cursor2.end);
+        assert_eq!(&text[s2..e2], "hello");
     }
 }
