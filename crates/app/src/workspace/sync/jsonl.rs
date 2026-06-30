@@ -100,7 +100,6 @@ impl Workspace {
                 self.log_lane_status_change(dbg_probe, &sid, &cwd, &event, source);
             }
             cx.notify();
-            self.notify_right_dock(cx);
         }
     }
 }

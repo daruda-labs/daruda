@@ -344,6 +344,29 @@ pub(in crate::workspace) struct RightDockSnapshot {
     pub mcp: crate::agent::mcp::McpSnapshot,
 }
 
+impl RightDockSnapshot {
+    /// Notify-on-change diff, like [`LeftDockSnapshot::content_differs`].
+    /// Excludes GPUI handles, the per-frame `now` (refreshed by the
+    /// task-live tick, not the snapshot), and the dead
+    /// `claude_status_per_path`.
+    pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
+        self.right_dock_view != prev.right_dock_view
+            || self.plan_limits != prev.plan_limits
+            || self.service_status != prev.service_status
+            || self.activity != prev.activity
+            || self.usage_refresh_in_flight != prev.usage_refresh_in_flight
+            || self.skills != prev.skills
+            || self.skill_search_query != prev.skill_search_query
+            || self.skill_plugin_expanded != prev.skill_plugin_expanded
+            || self.tasks != prev.tasks
+            || self.task_search_query != prev.task_search_query
+            || self.task_filter != prev.task_filter
+            || self.claude_status_per_session != prev.claude_status_per_session
+            || self.tool_use_failure_counts != prev.tool_use_failure_counts
+            || self.mcp != prev.mcp
+    }
+}
+
 // ----------------------------------------------------------------
 // Discriminated union stored on Dock
 // ----------------------------------------------------------------

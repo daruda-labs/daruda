@@ -151,9 +151,6 @@ impl Workspace {
         self.refresh_locale_strings(cx);
 
         cx.notify();
-        // The poll cadence feeds the Usage tab's gauges; the right dock
-        // is `.cached()`, so a config reload must dirty it explicitly.
-        self.notify_right_dock(cx);
     }
 
     /// Re-apply translated strings to all widgets whose labels are captured

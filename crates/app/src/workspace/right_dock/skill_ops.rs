@@ -28,7 +28,6 @@ impl Workspace {
         if self.skill_plugin_expanded != expanded {
             self.skill_plugin_expanded = expanded;
             cx.notify();
-            self.notify_right_dock(cx);
         }
     }
 

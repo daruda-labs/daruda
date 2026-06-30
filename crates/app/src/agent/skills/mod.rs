@@ -107,7 +107,7 @@ impl SkillInvocation {
 
 /// One skill on disk. Built by [`scan::scan_scope`] and
 /// [`scan::scan_plugins`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Skill {
     /// Display name. Frontmatter `name` if present, else the directory
     /// stem. The scanner guarantees this is non-empty.
@@ -242,7 +242,7 @@ impl SkillsState {
 /// Owned per-lane projection of [`SkillsState`] consumed by the
 /// renderer and CRUD modals. Carries the project Vec for *one*
 /// lane along with the user-global personal + plugin vectors.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SkillsSnapshot {
     pub project: Vec<Skill>,
     pub personal: Vec<Skill>,

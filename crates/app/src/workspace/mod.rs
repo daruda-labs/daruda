@@ -936,7 +936,6 @@ impl Workspace {
             _tasks_global_subscription: cx
                 .observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
                     ws.ensure_task_live_tick(cx);
-                    ws.notify_right_dock(cx);
                     cx.notify();
                 }),
             _task_live_tick: None,
@@ -967,18 +966,20 @@ impl Workspace {
             _skills_watcher: None,
             _skills_event_pump: None,
             _skills_global_subscription: cx.observe_global::<crate::agent::skills::SkillsState>(
-                |ws, cx| {
-                    ws.notify_right_dock(cx);
+                |_ws, cx| {
+                    // Right dock re-stages + diffs on this notify.
                     cx.notify();
                 },
             ),
             _mcp_watcher: None,
             _mcp_event_pump: None,
             mcp_project_dirs: Vec::new(),
-            _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(|ws, cx| {
-                ws.notify_right_dock(cx);
-                cx.notify();
-            }),
+            _mcp_global_subscription: cx.observe_global::<crate::agent::mcp::McpState>(
+                |_ws, cx| {
+                    // Right dock re-stages + diffs on this notify.
+                    cx.notify();
+                },
+            ),
             // Re-resolve the user layer with this workspace's project
             // overlay and reapply whenever `SettingsStore` changes —
             // both the FS watch tick and the Settings-window save
@@ -1406,23 +1407,11 @@ impl Workspace {
         gpui::App::notify(cx, dock_id);
     }
 
-    /// Dirty both the left and right docks after a Claude **session
-    /// status** change. The per-lane `AgentStatusBadge` (left dock) and the
-    /// Tasks badges (right dock) both render from a staged snapshot that
-    /// reads each session's status; the docks are `.cached()` and staged
-    /// without self-notify, so a status transition that only `cx.notify`s
-    /// its own view (e.g. an ACP `apply_event` fold) would otherwise leave
-    /// the cached badge stale. The status-pulse covers the *animating*
-    /// window only, so the final settle to `Idle` needs this explicit
-    /// push. Mirrors the PTY pump (`sync/pty.rs`), which already notifies
-    /// the docks on every status-file change.
+    /// Refresh both dock badges after an agent session-status change.
+    /// One notify re-stages both snapshots; each dock's staging diff
+    /// repaints it only on a real change.
     pub(crate) fn notify_status_docks(&self, cx: &mut Context<Self>) {
-        // The left dock's `.cached()` snapshot carries per-lane Claude
-        // status, so a workspace render re-stages it and the staging diff
-        // invalidates the dock. The right dock has no such diff yet, so it
-        // still needs its explicit notify.
         cx.notify();
-        self.notify_right_dock(cx);
     }
 
     /// `true` when any AgentChat pane has a turn in flight. Gates the
@@ -1466,7 +1455,6 @@ impl Workspace {
             ws.right_dock_view = view;
         });
         cx.notify();
-        self.notify_right_dock(cx);
     }
 
     /// Execute the currently focused palette action and close.

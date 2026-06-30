@@ -96,7 +96,6 @@ impl Workspace {
                         let _ = sf::delete(&sf::lock_path_for(&dir, &session_id));
                     }
                     cx.notify();
-                    self.notify_right_dock(cx);
                 }
             }
         }

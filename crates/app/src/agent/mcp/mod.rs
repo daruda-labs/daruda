@@ -427,7 +427,7 @@ impl McpState {
 /// JSON trees stay on [`McpState`] (read directly by the persist
 /// layer) and are deliberately absent here — the renderer never
 /// reads them, so cloning them per frame would be pure waste.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct McpSnapshot {
     /// User scope (`~/.claude.json` top-level).
     pub user: Vec<McpServer>,

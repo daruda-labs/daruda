@@ -377,8 +377,13 @@ impl Render for Workspace {
                 cx.notify();
             }
         });
-        self.right_dock.update(cx, |d, _| {
-            d.snap = DockSnapshot::Right(Box::new(right_snap))
+        self.right_dock.update(cx, |d, cx| {
+            let changed =
+                !matches!(&d.snap, DockSnapshot::Right(old) if !right_snap.content_differs(old));
+            if changed {
+                d.snap = DockSnapshot::Right(Box::new(right_snap));
+                cx.notify();
+            }
         });
 
         // Read dock display state after staging snapshots.
@@ -827,14 +832,11 @@ impl Render for Workspace {
                 )
             })
             .child(main_area)
-            // `.cached()`: the right dock re-renders only when one of its
-            // sources notifies it (`Workspace::notify_right_dock` — wired
-            // at every MCP/skills/tasks global, usage/limits, claude
-            // status, tab/filter setter, and the status + task-live
-            // pulses). On unrelated parent repaints (terminal output) the
-            // cached layout + paint is recycled instead of rebuilding the
-            // Usage/Skills/Tasks/Tools view. Embedded search/dropdown
-            // entities self-notify and dirty this dock as an ancestor.
+            // `.cached()`: staging diffs `RightDockSnapshot`
+            // (`content_differs`) and repaints only on real change, so a
+            // workspace `cx.notify()` suffices. Exceptions keeping an
+            // explicit `notify_right_dock`: the status pulse and task-live
+            // tick, whose changes (animation, `now`) aren't in the snapshot.
             .when(right_dock_open, |el| {
                 el.child(
                     gpui::AnyView::from(self.right_dock.clone()).cached(
