@@ -48,7 +48,7 @@ use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
-    SetSessionModeRequest, TextContent,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo};
 use futures::FutureExt;
@@ -57,7 +57,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::channel::oneshot;
 
 use crate::connection::{AcpClientError, AdapterCommand};
-use crate::model::ModeStateView;
+use crate::model::{ConfigOptionView, ModeStateView};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -97,8 +97,17 @@ impl PermissionDecision {
 pub enum AcpEvent {
     /// `initialize` + `session/new` succeeded; the session is ready for prompts.
     /// `modes` carries the advertised session-mode state when the agent supports
-    /// modes; `None` otherwise.
-    Connected { modes: Option<ModeStateView> },
+    /// modes; `None` otherwise. `config_options` carries the advertised select
+    /// config options (model / effort / etc.); empty when the agent advertises
+    /// none.
+    Connected {
+        modes: Option<ModeStateView>,
+        config_options: Vec<ConfigOptionView>,
+    },
+    /// The agent replaced its session config option state — the response to a
+    /// `set_config_option` request (the protocol returns the full updated set).
+    /// Full replacement of the host's cached options.
+    ConfigOptionsChanged(Vec<ConfigOptionView>),
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
     Update(Box<SessionUpdate>),
@@ -138,6 +147,9 @@ enum Command {
     Cancel,
     /// Send a `session/set_mode` request to switch the agent to the named mode.
     SetMode(String),
+    /// Send a `session/set_config_option` request to change a config option
+    /// (model / effort / etc.) to the given value.
+    SetConfigOption { config_id: String, value: String },
 }
 
 /// Host-side handle to a live ACP session. Cloning is intentionally not derived
@@ -175,6 +187,19 @@ impl AcpSessionHandle {
     /// dropped because the host learns of termination via the event stream.
     pub fn set_mode(&self, mode_id: String) {
         let _ = self.commands.unbounded_send(Command::SetMode(mode_id));
+    }
+
+    /// Request a config option change via `session/set_config_option`. Returns
+    /// immediately; the connection task issues the request on the next idle
+    /// cycle and emits [`AcpEvent::ConfigOptionsChanged`] with the agent's
+    /// updated option set.
+    ///
+    /// A send failure means the connection task has already ended; the error is
+    /// dropped because the host learns of termination via the event stream.
+    pub fn set_config_option(&self, config_id: String, value: String) {
+        let _ = self
+            .commands
+            .unbounded_send(Command::SetConfigOption { config_id, value });
     }
 
     /// Resolve a parked permission request the host received as
@@ -347,6 +372,15 @@ async fn run_connection(
                 .await?;
             let session_id = new_session.session_id.clone();
             let mut modes: Option<ModeStateView> = new_session.modes.as_ref().map(Into::into);
+            // Select config options advertised at connect (model / effort / …).
+            // Non-select kinds are dropped by `from_protocol`.
+            let config_options: Vec<ConfigOptionView> = new_session
+                .config_options
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(ConfigOptionView::from_protocol)
+                .collect();
 
             // Apply the configured initial mode when the adapter advertised it,
             // the requested id is in the available list, and it differs from
@@ -379,7 +413,10 @@ async fn run_connection(
                 }
             }
 
-            let _ = event_tx.unbounded_send(AcpEvent::Connected { modes });
+            let _ = event_tx.unbounded_send(AcpEvent::Connected {
+                modes,
+                config_options,
+            });
 
             prompt_loop(&connection, session_id, command_rx, &event_tx).await?;
             Ok(())
@@ -419,6 +456,13 @@ async fn prompt_loop(
                     connection
                         .send_request(SetSessionModeRequest::new(session_id.clone(), id))
                         .block_task()
+                        .await?;
+                    continue;
+                }
+                // A config option change while idle: issue the request and wait
+                // for the next command. The response carries the updated set.
+                Some(Command::SetConfigOption { config_id, value }) => {
+                    send_set_config_option(connection, &session_id, config_id, value, event_tx)
                         .await?;
                     continue;
                 }
@@ -486,6 +530,13 @@ async fn run_turn(
                         .block_task()
                         .await?;
                 }
+                Some(Command::SetConfigOption { config_id, value }) => {
+                    // Config change mid-turn: issue it and keep awaiting the
+                    // prompt response; the updated set arrives in the response,
+                    // forwarded as ConfigOptionsChanged.
+                    send_set_config_option(connection, session_id, config_id, value, event_tx)
+                        .await?;
+                }
                 None => {
                     // Handle dropped mid-turn: cancel and let the turn wind
                     // down. `UnboundedReceiver` is a `FusedStream`, so once it
@@ -502,6 +553,35 @@ async fn run_turn(
         stop_reason: format!("{stop_reason:?}"),
     });
     Ok(handle_dropped)
+}
+
+/// Send a `session/set_config_option` and broadcast the agent's updated option
+/// set as [`AcpEvent::ConfigOptionsChanged`]. The protocol returns the full
+/// option list in the response, so the host replaces its cache wholesale (no
+/// separate notification, unlike `set_mode` which confirms via
+/// `CurrentModeUpdate`).
+async fn send_set_config_option(
+    connection: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    config_id: String,
+    value: String,
+    event_tx: &UnboundedSender<AcpEvent>,
+) -> Result<(), agent_client_protocol::Error> {
+    let resp = connection
+        .send_request(SetSessionConfigOptionRequest::new(
+            session_id.clone(),
+            config_id,
+            value,
+        ))
+        .block_task()
+        .await?;
+    let options: Vec<ConfigOptionView> = resp
+        .config_options
+        .iter()
+        .filter_map(ConfigOptionView::from_protocol)
+        .collect();
+    let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(options));
+    Ok(())
 }
 
 #[cfg(test)]

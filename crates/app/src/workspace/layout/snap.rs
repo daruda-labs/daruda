@@ -244,6 +244,15 @@ pub(in crate::workspace) struct BottomDockSnapshot {
         crate::workspace::main_area::pane_tree::PaneId,
         daruda_acp::ModeStateView,
     )>,
+    /// Set when the focused pane is an Agent chat pane advertising select config
+    /// options of the Model / ThoughtLevel category. Carries the pane id + those
+    /// options so the bottom input renders a chip per option (model, effort)
+    /// beside the Submit button. `None` for a terminal-pane focus or an agent
+    /// pane with no such options. Mode is excluded — it renders via `agent_mode`.
+    pub agent_config_options: Option<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        Vec<daruda_acp::ConfigOptionView>,
+    )>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

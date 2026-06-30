@@ -39,9 +39,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
-    AcpEvent, AcpSessionHandle, ChatItem, ModeStateView, PermissionDecision, PermissionKindView,
-    PlanEntryView, SlashCommand, apply_update, cancel_pending_tools, finalize_streaming,
-    permission_item,
+    AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ModeStateView, PermissionDecision,
+    PermissionKindView, PlanEntryView, SlashCommand, apply_update, cancel_pending_tools,
+    finalize_streaming, permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -184,6 +184,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// updated on `CurrentModeUpdate` notifications. `None` until the session
     /// connects, or when the agent does not advertise modes.
     pub(in crate::workspace) modes: Option<ModeStateView>,
+    /// Select config options (model / effort / …) advertised by the agent at
+    /// `session/new` time and replaced wholesale on `ConfigOptionsChanged`.
+    /// Empty until the session connects or when the agent advertises none.
+    /// `Mode`-category options are intentionally not kept here — mode is
+    /// rendered through [`Self::modes`] and the existing mode chip.
+    pub(in crate::workspace) config_options: Vec<ConfigOptionView>,
     /// Slash commands advertised by the agent via `AvailableCommandsChanged`.
     /// Runtime-only; never serialized. Consumed by the slash-command
     /// autocomplete provider (later task).
@@ -272,6 +278,7 @@ impl AgentChatView {
             },
             rows: Vec::new(),
             modes: None,
+            config_options: Vec::new(),
             available_commands: Vec::new(),
             plan: Vec::new(),
             session_title: None,
@@ -329,14 +336,21 @@ impl AgentChatView {
         }
 
         match event {
-            AcpEvent::Connected { modes } => {
+            AcpEvent::Connected {
+                modes,
+                config_options,
+            } => {
                 self.status = AgentSessionStatus::Connected;
                 self.modes = modes;
+                self.config_options = config_options;
                 // Clear stale plan/title from a previous session so they don't
                 // flash before the new agent sends its first updates.
                 self.plan.clear();
                 self.session_title = None;
                 self.plan_collapsed = false;
+            }
+            AcpEvent::ConfigOptionsChanged(options) => {
+                self.config_options = options;
             }
             AcpEvent::ModeChanged { mode_id } => {
                 if let Some(m) = &mut self.modes {
@@ -645,6 +659,26 @@ impl AgentChatView {
         }
         if let Some(h) = &self.handle {
             h.set_mode(mode_id);
+        }
+        cx.notify();
+    }
+
+    /// Change a select config option (model / effort / …). Optimistically
+    /// updates the option's `current_value` so the chip reflects the choice
+    /// immediately; the adapter reconciles by replacing the whole option set via
+    /// a `ConfigOptionsChanged` event. Sends `session/set_config_option` over
+    /// the live handle (no-op when the handle is absent).
+    pub(in crate::workspace) fn set_config_option(
+        &mut self,
+        config_id: String,
+        value: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(opt) = self.config_options.iter_mut().find(|o| o.id == config_id) {
+            opt.current_value = value.clone();
+        }
+        if let Some(h) = &self.handle {
+            h.set_config_option(config_id, value);
         }
         cx.notify();
     }

@@ -201,6 +201,33 @@ impl Workspace {
             .and_then(|view| view.read(cx).modes.clone())
             .filter(|m| !m.available.is_empty())
             .map(|m| (focused_id, m));
+        // Model / effort chips: same focused-agent-pane gate as the mode chip,
+        // sourced from `config_options`. Only Model and ThoughtLevel categories
+        // surface as chips (mode renders via `agent_mode`; Other / ModelConfig
+        // are not exposed). `None` when the focused pane is not an agent pane or
+        // advertises no such options.
+        let agent_config_options = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused_id)
+            .and_then(|p| p.agent_chat_view())
+            .map(|view| {
+                view.read(cx)
+                    .config_options
+                    .iter()
+                    .filter(|o| {
+                        matches!(
+                            o.category,
+                            daruda_acp::ConfigOptionCategoryView::Model
+                                | daruda_acp::ConfigOptionCategoryView::ThoughtLevel
+                        )
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .filter(|opts| !opts.is_empty())
+            .map(|opts| (focused_id, opts));
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
@@ -211,6 +238,7 @@ impl Workspace {
             terminal_input: self.terminal_input.clone(),
             agent_stop_pane,
             agent_mode,
+            agent_config_options,
             shell,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }

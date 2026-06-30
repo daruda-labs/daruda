@@ -41,10 +41,19 @@ fn main() {
 
         while let Some(event) = events.next().await {
             match event {
-                AcpEvent::Connected { modes } => {
-                    eprintln!("[connected] modes={modes:?} sending prompt 1");
+                AcpEvent::Connected {
+                    modes,
+                    config_options,
+                } => {
+                    eprintln!(
+                        "[connected] modes={modes:?} config_options={config_options:?} \
+                         sending prompt 1"
+                    );
                     handle.send_prompt(prompts[next_prompt].to_string());
                     next_prompt += 1;
+                }
+                AcpEvent::ConfigOptionsChanged(options) => {
+                    eprintln!("[config-options] {options:?}");
                 }
                 AcpEvent::Update(update) => {
                     eprintln!("[update] {update:?}");

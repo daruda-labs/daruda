@@ -371,6 +371,23 @@ impl Workspace {
         self.refresh_terminal_input_placeholder(cx);
     }
 
+    /// Change a select config option (model / effort / …) of an Agent chat
+    /// pane. Shim for the bottom-dock config chips: routes the chosen
+    /// `(config_id, value)` into the focused pane's view, which optimistically
+    /// updates the chip and sends `session/set_config_option`. No-op when
+    /// `pane_id` is gone or is not an Agent chat pane.
+    pub(in crate::workspace) fn set_agent_config_option(
+        &mut self,
+        pane_id: PaneId,
+        config_id: String,
+        value: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.set_config_option(config_id, value, cx));
+        }
+    }
+
     /// Advance an Agent chat pane's session mode to the next advertised mode,
     /// wrapping at the end. Backs the bottom-input Shift+Tab shortcut (mirrors
     /// Claude Code's permission-mode cycle). Returns `true` when it switched the

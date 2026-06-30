@@ -36,9 +36,12 @@ pub struct AdapterCommand(pub String);
 
 impl Default for AdapterCommand {
     fn default() -> Self {
-        // Zed-maintained Claude Code ACP adapter. Auth (subscription or API
-        // key) is the adapter's responsibility — daruda passes no credentials.
-        Self("npx -y @zed-industries/claude-code-acp@latest".to_string())
+        // ACP Claude agent adapter (agentclientprotocol/claude-agent-acp). Auth
+        // (subscription or API key) is the adapter's responsibility — daruda
+        // passes no credentials. `@latest` keeps us on the newest adapter, which
+        // advertises model / effort / mode as session config options; see
+        // ../CLAUDE.md for the upstream-version policy.
+        Self("npx -y @agentclientprotocol/claude-agent-acp@latest".to_string())
     }
 }
 
@@ -171,10 +174,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_adapter_command_is_zed_claude_code() {
+    fn default_adapter_command_is_claude_agent_acp() {
         assert_eq!(
             AdapterCommand::default().0,
-            "npx -y @zed-industries/claude-code-acp@latest"
+            "npx -y @agentclientprotocol/claude-agent-acp@latest"
         );
     }
 

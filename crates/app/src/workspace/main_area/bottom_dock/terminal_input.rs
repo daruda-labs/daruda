@@ -86,28 +86,48 @@ pub(in crate::workspace) fn render_body(
                 }))
         }
     };
-    // When the focused pane is an Agent chat pane that advertises modes, a
-    // mode-selector chip sits to the left of the Submit button (both in the
-    // input's right-hand action column). It is agent-only: a terminal-pane
-    // focus carries `None`, so only Submit shows. Selecting a mode dispatches
-    // through `Workspace::set_agent_mode` (one-way data flow).
-    let action: AnyElement = match &snap.agent_mode {
-        Some((pane_id, modes)) => {
-            let chip = super::super::agent_chat_pane::mode_chip::mode_chip(
+    // When the focused pane is an Agent chat pane, selector chips sit to the
+    // left of the Submit button (all in the input's right-hand action column):
+    // the mode chip (permission mode), then one chip per Model / ThoughtLevel
+    // config option (model, effort). All agent-only: a terminal-pane focus
+    // carries `None` for both, so only Submit shows. Selecting dispatches
+    // through `Workspace::set_agent_mode` / `set_agent_config_option` (one-way
+    // data flow).
+    let mut chips: Vec<AnyElement> = Vec::new();
+    if let Some((pane_id, modes)) = &snap.agent_mode {
+        chips.push(
+            super::super::agent_chat_pane::mode_chip::mode_chip(
                 *pane_id,
                 modes,
                 snap.workspace.clone(),
+            )
+            .into_any_element(),
+        );
+    }
+    if let Some((pane_id, options)) = &snap.agent_config_options {
+        for opt in options {
+            chips.push(
+                super::super::agent_chat_pane::config_chip::config_chip(
+                    *pane_id,
+                    opt,
+                    snap.workspace.clone(),
+                )
+                .into_any_element(),
             );
-            div()
-                .flex()
-                .flex_row()
-                .items_end()
-                .gap(gpui::px(theme::AGENT_CHAT_MSG_GAP))
-                .child(chip)
-                .child(submit)
-                .into_any_element()
         }
-        None => submit.into_any_element(),
+    }
+    let action: AnyElement = if chips.is_empty() {
+        submit.into_any_element()
+    } else {
+        let mut row = div()
+            .flex()
+            .flex_row()
+            .items_end()
+            .gap(gpui::px(theme::AGENT_CHAT_MSG_GAP));
+        for chip in chips {
+            row = row.child(chip);
+        }
+        row.child(submit).into_any_element()
     };
     // The action column sits beside the text in its own column (see
     // `input_with_action_grow`). In auto-grow mode the editor self-sizes

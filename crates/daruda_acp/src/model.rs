@@ -270,6 +270,121 @@ impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateVie
     }
 }
 
+/// Semantic category of a session config option (mirror of the protocol's
+/// `SessionConfigOptionCategory`). Drives which input chip renders the option;
+/// the host groups options by this rather than by id. `Mode` is also surfaced
+/// via [`ModeStateView`] (the adapter advertises mode on both paths), so the
+/// host renders mode through the existing mode chip and uses config options for
+/// `Model` / `ThoughtLevel` / `ModelConfig` / `Other`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigOptionCategoryView {
+    /// Permission / session mode selector.
+    Mode,
+    /// Model selector.
+    Model,
+    /// Model-related parameter (e.g. context window).
+    ModelConfig,
+    /// Reasoning / thinking effort level.
+    ThoughtLevel,
+    /// Uncategorized, custom (`_`-prefixed), or a category added by a newer
+    /// protocol than this build knows — rendered generically.
+    Other,
+}
+
+/// One selectable value of a config option (mirror of the protocol's
+/// `SessionConfigSelectOption`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigChoiceView {
+    /// Stable id submitted via `set_config_option` to pick this value.
+    pub value: String,
+    /// Human-readable label shown in the dropdown.
+    pub name: String,
+    /// Optional longer description, shown as secondary text / tooltip.
+    pub description: Option<String>,
+}
+
+/// An advertised session config option of the `select` kind (mirror of the
+/// protocol's `SessionConfigOption`). Advertised at connect time in
+/// `NewSessionResponse.config_options` and replaced wholesale by
+/// `SetSessionConfigOptionResponse`. Non-select kinds (e.g. boolean) are dropped
+/// at the mapping boundary, so this type always describes a dropdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigOptionView {
+    /// Stable identifier used to set this option via `set_config_option`.
+    pub id: String,
+    /// Human-readable label (e.g. "Model", "Effort").
+    pub name: String,
+    /// Optional longer description, shown in a tooltip.
+    pub description: Option<String>,
+    /// Semantic category, used to route the option to the right chip.
+    pub category: ConfigOptionCategoryView,
+    /// `value` of the currently-selected choice.
+    pub current_value: String,
+    /// The selectable choices, flattened across any protocol grouping.
+    pub options: Vec<ConfigChoiceView>,
+}
+
+impl ConfigOptionView {
+    /// Map a protocol `SessionConfigOption` to a view, or `None` when it is not
+    /// a select-kind option daruda renders as a dropdown (boolean / future
+    /// kinds are skipped — forward-compatible with protocol extensions).
+    pub fn from_protocol(
+        o: &agent_client_protocol::schema::v1::SessionConfigOption,
+    ) -> Option<Self> {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
+        };
+        let select = match &o.kind {
+            SessionConfigKind::Select(s) => s,
+            // Boolean (unstable) and any future non-select kind aren't
+            // dropdowns — skip. `SessionConfigKind` is `#[non_exhaustive]`.
+            #[allow(unreachable_patterns)]
+            _ => return None,
+        };
+        let options = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(opts) => opts.iter().map(config_choice).collect(),
+            // Grouped options are flattened (daruda's chip is a flat dropdown);
+            // group headers are dropped. The current adapter sends ungrouped.
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|g| g.options.iter())
+                .map(config_choice)
+                .collect(),
+            // `SessionConfigSelectOptions` is `#[non_exhaustive]`.
+            #[allow(unreachable_patterns)]
+            _ => Vec::new(),
+        };
+        let category = match &o.category {
+            Some(SessionConfigOptionCategory::Mode) => ConfigOptionCategoryView::Mode,
+            Some(SessionConfigOptionCategory::Model) => ConfigOptionCategoryView::Model,
+            Some(SessionConfigOptionCategory::ModelConfig) => ConfigOptionCategoryView::ModelConfig,
+            Some(SessionConfigOptionCategory::ThoughtLevel) => {
+                ConfigOptionCategoryView::ThoughtLevel
+            }
+            // None, Other(_), or a future category → render generically.
+            _ => ConfigOptionCategoryView::Other,
+        };
+        Some(ConfigOptionView {
+            id: o.id.to_string(),
+            name: o.name.clone(),
+            description: o.description.clone(),
+            category,
+            current_value: select.current_value.to_string(),
+            options,
+        })
+    }
+}
+
+fn config_choice(
+    o: &agent_client_protocol::schema::v1::SessionConfigSelectOption,
+) -> ConfigChoiceView {
+    ConfigChoiceView {
+        value: o.value.to_string(),
+        name: o.name.clone(),
+        description: o.description.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::v1::{
@@ -397,5 +512,65 @@ mod tests {
         let via_into: ModeStateView = (&state).into();
         let via_from = ModeStateView::from(&state);
         assert_eq!(via_into, via_from);
+    }
+
+    #[test]
+    fn config_option_select_maps_id_value_and_choices() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+        let opt = SessionConfigOption::select(
+            "model",
+            "Model",
+            "default",
+            vec![
+                SessionConfigSelectOption::new("default", "Default (recommended)"),
+                SessionConfigSelectOption::new("sonnet", "Sonnet")
+                    .description("Efficient for routine tasks"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Model);
+
+        let view = ConfigOptionView::from_protocol(&opt).expect("select option maps");
+        assert_eq!(view.id, "model");
+        assert_eq!(view.name, "Model");
+        assert_eq!(view.category, ConfigOptionCategoryView::Model);
+        assert_eq!(view.current_value, "default");
+        assert_eq!(view.options.len(), 2);
+        assert_eq!(view.options[0].value, "default");
+        assert_eq!(view.options[1].value, "sonnet");
+        assert_eq!(
+            view.options[1].description.as_deref(),
+            Some("Efficient for routine tasks")
+        );
+    }
+
+    #[test]
+    fn config_option_thought_level_category_maps() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+        let opt = SessionConfigOption::select(
+            "effort",
+            "Effort",
+            "high",
+            vec![SessionConfigSelectOption::new("high", "High")],
+        )
+        .category(SessionConfigOptionCategory::ThoughtLevel);
+        let view = ConfigOptionView::from_protocol(&opt).expect("maps");
+        assert_eq!(view.category, ConfigOptionCategoryView::ThoughtLevel);
+    }
+
+    #[test]
+    fn config_option_without_category_is_other() {
+        use agent_client_protocol::schema::v1::{SessionConfigOption, SessionConfigSelectOption};
+        let opt = SessionConfigOption::select(
+            "agent",
+            "Agent",
+            "default",
+            vec![SessionConfigSelectOption::new("default", "Default")],
+        );
+        let view = ConfigOptionView::from_protocol(&opt).expect("maps");
+        assert_eq!(view.category, ConfigOptionCategoryView::Other);
     }
 }
