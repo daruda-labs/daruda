@@ -161,6 +161,33 @@ impl Workspace {
         }
         index
     }
+
+    /// `(pane_id, status)` for every AgentChat (ACP) pane across **all**
+    /// lanes — not just the active one — so a parked lane's agent session
+    /// still feeds the left-dock leading indicator and the status-pulse
+    /// gate after a lane switch. Single source for both
+    /// [`Workspace::prepare_left_dock_snapshot`] and
+    /// [`Workspace::has_animating_claude_status`]; keeping it in one place
+    /// means the "scan all lanes" rule can't drift between the two.
+    ///
+    /// Reading each view registers a GPUI entity dependency on the caller,
+    /// so a view's `cx.notify()` dirties whatever observed it (the render
+    /// snapshot) — the reactive half of the indicator update.
+    pub(in crate::workspace) fn agent_chat_statuses(
+        &self,
+        cx: &gpui::App,
+    ) -> Vec<(PaneId, SessionStatus)> {
+        self.main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .filter_map(|p| {
+                let view = p.agent_chat_view()?;
+                let status = view.read(cx).to_session_status()?;
+                Some((p.id, status))
+            })
+            .collect()
+    }
 }
 
 /// Pre-mutation snapshot of one lane's status, captured so a transition

@@ -173,6 +173,9 @@ impl Workspace {
                 v.status = AgentSessionStatus::Connecting;
                 cx.notify();
             });
+            // Idle → Connecting is a dock-badge status change; the cached
+            // docks need an explicit dirty (see `notify_status_docks`).
+            self.notify_status_docks(cx);
         }
         self.connect_agent_chat(pane_id, cwd, cx);
     }
@@ -227,9 +230,21 @@ impl Workspace {
                             let Some(view) = ws.agent_chat_view(pane_id).cloned() else {
                                 return false;
                             };
+                            // The displayed session status (Working / Idle /
+                            // NeedsAttention / …) feeds the cached per-lane
+                            // dock badge. `apply_event` only self-notifies the
+                            // view, so dirty the docks when the status actually
+                            // changes — including for a *parked* lane, whose
+                            // badge would otherwise freeze at its last animating
+                            // frame once the pulse stops. Gated on change so
+                            // token-streaming events don't repaint the docks.
+                            let before = view.read(cx).to_session_status();
                             view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
+                            if view.read(cx).to_session_status() != before {
+                                ws.notify_status_docks(cx);
+                            }
                             true
                         });
                         // Workspace/window gone (Err) or view gone (Ok(false)) —
@@ -250,6 +265,11 @@ impl Workspace {
                                 v.status = AgentSessionStatus::Error(message.clone());
                                 cx.notify();
                             });
+                            // Connecting → Error clears the badge (maps to
+                            // `None`); dirty the cached docks so the stale
+                            // Connecting badge doesn't linger after the pulse
+                            // stops.
+                            ws.notify_status_docks(cx);
                         }
                         let report = ErrorReport::new("ACP session connect failed")
                             .severity(ErrorSeverity::Error)

@@ -1278,23 +1278,10 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        // Collect ACP pane statuses (agent chat sessions) across every
-        // lane's panes so a parked lane with a live agent turn still keeps
-        // the status pulse running.
-        let acp_statuses: Vec<(
-            crate::workspace::main_area::pane_tree::PaneId,
-            daruda_claude::SessionStatus,
-        )> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| {
-                let view = p.agent_chat_view()?;
-                let status = view.read(cx).to_session_status()?;
-                Some((p.id, status))
-            })
-            .collect();
+        // ACP pane statuses across every lane (see `agent_chat_statuses`),
+        // so a parked lane with a live agent turn still keeps the pulse
+        // running.
+        let acp_statuses = self.agent_chat_statuses(cx);
         if self.claude.pty_claude_bindings.is_empty() && acp_statuses.is_empty() {
             return false;
         }
@@ -1425,6 +1412,21 @@ impl Workspace {
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {
         let dock_id = self.left_dock.entity_id();
         gpui::App::notify(cx, dock_id);
+    }
+
+    /// Dirty both the left and right docks after a Claude **session
+    /// status** change. The per-lane `AgentStatusBadge` (left dock) and the
+    /// Tasks badges (right dock) both render from a staged snapshot that
+    /// reads each session's status; the docks are `.cached()` and staged
+    /// without self-notify, so a status transition that only `cx.notify`s
+    /// its own view (e.g. an ACP `apply_event` fold) would otherwise leave
+    /// the cached badge stale. The status-pulse covers the *animating*
+    /// window only, so the final settle to `Idle` needs this explicit
+    /// push. Mirrors the PTY pump (`sync/pty.rs`), which already notifies
+    /// the docks on every status-file change.
+    pub(crate) fn notify_status_docks(&self, cx: &mut Context<Self>) {
+        self.notify_left_dock(cx);
+        self.notify_right_dock(cx);
     }
 
     /// `true` when any AgentChat pane has a turn in flight. Gates the

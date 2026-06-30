@@ -733,6 +733,94 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
     .unwrap();
 }
 
+/// Regression for "the agent status indicator disappears after a lane
+/// switch": a parked lane's AgentChat session status must still reach the
+/// **rendered** left-dock snapshot. Drives a *real* `activate_lane` switch
+/// between two lanes and asserts on the output of the real
+/// `prepare_left_dock_snapshot` — the same `claude_status_per_lane` map the
+/// per-lane row keys its badge from. This is the production render path, not
+/// a re-implementation.
+#[gpui::test]
+async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    // Both roots must exist so activation classifies them `Present`.
+    let root_a = std::path::PathBuf::from("/tmp/test_acp_indicator_a");
+    let root_b = std::path::PathBuf::from("/tmp/test_acp_indicator_b");
+    let _ = std::fs::create_dir_all(&root_a);
+    let _ = std::fs::create_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
+    let window_handle = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            super::fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let workspace = window_handle.root(cx).unwrap();
+    cx.run_until_parked();
+
+    let lane0 = workspace.read_with(cx, |ws, _| ws.active);
+    // Seed a second lane to switch into.
+    workspace.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
+        }
+    });
+    let lane1 = daruda_store::project::LaneRef {
+        project: lane0.project,
+        lane: 1,
+    };
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            // An agent chat pane in lane 0 (active) with a turn in flight →
+            // `to_session_status()` is `Working`. Wire it into a tab layout
+            // exactly as `open_agent_chat_pane` does (pane + TabEntry) so it
+            // appears in `pane_lane_index`; do it directly rather than via the
+            // open action to skip `focus_pane`'s lazy `maybe_connect` (which
+            // would spawn a real adapter). `create_agent_chat_pane` itself
+            // opens no connection.
+            let pane = ws.create_agent_chat_pane(Some(root_a.clone()), window, cx);
+            let id = pane.id;
+            let tab_id = ws.alloc_id();
+            ws.active_runtime_mut().panes.push(pane);
+            ws.active_runtime_mut()
+                .tabs
+                .push(crate::workspace::main_area::pane::TabEntry {
+                    id: tab_id,
+                    layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(id),
+                    last_focused_pane: id,
+                    user_label: None,
+                });
+            agent_view(ws, id).update(cx, |v, _| {
+                v.status = AgentSessionStatus::Connected;
+                v.turn_in_flight = true;
+            });
+
+            // Switch away → lane 0 is now parked, lane 1 active.
+            ws.activate_lane(lane1, window, cx);
+            assert_eq!(ws.active, lane1);
+
+            // Build the actual left-dock snapshot the renderer consumes and
+            // assert the parked lane's badge source is `Working`.
+            let snap = ws.prepare_left_dock_snapshot(cx);
+            assert_eq!(
+                snap.claude_status_per_lane.get(&lane0),
+                Some(&daruda_claude::SessionStatus::Working),
+                "a parked lane's agent Working status must appear in the rendered \
+                 left-dock snapshot keyed by its LaneRef"
+            );
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
 #[gpui::test]
 async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);

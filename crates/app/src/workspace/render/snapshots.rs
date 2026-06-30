@@ -10,7 +10,7 @@ use crate::workspace::Workspace;
 use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 
 impl Workspace {
-    pub(super) fn prepare_left_dock_snapshot(
+    pub(in crate::workspace) fn prepare_left_dock_snapshot(
         &mut self,
         cx: &mut Context<Self>,
     ) -> LeftDockSnapshot {
@@ -21,26 +21,12 @@ impl Workspace {
         // directly, so the lane indicator reflects both PTY and ACP
         // sessions.
         let pane_lane = self.pane_lane_index();
-        // Collect agent chat pane statuses for the aggregation across
-        // every lane's panes (not just the active one) so a parked lane's
-        // agent-chat indicator keeps reflecting its session after a lane
-        // switch. Reading each view registers a GPUI entity dependency so
-        // `cx.notify()` on the view dirties this snapshot — the same
-        // pattern the bottom-dock snapshot uses for `turn_in_flight`.
-        let acp_statuses: Vec<(
-            crate::workspace::main_area::pane_tree::PaneId,
-            daruda_claude::SessionStatus,
-        )> = self
-            .main_area
-            .runtimes
-            .values()
-            .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| {
-                let view = p.agent_chat_view()?;
-                let status = view.read(cx).to_session_status()?;
-                Some((p.id, status))
-            })
-            .collect();
+        // Agent chat (ACP) statuses across every lane — see
+        // `agent_chat_statuses`. Reading each view here (during render)
+        // registers the dependency that makes a view's `cx.notify()` dirty
+        // this snapshot, the same pattern the bottom-dock snapshot uses for
+        // `turn_in_flight`.
+        let acp_statuses = self.agent_chat_statuses(cx);
         let (claude_status_per_lane, claude_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
