@@ -166,7 +166,7 @@ pub fn input_with_action_grow<T: InputTabSpec>(
         .border_1()
         .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
-        .rounded(px(d::MODAL_BUTTON_RADIUS))
+        .rounded(px(d::RADIUS_MD))
         // Text region claims the row's free width and full height — `flex_1`
         // takes the free width, the row's `stretch` gives it the full height,
         // and the inner `h_full` editor scrolls within it.

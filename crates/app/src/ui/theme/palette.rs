@@ -510,6 +510,9 @@ pub const TRAFFIC_LIGHT_Y: f32 = 6.0;
 pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
 /// Dock panel header height (px).
 pub const DOCK_HEADER_HEIGHT: f32 = 28.0;
+/// Standard button height (px) — DESIGN.md §Fixed Heights "Button (standard): 28px".
+/// Applied to Submit and secondary action buttons in the bottom-dock input chrome.
+pub const BUTTON_HEIGHT: f32 = 28.0;
 /// Command palette panel width (px).
 pub const PALETTE_WIDTH: f32 = 500.0;
 /// Command palette top offset from window (px).

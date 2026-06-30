@@ -11,12 +11,10 @@
 //! `modes.available` is non-empty (the caller gates).
 
 use daruda_acp::ModeStateView;
-use gpui::{IntoElement, SharedString, WeakEntity};
+use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
-use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
-};
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -55,9 +53,16 @@ pub(in crate::workspace) fn mode_chip(
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
 
+    // DESIGN.md: Secondary action buttons — background surface-2, text body,
+    // radius md (6px), height 28px. `button()` defaults to `ButtonVariant::Secondary`
+    // which maps to `theme.secondary = SURFACE_2` + `secondary_foreground = TEXT_BODY`.
+    // Previously `.ghost()` (transparent bg) was used; removed to match the spec's
+    // "background surface-2" requirement. Height and radius pin the button to the
+    // spec's fixed-heights table (Button: 28px, radius md: 6px).
     button(chip_id, label)
-        .ghost()
         .xsmall()
+        .h(px(theme::BUTTON_HEIGHT))
+        .rounded(px(theme::RADIUS_MD))
         .dropdown_menu(move |menu, _window, _cx| {
             build_mode_menu(pane_id, &available, &current, &workspace, menu)
         })
