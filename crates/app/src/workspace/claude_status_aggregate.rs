@@ -141,23 +141,18 @@ pub(in crate::workspace) fn any_pane_session_animating(
 }
 
 impl Workspace {
-    /// Every pane in the workspace paired with its owning lane. The
-    /// active lane's panes come first, in tab/layout order, from the
-    /// live `main_area` tabs; then each inactive lane's panes from its
-    /// frozen runtime — layout order within a lane, cross-lane order
-    /// unspecified (HashMap iteration), so consumers must group per
-    /// lane. Feeds [`aggregate_over_panes`] so status attribution
-    /// follows pane membership rather than session cwd.
+    /// Every pane in the workspace paired with its owning lane, drawn
+    /// from the single `runtimes` map. Layout order holds within a lane;
+    /// cross-lane order is unspecified (HashMap iteration), so consumers
+    /// must group per lane. Feeds [`aggregate_over_panes`] so status
+    /// attribution follows pane membership rather than session cwd —
+    /// and covers parked lanes, so a backgrounded lane's agent-chat
+    /// indicator keeps updating after a lane switch.
     pub(in crate::workspace) fn pane_lane_index(
         &self,
     ) -> Vec<(PaneId, daruda_store::project::LaneRef)> {
         let mut index = Vec::new();
-        for tab in &self.main_area.tabs {
-            for pane_id in tab.layout.pane_ids() {
-                index.push((pane_id, self.active));
-            }
-        }
-        for (lane_ref, runtime) in &self.main_area.inactive_lane_runtimes {
+        for (lane_ref, runtime) in &self.main_area.runtimes {
             for tab in &runtime.tabs {
                 for pane_id in tab.layout.pane_ids() {
                     index.push((pane_id, *lane_ref));
@@ -165,6 +160,33 @@ impl Workspace {
             }
         }
         index
+    }
+
+    /// `(pane_id, status)` for every AgentChat (ACP) pane across **all**
+    /// lanes — not just the active one — so a parked lane's agent session
+    /// still feeds the left-dock leading indicator and the status-pulse
+    /// gate after a lane switch. Single source for both
+    /// [`Workspace::prepare_left_dock_snapshot`] and
+    /// [`Workspace::has_animating_claude_status`]; keeping it in one place
+    /// means the "scan all lanes" rule can't drift between the two.
+    ///
+    /// Reading each view registers a GPUI entity dependency on the caller,
+    /// so a view's `cx.notify()` dirties whatever observed it (the render
+    /// snapshot) — the reactive half of the indicator update.
+    pub(in crate::workspace) fn agent_chat_statuses(
+        &self,
+        cx: &gpui::App,
+    ) -> Vec<(PaneId, SessionStatus)> {
+        self.main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .filter_map(|p| {
+                let view = p.agent_chat_view()?;
+                let status = view.read(cx).to_session_status()?;
+                Some((p.id, status))
+            })
+            .collect()
     }
 }
 
@@ -566,7 +588,12 @@ mod tests {
             entry("a", "/x", SessionStatus::Idle),
             entry("b", "/x", SessionStatus::Connecting),
         ]);
-        assert!(any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
+        assert!(any_pane_session_animating(
+            &pane_lane,
+            &bindings,
+            &store,
+            &[]
+        ));
     }
 
     #[test]
@@ -579,7 +606,12 @@ mod tests {
             entry("a", "/x", SessionStatus::Idle),
             entry("b", "/y", SessionStatus::Idle),
         ]);
-        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
+        assert!(!any_pane_session_animating(
+            &pane_lane,
+            &bindings,
+            &store,
+            &[]
+        ));
     }
 
     #[test]
@@ -590,7 +622,12 @@ mod tests {
         let pane_lane = vec![(10u64, lane), (20u64, lane)];
         let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "ghost")].into_iter().collect();
         let store = daruda_claude::ClaudeStatusStore::new();
-        assert!(!any_pane_session_animating(&pane_lane, &bindings, &store, &[]));
+        assert!(!any_pane_session_animating(
+            &pane_lane,
+            &bindings,
+            &store,
+            &[]
+        ));
     }
 
     #[cfg(debug_assertions)]

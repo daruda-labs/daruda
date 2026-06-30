@@ -136,10 +136,10 @@ impl Workspace {
     /// The focused terminal pane's live working directory (OSC 7).
     /// `None` when no focused pane reports a cwd.
     pub(in crate::workspace) fn active_mcp_cwd(&self) -> Option<PathBuf> {
-        self.main_area
+        self.active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == self.main_area.focused_pane_id)
+            .find(|p| p.id == self.active_runtime().focused_pane_id)
             .and_then(|p| p.cwd().map(Path::to_path_buf))
     }
 

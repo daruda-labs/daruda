@@ -102,7 +102,11 @@ impl Workspace {
         anchor_px: f32,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) else {
+        let Some(tab) = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+        else {
             return;
         };
         let Some((direction, start_left_ratio)) = find_divider(&tab.layout, left_first_leaf) else {
@@ -136,7 +140,7 @@ impl Workspace {
         }
         let delta_px = cursor_px - drag.anchor_px;
         let delta_ratio = delta_px / drag.axis_size_px;
-        if let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
+        if let Some(tab) = self.active_tab_mut() {
             // Reset ratio to start before applying delta to avoid drift.
             // adjust_divider applies relative delta from current ratios, so
             // reapply (target - current) to converge on the desired value.

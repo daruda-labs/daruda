@@ -44,8 +44,8 @@ impl Workspace {
     // whichever file pane currently has focus.
 
     pub(in crate::workspace) fn focused_file_view(&self) -> Option<&PaneFileView> {
-        let id = self.main_area.focused_pane_id;
-        self.main_area
+        let id = self.active_runtime().focused_pane_id;
+        self.active_runtime()
             .panes
             .iter()
             .find(|p| p.id == id)
@@ -58,8 +58,8 @@ impl Workspace {
     pub(in crate::workspace) fn focused_terminal_view(
         &self,
     ) -> Option<&gpui::Entity<daruda_terminal::view::TerminalView>> {
-        let id = self.main_area.focused_pane_id;
-        self.main_area
+        let id = self.active_runtime().focused_pane_id;
+        self.active_runtime()
             .panes
             .iter()
             .find(|p| p.id == id)
@@ -67,8 +67,8 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_view_mut(&mut self) -> Option<&mut PaneFileView> {
-        let id = self.main_area.focused_pane_id;
-        self.main_area
+        let id = self.active_runtime().focused_pane_id;
+        self.active_runtime_mut()
             .panes
             .iter_mut()
             .find(|p| p.id == id)
@@ -76,8 +76,8 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_content(&self) -> Option<&FileContent> {
-        let id = self.main_area.focused_pane_id;
-        self.main_area
+        let id = self.active_runtime().focused_pane_id;
+        self.active_runtime()
             .panes
             .iter()
             .find(|p| p.id == id)
@@ -85,8 +85,8 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_content_mut(&mut self) -> Option<&mut FileContent> {
-        let id = self.main_area.focused_pane_id;
-        self.main_area
+        let id = self.active_runtime().focused_pane_id;
+        self.active_runtime_mut()
             .panes
             .iter_mut()
             .find(|p| p.id == id)
@@ -97,10 +97,10 @@ impl Workspace {
     /// Returns `(tab_index, pane_id)` when found. Used by
     /// `open_pane_file_view` in preview-tab mode.
     pub(in crate::workspace) fn find_any_file_tab(&self) -> Option<(usize, PaneId)> {
-        for (i, tab) in self.main_area.tabs.iter().enumerate() {
+        for (i, tab) in self.active_runtime().tabs.iter().enumerate() {
             if let PaneLayout::Pane(pane_id) = tab.layout
                 && self
-                    .main_area
+                    .active_runtime()
                     .panes
                     .iter()
                     .any(|p| p.id == pane_id && p.file_view().is_some())
@@ -120,9 +120,9 @@ impl Workspace {
         path: &std::path::Path,
         staged: bool,
     ) -> Option<(usize, PaneId)> {
-        for (i, tab) in self.main_area.tabs.iter().enumerate() {
+        for (i, tab) in self.active_runtime().tabs.iter().enumerate() {
             if let PaneLayout::Pane(pane_id) = tab.layout
-                && let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id)
+                && let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
                 && let Some(fv) = pane.file_view()
                 && fv.lane_id == lane_id
                 && fv.path == path
@@ -170,7 +170,11 @@ impl Workspace {
             move |this, inp, ev: &crate::ui::InputEvent, _window, cx| match ev {
                 crate::ui::InputEvent::Change => {
                     let query = inp.read(cx).value().to_string();
-                    if let Some(pane) = this.main_area.panes.iter_mut().find(|p| p.id == pane_id)
+                    if let Some(pane) = this
+                        .active_runtime_mut()
+                        .panes
+                        .iter_mut()
+                        .find(|p| p.id == pane_id)
                         && let Some(fv) = pane.file_view_mut()
                     {
                         fv.search_update_query(&query);
@@ -179,7 +183,11 @@ impl Workspace {
                     cx.notify();
                 }
                 crate::ui::InputEvent::PressEnter { .. } => {
-                    if let Some(pane) = this.main_area.panes.iter_mut().find(|p| p.id == pane_id)
+                    if let Some(pane) = this
+                        .active_runtime_mut()
+                        .panes
+                        .iter_mut()
+                        .find(|p| p.id == pane_id)
                         && let Some(fv) = pane.file_view_mut()
                     {
                         fv.search_next_match();

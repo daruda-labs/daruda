@@ -51,9 +51,20 @@ impl Workspace {
         self.agent = config.agent.clone();
         self.claude.usage_poll = config.usage.poll.clone();
 
-        // Patch all existing pane views: font + colors + opacity.
+        // Patch all existing pane views: font + colors + opacity. Iterate
+        // every lane's panes (not just the active lane) so a parked lane's
+        // terminals pick up the new font/colors too. `set_font` /
+        // `apply_font_settings` only invalidate the shape cache (they do
+        // not resize or read `last_viewport`), so patching a parked,
+        // never-painted view is safe — the new geometry is recomputed on
+        // its next paint, after the lane is activated.
         let font = daruda_terminal::terminal_font_with_family(&self.font_family);
-        for pane in &self.main_area.panes {
+        for pane in self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+        {
             let Some(view) = pane.terminal_view() else {
                 continue;
             };

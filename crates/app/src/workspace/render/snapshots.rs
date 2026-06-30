@@ -10,7 +10,7 @@ use crate::workspace::Workspace;
 use crate::workspace::layout::snap::{BottomDockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 
 impl Workspace {
-    pub(super) fn prepare_left_dock_snapshot(
+    pub(in crate::workspace) fn prepare_left_dock_snapshot(
         &mut self,
         cx: &mut Context<Self>,
     ) -> LeftDockSnapshot {
@@ -21,20 +21,12 @@ impl Workspace {
         // directly, so the lane indicator reflects both PTY and ACP
         // sessions.
         let pane_lane = self.pane_lane_index();
-        // Collect agent chat pane statuses for the aggregation. Reading
-        // each view registers a GPUI entity dependency so `cx.notify()`
-        // on the view dirties this snapshot — the same pattern the
-        // bottom-dock snapshot uses for `turn_in_flight`.
-        let acp_statuses: Vec<(crate::workspace::main_area::pane_tree::PaneId, daruda_claude::SessionStatus)> = self
-            .main_area
-            .panes
-            .iter()
-            .filter_map(|p| {
-                let view = p.agent_chat_view()?;
-                let status = view.read(cx).to_session_status()?;
-                Some((p.id, status))
-            })
-            .collect();
+        // Agent chat (ACP) statuses across every lane — see
+        // `agent_chat_statuses`. Reading each view here (during render)
+        // registers the dependency that makes a view's `cx.notify()` dirty
+        // this snapshot, the same pattern the bottom-dock snapshot uses for
+        // `turn_in_flight`.
+        let acp_statuses = self.agent_chat_statuses(cx);
         let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
@@ -123,12 +115,12 @@ impl Workspace {
             agent_active_session_id: self
                 .claude
                 .pty_claude_bindings
-                .get(&self.main_area.focused_pane_id)
+                .get(&self.active_runtime().focused_pane_id)
                 .map(|b| b.session_id.clone())
                 .or_else(|| {
                     // If the focused pane is an agent chat with a live session,
                     // use its synthetic ACP id so the sub-row badge highlights.
-                    let focused = self.main_area.focused_pane_id;
+                    let focused = self.active_runtime().focused_pane_id;
                     acp_statuses
                         .iter()
                         .find(|(pid, _)| *pid == focused)
@@ -186,9 +178,9 @@ impl Workspace {
         // already marks the Workspace dirty via ancestor propagation
         // (`mark_view_dirty`) regardless of this read — and that propagation
         // walks ancestors only, so sibling docks / terminals stay cached.
-        let focused_id = self.main_area.focused_pane_id;
+        let focused_id = self.active_runtime().focused_pane_id;
         let agent_stop_pane = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_id)
@@ -201,7 +193,7 @@ impl Workspace {
         // terminal-pane focus yields `None` (the input is shared across pane
         // kinds, so the chip must stay agent-only).
         let agent_mode = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_id)

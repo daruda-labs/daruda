@@ -524,7 +524,7 @@ impl Workspace {
         }
         // When an Agent chat pane is focused, the bottom-dock input drives
         // its ACP session as a prompt rather than a terminal's PTY.
-        let focused_id = self.main_area.focused_pane_id;
+        let focused_id = self.active_runtime().focused_pane_id;
         if self.is_agent_chat_pane(focused_id) {
             let text = trimmed.trim().to_string();
             if !text.is_empty() {
@@ -565,7 +565,7 @@ impl Workspace {
     ) {
         // Resolve the command kind to a plain bool first so the `&self`/`cx`
         // read borrow ends before the `&mut self` `send_terminal_input` call.
-        let focused = self.main_area.focused_pane_id;
+        let focused = self.active_runtime().focused_pane_id;
         let is_no_input = self
             .agent_chat_view(focused)
             .and_then(|v| {
@@ -619,9 +619,9 @@ impl Workspace {
     }
 
     fn send_to_focused_pane(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let focused_id = self.main_area.focused_pane_id;
+        let focused_id = self.active_runtime().focused_pane_id;
         let Some(view) = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_id)

@@ -15,7 +15,7 @@ use daruda_terminal::session::LineBufferPosition;
 use daruda_terminal::session::interval_tree::{LineCoord, LineRange};
 
 fn first_terminal_pane_id(ws: &Workspace) -> crate::workspace::main_area::pane_tree::PaneId {
-    ws.main_area
+    ws.active_runtime()
         .panes
         .iter()
         .find(|p| {
@@ -49,7 +49,7 @@ async fn add_annotation_round_trips_into_session(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, cx| {
         let pane = ws
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| {

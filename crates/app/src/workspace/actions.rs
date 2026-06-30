@@ -54,7 +54,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            let idx = ws.main_area.active_tab_index;
+            let idx = ws.active_runtime().active_tab_index;
             ws.request_close_tab(idx, window, cx);
         });
     }
@@ -65,9 +65,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.main_area.tabs.len() > 1 {
+        if self.active_runtime().tabs.len() > 1 {
             self.activate_tab(
-                (self.main_area.active_tab_index + 1) % self.main_area.tabs.len(),
+                (self.active_runtime().active_tab_index + 1) % self.active_runtime().tabs.len(),
                 window,
                 cx,
             );
@@ -80,11 +80,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.main_area.tabs.len() > 1 {
-            let idx = if self.main_area.active_tab_index == 0 {
-                self.main_area.tabs.len() - 1
+        if self.active_runtime().tabs.len() > 1 {
+            let idx = if self.active_runtime().active_tab_index == 0 {
+                self.active_runtime().tabs.len() - 1
             } else {
-                self.main_area.active_tab_index - 1
+                self.active_runtime().active_tab_index - 1
             };
             self.activate_tab(idx, window, cx);
         }
@@ -97,11 +97,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let index = if n == 8 {
-            self.main_area.tabs.len().saturating_sub(1)
+            self.active_runtime().tabs.len().saturating_sub(1)
         } else {
             n
         };
-        if index < self.main_area.tabs.len() {
+        if index < self.active_runtime().tabs.len() {
             self.activate_tab(index, window, cx);
         }
     }
@@ -679,8 +679,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            let idx = ws.main_area.active_tab_index;
-            let indices: Vec<usize> = (0..ws.main_area.tabs.len())
+            let idx = ws.active_runtime().active_tab_index;
+            let indices: Vec<usize> = (0..ws.active_runtime().tabs.len())
                 .rev()
                 .filter(|&i| i != idx)
                 .collect();
@@ -695,8 +695,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            let idx = ws.main_area.active_tab_index;
-            let indices: Vec<usize> = (idx + 1..ws.main_area.tabs.len()).rev().collect();
+            let idx = ws.active_runtime().active_tab_index;
+            let indices: Vec<usize> = (idx + 1..ws.active_runtime().tabs.len()).rev().collect();
             ws.request_close_tabs_bulk(indices, window, cx);
         });
     }
@@ -707,7 +707,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pane_id = self.main_area.focused_pane_id;
+        let pane_id = self.active_runtime().focused_pane_id;
         self.toggle_zoom_pane(pane_id, cx);
     }
 
@@ -791,7 +791,7 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from = self.main_area.active_tab_index;
+        let from = self.active_runtime().active_tab_index;
         if from > 0 {
             self.mutate_durable(cx, |ws, cx| {
                 ws.move_tab(from, from - 1, cx);
@@ -805,8 +805,8 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from = self.main_area.active_tab_index;
-        if from + 1 < self.main_area.tabs.len() {
+        let from = self.active_runtime().active_tab_index;
+        if from + 1 < self.active_runtime().tabs.len() {
             self.mutate_durable(cx, |ws, cx| {
                 ws.move_tab(from, from + 1, cx);
             });

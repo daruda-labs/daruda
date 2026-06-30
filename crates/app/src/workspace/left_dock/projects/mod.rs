@@ -4,9 +4,9 @@
 //! modal state lives on `Workspace` because it needs to outlive any
 //! single render and survive view-tab switches.
 
+pub(in crate::workspace) mod agent_badges;
 pub(in crate::workspace) mod banner;
 pub(in crate::workspace) mod card;
-pub(in crate::workspace) mod agent_badges;
 pub(in crate::workspace) mod context_menu;
 pub(in crate::workspace) mod create_modal;
 pub(in crate::workspace) mod drag;

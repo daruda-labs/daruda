@@ -57,7 +57,7 @@ async fn task_edit_pane_tab_cycle_wires_base_select(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
             let pane = ws
-                .main_area
+                .active_runtime()
                 .panes
                 .last()
                 .expect("open_task_edit_pane pushed a pane");
@@ -72,7 +72,7 @@ async fn task_edit_pane_tab_cycle_wires_base_select(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, cx| {
-        let pane = ws.main_area.panes.last().unwrap();
+        let pane = ws.active_runtime().panes.last().unwrap();
         let te = match &pane.content {
             crate::workspace::main_area::pane::PaneContent::TaskEditPane(te) => te,
             _ => panic!("expected TaskEdit pane"),

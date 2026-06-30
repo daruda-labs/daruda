@@ -692,7 +692,7 @@ fn handle_view_event(
     // because the user, by definition, is not looking at the pane.
     let suppressed_by_focus = workspace.notifications.skip_focused_pane
         && platform::attention::is_app_active()
-        && workspace.main_area.focused_pane_id == pane_id;
+        && workspace.active_runtime().focused_pane_id == pane_id;
 
     match event {
         TerminalViewEvent::AttentionRequested(kind) => {
@@ -831,10 +831,10 @@ impl Workspace {
     pub(in crate::workspace) fn default_cwd_for_new_pane(&self) -> Option<PathBuf> {
         let candidates = CwdCandidates {
             focused_pane: self
-                .main_area
+                .active_runtime()
                 .panes
                 .iter()
-                .find(|p| p.id == self.main_area.focused_pane_id)
+                .find(|p| p.id == self.active_runtime().focused_pane_id)
                 .and_then(|p| p.cwd().map(Path::to_path_buf)),
             active_lane: self.active_lane().map(|w| w.path.clone()),
             project_root: self.active_project().map(|p| p.root.clone()),
@@ -1055,7 +1055,7 @@ impl Workspace {
                     let update_result = cx.update(|_, app_cx| {
                         workspace_for_errors.update(app_cx, |ws, cx| {
                             let cwd = ws
-                                .main_area
+                                .active_runtime()
                                 .panes
                                 .iter()
                                 .find(|p| p.id == pane_id)
@@ -1110,19 +1110,19 @@ impl Workspace {
                         let title = v.terminal_title().to_string();
                         let cwd = v.terminal_cwd().map(PathBuf::from);
                         workspace.update(cx, |ws, cx| {
-                            let is_focused = ws.main_area.focused_pane_id == pane_id;
+                            let is_focused = ws.active_runtime().focused_pane_id == pane_id;
                             // Capture the focused pane's cwd before the
                             // update so a change can re-target the MCP
                             // watcher (the Project scope reads the
                             // focused terminal's cwd `.mcp.json`).
                             let prev_cwd = ws
-                                .main_area
+                                .active_runtime()
                                 .panes
                                 .iter()
                                 .find(|p| p.id == pane_id)
                                 .and_then(|p| p.cwd().map(std::path::Path::to_path_buf));
                             let updated = ws
-                                .main_area
+                                .active_runtime_mut()
                                 .panes
                                 .iter_mut()
                                 .find(|p| p.id == pane_id)
@@ -1132,7 +1132,7 @@ impl Workspace {
                                 cx.notify();
                                 if is_focused {
                                     let new_cwd = ws
-                                        .main_area
+                                        .active_runtime()
                                         .panes
                                         .iter()
                                         .find(|p| p.id == pane_id)
@@ -1217,7 +1217,7 @@ impl Workspace {
                 .read(cx)
                 .focus_handle(cx)
                 .focus(window, cx);
-        } else if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) {
+        } else if let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
             pane.focus_handle(cx).focus(window, cx);
         }
     }

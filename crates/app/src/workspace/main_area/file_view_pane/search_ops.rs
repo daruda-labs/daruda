@@ -33,7 +33,7 @@ impl Workspace {
         input.update(cx, |inp, cx_state| {
             inp.set_value("", window, cx_state);
         });
-        let pane_id = self.main_area.focused_pane_id;
+        let pane_id = self.active_runtime().focused_pane_id;
         self.focus_pane(pane_id, window, cx);
         cx.notify();
     }

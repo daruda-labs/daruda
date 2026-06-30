@@ -90,7 +90,7 @@ impl Workspace {
         pane_id: crate::workspace::main_area::pane_tree::PaneId,
         bytes: &[u8],
     ) -> bool {
-        self.main_area
+        self.active_runtime()
             .panes
             .iter()
             .find(|p| p.id == pane_id)

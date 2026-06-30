@@ -134,7 +134,7 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
         );
         // The viewport must not be blank.
         assert!(
-            !ws.main_area.tabs.is_empty(),
+            !ws.active_runtime().tabs.is_empty(),
             "restored workspace must have at least one tab"
         );
     });

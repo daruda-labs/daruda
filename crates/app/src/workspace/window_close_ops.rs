@@ -125,7 +125,7 @@ impl Workspace {
         &self,
         cx: &App,
     ) -> Vec<(PaneId, gpui::SharedString, bool)> {
-        self.main_area
+        self.active_runtime()
             .panes
             .iter()
             .filter_map(|p| {

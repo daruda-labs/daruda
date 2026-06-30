@@ -188,8 +188,8 @@ fn backdrop() -> gpui::Div {
 /// directory is inaccessible (Missing / AccessDenied). The render gate
 /// in `center_content` keys off `availability` before any tab lookup,
 /// so this is shown whenever the active lane is non-`Present` — whether
-/// its pane spawn was suppressed (empty `tabs`) or a frozen runtime with
-/// stale tabs was swapped back in on reactivate. It fills the center
+/// its pane spawn was suppressed (empty `tabs`) or its runtime entry
+/// still carries tabs from when the lane was last `Present`. It fills the center
 /// with the state message and a Remove affordance. The Remove button is
 /// a one-line dispatch into `request_remove_inaccessible_active`
 /// (one-way data flow).
@@ -323,13 +323,13 @@ impl Render for Workspace {
             Option<std::path::PathBuf>,
             Option<std::path::PathBuf>,
         )> = self
-            .main_area
+            .active_runtime()
             .tabs
             .iter()
             .enumerate()
             .map(|(i, tab)| {
                 let pane = self
-                    .main_area
+                    .active_runtime()
                     .panes
                     .iter()
                     .find(|p| p.id == tab.last_focused_pane);
@@ -376,7 +376,7 @@ impl Render for Workspace {
                 };
                 (
                     i,
-                    i == self.main_area.active_tab_index,
+                    i == self.active_runtime().active_tab_index,
                     label,
                     file_path,
                     worktree_root,
@@ -573,7 +573,7 @@ impl Render for Workspace {
                                 use crate::surface::strings as s;
                                 use crate::ui::ContextMenuItem as CItem;
 
-                                let tab_count = this.main_area.tabs.len();
+                                let tab_count = this.active_runtime().tabs.len();
                                 let ws = cx.entity().downgrade();
                                 let abs_path = file_path.clone();
                                 let rel_path = file_path.as_ref().and_then(|p| {
@@ -606,7 +606,7 @@ impl Render for Workspace {
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
                                                 let indices: Vec<usize> =
-                                                    (0..ws.main_area.tabs.len())
+                                                    (0..ws.active_runtime().tabs.len())
                                                         .rev()
                                                         .filter(|&j| j != i)
                                                         .collect();
@@ -621,7 +621,7 @@ impl Render for Workspace {
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
                                                 let indices: Vec<usize> = (i + 1
-                                                    ..ws.main_area.tabs.len())
+                                                    ..ws.active_runtime().tabs.len())
                                                     .rev()
                                                     .collect();
                                                 ws.request_close_tabs_bulk(indices, win, cx);
@@ -646,7 +646,7 @@ impl Render for Workspace {
                                         s::ctx_move_tab_right(),
                                         is_last,
                                         move |this, _win, cx| {
-                                            if i + 1 < this.main_area.tabs.len() {
+                                            if i + 1 < this.active_runtime().tabs.len() {
                                                 this.mutate_durable(cx, |ws, cx| {
                                                     ws.move_tab(i, i + 1, cx);
                                                 });
@@ -665,7 +665,7 @@ impl Render for Workspace {
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.main_area.active_tab_index != i {
+                                                    if ws.active_runtime().active_tab_index != i {
                                                         ws.activate_tab(i, win, cx);
                                                     }
                                                     ws.split_focused_pane(
@@ -682,7 +682,7 @@ impl Render for Workspace {
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.main_area.active_tab_index != i {
+                                                    if ws.active_runtime().active_tab_index != i {
                                                         ws.activate_tab(i, win, cx);
                                                     }
                                                     ws.split_focused_pane(
@@ -821,21 +821,26 @@ impl Render for Workspace {
         {
             // Availability gate runs FIRST, before any tab lookup. An
             // inaccessible active lane must show the empty-state even
-            // when `tabs` is non-empty — a frozen runtime swapped in on
-            // reactivate, or a mid-session vanish that never cleared
-            // tabs, would otherwise render a stale terminal against a
-            // dead cwd. `availability` is precomputed (recompute on
+            // when `tabs` is non-empty — a lane whose runtime entry still
+            // holds tabs from when it was last `Present`, or a mid-session
+            // vanish that never cleared tabs, would otherwise render a
+            // stale terminal against a dead cwd. `availability` is
+            // precomputed (recompute on
             // restore / activate / load-failure); reading it here keeps
             // `render()` pure.
             inaccessible_empty_state(availability, cx)
-        } else if let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) {
+        } else if let Some(tab) = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+        {
             let actual_has_splits = tab.layout.leaf_count() > 1;
             if let Some(zoomed_id) = self.main_area.zoomed_pane_id {
                 if tab.layout.pane_ids().contains(&zoomed_id) {
                     let leaf = PaneLayout::Pane(zoomed_id);
                     render_layout(
                         &leaf,
-                        &self.main_area.panes,
+                        &self.active_runtime().panes,
                         zoomed_id,
                         true,
                         SharedString::from(self.font_family.clone()),
@@ -846,8 +851,8 @@ impl Render for Workspace {
                 } else {
                     render_layout(
                         &tab.layout,
-                        &self.main_area.panes,
-                        self.main_area.focused_pane_id,
+                        &self.active_runtime().panes,
+                        self.active_runtime().focused_pane_id,
                         actual_has_splits,
                         SharedString::from(self.font_family.clone()),
                         self.main_area.zoomed_pane_id,
@@ -858,8 +863,8 @@ impl Render for Workspace {
             } else {
                 render_layout(
                     &tab.layout,
-                    &self.main_area.panes,
-                    self.main_area.focused_pane_id,
+                    &self.active_runtime().panes,
+                    self.active_runtime().focused_pane_id,
                     actual_has_splits,
                     SharedString::from(self.font_family.clone()),
                     None,
@@ -968,12 +973,16 @@ impl Render for Workspace {
                 el.child(dock_resize_handle(DockPosition::Right, right_dock_size, cx))
             });
 
-        // Status bar
-        let focused_pane = self
-            .main_area
+        // Status bar. Resolve the focused pane's title eagerly into an owned
+        // value so the `active_runtime()` borrow doesn't span the
+        // `cached_project_config` write below (it borrows all of `self`).
+        let focused_title = self
+            .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == self.main_area.focused_pane_id);
+            .find(|p| p.id == self.active_runtime().focused_pane_id)
+            .map(|p| p.title())
+            .unwrap_or_else(|| "shell".into());
         // `project_config_path` (canonicalize) + `Path::exists` are
         // filesystem stats, and `render()` re-runs on every animation frame
         // (status badges request frames without `cx.notify`). Memoize the
@@ -998,9 +1007,7 @@ impl Render for Workspace {
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
-            title: focused_pane
-                .map(|p| p.title())
-                .unwrap_or_else(|| "shell".into()),
+            title: focused_title,
             error: self.last_error.clone(),
             has_project_config,
         };
@@ -1065,7 +1072,7 @@ impl Render for Workspace {
                         // `InputEvent`, so the per-pane subscription can't
                         // see it; the panel-level handler picks it up.
                         "escape" if search_open => {
-                            let pane_id = this.main_area.focused_pane_id;
+                            let pane_id = this.active_runtime().focused_pane_id;
                             if let Some(fc) = this.focused_file_content() {
                                 let input = fc.search_input.clone();
                                 input.update(cx, |inp, cx_state| {

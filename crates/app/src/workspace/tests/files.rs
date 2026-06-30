@@ -217,7 +217,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
-    let initial_tab_count = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
+    let initial_tab_count = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -225,7 +225,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
         });
     })
     .unwrap();
-    let after_first = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
+    let after_first = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
     assert_eq!(
         after_first,
         initial_tab_count + 1,
@@ -239,7 +239,7 @@ async fn clicking_same_file_again_activates_existing_tab(cx: &mut TestAppContext
         });
     })
     .unwrap();
-    let after_second = ws.read_with(cx, |ws, _| ws.main_area.tabs.len());
+    let after_second = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
     assert_eq!(
         after_second, after_first,
         "re-clicking the same file does not open a second tab"
@@ -1427,7 +1427,7 @@ async fn reactivated_missing_lane_with_tabs_selects_empty_state(cx: &mut TestApp
     // gate's predicate, so the test survives a predicate refactor.
     ws.read_with(cx, |ws, _| {
         assert!(
-            !ws.main_area.tabs.is_empty(),
+            !ws.active_runtime().tabs.is_empty(),
             "active lane still has frozen tabs"
         );
         assert_eq!(

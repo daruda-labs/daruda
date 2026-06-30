@@ -7,11 +7,11 @@ use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, VisualTestContext, point, 
 
 fn active_terminal_view(ws: &Workspace) -> gpui::Entity<daruda_terminal::view::TerminalView> {
     let pane = ws
-        .main_area
+        .active_runtime()
         .panes
         .iter()
-        .find(|p| p.id == ws.main_area.focused_pane_id)
-        .or_else(|| ws.main_area.panes.first())
+        .find(|p| p.id == ws.active_runtime().focused_pane_id)
+        .or_else(|| ws.active_runtime().panes.first())
         .expect("workspace must have a pane");
     match &pane.content {
         crate::workspace::main_area::pane::PaneContent::Terminal(t) => t.view.clone(),
