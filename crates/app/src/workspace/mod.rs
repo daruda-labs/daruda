@@ -250,8 +250,9 @@ pub struct Workspace {
     /// unread by anything other than tests.
     #[allow(dead_code)]
     pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
-    /// TabBar + PaneTree runtime state. Holds tabs, panes, focus,
-    /// drag/context-menu overlays, and inactive lane runtimes.
+    /// TabBar + PaneTree runtime state. Holds every lane's runtime
+    /// (tabs / panes / focus, keyed by `LaneRef`) plus the
+    /// drag/context-menu overlays.
     pub(in crate::workspace) main_area: main_area::MainAreaContext,
     next_id: u64,
     focus_handle: FocusHandle,
@@ -708,7 +709,7 @@ impl Workspace {
                 .submit_on_enter(move |app| {
                     ws_for_input.upgrade().is_some_and(|ws| {
                         let ws = ws.read(app);
-                        ws.is_agent_chat_pane(ws.main_area.focused_pane_id)
+                        ws.is_agent_chat_pane(ws.active_runtime().focused_pane_id)
                             && !ws.agent.use_modifier_to_send
                     })
                 })
@@ -719,7 +720,7 @@ impl Workspace {
                 // through to the default outdent. Evaluated live on each press.
                 .on_secondary_tab(move |_window, app| {
                     ws_for_tab.upgrade().is_some_and(|ws| {
-                        let focused = ws.read(app).main_area.focused_pane_id;
+                        let focused = ws.read(app).active_runtime().focused_pane_id;
                         ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
                     })
                 })
@@ -731,7 +732,7 @@ impl Workspace {
                 // so an open completion menu still closes on the first Escape.
                 .on_escape(move |_window, app| {
                     ws_for_escape.upgrade().is_some_and(|ws| {
-                        let focused = ws.read(app).main_area.focused_pane_id;
+                        let focused = ws.read(app).active_runtime().focused_pane_id;
                         ws.update(app, |ws, cx| ws.cancel_agent_turn_if_in_flight(focused, cx))
                     })
                 })
@@ -991,6 +992,15 @@ impl Workspace {
                 }),
             window_handle: window.window_handle(),
         };
+        // Invariant seed: the active lane's runtime must always exist in
+        // `runtimes` so `active_runtime()` (read unconditionally by
+        // `render`) never panics — including the Welcome state, where
+        // `active` is `LaneRef::default()` and no project is open. Seed
+        // it for whatever `active` is, unconditionally: production then
+        // populates it via `add_tab`, a bootstrapped project via
+        // `activate_lane`, and Welcome leaves it empty (render shows the
+        // welcome screen).
+        ws.main_area.runtimes.entry(ws.active).or_default();
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O
         // (persist_state, tasks_global::load_from_dir). Tests that need
@@ -1204,8 +1214,8 @@ impl Workspace {
     /// paneless lane (the inaccessible empty-state) is detected only because
     /// `panes` is empty — not by comparing against a magic id.
     pub(in crate::workspace) fn has_focused_pane(&self) -> bool {
-        let focused = self.main_area.focused_pane_id;
-        self.main_area.panes.iter().any(|p| p.id == focused)
+        let focused = self.active_runtime().focused_pane_id;
+        self.active_runtime().panes.iter().any(|p| p.id == focused)
     }
 
     /// Resolve a `ProjectId` to its runtime project.
@@ -1268,14 +1278,17 @@ impl Workspace {
         if !self.claude.claude_status_enabled {
             return false;
         }
-        // Collect ACP pane statuses (agent chat sessions).
+        // Collect ACP pane statuses (agent chat sessions) across every
+        // lane's panes so a parked lane with a live agent turn still keeps
+        // the status pulse running.
         let acp_statuses: Vec<(
             crate::workspace::main_area::pane_tree::PaneId,
             daruda_claude::SessionStatus,
         )> = self
             .main_area
-            .panes
-            .iter()
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
             .filter_map(|p| {
                 let view = p.agent_chat_view()?;
                 let status = view.read(cx).to_session_status()?;
@@ -1418,7 +1431,7 @@ impl Workspace {
     /// status-pulse pump so its Working footer's animated badge keeps ticking
     /// (the pump only runs for windows that actually show motion).
     pub(crate) fn has_in_flight_agent_chat(&self, cx: &gpui::App) -> bool {
-        self.main_area
+        self.active_runtime()
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())
@@ -1431,7 +1444,7 @@ impl Workspace {
     /// (`App::notify` by id), like the dock notifiers.
     pub(crate) fn notify_in_flight_agent_chats(&self, cx: &mut Context<Self>) {
         let ids: Vec<_> = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())

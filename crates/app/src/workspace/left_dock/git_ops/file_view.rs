@@ -93,13 +93,17 @@ impl Workspace {
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
             let prev_lane = self
-                .main_area
+                .active_runtime()
                 .panes
                 .iter()
                 .find(|p| p.id == pane_id)
                 .and_then(|p| p.file_view())
                 .map(|fv| fv.lane_id);
-            if let Some(pane) = self.main_area.panes.iter_mut().find(|p| p.id == pane_id)
+            if let Some(pane) = self
+                .active_runtime_mut()
+                .panes
+                .iter_mut()
+                .find(|p| p.id == pane_id)
                 && let Some(fc) = pane.file_content_mut()
             {
                 let new_title = path
@@ -121,7 +125,7 @@ impl Workspace {
                     .update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
             }
             // Clear the reused tab's user label (it was set for the old file).
-            if let Some(tab) = self.main_area.tabs.get_mut(tab_idx) {
+            if let Some(tab) = self.active_runtime_mut().tabs.get_mut(tab_idx) {
                 tab.user_label = None;
             }
             self.activate_tab(tab_idx, window, cx);
@@ -139,7 +143,11 @@ impl Workspace {
             });
             cx.notify();
             self.notify_left_dock(cx);
-            self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
+            let owner = daruda_store::project::LaneRef {
+                project,
+                lane: lane_id,
+            };
+            self.load_pane_file_content(owner, path, staged, effective_mode, file_status, cx);
             return;
         }
 
@@ -155,8 +163,8 @@ impl Workspace {
         );
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
-        self.main_area.panes.push(pane);
-        self.main_area
+        self.active_runtime_mut().panes.push(pane);
+        self.active_runtime_mut()
             .tabs
             .push(crate::workspace::main_area::pane::TabEntry {
                 id: tab_id,
@@ -164,11 +172,11 @@ impl Workspace {
                 last_focused_pane: pane_id,
                 user_label: None,
             });
-        self.main_area
-            .tab_history
-            .push(self.main_area.active_tab_index);
-        self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
-        self.main_area.focused_pane_id = pane_id;
+        let cur_tab = self.active_runtime().active_tab_index;
+        self.active_runtime_mut().tab_history.push(cur_tab);
+        let last_tab = self.active_runtime().tabs.len() - 1;
+        self.active_runtime_mut().active_tab_index = last_tab;
+        self.active_runtime_mut().focused_pane_id = pane_id;
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
 
@@ -180,7 +188,11 @@ impl Workspace {
         cx.notify();
         self.notify_left_dock(cx);
 
-        self.load_pane_file_content(lane_id, path, staged, effective_mode, file_status, cx);
+        let owner = daruda_store::project::LaneRef {
+            project: self.active.project,
+            lane: lane_id,
+        };
+        self.load_pane_file_content(owner, path, staged, effective_mode, file_status, cx);
     }
 
     /// Open `path` as a file viewer in a new pane *split to the right
@@ -227,13 +239,13 @@ impl Workspace {
             cx,
         );
         let new_pane_id = pane.id;
-        self.main_area.panes.push(pane);
+        self.active_runtime_mut().panes.push(pane);
 
         // Insert the new pane to the right of `anchor` in whichever
         // tab owns it. Mirrors `split_focused_pane` but targets a
         // caller-supplied anchor instead of `focused_pane_id`.
         let mut inserted_tab: Option<usize> = None;
-        for (idx, tab) in self.main_area.tabs.iter_mut().enumerate() {
+        for (idx, tab) in self.active_runtime_mut().tabs.iter_mut().enumerate() {
             if crate::workspace::main_area::pane_tree::insert_split_at(
                 &mut tab.layout,
                 anchor,
@@ -249,12 +261,14 @@ impl Workspace {
         let Some(tab_idx) = inserted_tab else {
             // Anchor vanished. Drop the orphan pane so the workspace
             // doesn't grow a phantom file viewer with no host tab.
-            self.main_area.panes.retain(|p| p.id != new_pane_id);
+            self.active_runtime_mut()
+                .panes
+                .retain(|p| p.id != new_pane_id);
             return;
         };
 
-        self.main_area.active_tab_index = tab_idx;
-        self.main_area.focused_pane_id = new_pane_id;
+        self.active_runtime_mut().active_tab_index = tab_idx;
+        self.active_runtime_mut().focused_pane_id = new_pane_id;
         self.bump_activity(new_pane_id);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
@@ -265,7 +279,11 @@ impl Workspace {
         cx.notify();
         self.notify_left_dock(cx);
 
-        self.load_pane_file_content(lane_id, path, false, effective_mode, None, cx);
+        let owner = daruda_store::project::LaneRef {
+            project: self.active.project,
+            lane: lane_id,
+        };
+        self.load_pane_file_content(owner, path, false, effective_mode, None, cx);
     }
 
     /// Switch the focused file pane between Raw / Preview / Changes mode.
@@ -308,7 +326,11 @@ impl Workspace {
         cx.notify();
 
         if let Some((lane_id, path, staged, file_status)) = load_args {
-            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
+            let owner = daruda_store::project::LaneRef {
+                project: self.active.project,
+                lane: lane_id,
+            };
+            self.load_pane_file_content(owner, path, staged, mode, file_status, cx);
         }
     }
 
@@ -363,9 +385,9 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let id = self.main_area.focused_pane_id;
+        let id = self.active_runtime().focused_pane_id;
         let is_file = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .any(|p| p.id == id && p.file_content().is_some());
@@ -405,35 +427,33 @@ impl Workspace {
         }
     }
 
-    /// Trigger content loads for every File pane in the live `panes`
-    /// vec whose content is still `Loading`. Called at the end of
-    /// `restore_state` (for the active lane's panes only — others
-    /// live in `inactive_lane_runtimes` and load when their
-    /// lane is next activated) and at the end of `activate_lane`.
+    /// Trigger content loads for every File pane in the active lane's
+    /// `panes` whose content is still `Loading`. Called at the end of
+    /// `restore_state` (for the active lane's panes only — parked lanes
+    /// load when next activated) and at the end of `activate_lane`.
     /// Already-loaded panes are skipped, so re-activations are cheap.
     pub(in crate::workspace) fn load_pending_file_panes(&mut self, cx: &mut Context<Self>) {
-        let pending: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = self
-            .main_area
+        let active = self.active;
+        let pending: Vec<(PathBuf, bool, FileViewMode, Option<char>)> = self
+            .active_runtime()
             .panes
             .iter()
             .filter_map(|p| p.file_view())
             .filter(|fv| matches!(fv.content, PaneFileContent::Loading))
-            .map(|fv| {
-                (
-                    fv.lane_id,
-                    fv.path.clone(),
-                    fv.staged,
-                    fv.view_mode,
-                    fv.file_status,
-                )
-            })
+            .map(|fv| (fv.path.clone(), fv.staged, fv.view_mode, fv.file_status))
             .collect();
-        for (lane_id, path, staged, mode, file_status) in pending {
-            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
+        // Every pending pane lives in the active lane, so the owning ref
+        // is `self.active` (a file pane always references the lane it
+        // lives in — `fv.lane_id == active.lane`).
+        for (path, staged, mode, file_status) in pending {
+            self.load_pane_file_content(active, path, staged, mode, file_status, cx);
         }
     }
 
-    /// Re-apply the current syntax palette to every open file-view pane.
+    /// Re-apply the current syntax palette to every open file-view pane,
+    /// across *all* lanes (active and parked) so a backgrounded lane's
+    /// open diff/markdown view doesn't keep stale colours after a theme
+    /// or syntax-palette switch.
     ///
     /// Raw panes highlight live from `cx.theme().highlight_theme` at paint
     /// time, so a `cx.notify()` on the editor recolours them while
@@ -441,32 +461,36 @@ impl Workspace {
     /// bake their colours into spans at load time, so they need a full
     /// reload. Called when `config.file_viewer.syntax_theme` changes.
     pub(in crate::workspace) fn reload_file_panes(&mut self, cx: &mut Context<Self>) {
-        // Collect first — `load_pane_file_content` reborrows `self`.
+        // Collect first — `load_pane_file_content` reborrows `self`. Each
+        // reload carries its owning `LaneRef` so the loader resolves the
+        // right lane path and re-finds the pane in the right runtime.
         let mut raw_editors = Vec::new();
-        let mut reloads: Vec<(LaneId, PathBuf, bool, FileViewMode, Option<char>)> = Vec::new();
-        for pane in &self.main_area.panes {
-            let Some(f) = pane.file_content() else {
-                continue;
-            };
-            match &f.view.content {
-                PaneFileContent::LoadedRaw => raw_editors.push(f.editor_state.clone()),
-                PaneFileContent::LoadedDiff { .. } | PaneFileContent::LoadedMarkdown { .. } => {
-                    reloads.push((
-                        f.view.lane_id,
-                        f.view.path.clone(),
-                        f.view.staged,
-                        f.view.view_mode,
-                        f.view.file_status,
-                    ));
+        let mut reloads: Vec<(LaneRef, PathBuf, bool, FileViewMode, Option<char>)> = Vec::new();
+        for (lane_ref, runtime) in &self.main_area.runtimes {
+            for pane in &runtime.panes {
+                let Some(f) = pane.file_content() else {
+                    continue;
+                };
+                match &f.view.content {
+                    PaneFileContent::LoadedRaw => raw_editors.push(f.editor_state.clone()),
+                    PaneFileContent::LoadedDiff { .. } | PaneFileContent::LoadedMarkdown { .. } => {
+                        reloads.push((
+                            *lane_ref,
+                            f.view.path.clone(),
+                            f.view.staged,
+                            f.view.view_mode,
+                            f.view.file_status,
+                        ));
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
         for editor in raw_editors {
             editor.update(cx, |_, cx| cx.notify());
         }
-        for (lane_id, path, staged, mode, file_status) in reloads {
-            self.load_pane_file_content(lane_id, path, staged, mode, file_status, cx);
+        for (owner, path, staged, mode, file_status) in reloads {
+            self.load_pane_file_content(owner, path, staged, mode, file_status, cx);
         }
     }
 
@@ -477,17 +501,19 @@ impl Workspace {
     /// switched mode or closed the tab), the result is dropped.
     fn load_pane_file_content(
         &mut self,
-        lane_id: LaneId,
+        owner: LaneRef,
         path: PathBuf,
         staged: bool,
         mode: FileViewMode,
         file_status: Option<char>,
         cx: &mut Context<Self>,
     ) {
-        let target = LaneRef {
-            project: self.active.project,
-            lane: lane_id,
-        };
+        // `owner` is the lane that holds the pane *and* the lane the file
+        // belongs to (a file pane always lives in the lane it references),
+        // so it drives both the path/repo resolution here and the
+        // pane-match scan in the completion callback below. This lets the
+        // loader run for a parked lane, not just the active one.
+        let target = owner;
         let Some(wt) = self.lane_for(target) else {
             return;
         };
@@ -518,15 +544,20 @@ impl Workspace {
                 )
             },
             move |ws, outcome, cx| {
-                // Apply only if a file pane still matches the load
-                // criteria — the user may have switched modes or
-                // closed the tab while the load was in flight.
-                let pane_match = ws.main_area.panes.iter_mut().find(|p| {
-                    p.file_view().is_some_and(|fv| {
-                        fv.lane_id == lane_id
-                            && fv.path == path
-                            && fv.staged == staged
-                            && fv.view_mode == mode
+                // Apply only if a file pane in the owning lane still
+                // matches the load criteria — the user may have switched
+                // modes, closed the tab, or removed the lane while the load
+                // was in flight. Scan the owner's runtime directly so a
+                // parked lane's pane is found (the active lane may have
+                // changed since the load started).
+                let pane_match = ws.main_area.runtimes.get_mut(&owner).and_then(|rt| {
+                    rt.panes.iter_mut().find(|p| {
+                        p.file_view().is_some_and(|fv| {
+                            fv.lane_id == owner.lane
+                                && fv.path == path
+                                && fv.staged == staged
+                                && fv.view_mode == mode
+                        })
                     })
                 });
                 let Some(pane) = pane_match else { return };

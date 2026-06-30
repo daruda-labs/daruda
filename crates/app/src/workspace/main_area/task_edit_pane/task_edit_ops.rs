@@ -98,8 +98,8 @@ impl Workspace {
         let pane = self.create_task_edit_pane(task_id, initial, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
-        self.main_area.panes.push(pane);
-        self.main_area
+        self.active_runtime_mut().panes.push(pane);
+        self.active_runtime_mut()
             .tabs
             .push(crate::workspace::main_area::pane::TabEntry {
                 id: tab_id,
@@ -107,10 +107,10 @@ impl Workspace {
                 last_focused_pane: pane_id,
                 user_label: None,
             });
-        self.main_area
-            .tab_history
-            .push(self.main_area.active_tab_index);
-        self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
+        let cur_tab = self.active_runtime().active_tab_index;
+        self.active_runtime_mut().tab_history.push(cur_tab);
+        let last_tab = self.active_runtime().tabs.len() - 1;
+        self.active_runtime_mut().active_tab_index = last_tab;
         self.set_focused_pane(pane_id, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
@@ -121,10 +121,15 @@ impl Workspace {
     /// `task_id`, if any. Drafts (`task_id = None`) are never
     /// deduplicated — each `[+ New]` click is a fresh draft.
     pub(in crate::workspace) fn find_task_edit_pane(&self, task_id: &str) -> Option<PaneId> {
-        self.main_area.panes.iter().find_map(|p| match &p.content {
-            PaneContent::TaskEditPane(te) if te.task_id.as_deref() == Some(task_id) => Some(p.id),
-            _ => None,
-        })
+        self.active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| match &p.content {
+                PaneContent::TaskEditPane(te) if te.task_id.as_deref() == Some(task_id) => {
+                    Some(p.id)
+                }
+                _ => None,
+            })
     }
 
     fn create_task_edit_pane(
@@ -332,7 +337,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
@@ -373,7 +378,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        let branch_text = match self.main_area.panes.iter().find(|p| p.id == pane_id) {
+        let branch_text = match self.active_runtime().panes.iter().find(|p| p.id == pane_id) {
             Some(p) => match p.task_edit_content() {
                 Some(te) => te.branch_input.read(cx).text().to_string(),
                 None => return,
@@ -388,7 +393,7 @@ impl Workspace {
     }
 
     fn task_edit_content_mut_for(&mut self, pane_id: PaneId) -> Option<&mut TaskEditContent> {
-        self.main_area
+        self.active_runtime_mut()
             .panes
             .iter_mut()
             .find(|p| p.id == pane_id)?
@@ -413,7 +418,11 @@ impl Workspace {
         &self,
         pane_id: PaneId,
     ) -> Option<&TaskEditContent> {
-        let pane = self.main_area.panes.iter().find(|p| p.id == pane_id)?;
+        let pane = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)?;
         match &pane.content {
             PaneContent::TaskEditPane(te) => Some(te),
             _ => None,
@@ -437,7 +446,7 @@ impl Workspace {
             return;
         };
         let already_attached = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == pane_id)
@@ -469,7 +478,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
@@ -500,7 +509,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
@@ -533,7 +542,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
@@ -686,7 +695,7 @@ impl Workspace {
         // through `current_snapshot` so any new field on
         // `TaskEditSnapshot` (e.g. C-1 `base_value`) is captured by
         // a single source of truth rather than duplicated here.
-        if let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id)
+        if let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
             && let Some(te) = pane.task_edit_content()
         {
             let snapshot = te.current_snapshot(cx);
@@ -698,14 +707,14 @@ impl Workspace {
     }
 
     /// Read the current form values without holding a `&mut self`
-    /// borrow on `self.main_area.panes` past the snapshot.
+    /// borrow on `self.active_runtime().panes` past the snapshot.
     fn read_task_edit_form(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> Option<TaskEditFormSnapshot> {
         let te = self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == pane_id)?
@@ -729,7 +738,7 @@ impl Workspace {
 }
 
 /// Plain-data form snapshot used by `save_task_edit_pane` so the save
-/// path doesn't keep a borrow on `self.main_area.panes` past the read step.
+/// path doesn't keep a borrow on `self.active_runtime().panes` past the read step.
 struct TaskEditFormSnapshot {
     task_id: Option<TaskId>,
     title: String,
@@ -855,7 +864,7 @@ impl Workspace {
             }
         };
 
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
         let Some(te) = pane.task_edit_content() else {
@@ -916,7 +925,8 @@ impl Workspace {
             // SILENT-OK: user may close window before save-dialog answer arrives
             let _ = this.update_in(cx, |this, window, cx| match answer {
                 0 => {
-                    let Some(pane) = this.main_area.panes.iter().find(|p| p.id == pane_id) else {
+                    let Some(pane) = this.active_runtime().panes.iter().find(|p| p.id == pane_id)
+                    else {
                         return;
                     };
                     let Some(te) = pane.task_edit_content() else {

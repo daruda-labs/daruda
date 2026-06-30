@@ -32,7 +32,7 @@ impl Workspace {
     /// construction (`cx.new`) — no prior cache exists at that point, so
     /// no explicit notify is needed.
     pub(in crate::workspace) fn set_focused_pane(&mut self, id: PaneId, cx: &mut Context<Self>) {
-        self.main_area.focused_pane_id = id;
+        self.active_runtime_mut().focused_pane_id = id;
         self.notify_left_dock(cx);
         // Re-evaluate inactive-pane dim: the focused pane drops to full
         // color and its former-focused sibling dims (or, after a split /
@@ -53,11 +53,15 @@ impl Workspace {
     /// Notifies only the views whose amount changed (Pitfall #10: the
     /// `.cached()` terminal must be dirtied for the new dim to paint).
     pub(in crate::workspace) fn refresh_pane_dimming(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) else {
+        let Some(tab) = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+        else {
             return;
         };
         let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane_id.is_none();
-        let focused = self.main_area.focused_pane_id;
+        let focused = self.active_runtime().focused_pane_id;
         let pane_ids = tab.layout.pane_ids();
 
         for pane_id in pane_ids {
@@ -67,7 +71,7 @@ impl Workspace {
                 0.0
             };
             let Some(view) = self
-                .main_area
+                .active_runtime()
                 .panes
                 .iter()
                 .find(|p| p.id == pane_id)
@@ -93,11 +97,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.main_area.focused_pane_id == id {
+        if self.active_runtime().focused_pane_id == id {
             return;
         }
         self.set_focused_pane(id, cx);
-        if let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
+        if let Some(tab) = self.active_tab_mut() {
             tab.last_focused_pane = id;
         }
         self.bump_activity(id);
@@ -125,18 +129,18 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
 
-        self.main_area.panes.push(pane);
-        self.main_area.tabs.push(TabEntry {
+        self.active_runtime_mut().panes.push(pane);
+        self.active_runtime_mut().tabs.push(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
 
-        self.main_area
-            .tab_history
-            .push(self.main_area.active_tab_index);
-        self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
+        let cur_tab = self.active_runtime().active_tab_index;
+        self.active_runtime_mut().tab_history.push(cur_tab);
+        let last_tab = self.active_runtime().tabs.len() - 1;
+        self.active_runtime_mut().active_tab_index = last_tab;
         self.set_focused_pane(pane_id, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
@@ -150,22 +154,22 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if index >= self.main_area.tabs.len() {
+        if index >= self.active_runtime().tabs.len() {
             return;
         }
         // Last tab in the active lane → close this window. Other
         // windows (and the app itself under `QuitMode::Default`) stay
         // alive; the user reopens projects via File > New Window /
         // Open… / Open Recent. If the project had other lanes
-        // parked in `inactive_lane_runtimes`, their PTYs drop
-        // with the workspace entity when the window is removed —
-        // that's fine for now, a future phase could offer a confirm.
-        if self.main_area.tabs.len() <= 1 {
+        // parked in `runtimes`, their PTYs drop with the workspace
+        // entity when the window is removed — that's fine for now, a
+        // future phase could offer a confirm.
+        if self.active_runtime().tabs.len() <= 1 {
             window.remove_window();
             return;
         }
 
-        let tab = self.main_area.tabs.remove(index);
+        let tab = self.active_runtime_mut().tabs.remove(index);
         let pane_ids = tab.layout.pane_ids();
         if pane_ids
             .iter()
@@ -174,15 +178,19 @@ impl Workspace {
             self.main_area.zoomed_pane_id = None;
         }
         self.release_pane_tracking(&pane_ids, cx);
-        self.main_area.panes.retain(|p| !pane_ids.contains(&p.id));
+        self.active_runtime_mut()
+            .panes
+            .retain(|p| !pane_ids.contains(&p.id));
         for id in &pane_ids {
             self.main_area.activity_counter.remove(id);
         }
 
         // Adjust history for the removed tab: drop direct references to it
         // and shift all higher indices down by one so they remain valid.
-        self.main_area.tab_history.retain(|&i| i != index);
-        for idx in &mut self.main_area.tab_history {
+        self.active_runtime_mut()
+            .tab_history
+            .retain(|&i| i != index);
+        for idx in &mut self.active_runtime_mut().tab_history {
             if *idx > index {
                 *idx -= 1;
             }
@@ -190,30 +198,30 @@ impl Workspace {
 
         // Choose next active tab. Prefer the most-recent history entry;
         // fall back to the nearest neighbor when history is empty.
-        let new_active = if self.main_area.active_tab_index == index {
+        let new_active = if self.active_runtime().active_tab_index == index {
             // Pop history to find a valid destination. Entries that fall
             // outside the current tab count (e.g. pointing at a tab that was
             // already closed in the same session) are silently discarded;
             // they can never be navigated to anyway.
             let mut found = None;
-            while let Some(prev) = self.main_area.tab_history.pop() {
-                if prev < self.main_area.tabs.len() {
+            while let Some(prev) = self.active_runtime_mut().tab_history.pop() {
+                if prev < self.active_runtime().tabs.len() {
                     found = Some(prev);
                     break;
                 }
             }
-            found.unwrap_or_else(|| index.min(self.main_area.tabs.len() - 1))
-        } else if self.main_area.active_tab_index > index {
-            self.main_area.active_tab_index - 1
+            found.unwrap_or_else(|| index.min(self.active_runtime().tabs.len() - 1))
+        } else if self.active_runtime().active_tab_index > index {
+            self.active_runtime().active_tab_index - 1
         } else {
-            self.main_area.active_tab_index
+            self.active_runtime().active_tab_index
         };
-        self.main_area.active_tab_index = new_active;
+        self.active_runtime_mut().active_tab_index = new_active;
 
         if let Some(focused) = self
-            .main_area
+            .active_runtime()
             .tabs
-            .get(self.main_area.active_tab_index)
+            .get(self.active_runtime().active_tab_index)
             .map(|tab| tab.last_focused_pane)
         {
             self.set_focused_pane(focused, cx);
@@ -229,27 +237,29 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if index < self.main_area.tabs.len() && index != self.main_area.active_tab_index {
+        if index < self.active_runtime().tabs.len()
+            && index != self.active_runtime().active_tab_index
+        {
             self.main_area.zoomed_pane_id = None;
             // Drop any in-flight drag hover so a stale half-fill overlay does
             // not linger on the newly-activated tab. The notify below covers it.
             self.main_area.pane_drop_hover = None;
             // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
-            if self.main_area.tab_history.last() != Some(&self.main_area.active_tab_index) {
-                self.main_area
-                    .tab_history
-                    .push(self.main_area.active_tab_index);
+            if self.active_runtime().tab_history.last()
+                != Some(&self.active_runtime().active_tab_index)
+            {
+                let cur_tab = self.active_runtime().active_tab_index;
+                self.active_runtime_mut().tab_history.push(cur_tab);
             }
             // Cap size to bound memory use across long sessions.
             const TAB_HISTORY_CAP: usize = 64;
-            if self.main_area.tab_history.len() > TAB_HISTORY_CAP {
-                self.main_area
-                    .tab_history
-                    .drain(..self.main_area.tab_history.len() - TAB_HISTORY_CAP);
+            if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
+                let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
+                self.active_runtime_mut().tab_history.drain(..drain_to);
             }
-            self.main_area.active_tab_index = index;
-            let focused = self.main_area.tabs[index].last_focused_pane;
-            self.main_area.focused_pane_id = focused;
+            self.active_runtime_mut().active_tab_index = index;
+            let focused = self.active_runtime().tabs[index].last_focused_pane;
+            self.active_runtime_mut().focused_pane_id = focused;
             // New active tab may have a different split structure — recompute
             // dim across its panes (the previous tab's views keep their dim;
             // they are not visible).
@@ -268,17 +278,20 @@ impl Workspace {
         to: usize,
         cx: &mut Context<Self>,
     ) {
-        if from == to || from >= self.main_area.tabs.len() || to >= self.main_area.tabs.len() {
+        if from == to
+            || from >= self.active_runtime().tabs.len()
+            || to >= self.active_runtime().tabs.len()
+        {
             return;
         }
-        let tab = self.main_area.tabs.remove(from);
-        self.main_area.tabs.insert(to, tab);
-        if self.main_area.active_tab_index == from {
-            self.main_area.active_tab_index = to;
+        let tab = self.active_runtime_mut().tabs.remove(from);
+        self.active_runtime_mut().tabs.insert(to, tab);
+        if self.active_runtime().active_tab_index == from {
+            self.active_runtime_mut().active_tab_index = to;
         } else {
             // Adjust active index for the shift.
-            let a = self.main_area.active_tab_index;
-            self.main_area.active_tab_index = if from < a && to >= a {
+            let a = self.active_runtime().active_tab_index;
+            self.active_runtime_mut().active_tab_index = if from < a && to >= a {
                 a - 1
             } else if from > a && to <= a {
                 a + 1
@@ -287,7 +300,7 @@ impl Workspace {
             };
         }
         // Adjust history indices to track the reorder.
-        for idx in &mut self.main_area.tab_history {
+        for idx in &mut self.active_runtime_mut().tab_history {
             if *idx == from {
                 *idx = to;
             } else if from < to && *idx > from && *idx <= to {
@@ -311,8 +324,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let focused = self.main_area.focused_pane_id;
-        let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) else {
+        let focused = self.active_runtime().focused_pane_id;
+        let Some(tab) = self.active_tab_mut() else {
             return;
         };
         if let Some(next) = tab.layout.next_pane(focused) {
@@ -328,8 +341,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let focused = self.main_area.focused_pane_id;
-        let Some(tab) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) else {
+        let focused = self.active_runtime().focused_pane_id;
+        let Some(tab) = self.active_tab_mut() else {
             return;
         };
         if let Some(prev) = tab.layout.prev_pane(focused) {
@@ -346,7 +359,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) else {
+        let Some(tab) = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+        else {
             return;
         };
         let (w, h) = self.main_area.last_viewport.unwrap_or((1.0, 1.0));
@@ -354,12 +371,12 @@ impl Workspace {
         collect_pane_rects(&tab.layout, 0.0, 0.0, w, h, &mut rects);
         if let Some(target) = pane_in_direction(
             &rects,
-            self.main_area.focused_pane_id,
+            self.active_runtime().focused_pane_id,
             dir,
             &self.main_area.activity_counter,
         ) {
             self.set_focused_pane(target, cx);
-            if let Some(t) = self.main_area.tabs.get_mut(self.main_area.active_tab_index) {
+            if let Some(t) = self.active_tab_mut() {
                 t.last_focused_pane = target;
             }
             self.bump_activity(target);
@@ -388,7 +405,7 @@ impl Workspace {
         // inaccessible empty-state) has `focused_pane_id` at its default,
         // which matches no pane — guard so we never stamp
         // `zoomed_pane_id = Some(<bogus id>)` and zoom an empty viewport.
-        if !self.main_area.panes.iter().any(|p| p.id == pane_id) {
+        if !self.active_runtime().panes.iter().any(|p| p.id == pane_id) {
             return;
         }
         if self.main_area.zoomed_pane_id == Some(pane_id) {
@@ -430,10 +447,10 @@ impl Workspace {
             }
         };
         let new_pane_id = new_pane.id;
-        self.main_area.panes.push(new_pane);
+        self.active_runtime_mut().panes.push(new_pane);
 
-        let focused = self.main_area.focused_pane_id;
-        for tab in &mut self.main_area.tabs {
+        let focused = self.active_runtime().focused_pane_id;
+        for tab in &mut self.active_runtime_mut().tabs {
             if insert_split_at(&mut tab.layout, focused, direction, new_pane_id, false) {
                 tab.last_focused_pane = new_pane_id;
                 break;
@@ -453,40 +470,43 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(tab_index) = self
-            .main_area
+            .active_runtime()
             .tabs
             .iter()
             .position(|t| t.layout.pane_ids().contains(&pane_id))
         else {
             return;
         };
-        let leaf_count = self.main_area.tabs[tab_index].layout.leaf_count();
+        let leaf_count = self.active_runtime().tabs[tab_index].layout.leaf_count();
         if leaf_count <= 1 {
             self.close_tab_at(tab_index, window, cx);
             return;
         }
 
-        let next_focus = self.main_area.tabs[tab_index]
+        let next_focus = self.active_runtime().tabs[tab_index]
             .layout
             .prev_pane(pane_id)
-            .unwrap_or_else(|| self.main_area.tabs[tab_index].layout.first_leaf());
+            .unwrap_or_else(|| self.active_runtime().tabs[tab_index].layout.first_leaf());
 
         if self.main_area.zoomed_pane_id == Some(pane_id) {
             self.main_area.zoomed_pane_id = None;
         }
         // A pane removal invalidates any in-flight drop-hover target.
         self.main_area.pane_drop_hover = None;
-        remove_pane_from_layout(&mut self.main_area.tabs[tab_index].layout, pane_id);
+        remove_pane_from_layout(
+            &mut self.active_runtime_mut().tabs[tab_index].layout,
+            pane_id,
+        );
         self.release_pane_tracking(&[pane_id], cx);
-        self.main_area.panes.retain(|p| p.id != pane_id);
+        self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
         self.main_area.activity_counter.remove(&pane_id);
 
-        if tab_index == self.main_area.active_tab_index {
+        if tab_index == self.active_runtime().active_tab_index {
             self.set_focused_pane(next_focus, cx);
             self.bump_activity(next_focus);
             self.focus_pane(next_focus, window, cx);
         }
-        self.main_area.tabs[tab_index].last_focused_pane = next_focus;
+        self.active_runtime_mut().tabs[tab_index].last_focused_pane = next_focus;
         self.resize_all_tabs(window, cx);
         cx.notify();
     }
@@ -496,7 +516,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request_close_pane(self.main_area.focused_pane_id, window, cx);
+        self.request_close_pane(self.active_runtime().focused_pane_id, window, cx);
     }
 
     // ---- Dirty-checked close entry points (R-25) ----
@@ -512,10 +532,10 @@ impl Workspace {
     ) {
         let dirty: Vec<(PaneId, gpui::SharedString, bool)> = indices
             .iter()
-            .filter_map(|&i| self.main_area.tabs.get(i))
+            .filter_map(|&i| self.active_runtime().tabs.get(i))
             .flat_map(|tab| tab.layout.pane_ids().into_iter())
             .filter_map(|id| {
-                let pane = self.main_area.panes.iter().find(|p| p.id == id)?;
+                let pane = self.active_runtime().panes.iter().find(|p| p.id == id)?;
                 if !pane.is_dirty(cx) {
                     return None;
                 }
@@ -594,7 +614,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self.main_area.tabs.get(index) else {
+        let Some(tab) = self.active_runtime().tabs.get(index) else {
             return;
         };
 
@@ -603,7 +623,7 @@ impl Workspace {
             .pane_ids()
             .iter()
             .filter_map(|&id| {
-                let pane = self.main_area.panes.iter().find(|p| p.id == id)?;
+                let pane = self.active_runtime().panes.iter().find(|p| p.id == id)?;
                 if !pane.is_dirty(cx) {
                     return None;
                 }
@@ -673,7 +693,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+        let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
             return;
         };
 

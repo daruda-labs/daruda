@@ -38,12 +38,12 @@ impl Workspace {
     /// Called from `close_active_project` when no project (or no usable
     /// lane) remains.
     fn reset_to_empty_workspace(&mut self, cx: &mut Context<Self>) {
-        self.main_area.tabs.clear();
-        self.main_area.panes.clear();
-        self.main_area.active_tab_index = 0;
-        self.main_area.tab_history.clear();
-        self.main_area.focused_pane_id = 0;
+        // Drop every lane's runtime — no project remains — and re-seed the
+        // default-ref entry so the "active runtime always present"
+        // invariant holds for the Welcome state that `render` paints next.
+        self.main_area.runtimes.clear();
         self.active = LaneRef::default();
+        self.main_area.runtimes.entry(self.active).or_default();
         self.mutate_durable(cx, |_, _| {});
     }
 
@@ -54,8 +54,8 @@ impl Workspace {
     /// counter, walks the filesystem at `root` to discover git
     /// lanes (or falls back to one default), and pushes the result
     /// onto `self.projects`. Then routes through `activate_lane`
-    /// to swap the live `MainAreaContext` over to the new lane —
-    /// the previous active runtime is preserved in the inactive map.
+    /// to re-point `self.active` at the new lane — the previous lane's
+    /// runtime stays in the `runtimes` map under its own key.
     ///
     /// **Pre-condition (caller):** the same-workspace duplicate-root
     /// check has already run. Policy B explicitly allows the same root
@@ -90,19 +90,16 @@ impl Workspace {
         project.tab_order = tab_order;
         let target = project.first_lane_ref();
         self.projects.push(project);
-        // Activate the new lane. When `self.projects` was empty
-        // before this call there is no prior runtime to freeze, but
-        // `activate_lane` is still the right path: it lazy-seeds
-        // a pane at the new lane's path so the user lands on a
-        // live shell immediately.
+        // Activate the new lane via `activate_lane` — it lazy-seeds a
+        // pane at the new lane's path so the user lands on a live shell
+        // immediately, whether or not a prior lane was active.
         if let Some(t) = target {
             // First project case: `self.active` is the default
             // (project=0, lane=0). `activate_lane` skips when
             // `self.active == target`, but with monotonic ids the new
             // project's id is always > 0 the first time so this fires.
-            // Manually set `self.active` to a sentinel that differs
-            // from `target` so the swap path runs even when the
-            // workspace previously had no live runtime to freeze.
+            // Reset `self.active` to the default ref so it differs from
+            // `target` and the full activation path runs.
             if self.projects.len() == 1 {
                 self.active = LaneRef::default();
             }
@@ -242,8 +239,8 @@ impl Workspace {
     /// left, or every surviving project is lane-less); the caller closes
     /// the window, which routes to the Welcome screen.
     ///
-    /// Inactive lanes from the removed project also drop out of
-    /// `inactive_lane_runtimes` so memory does not leak.
+    /// Every lane's runtime for the removed project also drops out of
+    /// `runtimes` so memory does not leak.
     pub(crate) fn close_active_project(
         &mut self,
         window: &mut Window,
@@ -252,31 +249,23 @@ impl Workspace {
         let Some(project_id) = self.active_project().map(|p| p.id) else {
             return false;
         };
-        // Release every pane the closing project owns — the live ones
-        // (the active lane belongs to this project) and those in its
-        // frozen runtimes — before they drop below. Skipping this
-        // leaves the tracker polling dead shell PIDs for the window's
-        // lifetime and stale claude bindings behind.
+        // Release every pane the closing project owns — across all of its
+        // lanes' runtimes (including the active lane, which belongs to
+        // this project) — before they drop below. Skipping this leaves
+        // the tracker polling dead shell PIDs for the window's lifetime
+        // and stale claude bindings behind. The runtimes themselves are
+        // dropped *after* `activate_lane` re-points `self.active` away
+        // from this project (a single `retain` at the tail), so the
+        // "active runtime always present" invariant is never broken
+        // mid-teardown.
         let owned_pane_ids: Vec<_> = self
             .main_area
-            .panes
+            .runtimes
             .iter()
-            .map(|p| p.id)
-            .chain(
-                self.main_area
-                    .inactive_lane_runtimes
-                    .iter()
-                    .filter(|(key, _)| key.project == project_id)
-                    .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id)),
-            )
+            .filter(|(key, _)| key.project == project_id)
+            .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
             .collect();
         self.release_pane_tracking(&owned_pane_ids, cx);
-        // Forget every inactive runtime that belonged to the removed
-        // project — the WorktreeRefs become dangling once the project
-        // is gone.
-        self.main_area
-            .inactive_lane_runtimes
-            .retain(|key, _| key.project != project_id);
         // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.
         self.git_status_cache
@@ -335,28 +324,25 @@ impl Workspace {
             self.reset_to_empty_workspace(cx);
             return false;
         };
-        // Reset live runtime; the removed project's panes are gone for
-        // good and their TabEntry ids hold no PaneIds we can reuse.
         // `self.active` is intentionally left pointing at the deleted
-        // project's lane ref — its project_id is guaranteed
-        // distinct from `next_target.project` (we just removed it from
-        // `self.projects`), so `activate_lane`'s same-target guard
+        // project's lane ref through this call — its project_id is
+        // guaranteed distinct from `next_target.project` (we just removed
+        // it from `self.projects`), so `activate_lane`'s same-target guard
         // doesn't fire. Resetting to `LaneRef::default()` here would
-        // collide with the natural (project=0, lane=0) target of
-        // the surviving first project and false-trigger the guard,
-        // leaving main_area empty (regression covered by
-        // `close_active_project_keeps_window_when_other_remain`).
-        self.main_area.tabs.clear();
-        self.main_area.panes.clear();
-        self.main_area.active_tab_index = 0;
-        self.main_area.tab_history.clear();
-        self.main_area.focused_pane_id = 0;
+        // collide with the natural (project=0, lane=0) target of the
+        // surviving first project and false-trigger the guard, leaving
+        // main_area empty (regression covered by
+        // `close_active_project_keeps_window_when_other_remain`). The
+        // deleted project's runtime stays in `runtimes` until the retain
+        // below so `active_runtime()` keeps resolving during the switch.
         self.activate_lane(next_target, window, cx);
-        // `activate_lane`'s freeze step wrote a dangling empty
-        // runtime under the deleted project's lane ref. Drop it so
-        // `inactive_lane_runtimes` stays clean.
+        // Now that `self.active` points at the surviving lane, forget every
+        // runtime that belonged to the removed project (the formerly-active
+        // one included) — their `LaneRef`s are dangling once the project
+        // is gone. The active runtime survives because `next_target` is in
+        // a different project.
         self.main_area
-            .inactive_lane_runtimes
+            .runtimes
             .retain(|key, _| key.project != project_id);
         self.mutate_durable(cx, |_, _| {});
         true
@@ -468,8 +454,11 @@ impl Workspace {
                         // through the activate path.
                         if ws.active.project != project_id {
                             ws.projects.retain(|p| p.id != project_id);
+                            // Active is in a different project, so dropping
+                            // every runtime keyed to `project_id` leaves the
+                            // active runtime intact.
                             ws.main_area
-                                .inactive_lane_runtimes
+                                .runtimes
                                 .retain(|key, _| key.project != project_id);
                             ws.mutate_durable(cx, |_, _| {});
                             return ws.projects.is_empty();
@@ -600,11 +589,15 @@ impl Workspace {
             // Discovery assigns ids before sorting the project-root
             // lane first, so the active lane's id may differ from the
             // placeholder's `0` — re-key everything addressed by the
-            // placeholder ref.
+            // placeholder ref. The runtime is in the single `runtimes`
+            // map whether the lane is active or not, so re-key it
+            // unconditionally, then re-point `self.active` if it named
+            // the placeholder.
+            if let Some(rt) = self.main_area.runtimes.remove(&old_ref) {
+                self.main_area.runtimes.insert(new_ref, rt);
+            }
             if self.active == old_ref {
                 self.active = new_ref;
-            } else if let Some(rt) = self.main_area.inactive_lane_runtimes.remove(&old_ref) {
-                self.main_area.inactive_lane_runtimes.insert(new_ref, rt);
             }
             self.invalidate_visible_files_cache(old_ref);
             self.invalidate_visible_files_cache(new_ref);

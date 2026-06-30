@@ -77,7 +77,11 @@ impl Workspace {
         let w = f32::from(event.bounds.size.width);
         let h = f32::from(event.bounds.size.height);
 
-        let Some(tab) = self.main_area.tabs.get(self.main_area.active_tab_index) else {
+        let Some(tab) = self
+            .active_runtime()
+            .tabs
+            .get(self.active_runtime().active_tab_index)
+        else {
             return;
         };
         let mut rects = Vec::new();
@@ -122,9 +126,7 @@ impl Workspace {
         };
         // The dragged == target no-op is handled inside `rearrange_pane`.
         let moved = self.mutate_durable(cx, |ws, _| {
-            ws.main_area
-                .tabs
-                .get_mut(ws.main_area.active_tab_index)
+            ws.active_tab_mut()
                 .map(|t| rearrange_pane(&mut t.layout, dragged, target, half))
                 .unwrap_or(false)
         });

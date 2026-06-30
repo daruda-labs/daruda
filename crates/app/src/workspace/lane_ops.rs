@@ -1,6 +1,6 @@
 //! Lane lifecycle operations on `Workspace`: create / remove
 //! validation + execution, modal openers, slot-id allocation, and the
-//! tab-swap activation path.
+//! lane activation path (re-points `active` into the single runtimes map).
 //!
 //! All git CLI calls go through `cx.background_executor` so the
 //! UI thread never blocks; the post-git state mutations come back via
@@ -218,15 +218,22 @@ impl Workspace {
         }
         // Release the removed lane's panes from PTY tracking before
         // their runtime drops — otherwise the tracker keeps walking
-        // the dead shell PIDs for the window's lifetime.
-        let removed_pane_ids: Vec<_> = self
-            .main_area
-            .inactive_lane_runtimes
-            .get(&target)
-            .map(|runtime| runtime.panes.iter().map(|p| p.id).collect())
-            .unwrap_or_default();
-        self.release_pane_tracking(&removed_pane_ids, cx);
-        self.main_area.inactive_lane_runtimes.remove(&target);
+        // the dead shell PIDs for the window's lifetime. Gated on
+        // `target != self.active`: if no fallback was found above
+        // (`fallback_target` was `None` — the degenerate about-to-be-
+        // empty case) `target` is still the active lane, and dropping
+        // its runtime would violate the "active runtime always present"
+        // invariant. The window is closing in that case, so leave it.
+        if target != self.active {
+            let removed_pane_ids: Vec<_> = self
+                .main_area
+                .runtimes
+                .get(&target)
+                .map(|runtime| runtime.panes.iter().map(|p| p.id).collect())
+                .unwrap_or_default();
+            self.release_pane_tracking(&removed_pane_ids, cx);
+            self.main_area.runtimes.remove(&target);
+        }
         // W-7 per-lane state must be cleared too — otherwise the
         // notify watcher keeps running, the cache holds stale paths,
         // and the gitignore matcher leaks. Dropping the entries also
@@ -363,9 +370,7 @@ impl Workspace {
             tab_history: Vec::new(),
             focused_pane_id: pane_id,
         };
-        self.main_area
-            .inactive_lane_runtimes
-            .insert(new_ref, runtime);
+        self.main_area.runtimes.insert(new_ref, runtime);
         self.activate_lane(new_ref, window, cx);
         // New cwd → new `~/.claude/projects/<encoded>/` to watch.
         self.refresh_jsonl_watcher(cx);
@@ -380,7 +385,7 @@ impl Workspace {
     }
 
     /// Monotonic lane id allocator scoped to `project_id`.
-    /// Walks both the lane list and the stashed inactive runtimes
+    /// Walks both the lane list and every registered runtime key
     /// so a phantom key from a crash mid-remove never collides with a
     /// fresh id.
     fn allocate_lane_id(&self, project_id: ProjectId) -> LaneId {
@@ -392,7 +397,7 @@ impl Workspace {
             .max();
         let max_map = self
             .main_area
-            .inactive_lane_runtimes
+            .runtimes
             .keys()
             .filter(|r| r.project == project_id)
             .map(|r| r.lane)
@@ -405,15 +410,14 @@ impl Workspace {
             .unwrap_or(0)
     }
 
-    /// Switch the visible lane. The Workspace's `tabs` / `panes`
-    /// / focus fields represent the **active** lane's runtime;
-    /// activating a different one swaps those fields with the target
-    /// lane's stored runtime. If the target has never been
-    /// populated (e.g. `bootstrap_from_project` loaded its metadata
-    /// from `git worktree list` but no tabs were serialized), a fresh
-    /// pane is spawned at the lane's path so the user never lands
-    /// on an empty viewport. PTY entities survive the swap because
-    /// `_stdout_task` moves with the Pane rather than being cloned.
+    /// Switch the visible lane. Every lane's runtime lives in the single
+    /// `runtimes` map; the active lane is the entry under `self.active`,
+    /// so activating a different one just re-points that key — no fields
+    /// are moved and every parked lane's PTY entities keep running. If the
+    /// target has never been populated (e.g. `bootstrap_from_project`
+    /// loaded its metadata from `git worktree list` but no tabs were
+    /// serialized), a fresh pane is spawned at the lane's path so the user
+    /// never lands on an empty viewport.
     pub(in crate::workspace) fn activate_lane(
         &mut self,
         target: LaneRef,
@@ -446,30 +450,13 @@ impl Workspace {
         // visible list.
         self.file_tree.files_selection = None;
 
-        // 1. Freeze the currently active runtime into the inactive map.
-        let current = self.active;
-        let frozen = LaneRuntime {
-            tabs: std::mem::take(&mut self.main_area.tabs),
-            panes: std::mem::take(&mut self.main_area.panes),
-            active_tab_index: std::mem::take(&mut self.main_area.active_tab_index),
-            tab_history: std::mem::take(&mut self.main_area.tab_history),
-            focused_pane_id: std::mem::take(&mut self.main_area.focused_pane_id),
-        };
-        self.main_area
-            .inactive_lane_runtimes
-            .insert(current, frozen);
-
-        // 2. Pull the target lane's runtime into the live fields.
-        let next = self
-            .main_area
-            .inactive_lane_runtimes
-            .remove(&target)
-            .unwrap_or_default();
-        self.main_area.tabs = next.tabs;
-        self.main_area.panes = next.panes;
-        self.main_area.active_tab_index = next.active_tab_index;
-        self.main_area.tab_history = next.tab_history;
-        self.main_area.focused_pane_id = next.focused_pane_id;
+        // 1. Re-point the active key. Both lanes' runtimes already live in
+        //    the single `runtimes` map, so there is nothing to freeze or
+        //    swap — the previous lane's runtime stays under its key and the
+        //    target's stays under its. A lane loaded from `git worktree
+        //    list` but never activated has no entry yet; `entry().or_default`
+        //    seeds an empty one so `active_runtime()` resolves immediately.
+        self.main_area.runtimes.entry(target).or_default();
         // Drop any in-flight drag hover so a stale half-fill overlay does not
         // linger on the newly-activated lane. The notify paths below cover it.
         self.main_area.pane_drop_hover = None;
@@ -480,21 +467,19 @@ impl Workspace {
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
             project.last_active_lane_id = target.lane;
         }
-        // File viewer panes travel with their lane's tab list via
-        // the `LaneRuntime` swap above, so each lane retains
-        // its own open files across activations.
+        // File viewer panes live in their own lane's runtime entry, so
+        // each lane retains its own open files across activations.
 
         // An unavailable lane (root deleted / unreadable) becomes the
-        // active lane — the runtime freeze/swap above must still run so
-        // the previous lane's panes are frozen and the live fields hold
-        // this lane's (possibly empty) runtime — but the path-spawning
-        // work is skipped: lazy-seed would root a PTY at the dead path,
-        // and `refresh_git_status` would shell out `git status` against it
+        // active lane — `active` now points at its (possibly empty)
+        // runtime entry — but the path-spawning work is skipped:
+        // lazy-seed would root a PTY at the dead path, and
+        // `refresh_git_status` would shell out `git status` against it
         // and spam an error toast. The right-dock reconcile + persist
         // below are filesystem-tolerant (skills/mcp scan a missing dir as
         // empty; the commit button reads in-memory cache) so they still
         // run — otherwise the panels would keep showing the *previous*
-        // lane's data after the swap.
+        // lane's data after the switch.
         if self
             .lane_for(target)
             .map(|l| l.availability != LaneAvailability::Present)
@@ -518,21 +503,20 @@ impl Workspace {
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
         if self
-            .main_area
+            .active_runtime()
             .panes
             .iter()
-            .any(|p| p.id == self.main_area.focused_pane_id)
+            .any(|p| p.id == self.active_runtime().focused_pane_id)
         {
-            self.focus_pane(self.main_area.focused_pane_id, window, cx);
+            self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
         }
         // The incoming lane's runtime carries its own panes/split state;
         // recompute inactive-pane dim against the now-live focused pane.
         self.refresh_pane_dimming(cx);
         self.main_area.pending_resize = true;
-        // Any File panes that arrived in the live `panes` vec via the
-        // runtime swap above may still have `Loading` content (if they
-        // came in from a restored-but-never-active runtime); fire
-        // their loads now that the lane is active.
+        // The now-active lane's runtime may still hold File panes with
+        // `Loading` content (a lane restored but never activated defers
+        // its loads); fire them now that the lane is active.
         self.load_pending_file_panes(cx);
         self.mutate_durable(cx, |_, _| {});
         // 5. If the incoming lane's tree was modified while
@@ -582,7 +566,7 @@ impl Workspace {
         // disturb live terminals). A `Present` lane with *no* tabs (user
         // closed them all, or it was never seeded) deliberately falls
         // through so the re-probe + seed below give the user a shell.
-        if was_present && !self.main_area.tabs.is_empty() {
+        if was_present && !self.active_runtime().tabs.is_empty() {
             return;
         }
         self.recompute_availability_for(active);
@@ -596,7 +580,7 @@ impl Workspace {
             // path-dependent reconcile the empty-state had skipped.
             self.seed_initial_tab(active, window, cx);
             if self.has_focused_pane() {
-                self.focus_pane(self.main_area.focused_pane_id, window, cx);
+                self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
             }
             self.main_area.pending_resize = true;
             // The seeded tab is persisted runtime state.
@@ -633,23 +617,23 @@ impl Workspace {
     /// the status bar and the viewport stays empty — still better than a
     /// silent black pane. No-op when tabs already exist.
     fn seed_initial_tab(&mut self, target: LaneRef, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.main_area.tabs.is_empty() {
+        if !self.active_runtime().tabs.is_empty() {
             return;
         }
         let cwd = self.lane_for(target).map(|w| w.path.clone());
         match self.create_pane_with_cwd(cwd, window, cx) {
             Ok(pane) => {
                 let pane_id = pane.id;
-                self.main_area.panes.push(pane);
+                self.active_runtime_mut().panes.push(pane);
                 let tab_id = self.alloc_id();
-                self.main_area.tabs.push(TabEntry {
+                self.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(pane_id),
                     last_focused_pane: pane_id,
                     user_label: None,
                 });
-                self.main_area.active_tab_index = 0;
-                self.main_area.focused_pane_id = pane_id;
+                self.active_runtime_mut().active_tab_index = 0;
+                self.active_runtime_mut().focused_pane_id = pane_id;
                 self.bump_activity(pane_id);
             }
             Err(e) => {

@@ -110,17 +110,17 @@ impl Workspace {
         let pane = self.create_agent_chat_pane(cwd, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
-        self.main_area.panes.push(pane);
-        self.main_area.tabs.push(TabEntry {
+        self.active_runtime_mut().panes.push(pane);
+        self.active_runtime_mut().tabs.push(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
-        self.main_area
-            .tab_history
-            .push(self.main_area.active_tab_index);
-        self.main_area.active_tab_index = self.main_area.tabs.len() - 1;
+        let cur_tab = self.active_runtime().active_tab_index;
+        self.active_runtime_mut().tab_history.push(cur_tab);
+        let last_tab = self.active_runtime().tabs.len() - 1;
+        self.active_runtime_mut().active_tab_index = last_tab;
         // The live session is not started here — `focus_pane` below connects it
         // lazily (`maybe_connect_agent_chat`), the same path a restored pane
         // takes on first focus. The prompt input lives in the bottom dock, not
@@ -372,37 +372,32 @@ impl Workspace {
     /// True when `pane_id` is an Agent chat pane — lets the bottom-dock input
     /// route prompts to the session instead of a PTY.
     pub(in crate::workspace) fn is_agent_chat_pane(&self, pane_id: PaneId) -> bool {
-        self.main_area
+        self.active_runtime()
             .panes
             .iter()
             .any(|p| p.id == pane_id && p.agent_chat_view().is_some())
     }
 
-    /// Look up an AgentChat pane's view entity by id — across the active lane's
-    /// live panes **and** every inactive lane's parked panes. Returns `None`
-    /// when the pane is gone or is not an AgentChat pane.
+    /// Look up an AgentChat pane's view entity by id across every lane's
+    /// panes in the single `runtimes` map. Returns `None` when the pane is
+    /// gone or is not an AgentChat pane.
     ///
-    /// Scanning the inactive lanes is essential, not a convenience: the view's
-    /// event pump looks the view up by id on every ACP event, and switching
-    /// lanes moves the pane out of `main_area.panes` into
-    /// `inactive_lane_runtimes` (`activate_lane`'s `mem::take`). A main-area-only
-    /// lookup would then return `None`, the pump would treat it as "view gone"
-    /// and break its loop, and the session's remaining responses would be
-    /// dropped forever — even after switching back. Pane ids are
-    /// workspace-global, so scanning both sets is unambiguous.
+    /// Scanning every lane is essential, not a convenience: the view's
+    /// event pump looks the view up by id on every ACP event, and a lane
+    /// switch only re-points `self.active` — the pane stays in its lane's
+    /// runtime, which is no longer the active one. An active-lane-only
+    /// lookup would then return `None`, the pump would treat it as "view
+    /// gone" and break its loop, and the session's remaining responses
+    /// would be dropped forever — even after switching back. Pane ids are
+    /// workspace-global, so scanning every runtime is unambiguous.
     pub(in crate::workspace) fn agent_chat_view(
         &self,
         pane_id: PaneId,
     ) -> Option<&Entity<AgentChatView>> {
         self.main_area
-            .panes
-            .iter()
-            .chain(
-                self.main_area
-                    .inactive_lane_runtimes
-                    .values()
-                    .flat_map(|rt| rt.panes.iter()),
-            )
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
             .find(|p| p.id == pane_id)?
             .agent_chat_view()
     }

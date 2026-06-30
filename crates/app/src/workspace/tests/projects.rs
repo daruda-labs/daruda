@@ -97,7 +97,7 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| {
             ws.add_tab(window, cx);
             let pane_ids: Vec<_> = ws
-                .main_area
+                .active_runtime()
                 .tabs
                 .iter()
                 .flat_map(|t| t.layout.pane_ids())
@@ -171,11 +171,11 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         // surviving project's lane should be re-activated with at
         // least one tab/pane so the user doesn't see a blank viewport.
         assert!(
-            !ws.main_area.tabs.is_empty(),
+            !ws.active_runtime().tabs.is_empty(),
             "main area tabs must not be empty after closing a project"
         );
         assert!(
-            !ws.main_area.panes.is_empty(),
+            !ws.active_runtime().panes.is_empty(),
             "main area panes must not be empty after closing a project"
         );
     });
@@ -231,7 +231,7 @@ fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mu
     ws.read_with(cx, |ws, _| {
         // Live runtime is cleared; the window is closing, so the user
         // lands on Welcome instead of a blank viewport.
-        assert!(ws.main_area.tabs.is_empty());
+        assert!(ws.active_runtime().tabs.is_empty());
         assert_eq!(ws.active, daruda_store::project::LaneRef::default());
     });
 }

@@ -86,7 +86,7 @@ impl Workspace {
             description: skill.frontmatter.description.clone(),
             argument_hint: skill.frontmatter.argument_hint.clone(),
             scope: skill.scope,
-            target_pane_id: self.main_area.focused_pane_id,
+            target_pane_id: self.active_runtime().focused_pane_id,
         };
 
         let workspace = cx.weak_entity();

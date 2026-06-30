@@ -314,7 +314,7 @@ impl Workspace {
             .pty_claude_bindings
             .iter()
             .find(|(_, b)| b.session_id == session_id)
-            .is_some_and(|(pane_id, _)| *pane_id == self.main_area.focused_pane_id)
+            .is_some_and(|(pane_id, _)| *pane_id == self.active_runtime().focused_pane_id)
     }
 
     /// Replace the cached plan-rate snapshot. Called by `limits_pump`

@@ -56,7 +56,7 @@ impl Workspace {
         self.main_area.last_viewport = Some((width, height));
         let mut any_measured = false;
 
-        for tab in &self.main_area.tabs {
+        for tab in &self.active_runtime().tabs {
             let mut sizes = Vec::new();
             collect_pane_sizes(&tab.layout, width, height, &mut sizes);
             // Single-pane tabs have no pane header; split tabs reserve
@@ -67,7 +67,8 @@ impl Workspace {
                 0.0
             };
             for (pane_id, w, h) in sizes {
-                let Some(pane) = self.main_area.panes.iter().find(|p| p.id == pane_id) else {
+                let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
+                else {
                     continue;
                 };
                 if pane.resize(w, h, pane_header_h, &mut metrics_cache, window, cx) {

@@ -3,10 +3,10 @@
 //! `rebuild_layout`) that translate between the in-memory pane tree
 //! and the on-disk JSON form.
 //!
-//! Owns `LaneRuntime`, the frozen-fields struct used by the
-//! tab-swap path; both `restore_from_disk` and `activate_lane`
+//! Owns `LaneRuntime`, the per-lane runtime stored in the single
+//! `runtimes` map; both `restore_from_disk` and `activate_lane`
 //! live across persistence + lane_ops, but the *type* belongs here
-//! so the inactive map and the save format share a single definition.
+//! so the runtime store and the save format share a single definition.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -24,10 +24,10 @@ use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::pane::{self, PaneSpawnError, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
 
-/// Frozen runtime state of a non-active lane. `activate_lane`
-/// swaps this with the live `Workspace` fields (`tabs`, `panes`, etc.).
-/// Kept in its own struct so the swap is a single `std::mem::take` +
-/// assignment pair per direction, rather than a tangle of field moves.
+/// Runtime tab/pane state of a single lane. One of these lives in
+/// `MainAreaContext::runtimes` per lane; the active lane is just the
+/// entry under `Workspace::active`. Switching lanes re-points that key
+/// rather than moving any fields.
 #[derive(Default)]
 pub(in crate::workspace) struct LaneRuntime {
     pub tabs: Vec<pane::TabEntry>,
@@ -42,6 +42,33 @@ pub(in crate::workspace) struct LaneRuntime {
 }
 
 impl Workspace {
+    /// The active lane's live runtime, resolved from the unified
+    /// `runtimes` map by `self.active`. The entry is an invariant: it is
+    /// seeded at construction (`new_with_project_impl`), on every
+    /// `activate_lane`, and on `reset_to_empty_workspace`, so the
+    /// `expect` never fires in correct code.
+    pub(in crate::workspace) fn active_runtime(&self) -> &LaneRuntime {
+        self.main_area
+            .runtimes
+            .get(&self.active)
+            .expect("active runtime always present")
+    }
+
+    pub(in crate::workspace) fn active_runtime_mut(&mut self) -> &mut LaneRuntime {
+        let active = self.active;
+        self.main_area
+            .runtimes
+            .get_mut(&active)
+            .expect("active runtime always present")
+    }
+
+    /// `get_mut` of the active lane's currently-active tab. Hoists the index
+    /// read out of the mutable borrow so callers don't have to.
+    pub(in crate::workspace) fn active_tab_mut(&mut self) -> Option<&mut TabEntry> {
+        let idx = self.active_runtime().active_tab_index;
+        self.active_runtime_mut().tabs.get_mut(idx)
+    }
+
     /// Snapshot the workspace into the UUID-keyed disk shape
     /// (`(WorkspaceState, Vec<ProjectState>)`).
     ///
@@ -83,17 +110,15 @@ impl Workspace {
                         project: project.id,
                         lane: wt.id,
                     };
-                    let (tabs_src, panes_src, active_idx) = if self.active == wt_ref {
-                        (
-                            &self.main_area.tabs,
-                            &self.main_area.panes,
-                            self.main_area.active_tab_index,
-                        )
-                    } else if let Some(rt) = self.main_area.inactive_lane_runtimes.get(&wt_ref) {
-                        (&rt.tabs, &rt.panes, rt.active_tab_index)
-                    } else {
+                    // Every lane's runtime — active or parked — lives in the
+                    // single `runtimes` map, so one lookup covers both. A
+                    // lane with no registered runtime (never activated) keeps
+                    // its serialized form untouched.
+                    let Some(rt) = self.main_area.runtimes.get(&wt_ref) else {
                         return s;
                     };
+                    let (tabs_src, panes_src, active_idx) =
+                        (&rt.tabs, &rt.panes, rt.active_tab_index);
                     s.tabs = tabs_src
                         .iter()
                         .map(|tab| daruda_store::project::SerializedTab {
@@ -109,18 +134,18 @@ impl Workspace {
 
             // `next_lane_id`: smallest id strictly greater than every
             // lane currently registered for this project (both live
-            // lanes and any stashed inactive runtimes for the same
-            // project). Matches the "monotonic — never reused" invariant
-            // enforced by `allocate_lane_id`.
+            // lanes and every runtime key for the same project). Matches
+            // the "monotonic — never reused" invariant enforced by
+            // `allocate_lane_id`.
             let max_live = project.lanes.iter().map(|w| w.id).max();
-            let max_inactive = self
+            let max_runtime = self
                 .main_area
-                .inactive_lane_runtimes
+                .runtimes
                 .keys()
                 .filter(|r| r.project == project.id)
                 .map(|r| r.lane)
                 .max();
-            let next_lane_id = match (max_live, max_inactive) {
+            let next_lane_id = match (max_live, max_runtime) {
                 (Some(a), Some(b)) => a.max(b) + 1,
                 (Some(a), None) => a + 1,
                 (None, Some(b)) => b + 1,
@@ -190,7 +215,7 @@ impl Workspace {
             font_size: self.terminal_config.font_size,
             vertical_spacing: self.terminal_config.vertical_spacing,
             horizontal_spacing: self.terminal_config.horizontal_spacing,
-            focused_pane_id: self.main_area.focused_pane_id,
+            focused_pane_id: self.active_runtime().focused_pane_id,
             active_dock_view: self.left_dock_view,
             active_right_panel_view: self.right_dock_view,
             window_open_policy: self.window_open_policy,
@@ -416,13 +441,13 @@ impl Workspace {
         };
         self.active = self.resolve_active(requested);
 
-        // Drop bootstrapped pane/tab; rebuild every lane's
-        // runtime from the persisted SerializedTab lists carried on
-        // each `SerializedLane`.
-        self.main_area.tabs.clear();
-        self.main_area.panes.clear();
+        // Drop every bootstrapped runtime; rebuild each lane's runtime
+        // from the persisted SerializedTab lists carried on its
+        // `SerializedLane`. The active entry is re-seeded after the loop
+        // so the "active runtime always present" invariant holds even if
+        // the active lane was skipped (unavailable / absent from disk).
+        self.main_area.runtimes.clear();
         self.main_area.activity_counter.clear();
-        self.main_area.inactive_lane_runtimes.clear();
 
         let mut active_focus: Option<pane_tree::PaneId> = None;
         let mut early_exit = false;
@@ -460,17 +485,21 @@ impl Workspace {
                     continue;
                 }
 
-                let panes_start = self.main_area.panes.len();
+                // Build this lane's panes into a local scratch buffer so
+                // the recursion never touches `self`'s runtimes — the
+                // finished `Vec` becomes the lane's `LaneRuntime.panes` in
+                // one `insert`, uniform for active and parked alike.
+                let mut scratch: Vec<pane::Pane> = Vec::new();
                 let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
                 let mut tabs: Vec<TabEntry> = Vec::new();
                 let mut failed = false;
 
                 for stab in &swt.tabs {
-                    let panes_before = self.main_area.panes.len();
                     match self.rebuild_layout(
                         &stab.layout,
                         Some(&swt.path),
                         &mut id_map,
+                        &mut scratch,
                         window,
                         cx,
                     ) {
@@ -491,7 +520,8 @@ impl Workspace {
                             });
                         }
                         Err(e) => {
-                            self.main_area.panes.truncate(panes_before);
+                            // Drop the whole lane's partial panes (scratch
+                            // goes out of scope) — restore aborts here.
                             self.report_pane_error("restore", e, cx);
                             failed = true;
                             break;
@@ -503,7 +533,6 @@ impl Workspace {
                     break;
                 }
 
-                let wt_panes = self.main_area.panes.split_off(panes_start);
                 let wt_active_tab = swt.active_tab_index.min(tabs.len().saturating_sub(1));
                 let focused = if wt_ref == self.active {
                     let focused_tab = tabs.get(wt_active_tab);
@@ -523,28 +552,26 @@ impl Workspace {
 
                 let runtime = LaneRuntime {
                     tabs,
-                    panes: wt_panes,
+                    panes: scratch,
                     active_tab_index: wt_active_tab,
                     tab_history: Vec::new(),
                     focused_pane_id: focused,
                 };
-
                 if wt_ref == self.active {
-                    self.main_area.tabs = runtime.tabs;
-                    self.main_area.panes = runtime.panes;
-                    self.main_area.active_tab_index = runtime.active_tab_index;
-                    self.main_area.focused_pane_id = runtime.focused_pane_id;
-                    self.main_area.tab_history = runtime.tab_history;
                     active_focus = Some(runtime.focused_pane_id);
-                } else {
-                    self.main_area
-                        .inactive_lane_runtimes
-                        .insert(wt_ref, runtime);
                 }
+                self.main_area.runtimes.insert(wt_ref, runtime);
             }
         }
 
-        if self.main_area.tabs.is_empty() {
+        // Invariant: the active lane's runtime must exist before any
+        // `active_runtime()` read below. The loop inserts one per present
+        // lane, but the active lane may have been skipped (unavailable) or
+        // absent from disk — seed an empty entry so the seed-or-render
+        // tail never panics.
+        self.main_area.runtimes.entry(self.active).or_default();
+
+        if self.active_runtime().tabs.is_empty() {
             // Seed a fresh tab only for a legitimately-empty *Present*
             // active lane. When the active lane is inaccessible the
             // restore loop above deliberately skipped its pane rebuild
@@ -632,6 +659,7 @@ impl Workspace {
         slayout: &daruda_store::project::SerializedLayout,
         fallback_cwd: Option<&std::path::Path>,
         id_map: &mut HashMap<u64, pane_tree::PaneId>,
+        scratch: &mut Vec<pane::Pane>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneLayout, PaneSpawnError> {
@@ -671,7 +699,7 @@ impl Workspace {
                 };
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
-                self.main_area.panes.push(pane);
+                scratch.push(pane);
                 Ok(PaneLayout::Pane(new_id))
             }
             daruda_store::project::SerializedLayout::Split {
@@ -689,7 +717,14 @@ impl Workspace {
                 };
                 let mut rebuilt = Vec::with_capacity(children.len());
                 for c in children {
-                    rebuilt.push(self.rebuild_layout(c, fallback_cwd, id_map, window, cx)?);
+                    rebuilt.push(self.rebuild_layout(
+                        c,
+                        fallback_cwd,
+                        id_map,
+                        scratch,
+                        window,
+                        cx,
+                    )?);
                 }
                 let n = rebuilt.len();
                 if n == 0 {
@@ -701,7 +736,7 @@ impl Workspace {
                         cx,
                     )?;
                     let id = pane.id;
-                    self.main_area.panes.push(pane);
+                    scratch.push(pane);
                     return Ok(PaneLayout::Pane(id));
                 }
                 if n == 1 {

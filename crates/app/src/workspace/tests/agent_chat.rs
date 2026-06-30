@@ -21,7 +21,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// Fetch the `AgentChatView` entity for `pane_id` (panics if the pane is gone
 /// or is not an AgentChat pane).
 fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatView> {
-    ws.main_area
+    ws.active_runtime()
         .panes
         .iter()
         .find(|p| p.id == pane_id)
@@ -35,7 +35,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
-    let tabs_before = workspace.read_with(cx, |ws, _| ws.main_area.tabs.len());
+    let tabs_before = workspace.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -47,12 +47,12 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(
-            ws.main_area.tabs.len(),
+            ws.active_runtime().tabs.len(),
             tabs_before + 1,
             "opening an agent chat pane appends a tab"
         );
         let pane = ws
-            .main_area
+            .active_runtime()
             .panes
             .last()
             .expect("open_agent_chat_pane pushed a pane");
@@ -72,7 +72,7 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
             }
             _ => panic!("expected an AgentChat pane"),
         }
-        assert_eq!(ws.main_area.focused_pane_id, pane.id);
+        assert_eq!(ws.active_runtime().focused_pane_id, pane.id);
     });
 }
 
@@ -91,7 +91,7 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 // Each prompt echoes one `UserText` item (no live handle, so no
                 // turn) and routes through `send_prompt_text` → `rebuild_rows`.
                 for n in 0..3 {
@@ -143,7 +143,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 view.update(cx, |v, cx| {
                     v.items = vec![
@@ -229,7 +229,7 @@ async fn notify_rerenders_cached_agent_view(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let view = workspace.read_with(cx, |ws, _| {
-        ws.main_area
+        ws.active_runtime()
             .panes
             .last()
             .and_then(|p| p.agent_chat_view())
@@ -267,7 +267,7 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
                 // an adapter. Push it directly into the tree.
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 // The prompt arrives from the shared bottom-dock input via the
                 // `send_agent_prompt_text` shim (the pane no longer owns an
                 // input); it routes into the view.
@@ -310,7 +310,7 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 // Inject a pending permission card + its pending id, as the
                 // event pump would have on a `PermissionRequested` event, then
@@ -388,7 +388,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 agent_view(ws, id).update(cx, |v, cx| {
                     v.items = vec![
                         ChatItem::UserText("q".into()),
@@ -526,7 +526,7 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 view.update(cx, |v, cx| {
                     // Inject a ModeStateView with two modes so `set_mode` has
@@ -578,7 +578,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 // Inject a pending permission card + its pending id, as the
                 // event pump would have on a `PermissionRequested` event.
@@ -635,7 +635,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
                 let id = pane.id;
-                ws.main_area.panes.push(pane);
+                ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 // A turn mid-flight: streaming text + a still-running tool call,
                 // exactly the state a hung agent would leave (it never sends a
@@ -705,7 +705,7 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
             let id = pane.id;
-            ws.main_area.panes.push(pane);
+            ws.active_runtime_mut().panes.push(pane);
 
             // No turn running yet → the Escape shim is a no-op and reports it
             // did not handle the key, so Escape can propagate normally.
@@ -743,20 +743,27 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
             let id = pane.id;
-            ws.main_area.panes.push(pane);
+            ws.active_runtime_mut().panes.push(pane);
             assert!(
                 ws.agent_chat_view(id).is_some(),
                 "found while live in the active lane"
             );
 
-            // Simulate a lane switch: `activate_lane` freezes the active lane's
-            // panes into `inactive_lane_runtimes` via mem::take, so the pane
-            // leaves `main_area.panes`. (The map key is arbitrary here — the
-            // lookup scans every inactive runtime.)
-            let parked = ws.main_area.panes.pop().expect("the pane we just pushed");
-            let key = ws.active;
-            ws.main_area.inactive_lane_runtimes.insert(
-                key,
+            // Simulate a lane switch: the pane moves into a *different*
+            // lane's runtime in the single `runtimes` map while `self.active`
+            // points elsewhere. (The key is a distinct parked lane — the
+            // lookup scans every runtime, not just the active one.)
+            let parked = ws
+                .active_runtime_mut()
+                .panes
+                .pop()
+                .expect("the pane we just pushed");
+            let parked_key = daruda_store::project::LaneRef {
+                project: ws.active.project,
+                lane: ws.active.lane + 1,
+            };
+            ws.main_area.runtimes.insert(
+                parked_key,
                 crate::workspace::LaneRuntime {
                     tabs: Vec::new(),
                     panes: vec![parked],

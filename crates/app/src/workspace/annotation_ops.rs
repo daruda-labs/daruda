@@ -15,7 +15,7 @@
 //!    (the view-purity rule says the context-menu listener is a
 //!    one-liner; the body lives here).
 //!
-//! The pane lookup walks `self.main_area.panes`; a removed pane (race
+//! The pane lookup walks `self.active_runtime().panes`; a removed pane (race
 //! between the context-menu click and a `Cmd+W`) surfaces as an Info
 //! report — the underlying session is gone but the user does not need
 //! a loud error toast for a self-resolved race.
@@ -230,7 +230,11 @@ impl Workspace {
         &self,
         pane_id: PaneId,
     ) -> Option<gpui::Entity<daruda_terminal::view::TerminalView>> {
-        let pane = self.main_area.panes.iter().find(|p| p.id == pane_id)?;
+        let pane = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)?;
         match &pane.content {
             PaneContent::Terminal(t) => Some(t.view.clone()),
             PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => None,

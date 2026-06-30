@@ -12,8 +12,8 @@ async fn test_workspace_renders_without_reentrant_panic(cx: &mut TestAppContext)
     .unwrap();
 
     workspace.update(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 1);
-        assert_eq!(ws.main_area.active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().active_tab_index, 0);
     });
 }
 
@@ -33,7 +33,7 @@ async fn test_add_tab(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -44,8 +44,8 @@ async fn test_add_tab(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 2);
-        assert_eq!(ws.main_area.active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert_eq!(ws.active_runtime().active_tab_index, 1);
     });
 }
 
@@ -88,8 +88,8 @@ async fn test_close_tab_removes_tab(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 3);
-        assert_eq!(ws.main_area.active_tab_index, 2);
+        assert_eq!(ws.active_runtime().tabs.len(), 3);
+        assert_eq!(ws.active_runtime().active_tab_index, 2);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -100,8 +100,8 @@ async fn test_close_tab_removes_tab(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 2);
-        assert_eq!(ws.main_area.active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert_eq!(ws.active_runtime().active_tab_index, 1);
     });
 }
 
@@ -125,8 +125,8 @@ async fn test_close_non_active_tab_preserves_active(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 2);
-        assert_eq!(ws.main_area.active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert_eq!(ws.active_runtime().active_tab_index, 1);
     });
 }
 
@@ -148,7 +148,9 @@ async fn test_next_prev_tab_cycles(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    workspace.read_with(cx, |ws, _| assert_eq!(ws.main_area.active_tab_index, 0));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().active_tab_index, 0)
+    });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -156,7 +158,9 @@ async fn test_next_prev_tab_cycles(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    workspace.read_with(cx, |ws, _| assert_eq!(ws.main_area.active_tab_index, 2));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().active_tab_index, 2)
+    });
 }
 
 #[gpui::test]
@@ -177,7 +181,9 @@ async fn test_activate_tab_by_index(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    workspace.read_with(cx, |ws, _| assert_eq!(ws.main_area.active_tab_index, 0));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().active_tab_index, 0)
+    });
 
     // Out-of-bounds is a no-op
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -186,7 +192,9 @@ async fn test_activate_tab_by_index(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    workspace.read_with(cx, |ws, _| assert_eq!(ws.main_area.active_tab_index, 0));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().active_tab_index, 0)
+    });
 }
 
 #[gpui::test]
@@ -214,7 +222,9 @@ async fn test_cmd9_activates_last_tab(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    workspace.read_with(cx, |ws, _| assert_eq!(ws.main_area.active_tab_index, 2));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().active_tab_index, 2)
+    });
 }
 
 #[gpui::test]
@@ -229,8 +239,9 @@ async fn test_tab_ids_are_unique_and_stable(cx: &mut TestAppContext) {
     })
     .unwrap();
 
-    let ids_before: Vec<u64> =
-        workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
+    let ids_before: Vec<u64> = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
+    });
     assert_eq!(ids_before.len(), 3);
     assert!(ids_before[0] != ids_before[1] && ids_before[1] != ids_before[2]);
 
@@ -241,8 +252,9 @@ async fn test_tab_ids_are_unique_and_stable(cx: &mut TestAppContext) {
     })
     .unwrap();
 
-    let ids_after: Vec<u64> =
-        workspace.read_with(cx, |ws, _| ws.main_area.tabs.iter().map(|t| t.id).collect());
+    let ids_after: Vec<u64> = workspace.read_with(cx, |ws, _| {
+        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
+    });
     assert_eq!(ids_after, vec![ids_before[0], ids_before[2]]);
 }
 
@@ -267,7 +279,7 @@ async fn test_resize_all_tabs_no_reentrant_panic(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 2);
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
     });
 }
 
@@ -283,7 +295,7 @@ async fn test_observe_window_bounds_no_reentrant_panic(cx: &mut TestAppContext) 
     cx.simulate_window_resize(window_handle.into(), size(gpui::px(800.0), gpui::px(600.0)));
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 1);
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
     });
 }
 
@@ -345,7 +357,10 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
 
     let (window_handle, workspace) = build_workspace(cx);
     let (tabs_before, panes_before) = workspace.read_with(cx, |ws, _| {
-        (ws.main_area.tabs.len(), ws.main_area.panes.len())
+        (
+            ws.active_runtime().tabs.len(),
+            ws.active_runtime().panes.len(),
+        )
     });
 
     cx.update_window(window_handle.into(), |_, _window, cx| {
@@ -361,12 +376,12 @@ fn test_report_pane_error_does_not_mutate_layout(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.main_area.tabs.len(),
+            ws.active_runtime().tabs.len(),
             tabs_before,
             "tabs should be untouched"
         );
         assert_eq!(
-            ws.main_area.panes.len(),
+            ws.active_runtime().panes.len(),
             panes_before,
             "panes should be untouched"
         );
@@ -395,7 +410,7 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
         ws.update(cx, |ws, cx| ws.add_tab(window, cx));
     })
     .unwrap();
-    let pane_id = ws.read_with(cx, |ws, _| ws.main_area.panes[0].id);
+    let pane_id = ws.read_with(cx, |ws, _| ws.active_runtime().panes[0].id);
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         let should_close = ws.read(cx).mirrors.close_pane_on_exit;
@@ -406,8 +421,8 @@ fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
     .unwrap();
 
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.main_area.tabs.len(), 1, "one tab should remain");
-        assert_eq!(ws.main_area.panes.len(), 1, "one pane should remain");
+        assert_eq!(ws.active_runtime().tabs.len(), 1, "one tab should remain");
+        assert_eq!(ws.active_runtime().panes.len(), 1, "one pane should remain");
     });
 }
 
