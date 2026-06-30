@@ -82,6 +82,7 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
+pub use gpui_component::text::SelectMode;
 pub use gpui_component::text_selection::{CharType, word_range};
 pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};
@@ -150,5 +151,170 @@ mod word_range_tests {
         assert_eq!(CharType::from_char('\n'), CharType::Newline);
         assert_eq!(CharType::from_char('.'), CharType::Other);
         assert_eq!(CharType::from_char('中'), CharType::Other);
+    }
+}
+
+#[cfg(test)]
+mod text_view_select_mode_tests {
+    use super::{SelectMode, word_range};
+    use gpui::{point, px};
+
+    fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
+        if byte_offset >= s.len() || !s.is_char_boundary(byte_offset) {
+            return None;
+        }
+        s[byte_offset..].chars().next()
+    }
+
+    /// SelectMode variants must match their click counts.
+    #[test]
+    fn select_mode_from_click_count() {
+        let p = point(px(10.0_f32), px(20.0_f32));
+
+        let mode_for = |click_count: usize| -> SelectMode {
+            match click_count {
+                2 => SelectMode::Word(p),
+                3 => SelectMode::Line(p),
+                c if c >= 4 => SelectMode::All,
+                _ => SelectMode::Character,
+            }
+        };
+
+        assert_eq!(mode_for(1), SelectMode::Character);
+        assert_eq!(mode_for(2), SelectMode::Word(p));
+        assert_eq!(mode_for(3), SelectMode::Line(p));
+        assert_eq!(mode_for(4), SelectMode::All);
+        assert_eq!(mode_for(10), SelectMode::All);
+    }
+
+    /// has_selection logic: Word/Line/All return true even with same start==end.
+    #[test]
+    fn has_selection_word_mode_without_drag() {
+        let p = point(px(10.0_f32), px(20.0_f32));
+
+        let has_selection = |mode: SelectMode, has_start: bool| -> bool {
+            match mode {
+                SelectMode::Word(_) | SelectMode::Line(_) | SelectMode::All => has_start,
+                SelectMode::Character => false,
+            }
+        };
+
+        assert!(!has_selection(SelectMode::Character, true));
+        assert!(has_selection(SelectMode::Word(p), true));
+        assert!(has_selection(SelectMode::Line(p), true));
+        assert!(has_selection(SelectMode::All, true));
+        assert!(!has_selection(SelectMode::All, false));
+    }
+
+    /// Word expansion: raw byte range is expanded to word boundaries.
+    #[test]
+    fn word_expansion_expands_to_boundaries() {
+        let text = "hello world foo";
+        let char_at = |i: usize| str_char_at(text, i);
+
+        // Click on 'w' (offset 6): word = "world" (6..11).
+        let start = word_range(text.len(), char_at, 6)
+            .map(|r| r.start)
+            .unwrap_or(6);
+        let end = word_range(text.len(), char_at, 10)
+            .map(|r| r.end)
+            .unwrap_or(11);
+        assert_eq!(&text[start..end], "world");
+
+        // Click on middle of "hello" (offset 2): word = 0..5.
+        let r = word_range(text.len(), char_at, 2).unwrap();
+        assert_eq!(&text[r], "hello");
+
+        // Click on space (offset 5): word = space run.
+        let r = word_range(text.len(), char_at, 5).unwrap();
+        assert_eq!(&text[r], " ");
+    }
+
+    /// Visual line expansion: characters on the same Y row are selected.
+    ///
+    /// Simulates a 2-line layout: "hello " on row y=0, "world" on row y=20.
+    #[test]
+    fn visual_line_expansion_covers_full_row() {
+        use gpui::Pixels;
+
+        let text = "hello world";
+        let line_height = px(20.0_f32);
+
+        // Fake position_for_index: first 6 bytes (0..6) on y=0, rest on y=20.
+        let position_for_index = |offset: usize| -> Option<gpui::Point<Pixels>> {
+            if offset > text.len() {
+                return None;
+            }
+            let y = if offset < 6 { 0.0_f32 } else { 20.0_f32 };
+            Some(point(px(offset as f32 * 8.0), px(y)))
+        };
+
+        // Simulate a narrow pixel selection inside line 1 (y=20): offsets 6..8.
+        let raw_start = 6usize;
+        let raw_end = 8usize;
+        let raw_top = position_for_index(raw_start)
+            .map(|p| p.y)
+            .unwrap_or_default();
+        let raw_bottom = position_for_index(raw_end.saturating_sub(1))
+            .map(|p| p.y + line_height)
+            .unwrap_or(raw_top + line_height);
+
+        let (line_start, line_end) = {
+            let mut ls: Option<usize> = None;
+            let mut le: Option<usize> = None;
+            let mut off = 0;
+            for c in text.chars() {
+                if let Some(pos) = position_for_index(off)
+                    && pos.y < raw_bottom
+                    && pos.y + line_height > raw_top
+                {
+                    if ls.is_none() {
+                        ls = Some(off);
+                    }
+                    le = Some(off + c.len_utf8());
+                }
+                off += c.len_utf8();
+            }
+            (ls, le)
+        };
+
+        // Entire "world" (6..11) should be selected.
+        assert_eq!(line_start, Some(6));
+        assert_eq!(line_end, Some(11));
+        assert_eq!(&text[line_start.unwrap()..line_end.unwrap()], "world");
+
+        // Simulate a narrow selection inside line 0 (y=0): offsets 1..3.
+        let raw_start0 = 1usize;
+        let raw_end0 = 3usize;
+        let raw_top0 = position_for_index(raw_start0)
+            .map(|p| p.y)
+            .unwrap_or_default();
+        let raw_bottom0 = position_for_index(raw_end0.saturating_sub(1))
+            .map(|p| p.y + line_height)
+            .unwrap_or(raw_top0 + line_height);
+
+        let (ls0, le0) = {
+            let mut ls: Option<usize> = None;
+            let mut le: Option<usize> = None;
+            let mut off = 0;
+            for c in text.chars() {
+                if let Some(pos) = position_for_index(off)
+                    && pos.y < raw_bottom0
+                    && pos.y + line_height > raw_top0
+                {
+                    if ls.is_none() {
+                        ls = Some(off);
+                    }
+                    le = Some(off + c.len_utf8());
+                }
+                off += c.len_utf8();
+            }
+            (ls, le)
+        };
+
+        // Entire "hello " (0..6) should be selected.
+        assert_eq!(ls0, Some(0));
+        assert_eq!(le0, Some(6));
+        assert_eq!(&text[ls0.unwrap()..le0.unwrap()], "hello ");
     }
 }

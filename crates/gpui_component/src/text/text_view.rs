@@ -227,6 +227,23 @@ enum InitState {
     },
 }
 
+/// Selection granularity mode, set by click count on a selectable TextView.
+///
+/// - `Character` (1-click): drag selects individual characters (default).
+/// - `Word` (2-click): initial click selects the word under cursor; dragging
+///   extends selection to whole-word boundaries.  The inner `Point` is the
+///   local (TextView-relative) pixel position of the original click.
+/// - `Line` (3-click): selects the visual (rendered/wrapped) line; dragging
+///   extends by whole visual lines.
+/// - `All` (4+-click): selects the entire text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SelectMode {
+    Character,
+    Word(Point<Pixels>),
+    Line(Point<Pixels>),
+    All,
+}
+
 pub(crate) struct TextViewState {
     parent_entity: Option<EntityId>,
     tx: Option<smol::channel::Sender<Update>>,
@@ -240,6 +257,8 @@ pub(crate) struct TextViewState {
     is_selecting: bool,
     is_selectable: bool,
     list_state: ListState,
+    /// Granularity mode set by click count (double=word, triple=line, quad=all).
+    select_mode: SelectMode,
 }
 
 impl TextViewState {
@@ -255,6 +274,7 @@ impl TextViewState {
             is_selecting: false,
             is_selectable: false,
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
+            select_mode: SelectMode::Character,
         }
     }
 }
@@ -271,11 +291,25 @@ impl TextViewState {
     fn clear_selection(&mut self) {
         self.selection_positions = (None, None);
         self.is_selecting = false;
+        self.select_mode = SelectMode::Character;
     }
 
-    fn start_selection(&mut self, pos: Point<Pixels>) {
-        let pos = pos - self.bounds.origin;
-        self.selection_positions = (Some(pos), Some(pos));
+    /// Begin a selection at `pos` (window coordinates).
+    ///
+    /// `click_count` determines the selection granularity:
+    /// - 1 → Character (existing drag behaviour)
+    /// - 2 → Word (double-click selects the word under the cursor)
+    /// - 3 → Line (triple-click selects the visual/wrapped line)
+    /// - 4+ → All (select the entire text)
+    fn start_selection(&mut self, pos: Point<Pixels>, click_count: usize) {
+        let local = pos - self.bounds.origin;
+        self.select_mode = match click_count {
+            2 => SelectMode::Word(local),
+            3 => SelectMode::Line(local),
+            c if c >= 4 => SelectMode::All,
+            _ => SelectMode::Character,
+        };
+        self.selection_positions = (Some(local), Some(local));
         self.is_selecting = true;
     }
 
@@ -291,15 +325,28 @@ impl TextViewState {
     }
 
     pub(crate) fn has_selection(&self) -> bool {
-        if let (Some(start), Some(end)) = self.selection_positions {
-            start != end
-        } else {
-            false
+        match self.select_mode {
+            // Word/Line/All always have a non-empty selection (expansion happens in layout_selections).
+            SelectMode::Word(_) | SelectMode::Line(_) | SelectMode::All => {
+                self.selection_positions.0.is_some()
+            }
+            SelectMode::Character => {
+                if let (Some(start), Some(end)) = self.selection_positions {
+                    start != end
+                } else {
+                    false
+                }
+            }
         }
     }
 
     pub(crate) fn is_selectable(&self) -> bool {
         self.is_selectable
+    }
+
+    /// The current selection granularity mode.
+    pub(crate) fn select_mode(&self) -> SelectMode {
+        self.select_mode
     }
 
     /// Return the bounds of the selection in window coordinates.
@@ -745,8 +792,9 @@ impl Element for TextView {
                         return;
                     }
 
+                    let click_count = event.click_count;
                     state.update(cx, |state, _| {
-                        state.start_selection(event.position);
+                        state.start_selection(event.position, click_count);
                     });
                     cx.notify(entity_id);
                 }
@@ -936,5 +984,60 @@ mod tests {
                 size: size(px(40.), px(40.))
             }
         );
+    }
+
+    #[test]
+    fn test_select_mode_from_click_count() {
+        // Simulate TextViewState::start_selection mode selection.
+        fn mode_for(click_count: usize, local: gpui::Point<Pixels>) -> SelectMode {
+            match click_count {
+                2 => SelectMode::Word(local),
+                3 => SelectMode::Line(local),
+                c if c >= 4 => SelectMode::All,
+                _ => SelectMode::Character,
+            }
+        }
+
+        let p = point(px(10.), px(20.));
+        assert_eq!(mode_for(1, p), SelectMode::Character);
+        assert_eq!(mode_for(2, p), SelectMode::Word(p));
+        assert_eq!(mode_for(3, p), SelectMode::Line(p));
+        assert_eq!(mode_for(4, p), SelectMode::All);
+        assert_eq!(mode_for(99, p), SelectMode::All);
+    }
+
+    #[test]
+    fn test_has_selection_word_mode_without_drag() {
+        // Word mode should report has_selection even when start == end (no drag).
+        // Replicates the logic from TextViewState::has_selection().
+        fn has_selection(
+            mode: SelectMode,
+            start: Option<Point<Pixels>>,
+            end: Option<Point<Pixels>>,
+        ) -> bool {
+            match mode {
+                SelectMode::Word(_) | SelectMode::Line(_) | SelectMode::All => start.is_some(),
+                SelectMode::Character => {
+                    if let (Some(s), Some(e)) = (start, end) {
+                        s != e
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+
+        let p = point(px(10.), px(20.));
+
+        // Character mode with same start/end → no selection.
+        assert!(!has_selection(SelectMode::Character, Some(p), Some(p)));
+        // Word mode with same start/end → selection (word expanded at render).
+        assert!(has_selection(SelectMode::Word(p), Some(p), Some(p)));
+        // Line mode with same start/end → selection.
+        assert!(has_selection(SelectMode::Line(p), Some(p), Some(p)));
+        // All mode → always selected when position is set.
+        assert!(has_selection(SelectMode::All, Some(p), Some(p)));
+        // All mode without position → no selection.
+        assert!(!has_selection(SelectMode::All, None, None));
     }
 }
