@@ -64,7 +64,8 @@ pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
-    CompletionProvider, Input, InputEvent, InputState, Rope, RopeExt, input, input_with_action,
+    CompletionProvider, Input, InputEvent, InputGrowMode, InputState, Rope, RopeExt, input,
+    input_with_action, input_with_action_grow,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,

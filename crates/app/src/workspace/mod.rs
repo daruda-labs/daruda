@@ -489,6 +489,11 @@ pub struct Workspace {
     /// Keeps the terminal_input subscription alive for the lifetime of
     /// the Workspace entity.
     _terminal_input_subscription: gpui::Subscription,
+    /// Cached line count of `terminal_input`. Updated on every
+    /// `InputEvent::Change` so `adapt_dock_to_input_lines` can guard
+    /// against redundant resizes without re-reading the entity on every
+    /// render cycle.
+    pub(in crate::workspace) terminal_input_line_count: usize,
     /// When true, the bottom dock shows the built-in "Input" panel
     /// instead of the active macro tab.
     pub(in crate::workspace) terminal_input_visible: bool,
@@ -700,8 +705,9 @@ impl Workspace {
         let ws_for_accept = ws_weak.clone();
         let ws_for_provider = ws_weak.clone();
         let terminal_input = cx.new(|cx_state| {
+            let max_rows = usize::from(config.agent.input_max_rows);
             let mut state = crate::ui::InputState::new(window, cx_state)
-                .multi_line(true)
+                .auto_grow(1, max_rows)
                 // While an agent chat pane is focused and the user hasn't opted
                 // into modifier-to-send, plain Enter submits and Shift+Enter
                 // inserts a newline (Zed's agent-panel default). Evaluated live
@@ -779,10 +785,14 @@ impl Workspace {
         let terminal_input_sub = cx.subscribe_in(
             &terminal_input,
             window,
-            |this, _, ev: &crate::ui::InputEvent, window, cx| {
-                if let crate::ui::InputEvent::PressEnter { secondary: true } = ev {
+            |this, _, ev: &crate::ui::InputEvent, window, cx| match ev {
+                crate::ui::InputEvent::PressEnter { secondary: true } => {
                     this.send_terminal_input(window, cx);
                 }
+                crate::ui::InputEvent::Change => {
+                    this.adapt_dock_to_input_lines(window, cx);
+                }
+                _ => {}
             },
         );
 
@@ -945,6 +955,7 @@ impl Workspace {
             window_close_in_flight: false,
             terminal_input,
             _terminal_input_subscription: terminal_input_sub,
+            terminal_input_line_count: 1,
             terminal_input_visible: false,
             skill_search_input: cx.new(|cx_state| {
                 crate::ui::InputState::new(window, cx_state)

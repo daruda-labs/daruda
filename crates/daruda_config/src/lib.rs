@@ -139,6 +139,7 @@ impl Config {
         self.claude_status.clamp();
         self.panels.clamp();
         self.render.clamp();
+        self.agent.clamp();
     }
 
     /// Return the effective `ColorConfig` for this configuration.

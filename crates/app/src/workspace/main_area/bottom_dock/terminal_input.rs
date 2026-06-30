@@ -102,12 +102,22 @@ pub(in crate::workspace) fn render_body(
         None => submit.into_any_element(),
     };
     // The action column sits beside the text in its own column (see
-    // `input_with_action`), so the text uses the cell's full height at
-    // every dock size — no row-preset branch is needed.
+    // `input_with_action_grow`). In auto-grow mode the editor self-sizes
+    // to content (up to `max_rows` configured via `AgentConfig`); the
+    // outer dock height is driven by `adapt_dock_to_input_lines` on every
+    // `InputEvent::Change`. In fill mode (fallback) the editor fills the
+    // dock's fixed height and scrolls internally.
+    let max_rows = usize::from(snap.input_max_rows);
     let cell = div()
         .flex_1()
         .flex()
-        .child(crate::ui::input_with_action(&state, action, cx, 0_isize));
+        .child(crate::ui::input_with_action_grow(
+            &state,
+            action,
+            cx,
+            0_isize,
+            crate::ui::InputGrowMode::AutoGrow { max_rows },
+        ));
     super::bottom_panel_body()
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)

@@ -875,6 +875,12 @@ pub const DOCK_BOTTOM_ROW_PRESET_1_H: f32 = 76.0;
 pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 /// Three-row preset height for the bottom dock (px).
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
+/// Height added to the bottom dock for each extra text line when the
+/// bottom input auto-grows beyond one row (px). Sized to match one
+/// `Size::Small` input line: gpui `line_height` (1.25 rem at 16 rem
+/// base ≈ 20 px). The first row is already covered by
+/// `DOCK_BOTTOM_ROW_PRESET_1_H`; this constant covers lines 2…N.
+pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without

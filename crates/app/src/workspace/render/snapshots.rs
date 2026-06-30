@@ -212,6 +212,7 @@ impl Workspace {
             agent_stop_pane,
             agent_mode,
             shell,
+            input_max_rows: self.agent.input_max_rows,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }
     }
