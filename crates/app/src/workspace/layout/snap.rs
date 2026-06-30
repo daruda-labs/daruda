@@ -127,31 +127,31 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub files_icon_color_mode: daruda_config::IconColorMode,
     pub cached_visible: Arc<Vec<VisibleEntry>>,
     pub root_kind: Option<EntryKind>,
-    /// Aggregate Claude status per lane. Keyed by `LaneRef`
+    /// Aggregate agent status per lane. Keyed by `LaneRef`
     /// so lane ids in distinct projects (each project numbers its
     /// lanes from 0) don't collide. Empty when the
-    /// `claude_status.enable` config flag is off, no Claude session is
+    /// `claude_status.enable` config flag is off, no agent session is
     /// running, or the lane has no matching cwd.
-    pub claude_status_per_lane:
+    pub agent_status_per_lane:
         std::collections::HashMap<daruda_store::project::LaneRef, daruda_claude::SessionStatus>,
-    /// Per-session statuses for lanes that have ≥ 2 active Claude
+    /// Per-session statuses for lanes that have ≥ 2 active agent
     /// sessions. Phase D sub-row badges read this. Lanes with 0 or
     /// 1 sessions are absent (the leading indicator covers them).
     /// Keyed by `LaneRef` for the same cross-project reason.
-    pub claude_per_session_per_lane: std::collections::HashMap<
+    pub agent_per_session_per_lane: std::collections::HashMap<
         daruda_store::project::LaneRef,
         Vec<(String, daruda_claude::SessionStatus)>,
     >,
-    /// `session_id` of the claude process living inside the focused
+    /// `session_id` of the agent process living inside the focused
     /// pane (Phase E). Used by sub-row badge render to highlight the
     /// session attached to the active terminal. `None` when the
-    /// focused pane has no claude descendant or the tracker hasn't
+    /// focused pane has no agent descendant or the tracker hasn't
     /// resolved it yet.
-    pub claude_active_session_id: Option<String>,
-    /// Show the "Claude integration disabled" banner above the
+    pub agent_active_session_id: Option<String>,
+    /// Show the "Agent integration disabled" banner above the
     /// lanes list. True when status is enabled in config but
     /// hooks aren't yet installed in `~/.claude/settings.json`.
-    pub claude_install_banner_visible: bool,
+    pub agent_install_banner_visible: bool,
     pub workspace: WeakEntity<Workspace>,
 }
 

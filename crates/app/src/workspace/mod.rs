@@ -179,8 +179,8 @@ actions!(
         GitChangesToggleStage,
         GitChangesActivate,
         OpenProjectConfig,
-        InstallClaudeHooks,
-        UninstallClaudeHooks,
+        InstallAgentHooks,
+        UninstallAgentHooks,
         MinimizeWindow,
         ZoomWindow,
         ToggleFullScreen,
@@ -1549,10 +1549,10 @@ impl Workspace {
                     // terminal has focus, so no-op here is correct.
                 }
                 "install_claude_hooks" => {
-                    self.on_install_claude_hooks(&InstallClaudeHooks, window, cx);
+                    self.on_install_agent_hooks(&InstallAgentHooks, window, cx);
                 }
                 "uninstall_claude_hooks" => {
-                    self.on_uninstall_claude_hooks(&UninstallClaudeHooks, window, cx);
+                    self.on_uninstall_agent_hooks(&UninstallAgentHooks, window, cx);
                 }
                 "open_command_history" => {
                     self.on_open_command_history(&OpenCommandHistory, window, cx);

@@ -1,9 +1,9 @@
-//! Claude status pane aggregation.
+//! Agent status pane aggregation.
 //!
 //! `aggregate_over_panes` is the single source of truth for the left-dock
 //! leading indicator's aggregate, shared with the render snapshot
-//! (`render::snapshots`'s `claude_status_per_lane` /
-//! `claude_per_session_per_lane`). The debug-only probe / logger sit on top
+//! (`render::snapshots`'s `agent_status_per_lane` /
+//! `agent_per_session_per_lane`). The debug-only probe / logger sit on top
 //! of it so the on-disk NDJSON log can be diffed against the rendered
 //! indicator when verifying status transitions.
 

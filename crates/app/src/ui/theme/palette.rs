@@ -2035,17 +2035,17 @@ pub const STATUS_BADGE_ACTIVE_OUTER_PAD: f32 = GAP_XS;
 pub const STATUS_BADGE_TOOLTIP_SESSION_PREFIX_LEN: usize = 8;
 /// Bright blue — the banner's icon tint and the opaque base every other
 /// banner surface (bg / border / hover) derives from via [`with_alpha`].
-pub const CLAUDE_BANNER_ICON: Hsla = hsla(210.0, 1.0, 0.68, 1.0);
-pub const CLAUDE_BANNER_BG: Hsla = with_alpha(CLAUDE_BANNER_ICON, 0.08);
-pub const CLAUDE_BANNER_BORDER: Hsla = with_alpha(CLAUDE_BANNER_ICON, 0.20);
-pub const CLAUDE_BANNER_HOVER_BG: Hsla = with_alpha(CLAUDE_BANNER_ICON, 0.14);
-pub const CLAUDE_BANNER_PAD_X: f32 = 12.0;
-pub const CLAUDE_BANNER_PAD_Y: f32 = PAD_STANDARD;
-pub const CLAUDE_BANNER_GAP: f32 = GAP_LG;
-pub const CLAUDE_BANNER_RADIUS: f32 = RADIUS_MD;
-pub const CLAUDE_BANNER_FONT_SIZE: f32 = FONT_SIZE_SM;
-pub const CLAUDE_BANNER_MARGIN_X: f32 = PAD_STANDARD;
-pub const CLAUDE_BANNER_MARGIN_Y: f32 = PAD_SM;
+pub const AGENT_BANNER_ICON: Hsla = hsla(210.0, 1.0, 0.68, 1.0);
+pub const AGENT_BANNER_BG: Hsla = with_alpha(AGENT_BANNER_ICON, 0.08);
+pub const AGENT_BANNER_BORDER: Hsla = with_alpha(AGENT_BANNER_ICON, 0.20);
+pub const AGENT_BANNER_HOVER_BG: Hsla = with_alpha(AGENT_BANNER_ICON, 0.14);
+pub const AGENT_BANNER_PAD_X: f32 = 12.0;
+pub const AGENT_BANNER_PAD_Y: f32 = PAD_STANDARD;
+pub const AGENT_BANNER_GAP: f32 = GAP_LG;
+pub const AGENT_BANNER_RADIUS: f32 = RADIUS_MD;
+pub const AGENT_BANNER_FONT_SIZE: f32 = FONT_SIZE_SM;
+pub const AGENT_BANNER_MARGIN_X: f32 = PAD_STANDARD;
+pub const AGENT_BANNER_MARGIN_Y: f32 = PAD_SM;
 /// Outer horizontal padding for right-panel content rows (px).
 pub const RIGHT_PANEL_PAD_X: f32 = PAD_LG;
 /// Outer vertical padding between right-panel sections (px).

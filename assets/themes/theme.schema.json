@@ -548,23 +548,23 @@
       "$ref": "#/$defs/Rgba",
       "default": "#ffffffd9"
     },
-    "claude_banner_bg": {
-      "description": "Maps to `palette::CLAUDE_BANNER_BG`.",
+    "agent_banner_bg": {
+      "description": "Maps to `palette::AGENT_BANNER_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5cadff14"
     },
-    "claude_banner_border": {
-      "description": "Maps to `palette::CLAUDE_BANNER_BORDER`.",
+    "agent_banner_border": {
+      "description": "Maps to `palette::AGENT_BANNER_BORDER`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5cadff33"
     },
-    "claude_banner_hover_bg": {
-      "description": "Maps to `palette::CLAUDE_BANNER_HOVER_BG`.",
+    "agent_banner_hover_bg": {
+      "description": "Maps to `palette::AGENT_BANNER_HOVER_BG`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5cadff24"
     },
-    "claude_banner_icon": {
-      "description": "Maps to `palette::CLAUDE_BANNER_ICON`.",
+    "agent_banner_icon": {
+      "description": "Maps to `palette::AGENT_BANNER_ICON`.",
       "$ref": "#/$defs/Rgba",
       "default": "#5cadffff"
     },

@@ -35,7 +35,7 @@ impl Workspace {
                 Some((p.id, status))
             })
             .collect();
-        let (claude_status_per_lane, claude_per_session_per_lane) =
+        let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
                 &pane_lane,
                 &self.claude.pty_claude_bindings,
@@ -118,9 +118,9 @@ impl Workspace {
                 .get(&self.active_ref())
                 .and_then(|t| t.entry(t.root_id))
                 .map(|e| e.kind),
-            claude_status_per_lane,
-            claude_per_session_per_lane,
-            claude_active_session_id: self
+            agent_status_per_lane,
+            agent_per_session_per_lane,
+            agent_active_session_id: self
                 .claude
                 .pty_claude_bindings
                 .get(&self.main_area.focused_pane_id)
@@ -134,7 +134,7 @@ impl Workspace {
                         .find(|(pid, _)| *pid == focused)
                         .map(|(pid, _)| format!("acp:{pid}"))
                 }),
-            claude_install_banner_visible: self.claude.claude_status_enabled
+            agent_install_banner_visible: self.claude.claude_status_enabled
                 && !self.claude.claude_hooks_installed,
             workspace: self.left_dock.read(cx).workspace.clone(),
         }

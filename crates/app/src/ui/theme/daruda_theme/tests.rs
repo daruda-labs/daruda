@@ -201,10 +201,10 @@ fn default_clones_compile_time_palette() {
         t.status_badge_active_outline,
         palette::STATUS_BADGE_ACTIVE_OUTLINE
     );
-    assert_eq!(t.claude_banner_bg, palette::CLAUDE_BANNER_BG);
-    assert_eq!(t.claude_banner_border, palette::CLAUDE_BANNER_BORDER);
-    assert_eq!(t.claude_banner_hover_bg, palette::CLAUDE_BANNER_HOVER_BG);
-    assert_eq!(t.claude_banner_icon, palette::CLAUDE_BANNER_ICON);
+    assert_eq!(t.agent_banner_bg, palette::AGENT_BANNER_BG);
+    assert_eq!(t.agent_banner_border, palette::AGENT_BANNER_BORDER);
+    assert_eq!(t.agent_banner_hover_bg, palette::AGENT_BANNER_HOVER_BG);
+    assert_eq!(t.agent_banner_icon, palette::AGENT_BANNER_ICON);
     assert_eq!(t.right_panel_task_running_color, palette::SIGNAL_GREEN);
     assert_eq!(t.task_edit_branch_invalid_border, palette::ERROR);
     assert_eq!(t.badge_bg, palette::BG_HOVER);

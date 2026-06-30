@@ -1384,40 +1384,40 @@ pub fn project_menu_open_in_new_window() -> String {
 }
 
 // ----------------------------------------------------------------
-// Claude integration banner (dock prompt to install hooks)
+// Agent integration banner (dock prompt to install hooks)
 // ----------------------------------------------------------------
 
-pub const CLAUDE_BANNER_ICON: &str = "ⓘ";
-pub fn claude_banner_title() -> String {
+pub const AGENT_BANNER_ICON: &str = "ⓘ";
+pub fn agent_banner_title() -> String {
     rust_i18n::t!("claude.banner_title").into_owned()
 }
-pub fn claude_banner_hint() -> String {
+pub fn agent_banner_hint() -> String {
     rust_i18n::t!("claude.banner_hint").into_owned()
 }
 
-pub fn claude_consent_title() -> String {
+pub fn agent_consent_title() -> String {
     rust_i18n::t!("claude.consent_title").into_owned()
 }
-pub fn claude_consent_body() -> String {
+pub fn agent_consent_body() -> String {
     rust_i18n::t!("claude.consent_body").into_owned()
 }
-pub fn claude_consent_confirm() -> String {
+pub fn agent_consent_confirm() -> String {
     rust_i18n::t!("claude.consent_confirm").into_owned()
 }
 
 /// Per-badge tooltip — appended after the session_id prefix to mark
 /// the truncation. Localized separately from the active suffix so a
 /// single en-dash / horizontal-ellipsis swap covers every badge.
-pub const CLAUDE_BADGE_TOOLTIP_ELLIPSIS: &str = "…";
+pub const AGENT_BADGE_TOOLTIP_ELLIPSIS: &str = "…";
 /// Suffix appended to the active session's badge tooltip to identify
 /// the one that's bound to the focused tab. Empty for inactive
 /// siblings.
-pub fn claude_badge_tooltip_active_suffix() -> String {
+pub fn agent_badge_tooltip_active_suffix() -> String {
     rust_i18n::t!("claude.badge_active_suffix").into_owned()
 }
 /// Sub-row label preceding the session badges (e.g. `"3 sessions:"`).
 /// Rendered as `format!("{count}{SUFFIX}")`.
-pub fn claude_sessions_label_suffix() -> String {
+pub fn agent_sessions_label_suffix() -> String {
     rust_i18n::t!("claude.sessions_label_suffix").into_owned()
 }
 

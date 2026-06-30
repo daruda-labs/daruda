@@ -1,11 +1,11 @@
-//! Per-lane Claude session indicators rendered inside the
+//! Per-lane agent session indicators rendered inside the
 //! dock row.
 //!
 //! Two pieces:
-//! - `claude_status_cell` — the leading dot column (always present
+//! - `agent_status_cell` — the leading dot column (always present
 //!   so rows align whether or not a session is bound).
-//! - `claude_badges_row` — the multi-session sub-row shown only when
-//!   a lane has ≥ 2 concurrent Claude sessions. The badge
+//! - `agent_badges_row` — the multi-session sub-row shown only when
+//!   a lane has ≥ 2 concurrent agent sessions. The badge
 //!   matching the focused tab gets an outline ring (Phase E) so the
 //!   user can tell which sibling their terminal is talking to.
 
@@ -16,10 +16,10 @@ use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px};
 use crate::surface::strings as surface_strings;
 use crate::ui::{AgentStatusBadge, IndicatorSize};
 
-/// Fixed-width cell that holds the leading Claude-status indicator.
-/// Empty (just the spacer width) when no Claude session is associated
+/// Fixed-width cell that holds the leading agent-status indicator.
+/// Empty (just the spacer width) when no agent session is associated
 /// with the lane.
-pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -> AnyElement {
+pub(super) fn agent_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -> AnyElement {
     let cell = div()
         .flex_none()
         .w(px(theme::STATUS_INDICATOR_CELL_WIDTH))
@@ -36,22 +36,22 @@ pub(super) fn claude_status_cell(state: Option<SessionStatus>, cx: &gpui::App) -
 }
 
 /// Phase D — sub-row badge strip. Shown when a lane has ≥ 2
-/// concurrent Claude sessions; each badge is a small per-session
+/// concurrent agent sessions; each badge is a small per-session
 /// indicator (`IndicatorSize::Badge`) so the user can tell which of
 /// several agents needs attention.
 ///
 /// Phase E — `active_session_id` highlights the badge corresponding
-/// to the focused tab's claude session with an outline ring, so the
+/// to the focused tab's agent session with an outline ring, so the
 /// user can tell which sibling session their terminal is talking to.
 /// Each badge also gets a hover tooltip showing the session_id
 /// prefix.
-pub(super) fn claude_badges_row(
+pub(super) fn agent_badges_row(
     sessions: &[(String, SessionStatus)],
     active_session_id: Option<&str>,
     cx: &gpui::App,
 ) -> impl IntoElement + use<> {
     let count = sessions.len();
-    let label = format!("{count}{}", surface_strings::claude_sessions_label_suffix());
+    let label = format!("{count}{}", surface_strings::agent_sessions_label_suffix());
     let faint_text = theme::current(cx).text_subtle;
     div()
         .flex()
@@ -80,11 +80,11 @@ pub(super) fn claude_badges_row(
                     let tooltip_text = if is_active {
                         format!(
                             "{prefix}{}{}",
-                            surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS,
-                            surface_strings::claude_badge_tooltip_active_suffix()
+                            surface_strings::AGENT_BADGE_TOOLTIP_ELLIPSIS,
+                            surface_strings::agent_badge_tooltip_active_suffix()
                         )
                     } else {
-                        format!("{prefix}{}", surface_strings::CLAUDE_BADGE_TOOLTIP_ELLIPSIS)
+                        format!("{prefix}{}", surface_strings::AGENT_BADGE_TOOLTIP_ELLIPSIS)
                     };
                     let mut indicator =
                         AgentStatusBadge::for_status(*state, IndicatorSize::Badge, cx);
@@ -92,7 +92,7 @@ pub(super) fn claude_badges_row(
                         indicator = indicator.active();
                     }
                     div()
-                        .id(("claude-badge", idx))
+                        .id(("agent-badge", idx))
                         .flex_none()
                         .child(indicator)
                         .tooltip(crate::ui::tooltip::text(tooltip_text))
@@ -113,7 +113,7 @@ mod tests {
             // outcome here without a render harness, but we can guard
             // against shape regressions.
             let sessions = vec![("abc".to_string(), SessionStatus::Idle)];
-            let _ = claude_badges_row(&sessions, None, cx);
+            let _ = agent_badges_row(&sessions, None, cx);
         });
     }
 
@@ -124,8 +124,8 @@ mod tests {
             // Both populated and empty cells must reserve the same
             // horizontal space so lane rows in the list don't visually
             // shift when a session attaches.
-            let with = claude_status_cell(Some(SessionStatus::Working), cx);
-            let without = claude_status_cell(None, cx);
+            let with = agent_status_cell(Some(SessionStatus::Working), cx);
+            let without = agent_status_cell(None, cx);
             // Smoke check — each call returns an AnyElement; the actual
             // width is enforced by `STATUS_INDICATOR_CELL_WIDTH`.
             let _ = (with, without);

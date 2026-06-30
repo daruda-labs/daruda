@@ -11,7 +11,7 @@ use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px};
 use crate::surface::strings as surface_strings;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
 
-use super::banner::claude_install_banner;
+use super::banner::agent_install_banner;
 use super::rows::{
     git_badge_for, group_header_row, non_git_placeholder, project_header_row, section_header,
     worktree_row,
@@ -39,8 +39,8 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     let header = section_header(false, snap, cx);
 
     let mut body = crate::workspace::left_dock::left_panel_body().gap(px(theme::LANE_CARD_GAP));
-    if snap.claude_install_banner_visible {
-        body = body.child(claude_install_banner(snap, cx));
+    if snap.agent_install_banner_visible {
+        body = body.child(agent_install_banner(snap, cx));
     }
     body = body.child(header);
 

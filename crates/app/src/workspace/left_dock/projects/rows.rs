@@ -20,7 +20,7 @@ use crate::ui::{
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
 
-use super::claude_badges::{claude_badges_row, claude_status_cell};
+use super::agent_badges::{agent_badges_row, agent_status_cell};
 use super::context_menu::build_context_menu_items;
 use super::drag::{DragGhost, DragPayload};
 use crate::workspace::dnd_ops::TopRow;
@@ -750,7 +750,7 @@ pub(in crate::workspace) fn worktree_row(
         .rounded(px(theme::LANE_UNREAD_DOT_RADIUS))
         .bg(unread_dot_color);
 
-    // Body — label row + sublabel row + optional Claude multi-session sub-row.
+    // Body — label row + sublabel row + optional agent multi-session sub-row.
     let body = div()
         .flex_1()
         .flex()
@@ -802,15 +802,15 @@ pub(in crate::workspace) fn worktree_row(
                 .into_any_element(),
         })
         .when_some(
-            snap.claude_per_session_per_lane
+            snap.agent_per_session_per_lane
                 .get(&daruda_store::project::LaneRef {
                     project: project_id,
                     lane: wt.id,
                 }),
             |d, sessions| {
-                d.child(claude_badges_row(
+                d.child(agent_badges_row(
                     sessions,
-                    snap.claude_active_session_id.as_deref(),
+                    snap.agent_active_session_id.as_deref(),
                     cx,
                 ))
             },
@@ -883,7 +883,7 @@ pub(in crate::workspace) fn worktree_row(
         // Vertical padding matches the project/group header rows
         // (`LANE_SECTION_PAD_Y`) so all three row kinds share the
         // same breathing room regardless of body height — a `min_h`
-        // approach collapsed to zero padding once the Claude
+        // approach collapsed to zero padding once the agent
         // multi-session sub-row grew the row past the floor.
         .px(px(theme::LANE_ROW_PAD_X))
         .py(px(theme::LANE_SECTION_PAD_Y))
@@ -972,8 +972,8 @@ pub(in crate::workspace) fn worktree_row(
                 }
             }),
         )
-        .child(claude_status_cell(
-            snap.claude_status_per_lane
+        .child(agent_status_cell(
+            snap.agent_status_per_lane
                 .get(&daruda_store::project::LaneRef {
                     project: project_id,
                     lane: wt.id,

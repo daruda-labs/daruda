@@ -431,8 +431,8 @@ impl Workspace {
             self.claude.pty_tracker.unregister(*id);
             self.claude.pty_claude_bindings.remove(id);
         }
-        // Dropped bindings feed the left-dock per-lane Claude badges and
-        // `claude_active_session_id`; the dock is `.cached()` (Pitfall #10).
+        // Dropped bindings feed the left-dock per-lane agent badges and
+        // `agent_active_session_id`; the dock is `.cached()` (Pitfall #10).
         self.notify_left_dock(cx);
     }
 }

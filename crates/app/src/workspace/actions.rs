@@ -22,13 +22,13 @@ use super::{
     FetchChanges, FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext,
     FilesSelectPrev, FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft,
     FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch, GitChangesActivate,
-    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InstallClaudeHooks,
+    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InstallAgentHooks,
     InvokeSkillPalette, MinimizeWindow, MoveTabLeft, MoveTabRight, NewSkill, NewTab, NewTask,
     NextTab, OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab,
     PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes,
     SplitDown, SplitRight, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
     SwitchRightPanelUsage, ToggleCommandPalette, ToggleFullScreen, ToggleZoomPane,
-    UninstallClaudeHooks, ZoomWindow,
+    UninstallAgentHooks, ZoomWindow,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -599,9 +599,9 @@ impl Workspace {
 
     // ---- Claude Code integration ----
 
-    pub(in crate::workspace) fn on_install_claude_hooks(
+    pub(in crate::workspace) fn on_install_agent_hooks(
         &mut self,
-        _: &InstallClaudeHooks,
+        _: &InstallAgentHooks,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -633,9 +633,9 @@ impl Workspace {
         self.notify_left_dock(cx);
     }
 
-    pub(in crate::workspace) fn on_uninstall_claude_hooks(
+    pub(in crate::workspace) fn on_uninstall_agent_hooks(
         &mut self,
-        _: &UninstallClaudeHooks,
+        _: &UninstallAgentHooks,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {

@@ -24,7 +24,7 @@ impl Workspace {
     }
 
     /// Focus-change chokepoint for `main_area.focused_pane_id`. The left
-    /// dock derives `focused_file_selection` and `claude_active_session_id`
+    /// dock derives `focused_file_selection` and `agent_active_session_id`
     /// from the focused pane and is `.cached()`, so every focus change must
     /// dirty it (Pitfall #10). Bulk context swaps (lane activation,
     /// project close) carry their own left-dock notify via `mutate_durable`.
