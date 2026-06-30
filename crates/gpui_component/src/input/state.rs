@@ -607,6 +607,31 @@ impl InputState {
         }
     }
 
+    /// Return the number of display rows the editor currently occupies.
+    ///
+    /// For [`InputMode::AutoGrow`] this is the soft-wrapped row count that
+    /// `update_auto_grow` computes from the text wrapper — not the
+    /// hard-newline count.  For other modes it equals the configured `rows`
+    /// value (minimum 1).
+    ///
+    /// daruda vendor patch — used by `adapt_dock_to_input_lines` so the
+    /// bottom-dock height tracks soft-wrapped display rows rather than
+    /// hard newlines.
+    pub fn display_rows(&self) -> usize {
+        self.mode.rows()
+    }
+
+    /// Move the cursor to the end of the current text without changing the
+    /// content.  A no-op when the text is empty.
+    ///
+    /// daruda vendor patch — used after `set_value` in history navigation so
+    /// the recalled entry has the cursor at the end (shell-history convention)
+    /// rather than the start (multi-line `set_value` default).
+    pub fn move_cursor_to_end(&mut self, cx: &mut Context<Self>) {
+        let end = self.text.len();
+        self.move_to(end, None, cx);
+    }
+
     /// Set Input to use [`InputMode::CodeEditor`] mode.
     ///
     /// Default options:

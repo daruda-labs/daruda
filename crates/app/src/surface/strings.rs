@@ -2948,6 +2948,10 @@ mod tests {
             bottom_input_placeholder_for_context(false, Some("Auto"), false),
             bottom_input_placeholder(),
         );
+        assert_eq!(
+            bottom_input_placeholder_for_context(false, Some("Auto"), true),
+            bottom_input_placeholder(),
+        );
     }
 
     #[test]

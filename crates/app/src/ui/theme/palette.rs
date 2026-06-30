@@ -886,13 +886,13 @@ pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 /// Height added to the bottom dock for each extra text line when the
 /// bottom input auto-grows beyond one row (px). Sized to match one
-/// `Size::Small` input line: gpui `line_height` is 1.25 rem, resolved
-/// against the **terminal** font size (default 13 px from
-/// `daruda_config::FontConfig::size`) — 13 × 1.25 ≈ 16 px. Using the
-/// `rem_size` (16 px global) would overestimate by ~4 px per line. The
-/// first row is already covered by `DOCK_BOTTOM_ROW_PRESET_1_H`; this
-/// constant covers lines 2…N.
-pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 16.0;
+/// `Size::Small` input line: gpui `line_height` is `LINE_HEIGHT = Rems(1.25)`
+/// resolved against the global `rem_size` (16 px) — 1.25 × 16 = 20 px,
+/// independent of the terminal font size. `TextElement::request_layout`
+/// sets `min_size.height = rows * window.line_height()` = `rows * 20 px`.
+/// The first row is already covered by `DOCK_BOTTOM_ROW_PRESET_1_H`; this
+/// constant covers display rows 2…N (soft-wrapped).
+pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without

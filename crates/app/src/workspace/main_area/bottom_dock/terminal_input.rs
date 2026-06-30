@@ -111,11 +111,11 @@ pub(in crate::workspace) fn render_body(
     };
     // The action column sits beside the text in its own column (see
     // `input_with_action_grow`). In auto-grow mode the editor self-sizes
-    // to content (up to `max_rows` configured via `AgentConfig`); the
-    // outer dock height is driven by `adapt_dock_to_input_lines` on every
-    // `InputEvent::Change`. In fill mode (fallback) the editor fills the
-    // dock's fixed height and scrolls internally.
-    let max_rows = usize::from(snap.input_max_rows);
+    // to content (the cap is owned by `InputState` — set at construction
+    // via `auto_grow(1, max_rows)` and kept in sync on live config reload
+    // via `set_auto_grow`); the outer dock height is driven by
+    // `adapt_dock_to_input_lines` on every `InputEvent::Change`. In fill
+    // mode (fallback) the editor fills the dock's fixed height and scrolls.
     let cell = div()
         .flex_1()
         .flex()
@@ -124,7 +124,7 @@ pub(in crate::workspace) fn render_body(
             action,
             cx,
             0_isize,
-            crate::ui::InputGrowMode::AutoGrow { max_rows },
+            crate::ui::InputGrowMode::AutoGrow,
         ));
     super::bottom_panel_body()
         .drag_over::<PathDrag>(|style, _, _, cx| {

@@ -57,6 +57,28 @@ impl Workspace {
         let new_max_rows = usize::from(config.agent.input_max_rows);
         self.terminal_input
             .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
+        // Resync the dock height after the cap change — lowering `input_max_rows`
+        // mid-edit would otherwise leave the dock too tall until the next
+        // keystroke. `adapt_dock_to_input_lines` is idempotent via its guard.
+        // `apply_config` runs inside `observe_global` (no `&mut Window` in scope
+        // and the workspace entity is already borrowed), so we re-enter the window
+        // via `try_update_workspace_window` and then `window.defer` to push the
+        // entity-borrowing work to the next event cycle (after the current observe
+        // callback releases its `&mut Workspace` borrow).
+        let handle = self.window_handle;
+        let ws_weak = cx.weak_entity();
+        crate::windows::try_update_workspace_window(
+            handle,
+            cx,
+            "apply_config.resync_dock",
+            |window, cx| {
+                window.defer(cx, move |window, cx| {
+                    if let Some(ws) = ws_weak.upgrade() {
+                        ws.update(cx, |ws, cx| ws.adapt_dock_to_input_lines(window, cx));
+                    }
+                });
+            },
+        );
         self.claude.usage_poll = config.usage.poll.clone();
 
         // Patch all existing pane views: font + colors + opacity. Iterate

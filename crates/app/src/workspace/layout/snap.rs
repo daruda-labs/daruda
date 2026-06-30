@@ -248,10 +248,6 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.
     pub shell: crate::shell_quote::Shell,
-    /// Mirror of `AgentConfig::input_max_rows` — maximum visible rows
-    /// before the bottom input scrolls. Threaded into `terminal_input`
-    /// render so `input_with_action_grow` receives the live value.
-    pub input_max_rows: u8,
     pub workspace: WeakEntity<Workspace>,
 }
 

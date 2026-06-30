@@ -597,8 +597,13 @@ impl Workspace {
         let Some(new_text) = new_text else {
             return;
         };
-        self.terminal_input
-            .update(cx, |s, cx_state| s.set_value(&new_text, window, cx_state));
+        self.terminal_input.update(cx, |s, cx_state| {
+            s.set_value(&new_text, window, cx_state);
+            // Move cursor to end so the user can append/edit immediately —
+            // shell history convention (bash/zsh/fish). `set_value` on a
+            // multi-line state clears the selection to 0..0 (cursor at start).
+            s.move_cursor_to_end(cx_state);
+        });
     }
 
     /// Finalize an accepted slash-command completion from the bottom-dock

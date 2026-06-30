@@ -47,6 +47,19 @@ pub(in crate::workspace) struct DockDrag {
     pub(in crate::workspace) start_size: f32,
 }
 
+/// Pure height formula for the bottom dock auto-grow path.
+///
+/// Given a display-row count (already clamped to `max_rows`) returns the
+/// desired dock height in pixels. First row is covered by
+/// `DOCK_BOTTOM_ROW_PRESET_1_H`; every additional display row adds
+/// `DOCK_BOTTOM_INPUT_EXTRA_LINE_H` (= `Rems(1.25) × rem_size(16px) = 20px`).
+///
+/// Extracted as a free function so it can be unit-tested without a GPUI context.
+pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
+    use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
+    DOCK_BOTTOM_ROW_PRESET_1_H + (rows.saturating_sub(1) as f32) * DOCK_BOTTOM_INPUT_EXTRA_LINE_H
+}
+
 impl Workspace {
     pub(in crate::workspace) fn on_toggle_left_dock(
         &mut self,
@@ -277,14 +290,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::ui::RopeExt as _;
-        use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
-
-        // Read line count from the input state (re-entrant-safe: we read
+        // Read display-row count from the input state (re-entrant-safe: we read
         // `terminal_input` here while holding `&mut Workspace` — it is a
         // separate entity so no re-entry conflict; we are not inside an
         // `entity.update` on `terminal_input`).
-        let new_line_count = self.terminal_input.read(cx).text().lines_len().max(1);
+        //
+        // `display_rows()` returns the soft-wrapped row count that the editor
+        // uses for its own layout (`update_auto_grow` → `text_wrapper.len()`),
+        // so the dock height stays in sync with the editor's actual height.
+        // Hard-newline count (`text().lines_len()`) would clip long soft-wrapped
+        // lines at the bottom.
+        // ⚠️ Do NOT call `window.line_height()` / `window.text_style()` here —
+        // this method runs in an event handler, outside the paint walk (CLAUDE.md
+        // Pitfall #8). The per-row height constant lives in the palette instead.
+        let new_line_count = self.terminal_input.read(cx).display_rows().max(1);
 
         let max_rows = usize::from(self.agent.input_max_rows);
         let clamped = new_line_count.min(max_rows);
@@ -295,8 +314,7 @@ impl Workspace {
         }
         self.terminal_input_line_count = clamped;
 
-        let desired = DOCK_BOTTOM_ROW_PRESET_1_H
-            + (clamped.saturating_sub(1) as f32) * DOCK_BOTTOM_INPUT_EXTRA_LINE_H;
+        let desired = bottom_dock_height_for_rows(clamped);
 
         // Only resize when the size actually changes to avoid notify storms.
         let current = self.bottom_dock.read(cx).size;
@@ -348,5 +366,44 @@ impl Workspace {
             self.main_area.context_menu = None;
             cx.notify();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bottom_dock_height_arithmetic() {
+        use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
+
+        // 1 row — base height only; no extra-line addition.
+        assert_eq!(
+            bottom_dock_height_for_rows(1),
+            DOCK_BOTTOM_ROW_PRESET_1_H,
+            "1 row should equal the preset-1 base"
+        );
+
+        // 2 rows — base + one extra-line step (20 px).
+        assert_eq!(
+            bottom_dock_height_for_rows(2),
+            DOCK_BOTTOM_ROW_PRESET_1_H + DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "2 rows should be base + one extra-line step"
+        );
+
+        // At max cap (8 rows by default config) — base + 7 extra-line steps.
+        let max_rows = 8_usize;
+        assert_eq!(
+            bottom_dock_height_for_rows(max_rows),
+            DOCK_BOTTOM_ROW_PRESET_1_H + 7.0 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
+            "8 rows (max cap) should be base + 7 extra-line steps"
+        );
+
+        // Regression guard: extra-line step must be 20 px (Rems(1.25) × 16px),
+        // not 16 px (was incorrect after a mis-attributed terminal-font reasoning).
+        assert_eq!(
+            DOCK_BOTTOM_INPUT_EXTRA_LINE_H, 20.0,
+            "extra-line step must be 20 px (Rems(1.25) × rem_size(16 px))"
+        );
     }
 }
