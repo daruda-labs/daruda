@@ -693,6 +693,106 @@ fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&feature);
 }
 
+/// Verify per-lane input draft separation:
+/// - Typing in lane A and switching to lane B clears the input (B has no draft).
+/// - Typing in lane B and switching back to lane A restores A's draft.
+/// - Submitting (`send_terminal_input`) drops the lane's saved draft.
+#[gpui::test]
+fn input_draft_is_per_lane(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root_a = std::path::PathBuf::from("/tmp/test_input_draft_a");
+    let root_b = std::path::PathBuf::from("/tmp/test_input_draft_b");
+    let _ = std::fs::create_dir_all(&root_a);
+    let _ = std::fs::create_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    // Seed a second lane.
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
+        }
+    });
+
+    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
+    let lane0 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 0,
+    };
+    let lane1 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 1,
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Lane 0 is active; type a draft into the input.
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("draft-a", window, cx_state));
+
+            // Switch to lane 1 — draft-a should be saved for lane 0,
+            // and the input should be cleared (lane 1 has no draft).
+            ws.activate_lane(lane1, window, cx);
+            assert_eq!(ws.active, lane1);
+            let after_switch = ws.terminal_input.read(cx).value().to_string();
+            assert_eq!(
+                after_switch, "",
+                "input must be empty after switching to a lane with no draft"
+            );
+            // The saved draft for lane 0 must be in the map.
+            assert_eq!(
+                ws.input_drafts.get(&lane0).map(String::as_str),
+                Some("draft-a"),
+                "lane 0 draft must be persisted on switch away"
+            );
+
+            // Type a draft for lane 1.
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("draft-b", window, cx_state));
+
+            // Switch back to lane 0 — lane 1's draft must be saved and
+            // lane 0's draft ("draft-a") must be restored.
+            ws.activate_lane(lane0, window, cx);
+            assert_eq!(ws.active, lane0);
+            let restored = ws.terminal_input.read(cx).value().to_string();
+            assert_eq!(
+                restored, "draft-a",
+                "lane 0 draft must be restored on switch back"
+            );
+            assert_eq!(
+                ws.input_drafts.get(&lane1).map(String::as_str),
+                Some("draft-b"),
+                "lane 1 draft must be persisted on switch away"
+            );
+
+            // Submit lane 0's draft — the saved entry must be cleared.
+            ws.send_terminal_input(window, cx);
+            assert_eq!(
+                ws.input_drafts.get(&lane0),
+                None,
+                "submitting must drop the lane's saved draft"
+            );
+            // The input widget itself must also be empty after send.
+            let after_send = ws.terminal_input.read(cx).value().to_string();
+            assert_eq!(after_send, "", "input must be empty after send");
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
 // TODO Task 11: rewrite for new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]

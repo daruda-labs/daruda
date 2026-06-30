@@ -560,6 +560,13 @@ pub struct Workspace {
         daruda_store::project::LaneRef,
         crate::lane::history::HistoryBuffer,
     >,
+    /// Per-lane unsent draft text for the bottom-dock input. Saved on
+    /// lane switch (outgoing lane) and restored on activation (incoming
+    /// lane), so each lane keeps its own in-progress text. Empty strings
+    /// are never stored — `remove` is used instead to avoid leaking
+    /// entries for empty drafts or deleted lanes.
+    pub(in crate::workspace) input_drafts:
+        std::collections::HashMap<daruda_store::project::LaneRef, String>,
 }
 
 impl Workspace {
@@ -1043,6 +1050,7 @@ impl Workspace {
                 }),
             window_handle: window.window_handle(),
             input_history: std::collections::HashMap::new(),
+            input_drafts: std::collections::HashMap::new(),
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

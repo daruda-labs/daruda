@@ -532,6 +532,9 @@ impl Workspace {
             .entry(lane_ref)
             .or_default()
             .push(&history_text);
+        // Submitted text is no longer a draft — drop the saved entry so
+        // switching back to this lane after send shows an empty input.
+        self.input_drafts.remove(&lane_ref);
         // When an Agent chat pane is focused, the bottom-dock input drives
         // its ACP session as a prompt rather than a terminal's PTY.
         let focused_id = self.active_runtime().focused_pane_id;

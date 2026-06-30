@@ -249,6 +249,8 @@ impl Workspace {
         self.git_status_cache.remove(&target);
         self.git_collapsed_dirs.remove(&target);
         self.git_changes_cursor.remove(&target);
+        self.input_drafts.remove(&target);
+        self.input_history.remove(&target);
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
             project.lanes.retain(|w| w.id != target.lane);
         }
@@ -460,7 +462,24 @@ impl Workspace {
         // Drop any in-flight drag hover so a stale half-fill overlay does not
         // linger on the newly-activated lane. The notify paths below cover it.
         self.main_area.pane_drop_hover = None;
+
+        // Save the outgoing lane's unsent draft. Empty drafts are discarded
+        // (remove rather than insert) to avoid accumulating empty entries.
+        let outgoing_draft = self.terminal_input.read(cx).value().to_string();
+        if outgoing_draft.is_empty() {
+            self.input_drafts.remove(&previous);
+        } else {
+            self.input_drafts.insert(previous, outgoing_draft);
+        }
+
         self.active = target;
+
+        // Restore the incoming lane's saved draft (empty string when none).
+        let incoming_draft = self.input_drafts.get(&target).cloned().unwrap_or_default();
+        self.terminal_input.update(cx, |s, cx_state| {
+            s.set_value(&incoming_draft, window, cx_state)
+        });
+
         // Update the project's last-active-lane hint so clicking
         // the project header in the left dock snaps to the same
         // lane the user just left.
