@@ -522,6 +522,16 @@ impl Workspace {
         if trimmed.is_empty() {
             return;
         }
+        // Push to per-lane history before routing so both agent prompts and
+        // terminal commands land in the same unified buffer. `push` resets
+        // the navigation cursor, so ↑ after submit starts from the entry
+        // we just pushed.
+        let lane_id = self.active.lane;
+        let history_text = trimmed.trim().to_owned();
+        self.input_history
+            .entry(lane_id)
+            .or_default()
+            .push(&history_text);
         // When an Agent chat pane is focused, the bottom-dock input drives
         // its ACP session as a prompt rather than a terminal's PTY.
         let focused_id = self.active_runtime().focused_pane_id;
@@ -545,6 +555,50 @@ impl Workspace {
         self.send_to_focused_pane(payload.as_bytes(), cx);
         self.terminal_input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+    }
+
+    /// Returns `true` when history navigation in `dir` is possible for the
+    /// currently active lane. Called from the `on_history_navigate` hook to
+    /// decide whether to consume ↑/↓ before deferring `do_history_navigate`.
+    /// Reading `self.input_history` is safe here (hook fires inside
+    /// `terminal_input`'s update; `self` is `Workspace`, a different entity).
+    pub(in crate::workspace) fn history_navigate_possible(
+        &self,
+        dir: crate::ui::HistoryDir,
+    ) -> bool {
+        let lane_id = self.active.lane;
+        let Some(buf) = self.input_history.get(&lane_id) else {
+            return false;
+        };
+        match dir {
+            crate::ui::HistoryDir::Up => buf.has_entries(),
+            crate::ui::HistoryDir::Down => buf.is_navigating(),
+        }
+    }
+
+    /// Execute a history navigation step for the active lane. Reads the
+    /// current `terminal_input` text, calls `prev` or `next` on the lane's
+    /// `HistoryBuffer`, and calls `set_value` with the result. Called from a
+    /// `window.defer` inside `on_history_navigate` so it runs after
+    /// `terminal_input`'s current update has finished (re-entry guard).
+    pub(in crate::workspace) fn do_history_navigate(
+        &mut self,
+        dir: crate::ui::HistoryDir,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.terminal_input.read(cx).value().to_string();
+        let lane_id = self.active.lane;
+        let buf = self.input_history.entry(lane_id).or_default();
+        let new_text = match dir {
+            crate::ui::HistoryDir::Up => buf.prev(&current).map(str::to_owned),
+            crate::ui::HistoryDir::Down => buf.forward().map(str::to_owned),
+        };
+        let Some(new_text) = new_text else {
+            return;
+        };
+        self.terminal_input
+            .update(cx, |s, cx_state| s.set_value(&new_text, window, cx_state));
     }
 
     /// Finalize an accepted slash-command completion from the bottom-dock

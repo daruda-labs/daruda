@@ -1,4 +1,4 @@
-use gpui::Context;
+use gpui::{Context, Window};
 
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -199,6 +199,79 @@ impl Workspace {
                 });
             },
         );
+
+        // Re-sync the bottom input placeholder: a language switch or
+        // `use_modifier_to_send` toggle may change its copy.
+        self.refresh_terminal_input_placeholder(cx);
+    }
+
+    /// Derive the bottom-input placeholder from the focused pane's kind and
+    /// the agent mode / modifier-key policy, then push it to the widget.
+    ///
+    /// **No `&mut Window` needed at the call site.** This method captures
+    /// the placeholder string (which requires only `&Context<Self>`) and then
+    /// re-enters the window via `try_update_workspace_window` to call
+    /// `set_placeholder`. Callers that *already hold* a `&mut Window`
+    /// (i.e. `focus_pane`) should call
+    /// [`Workspace::apply_input_placeholder`] instead to avoid nested
+    /// window re-entry.
+    pub(in crate::workspace) fn refresh_terminal_input_placeholder(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let placeholder = self.compute_input_placeholder(cx);
+        let terminal_input = self.terminal_input.clone();
+        let handle = self.window_handle;
+        crate::windows::try_update_workspace_window(
+            handle,
+            cx,
+            "refresh_terminal_input_placeholder",
+            |window, cx| {
+                terminal_input.update(cx, |state, cx| {
+                    state.set_placeholder(placeholder, window, cx);
+                });
+            },
+        );
+    }
+
+    /// Push the context-derived placeholder to the bottom input using the
+    /// live `window`. Use this from paths that already hold `&mut Window`
+    /// (e.g. `focus_pane`) to avoid nested `update_window` re-entry.
+    pub(in crate::workspace) fn apply_input_placeholder(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let placeholder = self.compute_input_placeholder(cx);
+        let terminal_input = self.terminal_input.clone();
+        terminal_input.update(cx, |state, cx| {
+            state.set_placeholder(placeholder, window, cx);
+        });
+    }
+
+    /// Derive the bottom-input placeholder string from the current focused-pane
+    /// context. Pure read — no window or side-effects required.
+    fn compute_input_placeholder(&self, cx: &Context<Self>) -> String {
+        let focused_id = self.active_runtime().focused_pane_id;
+        let is_agent = self.is_agent_chat_pane(focused_id);
+        let mode_name: Option<String> = if is_agent {
+            self.agent_chat_view(focused_id).and_then(|v| {
+                let view = v.read(cx);
+                view.modes.as_ref().and_then(|m| {
+                    m.available
+                        .iter()
+                        .find(|av| av.id == m.current)
+                        .map(|av| av.name.clone())
+                })
+            })
+        } else {
+            None
+        };
+        s::bottom_input_placeholder_for_context(
+            is_agent,
+            mode_name.as_deref(),
+            self.agent.use_modifier_to_send,
+        )
     }
 }
 

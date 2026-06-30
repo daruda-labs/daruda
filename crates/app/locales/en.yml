@@ -291,8 +291,11 @@ modal:
 # Bottom dock
 bottom_dock:
   input_tab_label: "Input"
+  input_agent_mode_modifier_placeholder: "Message agent · %{mode} · ⌘↵ to send"
+  input_agent_mode_placeholder: "Message agent · %{mode} · Enter to send"
+  input_agent_modifier_placeholder: "Message agent · ⌘↵ to send"
+  input_agent_placeholder: "Message agent · Enter to send"
   input_placeholder: "Type to send to terminal…"
-  input_agent_placeholder: "Send a message to the agent…"
   row_preset_1: "1 row"
   row_preset_2: "2 rows"
   row_preset_3: "3 rows"

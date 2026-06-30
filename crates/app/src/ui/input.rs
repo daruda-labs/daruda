@@ -33,7 +33,9 @@ use gpui::{
 };
 use gpui_component::Sizable as _;
 
-pub use gpui_component::input::{CompletionProvider, Input, InputEvent, InputState, Rope, RopeExt};
+pub use gpui_component::input::{
+    CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
+};
 
 /// Tab-participation specifier for [`input`]. Mirrors `CheckboxTabSpec`
 /// / `RadioTabSpec` / `SelectTabSpec` — `isize` slots the input at
@@ -101,18 +103,58 @@ pub fn input<T: InputTabSpec>(state: &Entity<InputState>, cx: &App, tab: T) -> i
 ///
 /// Caller controls width via the surrounding container; the wrapper
 /// commits only to chrome + the row layout.
+/// Max-rows value passed to [`input_with_action`]. When the input state
+/// was built with [`InputState::auto_grow`], this cap is already baked
+/// into the state; this argument merely documents the call site's
+/// intent without duplicating the state-side value.
+///
+/// Pass `None` to keep the classic `h_full` fill behaviour (the input
+/// scrolls within whatever height its parent allocates). Pass `Some(n)`
+/// to switch to content-driven growth: the editor expands row-by-row up
+/// to `n` rows and scrolls internally beyond that. The outer container
+/// must be resized independently (e.g. via `set_bottom_dock_row_preset`
+/// on `InputEvent::Change`) to match the desired growth.
+pub enum InputGrowMode {
+    /// Classic mode: editor fills the available height and scrolls.
+    Fill,
+    /// Auto-grow mode: editor grows with content up to `max_rows`.
+    AutoGrow { max_rows: usize },
+}
+
 pub fn input_with_action<T: InputTabSpec>(
     state: &Entity<InputState>,
     action: impl IntoElement,
     cx: &App,
     tab: T,
 ) -> impl IntoElement {
-    // `h_full()` fills the text column's (definite) height and scrolls
-    // internally instead of auto-growing past it. The row is left at the
-    // default cross-axis `stretch`, so the `flex_1` text column inherits the
-    // row's full height — that definite height is what `h_full`'s
-    // `relative(1.)` resolves against. Single-line states ignore it.
-    let inner = Input::new(state).small().appearance(false).h_full();
+    input_with_action_grow(state, action, cx, tab, InputGrowMode::Fill)
+}
+
+/// Like [`input_with_action`] but lets the caller choose the growth
+/// mode. Used by the bottom-dock terminal input to switch to content-
+/// driven auto-grow.
+pub fn input_with_action_grow<T: InputTabSpec>(
+    state: &Entity<InputState>,
+    action: impl IntoElement,
+    cx: &App,
+    tab: T,
+    grow_mode: InputGrowMode,
+) -> impl IntoElement {
+    // In `Fill` mode `h_full()` fills the text column's (definite) height
+    // and scrolls internally instead of auto-growing past it. The row is
+    // left at the default cross-axis `stretch`, so the `flex_1` text column
+    // inherits the row's full height — that definite height is what
+    // `h_full`'s `relative(1.)` resolves against. Single-line states ignore
+    // it.
+    //
+    // In `AutoGrow` mode the inner editor self-sizes to N lines (already
+    // configured via `InputState::auto_grow`); `h_full` is omitted so the
+    // column shrinks to the editor's natural height instead of stretching to
+    // fill the parent.
+    let inner = match grow_mode {
+        InputGrowMode::Fill => Input::new(state).small().appearance(false).h_full(),
+        InputGrowMode::AutoGrow { .. } => Input::new(state).small().appearance(false),
+    };
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
     // Focus-within accent border.
@@ -126,7 +168,7 @@ pub fn input_with_action<T: InputTabSpec>(
         .border_1()
         .border_color(t.border)
         .in_focus(|s| s.border_color(d::PRIMARY))
-        .rounded(px(d::MODAL_BUTTON_RADIUS))
+        .rounded(px(d::RADIUS_MD))
         // Text region claims the row's free width and full height — `flex_1`
         // takes the free width, the row's `stretch` gives it the full height,
         // and the inner `h_full` editor scrolls within it.

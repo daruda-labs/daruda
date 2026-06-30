@@ -95,6 +95,16 @@ actions!(
     ]
 );
 
+/// Direction for history navigation callbacks installed via
+/// [`InputState::on_history_navigate`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryDir {
+    /// Navigate toward older entries (↑ key).
+    Up,
+    /// Navigate toward more recent entries (↓ key).
+    Down,
+}
+
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
@@ -355,6 +365,16 @@ pub struct InputState {
     /// &mut App`. daruda uses it to cancel the focused agent pane's in-flight
     /// turn (the keyboard counterpart of the bottom-dock "Stop" button).
     pub(super) on_escape: Option<Box<dyn Fn(&mut Window, &mut App) -> bool + 'static>>,
+    /// Optional handler invoked when ↑ or ↓ is pressed and the cursor is
+    /// at the relevant boundary of the text (first visual line for ↑, last
+    /// visual line for ↓). It performs the host's custom action (e.g. recall
+    /// a history entry) and returns `true` to consume the key (input then
+    /// skips its default cursor-movement), `false` to fall through to normal
+    /// up/down cursor movement. Like [`Self::on_secondary_tab`] it does work,
+    /// so it takes the direction plus `&mut Window, &mut App`. daruda installs
+    /// it on the shared bottom-dock input to provide per-lane prompt history.
+    pub(super) on_history_navigate:
+        Option<Box<dyn Fn(HistoryDir, &mut Window, &mut App) -> bool + 'static>>,
     /// Invoked when the user accepts a completion item from the completion menu.
     /// `Rc` (not `Box` like `submit_on_enter`) so the consumer can clone the
     /// handler out and move it into a deferred closure — the accept fires inside
@@ -461,6 +481,7 @@ impl InputState {
             submit_on_enter: None,
             on_secondary_tab: None,
             on_escape: None,
+            on_history_navigate: None,
             on_completion_accept: None,
             mode: InputMode::default(),
             last_layout: None,
@@ -530,6 +551,21 @@ impl InputState {
     /// [`Self::on_escape`] field docs.
     pub fn on_escape(mut self, handler: impl Fn(&mut Window, &mut App) -> bool + 'static) -> Self {
         self.on_escape = Some(Box::new(handler));
+        self
+    }
+
+    /// Install a handler invoked when ↑ or ↓ is pressed and the cursor is at the
+    /// first or last visual line respectively. The handler receives the navigation
+    /// direction, does the host's work (e.g. recall a history entry), and returns
+    /// `true` to consume the key (input skips cursor movement), `false` to fall
+    /// through to the default up/down cursor movement. Evaluated live so it can
+    /// reflect external state (e.g. which lane is focused); see
+    /// [`Self::on_history_navigate`] field docs.
+    pub fn on_history_navigate(
+        mut self,
+        handler: impl Fn(HistoryDir, &mut Window, &mut App) -> bool + 'static,
+    ) -> Self {
+        self.on_history_navigate = Some(Box::new(handler));
         self
     }
 

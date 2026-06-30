@@ -34,7 +34,7 @@
 //! - [`gpui::ExternalPaths`] — Finder / desktop / other-app file drops.
 
 use crate::ui::theme;
-use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*};
+use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
 
 use crate::shell_quote::{format_paths_for_drop, quote_path};
 use crate::workspace::layout::BottomDockSnapshot;
@@ -60,9 +60,15 @@ pub(in crate::workspace) fn render_body(
     // reads "Stop" and cancels that pane's turn; otherwise it reads "Send"
     // and forwards the input (to the agent session or the terminal PTY,
     // resolved inside `send_terminal_input`).
+    // DESIGN.md: Submit button — height 28px, radius md (6px). The primary / danger
+    // factory applies the accent / danger background; height and radius are pinned
+    // here to match the spec's fixed heights table (Button: 28px) and radius scale
+    // (md: 6px), overriding `Button::small()`'s 24px default.
     let submit = match snap.agent_stop_pane {
         Some(pane_id) => {
             crate::ui::button_danger("send", crate::surface::strings::bottom_input_stop_button())
+                .h(px(theme::BUTTON_HEIGHT))
+                .rounded(px(theme::RADIUS_MD))
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| ws.cancel_agent_turn(pane_id, cx));
@@ -71,6 +77,8 @@ pub(in crate::workspace) fn render_body(
         }
         None => {
             crate::ui::button_primary("send", crate::surface::strings::bottom_input_send_button())
+                .h(px(theme::BUTTON_HEIGHT))
+                .rounded(px(theme::RADIUS_MD))
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
@@ -102,12 +110,22 @@ pub(in crate::workspace) fn render_body(
         None => submit.into_any_element(),
     };
     // The action column sits beside the text in its own column (see
-    // `input_with_action`), so the text uses the cell's full height at
-    // every dock size — no row-preset branch is needed.
+    // `input_with_action_grow`). In auto-grow mode the editor self-sizes
+    // to content (up to `max_rows` configured via `AgentConfig`); the
+    // outer dock height is driven by `adapt_dock_to_input_lines` on every
+    // `InputEvent::Change`. In fill mode (fallback) the editor fills the
+    // dock's fixed height and scrolls internally.
+    let max_rows = usize::from(snap.input_max_rows);
     let cell = div()
         .flex_1()
         .flex()
-        .child(crate::ui::input_with_action(&state, action, cx, 0_isize));
+        .child(crate::ui::input_with_action_grow(
+            &state,
+            action,
+            cx,
+            0_isize,
+            crate::ui::InputGrowMode::AutoGrow { max_rows },
+        ));
     super::bottom_panel_body()
         .drag_over::<PathDrag>(|style, _, _, cx| {
             style.bg(theme::current(cx).input_panel_drop_target_bg)

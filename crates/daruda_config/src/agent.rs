@@ -51,7 +51,7 @@ impl DefaultPermissionMode {
 }
 
 /// Agent chat configuration.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentConfig {
     /// Permission mode applied when an agent chat session connects.
@@ -63,6 +63,37 @@ pub struct AgentConfig {
     /// affects the bottom input while an agent chat pane is focused; the
     /// terminal input always uses Cmd+Enter to send.
     pub use_modifier_to_send: bool,
+    /// Maximum number of visible rows before the bottom input scrolls
+    /// internally. The input auto-grows from 1 row up to this limit,
+    /// then clips and scrolls. Clamped to
+    /// [`INPUT_MAX_ROWS_MIN`]..=[`INPUT_MAX_ROWS_MAX`] at load time.
+    pub input_max_rows: u8,
+}
+
+/// Minimum allowed value for `AgentConfig::input_max_rows`.
+pub const INPUT_MAX_ROWS_MIN: u8 = 2;
+/// Maximum allowed value for `AgentConfig::input_max_rows`.
+pub const INPUT_MAX_ROWS_MAX: u8 = 20;
+/// Default maximum rows for the bottom input before it scrolls.
+pub const INPUT_MAX_ROWS_DEFAULT: u8 = 8;
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            default_permission_mode: DefaultPermissionMode::default(),
+            use_modifier_to_send: false,
+            input_max_rows: INPUT_MAX_ROWS_DEFAULT,
+        }
+    }
+}
+
+impl AgentConfig {
+    /// Clamp `input_max_rows` to its valid range.
+    pub fn clamp(&mut self) {
+        self.input_max_rows = self
+            .input_max_rows
+            .clamp(INPUT_MAX_ROWS_MIN, INPUT_MAX_ROWS_MAX);
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +198,34 @@ mod tests {
         let omitted: AgentConfig =
             toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
         assert!(!omitted.use_modifier_to_send);
+    }
+
+    #[test]
+    fn input_max_rows_defaults_and_clamps() {
+        assert_eq!(
+            AgentConfig::default().input_max_rows,
+            INPUT_MAX_ROWS_DEFAULT
+        );
+
+        // Round-trip a non-default value.
+        let toml_str = "input_max_rows = 5";
+        let cfg: AgentConfig = toml::from_str(toml_str).expect("deserialize");
+        assert_eq!(cfg.input_max_rows, 5);
+
+        // Values below the minimum are clamped up.
+        let mut too_low: AgentConfig = toml::from_str("input_max_rows = 0").expect("deserialize");
+        too_low.clamp();
+        assert_eq!(too_low.input_max_rows, INPUT_MAX_ROWS_MIN);
+
+        // Values above the maximum are clamped down.
+        let mut too_high: AgentConfig =
+            toml::from_str("input_max_rows = 255").expect("deserialize");
+        too_high.clamp();
+        assert_eq!(too_high.input_max_rows, INPUT_MAX_ROWS_MAX);
+
+        // Omitting the key keeps the default.
+        let omitted: AgentConfig =
+            toml::from_str("use_modifier_to_send = false").expect("deserialize");
+        assert_eq!(omitted.input_max_rows, INPUT_MAX_ROWS_DEFAULT);
     }
 }

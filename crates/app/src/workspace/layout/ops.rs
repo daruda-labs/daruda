@@ -259,6 +259,54 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Recompute and apply the bottom dock height to match the current
+    /// line count of the shared bottom input. Called from the
+    /// `InputEvent::Change` subscription in `workspace/mod.rs`.
+    ///
+    /// Height formula: `DOCK_BOTTOM_ROW_PRESET_1_H` covers the 1-row
+    /// base (tab bar + padding + one text line); each additional line
+    /// adds `DOCK_BOTTOM_INPUT_EXTRA_LINE_H`. The result is clamped to
+    /// `[DOCK_BOTTOM_MIN_H, DOCK_BOTTOM_MAX_H]` by `Dock::resize`.
+    ///
+    /// Redundant calls are guarded: the new height is compared to the
+    /// dock's current size before going through the resize path to
+    /// avoid notify storms when the content changes within the same row
+    /// count (e.g. typing within a single line doesn't change N).
+    pub(in crate::workspace) fn adapt_dock_to_input_lines(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::ui::RopeExt as _;
+        use crate::ui::theme::{DOCK_BOTTOM_INPUT_EXTRA_LINE_H, DOCK_BOTTOM_ROW_PRESET_1_H};
+
+        // Read line count from the input state (re-entrant-safe: we read
+        // `terminal_input` here while holding `&mut Workspace` — it is a
+        // separate entity so no re-entry conflict; we are not inside an
+        // `entity.update` on `terminal_input`).
+        let new_line_count = self.terminal_input.read(cx).text().lines_len().max(1);
+
+        let max_rows = usize::from(self.agent.input_max_rows);
+        let clamped = new_line_count.min(max_rows);
+
+        // Guard: only resize when line count actually changes.
+        if clamped == self.terminal_input_line_count {
+            return;
+        }
+        self.terminal_input_line_count = clamped;
+
+        let desired = DOCK_BOTTOM_ROW_PRESET_1_H
+            + (clamped.saturating_sub(1) as f32) * DOCK_BOTTOM_INPUT_EXTRA_LINE_H;
+
+        // Only resize when the size actually changes to avoid notify storms.
+        let current = self.bottom_dock.read(cx).size;
+        if (desired - current).abs() < f32::EPSILON {
+            return;
+        }
+
+        self.set_bottom_dock_row_preset(desired, window, cx);
+    }
+
     // ---- Context menu ----
 
     pub(in crate::workspace) fn open_context_menu(

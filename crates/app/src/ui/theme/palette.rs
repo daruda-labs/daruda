@@ -510,6 +510,9 @@ pub const TRAFFIC_LIGHT_Y: f32 = 6.0;
 pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
 /// Dock panel header height (px).
 pub const DOCK_HEADER_HEIGHT: f32 = 28.0;
+/// Standard button height (px) — DESIGN.md §Fixed Heights "Button (standard): 28px".
+/// Applied to Submit and secondary action buttons in the bottom-dock input chrome.
+pub const BUTTON_HEIGHT: f32 = 28.0;
 /// Command palette panel width (px).
 pub const PALETTE_WIDTH: f32 = 500.0;
 /// Command palette top offset from window (px).
@@ -875,6 +878,12 @@ pub const DOCK_BOTTOM_ROW_PRESET_1_H: f32 = 76.0;
 pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 /// Three-row preset height for the bottom dock (px).
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
+/// Height added to the bottom dock for each extra text line when the
+/// bottom input auto-grows beyond one row (px). Sized to match one
+/// `Size::Small` input line: gpui `line_height` (1.25 rem at 16 rem
+/// base ≈ 20 px). The first row is already covered by
+/// `DOCK_BOTTOM_ROW_PRESET_1_H`; this constant covers lines 2…N.
+pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without
