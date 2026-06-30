@@ -598,6 +598,12 @@ pub const GIT_REMOTE_BTN_GAP: f32 = GAP_SM;
 pub const INPUT_PANEL_SECTION_GAP: f32 = GAP_STANDARD;
 /// Gap between buttons in the InputPanel action group (px).
 pub const INPUT_PANEL_BUTTON_GAP: f32 = GAP_STANDARD;
+/// Horizontal inner padding of the bottom-dock textarea (px). Matches
+/// DESIGN.md TerminalInputDock textarea spec: `padding: sm md (8px 12px)`.
+pub const INPUT_TEXTAREA_PAD_X: f32 = 12.0;
+/// Vertical inner padding of the bottom-dock textarea (px). Matches
+/// DESIGN.md TerminalInputDock textarea spec: `padding: sm md (8px 12px)`.
+pub const INPUT_TEXTAREA_PAD_Y: f32 = 8.0;
 /// Minimum height of the TextArea inside InputPanel (px).
 pub const INPUT_PANEL_MIN_H: f32 = 48.0;
 /// Height of the floating action bar overlaid at the bottom of an InputPanel
@@ -880,10 +886,13 @@ pub const DOCK_BOTTOM_ROW_PRESET_2_H: f32 = 114.0;
 pub const DOCK_BOTTOM_ROW_PRESET_3_H: f32 = 152.0;
 /// Height added to the bottom dock for each extra text line when the
 /// bottom input auto-grows beyond one row (px). Sized to match one
-/// `Size::Small` input line: gpui `line_height` (1.25 rem at 16 rem
-/// base ≈ 20 px). The first row is already covered by
-/// `DOCK_BOTTOM_ROW_PRESET_1_H`; this constant covers lines 2…N.
-pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 20.0;
+/// `Size::Small` input line: gpui `line_height` is 1.25 rem, resolved
+/// against the **terminal** font size (default 13 px from
+/// `daruda_config::FontConfig::size`) — 13 × 1.25 ≈ 16 px. Using the
+/// `rem_size` (16 px global) would overestimate by ~4 px per line. The
+/// first row is already covered by `DOCK_BOTTOM_ROW_PRESET_1_H`; this
+/// constant covers lines 2…N.
+pub const DOCK_BOTTOM_INPUT_EXTRA_LINE_H: f32 = 16.0;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without

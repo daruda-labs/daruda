@@ -550,12 +550,14 @@ pub struct Workspace {
     /// re-enter the window via `cx.update_window` when they need to
     /// update widgets whose setters require `&mut Window`.
     pub(in crate::workspace) window_handle: gpui::AnyWindowHandle,
-    /// Per-lane bottom-dock input history. Keyed by `LaneId`; each
-    /// buffer holds submitted prompts and terminal commands in order.
-    /// Populated by `send_terminal_input`; navigated via the ↑/↓
+    /// Per-lane bottom-dock input history. Keyed by `LaneRef` (same as
+    /// every other per-lane workspace cache) to prevent cross-project
+    /// collisions: `LaneId` is a per-project monotonic counter, so two
+    /// different projects can share the same raw id. Populated by
+    /// `send_terminal_input`; navigated via the ↑/↓
     /// `on_history_navigate` hook installed on `terminal_input`.
     pub(in crate::workspace) input_history: std::collections::HashMap<
-        daruda_store::project::LaneId,
+        daruda_store::project::LaneRef,
         crate::lane::history::HistoryBuffer,
     >,
 }

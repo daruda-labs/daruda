@@ -584,6 +584,29 @@ impl InputState {
         self
     }
 
+    /// Update the auto-grow bounds on an already-constructed [`InputState`].
+    ///
+    /// Mirrors [`Self::auto_grow`] but takes `&mut self` so it can be called
+    /// after construction — e.g. from a live-config-reload handler. No-op when
+    /// the mode is not [`InputMode::AutoGrow`]; call sites that want to switch
+    /// from a different mode should use the builder instead.
+    ///
+    /// daruda vendor patch — `auto_grow` builder sets bounds at construction
+    /// time only; this setter lets `Workspace::apply_config` update the cap
+    /// after a `[agent] input_max_rows` change so the editor cap and the dock
+    /// height cap stay in sync (single source of truth, Issue C fix).
+    pub fn set_auto_grow(&mut self, min_rows: usize, max_rows: usize) {
+        if let InputMode::AutoGrow {
+            min_rows: ref mut min,
+            max_rows: ref mut max,
+            ..
+        } = self.mode
+        {
+            *min = min_rows;
+            *max = max_rows;
+        }
+    }
+
     /// Set Input to use [`InputMode::CodeEditor`] mode.
     ///
     /// Default options:

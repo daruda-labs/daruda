@@ -1,6 +1,6 @@
 //! Mode-selector chip for the bottom-dock terminal input.
 //!
-//! Renders the focused Agent chat pane's current session mode as a ghost
+//! Renders the focused Agent chat pane's current session mode as a Secondary
 //! `xsmall` button with a chevron; clicking it opens a dropdown listing every
 //! advertised mode. Selecting a mode dispatches `Workspace::set_agent_mode`
 //! for that pane (one-line dispatch — no state logic in this builder, MVU view

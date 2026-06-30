@@ -49,6 +49,14 @@ impl Workspace {
         self.notifications = config.notifications.clone();
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
+        // Keep the `InputState`'s auto-grow cap in sync with the new
+        // `input_max_rows` value. The cap is also baked in at construction
+        // (`workspace/mod.rs`); without this update a live reload would leave
+        // the editor expanding past the new limit or stopping short of it.
+        // `set_auto_grow` requires no `&mut Window`, so it runs inline.
+        let new_max_rows = usize::from(config.agent.input_max_rows);
+        self.terminal_input
+            .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
         self.claude.usage_poll = config.usage.poll.clone();
 
         // Patch all existing pane views: font + colors + opacity. Iterate

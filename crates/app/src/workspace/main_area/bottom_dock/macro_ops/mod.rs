@@ -526,10 +526,10 @@ impl Workspace {
         // terminal commands land in the same unified buffer. `push` resets
         // the navigation cursor, so ↑ after submit starts from the entry
         // we just pushed.
-        let lane_id = self.active.lane;
+        let lane_ref = self.active_ref();
         let history_text = trimmed.trim().to_owned();
         self.input_history
-            .entry(lane_id)
+            .entry(lane_ref)
             .or_default()
             .push(&history_text);
         // When an Agent chat pane is focused, the bottom-dock input drives
@@ -566,8 +566,8 @@ impl Workspace {
         &self,
         dir: crate::ui::HistoryDir,
     ) -> bool {
-        let lane_id = self.active.lane;
-        let Some(buf) = self.input_history.get(&lane_id) else {
+        let lane_ref = self.active_ref();
+        let Some(buf) = self.input_history.get(&lane_ref) else {
             return false;
         };
         match dir {
@@ -588,8 +588,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let current = self.terminal_input.read(cx).value().to_string();
-        let lane_id = self.active.lane;
-        let buf = self.input_history.entry(lane_id).or_default();
+        let lane_ref = self.active_ref();
+        let buf = self.input_history.entry(lane_ref).or_default();
         let new_text = match dir {
             crate::ui::HistoryDir::Up => buf.prev(&current).map(str::to_owned),
             crate::ui::HistoryDir::Down => buf.forward().map(str::to_owned),

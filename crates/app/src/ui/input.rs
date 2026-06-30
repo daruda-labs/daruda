@@ -151,9 +151,27 @@ pub fn input_with_action_grow<T: InputTabSpec>(
     // configured via `InputState::auto_grow`); `h_full` is omitted so the
     // column shrinks to the editor's natural height instead of stretching to
     // fill the parent.
+    // Disable the size-derived inner padding (`input_px`/`input_py`) on the
+    // Input itself so the text column wrapper can apply the DESIGN.md spec:
+    // `padding: sm md (8px 12px)` — `INPUT_TEXTAREA_PAD_X` horizontal,
+    // `INPUT_TEXTAREA_PAD_Y` vertical. Without `input_padding(false)` the
+    // `Small` defaults (px=8, py=2) would contradict the spec.
+    //
+    // In `AutoGrow` mode the `max_rows` field is now live: it is forwarded
+    // to `InputState::set_auto_grow` from the `InputEvent::Change` subscriber
+    // on config reload (Issue C fix), so the state's internal cap stays in
+    // sync after a live config change. The field is kept in the enum rather
+    // than dropped so the render path doesn't need to re-read the state.
     let inner = match grow_mode {
-        InputGrowMode::Fill => Input::new(state).small().appearance(false).h_full(),
-        InputGrowMode::AutoGrow { .. } => Input::new(state).small().appearance(false),
+        InputGrowMode::Fill => Input::new(state)
+            .small()
+            .appearance(false)
+            .input_padding(false)
+            .h_full(),
+        InputGrowMode::AutoGrow { .. } => Input::new(state)
+            .small()
+            .appearance(false)
+            .input_padding(false),
     };
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
@@ -171,8 +189,17 @@ pub fn input_with_action_grow<T: InputTabSpec>(
         .rounded(px(d::RADIUS_MD))
         // Text region claims the row's free width and full height — `flex_1`
         // takes the free width, the row's `stretch` gives it the full height,
-        // and the inner `h_full` editor scrolls within it.
-        .child(div().flex_1().flex().min_w_0().child(inner))
+        // and the inner `h_full` editor scrolls within it. Padding follows
+        // DESIGN.md TerminalInputDock spec: `sm md (8px 12px)`.
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .min_w_0()
+                .px(px(d::INPUT_TEXTAREA_PAD_X))
+                .py(px(d::INPUT_TEXTAREA_PAD_Y))
+                .child(inner),
+        )
         // Action — beside the text on the right in its own full-height
         // column, bottom-aligned (composer feel). No vertical reservation is
         // taken from the text (the button sits in a separate column, not over
