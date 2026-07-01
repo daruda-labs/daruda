@@ -161,6 +161,29 @@ pub fn logical_line_range(
     start..end
 }
 
+/// Whether a character occupying the horizontal cell `[cell_left, cell_left +
+/// cell_width)` is covered by a horizontal selection span `[sel_left,
+/// sel_right]` (all values in the same 1-D pixel space, e.g. window x).
+///
+/// Two regimes, keyed on whether the span is degenerate:
+/// - **Drag** (`sel_left != sel_right`): a character is selected when its
+///   *center* falls within the span. This is the half-character threshold
+///   convention used while dragging a selection.
+/// - **Click, no drag** (`sel_left == sel_right`): the span collapses to a
+///   single point (the click). The character whose cell *contains* that point
+///   is hit. Without this case a word/line click — which produces a zero-width
+///   selection box and re-expands from the raw pixel scan — would match no
+///   character (center == point is effectively never true), so nothing gets
+///   selected.
+pub fn char_cell_hit_x(cell_left: f32, cell_width: f32, sel_left: f32, sel_right: f32) -> bool {
+    if sel_left == sel_right {
+        cell_left <= sel_left && sel_left < cell_left + cell_width
+    } else {
+        let center = cell_left + cell_width / 2.0;
+        center >= sel_left && center <= sel_right
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

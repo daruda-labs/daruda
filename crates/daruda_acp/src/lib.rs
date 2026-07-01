@@ -22,4 +22,6 @@ pub use model::{
     PlanEntryView, PlanPriority, PlanStatus, SessionModeView, SlashCommand, SlashCommandInput,
     ToolCallItem, ToolKindView, ToolStatusView,
 };
-pub use session::{AcpEvent, AcpSessionHandle, PermissionDecision, connect_session};
+pub use session::{
+    AcpEvent, AcpSessionHandle, InfoFieldChange, PermissionDecision, connect_session,
+};

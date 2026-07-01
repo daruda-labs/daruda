@@ -93,8 +93,8 @@ fn main() {
                 AcpEvent::PlanChanged(entries) => {
                     eprintln!("[plan] {} entries", entries.len());
                 }
-                AcpEvent::SessionTitleChanged(title) => {
-                    eprintln!("[title] {title:?}");
+                AcpEvent::SessionInfoChanged { title, updated_at } => {
+                    eprintln!("[session-info] title={title:?} updated_at={updated_at:?}");
                 }
                 AcpEvent::Notice(msg) => {
                     eprintln!("[notice] {msg}");

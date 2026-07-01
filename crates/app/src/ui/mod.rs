@@ -83,7 +83,9 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
 pub use gpui_component::text::{SelectMode, select_mode_for_click_count};
-pub use gpui_component::text_selection::{CharType, logical_line_range, word_range};
+pub use gpui_component::text_selection::{
+    CharType, char_cell_hit_x, logical_line_range, word_range,
+};
 pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};
 
@@ -156,7 +158,9 @@ mod word_range_tests {
 
 #[cfg(test)]
 mod text_view_select_mode_tests {
-    use super::{SelectMode, logical_line_range, select_mode_for_click_count, word_range};
+    use super::{
+        SelectMode, char_cell_hit_x, logical_line_range, select_mode_for_click_count, word_range,
+    };
 
     fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
         if byte_offset >= s.len() || !s.is_char_boundary(byte_offset) {
@@ -264,5 +268,42 @@ mod text_view_select_mode_tests {
         let s2 = anchor.start.min(line_at_cursor2.start);
         let e2 = anchor.end.max(line_at_cursor2.end);
         assert_eq!(&text[s2..e2], "hello");
+    }
+
+    /// A word/line click produces a zero-width selection span (start == end),
+    /// and `layout_selections` re-expands from the raw pixel-hit scan. The
+    /// scan must still hit the char cell under the click — this is the bug
+    /// where only quad-click (which bypasses the scan) appeared to work.
+    /// Calls the real `char_cell_hit_x` used by `point_in_text_selection`.
+    #[test]
+    fn char_cell_hit_click_point_hits_cell_under_point() {
+        // Click at x=102, off the center of any 10px cell — the old
+        // center-threshold logic (center == click) would miss the containing
+        // cell here, which is exactly the "only quad-click works" bug.
+        let click = 102.0;
+        // Cell [100, 112) contains 102 → hit (center 105 ≠ click).
+        assert!(char_cell_hit_x(100.0, 10.0, click, click));
+        // Cell [110, 120) is right of the click → miss.
+        assert!(!char_cell_hit_x(110.0, 10.0, click, click));
+        // Cell [90, 100) is left of the click → miss.
+        assert!(!char_cell_hit_x(90.0, 10.0, click, click));
+        // Left edge inclusive, right edge exclusive.
+        assert!(char_cell_hit_x(102.0, 10.0, click, click));
+        assert!(!char_cell_hit_x(92.0, 10.0, click, click));
+    }
+
+    /// A drag span keeps the pre-existing half-character (center) threshold:
+    /// a char is selected when its center falls inside the span.
+    #[test]
+    fn char_cell_hit_drag_span_uses_center_threshold() {
+        // Span [100, 150]; cells 10px wide.
+        // Cell [95, 105): center 100 ≥ 100 → hit (center exactly at left edge).
+        assert!(char_cell_hit_x(95.0, 10.0, 100.0, 150.0));
+        // Cell [90, 100): center 95 < 100 → miss (matches "left out" convention).
+        assert!(!char_cell_hit_x(90.0, 10.0, 100.0, 150.0));
+        // Cell [145, 155): center 150 ≤ 150 → hit.
+        assert!(char_cell_hit_x(145.0, 10.0, 100.0, 150.0));
+        // Cell [150, 160): center 155 > 150 → miss.
+        assert!(!char_cell_hit_x(150.0, 10.0, 100.0, 150.0));
     }
 }

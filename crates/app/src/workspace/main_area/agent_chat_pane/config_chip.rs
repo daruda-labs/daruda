@@ -2,7 +2,7 @@
 //!
 //! Sibling of [`super::mode_chip`]: where the mode chip renders the session's
 //! permission mode (via `ModeStateView`), this renders one ACP *select* config
-//! option (model, reasoning effort, …) as a Secondary `xsmall` button with a
+//! option (model, reasoning effort, …) as a ghost `xsmall` button with a
 //! chevron; clicking it opens a dropdown of the option's choices. Selecting a
 //! choice dispatches `Workspace::set_agent_config_option` for that pane (one-line
 //! dispatch — no state logic here, MVU view purity + one-way data flow).
@@ -14,7 +14,9 @@ use daruda_acp::ConfigOptionView;
 use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
-use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme};
+use crate::ui::{
+    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme,
+};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -49,9 +51,10 @@ pub(in crate::workspace) fn config_chip(
 
     let chip_id = SharedString::from(format!("agent-chat-config-chip-{pane_id}-{}", option.id));
 
-    // Same chrome as the mode chip (DESIGN.md Secondary button: surface-2 bg,
-    // 28px height, radius md) so the chip row reads as one control group.
+    // Same chrome as the mode chip (ghost variant: transparent bg, fills on
+    // hover; 28px height, radius md) so the chip row reads as one control group.
     button(chip_id, label)
+        .ghost()
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))

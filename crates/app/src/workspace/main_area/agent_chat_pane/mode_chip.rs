@@ -1,6 +1,6 @@
 //! Mode-selector chip for the bottom-dock terminal input.
 //!
-//! Renders the focused Agent chat pane's current session mode as a Secondary
+//! Renders the focused Agent chat pane's current session mode as a ghost
 //! `xsmall` button with a chevron; clicking it opens a dropdown listing every
 //! advertised mode. Selecting a mode dispatches `Workspace::set_agent_mode`
 //! for that pane (one-line dispatch — no state logic in this builder, MVU view
@@ -14,7 +14,9 @@ use daruda_acp::ModeStateView;
 use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
 
 use crate::surface::strings;
-use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme};
+use crate::ui::{
+    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button, theme,
+};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -53,13 +55,13 @@ pub(in crate::workspace) fn mode_chip(
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
 
-    // DESIGN.md: Secondary action buttons — background surface-2, text body,
-    // radius md (6px), height 28px. `button()` defaults to `ButtonVariant::Secondary`
-    // which maps to `theme.secondary = SURFACE_2` + `secondary_foreground = TEXT_BODY`.
-    // Previously `.ghost()` (transparent bg) was used; removed to match the spec's
-    // "background surface-2" requirement. Height and radius pin the button to the
-    // spec's fixed-heights table (Button: 28px, radius md: 6px).
+    // Ghost variant: transparent background at rest, fills only on hover, so the
+    // chip row reads as inline text controls beside the input rather than raised
+    // buttons. Height and radius pin the button to the spec's fixed-heights table
+    // (Button: 28px, radius md: 6px). Kept identical to the model/effort
+    // `config_chip` so all three chips read as one control group.
     button(chip_id, label)
+        .ghost()
         .xsmall()
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))

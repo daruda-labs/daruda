@@ -212,6 +212,7 @@ agent_chat:
   activity_bar_title: "Agent"
   expand_all: "Expand all"
   collapse_all: "Collapse all"
+  last_active_tooltip: "Last active: %{time}"
   plan_label: "Plan"
   thinking_label: "Thinking"
   tool_output_label: "Output"

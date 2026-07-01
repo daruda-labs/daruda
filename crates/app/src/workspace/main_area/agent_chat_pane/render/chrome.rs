@@ -19,6 +19,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(super) fn activity_bar(
     pane_id: PaneId,
     session_title: Option<&str>,
+    last_active: Option<&str>,
     has_items: bool,
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
@@ -26,6 +27,12 @@ pub(super) fn activity_bar(
     let title: SharedString = session_title
         .map(|s| SharedString::from(s.to_string()))
         .unwrap_or_else(|| SharedString::from(s::agent_chat_activity_bar_title()));
+    // Last-activity timestamp (from `SessionInfoUpdate.updated_at`) surfaces as a
+    // tooltip on the title rather than inline text — it's low-frequency detail
+    // and the bar is width-constrained (title ellipsizes).
+    let last_active_tooltip: Option<SharedString> = last_active
+        .map(format_last_active)
+        .map(|when| SharedString::from(s::agent_chat_last_active_tooltip(&when)));
 
     let expand = crate::ui::button(
         ("agent-chat-expand-all", pane_id as usize),
@@ -56,6 +63,7 @@ pub(super) fn activity_bar(
         .border_color(t.border)
         .child(
             div()
+                .id(("agent-chat-title", pane_id as usize))
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
@@ -63,7 +71,10 @@ pub(super) fn activity_bar(
                 .text_ellipsis()
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .text_color(t.text_primary)
-                .child(title),
+                .child(title)
+                .when_some(last_active_tooltip, |el, tip| {
+                    el.tooltip(crate::ui::tooltip::text(tip))
+                }),
         )
         .when(has_items, |row| {
             row.child(
@@ -78,6 +89,19 @@ pub(super) fn activity_bar(
                     .child(collapse),
             )
         })
+}
+
+/// Format an ISO 8601 timestamp (`2026-07-01T14:32:05.000Z`) into a compact
+/// `YYYY-MM-DD HH:MM` for the last-active tooltip. Best-effort by slicing the
+/// canonical shape (date + `HH:MM`); returns the input unchanged when it does
+/// not match, so a non-standard timestamp still shows rather than being dropped.
+fn format_last_active(iso: &str) -> String {
+    match iso.split_once('T') {
+        Some((date, time)) if date.len() == 10 && time.len() >= 5 => {
+            format!("{date} {}", &time[..5])
+        }
+        _ => iso.to_string(),
+    }
 }
 
 /// The thin top banner — shown while connecting or on error; hidden once
@@ -216,8 +240,27 @@ pub(super) fn working_indicator(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_elapsed, running_tool_title};
+    use super::{format_elapsed, format_last_active, running_tool_title};
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    #[test]
+    fn format_last_active_slices_canonical_iso_to_date_and_hh_mm() {
+        assert_eq!(
+            format_last_active("2026-07-01T14:32:05.123Z"),
+            "2026-07-01 14:32"
+        );
+        assert_eq!(
+            format_last_active("2026-12-25T09:00:00+09:00"),
+            "2026-12-25 09:00"
+        );
+    }
+
+    #[test]
+    fn format_last_active_returns_unrecognized_input_unchanged() {
+        // No 'T' separator / wrong shape → best-effort passthrough, not a panic.
+        assert_eq!(format_last_active("not-a-timestamp"), "not-a-timestamp");
+        assert_eq!(format_last_active("2026-07-01"), "2026-07-01");
+    }
 
     fn tool(id: &str, status: ToolStatusView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {

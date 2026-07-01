@@ -92,6 +92,31 @@ impl PermissionDecision {
     }
 }
 
+/// A change to one `SessionInfoUpdate` field. Mirrors the protocol's tri-state
+/// `MaybeUndefined`: the field may be absent (untouched), explicitly cleared, or
+/// set to a value — three distinct states, so a plain `Option<String>` (which
+/// can't tell "untouched" from "cleared") would be lossy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InfoFieldChange {
+    /// The update omitted this field — leave the host's current value untouched.
+    Unchanged,
+    /// The update set this field to null — clear the host's value.
+    Cleared,
+    /// The update set this field to a concrete value.
+    Set(String),
+}
+
+impl From<agent_client_protocol::schema::MaybeUndefined<String>> for InfoFieldChange {
+    fn from(field: agent_client_protocol::schema::MaybeUndefined<String>) -> Self {
+        use agent_client_protocol::schema::MaybeUndefined;
+        match field {
+            MaybeUndefined::Undefined => InfoFieldChange::Unchanged,
+            MaybeUndefined::Null => InfoFieldChange::Cleared,
+            MaybeUndefined::Value(v) => InfoFieldChange::Set(v),
+        }
+    }
+}
+
 /// An event emitted by the live connection for the host to consume.
 #[derive(Debug)]
 pub enum AcpEvent {
@@ -104,9 +129,11 @@ pub enum AcpEvent {
         modes: Option<ModeStateView>,
         config_options: Vec<ConfigOptionView>,
     },
-    /// The agent replaced its session config option state — the response to a
-    /// `set_config_option` request (the protocol returns the full updated set).
-    /// Full replacement of the host's cached options.
+    /// The agent replaced its session config option state (the protocol carries
+    /// the full option set), from either source: the reply to our
+    /// `set_config_option` request, or an agent-pushed `ConfigOptionUpdate`
+    /// notification (a change the agent made itself — e.g. a fast-mode toggle).
+    /// Either way it is a full replacement of the host's cached options.
     ConfigOptionsChanged(Vec<ConfigOptionView>),
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
@@ -127,8 +154,15 @@ pub enum AcpEvent {
     AvailableCommandsChanged(Vec<crate::model::SlashCommand>),
     /// The agent's execution plan changed (`SessionUpdate::Plan`). Full replacement.
     PlanChanged(Vec<crate::model::PlanEntryView>),
-    /// The session title changed (`SessionInfoUpdate.title`). `None` = cleared.
-    SessionTitleChanged(Option<String>),
+    /// Session metadata changed (`SessionInfoUpdate`): the title and/or the
+    /// last-activity timestamp. Each field applies additively — `Unchanged`
+    /// leaves the host's cached value alone (the protocol omits fields it isn't
+    /// touching), so this one event covers a title-only, timestamp-only, or
+    /// combined update without a bool/`Option` soup.
+    SessionInfoChanged {
+        title: InfoFieldChange,
+        updated_at: InfoFieldChange,
+    },
     /// A non-fatal advisory message (e.g. set_mode on connect was rejected
     /// by the adapter). The session remains live; the host should log this
     /// at Warning severity without changing the session status.
@@ -312,19 +346,24 @@ async fn run_connection(
                             .map(crate::model::PlanEntryView::from)
                             .collect(),
                     ),
-                    // title == Undefined: no title change. A timestamp-only update
-                    // (updated_at == Value) is forwarded as a raw Update, which
-                    // apply_update drops (catch-all) — daruda does not consume
-                    // updated_at yet.
-                    // TODO(acp): consume `updated_at` for last-activity display.
-                    SessionUpdate::SessionInfoUpdate(u) if u.title.is_undefined() => {
-                        AcpEvent::Update(Box::new(SessionUpdate::SessionInfoUpdate(u)))
-                    }
-                    // Not undefined here: Null → take() = None (clear),
-                    // Value(s) → Some(s) (set).
-                    SessionUpdate::SessionInfoUpdate(u) => {
-                        AcpEvent::SessionTitleChanged(u.title.take())
-                    }
+                    // Title and last-activity timestamp. The adapter pushes both
+                    // together at turn-end, but each field is mapped independently
+                    // so a title-only or timestamp-only update (per the protocol's
+                    // per-field `MaybeUndefined`) is also handled correctly.
+                    SessionUpdate::SessionInfoUpdate(u) => AcpEvent::SessionInfoChanged {
+                        title: u.title.into(),
+                        updated_at: u.updated_at.into(),
+                    },
+                    // The agent pushed a config-option change it made itself
+                    // (e.g. a fast-mode toggle, or effort reconciliation after a
+                    // mode downgrade) — not a reply to our `set_config_option`.
+                    // Carries the full option set, so reuse the same
+                    // ConfigOptionsChanged full-replace the request path emits;
+                    // without this the model/effort/mode chips show a stale value
+                    // after any agent-driven change.
+                    SessionUpdate::ConfigOptionUpdate(u) => AcpEvent::ConfigOptionsChanged(
+                        config_options_from_protocol(&u.config_options),
+                    ),
                     update => AcpEvent::Update(Box::new(update)),
                 };
                 let _ = notif_tx.unbounded_send(event);
@@ -374,13 +413,8 @@ async fn run_connection(
             let mut modes: Option<ModeStateView> = new_session.modes.as_ref().map(Into::into);
             // Select config options advertised at connect (model / effort / …).
             // Non-select kinds are dropped by `from_protocol`.
-            let config_options: Vec<ConfigOptionView> = new_session
-                .config_options
-                .as_deref()
-                .unwrap_or(&[])
-                .iter()
-                .filter_map(ConfigOptionView::from_protocol)
-                .collect();
+            let config_options =
+                config_options_from_protocol(new_session.config_options.as_deref().unwrap_or(&[]));
 
             // Apply the configured initial mode when the adapter advertised it,
             // the requested id is in the available list, and it differs from
@@ -575,13 +609,23 @@ async fn send_set_config_option(
         ))
         .block_task()
         .await?;
-    let options: Vec<ConfigOptionView> = resp
-        .config_options
-        .iter()
-        .filter_map(ConfigOptionView::from_protocol)
-        .collect();
+    let options = config_options_from_protocol(&resp.config_options);
     let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(options));
     Ok(())
+}
+
+/// Map a protocol config-option list to the view model, dropping non-select
+/// kinds (`from_protocol` returns `None` for them). The single conversion site
+/// shared by all three sources of a full option set: the connect-time advertise
+/// (`session/new` response), the `set_config_option` reply, and the agent-pushed
+/// `ConfigOptionUpdate` notification.
+fn config_options_from_protocol(
+    options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+) -> Vec<ConfigOptionView> {
+    options
+        .iter()
+        .filter_map(ConfigOptionView::from_protocol)
+        .collect()
 }
 
 #[cfg(test)]
@@ -651,6 +695,47 @@ mod tests {
             }
         );
         assert!(parks.lock().unwrap().is_empty(), "id must be consumed");
+    }
+
+    #[test]
+    fn info_field_change_maps_all_three_maybe_undefined_states() {
+        use agent_client_protocol::schema::MaybeUndefined;
+        assert_eq!(
+            InfoFieldChange::from(MaybeUndefined::<String>::Undefined),
+            InfoFieldChange::Unchanged
+        );
+        assert_eq!(
+            InfoFieldChange::from(MaybeUndefined::<String>::Null),
+            InfoFieldChange::Cleared
+        );
+        assert_eq!(
+            InfoFieldChange::from(MaybeUndefined::Value("Fix parser bug".to_string())),
+            InfoFieldChange::Set("Fix parser bug".to_string())
+        );
+    }
+
+    #[test]
+    fn config_options_from_protocol_maps_select_options() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+        let opts = vec![
+            SessionConfigOption::select(
+                "model",
+                "Model",
+                "sonnet",
+                vec![SessionConfigSelectOption::new("sonnet", "Sonnet")],
+            )
+            .category(SessionConfigOptionCategory::Model),
+        ];
+        let views = config_options_from_protocol(&opts);
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].id, "model");
+        assert_eq!(views[0].current_value, "sonnet");
+        assert_eq!(
+            views[0].category,
+            crate::model::ConfigOptionCategoryView::Model
+        );
     }
 
     #[test]

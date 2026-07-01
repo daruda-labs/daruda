@@ -12,8 +12,12 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme, global_state::GlobalState, input::Selection, text::node::LinkMark,
-    text::text_view::SelectMode, text_selection::word_range,
+    ActiveTheme,
+    global_state::GlobalState,
+    input::Selection,
+    text::node::LinkMark,
+    text::text_view::SelectMode,
+    text_selection::{char_cell_hit_x, word_range},
 };
 
 /// A inline element used to render a inline text and support selectable.
@@ -470,8 +474,16 @@ fn point_in_text_selection(
 
     let single_line = (bottom - top) <= line_height;
     if single_line {
-        // If it's a single line selection, just check horizontal bounds
-        return pos.x + char_width.half() >= left && pos.x + char_width.half() <= right;
+        // Single-line (or zero-height click) selection: decide purely on the
+        // horizontal span. `char_cell_hit_x` handles both a drag span (center
+        // threshold) and a degenerate click point (cell contains the point),
+        // so a word/line click with no drag still hits the char under it.
+        return char_cell_hit_x(
+            f32::from(pos.x),
+            f32::from(char_width),
+            f32::from(left),
+            f32::from(right),
+        );
     }
 
     let is_above = pos.y <= top;

@@ -50,9 +50,9 @@ use gpui::{
 };
 
 use super::agent_chat_ops::{
-    DiffStat, build_diff_view_model, cancel_pending_permission, chat_item_markdown,
-    collect_foldable_keys, create_diff_editor, diff_editor_key, diff_editor_language, is_active,
-    mermaid_key, mermaid_sources, trailing_unresolved_permission,
+    DiffStat, apply_info_field, build_diff_view_model, cancel_pending_permission,
+    chat_item_markdown, collect_foldable_keys, create_diff_editor, diff_editor_key,
+    diff_editor_language, is_active, mermaid_key, mermaid_sources, trailing_unresolved_permission,
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, project};
@@ -197,8 +197,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// The agent's live execution plan (`PlanChanged`); full-replaced each update.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) plan: Vec<PlanEntryView>,
-    /// Agent-provided session title (`SessionTitleChanged`); `None` = fallback label.
+    /// Agent-provided session title (`SessionInfoChanged`); `None` = fallback label.
     pub(in crate::workspace) session_title: Option<String>,
+    /// Agent-provided last-activity timestamp (`SessionInfoChanged`, ISO 8601);
+    /// `None` = unknown. Shown as a tooltip on the activity-bar title. Runtime-only.
+    pub(in crate::workspace) session_updated_at: Option<String>,
     /// Whether the bottom plan region is collapsed to its header. Transient /
     /// session-only; defaults to `false` (expanded) so a fresh plan shows its
     /// checklist. Toggled by the header click via [`Self::toggle_plan_collapsed`].
@@ -282,6 +285,7 @@ impl AgentChatView {
             available_commands: Vec::new(),
             plan: Vec::new(),
             session_title: None,
+            session_updated_at: None,
             plan_collapsed: false,
             plan_scroll: ScrollHandle::new(),
             #[cfg(test)]
@@ -347,6 +351,7 @@ impl AgentChatView {
                 // flash before the new agent sends its first updates.
                 self.plan.clear();
                 self.session_title = None;
+                self.session_updated_at = None;
                 self.plan_collapsed = false;
             }
             AcpEvent::ConfigOptionsChanged(options) => {
@@ -403,8 +408,9 @@ impl AgentChatView {
                 }
                 self.plan = entries;
             }
-            AcpEvent::SessionTitleChanged(title) => {
-                self.session_title = title;
+            AcpEvent::SessionInfoChanged { title, updated_at } => {
+                apply_info_field(&mut self.session_title, title);
+                apply_info_field(&mut self.session_updated_at, updated_at);
             }
             AcpEvent::Notice(_) => {
                 // Logged above; no status change.

@@ -212,6 +212,7 @@ agent_chat:
   activity_bar_title: "에이전트"
   expand_all: "모두 펼치기"
   collapse_all: "모두 접기"
+  last_active_tooltip: "마지막 활동: %{time}"
   plan_label: "계획"
   thinking_label: "생각 중"
   tool_output_label: "출력"

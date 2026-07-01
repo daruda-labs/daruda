@@ -788,6 +788,21 @@ pub(in crate::workspace) fn cancel_pending_permission(view: &mut AgentChatView) 
     }
 }
 
+/// Apply one `SessionInfoUpdate` field change to a cached `Option<String>`
+/// slot. `Unchanged` leaves the slot as-is (the update omitted the field);
+/// `Cleared` resets it to `None`; `Set` overwrites it. Shared by the title and
+/// last-activity fields so both honour the protocol's per-field tri-state.
+pub(in crate::workspace) fn apply_info_field(
+    slot: &mut Option<String>,
+    change: daruda_acp::InfoFieldChange,
+) {
+    match change {
+        daruda_acp::InfoFieldChange::Unchanged => {}
+        daruda_acp::InfoFieldChange::Cleared => *slot = None,
+        daruda_acp::InfoFieldChange::Set(value) => *slot = Some(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -96,6 +96,7 @@ pub(in crate::workspace) fn render(
     let bar = activity_bar(
         pane_id,
         content.session_title.as_deref(),
+        content.session_updated_at.as_deref(),
         !content.items.is_empty(),
         &t,
         cx,
