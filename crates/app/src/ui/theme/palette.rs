@@ -70,6 +70,27 @@ pub const fn with_lightness(c: Hsla, l: f32) -> Hsla {
 /// nothing (e.g. a nested accordion whose parent surface shows through).
 pub const TRANSPARENT: Hsla = hsla(0.0, 0.0, 0.0, 0.0);
 
+/// Neutral overlays (`s = 0`, hue irrelevant) for background-derived
+/// elevation. Laid over any surface at a low alpha via [`with_alpha`], white
+/// lifts a dark background and black recesses a light one, so a tint reads one
+/// step off the base regardless of the background *color* — the base needs
+/// only its lightness inspected. See `theme::agent_chat_tint`.
+pub const OVERLAY_WHITE: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
+pub const OVERLAY_BLACK: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
+/// Alpha for the agent-chat tool-card tint — a gentle lift so the card sits
+/// one step above the pane background on any background color.
+pub const AGENT_CHAT_CARD_TINT_ALPHA: f32 = 0.05;
+/// Alpha for the agent-chat tool-card / code-block border — a hairline one
+/// step stronger than the fill tint, drawn from the same neutral overlay so
+/// the edge tracks the background instead of a fixed line color.
+pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
+/// User-message bubble fill: a translucent *accent* tint (not the neutral
+/// white/black used for code), so the user's turn is set off by hue while code
+/// stays chromatically quiet. Translucent, so it rides the pane background on
+/// any theme; accent-hued rather than neutral is the one sanctioned chromatic
+/// fill (cf. `accent-muted`, DESIGN §Accent — badge fill).
+pub const AGENT_CHAT_USER_TINT: Hsla = with_alpha(PRIMARY, 0.22);
+
 // ============================================================================
 // Design tokens — primitive colour literals (single source of truth)
 // ============================================================================

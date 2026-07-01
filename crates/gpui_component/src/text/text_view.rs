@@ -297,7 +297,11 @@ impl TextViewState {
 impl TextViewState {
     /// Save bounds and unselect if bounds changed.
     fn update_bounds(&mut self, bounds: Bounds<Pixels>) {
-        if self.bounds.size != bounds.size {
+        // Only a width change reflows the text and invalidates the pixel-based
+        // selection. A height change (streaming append growing the block, or a
+        // vertical relayout) leaves existing lines at the same x/y, so keep the
+        // selection — otherwise a growing streamed response drops it mid-drag.
+        if self.bounds.size.width != bounds.size.width {
             self.clear_selection();
         }
         self.bounds = bounds;
@@ -725,7 +729,12 @@ impl Element for TextView {
                                     let app = &mut **cx;
                                     app.notify(parent_entity);
                                 }
-                                state.clear_selection();
+                                // Do NOT clear the selection on reparse. Streaming
+                                // text only appends (existing layout is stable), so
+                                // the pixel selection stays valid; clearing here
+                                // dropped the user's selection on every chunk. A
+                                // width change (real reflow) still clears via
+                                // `update_bounds`.
                             });
                         } else {
                             // state released, stopping processing

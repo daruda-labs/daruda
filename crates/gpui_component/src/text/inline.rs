@@ -17,7 +17,7 @@ use crate::{
     input::Selection,
     text::node::LinkMark,
     text::text_view::SelectMode,
-    text_selection::{char_cell_hit_x, word_range},
+    text_selection::{char_cell_hit_x, floor_char_boundary, word_range},
 };
 
 /// A inline element used to render a inline text and support selectable.
@@ -139,8 +139,14 @@ impl Inline {
                 continue;
             };
 
+            // Advance by the current char's byte length, not a single byte, so
+            // the next index is a valid UTF-8 boundary. `offset + 1` lands
+            // mid-char for multi-byte glyphs (e.g. 3-byte Hangul/CJK), which
+            // makes `position_for_index` miss and the cell width collapse to the
+            // fallback — so clicks on the char's right half miss it and word
+            // selection never fires for non-ASCII text.
             let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(offset + 1) {
+            if let Some(next_pos) = text_layout.position_for_index(offset + c.len_utf8()) {
                 if next_pos.y == pos.y {
                     char_width = next_pos.x - pos.x;
                 }
@@ -186,7 +192,12 @@ impl Inline {
                 let start = word_range(text.len(), char_at, raw_start)
                     .map(|r| r.start)
                     .unwrap_or(raw_start);
-                let end = word_range(text.len(), char_at, raw_end.saturating_sub(1))
+                // Expand from the last selected char's *start*. `raw_end` is
+                // exclusive, so `raw_end - 1` would land inside a multi-byte
+                // glyph (Hangul/CJK) and `word_range` would bail (char_at at a
+                // non-boundary is None) — leaving the word end unexpanded.
+                let last_char_start = floor_char_boundary(text, raw_end.saturating_sub(1));
+                let end = word_range(text.len(), char_at, last_char_start)
                     .map(|r| r.end)
                     .unwrap_or(raw_end);
                 Some((start..end).into())
@@ -200,8 +211,11 @@ impl Inline {
                     .position_for_index(raw_start)
                     .map(|p| p.y)
                     .unwrap_or_default();
+                // Floor to a char boundary: `raw_end - 1` is mid-glyph for
+                // multi-byte text, which `position_for_index` can't resolve.
+                let raw_last = floor_char_boundary(&self.text, raw_end.saturating_sub(1));
                 let raw_bottom = text_layout
-                    .position_for_index(raw_end.saturating_sub(1))
+                    .position_for_index(raw_last)
                     .map(|p| p.y + line_height)
                     .unwrap_or(raw_top + line_height);
 

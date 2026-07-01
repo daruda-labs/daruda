@@ -382,3 +382,98 @@ pub fn editor_font_size(cx: &App) -> f32 {
 pub fn set_editor_font_size(cx: &mut App, size: f32) {
     cx.set_global(EditorFontSize(size));
 }
+
+/// Background opacity (0.1–1.0), mirrored from config `window.opacity` — the
+/// same value that drives terminal-pane background translucency. Lets the
+/// agent-chat pane render its background at the window opacity so it matches
+/// the terminal when the window is transparent/blurred. Single update site:
+/// [`set_background_alpha`], called from the config-reload path.
+#[derive(Clone, Copy)]
+struct BackgroundAlpha(f32);
+
+impl gpui::Global for BackgroundAlpha {}
+
+/// Read the background opacity. Defaults to `1.0` (fully opaque) before any
+/// config load, so panes render solid until the config mirrors a lower value.
+pub fn background_alpha(cx: &App) -> f32 {
+    cx.try_global::<BackgroundAlpha>()
+        .map(|g| g.0)
+        .unwrap_or(1.0)
+}
+
+/// Mirror the resolved config `window.opacity` for the GPUI side. The config
+/// value stays the single source; this caches it for the agent-chat render
+/// path (which reads the global directly, like [`editor_font_size`]).
+pub fn set_background_alpha(cx: &mut App, alpha: f32) {
+    cx.set_global(BackgroundAlpha(alpha));
+}
+
+/// Terminal-theme background color, mirrored from config
+/// `effective_colors().background` (i.e. `[colors]` + `[theme].terminal_preset`)
+/// — the same value that fills the terminal pane. Lets the agent-chat pane
+/// render on the terminal color theme rather than the UI theme's editor
+/// surface, so the two panes match. Stored as raw RGB (the channel the
+/// terminal fill uses) and converted to `Hsla` on read. Single update sites:
+/// the construction seed in `globals` + the config-reload path.
+#[derive(Clone, Copy, PartialEq)]
+struct AgentChatBg {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+impl gpui::Global for AgentChatBg {}
+
+/// Read the agent-chat background color. Defaults to [`BG_EDITOR`](p::BG_EDITOR)
+/// before any config load, so the pane renders on the editor surface until the
+/// terminal color is mirrored in.
+pub fn agent_chat_bg(cx: &App) -> gpui::Hsla {
+    match cx.try_global::<AgentChatBg>() {
+        Some(c) => gpui::Rgba {
+            r: f32::from(c.r) / 255.0,
+            g: f32::from(c.g) / 255.0,
+            b: f32::from(c.b) / 255.0,
+            a: 1.0,
+        }
+        .into(),
+        None => p::BG_EDITOR,
+    }
+}
+
+/// Mirror the resolved terminal background color for the agent-chat render
+/// path. Returns `true` when the value changed, so the reload path can decide
+/// whether to repaint the cached agent-chat views.
+pub fn set_agent_chat_bg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
+    let next = AgentChatBg { r, g, b };
+    let changed = cx.try_global::<AgentChatBg>() != Some(&next);
+    cx.set_global(next);
+    changed
+}
+
+/// Background-derived elevation tint for the agent-chat tool cards. A
+/// translucent neutral overlay picked by the pane background's *lightness*
+/// (white over a dark background, black over a light one), so a tool card
+/// reads one step above the pane on any background color — and, being
+/// translucent, keeps the pane's window opacity showing through. Mirrors the
+/// inline-code tint in the vendored `text/node.rs`.
+pub fn agent_chat_tint(cx: &App) -> gpui::Hsla {
+    let overlay = if agent_chat_bg(cx).l < 0.5 {
+        p::OVERLAY_WHITE
+    } else {
+        p::OVERLAY_BLACK
+    };
+    p::with_alpha(overlay, p::AGENT_CHAT_CARD_TINT_ALPHA)
+}
+
+/// Background-derived border for the agent-chat tool cards — the same neutral
+/// overlay as [`agent_chat_tint`] but one step stronger, so the hairline edge
+/// tracks the pane background instead of a fixed line color. Pairs with the
+/// fill tint on the same card.
+pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
+    let overlay = if agent_chat_bg(cx).l < 0.5 {
+        p::OVERLAY_WHITE
+    } else {
+        p::OVERLAY_BLACK
+    };
+    p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA)
+}

@@ -74,6 +74,7 @@ pub(super) fn user_bubble(
     text: &str,
     mermaid_images: &MermaidImages,
     t: &theme::DarudaTheme,
+    cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
         .color(t.text_primary)
@@ -85,7 +86,13 @@ pub(super) fn user_bubble(
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
         .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
         .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        .bg(t.lane_card_active_bg)
+        // Translucent accent tint (not the neutral code tint): sets the user's
+        // turn off by hue while riding the pane background on any theme. Border
+        // is the shared neutral hairline (same as code blocks / tool cards), so
+        // accent stays on the fill alone — the card border system is uniform.
+        .bg(theme::AGENT_CHAT_USER_TINT)
+        .border_1()
+        .border_color(theme::agent_chat_border_tint(cx))
         .text_color(t.text_primary)
         .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
         .child(body);

@@ -86,14 +86,15 @@ pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
 pub use gpui_component::text::{SelectMode, select_mode_for_click_count};
 pub use gpui_component::text_selection::{
-    CharType, char_cell_hit_x, logical_line_range, word_range,
+    CharType, ceil_char_boundary, char_cell_hit_x, floor_char_boundary, logical_line_range,
+    word_range,
 };
 pub use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 pub use gpui_component::{Icon, IconName};
 
 #[cfg(test)]
 mod word_range_tests {
-    use super::{CharType, word_range};
+    use super::{CharType, ceil_char_boundary, floor_char_boundary, word_range};
 
     /// Byte-offset `char_at` for a plain &str.
     fn str_char_at(s: &str, byte_offset: usize) -> Option<char> {
@@ -134,10 +135,29 @@ mod word_range_tests {
 
     #[test]
     fn word_range_multibyte_cjk() {
-        // "中文" — each char is 3 bytes.
+        // "中文" — 3 bytes each; both are letters so they form one word.
         let s = "中文";
-        assert_eq!(word(s, 0).as_deref(), Some("中"));
-        assert_eq!(word(s, 3).as_deref(), Some("文"));
+        assert_eq!(word(s, 0).as_deref(), Some("中文"));
+        assert_eq!(word(s, 3).as_deref(), Some("中文"));
+    }
+
+    #[test]
+    fn word_range_hangul_double_click() {
+        // The regression: double-clicking Hangul must select the whole word,
+        // not one syllable and not nothing. Space-delimited so it stops there.
+        let s = "한글 테스트";
+        assert_eq!(word(s, 0).as_deref(), Some("한글"));
+        assert_eq!(word(s, 3).as_deref(), Some("한글")); // second syllable
+        assert_eq!(word(s, 7).as_deref(), Some("테스트"));
+    }
+
+    #[test]
+    fn char_boundary_helpers_round_to_glyph() {
+        let s = "한A"; // 한 = bytes 0..3, A = byte 3
+        assert_eq!(floor_char_boundary(s, 2), 0);
+        assert_eq!(floor_char_boundary(s, 3), 3);
+        assert_eq!(ceil_char_boundary(s, 1), 3);
+        assert_eq!(ceil_char_boundary(s, 3), 3);
     }
 
     #[test]
@@ -154,7 +174,9 @@ mod word_range_tests {
         assert_eq!(CharType::from_char(' '), CharType::Whitespace);
         assert_eq!(CharType::from_char('\n'), CharType::Newline);
         assert_eq!(CharType::from_char('.'), CharType::Other);
-        assert_eq!(CharType::from_char('中'), CharType::Other);
+        // CJK / Hangul are letters → Word (so double-click selects them).
+        assert_eq!(CharType::from_char('中'), CharType::Word);
+        assert_eq!(CharType::from_char('글'), CharType::Word);
     }
 }
 

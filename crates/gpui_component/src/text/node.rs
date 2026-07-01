@@ -386,9 +386,23 @@ impl CodeBlock {
                     .id("codeblock")
                     .p_3()
                     .rounded(cx.theme().radius)
-                    .bg(cx.theme().muted)
+                    // Background-derived tint (fill + one-step-stronger border)
+                    // instead of the fixed `muted`/`border` surface, so the
+                    // block tracks the pane background on any theme and lets
+                    // the pane opacity show through. White over a dark surface,
+                    // black over a light one — mirrors the inline-code tint and
+                    // the host's `theme::agent_chat_tint` (tool cards).
+                    .bg(if cx.theme().background.l < 0.5 {
+                        gpui::hsla(0., 0., 1., 0.05)
+                    } else {
+                        gpui::hsla(0., 0., 0., 0.05)
+                    })
                     .border_1()
-                    .border_color(cx.theme().border)
+                    .border_color(if cx.theme().background.l < 0.5 {
+                        gpui::hsla(0., 0., 1., 0.12)
+                    } else {
+                        gpui::hsla(0., 0., 0., 0.12)
+                    })
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
                     .relative()
@@ -658,7 +672,21 @@ impl Paragraph {
                         });
                     }
                     if style.code {
-                        highlight.background_color = Some(cx.theme().accent);
+                        // Inline code: a background-derived translucent tint
+                        // instead of the chromatic `accent` (a scarce signal
+                        // color — active lane / focus / CTA — that reads as
+                        // noise repeated across inline-code spans). White over a
+                        // dark surface, black over a light one, picked by the
+                        // theme background lightness, so the chip reads one step
+                        // off the background on any theme and lets the pane
+                        // opacity show through. Mirrors the host's
+                        // `theme::agent_chat_tint` (tool cards).
+                        let tint = if cx.theme().background.l < 0.5 {
+                            gpui::hsla(0., 0., 1., 0.08)
+                        } else {
+                            gpui::hsla(0., 0., 0., 0.08)
+                        };
+                        highlight.background_color = Some(tint);
                     }
 
                     if let Some(mut link_mark) = style.link.clone() {

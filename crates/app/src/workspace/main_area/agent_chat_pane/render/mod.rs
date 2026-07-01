@@ -172,7 +172,15 @@ pub(in crate::workspace) fn render(
         // `TerminalView`), so the pane walker embeds it as a plain cached
         // `AnyView` and `wrapper_focus_handle` returns `None` for this kind.
         .track_focus(&content.focus_handle)
-        .bg(t.file_viewer_bg)
+        // Background: the terminal color theme (config
+        // `effective_colors().background`) at the window opacity (config
+        // `window.opacity`), so this pane matches the terminal in both color
+        // and translucency. `agent_chat_bg` is opaque (a=1.0), so
+        // `.opacity(alpha)` yields exactly the window alpha; at the default
+        // 1.0 this is a plain fill. Applied only to the pane fill — message
+        // bubbles and the header keep their own opaque backgrounds for
+        // legibility.
+        .bg(crate::ui::theme::agent_chat_bg(cx).opacity(crate::ui::theme::background_alpha(cx)))
         .children(status_banner)
         .child(bar)
         .child(body)
@@ -209,7 +217,7 @@ fn render_row(
     let inner: AnyElement = match &row.kind {
         RowKind::User(i) => match this.items.get(*i) {
             Some(ChatItem::UserText(text)) => {
-                user_bubble(*i, text, &this.mermaid_images, t).into_any_element()
+                user_bubble(*i, text, &this.mermaid_images, t, cx).into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -573,7 +581,7 @@ fn render_item(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, t).into_any_element(),
+        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, t, cx).into_any_element(),
         // Under a response bar the speaker is already labeled "Agent"; render the
         // prose inline with no redundant per-block header/fold. A trivial / top-
         // level reply (no response bar) keeps the labeled, foldable block.

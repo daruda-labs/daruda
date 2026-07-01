@@ -142,6 +142,32 @@ impl Workspace {
             (crate::ui::theme::editor_font_size(cx) - config.font.editor_size).abs() > f32::EPSILON;
         crate::ui::theme::set_editor_font_size(cx, config.font.editor_size);
 
+        // Background opacity (config `window.opacity`) drives both the terminal
+        // pane fill (pushed per-view above) and the agent-chat pane background.
+        // Mirror it to the GPUI-side global the agent-chat render path reads
+        // directly; on a change, dirty each cached `AgentChatView` so its
+        // `.cached()` subtree repaints with the new alpha (a bare workspace
+        // `cx.notify()` would not reach a cached child — render-cost rule §10).
+        let bg_alpha_changed =
+            (crate::ui::theme::background_alpha(cx) - config.window.opacity).abs() > f32::EPSILON;
+        crate::ui::theme::set_background_alpha(cx, config.window.opacity);
+        // Mirror the terminal background color (same `bg` the terminal fill
+        // uses, resolved above) so the agent-chat pane tracks the terminal
+        // color theme on a live reload too.
+        let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+        if bg_alpha_changed || bg_color_changed {
+            let views: Vec<_> = self
+                .main_area
+                .runtimes
+                .values()
+                .flat_map(|rt| rt.panes.iter())
+                .filter_map(|pane| pane.agent_chat_content().map(|ac| ac.view.clone()))
+                .collect();
+            for view in views {
+                view.update(cx, |_, cx| cx.notify());
+            }
+        }
+
         // A UI-theme switch changes the editor background's lightness, so the
         // syntax palette flips its light/dark variant. Reload open file views
         // to recompute the baked diff/markdown spans (and re-theme mermaid

@@ -103,9 +103,13 @@ pub(super) fn tool_card(
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
         .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
         .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        .bg(t.lane_card_bg)
+        // Background-derived tint (not a fixed surface): a translucent lift
+        // over the pane background so the card sits one step above it on any
+        // background color / theme / opacity. Border is the same overlay one
+        // step stronger, so the edge tracks the background too.
+        .bg(theme::agent_chat_tint(cx))
         .border_1()
-        .border_color(t.border)
+        .border_color(theme::agent_chat_border_tint(cx))
         .child(foldable_block(
             SharedString::from(format!("agent-chat-tool-{}", tc.id)),
             key,
@@ -119,8 +123,10 @@ pub(super) fn tool_card(
         ))
 }
 
-/// Render one tool-output block: verbatim drag-selectable text (keyed per
+/// Render one tool-output block: rendered markdown (drag-selectable, keyed per
 /// block for stable selection state), or a resource link as an open button.
+/// The ACP spec says clients SHOULD render tool text as Markdown; code blocks
+/// keep their own monospace + syntax highlight.
 fn output_block_view(
     tool_id: &str,
     ix: usize,
@@ -128,17 +134,13 @@ fn output_block_view(
     t: &theme::DarudaTheme,
 ) -> AnyElement {
     match block {
-        ToolOutputBlock::Text(text) => div()
-            .font_family(theme::FONT_FAMILY_MONOSPACE)
-            .child(
-                crate::ui::selectable_text(
-                    SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
-                    text.clone(),
-                )
-                .color(t.text_body)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE)),
-            )
-            .into_any_element(),
+        ToolOutputBlock::Text(text) => crate::ui::markdown(
+            SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
+            text.clone(),
+        )
+        .color(t.text_body)
+        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .into_any_element(),
         ToolOutputBlock::ResourceLink { uri, name } => {
             let uri = uri.clone();
             crate::ui::button(

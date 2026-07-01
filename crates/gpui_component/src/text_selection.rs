@@ -8,13 +8,14 @@ use std::ops::Range;
 /// Category of a character for word-boundary detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharType {
-    /// a–z, A–Z, 0–9, _
+    /// Unicode letters/digits of any script (a–z, 0–9, Hangul, CJK, accented
+    /// Latin, …) plus `_`. A run of these is one word token.
     Word,
     /// '\t', ' ', '\u{00A0}', and other Unicode whitespace (excluding newlines)
     Whitespace,
     /// '\n', '\r'
     Newline,
-    /// Punctuation, CJK characters, emoji, etc.
+    /// Punctuation, symbols, emoji, etc.
     Other,
 }
 
@@ -23,7 +24,9 @@ impl CharType {
     pub fn from_char(c: char) -> Self {
         match c {
             '_' => CharType::Word,
-            c if c.is_ascii_alphanumeric() => CharType::Word,
+            // Any-script alphanumeric, not just ASCII — so double-click word
+            // selection works for Hangul / CJK / accented text, not only a–z.
+            c if c.is_alphanumeric() => CharType::Word,
             c if c == '\n' || c == '\r' => CharType::Newline,
             c if c.is_whitespace() => CharType::Whitespace,
             _ => CharType::Other,
@@ -161,6 +164,36 @@ pub fn logical_line_range(
     start..end
 }
 
+/// The byte offset of the UTF-8 char boundary at or **before** `offset`
+/// (clamped to `0..=len`). Reach for this instead of `offset - 1` when stepping
+/// a byte index backward: `offset - 1` lands inside a multi-byte glyph
+/// (Hangul/CJK are 3 bytes), splitting it and breaking any downstream
+/// `is_char_boundary` / slice / `char_at` lookup. Stable stand-in for the
+/// unstable `str::floor_char_boundary`.
+pub fn floor_char_boundary(text: &str, offset: usize) -> usize {
+    let mut i = offset.min(text.len());
+    while i > 0 && !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// The byte offset of the UTF-8 char boundary at or **after** `offset` (clamped
+/// to `0..=len`). Reach for this instead of `offset + 1` when stepping a byte
+/// index forward past a glyph whose length you don't have in hand. Stable
+/// stand-in for the unstable `str::ceil_char_boundary`. (When you already hold
+/// the `char`, `offset + c.len_utf8()` is equivalent and clearer.)
+pub fn ceil_char_boundary(text: &str, offset: usize) -> usize {
+    if offset >= text.len() {
+        return text.len();
+    }
+    let mut i = offset;
+    while i < text.len() && !text.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 /// Whether a character occupying the horizontal cell `[cell_left, cell_left +
 /// cell_width)` is covered by a horizontal selection span `[sel_left,
 /// sel_right]` (all values in the same 1-D pixel space, e.g. window x).
@@ -251,10 +284,36 @@ mod tests {
 
     #[test]
     fn test_word_boundary_multibyte() {
-        // "中文" — each char is 3 bytes
+        // "中文" — each char is 3 bytes. Both are alphanumeric letters, so they
+        // form one connectable word (the point of treating CJK/Hangul as Word).
         let s = "中文";
-        assert_eq!(word(s, 0), Some("中".into()));
-        assert_eq!(word(s, 3), Some("文".into()));
+        assert_eq!(word(s, 0), Some("中文".into()));
+        assert_eq!(word(s, 3), Some("中文".into()));
+    }
+
+    #[test]
+    fn test_word_boundary_hangul() {
+        // Hangul is 3 bytes/char; a run is one word, stopping at the space.
+        let s = "한글 테스트";
+        assert_eq!(word(s, 0), Some("한글".into()));
+        assert_eq!(word(s, 3), Some("한글".into())); // second syllable, same word
+        assert_eq!(word(s, 6), Some(" ".into()));
+        assert_eq!(word(s, 7), Some("테스트".into()));
+    }
+
+    #[test]
+    fn test_char_boundary_helpers() {
+        // "한A" — 한 is bytes 0..3, A is byte 3.
+        let s = "한A";
+        // floor rounds a mid-glyph index down to the glyph start.
+        assert_eq!(floor_char_boundary(s, 1), 0);
+        assert_eq!(floor_char_boundary(s, 2), 0);
+        assert_eq!(floor_char_boundary(s, 3), 3);
+        assert_eq!(floor_char_boundary(s, 99), s.len());
+        // ceil rounds a mid-glyph index up to the next boundary.
+        assert_eq!(ceil_char_boundary(s, 1), 3);
+        assert_eq!(ceil_char_boundary(s, 3), 3);
+        assert_eq!(ceil_char_boundary(s, 99), s.len());
     }
 
     #[test]
@@ -268,6 +327,10 @@ mod tests {
         assert_eq!(CharType::from_char('\t'), CharType::Whitespace);
         assert_eq!(CharType::from_char('\n'), CharType::Newline);
         assert_eq!(CharType::from_char('\r'), CharType::Newline);
-        assert_eq!(CharType::from_char('汉'), CharType::Other);
+        // CJK / Hangul are letters → Word (so double-click selects them).
+        assert_eq!(CharType::from_char('汉'), CharType::Word);
+        assert_eq!(CharType::from_char('글'), CharType::Word);
+        // Symbols / emoji stay Other.
+        assert_eq!(CharType::from_char('😀'), CharType::Other);
     }
 }
