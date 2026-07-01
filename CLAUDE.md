@@ -1,6 +1,6 @@
 # daruda
 
-Run multiple AI agents in parallel — each in its own `Lane` (a git worktree-backed workspace), branch, and build cache — from a single macOS terminal window. Macro buttons in the bottom dock let you send preset commands to any terminal with one click or a keyboard shortcut.
+Run multiple AI coding agents in parallel — each in its own `Lane` (a git worktree-backed workspace), branch, and build cache — in a single macOS window. Talk to an agent in an in-app **chat pane** over the Agent Client Protocol (ACP), or drive its CLI in a **terminal pane**; either way the session is pinned to a Lane. Macro buttons in the bottom dock send preset commands to any terminal with one click or a keyboard shortcut.
 
 **Concept model**: `Workspace → N × Project (= git repo) → N × Lane`. A `Lane` is a worktree-like space — a checked-out branch (git worktree) or a plain directory — and is the unit a Claude session attaches to. Users see "Worktree" in the UI; "Lane" is the internal type.
 

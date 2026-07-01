@@ -1,8 +1,8 @@
 # daruda
 
-Run multiple AI agents in parallel — each in its own git worktree, branch, and build cache — from a single macOS terminal window.
+Run multiple AI coding agents in parallel — each in its own git worktree, branch, and build cache. Chat with an agent in an in-app pane over the Agent Client Protocol, or drive its CLI in a terminal — all in one macOS window.
 
-Built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and [ghostty_vt](https://ghostty.org) (Zig SIMD). Macro buttons in the bottom dock let you send preset commands to any terminal with one click or a keyboard shortcut.
+Built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and [ghostty_vt](https://ghostty.org) (Zig SIMD). Each agent lives in its own git worktree with a live status indicator; macro buttons in the bottom dock send preset commands to any terminal with one click or a keyboard shortcut.
 
 > **Platform**: macOS 12+ (Apple Silicon and Intel). Windows support is planned — see [Roadmap](#roadmap).
 
@@ -10,10 +10,11 @@ Built on [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) and
 
 ## Why daruda
 
+- **In-app agent chat** — talk to a coding agent right inside a pane over the Agent Client Protocol (ACP), no separate CLI window. Pick model, reasoning effort, and permission mode inline; watch tool calls, file diffs, and plans render in place; approve permission prompts without leaving the workspace.
 - **Worktree isolation** — every agent runs in its own git worktree, tab group, and working directory. No branch-switching, no `target/` cache thrashing between concurrent sessions.
 - **Live Claude Code status** — real-time Working / NeedsAttention / Idle indicators per worktree, driven by Claude Code hooks (push) with JSONL polling as fallback. Detects active sessions via PTY process tree.
 - **Left-dock IDE** — Worktrees, Git Changes, and File Explorer in one dock. Syntax-highlighted file viewer with word-level diff. 88 Material Design file icons. Event-driven git status (no polling).
-- **Right panel** — token usage + cost estimate, slash-command CRUD (Skills), MCP server manager (Tools), and agent task tracker (Tasks) — all without leaving the terminal.
+- **Right panel** — token usage + cost estimate, slash-command CRUD (Skills), MCP server manager (Tools), and agent task tracker (Tasks) — all without leaving the workspace.
 - **Macro panel** — bottom dock with user-defined macro tabs. Click or press a shortcut to send any command to the focused pane. Full GUI editor, shortcut record mode.
 - **Notification surface** — dock bounce, desktop notifications (via `osascript`; no Developer ID required), and long-running command alerts via OSC 1337 / OSC 9 / OSC 777.
 - **GPU Metal rendering** — GPUI-powered, 16 ms batch output, damage tracking. IME and Korean/CJK input first-class.
@@ -27,6 +28,17 @@ Each AI agent runs in its own **lane** — a git worktree (own directory, own HE
 ---
 
 ## Features
+
+### Agent chat
+
+Talk to a coding agent in a pane instead of — or alongside — its CLI. daruda speaks the **Agent Client Protocol (ACP)**, driving Claude Code through the `claude-agent-acp` adapter.
+
+- Pick **model**, **reasoning effort**, and **permission mode** from the input dock
+- Markdown replies with drag-select / copy, syntax-highlighted code blocks, and mermaid diagrams
+- Tool calls render as cards; file edits show inline word-level diffs in a read-only editor
+- Permission requests answered inline — approve / reject without a terminal prompt
+- Turn and tool-group folding, plus a live working indicator while the agent runs
+- One session per Lane — chat agents and terminal agents tracked side by side
 
 ### Terminal
 
@@ -105,7 +117,7 @@ Customizable macro tabs — click or press a shortcut to send text to the focuse
 
 **Usage tab** — live token consumption and cost estimate for each active Claude session, parsed from `~/.claude/projects/…/*.jsonl`. Stacked bar (input / output / cache).
 
-**Skills tab** — browse, create, edit, rename, and delete Claude Code slash commands (`.claude/commands/*.md`) for Project and Global scope — without leaving the terminal.
+**Skills tab** — browse, create, edit, rename, and delete Claude Code slash commands (`.claude/commands/*.md`) for Project and Global scope — without leaving the workspace.
 
 **Tools tab** — view and manage MCP servers from `~/.claude/settings.json`. Enable / disable without restarting Claude Code.
 
@@ -237,6 +249,7 @@ daruda/
 ├── crates/
 │   ├── app/              # binary — GPUI entry point, workspace, docks, panels
 │   ├── daruda_terminal/  # TerminalView + TerminalSession (GPUI rendering + VT parsing glue)
+│   ├── daruda_acp/       # Agent Client Protocol client — agent sessions, models, config options (GPUI-free)
 │   ├── daruda_claude/    # Claude Code hook FSM + JSONL fallback parser (GPUI-free)
 │   ├── daruda_config/    # TOML config loader (GPUI-free)
 │   ├── daruda_store/     # panels, project state, tasks persistence (GPUI-free)
@@ -263,6 +276,7 @@ GPUI event loop (Metal)
 | UI framework | GPUI (Zed, `cff3ac6`) |
 | Rendering | Metal (via GPUI) |
 | VT core | ghostty_vt (Ghostty v1.2.3, Zig 0.14.1) |
+| Agent protocol | Agent Client Protocol (`agent-client-protocol` 1.0) |
 | PTY | `portable-pty` |
 | Config | `toml` + `toml_edit` (live reload via `notify`) |
 | Syntax highlight | `syntect` |
@@ -300,7 +314,7 @@ All shortcuts can be remapped in `[keybindings]`.
 
 ### Multi-agent support
 
-daruda is built around Claude Code today, but the agent layer is designed to be extensible. The `AgentType` field in the task model is reserved, and the macro panel already seeds launch macros for multiple agents on first run.
+daruda is built around Claude Code today, but the agent layer is designed to be extensible — in-app chat already speaks the vendor-neutral Agent Client Protocol (ACP), so any ACP-compatible agent can plug in. The `AgentType` field in the task model is reserved, and the macro panel already seeds launch macros for multiple agents on first run.
 
 | Agent | Status | Notes |
 |---|---|---|
