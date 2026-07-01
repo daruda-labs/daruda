@@ -12,7 +12,7 @@ use agent_client_protocol::schema::v1::{
 
 use crate::model::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
-    ToolKindView, ToolStatusView,
+    ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 
 /// Apply one `session/update` notification to the chat item list.
@@ -207,9 +207,10 @@ fn find_tool_call<'a>(items: &'a mut [ChatItem], id: &str) -> Option<&'a mut Too
     })
 }
 
-/// Partition tool-call content into diffs and plain-text output, dropping
-/// embedded terminals (not rendered in the MVP).
-fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<String>) {
+/// Partition tool-call content into diffs and typed output blocks. Embedded
+/// terminals, images, audio, and embedded resources are not rendered yet and
+/// are dropped.
+fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputBlock>) {
     let mut diffs = Vec::new();
     let mut output = Vec::new();
     for block in content {
@@ -220,9 +221,8 @@ fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<String>) {
                 new_text: diff.new_text.clone(),
             }),
             ToolCallContent::Content(c) => {
-                let text = text_of(&c.content);
-                if !text.is_empty() {
-                    output.push(text);
+                if let Some(out) = output_block_of(&c.content) {
+                    output.push(out);
                 }
             }
             // Embedded terminals and any future content kinds are not rendered.
@@ -230,6 +230,20 @@ fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<String>) {
         }
     }
     (diffs, output)
+}
+
+/// Map a content block to a renderable output block. `None` for empty text and
+/// for kinds we don't render yet (image, audio, embedded resource).
+fn output_block_of(block: &ContentBlock) -> Option<ToolOutputBlock> {
+    match block {
+        ContentBlock::Text(t) if !t.text.is_empty() => Some(ToolOutputBlock::Text(t.text.clone())),
+        ContentBlock::ResourceLink(rl) => Some(ToolOutputBlock::ResourceLink {
+            uri: rl.uri.clone(),
+            // Prefer the human title; the `name` field is always present.
+            name: rl.title.clone().unwrap_or_else(|| rl.name.clone()),
+        }),
+        _ => None,
+    }
 }
 
 /// The owned `message_id` of a streamed content chunk, if the agent supplied
@@ -293,8 +307,34 @@ fn kind_of(kind: &ToolKind) -> ToolKindView {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, Diff, TextContent, ToolCallUpdateFields,
+        Content, ContentChunk, Diff, ResourceLink, TextContent, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn split_content_types_output_blocks() {
+        let content = vec![
+            ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new("hello")))),
+            // Empty text is dropped, not carried as an empty block.
+            ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new("")))),
+            ToolCallContent::Content(Content::new(ContentBlock::ResourceLink(ResourceLink::new(
+                "file.rs",
+                "file:///tmp/file.rs",
+            )))),
+            ToolCallContent::Diff(Diff::new("/tmp/x.txt", "hi\n")),
+        ];
+        let (diffs, output) = split_content(&content);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(
+            output,
+            vec![
+                ToolOutputBlock::Text("hello".to_string()),
+                ToolOutputBlock::ResourceLink {
+                    uri: "file:///tmp/file.rs".to_string(),
+                    name: "file.rs".to_string(),
+                },
+            ]
+        );
+    }
 
     fn text_chunk(s: &str) -> ContentChunk {
         ContentChunk::new(ContentBlock::Text(TextContent::new(s.to_string())))

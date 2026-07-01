@@ -51,10 +51,21 @@ pub struct ToolCallItem {
     pub status: ToolStatusView,
     /// File modifications shown as diffs (rendered via daruda's diff editor).
     pub diffs: Vec<DiffView>,
-    /// Plain-text output blocks produced by the tool.
-    pub output: Vec<String>,
+    /// Typed output blocks produced by the tool (text, resource links).
+    pub output: Vec<ToolOutputBlock>,
     /// Raw tool input, kept for an expandable "details" affordance.
     pub raw_input: Option<serde_json::Value>,
+}
+
+/// A single block of tool-call output. Typed so non-text content (resource
+/// links) survives rather than being flattened to a string. Image / audio /
+/// embedded-resource blocks are not carried yet (dropped in `split_content`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolOutputBlock {
+    /// Plain text — rendered verbatim and selectable.
+    Text(String),
+    /// A resource the tool produced or referenced — rendered as an open button.
+    ResourceLink { uri: String, name: String },
 }
 
 /// A file modification carried by a tool call.

@@ -3,9 +3,9 @@
 
 use daruda_acp::{
     PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, ToolCallItem,
-    ToolStatusView,
+    ToolOutputBlock, ToolStatusView,
 };
-use gpui::{Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
@@ -58,7 +58,14 @@ pub(super) fn tool_card(
                 .min_w_0()
                 .text_color(t.text_primary)
                 .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(SharedString::from(tc.title.clone())),
+                .child(
+                    crate::ui::selectable_text(
+                        SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
+                        tc.title.clone(),
+                    )
+                    .color(t.text_primary)
+                    .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE)),
+                ),
         )
         .child(
             div()
@@ -84,15 +91,8 @@ pub(super) fn tool_card(
                 .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
                 .child(SharedString::from(s::agent_chat_tool_output_label())),
         );
-        for block in &tc.output {
-            body = body.child(
-                div()
-                    .font_family(theme::FONT_FAMILY_MONOSPACE)
-                    .whitespace_normal()
-                    .text_color(t.text_body)
-                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                    .child(SharedString::from(block.clone())),
-            );
+        for (ix, block) in tc.output.iter().enumerate() {
+            body = body.child(output_block_view(&tc.id, ix, block, t));
         }
     }
 
@@ -117,6 +117,38 @@ pub(super) fn tool_card(
             t,
             cx,
         ))
+}
+
+/// Render one tool-output block: verbatim drag-selectable text (keyed per
+/// block for stable selection state), or a resource link as an open button.
+fn output_block_view(
+    tool_id: &str,
+    ix: usize,
+    block: &ToolOutputBlock,
+    t: &theme::DarudaTheme,
+) -> AnyElement {
+    match block {
+        ToolOutputBlock::Text(text) => div()
+            .font_family(theme::FONT_FAMILY_MONOSPACE)
+            .child(
+                crate::ui::selectable_text(
+                    SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
+                    text.clone(),
+                )
+                .color(t.text_body)
+                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE)),
+            )
+            .into_any_element(),
+        ToolOutputBlock::ResourceLink { uri, name } => {
+            let uri = uri.clone();
+            crate::ui::button(
+                SharedString::from(format!("agent-chat-tool-link-{tool_id}-{ix}")),
+                SharedString::from(name.clone()),
+            )
+            .on_click(move |_, _, cx| cx.open_url(&uri))
+            .into_any_element()
+        }
+    }
 }
 
 /// Map a tool status to its badge label + colour.
@@ -176,7 +208,11 @@ pub(super) fn permission_card(
             div()
                 .text_color(t.text_primary)
                 .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
-                .child(title),
+                .child(
+                    crate::ui::selectable_text(("agent-chat-perm-title", ix), title)
+                        .color(t.text_primary)
+                        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE)),
+                ),
         );
 
     match &card.resolved {

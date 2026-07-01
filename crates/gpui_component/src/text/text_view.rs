@@ -119,6 +119,9 @@ enum TextViewType {
     Markdown,
     /// HTML view
     Html,
+    /// Plain text view — the raw string rendered verbatim (no markup
+    /// interpretation), selectable like the other kinds.
+    Text,
 }
 
 enum Update {
@@ -532,6 +535,39 @@ impl TextView {
         }
     }
 
+    /// Create a new plain-text view: the raw string rendered verbatim (no
+    /// Markdown/HTML interpretation), selectable like the other kinds.
+    pub fn plain(
+        id: impl Into<ElementId>,
+        text: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let id: ElementId = id.into();
+        let text = text.into();
+        let highlight_theme = cx.theme().highlight_theme.clone();
+        let state =
+            window.use_keyed_state(SharedString::from(format!("{}/state", id)), cx, |_, cx| {
+                TextViewState::new(cx)
+            });
+        let init_state =
+            Self::create_init_state(TextViewType::Text, &text, &highlight_theme, &state, cx);
+        if let Some(tx) = &state.read(cx).tx {
+            let _ = tx.try_send(Update::Text(text.clone()));
+        }
+        Self {
+            id,
+            init_state: Some(init_state),
+            style: StyleRefinement::default(),
+            state,
+            raw: text,
+            selectable: false,
+            scrollable: false,
+            code_block_actions: None,
+            code_block_render: None,
+        }
+    }
+
     /// Set the source text of the text view.
     pub fn text(mut self, raw: impl Into<SharedString>) -> Self {
         let raw: SharedString = raw.into();
@@ -879,6 +915,13 @@ fn parse_content(
             super::format::markdown::parse(text, &style, &mut node_cx, highlight_theme)
         }
         TextViewType::Html => super::format::html::parse(text, &mut node_cx),
+        // Plain text: wrap the raw string in a single paragraph with no markup
+        // interpretation. Renders through the same selectable Inline path.
+        TextViewType::Text => Ok(node::Node::Root {
+            children: vec![node::Node::Paragraph(node::Paragraph::new(
+                text.to_string(),
+            ))],
+        }),
     };
     res.map(move |root_node| ParsedContent { root_node, node_cx })
 }

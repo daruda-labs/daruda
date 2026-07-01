@@ -20,7 +20,7 @@ pub use model::{
     ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView, DiffView,
     ModeStateView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
     PlanEntryView, PlanPriority, PlanStatus, SessionModeView, SlashCommand, SlashCommandInput,
-    ToolCallItem, ToolKindView, ToolStatusView,
+    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 pub use session::{
     AcpEvent, AcpSessionHandle, InfoFieldChange, PermissionDecision, connect_session,
