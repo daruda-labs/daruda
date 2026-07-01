@@ -25,6 +25,7 @@ pub mod project;
 mod screenshot;
 pub mod settings_store;
 pub mod settings_window;
+mod shell_env;
 pub(crate) mod shell_quote;
 mod slot_actions;
 pub mod surface;
@@ -180,6 +181,12 @@ fn main() {
     if let Some(code) = bootstrap::route_hook_subcommand() {
         std::process::exit(code);
     }
+
+    // A GUI launch (Finder / Dock / `open`) inherits only launchd's minimal
+    // PATH; hydrate it from the login shell so subprocesses spawned later —
+    // the ACP `npx` adapter, the `claude` CLI — are found. No-op from a
+    // terminal launch. Must precede any subprocess spawn.
+    shell_env::hydrate_path_from_login_shell();
 
     bootstrap::init_observability();
 
