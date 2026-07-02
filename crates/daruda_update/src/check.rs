@@ -13,8 +13,15 @@ use std::time::Duration;
 
 const RELEASES_LATEST: &str = "https://api.github.com/repos/daruda-labs/daruda/releases/latest";
 
-/// Hosts that a `.dmg` download is trusted to come from.
-const TRUSTED_HOSTS: &[&str] = &["github.com", "objects.githubusercontent.com"];
+/// The GitHub host serving the API and release pages.
+const TRUSTED_HOST: &str = "github.com";
+
+/// GitHub's user-content / release-asset domain. A release asset URL
+/// (`github.com/.../releases/download/...`) 302-redirects to a CDN host under
+/// this domain, and GitHub has renamed that host over time (`objects.` →
+/// `release-assets.`). We trust any subdomain of this GitHub-owned domain
+/// rather than pinning one CDN hostname that a future rename would break.
+const TRUSTED_ASSET_DOMAIN: &str = "githubusercontent.com";
 
 /// Upper bound on redirect hops we will follow when downloading a DMG.
 const MAX_REDIRECTS: usize = 5;
@@ -51,9 +58,10 @@ pub fn check_latest(current: &semver::Version) -> Result<Option<ReleaseInfo>, Up
 ///
 /// Redirects are followed manually (ureq's automatic following is disabled) so
 /// that EVERY hop's host is re-validated against the allowlist before we
-/// connect to it. GitHub's asset URLs 302-redirect to
-/// `objects.githubusercontent.com`; without per-hop validation a hijacked
-/// redirect could stream bytes from an arbitrary (even plain-`http`) host.
+/// connect to it. GitHub's asset URLs 302-redirect to its asset CDN
+/// (`release-assets.githubusercontent.com`); without per-hop validation a
+/// hijacked redirect could stream bytes from an arbitrary (even plain-`http`)
+/// host.
 /// Blocking; call off the main thread.
 pub fn download_dmg(url: &str, dest: &Path) -> Result<(), UpdateError> {
     let agent = ureq::AgentBuilder::new()
@@ -103,7 +111,10 @@ fn redirect_target(status: u16, location: Option<&str>) -> Result<String, Update
 
 /// Extract the host from a URL and check it against the trust allowlist.
 /// Requires `https://`, drops any userinfo (`user@host`) and port
-/// (`host:port`), and compares the remaining host exactly, case-insensitive.
+/// (`host:port`), then accepts exactly `github.com` or any host equal to or a
+/// subdomain of the GitHub-owned asset domain `githubusercontent.com`. The
+/// subdomain check requires a leading dot so a lookalike like
+/// `githubusercontent.com.evil.com` or `evilgithubusercontent.com` is rejected.
 fn is_trusted_host(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
         return false;
@@ -112,10 +123,11 @@ fn is_trusted_host(url: &str) -> bool {
     let authority = rest.split('/').next().unwrap_or("");
     let host_and_port = authority.rsplit('@').next().unwrap_or(authority);
     let host = host_and_port.split(':').next().unwrap_or(host_and_port);
+    let host = host.to_ascii_lowercase();
 
-    TRUSTED_HOSTS
-        .iter()
-        .any(|trusted| host.eq_ignore_ascii_case(trusted))
+    host == TRUSTED_HOST
+        || host == TRUSTED_ASSET_DOMAIN
+        || host.ends_with(&format!(".{TRUSTED_ASSET_DOMAIN}"))
 }
 
 #[cfg(test)]
@@ -137,6 +149,14 @@ mod tests {
     }
 
     #[test]
+    fn accepts_github_release_assets_host() {
+        // The host a release-asset download actually 302-redirects to today.
+        assert!(is_trusted_host(
+            "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=x"
+        ));
+    }
+
+    #[test]
     fn accepts_github_com_with_explicit_port() {
         assert!(is_trusted_host("https://github.com:443/x.dmg"));
     }
@@ -149,6 +169,16 @@ mod tests {
     #[test]
     fn rejects_subdomain_lookalike() {
         assert!(!is_trusted_host("https://github.com.evil.com/x.dmg"));
+    }
+
+    #[test]
+    fn rejects_asset_domain_lookalikes() {
+        // Suffix appended after the trusted domain.
+        assert!(!is_trusted_host(
+            "https://githubusercontent.com.evil.com/x.dmg"
+        ));
+        // Trusted domain glued to a longer label without a dot boundary.
+        assert!(!is_trusted_host("https://evilgithubusercontent.com/x.dmg"));
     }
 
     #[test]
