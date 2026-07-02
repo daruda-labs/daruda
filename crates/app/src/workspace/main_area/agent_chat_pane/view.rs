@@ -65,6 +65,20 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// Connection lifecycle of an [`AgentChatView`]'s ACP session. Declared as an
 /// enum so the connecting / live / failed states are distinct variants rather
 /// than a `bool` + companion field; the live `Error` arm carries the failure
+/// A user-visible milestone of the one-time Node.js runtime provisioning shown
+/// in the connecting banner. A closed set of only the slow, user-facing phases
+/// (the instant "found system node" / "cache probe" milestones never surface),
+/// so the banner text maps at render instead of being stored in the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum RuntimePrepPhase {
+    /// Downloading the Node.js archive.
+    Downloading,
+    /// Verifying the downloaded archive's checksum.
+    Verifying,
+    /// Extracting the archive.
+    Extracting,
+}
+
 /// message it renders.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum AgentSessionStatus {
@@ -73,6 +87,11 @@ pub(in crate::workspace) enum AgentSessionStatus {
     /// process) until the user focuses it. `focus_pane` then transitions it to
     /// `Connecting` via `maybe_connect_agent_chat`.
     Idle,
+    /// Provisioning the Node.js runtime the adapter needs, before the adapter is
+    /// even spawned. Only reached on a machine without a usable system Node.js,
+    /// where a one-time managed download runs. Carries the milestone (not its
+    /// localized text) so the banner copy is derived at render.
+    PreparingRuntime(RuntimePrepPhase),
     /// The ACP adapter has been asked to start but the session is not yet ready
     /// for prompts (handshake + `session/new` in flight).
     Connecting,
@@ -226,7 +245,10 @@ impl AgentChatView {
         use daruda_claude::SessionStatus;
         match &self.status {
             AgentSessionStatus::Idle | AgentSessionStatus::Error(_) => None,
-            AgentSessionStatus::Connecting => Some(SessionStatus::Connecting),
+            // Runtime prep is a connecting sub-phase — same pulsing badge.
+            AgentSessionStatus::PreparingRuntime(_) | AgentSessionStatus::Connecting => {
+                Some(SessionStatus::Connecting)
+            }
             AgentSessionStatus::Connected => {
                 if self.turn_in_flight {
                     if self.pending_permission.is_some() {

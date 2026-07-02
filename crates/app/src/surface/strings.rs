@@ -918,6 +918,22 @@ pub fn agent_chat_connecting() -> String {
     rust_i18n::t!("agent_chat.connecting").into_owned()
 }
 
+/// Status banner shown while the app is downloading the Node.js runtime the
+/// agent adapter needs (first run on a machine without a usable Node.js).
+pub fn agent_chat_runtime_downloading() -> String {
+    rust_i18n::t!("agent_chat.runtime_downloading").into_owned()
+}
+
+/// Status banner shown while the downloaded Node.js runtime is being verified.
+pub fn agent_chat_runtime_verifying() -> String {
+    rust_i18n::t!("agent_chat.runtime_verifying").into_owned()
+}
+
+/// Status banner shown while the downloaded Node.js runtime is being extracted.
+pub fn agent_chat_runtime_extracting() -> String {
+    rust_i18n::t!("agent_chat.runtime_extracting").into_owned()
+}
+
 /// Status-line reason shown when an Agent chat pane has no resolvable lane
 /// working directory to attach a session to. The renderer prepends the error
 /// prefix, so this is the bare reason (not itself prefixed).

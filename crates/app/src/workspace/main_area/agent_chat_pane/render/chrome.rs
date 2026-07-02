@@ -8,7 +8,9 @@ use gpui::{Hsla, IntoElement, SharedString, div, prelude::*, px};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ButtonVariants as _, Sizable as _, StatusPulseClock};
-use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
+use crate::workspace::main_area::agent_chat_pane::view::{
+    AgentChatView, AgentSessionStatus, RuntimePrepPhase,
+};
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Pane activity bar: session title on the LEFT, "Expand all" / "Collapse all"
@@ -104,6 +106,16 @@ fn format_last_active(iso: &str) -> String {
     }
 }
 
+/// Localized banner copy for a runtime-provisioning milestone.
+fn runtime_prep_text(phase: RuntimePrepPhase) -> SharedString {
+    match phase {
+        RuntimePrepPhase::Downloading => s::agent_chat_runtime_downloading(),
+        RuntimePrepPhase::Verifying => s::agent_chat_runtime_verifying(),
+        RuntimePrepPhase::Extracting => s::agent_chat_runtime_extracting(),
+    }
+    .into()
+}
+
 /// The thin top banner — shown while connecting or on error; hidden once
 /// the session is live (the conversation itself signals readiness).
 pub(super) fn status_banner(
@@ -113,6 +125,11 @@ pub(super) fn status_banner(
     let (text, bg, fg): (SharedString, Hsla, Hsla) = match status {
         AgentSessionStatus::Idle => (
             s::agent_chat_idle().into(),
+            t.banner_info_bg,
+            t.banner_info_text,
+        ),
+        AgentSessionStatus::PreparingRuntime(phase) => (
+            runtime_prep_text(*phase),
             t.banner_info_bg,
             t.banner_info_text,
         ),

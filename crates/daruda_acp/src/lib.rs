@@ -12,6 +12,7 @@
 pub mod connection;
 pub mod mapping;
 pub mod model;
+pub mod node;
 pub mod session;
 
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
@@ -22,6 +23,8 @@ pub use model::{
     PlanEntryView, PlanPriority, PlanStatus, SessionModeView, SlashCommand, SlashCommandInput,
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
+pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
 pub use session::{
     AcpEvent, AcpSessionHandle, InfoFieldChange, PermissionDecision, connect_session,
+    connect_session_with_node,
 };

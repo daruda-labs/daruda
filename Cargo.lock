@@ -1360,10 +1360,15 @@ dependencies = [
  "agent-client-protocol",
  "anyhow",
  "futures",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "smol",
+ "tempfile",
  "thiserror 2.0.18",
+ "ureq",
+ "which",
 ]
 
 [[package]]

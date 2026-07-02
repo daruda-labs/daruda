@@ -25,6 +25,13 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
 use futures::channel::mpsc::UnboundedSender;
 
+/// npm package (with `@latest`) for the ACP Claude agent adapter. Single source
+/// for both the default `npx` command and the managed-node command in
+/// [`crate::node`]. `@latest` keeps us on the newest adapter, which advertises
+/// model / effort / mode as session config options; see ../CLAUDE.md for the
+/// upstream-version policy.
+pub(crate) const ADAPTER_NPM_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp@latest";
+
 /// How to launch the ACP agent adapter.
 ///
 /// `AcpAgent::from_str` accepts either a bash-style command string
@@ -36,12 +43,11 @@ pub struct AdapterCommand(pub String);
 
 impl Default for AdapterCommand {
     fn default() -> Self {
-        // ACP Claude agent adapter (agentclientprotocol/claude-agent-acp). Auth
-        // (subscription or API key) is the adapter's responsibility — daruda
-        // passes no credentials. `@latest` keeps us on the newest adapter, which
-        // advertises model / effort / mode as session config options; see
-        // ../CLAUDE.md for the upstream-version policy.
-        Self("npx -y @agentclientprotocol/claude-agent-acp@latest".to_string())
+        // Auth (subscription or API key) is the adapter's responsibility —
+        // daruda passes no credentials. Assumes `npx` / `node` are on `PATH`
+        // (the System runtime case); the managed-node case rewrites this via
+        // [`crate::node::NodeRuntime::adapter_command`].
+        Self(format!("npx -y {ADAPTER_NPM_PACKAGE}"))
     }
 }
 
@@ -54,6 +60,10 @@ pub enum AcpClientError {
     /// The protocol exchange failed (handshake, session, or prompt).
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// Provisioning the Node.js runtime the adapter needs failed. `Display`
+    /// forwards the (user-facing) [`crate::node::NodeError`] message verbatim.
+    #[error("{0}")]
+    Runtime(#[from] crate::node::NodeError),
 }
 
 /// Minimal observable surface that proves the round-trip. The real connection

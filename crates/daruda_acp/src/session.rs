@@ -307,6 +307,26 @@ pub fn connect_session(
     Ok((handle, event_rx))
 }
 
+/// Ensure a usable Node.js runtime, then open a session against the ACP adapter
+/// running on it — the entry point the host uses instead of building an
+/// [`AdapterCommand`] by hand.
+///
+/// Reuses the user's system Node.js when present; otherwise downloads a managed
+/// Node.js into `node_install_dir` (see [`crate::node::ensure_node`]). A
+/// provisioning failure is surfaced as [`AcpClientError::Runtime`], whose
+/// `Display` carries a user-facing remedy. `progress` reports runtime-prep
+/// milestones so the host can show a status line during the (first-run only)
+/// download.
+pub fn connect_session_with_node(
+    node_install_dir: PathBuf,
+    cwd: PathBuf,
+    initial_mode: Option<String>,
+    progress: &mut dyn FnMut(crate::node::NodeProgress),
+) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
+    let runtime = crate::node::ensure_node(&node_install_dir, progress)?;
+    connect_session(runtime.adapter_command(), cwd, initial_mode)
+}
+
 /// Drive the whole connection: handshake, session creation, then the prompt /
 /// cancel select loop, until the command channel closes or the protocol fails.
 async fn run_connection(

@@ -168,6 +168,25 @@ pub fn default_data_dir() -> PathBuf {
     default_data_dir_from(override_env.as_deref(), profile_env.as_deref(), &base)
 }
 
+/// Directory holding the app-managed Node.js runtime for the ACP adapter.
+///
+/// Deliberately **profile-independent**: the runtime's version is pinned in
+/// `daruda_acp`, so one install (tens of MB) serves every profile — release,
+/// debug, and named — instead of being duplicated per profile like
+/// [`default_data_dir`]. Honors `DARUDA_DATA_DIR` (so tests / portable installs
+/// stay isolated), otherwise lands under the shared `daruda/node` regardless of
+/// the active profile.
+pub fn node_install_dir() -> PathBuf {
+    if let Some(dir) = std::env::var(DARUDA_DATA_DIR_ENV).ok().as_deref() {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join("node");
+        }
+    }
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("daruda").join("node")
+}
+
 /// Pure layout resolver — no env reads, no fs reads. Returns the
 /// path that `default_data_dir()` would produce for the given inputs.
 /// Crate-visible so unit tests drive every branch deterministically.

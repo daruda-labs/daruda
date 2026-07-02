@@ -33,14 +33,15 @@
 //! drops them: the handle drop closes the command channel (the connection task
 //! exits) and the pump-task drop ends the loop. No explicit teardown is needed.
 
-use daruda_acp::{AdapterCommand, DiffView, connect_session};
+use daruda_acp::{DiffView, NodeProgress, connect_session_with_node};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use futures::StreamExt as _;
+use futures::channel::mpsc::unbounded;
 use gpui::{AnyWindowHandle, AppContext as _, Context, Entity, Window};
 
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RowKind, project};
-use super::view::{AgentChatView, AgentSessionStatus};
+use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase};
 use crate::path_ext::PathExt as _;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -49,6 +50,18 @@ use crate::workspace::main_area::file_view_pane::diff_editor::{
 };
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+
+/// The banner phase for a runtime-provisioning milestone, or `None` for
+/// milestones that shouldn't surface a banner (system node found, or a cache
+/// probe — both instant, so the plain "Connecting…" banner already fits).
+fn runtime_prep_phase(progress: NodeProgress) -> Option<RuntimePrepPhase> {
+    match progress {
+        NodeProgress::UsingSystemNode | NodeProgress::CheckingCache => None,
+        NodeProgress::Downloading => Some(RuntimePrepPhase::Downloading),
+        NodeProgress::Verifying => Some(RuntimePrepPhase::Verifying),
+        NodeProgress::Extracting => Some(RuntimePrepPhase::Extracting),
+    }
+}
 
 impl Workspace {
     /// Construct an Agent chat `Pane` (no tab side-effects). Allocates the pane
@@ -195,23 +208,76 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
+        let node_root = daruda_store::persistence::node_install_dir();
+
+        // Runtime provisioning (see `connect_session_with_node`) can download
+        // Node.js on the first run of a machine without a usable system install.
+        // Milestones flow over this channel to a foreground drain that shows a
+        // "preparing runtime…" banner, so a slow first-run download doesn't look
+        // like a hang. The sender lives in the background task; when it finishes,
+        // the sender drops and the drain ends.
+        let (progress_tx, mut progress_rx) = unbounded::<NodeProgress>();
+        cx.spawn(async move |this, cx| {
+            while let Some(progress) = progress_rx.next().await {
+                let Some(phase) = runtime_prep_phase(progress) else {
+                    continue;
+                };
+                let cont = this.update(cx, |ws, cx| {
+                    let Some(view) = ws.agent_chat_view(pane_id).cloned() else {
+                        return false;
+                    };
+                    view.update(cx, |v, cx| {
+                        // Only advance the banner while still in a connecting
+                        // phase — never clobber a Connected/Error terminal state
+                        // (the connect and drain tasks race to completion).
+                        if matches!(
+                            v.status,
+                            AgentSessionStatus::Connecting
+                                | AgentSessionStatus::PreparingRuntime(_)
+                        ) {
+                            v.status = AgentSessionStatus::PreparingRuntime(phase);
+                            cx.notify();
+                        }
+                    });
+                    true
+                });
+                if !matches!(cont, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
+
         let pump = cx.spawn(async move |this, cx| {
-            // `connect_session` itself is synchronous (it parses the command and
-            // spawns the connection task); run it on the background executor so
-            // the smol `spawn` inside binds to a worker thread rather than the
-            // main loop.
+            // `connect_session_with_node` is synchronous (it provisions node,
+            // parses the command, and spawns the connection task); run it on the
+            // background executor so the download / smol `spawn` bind to a worker
+            // thread rather than the main loop. The progress sender is moved in
+            // and dropped when this closure returns, ending the drain above.
             let connected = cx
                 .background_executor()
-                .spawn(async move { connect_session(AdapterCommand::default(), cwd, initial_mode) })
+                .spawn(async move {
+                    let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
+                    connect_session_with_node(node_root, cwd, initial_mode, &mut progress)
+                })
                 .await;
 
             match connected {
                 Ok((handle, mut events)) => {
-                    // Store the handle on the view. If the view/window is
+                    // Store the handle on the view and clear any lingering
+                    // "preparing runtime" banner — the adapter is now spawning
+                    // (handshake in flight), so the state is plain Connecting
+                    // until the event pump reports it live. If the view/window is
                     // already gone, drop the handle (closing the session).
                     let stored = this.update(cx, |ws, cx| {
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
-                            view.update(cx, |v, _| v.handle = Some(handle));
+                            view.update(cx, |v, cx| {
+                                v.handle = Some(handle);
+                                if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
+                                    v.status = AgentSessionStatus::Connecting;
+                                    cx.notify();
+                                }
+                            });
                             true
                         } else {
                             false

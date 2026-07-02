@@ -1,0 +1,626 @@
+//! Node.js runtime provisioning for the ACP adapter — GPUI-free.
+//!
+//! The Claude ACP adapter is spawned as `npx -y <pkg>` (see
+//! [`crate::connection::AdapterCommand`]), which needs Node.js. A macOS `.app`
+//! launched from Finder inherits only launchd's minimal `PATH`; the login-shell
+//! `PATH` hydration in the host app fixes the *"node is installed but off PATH"*
+//! case, but a machine with **no Node.js at all** still fails the spawn with a
+//! raw `os error 2`.
+//!
+//! This module closes that gap the way zed's `node_runtime` does: reuse the
+//! system Node.js when it is present and recent enough, otherwise download a
+//! pinned Node.js from `nodejs.org/dist` into an app-managed directory —
+//! integrity-checked against the published `SHASUMS256.txt` — so the adapter
+//! runs with zero user setup.
+//!
+//! Blocking on purpose (system `tar` + synchronous `ureq`): it runs on the
+//! host's background executor, mirroring the blocking git-CLI layer. Nothing
+//! here touches GPUI.
+
+use std::fmt::Write as _;
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
+use semver::Version;
+use sha2::{Digest, Sha256};
+
+use crate::connection::{ADAPTER_NPM_PACKAGE, AdapterCommand};
+
+/// Pinned Node.js version for the managed install. A single pinned version keeps
+/// the download URL and integrity check deterministic; bump it periodically to a
+/// current LTS. Matches the version zed pins so the URL is known-good.
+const MANAGED_NODE_VERSION: &str = "v24.11.0";
+
+/// Minimum acceptable system Node.js version. Below this, a system install is
+/// treated as absent and the managed runtime is used instead — old Node.js
+/// tends to fail the adapter with cryptic errors, which is worse than a
+/// one-time managed download.
+const MIN_NODE_VERSION: Version = Version::new(20, 0, 0);
+
+/// Base URL for the official Node.js distribution.
+const NODE_DIST_BASE: &str = "https://nodejs.org/dist";
+
+/// Overall timeout for the (large) tarball / checksum downloads.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Serializes managed installs across concurrent lane connections so two panes
+/// starting at once download once, not twice (the second waiter re-checks the
+/// cache and reuses it). System detection needs no lock.
+static INSTALL_LOCK: Mutex<()> = Mutex::new(());
+
+/// A usable Node.js runtime for the ACP adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeRuntime {
+    /// The user's own Node.js, found on `PATH` and recent enough. The adapter
+    /// runs via the default `npx -y <pkg>` command, unchanged.
+    System,
+    /// An app-managed Node.js under the install root. `node_dir` is the
+    /// extracted `node-<ver>-<os>-<arch>` directory; its `bin/` holds `node` and
+    /// `npx`.
+    Managed { node_dir: PathBuf },
+}
+
+impl NodeRuntime {
+    /// The adapter launch command for this runtime.
+    ///
+    /// System reuses the default bash command (`node` / `npx` are on the
+    /// hydrated `PATH`). Managed emits a JSON stdio config with the **absolute**
+    /// `npx` path and a `PATH` that prepends the managed `bin/` — so `npx`, and
+    /// the adapter it spawns, find the managed `node`. JSON (not a bash string)
+    /// is used because the managed path can contain spaces (macOS
+    /// `Application Support`), which bash-word splitting would break.
+    #[must_use]
+    pub fn adapter_command(&self) -> AdapterCommand {
+        match self {
+            NodeRuntime::System => AdapterCommand::default(),
+            NodeRuntime::Managed { node_dir } => {
+                let bin_dir = node_dir.join("bin");
+                let npx = bin_dir.join("npx");
+                let path = prepend_to_path(&bin_dir);
+                let stdio = McpServerStdio::new("claude-agent-acp", npx)
+                    .args(vec!["-y".to_string(), ADAPTER_NPM_PACKAGE.to_string()])
+                    .env(vec![EnvVariable::new("PATH", path)]);
+                // `AcpAgent::from_str` parses a leading `{` as a JSON `McpServer`,
+                // so serializing the schema type gives a forward-compatible,
+                // shell-safe command. serde can't fail on this owned value.
+                let json = serde_json::to_string(&McpServer::Stdio(stdio))
+                    .expect("McpServer::Stdio serializes to JSON");
+                AdapterCommand(json)
+            }
+        }
+    }
+}
+
+/// Progress milestones during [`ensure_node`], for a host status line. The
+/// managed download is the only slow path (tens of MB on first run), so the
+/// host can show "preparing runtime…" instead of an apparent hang.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeProgress {
+    /// System Node.js was found and will be used — no download.
+    UsingSystemNode,
+    /// Checking the managed cache for an existing install.
+    CheckingCache,
+    /// Downloading the Node.js archive.
+    Downloading,
+    /// Verifying the archive checksum.
+    Verifying,
+    /// Extracting the archive.
+    Extracting,
+}
+
+/// Failure modes of node provisioning. `Display` is user-facing (surfaced as a
+/// toast + status line by the host), so messages name the remedy.
+#[derive(Debug, thiserror::Error)]
+pub enum NodeError {
+    /// The current OS/architecture has no managed Node.js build.
+    #[error(
+        "no managed Node.js build for this platform ({0}); install Node.js from https://nodejs.org and restart daruda"
+    )]
+    UnsupportedPlatform(String),
+    /// The download (tarball or checksums) failed.
+    #[error(
+        "couldn't download Node.js ({0}) — check your internet connection, or install Node.js from https://nodejs.org and restart daruda"
+    )]
+    Download(String),
+    /// The downloaded archive did not match its published checksum.
+    #[error("the downloaded Node.js archive failed its integrity check; not installing it")]
+    Checksum {
+        /// Checksum published in `SHASUMS256.txt`.
+        expected: String,
+        /// Checksum computed over the downloaded bytes.
+        actual: String,
+    },
+    /// Extraction or on-disk setup failed.
+    #[error("couldn't set up the downloaded Node.js: {0}")]
+    Extract(String),
+}
+
+/// Ensure a usable Node.js runtime, preferring the user's own install.
+///
+/// Order: system Node.js (recent enough) → managed cache → download + verify +
+/// extract. `install_root` is the app-managed directory that holds managed
+/// installs (injected so tests and profiles stay isolated). `progress` is
+/// called at each milestone.
+pub fn ensure_node(
+    install_root: &Path,
+    progress: &mut dyn FnMut(NodeProgress),
+) -> Result<NodeRuntime, NodeError> {
+    if detect_system_node() {
+        progress(NodeProgress::UsingSystemNode);
+        return Ok(NodeRuntime::System);
+    }
+
+    let (os, arch) = node_platform()?;
+    let node_dir = managed_node_dir(install_root, os, arch);
+
+    progress(NodeProgress::CheckingCache);
+    if managed_cache_valid(&node_dir) {
+        return Ok(NodeRuntime::Managed { node_dir });
+    }
+
+    install_managed(install_root, os, arch, progress)
+}
+
+/// `true` if a system `node` is on `PATH` and at least [`MIN_NODE_VERSION`].
+fn detect_system_node() -> bool {
+    let Ok(node) = which::which("node") else {
+        return false;
+    };
+    // `npx` must exist too — the adapter is launched through it.
+    if which::which("npx").is_err() {
+        return false;
+    }
+    let Ok(output) = std::process::Command::new(&node).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    match parse_node_version(&String::from_utf8_lossy(&output.stdout)) {
+        Some(version) => version >= MIN_NODE_VERSION,
+        None => false,
+    }
+}
+
+/// Parse `node --version` output (`v24.11.0\n`) into a [`Version`].
+fn parse_node_version(output: &str) -> Option<Version> {
+    Version::parse(output.trim().trim_start_matches('v')).ok()
+}
+
+/// Node's `(os, arch)` tokens for the current platform, as used in the
+/// distribution file names. `Err` on an unsupported platform.
+fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => return Err(NodeError::UnsupportedPlatform(format!("os: {other}"))),
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(NodeError::UnsupportedPlatform(format!("arch: {other}"))),
+    };
+    Ok((os, arch))
+}
+
+/// `node-<ver>-<os>-<arch>` — the distribution folder / archive stem.
+fn managed_folder_name(os: &str, arch: &str) -> String {
+    format!("node-{MANAGED_NODE_VERSION}-{os}-{arch}")
+}
+
+/// The extracted managed node directory under `install_root`.
+fn managed_node_dir(install_root: &Path, os: &str, arch: &str) -> PathBuf {
+    install_root.join(managed_folder_name(os, arch))
+}
+
+/// The `node` binary inside an extracted managed node directory.
+fn node_binary(node_dir: &Path) -> PathBuf {
+    node_dir.join("bin").join("node")
+}
+
+/// `true` if a managed install exists and its `node` runs. Cheap validity gate
+/// that also self-heals a truncated / corrupt extraction (it re-downloads).
+fn managed_cache_valid(node_dir: &Path) -> bool {
+    let node = node_binary(node_dir);
+    match std::process::Command::new(&node).arg("--version").output() {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Download, verify, and extract the pinned Node.js into `install_root`,
+/// returning the [`NodeRuntime::Managed`]. Serialized by [`INSTALL_LOCK`]; the
+/// cache is re-checked after acquiring so a queued caller reuses a just-finished
+/// install instead of downloading again.
+fn install_managed(
+    install_root: &Path,
+    os: &str,
+    arch: &str,
+    progress: &mut dyn FnMut(NodeProgress),
+) -> Result<NodeRuntime, NodeError> {
+    let _guard = INSTALL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let node_dir = managed_node_dir(install_root, os, arch);
+    progress(NodeProgress::CheckingCache);
+    if managed_cache_valid(&node_dir) {
+        return Ok(NodeRuntime::Managed { node_dir });
+    }
+
+    let file_name = format!("{}.tar.gz", managed_folder_name(os, arch));
+    let archive_url = format!("{NODE_DIST_BASE}/{MANAGED_NODE_VERSION}/{file_name}");
+    let shasums_url = format!("{NODE_DIST_BASE}/{MANAGED_NODE_VERSION}/SHASUMS256.txt");
+
+    progress(NodeProgress::Downloading);
+    let archive = http_get_bytes(&archive_url)?;
+
+    progress(NodeProgress::Verifying);
+    let shasums = http_get_string(&shasums_url)?;
+    let expected = find_checksum(&shasums, &file_name)
+        .ok_or_else(|| NodeError::Download(format!("no checksum listed for {file_name}")))?;
+    let actual = sha256_hex(&archive);
+    if actual != expected {
+        return Err(NodeError::Checksum {
+            expected: expected.to_string(),
+            actual,
+        });
+    }
+
+    progress(NodeProgress::Extracting);
+    std::fs::create_dir_all(install_root)
+        .map_err(|e| NodeError::Extract(format!("creating {}: {e}", install_root.display())))?;
+
+    // Extract into a private staging dir, then publish with an atomic rename.
+    // The install root is shared across profiles *and* instances (see
+    // `node_install_dir`), so `INSTALL_LOCK` — a process-local mutex — does not
+    // serialize a second process. Extracting straight into `node_dir` would let
+    // a concurrent installer observe or clobber a half-written tree; staging +
+    // rename means each process builds its own copy and exactly one publish
+    // wins, the other reuses it.
+    let staging = install_root.join(format!(".staging-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)
+        .map_err(|e| NodeError::Extract(format!("creating staging dir: {e}")))?;
+    let result = publish_managed(&archive, os, arch, &staging, &node_dir);
+    let _ = std::fs::remove_dir_all(&staging);
+    result?;
+
+    if !managed_cache_valid(&node_dir) {
+        return Err(NodeError::Extract(
+            "the extracted Node.js did not run".to_string(),
+        ));
+    }
+    Ok(NodeRuntime::Managed { node_dir })
+}
+
+/// Extract `archive` into `staging` and publish the resulting node tree to
+/// `node_dir`. Publishing is a same-filesystem `rename`, atomic when `node_dir`
+/// is absent. A concurrent process that published a valid install first wins
+/// (its tree is kept); a stale/corrupt `node_dir` is removed before the rename
+/// (that removal is serialized within the process by `INSTALL_LOCK`, and a lost
+/// cross-process race is caught by the post-rename re-validation).
+fn publish_managed(
+    archive: &[u8],
+    os: &str,
+    arch: &str,
+    staging: &Path,
+    node_dir: &Path,
+) -> Result<(), NodeError> {
+    extract_tar_gz(archive, staging)?;
+    let extracted = staging.join(managed_folder_name(os, arch));
+    if node_dir.exists() && !managed_cache_valid(node_dir) {
+        let _ = std::fs::remove_dir_all(node_dir);
+    }
+    match std::fs::rename(&extracted, node_dir) {
+        Ok(()) => Ok(()),
+        // Another process published a valid install between our checks and the
+        // rename — keep theirs rather than fail.
+        Err(_) if managed_cache_valid(node_dir) => Ok(()),
+        Err(e) => Err(NodeError::Extract(format!("publishing node: {e}"))),
+    }
+}
+
+/// GET `url` and return the body bytes (no size cap — the tarball is tens of MB).
+fn http_get_bytes(url: &str) -> Result<Vec<u8>, NodeError> {
+    let agent = ureq::AgentBuilder::new().timeout(DOWNLOAD_TIMEOUT).build();
+    let response = agent
+        .get(url)
+        .call()
+        .map_err(|e| NodeError::Download(e.to_string()))?;
+    let mut buf = Vec::new();
+    response
+        .into_reader()
+        .read_to_end(&mut buf)
+        .map_err(|e| NodeError::Download(e.to_string()))?;
+    Ok(buf)
+}
+
+/// GET `url` and return the body as a string (checksums file — small).
+fn http_get_string(url: &str) -> Result<String, NodeError> {
+    let agent = ureq::AgentBuilder::new().timeout(DOWNLOAD_TIMEOUT).build();
+    agent
+        .get(url)
+        .call()
+        .map_err(|e| NodeError::Download(e.to_string()))?
+        .into_string()
+        .map_err(|e| NodeError::Download(e.to_string()))
+}
+
+/// Find the checksum for `file_name` in a `SHASUMS256.txt` body (each line is
+/// `<hex>  <filename>`).
+fn find_checksum<'a>(shasums: &'a str, file_name: &str) -> Option<&'a str> {
+    shasums.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let hash = parts.next()?;
+        let name = parts.next()?;
+        (name == file_name).then_some(hash)
+    })
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+/// `bin_dir:$PATH`, or just `bin_dir` when `PATH` is unset. Uses OS path joining
+/// so a `bin_dir` with a separator-conflicting char is handled correctly.
+fn prepend_to_path(bin_dir: &Path) -> String {
+    match std::env::var_os("PATH") {
+        Some(existing) => {
+            let joined = std::iter::once(bin_dir.to_path_buf())
+                .chain(std::env::split_paths(&existing))
+                .collect::<Vec<_>>();
+            std::env::join_paths(joined)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| bin_dir.to_string_lossy().into_owned())
+        }
+        None => bin_dir.to_string_lossy().into_owned(),
+    }
+}
+
+/// Extract a gzip tarball (`bytes`) into `dest` via the system `tar`. macOS and
+/// Linux both ship a `tar` with gzip support; shelling out avoids pulling a
+/// `tar`/`flate2` crate for the one extraction, mirroring the blocking git-CLI
+/// layer. The bytes are staged to a temp file (same filesystem as `dest`) since
+/// `tar` reads a path.
+fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<(), NodeError> {
+    let tmp = dest.join(format!(".node-download-{}.tar.gz", std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|e| NodeError::Extract(format!("staging archive: {e}")))?;
+    let status = std::process::Command::new("tar")
+        .arg("-xzf")
+        .arg(&tmp)
+        .arg("-C")
+        .arg(dest)
+        .status();
+    let _ = std::fs::remove_file(&tmp);
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(NodeError::Extract(format!("tar exited with {status}"))),
+        Err(e) => Err(NodeError::Extract(format!("running tar: {e}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::AcpAgent;
+    use std::str::FromStr;
+
+    #[test]
+    fn system_runtime_uses_default_bash_command() {
+        assert_eq!(
+            NodeRuntime::System.adapter_command().0,
+            AdapterCommand::default().0
+        );
+    }
+
+    #[test]
+    fn managed_runtime_command_round_trips_to_absolute_npx_with_path_env() {
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let command = NodeRuntime::Managed {
+            node_dir: node_dir.clone(),
+        }
+        .adapter_command();
+
+        // The command must be JSON (leading `{`) so no shell splitting happens.
+        assert!(command.0.trim_start().starts_with('{'), "{}", command.0);
+
+        // And it must parse back into a stdio transport with the absolute npx
+        // path, the adapter package args, and a PATH env prepending the bin dir.
+        let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
+                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
+                let path = stdio
+                    .env
+                    .iter()
+                    .find(|e| e.name == "PATH")
+                    .expect("PATH env present");
+                assert!(
+                    path.value
+                        .starts_with(&node_dir.join("bin").to_string_lossy().into_owned()),
+                    "PATH must start with the managed bin dir, got {}",
+                    path.value
+                );
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn managed_command_survives_a_path_with_spaces() {
+        // macOS `Application Support` has a space — the JSON form must keep the
+        // absolute npx path intact where a bash string would split it.
+        let node_dir = PathBuf::from(
+            "/Users/x/Library/Application Support/daruda/node/node-v24.11.0-darwin-arm64",
+        );
+        let command = NodeRuntime::Managed {
+            node_dir: node_dir.clone(),
+        }
+        .adapter_command();
+        let agent = AcpAgent::from_str(&command.0).expect("command with spaces parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_node_version_reads_v_prefixed_output() {
+        assert_eq!(
+            parse_node_version("v24.11.0\n"),
+            Some(Version::new(24, 11, 0))
+        );
+        assert_eq!(
+            parse_node_version("  v20.0.0  "),
+            Some(Version::new(20, 0, 0))
+        );
+        assert_eq!(parse_node_version("not a version"), None);
+    }
+
+    #[test]
+    fn min_version_gate_rejects_old_and_accepts_current() {
+        assert!(parse_node_version("v18.20.0").unwrap() < MIN_NODE_VERSION);
+        assert!(parse_node_version("v20.0.0").unwrap() >= MIN_NODE_VERSION);
+        assert!(parse_node_version("v24.11.0").unwrap() >= MIN_NODE_VERSION);
+    }
+
+    #[test]
+    fn managed_dir_and_binary_paths() {
+        let root = PathBuf::from("/data/node");
+        let dir = managed_node_dir(&root, "darwin", "arm64");
+        assert_eq!(
+            dir,
+            root.join(format!("node-{MANAGED_NODE_VERSION}-darwin-arm64"))
+        );
+        assert_eq!(node_binary(&dir), dir.join("bin").join("node"));
+    }
+
+    #[test]
+    fn find_checksum_matches_exact_filename() {
+        let shasums = "\
+aaaa1111  node-v24.11.0-darwin-arm64.tar.gz
+bbbb2222  node-v24.11.0-darwin-x64.tar.gz
+cccc3333  node-v24.11.0-linux-x64.tar.xz
+";
+        assert_eq!(
+            find_checksum(shasums, "node-v24.11.0-darwin-arm64.tar.gz"),
+            Some("aaaa1111")
+        );
+        assert_eq!(
+            find_checksum(shasums, "node-v24.11.0-darwin-x64.tar.gz"),
+            Some("bbbb2222")
+        );
+        // A prefix match must not leak across filenames.
+        assert_eq!(find_checksum(shasums, "node-v24.11.0-darwin.tar.gz"), None);
+        assert_eq!(find_checksum(shasums, "missing.tar.gz"), None);
+    }
+
+    #[test]
+    fn sha256_hex_is_lowercase_and_correct() {
+        // SHA-256 of the empty string.
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        // SHA-256 of "abc".
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn prepend_to_path_puts_bin_dir_first() {
+        // SAFETY: single-threaded test; restored right after reading.
+        let saved = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", "/usr/bin:/bin");
+        }
+        let result = prepend_to_path(Path::new("/managed/bin"));
+        match saved {
+            Some(v) => unsafe { std::env::set_var("PATH", v) },
+            None => unsafe { std::env::remove_var("PATH") },
+        }
+        assert_eq!(result, "/managed/bin:/usr/bin:/bin");
+    }
+
+    #[test]
+    fn extract_tar_gz_unpacks_a_real_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("hello.txt"), b"hi").unwrap();
+
+        // Build a gzip tarball with the system tar, then extract it back.
+        let tarball = dir.path().join("out.tar.gz");
+        let status = std::process::Command::new("tar")
+            .arg("-czf")
+            .arg(&tarball)
+            .arg("-C")
+            .arg(&src)
+            .arg("hello.txt")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let bytes = std::fs::read(&tarball).unwrap();
+
+        let dest = dir.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+        extract_tar_gz(&bytes, &dest).expect("extraction succeeds");
+        assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn ensure_node_prefers_system_when_available() {
+        // The CI / dev host running these tests has a recent node on PATH, so
+        // ensure_node must pick System and never touch the (nonexistent) root.
+        if !detect_system_node() {
+            // No system node here — skip rather than assert on the environment.
+            return;
+        }
+        let mut seen = Vec::new();
+        let runtime = ensure_node(Path::new("/nonexistent-daruda-node-root"), &mut |p| {
+            seen.push(p)
+        })
+        .expect("system node is used");
+        assert_eq!(runtime, NodeRuntime::System);
+        assert_eq!(seen, vec![NodeProgress::UsingSystemNode]);
+    }
+
+    /// End-to-end check of the managed path against the *real* nodejs.org: it
+    /// downloads the pinned build, verifies it against the published checksum,
+    /// extracts it with the system `tar`, and confirms the extracted `node`
+    /// runs. Ignored by default (network + tens of MB); run explicitly with
+    /// `cargo test -p daruda_acp -- --ignored install_managed`.
+    #[test]
+    #[ignore = "network: downloads a real Node.js from nodejs.org"]
+    fn install_managed_downloads_verifies_and_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (os, arch) = node_platform().expect("supported test platform");
+        let mut seen = Vec::new();
+        let runtime =
+            install_managed(dir.path(), os, arch, &mut |p| seen.push(p)).expect("managed install");
+        match runtime {
+            NodeRuntime::Managed { node_dir } => {
+                assert!(node_binary(&node_dir).exists(), "node binary extracted");
+                assert!(node_dir.join("bin").join("npx").exists(), "npx extracted");
+                assert!(managed_cache_valid(&node_dir), "extracted node runs");
+            }
+            other => panic!("expected managed runtime, got {other:?}"),
+        }
+        assert!(seen.contains(&NodeProgress::Downloading));
+        assert!(seen.contains(&NodeProgress::Verifying));
+        assert!(seen.contains(&NodeProgress::Extracting));
+    }
+}
