@@ -16,7 +16,9 @@ pub mod node;
 pub mod session;
 
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
-pub use mapping::{apply_update, cancel_pending_tools, finalize_streaming, permission_item};
+pub use mapping::{
+    UpdateEffect, apply_update, cancel_pending_tools, finalize_streaming, permission_item,
+};
 pub use model::{
     ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView, DiffView,
     ModeStateView, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,

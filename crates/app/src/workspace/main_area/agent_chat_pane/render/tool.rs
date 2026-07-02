@@ -268,7 +268,9 @@ fn permission_button(
     choice: &PermissionChoice,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let id = ("agent-chat-perm", ix * 16 + choice_ix);
+    // Distinct id per (item, choice) without the old `ix * 16 + choice_ix`
+    // arithmetic, which collided once a card carried more than 16 choices.
+    let id = SharedString::from(format!("agent-chat-perm-{ix}-{choice_ix}"));
     let label: SharedString = choice.name.clone().into();
     let kind = choice.kind;
     let option_id = choice.option_id.clone();

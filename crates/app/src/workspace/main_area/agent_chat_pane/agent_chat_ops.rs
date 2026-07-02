@@ -624,13 +624,17 @@ pub(in crate::workspace) fn chat_item_markdown(item: &daruda_acp::ChatItem) -> O
     }
 }
 
-/// Stable cache key for a mermaid fence's source, shared between the rasterizer
-/// (insert) and the renderer (lookup) so the embed matches what was cached.
-/// `DefaultHasher` is process-stable, which is all the in-memory cache needs.
-pub(in crate::workspace) fn mermaid_key(source: &str) -> u64 {
+/// Stable cache key for a mermaid fence's source *at a given appearance*, shared
+/// between the rasterizer (insert) and the renderer (lookup) so the embed
+/// matches what was cached. `dark` is part of the key because the diagram is
+/// themed to the host appearance (`mermaid_with_theme`): without it a cached
+/// raster would keep its old colours after a light/dark toggle. `DefaultHasher`
+/// is process-stable, which is all the in-memory cache needs.
+pub(in crate::workspace) fn mermaid_key(source: &str, dark: bool) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
+    dark.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -1156,16 +1160,23 @@ mod tests {
         assert!(mermaid_sources(text).is_empty());
     }
 
-    /// The cache key is stable per source and distinct across sources.
+    /// The cache key is stable per (source, appearance) and distinct across
+    /// sources *and* across the dark/light appearance — so a light/dark toggle
+    /// re-rasterizes rather than reusing a stale-coloured diagram.
     #[test]
     fn mermaid_key_is_stable_and_distinct() {
         assert_eq!(
-            mermaid_key("graph TD\nA-->B"),
-            mermaid_key("graph TD\nA-->B")
+            mermaid_key("graph TD\nA-->B", true),
+            mermaid_key("graph TD\nA-->B", true)
         );
         assert_ne!(
-            mermaid_key("graph TD\nA-->B"),
-            mermaid_key("graph LR\nA-->B")
+            mermaid_key("graph TD\nA-->B", true),
+            mermaid_key("graph LR\nA-->B", true)
+        );
+        // Same source, different appearance → different key.
+        assert_ne!(
+            mermaid_key("graph TD\nA-->B", true),
+            mermaid_key("graph TD\nA-->B", false)
         );
     }
 

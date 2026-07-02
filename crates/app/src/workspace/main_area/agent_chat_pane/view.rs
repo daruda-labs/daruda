@@ -46,7 +46,7 @@ use daruda_acp::{
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
     AnyWindowHandle, App, Context, Entity, FocusHandle, Focusable, FollowMode, ListAlignment,
-    ListState, ScrollHandle, Task, Window, prelude::*, px,
+    ListState, ScrollHandle, Subscription, Task, Window, prelude::*, px,
 };
 
 use super::agent_chat_ops::{
@@ -62,9 +62,6 @@ use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Connection lifecycle of an [`AgentChatView`]'s ACP session. Declared as an
-/// enum so the connecting / live / failed states are distinct variants rather
-/// than a `bool` + companion field; the live `Error` arm carries the failure
 /// A user-visible milestone of the one-time Node.js runtime provisioning shown
 /// in the connecting banner. A closed set of only the slow, user-facing phases
 /// (the instant "found system node" / "cache probe" milestones never surface),
@@ -79,6 +76,9 @@ pub(in crate::workspace) enum RuntimePrepPhase {
     Extracting,
 }
 
+/// Connection lifecycle of an [`AgentChatView`]'s ACP session. Declared as an
+/// enum so the connecting / live / failed states are distinct variants rather
+/// than a `bool` + companion field; the live `Error` arm carries the failure
 /// message it renders.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum AgentSessionStatus {
@@ -229,6 +229,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// `list()`), backing the region's 4px daruda thumb overlay. Runtime-only;
     /// never serialized.
     pub(in crate::workspace) plan_scroll: ScrollHandle,
+    /// Observes the host `DarudaTheme` global so a light/dark toggle
+    /// re-rasterizes cached mermaid diagrams for the new appearance. The cache
+    /// is keyed by `(source, dark)` (see `mermaid_key`), so without this a
+    /// toggle would leave the old-appearance raster missing until the next ACP
+    /// event triggered a reconcile. Held for the view's lifetime; dropped with it.
+    _theme_observer: Subscription,
     /// Test-only render counter, asserted by the cache-scoping regression test
     /// (`notify_rerenders_cached_agent_view`) to confirm a `cx.notify()` on this
     /// view actually re-renders it.
@@ -274,6 +280,14 @@ impl AgentChatView {
         status: AgentSessionStatus,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Re-rasterize mermaid diagrams for the new appearance when the host
+        // theme toggles. `apply_ui_theme` replaces the `DarudaTheme` global, so
+        // this fires on every light/dark swap; `reconcile_mermaid` then fills the
+        // `(source, dark)` cache keys the render hook now looks up.
+        let theme_observer = cx.observe_global::<crate::ui::theme::DarudaTheme>(|this, cx| {
+            let dark = Self::host_is_dark(cx);
+            this.reconcile_mermaid(dark, cx);
+        });
         Self {
             pane_id,
             window_handle,
@@ -310,6 +324,7 @@ impl AgentChatView {
             session_updated_at: None,
             plan_collapsed: false,
             plan_scroll: ScrollHandle::new(),
+            _theme_observer: theme_observer,
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
@@ -361,6 +376,12 @@ impl AgentChatView {
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
 
+        // What this event changed, to gate the expensive full-conversation
+        // reconciles below. Only an `Update` carrying tool/text content sets
+        // these; every other event leaves both false.
+        let mut touched_tool = false;
+        let mut touched_text = false;
+
         match event {
             AcpEvent::Connected {
                 modes,
@@ -397,19 +418,20 @@ impl AgentChatView {
                     }
                 }
             }
-            AcpEvent::Update(update) => apply_update(&mut self.items, &update),
+            AcpEvent::Update(update) => {
+                let effect = apply_update(&mut self.items, &update);
+                touched_tool = effect.touched_tool;
+                touched_text = effect.touched_text;
+            }
             AcpEvent::PermissionRequested { id, request } => {
                 self.items.push(permission_item(&request));
                 self.pending_permission = Some(id);
             }
             AcpEvent::TurnEnded { .. } => {
-                finalize_streaming(&mut self.items);
-                self.turn_in_flight = false;
-                self.turn_started_at = None;
-                // A turn only ends with a permission still pending when it was
-                // cancelled / refused mid-request — drain it so no card is left
-                // with live buttons (no-op on a normal turn).
-                cancel_pending_permission(self);
+                // Settle the turn: finalize streaming, cancel any tool the agent
+                // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
+                // still-pending permission so no card keeps live buttons.
+                self.settle_turn();
                 // Auto-collapse the plan region so the completed checklist
                 // recedes to a one-line summary. The next `PlanChanged` will
                 // re-expand it (see below).
@@ -439,13 +461,24 @@ impl AgentChatView {
             }
             AcpEvent::Error(message) => {
                 self.status = AgentSessionStatus::Error(message);
-                self.turn_in_flight = false;
-                self.turn_started_at = None;
-                cancel_pending_permission(self);
+                // A mid-turn failure must settle the turn like a Stop would —
+                // otherwise a streaming block stays `streaming: true` and an
+                // `InProgress` tool stays live, so the rollup glyph blinks
+                // forever and the response bar reads `Running` after the session
+                // is already dead.
+                self.settle_turn();
             }
         }
-        self.reconcile_diff_editors(syntax_theme, is_light, cx);
-        self.reconcile_mermaid(!is_light, cx);
+        // Gate the full-conversation reconciles on what the event actually
+        // changed: diff editors only when a tool call moved, mermaid raster only
+        // when message text changed. Running both on every streamed chunk would
+        // rescan the whole `items` vec per chunk — O(n²) over a long turn.
+        if touched_tool {
+            self.reconcile_diff_editors(syntax_theme, is_light, cx);
+        }
+        if touched_text {
+            self.reconcile_mermaid(!is_light, cx);
+        }
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
         self.rebuild_rows();
@@ -552,17 +585,28 @@ impl AgentChatView {
         if let Some(handle) = &self.handle {
             handle.cancel();
         }
+        self.settle_turn();
+        // The settle above mutates items (streaming → done, running tools →
+        // cancelled, pending card → resolved), changing both fold visibility and
+        // row heights, so reproject and remeasure before notifying.
+        self.rebuild_rows();
+        self.list_state.remeasure();
+        cx.notify();
+    }
+
+    /// End the current turn *locally* and settle every still-live item: clear
+    /// the in-flight flags, finalize streaming text, mark running tool calls
+    /// cancelled, and drain any pending permission. Model-only (no rows /
+    /// notify) so the three call paths — the Stop button (`cancel_turn`), a
+    /// normal `TurnEnded`, and a terminal `Error` — share one settle sequence
+    /// and can never drift (e.g. one leaving streaming/tools live so the rollup
+    /// blinks forever). Idempotent: a later `TurnEnded` after a Stop is a no-op.
+    fn settle_turn(&mut self) {
         self.turn_in_flight = false;
         self.turn_started_at = None;
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);
-        // The above settle items (streaming → done, running tools → cancelled,
-        // pending card → resolved), changing both fold visibility and row
-        // heights, so reproject and remeasure before notifying.
-        self.rebuild_rows();
-        self.list_state.remeasure();
-        cx.notify();
     }
 
     /// Resolve the pending permission request with the chosen option. Marks the
@@ -819,7 +863,7 @@ impl AgentChatView {
                 continue;
             };
             for source in mermaid_sources(text) {
-                let key = mermaid_key(&source);
+                let key = mermaid_key(&source, dark);
                 if self.mermaid_images.lock().unwrap().contains_key(&key)
                     || self.mermaid_inflight.contains(&key)
                     || pending.iter().any(|(k, _)| *k == key)

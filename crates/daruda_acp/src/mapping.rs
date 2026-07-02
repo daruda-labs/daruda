@@ -15,8 +15,24 @@ use crate::model::{
     ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 
-/// Apply one `session/update` notification to the chat item list.
-pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) {
+/// What an applied `session/update` touched, so the host can gate its expensive
+/// per-event reconciles instead of rescanning the whole conversation on every
+/// event: diff editors are rebuilt only when a tool call changed, and mermaid
+/// diagrams re-rasterized only when message text changed. Keeping the protocol
+/// match here (rather than exposing `SessionUpdate` variants to the host) holds
+/// the "host never touches protocol types" boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UpdateEffect {
+    /// A tool call was inserted or updated — its diffs may have changed.
+    pub touched_tool: bool,
+    /// Assistant / thinking / user message text changed — it may carry a
+    /// ` ```mermaid ` fence to rasterize.
+    pub touched_text: bool,
+}
+
+/// Apply one `session/update` notification to the chat item list, reporting what
+/// it touched via [`UpdateEffect`] so the host can gate its reconciles.
+pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) -> UpdateEffect {
     match update {
         SessionUpdate::AgentMessageChunk(chunk) => {
             append_streaming(
@@ -25,6 +41,10 @@ pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) {
                 msg_id(chunk),
                 StreamKind::Assistant,
             );
+            UpdateEffect {
+                touched_text: true,
+                ..UpdateEffect::default()
+            }
         }
         SessionUpdate::AgentThoughtChunk(chunk) => {
             append_streaming(
@@ -33,15 +53,35 @@ pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) {
                 msg_id(chunk),
                 StreamKind::Thinking,
             );
+            UpdateEffect {
+                touched_text: true,
+                ..UpdateEffect::default()
+            }
         }
         SessionUpdate::UserMessageChunk(chunk) => {
-            items.push(ChatItem::UserText(text_of(&chunk.content)));
+            append_user_chunk(items, &text_of(&chunk.content));
+            UpdateEffect {
+                touched_text: true,
+                ..UpdateEffect::default()
+            }
         }
-        SessionUpdate::ToolCall(tool_call) => upsert_tool_call(items, tool_call),
-        SessionUpdate::ToolCallUpdate(update) => apply_tool_call_update(items, update),
+        SessionUpdate::ToolCall(tool_call) => {
+            upsert_tool_call(items, tool_call);
+            UpdateEffect {
+                touched_tool: true,
+                ..UpdateEffect::default()
+            }
+        }
+        SessionUpdate::ToolCallUpdate(update) => {
+            apply_tool_call_update(items, update);
+            UpdateEffect {
+                touched_tool: true,
+                ..UpdateEffect::default()
+            }
+        }
         // MVP: plan / available-commands / mode / config / info / usage updates
         // carry no conversation content we render yet.
-        _ => {}
+        _ => UpdateEffect::default(),
     }
 }
 
@@ -90,6 +130,25 @@ pub fn cancel_pending_tools(items: &mut [ChatItem]) {
             tc.status = ToolStatusView::Cancelled;
         }
     }
+}
+
+/// Fold a `UserMessageChunk` into the item list.
+///
+/// The host echoes the user's prompt locally on send (a `UserText` pushed
+/// straight into `items`), so an adapter that *also* replays that prompt back
+/// as a `UserMessageChunk` would double the bubble. Defensive dedup: skip a
+/// chunk that exactly repeats the trailing user text — the local echo is the
+/// authoritative copy of a user turn. This can only ever collapse an
+/// agent-originated replay of the message already on screen; two genuine
+/// consecutive user turns are pushed as separate local echoes and never travel
+/// through this path, so they are unaffected. In the observed adapter the
+/// replay does not occur, but the guard keeps a future/other adapter from
+/// duplicating the turn.
+fn append_user_chunk(items: &mut Vec<ChatItem>, text: &str) {
+    if matches!(items.last(), Some(ChatItem::UserText(prev)) if prev == text) {
+        return;
+    }
+    items.push(ChatItem::UserText(text.to_string()));
 }
 
 #[derive(Clone, Copy)]
@@ -417,6 +476,51 @@ mod tests {
                 message_id: Some("m2".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn user_message_chunk_deduped_against_local_echo() {
+        // The host echoed the prompt locally; the adapter then replays the same
+        // text as a UserMessageChunk. The replay must not double the bubble.
+        let mut items = vec![ChatItem::UserText("run the tests".to_string())];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk("run the tests")),
+        );
+        assert_eq!(
+            items.len(),
+            1,
+            "an exact replay of the echoed prompt is dropped"
+        );
+    }
+
+    #[test]
+    fn distinct_user_message_chunk_is_kept() {
+        // A user chunk that does not repeat the trailing text is a real new
+        // message and is appended (the guard only drops exact duplicates).
+        let mut items = vec![ChatItem::UserText("first".to_string())];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk("second")),
+        );
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1], ChatItem::UserText("second".to_string()));
+    }
+
+    #[test]
+    fn user_message_chunk_appends_when_no_trailing_user_text() {
+        // No preceding echo (e.g. the trailing item is agent text): the chunk is
+        // a genuine user message and is pushed.
+        let mut items = vec![ChatItem::AssistantText {
+            text: "hi".to_string(),
+            streaming: false,
+            message_id: None,
+        }];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk("a real prompt")),
+        );
+        assert_eq!(items.len(), 2);
     }
 
     #[test]

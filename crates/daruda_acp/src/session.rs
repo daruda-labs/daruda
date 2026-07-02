@@ -505,19 +505,18 @@ async fn prompt_loop(
                 // A cancel with no active turn has nothing to cancel; ignore.
                 Some(Command::Cancel) => continue,
                 // A mode switch while idle: issue the request and wait for the
-                // next command (the agent confirms via CurrentModeUpdate).
+                // next command (the agent confirms via CurrentModeUpdate). A
+                // rejected switch is non-fatal (Notice), never a session kill.
                 Some(Command::SetMode(id)) => {
-                    connection
-                        .send_request(SetSessionModeRequest::new(session_id.clone(), id))
-                        .block_task()
-                        .await?;
+                    send_set_mode(connection, &session_id, id, event_tx).await;
                     continue;
                 }
                 // A config option change while idle: issue the request and wait
-                // for the next command. The response carries the updated set.
+                // for the next command. The response carries the updated set; a
+                // failure is non-fatal (Notice).
                 Some(Command::SetConfigOption { config_id, value }) => {
                     send_set_config_option(connection, &session_id, config_id, value, event_tx)
-                        .await?;
+                        .await;
                     continue;
                 }
                 None => return Ok(()),
@@ -578,18 +577,15 @@ async fn run_turn(
                 Some(Command::SetMode(id)) => {
                     // Mode switch mid-turn: send the request and keep awaiting
                     // the prompt response; the confirmation arrives via
-                    // CurrentModeUpdate notification.
-                    connection
-                        .send_request(SetSessionModeRequest::new(session_id.clone(), id))
-                        .block_task()
-                        .await?;
+                    // CurrentModeUpdate notification. Non-fatal on rejection.
+                    send_set_mode(connection, session_id, id, event_tx).await;
                 }
                 Some(Command::SetConfigOption { config_id, value }) => {
                     // Config change mid-turn: issue it and keep awaiting the
                     // prompt response; the updated set arrives in the response,
-                    // forwarded as ConfigOptionsChanged.
+                    // forwarded as ConfigOptionsChanged. Non-fatal on rejection.
                     send_set_config_option(connection, session_id, config_id, value, event_tx)
-                        .await?;
+                        .await;
                 }
                 None => {
                     // Handle dropped mid-turn: cancel and let the turn wind
@@ -609,29 +605,69 @@ async fn run_turn(
     Ok(handle_dropped)
 }
 
+/// Send a `session/set_mode`, downgrading a rejected switch to a non-fatal
+/// [`AcpEvent::Notice`]. A mode switch is a user-initiated optional action, so
+/// an adapter that rejects it must NOT tear down the live session (unlike a
+/// `session/prompt` failure, which is terminal). Infallible by design: the
+/// connection keeps running whatever the adapter answers. On success the agent
+/// confirms the switch via a `CurrentModeUpdate` notification
+/// ([`AcpEvent::ModeChanged`]).
+async fn send_set_mode(
+    connection: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    mode_id: String,
+    event_tx: &UnboundedSender<AcpEvent>,
+) {
+    if let Err(e) = connection
+        .send_request(SetSessionModeRequest::new(
+            session_id.clone(),
+            mode_id.clone(),
+        ))
+        .block_task()
+        .await
+    {
+        let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
+            "set_mode({mode_id}) failed — the session stays in its current mode: {e:?}"
+        )));
+    }
+}
+
 /// Send a `session/set_config_option` and broadcast the agent's updated option
 /// set as [`AcpEvent::ConfigOptionsChanged`]. The protocol returns the full
 /// option list in the response, so the host replaces its cache wholesale (no
 /// separate notification, unlike `set_mode` which confirms via
 /// `CurrentModeUpdate`).
+///
+/// Infallible like [`send_set_mode`]: a rejected config change is a user-driven
+/// optional action, downgraded to a non-fatal [`AcpEvent::Notice`] rather than
+/// propagated as an error that would end the connection.
 async fn send_set_config_option(
     connection: &ConnectionTo<Agent>,
     session_id: &SessionId,
     config_id: String,
     value: String,
     event_tx: &UnboundedSender<AcpEvent>,
-) -> Result<(), agent_client_protocol::Error> {
-    let resp = connection
+) {
+    match connection
         .send_request(SetSessionConfigOptionRequest::new(
             session_id.clone(),
-            config_id,
-            value,
+            config_id.clone(),
+            value.clone(),
         ))
         .block_task()
-        .await?;
-    let options = config_options_from_protocol(&resp.config_options);
-    let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(options));
-    Ok(())
+        .await
+    {
+        Ok(resp) => {
+            let options = config_options_from_protocol(&resp.config_options);
+            let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(options));
+        }
+        Err(e) => {
+            let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
+                "set_config_option({config_id}={value}) failed — the session keeps its \
+                 current value: {e:?}"
+            )));
+        }
+    }
 }
 
 /// Map a protocol config-option list to the view model, dropping non-select

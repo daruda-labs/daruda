@@ -62,7 +62,10 @@ pub(super) fn activity_bar(
         .px(px(theme::AGENT_CHAT_PAD_X))
         .py(px(theme::AGENT_CHAT_PAD_Y))
         .border_b_1()
-        .border_color(t.border)
+        // Background-derived hairline: the bar sits directly on the pane's
+        // `agent_chat_bg` (mirrored terminal bg), where the fixed `t.border`
+        // hairline is near-invisible. Matches the tool-card / code-block edges.
+        .border_color(theme::agent_chat_border_tint(cx))
         .child(
             div()
                 .id(("agent-chat-title", pane_id as usize))

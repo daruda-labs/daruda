@@ -1066,6 +1066,18 @@ impl Node {
             _ => vec![],
         };
 
+        // Background-derived table lines instead of the fixed `border` color,
+        // so the outer frame, row, and cell separators track the pane
+        // background on any theme. White over a dark surface, black over a
+        // light one — mirrors the code-block border tint and the host's
+        // `theme::agent_chat_border_tint` (tool cards). The fixed hairline is
+        // near-invisible against the agent-chat pane's mirrored terminal bg.
+        let line_color = if cx.theme().background.l < 0.5 {
+            gpui::hsla(0., 0., 1., 0.12)
+        } else {
+            gpui::hsla(0., 0., 0., 0.12)
+        };
+
         match item {
             Node::Table(table) => div()
                 .pb(rems(1.))
@@ -1075,7 +1087,7 @@ impl Node {
                         .id("table")
                         .w_full()
                         .border_1()
-                        .border_color(cx.theme().border)
+                        .border_color(line_color)
                         .rounded(cx.theme().radius)
                         .children({
                             let mut rows = Vec::with_capacity(table.children.len());
@@ -1087,7 +1099,7 @@ impl Node {
                                         .when(row_ix < table.children.len() - 1, |this| {
                                             this.border_b_1()
                                         })
-                                        .border_color(cx.theme().border)
+                                        .border_color(line_color)
                                         .flex()
                                         .flex_row()
                                         .children({
@@ -1118,7 +1130,7 @@ impl Node {
                                                         .py_1()
                                                         .when(!is_last_col, |this| {
                                                             this.border_r_1()
-                                                                .border_color(cx.theme().border)
+                                                                .border_color(line_color)
                                                         })
                                                         .truncate()
                                                         .child(
@@ -1252,7 +1264,11 @@ impl Node {
                         .w_full()
                         .text_color(cx.theme().muted_foreground)
                         .border_l_3()
-                        .border_color(cx.theme().secondary_active)
+                        // The quote bar tracks the muted text color it accompanies.
+                        // The upstream `secondary_active` maps to daruda's canvas
+                        // (near-black), which is invisible on the agent-chat pane's
+                        // mirrored terminal background.
+                        .border_color(cx.theme().muted_foreground)
                         .px_4()
                         .children({
                             let children_len = children.len();
@@ -1299,11 +1315,21 @@ impl Node {
                 .into_any_element(),
             Node::CodeBlock(code_block) => code_block.render(&options, node_cx, window, cx),
             Node::Table { .. } => Self::render_table(self, node_cx, window, cx).into_any_element(),
-            Node::Divider => div()
-                .pt(rems(0.5))
-                .when(!options.is_last, |this| this.pb(rems(0.5)))
-                .child(div().id("divider").bg(cx.theme().border).h(px(1.)))
-                .into_any_element(),
+            Node::Divider => {
+                // Background-derived rule instead of the fixed `border` hairline,
+                // which is near-invisible on the agent-chat pane's mirrored
+                // terminal background. Matches the table line + code-block border.
+                let rule_color = if cx.theme().background.l < 0.5 {
+                    gpui::hsla(0., 0., 1., 0.12)
+                } else {
+                    gpui::hsla(0., 0., 0., 0.12)
+                };
+                div()
+                    .pt(rems(0.5))
+                    .when(!options.is_last, |this| this.pb(rems(0.5)))
+                    .child(div().id("divider").bg(rule_color).h(px(1.)))
+                    .into_any_element()
+            }
             Node::Break { .. } => div().id("break").into_any_element(),
             Node::Unknown | Node::Definition { .. } => div().into_any_element(),
             _ => {

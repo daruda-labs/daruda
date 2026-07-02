@@ -24,18 +24,25 @@ fn mermaid_code_block_render(
 ) -> impl Fn(&str, &str, &mut gpui::Window, &mut gpui::App) -> Option<AnyElement> + Send + Sync + 'static
 {
     let images = mermaid_images.clone();
-    move |lang, source, _window, _cx| {
+    move |lang, source, _window, cx| {
         if lang != "mermaid" {
             return None;
         }
+        // Key by the current appearance so a light/dark toggle looks up the
+        // matching raster (the ops layer re-rasterizes on theme change); a miss
+        // during the brief re-raster falls back to the default code block.
+        let dark = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(crate::ui::theme::DarudaTheme::is_dark)
+            .unwrap_or(true);
+        let key = mermaid_key(source, dark);
         // Read the live shared cache (not a snapshot) — see `MermaidImages`.
         // Cloning the cached `CachedImage` is an `Arc` bump, so gpui reuses the
         // already-uploaded texture instead of re-uploading the bitmap.
-        let image = images.lock().ok()?.get(&mermaid_key(source)).cloned()?;
+        let image = images.lock().ok()?.get(&key).cloned()?;
         let diagram = image.block();
         // The diagram is a bitmap (not selectable), so overlay a hover-revealed
         // button that copies the mermaid source to the clipboard.
-        let key = mermaid_key(source);
         let group = SharedString::from(format!("mermaid-{key}"));
         let src = source.to_string();
         Some(
