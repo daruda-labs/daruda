@@ -10,6 +10,7 @@
 //! `impl Workspace` block extends the same type through the
 //! standard sibling-module pattern.
 
+mod about;
 mod plugin;
 
 use crate::surface::strings as s;

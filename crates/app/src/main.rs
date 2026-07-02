@@ -32,6 +32,7 @@ pub mod surface;
 #[cfg(test)]
 mod test_support;
 pub mod ui;
+mod update;
 mod watcher_pumps;
 mod watchers_lifecycle;
 pub mod welcome;

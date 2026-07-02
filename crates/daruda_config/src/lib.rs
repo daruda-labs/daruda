@@ -24,6 +24,7 @@ pub mod settings_section;
 pub mod shell;
 pub mod theme_presets;
 pub mod ui_theme_presets;
+pub mod update;
 pub mod usage;
 pub mod window;
 
@@ -53,6 +54,7 @@ pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
 pub use theme_presets::{PRESETS as THEME_PRESETS, ThemePreset};
 pub use ui_theme_presets::{PRESETS as UI_THEME_PRESETS, UiThemePreset};
+pub use update::UpdateConfig;
 pub use usage::{PollConfig, UsageConfig};
 pub use window::WindowConfig;
 
@@ -110,6 +112,7 @@ pub struct Config {
     pub logs: LogsConfig,
     pub render: RenderConfig,
     pub agent: AgentConfig,
+    pub update: UpdateConfig,
 }
 
 impl Config {

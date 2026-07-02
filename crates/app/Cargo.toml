@@ -37,6 +37,7 @@ daruda_claude = { path = "../daruda_claude" }
 daruda_store = { path = "../daruda_store" }
 daruda_config = { path = "../daruda_config" }
 daruda_terminal = { path = "../daruda_terminal" }
+daruda_update = { path = "../daruda_update" }
 gpui = { workspace = true }
 gpui_macos = { workspace = true }
 gpui_component = { workspace = true }
@@ -52,6 +53,7 @@ pulldown-cmark = { version = "0.13", default-features = false }
 resvg = "0.45"
 selkie-rs = { version = "0.3", default-features = false }
 rust-i18n = { workspace = true }
+semver = "1"
 sys-locale = "0.3"
 schemars = { workspace = true }
 sysinfo = "0.32"

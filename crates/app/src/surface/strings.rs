@@ -2126,6 +2126,53 @@ pub fn settings_plugin_skill_body_error() -> String {
     rust_i18n::t!("settings.plugin_skill_body_error").into_owned()
 }
 
+// About section — app version + self-update controls
+pub fn settings_nav_about() -> String {
+    rust_i18n::t!("settings.nav_about").into_owned()
+}
+pub fn settings_section_about() -> String {
+    rust_i18n::t!("settings.section_about").into_owned()
+}
+pub fn settings_label_current_version() -> String {
+    rust_i18n::t!("settings.label_current_version").into_owned()
+}
+pub fn settings_button_check_updates() -> String {
+    rust_i18n::t!("settings.button_check_updates").into_owned()
+}
+pub fn settings_button_update() -> String {
+    rust_i18n::t!("settings.button_update").into_owned()
+}
+pub fn settings_button_restart() -> String {
+    rust_i18n::t!("settings.button_restart").into_owned()
+}
+pub fn settings_update_checking() -> String {
+    rust_i18n::t!("settings.update_checking").into_owned()
+}
+pub fn settings_update_up_to_date() -> String {
+    rust_i18n::t!("settings.update_up_to_date").into_owned()
+}
+pub fn settings_update_available(version: &str) -> String {
+    rust_i18n::t!("settings.update_available", version => version).into_owned()
+}
+pub fn settings_update_downloading() -> String {
+    rust_i18n::t!("settings.update_downloading").into_owned()
+}
+pub fn settings_update_installing() -> String {
+    rust_i18n::t!("settings.update_installing").into_owned()
+}
+pub fn settings_update_ready() -> String {
+    rust_i18n::t!("settings.update_ready").into_owned()
+}
+pub fn settings_update_error(msg: &str) -> String {
+    rust_i18n::t!("settings.update_error", msg => msg).into_owned()
+}
+pub fn settings_update_dev_build() -> String {
+    rust_i18n::t!("settings.update_dev_build").into_owned()
+}
+pub fn update_available_toast(version: &str) -> String {
+    rust_i18n::t!("settings.update_available_toast", version => version).into_owned()
+}
+
 // ============================================================================
 // Context menu labels (right-click on tab bar / pane header)
 // ============================================================================

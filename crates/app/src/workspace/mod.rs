@@ -49,6 +49,7 @@ pub(in crate::workspace) mod sync;
 #[cfg(test)]
 mod tests;
 mod toast_layer;
+mod update_ops;
 mod window_close_ops;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;
@@ -545,6 +546,14 @@ pub struct Workspace {
     /// effective config (user layer + this workspace's project
     /// overlay) and calls `apply_config` on every change.
     _settings_global_subscription: gpui::Subscription,
+    /// Subscription on the `Updater` entity. Fires on every status
+    /// transition; the handler toasts only when it becomes `Available`.
+    /// `None` when no `Updater` global is registered (e.g. tests).
+    _updater_subscription: Option<gpui::Subscription>,
+    /// Last version surfaced via the "update available" toast. Guards
+    /// against re-toasting the same version on repeated `Available`
+    /// notifies.
+    last_update_toast_version: Option<semver::Version>,
     /// Handle to this workspace's GPUI window. Stored so that methods
     /// called from `observe_global` (which has no `&mut Window`) can
     /// re-enter the window via `cx.update_window` when they need to
@@ -1048,6 +1057,15 @@ impl Workspace {
                     let effective = store.effective_for(lane);
                     ws.apply_config(&effective, cx);
                 }),
+            // Observe the Updater entity: it self-notifies on every status
+            // transition, so the handler filters for `Available` and toasts
+            // once per new version.
+            _updater_subscription: crate::update::Updater::get(cx).map(|e| {
+                cx.observe(&e, |this: &mut Workspace, updater, cx| {
+                    this.on_updater_status_changed(&updater, cx);
+                })
+            }),
+            last_update_toast_version: None,
             window_handle: window.window_handle(),
             input_history: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),

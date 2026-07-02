@@ -45,7 +45,7 @@ cargo build -p daruda
 cargo test
 cargo fmt --all -- --check
 cargo clippy -p ghostty_vt -p ghostty_vt_sys -p daruda_terminal -p daruda \
-  -p daruda_config -p daruda_store -p daruda_claude --all-targets -- -D warnings
+  -p daruda_config -p daruda_store -p daruda_claude -p daruda_update --all-targets -- -D warnings
 scripts/lint-inline-literals.sh
 scripts/lint-paint-scope.sh
 scripts/lint-reentrant-reads.sh

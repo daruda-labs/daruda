@@ -1316,6 +1316,7 @@ dependencies = [
  "daruda_config",
  "daruda_store",
  "daruda_terminal",
+ "daruda_update",
  "dirs",
  "fs4",
  "futures",
@@ -1339,6 +1340,7 @@ dependencies = [
  "rust-i18n",
  "schemars 1.2.1",
  "selkie-rs",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1429,6 +1431,18 @@ dependencies = [
  "tempfile",
  "tracing",
  "unicode-width",
+]
+
+[[package]]
+name = "daruda_update"
+version = "0.2.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "ureq",
 ]
 
 [[package]]

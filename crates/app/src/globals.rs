@@ -54,6 +54,18 @@ pub(crate) fn init_all(cx: &mut App) {
     crate::agent::skills::global::init(cx);
     crate::agent::mcp::global::init(cx);
     crate::agent::tasks_global::init(cx);
+    crate::update::init(cx);
+
+    // Kick off a single background update check on startup when enabled.
+    // Fired once here (not per-workspace) so multiple windows don't each check.
+    if crate::settings_store::SettingsStore::global(cx)
+        .user()
+        .update
+        .auto_check
+        && let Some(updater) = crate::update::Updater::get(cx)
+    {
+        updater.update(cx, |u, cx| u.check(cx));
+    }
 
     register_settings_observer(cx);
     crate::settings_store::spawn_file_watch(cx);

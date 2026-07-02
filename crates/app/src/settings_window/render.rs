@@ -150,6 +150,7 @@ impl SettingsWindow {
             BuiltinSection::Notifications => self.render_notifications(cx),
             BuiltinSection::Keymap => self.render_keymap(cx),
             BuiltinSection::Plugin => self.render_plugin(cx),
+            BuiltinSection::About => self.render_about(cx),
         }
     }
 
@@ -229,6 +230,7 @@ fn section_nav_label(section: BuiltinSection) -> String {
         BuiltinSection::Notifications => s::settings_nav_notifications(),
         BuiltinSection::Keymap => s::settings_nav_keymap(),
         BuiltinSection::Plugin => s::settings_nav_plugin(),
+        BuiltinSection::About => s::settings_nav_about(),
     }
 }
 

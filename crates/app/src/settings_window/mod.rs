@@ -144,6 +144,14 @@ pub struct SettingsWindow {
     /// install / uninstall completions (and external `claude plugin`
     /// CLI runs) without polling.
     _skills_global_subscription: Subscription,
+    /// Subscription that calls `cx.notify()` whenever the `Updater`
+    /// entity changes status — so the About page reflects check /
+    /// download / install progress reactively. `None` when the updater
+    /// global never registered (unparseable version). Observing the
+    /// entity (not the global) is deliberate: the global holder is set
+    /// once at init and never replaced, so `observe_global` would never
+    /// fire; the entity self-notifies on every status transition.
+    _updater_subscription: Option<Subscription>,
 }
 
 /// In-Settings SKILL.md viewer state. The body load is async (disk
@@ -442,6 +450,9 @@ impl SettingsWindow {
         section_focus.insert(BuiltinSection::Clipboard, clipboard_streaming_fh.clone());
         section_focus.insert(BuiltinSection::Panels, panels_grid_columns_fh.clone());
 
+        let _updater_subscription =
+            crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
+
         let result = Self {
             panel_focus_handle: cx.focus_handle(),
             base_config: config.clone(),
@@ -490,6 +501,7 @@ impl SettingsWindow {
             plugin_view_skill: None,
             _skills_global_subscription: cx
                 .observe_global::<crate::agent::skills::SkillsState>(|_, cx| cx.notify()),
+            _updater_subscription,
         };
         // The scroll handle is populated during prepaint, which runs after render.
         // Schedule a re-render so the scrollbar thumb appears on first display
@@ -799,7 +811,8 @@ impl SettingsWindow {
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Notifications
             | BuiltinSection::Keymap
-            | BuiltinSection::Plugin => return,
+            | BuiltinSection::Plugin
+            | BuiltinSection::About => return,
         };
         let n = handles.len();
         if n == 0 {

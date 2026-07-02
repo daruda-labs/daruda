@@ -1,0 +1,18 @@
+[package]
+name = "daruda_update"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+description = "Self-update logic for the daruda macOS app — release checking, download, and bundle swap (GPUI-free)"
+
+[lints]
+workspace = true
+
+[dependencies]
+semver = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"
+thiserror = "2"
+ureq = { version = "2", default-features = false, features = ["tls"] }

@@ -60,6 +60,7 @@ pub enum BuiltinSection {
     Notifications,
     Keymap,
     Plugin,
+    About,
 }
 
 impl BuiltinSection {
@@ -79,6 +80,7 @@ impl BuiltinSection {
         Self::Notifications,
         Self::Keymap,
         Self::Plugin,
+        Self::About,
     ];
 
     /// Stable slug used by config keybinding overrides
@@ -101,6 +103,7 @@ impl BuiltinSection {
             Self::Notifications => "notifications",
             Self::Keymap => "keymap",
             Self::Plugin => "plugin",
+            Self::About => "about",
         }
     }
 
@@ -170,6 +173,6 @@ mod tests {
         // added or removed. There is no `strum::EnumCount`-style helper
         // in this crate; the count exists precisely to force a manual
         // sync of `ALL` with the enum.
-        assert_eq!(BuiltinSection::ALL.len(), 14);
+        assert_eq!(BuiltinSection::ALL.len(), 15);
     }
 }
