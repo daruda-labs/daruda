@@ -386,12 +386,13 @@ impl CodeBlock {
                     .id("codeblock")
                     .p_3()
                     .rounded(cx.theme().radius)
-                    // Background-derived tint (fill + one-step-stronger border)
-                    // instead of the fixed `muted`/`border` surface, so the
-                    // block tracks the pane background on any theme and lets
-                    // the pane opacity show through. White over a dark surface,
-                    // black over a light one — mirrors the inline-code tint and
-                    // the host's `theme::agent_chat_tint` (tool cards).
+                    // Background-derived tint instead of the fixed
+                    // `muted`/`border` surface, so the block tracks the pane
+                    // background on any theme and lets the pane opacity show
+                    // through. White over a dark surface, black over a light
+                    // one. The fill mirrors the inline-code tint and the host's
+                    // `theme::agent_chat_tint` (tool cards); the border shares
+                    // the structural-line tint used by the table + rule.
                     .bg(if cx.theme().background.l < 0.5 {
                         gpui::hsla(0., 0., 1., 0.05)
                     } else {
@@ -399,9 +400,9 @@ impl CodeBlock {
                     })
                     .border_1()
                     .border_color(if cx.theme().background.l < 0.5 {
-                        gpui::hsla(0., 0., 1., 0.12)
+                        gpui::hsla(0., 0., 1., 0.28)
                     } else {
-                        gpui::hsla(0., 0., 0., 0.12)
+                        gpui::hsla(0., 0., 0., 0.28)
                     })
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
@@ -1069,13 +1070,13 @@ impl Node {
         // Background-derived table lines instead of the fixed `border` color,
         // so the outer frame, row, and cell separators track the pane
         // background on any theme. White over a dark surface, black over a
-        // light one — mirrors the code-block border tint and the host's
-        // `theme::agent_chat_border_tint` (tool cards). The fixed hairline is
+        // light one — the shared structural-line tint (same alpha as the
+        // code-block border + the `<hr>` rule). The fixed hairline is
         // near-invisible against the agent-chat pane's mirrored terminal bg.
         let line_color = if cx.theme().background.l < 0.5 {
-            gpui::hsla(0., 0., 1., 0.12)
+            gpui::hsla(0., 0., 1., 0.28)
         } else {
-            gpui::hsla(0., 0., 0., 0.12)
+            gpui::hsla(0., 0., 0., 0.28)
         };
 
         match item {
@@ -1318,11 +1319,12 @@ impl Node {
             Node::Divider => {
                 // Background-derived rule instead of the fixed `border` hairline,
                 // which is near-invisible on the agent-chat pane's mirrored
-                // terminal background. Matches the table line + code-block border.
+                // terminal background. Shares the structural-line tint (same
+                // alpha as the table lines + code-block border).
                 let rule_color = if cx.theme().background.l < 0.5 {
-                    gpui::hsla(0., 0., 1., 0.12)
+                    gpui::hsla(0., 0., 1., 0.28)
                 } else {
-                    gpui::hsla(0., 0., 0., 0.12)
+                    gpui::hsla(0., 0., 0., 0.28)
                 };
                 div()
                     .pt(rems(0.5))
