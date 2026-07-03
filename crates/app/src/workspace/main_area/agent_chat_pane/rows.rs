@@ -56,12 +56,12 @@ pub(in crate::workspace) enum RowKind {
     /// collapsed *and* carries its own fold toggle (`FoldKey::Assistant`), so it
     /// can be collapsed to a one-line summary independently of the process.
     ConclusionItem(usize),
-    /// Synthetic "agent is working" indicator, appended at the tail of the last
-    /// turn's run while a turn is in flight but no block is actively streaming —
-    /// i.e. the gap after a tool group settles and before the next assistant
-    /// text arrives. Carries no payload; at most one exists (always the last
-    /// row). Gives the conversation flow a live in-place progress signal that
-    /// the pinned working footer (which sits outside the timeline) can't.
+    /// Synthetic "agent is working" indicator pinned at the tail of the last
+    /// turn's run for the whole time a turn is in flight (through tool execution
+    /// and streaming), so the live "working … + elapsed" signal stays
+    /// consistently present in the conversation flow. Carries no payload; at
+    /// most one exists (always the last row). Suppressed on a permission prompt
+    /// or a manually-collapsed run.
     WorkingIndicator,
 }
 
@@ -122,11 +122,11 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 ///
 /// `awaiting_response` (the view's "a turn is in flight and not blocked on user
 /// input" flag — `turn_in_flight && pending_permission.is_none()`) drives a
-/// trailing [`RowKind::WorkingIndicator`]: emitted on the last turn only when it
-/// is set *and* the run has no actively-streaming block — the gap after a tool
-/// group settles and before the next assistant text streams. While a block is
-/// streaming the growing text already signals progress, so no indicator is added
-/// then (and the pinned footer covers tool execution / permission waits).
+/// trailing [`RowKind::WorkingIndicator`] pinned to the last turn's tail: it
+/// stays for the whole turn — through tool execution and streaming — so the
+/// "working … + elapsed" signal is consistently present, not just in the gap
+/// between blocks. Suppressed only when blocked on a permission prompt (the
+/// card carries that state) or when the turn's response is manually collapsed.
 pub(in crate::workspace) fn project(
     items: &[ChatItem],
     fold: &FoldState,
@@ -200,11 +200,14 @@ pub(in crate::workspace) fn project(
             (0u8, false)
         };
 
-        // The agent is working but nothing is streaming yet (tool group settled,
-        // awaiting the next text) → an in-place progress indicator at the run's
-        // tail. Last turn only, and hidden with the run when the response is
-        // collapsed so a manually-folded turn stays quiet (the footer covers it).
-        if awaiting_response && is_last_turn && !run_active {
+        // While a turn is in flight (and not blocked on a permission prompt),
+        // pin a live "agent is working" indicator to the last turn's tail — for
+        // the whole turn, through tool execution and streaming alike — so the
+        // "working … + elapsed" signal is consistently present instead of
+        // flickering out whenever a block is active. Last turn only; hidden with
+        // the run when the response is manually collapsed so a folded turn stays
+        // quiet.
+        if awaiting_response && is_last_turn {
             rows.push(RenderRow {
                 kind: RowKind::WorkingIndicator,
                 hidden: run_collapsed,
@@ -462,10 +465,11 @@ mod tests {
     }
 
     #[test]
-    fn working_indicator_absent_while_streaming() {
+    fn working_indicator_present_while_streaming() {
         use ToolStatusView::Completed;
-        // The tail block is still streaming (active) → the growing text already
-        // signals progress, so no indicator even though a turn is in flight.
+        // Even while the tail block streams, the indicator stays pinned to the
+        // run's tail so the "working … + elapsed" signal is consistent — it no
+        // longer flickers out during streaming / tool execution.
         let items = [
             ChatItem::UserText("q".into()),
             tool("a", Completed),
@@ -477,8 +481,8 @@ mod tests {
         ];
         let rows = project(&items, &FoldState::default(), true);
         assert!(
-            !kinds(&rows).iter().any(|(k, _)| *k == "working"),
-            "a streaming run shows no separate working indicator"
+            kinds(&rows).iter().any(|(k, _)| *k == "working"),
+            "a working turn keeps the indicator even while streaming"
         );
     }
 

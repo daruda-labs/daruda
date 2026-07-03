@@ -3,7 +3,7 @@
 
 use daruda_acp::{
     PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, ToolCallItem,
-    ToolOutputBlock, ToolStatusView,
+    ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
@@ -12,7 +12,10 @@ use super::diff::diff_block;
 use super::{DiffEditors, DiffStats, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::diff_editor_key;
+use crate::ui::{Icon, IconName, Sizable as _};
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
+    diff_editor_key, renders_raw_input,
+};
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
@@ -35,16 +38,25 @@ pub(super) fn tool_card(
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t, dim, cx);
-    // A running tool gets animated trailing dots (Running. / .. / ...) so the
-    // in-progress state reads as live, not just a static amber label.
-    let badge_text = if matches!(tc.status, ToolStatusView::InProgress) {
+    // A live tool gets animated trailing dots (Running. / .. / ...) so the
+    // in-progress state reads as live, not just a static amber label. `Pending`
+    // counts as live too (see `ToolStatusView::is_live`).
+    let badge_text = if tc.status.is_live() {
         SharedString::from(format!("{badge_text}{}", pulse_dots(cx)))
     } else {
         badge_text
     };
 
-    // Title + status badge: the header IS the summary, so the title fills the
-    // row and the badge pins to the right.
+    // Title + status badge: the header IS the summary. A tool-kind icon leads
+    // (so a bash call reads differently from a file read at a glance), then the
+    // title fills the row and the badge pins right. For an Execute (terminal)
+    // tool the ACP `title` is the shell command, so it renders in the monospace
+    // family — the ambient font cascades into the selectable text (zed's
+    // command-code-block model), setting the command off from prose labels.
+    let fg = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
+    let is_execute = matches!(tc.kind, ToolKindView::Execute);
+    let failed = matches!(tc.status, ToolStatusView::Failed);
+    let font_size = px(theme::agent_chat_font_size(cx));
     let header = div()
         .flex_1()
         .min_w_0()
@@ -57,28 +69,100 @@ pub(super) fn tool_card(
             div()
                 .flex_1()
                 .min_w_0()
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-                .text_size(px(theme::agent_chat_font_size(cx)))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::GAP_SM))
+                .child(Icon::new(tool_kind_icon(tc.kind)).xsmall().text_color(fg))
                 .child(
-                    crate::ui::selectable_text(
-                        SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
-                        tc.title.clone(),
-                    )
-                    .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-                    .text_size(px(theme::agent_chat_font_size(cx))),
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(fg)
+                        .text_size(font_size)
+                        .when(is_execute, |d| d.font_family(theme::FONT_FAMILY_MONOSPACE))
+                        .child(
+                            crate::ui::selectable_text(
+                                SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
+                                tc.title.clone(),
+                            )
+                            .color(fg)
+                            .text_size(font_size),
+                        ),
                 ),
         )
+        // Detached shell command (`run_in_background: true`): the tool completes
+        // immediately with an ack while the real process keeps running, so a
+        // chip marks it as launched-in-background — otherwise the card is
+        // indistinguishable from a normal one-shot command.
+        .when(tc.is_background(), |d| {
+            d.child(
+                crate::ui::Badge::new(SharedString::from(s::agent_chat_tool_background()))
+                    .bg_color(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
+                    .border_color(theme::dim_toward_gray(
+                        theme::agent_chat_border_tint(cx),
+                        dim,
+                    ))
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim)),
+            )
+        })
         .child(
             div()
                 .flex_none()
                 .text_color(badge_fg)
-                .text_size(px(theme::agent_chat_font_size(cx)))
+                .text_size(font_size)
                 .child(badge_text),
         )
         .into_any_element();
 
-    // Body: nested diffs (each independently foldable) then plain-text output.
+    // Body: an optional raw-input disclosure (generic tools), then nested diffs
+    // (each independently foldable), then plain-text output.
     let mut body = div().flex().flex_col().gap(px(theme::AGENT_CHAT_MSG_GAP));
+    if renders_raw_input(tc)
+        && let Some(raw) = &tc.raw_input
+    {
+        // Collapsed-by-default disclosure so the detail is on tap without
+        // cluttering the card. The pretty-print + selectable-text build only
+        // when expanded: `foldable_block` drops the body when collapsed, so
+        // building it then is wasted work on the render hot path (GPUI has no
+        // partial redraw) for a large `raw_input` blob.
+        let raw_key = FoldKey::ToolRawInput(tc.id.clone());
+        let raw_expanded = fold.is_expanded(&raw_key, false);
+        let raw_header = div()
+            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+            .text_size(font_size)
+            .child(SharedString::from(s::agent_chat_raw_input_label()))
+            .into_any_element();
+        let raw_json: AnyElement = if raw_expanded {
+            let pretty = serde_json::to_string_pretty(raw).unwrap_or_else(|_| raw.to_string());
+            div()
+                .min_w_0()
+                .font_family(theme::FONT_FAMILY_MONOSPACE)
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
+                .text_size(font_size)
+                .child(
+                    crate::ui::selectable_text(
+                        SharedString::from(format!("agent-chat-tool-rawin-{}", tc.id)),
+                        SharedString::from(pretty),
+                    )
+                    .text_size(font_size),
+                )
+                .into_any_element()
+        } else {
+            gpui::Empty.into_any_element()
+        };
+        body = body.child(foldable_block(
+            SharedString::from(format!("agent-chat-rawin-{}", tc.id)),
+            raw_key,
+            raw_expanded,
+            raw_header,
+            None,
+            raw_json,
+            |row| row,
+            dim,
+            cx,
+        ));
+    }
     for (di, diff) in tc.diffs.iter().enumerate() {
         let editor = diff_editors.get(&diff_editor_key(&tc.id, di));
         body = body.child(diff_block(
@@ -110,10 +194,17 @@ pub(super) fn tool_card(
         // step stronger, so the edge tracks the background too.
         .bg(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
         .border_1()
-        .border_color(theme::dim_toward_gray(
-            theme::agent_chat_border_tint(cx),
-            dim,
-        ))
+        // A failed tool call gets an error-tinted dashed border so it reads as
+        // failed at a glance, not just via the badge (mirrors zed's dashed
+        // failure card). `t.banner_error_text` is already dimmed (t is the
+        // dimmed theme); the normal border tint is a global-read, so it is
+        // dim-wrapped here.
+        .border_color(if failed {
+            t.banner_error_text
+        } else {
+            theme::dim_toward_gray(theme::agent_chat_border_tint(cx), dim)
+        })
+        .when(failed, |d| d.border_dashed())
         .child(foldable_block(
             SharedString::from(format!("agent-chat-tool-{}", tc.id)),
             key,
@@ -158,6 +249,25 @@ fn output_block_view(
     }
 }
 
+/// Map a tool kind to a leading header icon, so a tool call's type reads at a
+/// glance (terminal vs read vs edit …), mirroring zed's kind-based icon.
+fn tool_kind_icon(kind: ToolKindView) -> IconName {
+    // The vendored `IconName` set has no pencil/edit glyph, so Edit falls back
+    // to `File` (Read already uses `Eye`, so no visual collision).
+    match kind {
+        ToolKindView::Read => IconName::Eye,
+        ToolKindView::Edit => IconName::File,
+        ToolKindView::Delete => IconName::Delete,
+        ToolKindView::Move => IconName::ArrowRight,
+        ToolKindView::Search => IconName::Search,
+        ToolKindView::Execute => IconName::SquareTerminal,
+        ToolKindView::Think => IconName::Bot,
+        ToolKindView::Fetch => IconName::Globe,
+        ToolKindView::SwitchMode => IconName::Refresh,
+        ToolKindView::Other => IconName::Settings2,
+    }
+}
+
 /// Map a tool status to its badge label + colour.
 fn tool_status_badge(
     status: ToolStatusView,
@@ -166,13 +276,13 @@ fn tool_status_badge(
     cx: &App,
 ) -> (SharedString, Hsla) {
     match status {
-        ToolStatusView::Pending => (
-            s::agent_chat_tool_status_pending().into(),
-            theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
-        ),
-        // Amber accent so a running tool reads stronger than a settled
-        // green ✓ / red ✗; `tool_card` appends animated dots to the label.
-        ToolStatusView::InProgress => (
+        // `Pending` and `InProgress` both read as "running": the adapter marks
+        // every call `Pending` until an SDK progress ping (which many tools
+        // never get), and a live `Pending` always means an in-flight call in the
+        // active turn (see `ToolStatusView::is_live`). Amber accent so a running
+        // tool reads stronger than a settled green ✓ / red ✗; `tool_card`
+        // appends animated dots to the label.
+        ToolStatusView::Pending | ToolStatusView::InProgress => (
             s::agent_chat_tool_status_running().into(),
             t.status_executing_tool_dark,
         ),

@@ -995,14 +995,14 @@ pub fn agent_chat_tool_output_label() -> String {
     rust_i18n::t!("agent_chat.tool_output_label").into_owned()
 }
 
+/// Disclosure label for a tool call's raw input (JSON arguments).
+pub fn agent_chat_raw_input_label() -> String {
+    rust_i18n::t!("agent_chat.raw_input_label").into_owned()
+}
+
 /// Collapsed tool-group header summary, e.g. "3 tool calls".
 pub fn agent_chat_tool_group_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.tool_group_count", count = count).into_owned()
-}
-
-/// Tool-call status badge — queued, not yet started.
-pub fn agent_chat_tool_status_pending() -> String {
-    rust_i18n::t!("agent_chat.tool_status_pending").into_owned()
 }
 
 /// Tool-call status badge — executing.
@@ -1023,6 +1023,11 @@ pub fn agent_chat_tool_status_failed() -> String {
 /// Tool-call status badge — cancelled (the turn was stopped before it settled).
 pub fn agent_chat_tool_status_cancelled() -> String {
     rust_i18n::t!("agent_chat.tool_status_cancelled").into_owned()
+}
+
+/// Chip marking a shell command launched detached (`run_in_background: true`).
+pub fn agent_chat_tool_background() -> String {
+    rust_i18n::t!("agent_chat.tool_background").into_owned()
 }
 
 /// Pinned working-footer label while the agent is generating a response.

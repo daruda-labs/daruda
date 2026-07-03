@@ -784,8 +784,9 @@ impl AgentChatView {
                         .any(is_active)
                 })
                 .unwrap_or(false),
-            // Diff policy is DefaultCollapsed → derivation ignores `active`.
-            FoldKey::Diff(_) => false,
+            // Diff (DefaultExpanded) and raw-input (DefaultCollapsed) both
+            // ignore `active` in their derivation, so the flag is irrelevant.
+            FoldKey::Diff(_) | FoldKey::ToolRawInput(_) => false,
         };
         self.fold.toggle(key, active);
         // A fold change flips row `hidden` flags (and may collapse a group):

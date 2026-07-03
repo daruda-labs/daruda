@@ -36,7 +36,7 @@ pub(super) fn diff_block(
 ) -> impl IntoElement + use<> {
     let diff_key = diff_editor_key(tool_id, di);
     let key = FoldKey::Diff(diff_key.clone());
-    // Diff policy is DefaultCollapsed → derivation ignores `active`.
+    // Diff policy is DefaultExpanded → derivation ignores `active` either way.
     let expanded = fold.is_expanded(&key, false);
 
     let header = div()

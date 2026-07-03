@@ -57,6 +57,22 @@ pub struct ToolCallItem {
     pub raw_input: Option<serde_json::Value>,
 }
 
+impl ToolCallItem {
+    /// True when this is a shell command launched detached (Claude Code's Bash
+    /// `run_in_background: true`). The flag rides in the tool input, forwarded
+    /// verbatim as `raw_input` by the adapter, so we read it there. Gated to
+    /// [`ToolKindView::Execute`] since only shell tools carry it.
+    pub fn is_background(&self) -> bool {
+        self.kind == ToolKindView::Execute
+            && self
+                .raw_input
+                .as_ref()
+                .and_then(|v| v.get("run_in_background"))
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+    }
+}
+
 /// A single block of tool-call output. Typed so non-text content (resource
 /// links) survives rather than being flattened to a string. Image / audio /
 /// embedded-resource blocks are not carried yet (dropped in `split_content`).
@@ -88,6 +104,26 @@ pub enum ToolStatusView {
     /// [`crate::cancel_pending_tools`] when the user cancels — agents never
     /// emit it, so it has no `ToolCallStatus` mapping.
     Cancelled,
+}
+
+impl ToolStatusView {
+    /// True while a tool call is still underway — neither settled nor stopped.
+    ///
+    /// Groups `Pending` with `InProgress`: the adapter marks every tool call
+    /// `Pending` at first sight and only promotes to `InProgress` when the SDK
+    /// emits a `tool_progress` ping, which many tools never get. Since
+    /// [`crate::cancel_pending_tools`] settles any leftover `Pending` /
+    /// `InProgress` to `Cancelled` at turn end, a live `Pending` always means an
+    /// in-flight tool in the active turn — so the view treats the two alike.
+    ///
+    /// The shared predicate for the boolean live-state sites (badge, fold
+    /// `is_active`, running-tool title). The exhaustive `match tc.status` rollups
+    /// in `render/mod.rs` mirror this same `InProgress | Pending` grouping; they
+    /// stay hand-written so adding a status variant is a compile error there,
+    /// but must be kept in step with this grouping.
+    pub fn is_live(self) -> bool {
+        matches!(self, Self::Pending | Self::InProgress)
+    }
 }
 
 /// Tool category (mirror of the protocol's `ToolKind`) — drives icon/treatment.
@@ -404,6 +440,54 @@ mod tests {
     };
 
     use super::*;
+
+    fn tool(kind: ToolKindView, raw_input: Option<serde_json::Value>) -> ToolCallItem {
+        ToolCallItem {
+            id: "t1".into(),
+            title: "cmd".into(),
+            kind,
+            status: ToolStatusView::InProgress,
+            diffs: vec![],
+            output: vec![],
+            raw_input,
+        }
+    }
+
+    #[test]
+    fn is_live_groups_pending_with_in_progress() {
+        assert!(ToolStatusView::Pending.is_live());
+        assert!(ToolStatusView::InProgress.is_live());
+        assert!(!ToolStatusView::Completed.is_live());
+        assert!(!ToolStatusView::Failed.is_live());
+        assert!(!ToolStatusView::Cancelled.is_live());
+    }
+
+    #[test]
+    fn is_background_true_only_for_execute_with_flag_set() {
+        use serde_json::json;
+        assert!(
+            tool(
+                ToolKindView::Execute,
+                Some(json!({"run_in_background": true}))
+            )
+            .is_background()
+        );
+        assert!(
+            !tool(
+                ToolKindView::Execute,
+                Some(json!({"run_in_background": false}))
+            )
+            .is_background()
+        );
+        // Execute but no flag → not background.
+        assert!(!tool(ToolKindView::Execute, Some(json!({"command": "ls"}))).is_background());
+        // Flag set but not a shell tool → not background.
+        assert!(
+            !tool(ToolKindView::Read, Some(json!({"run_in_background": true}))).is_background()
+        );
+        // No raw input at all → not background.
+        assert!(!tool(ToolKindView::Execute, None).is_background());
+    }
 
     #[test]
     fn plan_entry_view_maps_all_statuses_and_a_priority() {

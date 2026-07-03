@@ -33,6 +33,8 @@ pub(in crate::workspace) enum FoldKey {
     Tool(String),
     /// Diff inside a tool call, keyed by `"{tool_id}#{diff_index}"`.
     Diff(String),
+    /// A tool call's raw-input (JSON args) disclosure, keyed by tool-call id.
+    ToolRawInput(String),
     /// A consecutive tool-call group, keyed by the group's first tool-call id.
     ToolGroup(String),
     /// An agent response (the run of agent items under a user message), keyed by
@@ -54,12 +56,16 @@ enum FoldPolicy {
 impl FoldKey {
     fn policy(&self) -> FoldPolicy {
         match self {
-            FoldKey::Assistant(_) => FoldPolicy::DefaultExpanded,
+            // Assistant prose and file-edit diffs stay open by default so the
+            // change is visible without a click (mirrors zed's expanded edit
+            // card); the user can still collapse them.
+            FoldKey::Assistant(_) | FoldKey::Diff(_) => FoldPolicy::DefaultExpanded,
             FoldKey::Thinking(_)
             | FoldKey::Tool(_)
             | FoldKey::ToolGroup(_)
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
-            FoldKey::Diff(_) => FoldPolicy::DefaultCollapsed,
+            // Raw-input JSON is supplementary detail — collapsed until asked for.
+            FoldKey::ToolRawInput(_) => FoldPolicy::DefaultCollapsed,
         }
     }
 }
@@ -145,10 +151,17 @@ mod tests {
     }
 
     #[test]
-    fn diff_is_always_collapsed_by_default() {
+    fn diff_is_expanded_by_default() {
         let state = FoldState::default();
-        assert!(!state.is_expanded(&FoldKey::Diff("call-1#0".into()), true));
-        assert!(!state.is_expanded(&FoldKey::Diff("call-1#0".into()), false));
+        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), true));
+        assert!(state.is_expanded(&FoldKey::Diff("call-1#0".into()), false));
+    }
+
+    #[test]
+    fn tool_raw_input_is_collapsed_by_default() {
+        let state = FoldState::default();
+        assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), true));
+        assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), false));
     }
 
     #[test]
@@ -188,9 +201,9 @@ mod tests {
     #[test]
     fn override_expanded_beats_collapsed_default() {
         let mut state = FoldState::default();
-        let key = FoldKey::Diff("call-1#0".into());
+        let key = FoldKey::ToolRawInput("call-1".into());
         state.set_all([key.clone()], true);
-        // Diff defaults to collapsed, but the override expands it regardless.
+        // Raw input defaults to collapsed, but the override expands it regardless.
         assert!(state.is_expanded(&key, true));
         assert!(state.is_expanded(&key, false));
     }
@@ -209,9 +222,9 @@ mod tests {
     // 3. toggle flips the effective state.
 
     #[test]
-    fn toggle_never_touched_diff_flips_to_expanded_then_back() {
+    fn toggle_never_touched_raw_input_flips_to_expanded_then_back() {
         let mut state = FoldState::default();
-        let key = FoldKey::Diff("call-1#0".into());
+        let key = FoldKey::ToolRawInput("call-1".into());
         // Default false → toggle → true.
         state.toggle(key.clone(), false);
         assert!(state.is_expanded(&key, false));
@@ -249,8 +262,8 @@ mod tests {
     #[test]
     fn set_all_affects_only_given_keys() {
         let mut state = FoldState::default();
-        let touched = FoldKey::Diff("call-1#0".into());
-        let untouched = FoldKey::Diff("call-1#1".into());
+        let touched = FoldKey::ToolRawInput("call-1".into());
+        let untouched = FoldKey::ToolRawInput("call-2".into());
         state.set_all([touched.clone()], true);
 
         assert!(state.is_expanded(&touched, false));

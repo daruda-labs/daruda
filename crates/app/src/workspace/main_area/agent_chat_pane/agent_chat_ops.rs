@@ -635,6 +635,11 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
                 for di in 0..tc.diffs.len() {
                     keys.push(FoldKey::Diff(diff_editor_key(&tc.id, di)));
                 }
+                // Mirror the renderer's raw-input gate (generic tool, no diffs,
+                // has args) so expand/collapse-all covers the disclosure.
+                if renders_raw_input(tc) {
+                    keys.push(FoldKey::ToolRawInput(tc.id.clone()));
+                }
             }
             daruda_acp::ChatItem::UserText(_)
             | daruda_acp::ChatItem::Permission(_)
@@ -642,6 +647,17 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
         }
     }
     keys
+}
+
+/// Whether a tool card renders its raw-input (JSON args) disclosure: a generic
+/// tool (not a terminal `Execute`, whose command is already the title) that
+/// carries args and has no diffs (an edit shows the diff instead). Single
+/// source shared by the renderer and [`collect_foldable_keys`], so the fold
+/// coverage matches what is actually on screen.
+pub(in crate::workspace) fn renders_raw_input(tc: &daruda_acp::ToolCallItem) -> bool {
+    tc.raw_input.is_some()
+        && tc.diffs.is_empty()
+        && !matches!(tc.kind, daruda_acp::ToolKindView::Execute)
 }
 
 /// Cache key for a tool call's `di`-th diff editor: one editor per file. Shared
@@ -899,12 +915,12 @@ pub(in crate::workspace) fn create_diff_editor(
 /// by [`AgentChatView::toggle_fold`] and the renderer so both derive the same
 /// effective fold state.
 pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
-    use daruda_acp::{ChatItem, ToolStatusView};
+    use daruda_acp::ChatItem;
     match item {
         ChatItem::AssistantText { streaming, .. } | ChatItem::Thinking { streaming, .. } => {
             *streaming
         }
-        ChatItem::ToolCall(tc) => tc.status == ToolStatusView::InProgress,
+        ChatItem::ToolCall(tc) => tc.status.is_live(),
         ChatItem::UserText(_) | ChatItem::Permission(_) | ChatItem::Error(_) => false,
     }
 }
@@ -1237,7 +1253,8 @@ mod tests {
         }
     }
 
-    /// `is_active` is true exactly while a block is streaming / in progress.
+    /// `is_active` is true while a block is streaming, or a tool call is live
+    /// (`Pending` or `InProgress` — see [`ToolStatusView::is_live`]).
     #[test]
     fn is_active_matches_streaming_and_in_progress() {
         use daruda_acp::ToolStatusView::*;
@@ -1264,7 +1281,10 @@ mod tests {
         assert!(is_active(&ChatItem::ToolCall(tool_call(
             "c1", InProgress, 0
         ))));
-        assert!(!is_active(&ChatItem::ToolCall(tool_call("c1", Pending, 0))));
+        // A live `Pending` tool means an in-flight call in the active turn
+        // (leftover `Pending` is settled to `Cancelled` at turn end), so it
+        // reads as active — same as `InProgress`.
+        assert!(is_active(&ChatItem::ToolCall(tool_call("c1", Pending, 0))));
         assert!(!is_active(&ChatItem::ToolCall(tool_call(
             "c1", Completed, 0
         ))));
@@ -1402,5 +1422,55 @@ mod tests {
                 FoldKey::Tool("c2".to_owned()),
             ]
         );
+    }
+
+    /// `renders_raw_input` is the single gate shared by the renderer and
+    /// `collect_foldable_keys`; pin both the predicate and the resulting fold
+    /// coverage so a future edit can't break renderer↔fold sync silently.
+    #[test]
+    fn raw_input_disclosure_gate_and_fold_coverage() {
+        use daruda_acp::{ChatItem, ToolKindView, ToolStatusView};
+        let generic = ToolCallItem {
+            id: "c1".to_owned(),
+            title: "Grep".to_owned(),
+            kind: ToolKindView::Search,
+            status: ToolStatusView::Completed,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: Some(serde_json::json!({ "pattern": "foo" })),
+        };
+        // Generic tool with args and no diffs → disclosure shown, and the fold
+        // key is collected (expand/collapse-all reaches it).
+        assert!(renders_raw_input(&generic));
+        let keys = collect_foldable_keys(&[ChatItem::ToolCall(generic.clone())]);
+        assert!(keys.contains(&FoldKey::ToolRawInput("c1".to_owned())));
+
+        // Execute (terminal): the command is already the title → no disclosure,
+        // and no fold key for it.
+        let exec = ToolCallItem {
+            kind: ToolKindView::Execute,
+            ..generic.clone()
+        };
+        assert!(!renders_raw_input(&exec));
+        let exec_keys = collect_foldable_keys(&[ChatItem::ToolCall(exec)]);
+        assert!(
+            !exec_keys
+                .iter()
+                .any(|k| matches!(k, FoldKey::ToolRawInput(_)))
+        );
+
+        // No args, or a diff present (an edit shows the diff) → nothing to show.
+        assert!(!renders_raw_input(&ToolCallItem {
+            raw_input: None,
+            ..generic.clone()
+        }));
+        assert!(!renders_raw_input(&ToolCallItem {
+            diffs: vec![DiffView {
+                path: std::path::PathBuf::from("f.rs"),
+                old_text: None,
+                new_text: "x".to_owned(),
+            }],
+            ..generic
+        }));
     }
 }

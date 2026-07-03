@@ -2,7 +2,7 @@
 //! bar (title + expand/collapse), and the inline "agent is working" indicator
 //! with its animated pulse dots and elapsed clock.
 
-use daruda_acp::{ChatItem, ToolStatusView};
+use daruda_acp::ChatItem;
 use gpui::{App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings as s;
@@ -172,9 +172,7 @@ pub(super) fn status_banner(
 /// `InProgress` call is the live one.
 fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     items.iter().rev().find_map(|item| match item {
-        ChatItem::ToolCall(tc) if matches!(tc.status, ToolStatusView::InProgress) => {
-            Some(tc.title.clone())
-        }
+        ChatItem::ToolCall(tc) if tc.status.is_live() => Some(tc.title.clone()),
         _ => None,
     })
 }
@@ -217,13 +215,13 @@ fn working_status(content: &AgentChatView) -> SharedString {
 }
 
 /// Inline "agent is working" indicator, projected as the tail row of the last
-/// turn while a turn is in flight but nothing is streaming yet (the gap after a
-/// tool group settles, before the next assistant text). It lives *in* the
-/// conversation flow, so the progress signal sits where the next response will
-/// appear. The label gets animated trailing dots (".", "..", "...") off the
-/// shared `StatusPulseClock` — the pulse pump dirties this view while the turn
-/// is in flight (`Workspace::notify_in_flight_agent_chats`), so they advance
-/// without a per-frame animation. Cancelling is the bottom-dock Stop button.
+/// turn for the whole time a turn is in flight (through tool execution and
+/// streaming) — see `rows::project`'s gate. It lives *in* the conversation
+/// flow, so the progress signal sits where the next response will appear. The
+/// label gets animated trailing dots (".", "..", "...") off the shared
+/// `StatusPulseClock` — the pulse pump dirties this view while the turn is in
+/// flight (`Workspace::notify_in_flight_agent_chats`), so they advance without
+/// a per-frame animation. Cancelling is the bottom-dock Stop button.
 pub(super) fn working_indicator(
     content: &AgentChatView,
     cx: &mut Context<AgentChatView>,
@@ -313,14 +311,16 @@ mod tests {
     }
 
     #[test]
-    fn running_tool_title_picks_the_last_in_progress_call() {
-        // Completed earlier calls are skipped; the latest in-progress one wins.
+    fn running_tool_title_picks_the_last_live_call() {
+        // Settled (Completed) calls are skipped; the latest *live* one wins.
+        // `Pending` counts as live (see `ToolStatusView::is_live`), so a trailing
+        // Pending call outranks an earlier InProgress one.
         let items = [
             tool("c1", ToolStatusView::Completed),
             tool("c2", ToolStatusView::InProgress),
             tool("c3", ToolStatusView::Pending),
         ];
-        assert_eq!(running_tool_title(&items), Some("Tool c2".to_owned()));
+        assert_eq!(running_tool_title(&items), Some("Tool c3".to_owned()));
     }
 
     #[test]
