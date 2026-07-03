@@ -219,7 +219,6 @@ agent_chat:
   error_prefix: "Connection error:"
   no_lane_cwd: "No working directory for this lane."
   empty: "Ask the agent anything to get started."
-  activity_bar_title: "Agent"
   expand_all: "Expand all"
   collapse_all: "Collapse all"
   last_active_tooltip: "Last active: %{time}"

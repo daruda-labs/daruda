@@ -650,6 +650,47 @@ pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> St
     format!("{tool_call_id}#{di}")
 }
 
+/// Max glyphs the first-prompt fallback title keeps before ellipsizing, and the
+/// head kept when it must (leaving room for the `…`). Mirrors Superset's
+/// 72/69 first-message-title budget.
+const FALLBACK_TITLE_MAX: usize = 72;
+const FALLBACK_TITLE_HEAD: usize = 69;
+
+/// The activity-bar title: the agent-supplied session title when set, else a
+/// fallback derived from the first user prompt (whitespace-normalized and
+/// glyph-truncated), else `None` for a still-empty session (the caller renders a
+/// blank bar — no placeholder). Precedence mirrors Superset's session-selector
+/// (`session title → first-message fallback → blank`); zed's constant-string
+/// fallback is intentionally *not* copied.
+pub(in crate::workspace) fn activity_bar_title(
+    session_title: Option<&str>,
+    items: &[daruda_acp::ChatItem],
+) -> Option<String> {
+    if let Some(title) = session_title.map(str::trim).filter(|s| !s.is_empty()) {
+        return Some(title.to_string());
+    }
+    items.iter().find_map(|item| match item {
+        daruda_acp::ChatItem::UserText(text) => {
+            let title = normalize_prompt_title(text);
+            (!title.is_empty()).then_some(title)
+        }
+        _ => None,
+    })
+}
+
+/// Collapse a user prompt to a single-line title: trim, collapse internal
+/// whitespace runs to one space, and glyph-truncate (never byte-slice, so a
+/// multibyte prompt can't split a char). Empty when the prompt is whitespace.
+fn normalize_prompt_title(text: &str) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() > FALLBACK_TITLE_MAX {
+        let head: String = normalized.chars().take(FALLBACK_TITLE_HEAD).collect();
+        format!("{}…", head.trim_end())
+    } else {
+        normalized
+    }
+}
+
 /// The markdown body of a chat item that can carry a ` ```mermaid ` fence —
 /// assistant / thinking / user text. Tool / permission / error items carry no
 /// markdown body and contribute none. Drives the mermaid scan.
@@ -917,6 +958,73 @@ pub(in crate::workspace) fn apply_info_field(
 mod tests {
     use super::*;
     use daruda_acp::{ChatItem, ModeStateView, SessionModeView, ToolCallItem};
+
+    fn asst(text: &str) -> ChatItem {
+        ChatItem::AssistantText {
+            text: text.to_owned(),
+            streaming: false,
+            message_id: None,
+        }
+    }
+
+    #[test]
+    fn activity_bar_title_prefers_the_session_title() {
+        let items = [ChatItem::UserText("run the tests".to_owned())];
+        assert_eq!(
+            activity_bar_title(Some("Refactor fold state"), &items).as_deref(),
+            Some("Refactor fold state")
+        );
+    }
+
+    #[test]
+    fn activity_bar_title_falls_back_to_first_user_prompt() {
+        // No session title yet (pre first turn-end): the first prompt stands in.
+        let items = [
+            ChatItem::UserText("  fix the   parser  ".to_owned()),
+            asst("sure"),
+            ChatItem::UserText("second".to_owned()),
+        ];
+        assert_eq!(
+            activity_bar_title(None, &items).as_deref(),
+            Some("fix the parser")
+        );
+    }
+
+    #[test]
+    fn activity_bar_title_ignores_blank_session_title_and_falls_back() {
+        let items = [ChatItem::UserText("hello".to_owned())];
+        assert_eq!(
+            activity_bar_title(Some("   "), &items).as_deref(),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn activity_bar_title_is_none_for_an_empty_session() {
+        // Neither a session title nor a user prompt → blank bar (no placeholder).
+        assert_eq!(activity_bar_title(None, &[]), None);
+        // Non-user leading items don't seed a title.
+        assert_eq!(activity_bar_title(None, &[asst("greeting")]), None);
+        // A whitespace-only prompt yields nothing.
+        assert_eq!(
+            activity_bar_title(None, &[ChatItem::UserText("   ".to_owned())]),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_prompt_title_truncates_long_prompts_on_a_char_boundary() {
+        let long = "가".repeat(100);
+        let title = normalize_prompt_title(&long);
+        // 69 kept glyphs + the ellipsis (never a split multibyte char).
+        assert_eq!(title.chars().count(), FALLBACK_TITLE_HEAD + 1);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn normalize_prompt_title_keeps_short_prompts_verbatim() {
+        assert_eq!(normalize_prompt_title("short one"), "short one");
+    }
 
     fn modes(ids: &[&str], current: &str) -> ModeStateView {
         ModeStateView {

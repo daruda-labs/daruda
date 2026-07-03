@@ -13,22 +13,24 @@ use crate::workspace::main_area::agent_chat_pane::view::{
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Pane activity bar: session title on the LEFT, "Expand all" / "Collapse all"
-/// ghost buttons on the RIGHT. Always rendered — it holds the title even while
-/// the conversation is empty or still connecting. The fold buttons appear only
-/// when `has_items` is true (render purity: no logic here, just `.when()`).
+/// Pane activity bar: resolved session title on the LEFT, "Expand all" /
+/// "Collapse all" ghost buttons on the RIGHT. Always rendered — it holds the
+/// fold buttons even while the conversation is empty or still connecting. The
+/// `title` is already resolved by the caller (`activity_bar_title`); `None`
+/// renders a blank left slot rather than a placeholder. The fold buttons appear
+/// only when `has_items` is true (render purity: no logic here, just `.when()`).
 /// A bottom hairline separates the bar from the conversation body.
 pub(super) fn activity_bar(
     pane_id: PaneId,
-    session_title: Option<&str>,
+    title: Option<&str>,
     last_active: Option<&str>,
     has_items: bool,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let title: SharedString = session_title
+    let title: SharedString = title
         .map(|s| SharedString::from(s.to_string()))
-        .unwrap_or_else(|| SharedString::from(s::agent_chat_activity_bar_title()));
+        .unwrap_or_default();
     // Last-activity timestamp (from `SessionInfoUpdate.updated_at`) surfaces as a
     // tooltip on the title rather than inline text — it's low-frequency detail
     // and the bar is width-constrained (title ellipsizes).

@@ -68,7 +68,9 @@ use tool::{permission_card, tool_card};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, IconName, StatusPulseClock, button_bare, disclosure};
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{DiffStat, is_active};
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
+    DiffStat, activity_bar_title, is_active,
+};
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -92,11 +94,14 @@ pub(in crate::workspace) fn render(
     let status_banner = status_banner(&content.status, &t, cx);
 
     // Activity bar: session title on the left, fold buttons on the right.
-    // Always visible — it holds the title even while the conversation is empty
-    // or still connecting. Fold buttons appear only once there are items.
+    // Always visible — it holds the fold buttons even while the conversation is
+    // empty or still connecting. The title resolves to the agent's session
+    // title, else the first prompt, else blank (no placeholder). Fold buttons
+    // appear only once there are items.
+    let title = activity_bar_title(content.session_title.as_deref(), &content.items);
     let bar = activity_bar(
         pane_id,
-        content.session_title.as_deref(),
+        title.as_deref(),
         content.session_updated_at.as_deref(),
         !content.items.is_empty(),
         dim,
