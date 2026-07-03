@@ -13,6 +13,7 @@ pub mod connection;
 pub mod mapping;
 pub mod model;
 pub mod node;
+pub(crate) mod output_highlight;
 pub mod session;
 
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};

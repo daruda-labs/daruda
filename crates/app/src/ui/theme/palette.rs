@@ -859,6 +859,14 @@ pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 /// Agent chat turn-boundary gap (px) — extra space above a new user message,
 /// paired with a hairline, so consecutive turns read as distinct exchanges.
 pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;
+/// Per-row height of the embedded diff editor inside a tool card (px). Equal to
+/// gpui's window `line_height` (`Rems(1.25)` × the 16 px `rem_size` = 20 px,
+/// font-size independent — same value the bottom-input auto-grow relies on).
+/// The inline diff editor (a `CodeEditor`, not `AutoGrow`) sizes to
+/// `relative(1.)` of its parent, which collapses to a single line without a
+/// definite-height parent; the tool-card diff body has none, so it sets an
+/// explicit `rows × this` height to reveal the whole diff.
+pub const AGENT_CHAT_DIFF_ROW_H: f32 = 20.0;
 /// Agent chat container padding X (px).
 pub const AGENT_CHAT_PAD_X: f32 = PAD_STANDARD;
 /// Agent chat container padding Y (px).

@@ -219,7 +219,7 @@ fn append_streaming(
 fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
     let id = tool_call.tool_call_id.0.to_string();
     let (diffs, output) = split_content(&tool_call.content);
-    let item = ToolCallItem {
+    let mut item = ToolCallItem {
         id: id.clone(),
         title: tool_call.title.clone(),
         kind: kind_of(&tool_call.kind),
@@ -228,9 +228,27 @@ fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
         output,
         raw_input: tool_call.raw_input.clone(),
     };
+    highlight_tool_output(&mut item);
     match find_tool_call(items, &id) {
         Some(existing) => *existing = item,
         None => items.push(ChatItem::ToolCall(item)),
+    }
+}
+
+/// Rewrite the tool's text output so its fenced code block syntax-highlights:
+/// the ACP adapter wraps results in a language-less ``` fence, so we inject the
+/// language inferred from the tool (the read target's file extension) and strip
+/// any `cat -n` line-number prefixes. No-op for tools without an inferable
+/// language and idempotent (an already-tagged fence is left untouched), so it
+/// is safe to run after every tool-call insert or update.
+fn highlight_tool_output(item: &mut ToolCallItem) {
+    let Some(lang) = crate::output_highlight::output_language(item.kind, &item.raw_input) else {
+        return;
+    };
+    for block in &mut item.output {
+        if let ToolOutputBlock::Text(text) = block {
+            *text = crate::output_highlight::rewrite_fenced_output(text, lang);
+        }
     }
 }
 
@@ -257,6 +275,9 @@ fn apply_tool_call_update(items: &mut [ChatItem], update: &ToolCallUpdate) {
     if fields.raw_input.is_some() {
         item.raw_input = fields.raw_input.clone();
     }
+    // Run last: kind / raw_input (source of the language) and output text are
+    // both current by now, and the rewrite is idempotent.
+    highlight_tool_output(item);
 }
 
 fn find_tool_call<'a>(items: &'a mut [ChatItem], id: &str) -> Option<&'a mut ToolCallItem> {
@@ -684,6 +705,40 @@ mod tests {
         assert_eq!(tc.status, ToolStatusView::Completed);
         assert_eq!(tc.diffs.len(), 1);
         assert_eq!(tc.diffs[0].new_text, "hi\n");
+    }
+
+    #[test]
+    fn read_output_gets_language_injected_and_line_numbers_stripped() {
+        let mut items = Vec::new();
+        // A Read tool call carrying its target path in raw_input.
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("t1", "Read src/main.rs")
+                    .kind(ToolKind::Read)
+                    .raw_input(serde_json::json!({"file_path": "src/main.rs"})),
+            ),
+        );
+        // The adapter delivers the file as a language-less, line-numbered fence.
+        let mut fields = ToolCallUpdateFields::default();
+        fields.status = Some(ToolCallStatus::Completed);
+        fields.content = Some(vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Text(TextContent::new("```\n1\tfn main() {}\n2\t// end\n```")),
+        ))]);
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new("t1", fields)),
+        );
+
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call item");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Text(
+                "```rust\nfn main() {}\n// end\n```".to_string()
+            )]
+        );
     }
 
     #[test]

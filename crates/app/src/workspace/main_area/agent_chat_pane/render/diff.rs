@@ -93,9 +93,21 @@ fn diff_body(
     let mut block = div().flex().flex_col().w_full();
 
     if let Some(editor) = editor {
+        // The embedded code editor stretches via `flex_grow` / `height: 100%`,
+        // which only resolves against a definite-height flex parent — without
+        // one it collapses to its single-line `min_height`, hiding all but the
+        // first diff row (the hunk header). The tool-card diff body has no
+        // definite height of its own, so give the wrapper an explicit
+        // `rows × line_height` and `.flex()` to reveal the whole diff. `rows` is
+        // the editor's display-row count, seeded at build time so it is correct
+        // from the first render.
+        let rows = editor.read(cx).display_rows().max(1);
+        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
         return block.child(
             div()
+                .flex()
                 .w_full()
+                .h(height)
                 .bg(t.file_viewer_bg)
                 .child(crate::ui::file_viewer_editor(editor, cx)),
         );

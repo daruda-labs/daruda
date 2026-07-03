@@ -876,6 +876,12 @@ pub(in crate::workspace) fn create_diff_editor(
     let language = language.to_owned();
     match cx.update_window(window_handle, move |_, window, cx_w| {
         cx_w.new(|cx_state| {
+            // One synthetic-buffer line per decoration (no trailing newline in
+            // `model.text`), so this is the editor's display-row count. Seeding
+            // it up front makes `display_rows()` correct from the first render
+            // — the diff body reads it to size the (parent-height-less) editor
+            // to its full content instead of a collapsed single line.
+            let rows = model.decorations.len().max(1);
             let mut state = gpui_component::input::InputState::new(window, cx_state)
                 .multi_line(true)
                 .soft_wrap(false);
@@ -884,6 +890,7 @@ pub(in crate::workspace) fn create_diff_editor(
             } else {
                 state.code_editor(&language)
             };
+            state = state.rows(rows);
             state.set_value(model.text, window, cx_state);
             state.set_disabled(true, cx_state);
             state.set_line_decorations(model.decorations, cx_state);
@@ -1144,6 +1151,15 @@ mod tests {
             .filter(|d| d.background.is_some())
             .count();
         assert!(with_bg >= 2, "at least the changed pair is tinted");
+        // One decoration per synthetic-buffer line (no trailing newline), so
+        // `decorations.len()` is the editor's display-row count — the value
+        // `create_diff_editor` seeds and the tool-card diff body uses to size
+        // the editor to its full content. Lock that relationship.
+        assert_eq!(
+            m.decorations.len(),
+            m.text.split('\n').count(),
+            "one decoration per display row drives the inline diff height"
+        );
     }
 
     /// A newly created file (`old_text == None`) diffs against an empty old
