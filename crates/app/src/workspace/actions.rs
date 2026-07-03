@@ -115,7 +115,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            let kind = ws.focused_pane_split_kind();
+            ws.split_focused_pane_kind(kind, SplitDirection::Horizontal, window, cx);
         });
     }
 
@@ -126,7 +127,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            ws.split_focused_pane(SplitDirection::Vertical, window, cx);
+            let kind = ws.focused_pane_split_kind();
+            ws.split_focused_pane_kind(kind, SplitDirection::Vertical, window, cx);
         });
     }
 

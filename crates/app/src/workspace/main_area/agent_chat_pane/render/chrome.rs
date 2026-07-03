@@ -23,6 +23,7 @@ pub(super) fn activity_bar(
     session_title: Option<&str>,
     last_active: Option<&str>,
     has_items: bool,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let title: SharedString = session_title
@@ -64,7 +65,10 @@ pub(super) fn activity_bar(
         // Background-derived hairline: the bar sits directly on the pane's
         // `agent_chat_bg` (mirrored terminal bg), where the fixed `t.border`
         // hairline is near-invisible. Matches the tool-card / code-block edges.
-        .border_color(theme::agent_chat_border_tint(cx))
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
         .child(
             div()
                 .id(("agent-chat-title", pane_id as usize))
@@ -74,7 +78,7 @@ pub(super) fn activity_bar(
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .text_color(theme::agent_chat_fg(cx))
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                 .child(title)
                 .when_some(last_active_tooltip, |el, tip| {
                     el.tooltip(crate::ui::tooltip::text(tip))
@@ -88,7 +92,7 @@ pub(super) fn activity_bar(
                     .flex_row()
                     .items_center()
                     .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                    .text_color(theme::agent_chat_fg_muted(cx))
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                     .child(expand)
                     .child(collapse),
             )
@@ -240,7 +244,7 @@ pub(super) fn working_indicator(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_color(theme::agent_chat_fg_subtle(cx))
+                .text_color(content.dim(theme::agent_chat_fg_subtle(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(format!("{base}{dots}"))),
         );
@@ -248,7 +252,7 @@ pub(super) fn working_indicator(
         row.child(
             div()
                 .flex_none()
-                .text_color(theme::agent_chat_fg_muted(cx))
+                .text_color(content.dim(theme::agent_chat_fg_muted(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(elapsed)),
         )

@@ -33,6 +33,10 @@ common:
   move_tab_right: "탭 오른쪽으로 이동"
   split_right: "오른쪽으로 분할"
   split_down: "아래로 분할"
+  split_terminal_horizontal: "터미널 — 가로 분할"
+  split_terminal_vertical: "터미널 — 세로 분할"
+  split_agent_chat_horizontal: "에이전트 채팅 — 가로 분할"
+  split_agent_chat_vertical: "에이전트 채팅 — 세로 분할"
 
 # Welcome screen
 welcome:

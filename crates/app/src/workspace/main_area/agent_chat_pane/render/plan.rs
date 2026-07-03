@@ -27,23 +27,31 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
 /// the filled ● glyph and are distinguished by colour alone. Mirrors
 /// [`super::rollup_glyph`]'s `(glyph, color)` shape; the completed green reuses
 /// the diff-stat add colour (there is no dedicated `success` theme token).
-fn plan_status_glyph(status: PlanStatus, t: &theme::DarudaTheme, cx: &App) -> (&'static str, Hsla) {
+fn plan_status_glyph(
+    status: PlanStatus,
+    t: &theme::DarudaTheme,
+    dim: f32,
+    cx: &App,
+) -> (&'static str, Hsla) {
     match status {
         // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
         PlanStatus::Completed => ("●", t.file_diff_stat_add),
         PlanStatus::InProgress => ("●", t.status_executing_tool_dark),
-        PlanStatus::Pending => ("●", theme::agent_chat_fg_muted(cx)),
+        PlanStatus::Pending => (
+            "●",
+            theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
+        ),
     }
 }
 
 /// The content text colour for one plan entry: completed dims (muted, no
 /// strikethrough), in-progress emphasizes (full foreground), pending stays
 /// foreground. All derive from the terminal-mirrored agent-chat foreground.
-fn plan_entry_color(status: PlanStatus, cx: &App) -> Hsla {
+fn plan_entry_color(status: PlanStatus, dim: f32, cx: &App) -> Hsla {
     match status {
-        PlanStatus::Completed => theme::agent_chat_fg_muted(cx),
-        PlanStatus::InProgress => theme::agent_chat_fg(cx),
-        PlanStatus::Pending => theme::agent_chat_fg(cx),
+        PlanStatus::Completed => theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
+        PlanStatus::InProgress => theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
+        PlanStatus::Pending => theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
     }
 }
 
@@ -62,6 +70,7 @@ pub(super) fn plan_region(
     collapsed: bool,
     plan_scroll: &gpui::ScrollHandle,
     t: &theme::DarudaTheme,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> Option<AnyElement> {
     if plan.is_empty() {
@@ -72,7 +81,7 @@ pub(super) fn plan_region(
     let count_color = if done == total {
         t.file_diff_stat_add
     } else {
-        theme::agent_chat_fg_muted(cx)
+        theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim)
     };
 
     // Header: same chevron + clickable-row scaffold as the section bars, but the
@@ -83,7 +92,7 @@ pub(super) fn plan_region(
         SharedString::from(format!("agent-chat-plan-chevron-{pane_id}")),
         !collapsed,
     )
-    .color(theme::agent_chat_fg_subtle(cx));
+    .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
     let mut header = div()
         .id(("agent-chat-plan-header", pane_id as usize))
         .w_full()
@@ -101,7 +110,7 @@ pub(super) fn plan_region(
             div()
                 .flex_none()
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme::agent_chat_fg(cx))
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::agent_chat_plan_label())),
         )
@@ -134,7 +143,7 @@ pub(super) fn plan_region(
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .text_color(theme::agent_chat_fg_subtle(cx))
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!("· {}", active.content))),
             );
@@ -152,8 +161,11 @@ pub(super) fn plan_region(
         // and its terminal-foreground text would render dark-on-dark there. The
         // translucent lift steps it one above the pane on any theme, matching
         // the tool cards.
-        .border_color(theme::agent_chat_border_tint(cx))
-        .bg(theme::agent_chat_tint(cx))
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
+        .bg(theme::dim_toward_gray(theme::agent_chat_tint(cx), dim))
         .child(header);
 
     if !collapsed {
@@ -174,7 +186,7 @@ pub(super) fn plan_region(
             .px(px(theme::AGENT_CHAT_PAD_X))
             .pb(px(theme::AGENT_CHAT_PAD_Y));
         for entry in plan {
-            let (glyph, glyph_color) = plan_status_glyph(entry.status, t, cx);
+            let (glyph, glyph_color) = plan_status_glyph(entry.status, t, dim, cx);
             let in_progress = entry.status == PlanStatus::InProgress;
             list = list.child(
                 div()
@@ -187,7 +199,10 @@ pub(super) fn plan_region(
                     // In-progress row: accent-28% tint + slight rounding so the
                     // highlight reads as a bar (mirrors the selection token used
                     // by the completion menu and text selection).
-                    .when(in_progress, |row| row.bg(theme::SELECTION_BG).rounded_sm())
+                    .when(in_progress, |row| {
+                        row.bg(theme::dim_toward_gray(theme::SELECTION_BG, dim))
+                            .rounded_sm()
+                    })
                     .child(
                         div()
                             .flex_none()
@@ -202,7 +217,7 @@ pub(super) fn plan_region(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_color(plan_entry_color(entry.status, cx))
+                            .text_color(plan_entry_color(entry.status, dim, cx))
                             .text_size(px(theme::agent_chat_font_size(cx)))
                             .child(SharedString::from(entry.content.clone())),
                     ),

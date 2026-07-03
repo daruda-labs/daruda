@@ -8,6 +8,15 @@ use super::pane_tree::{
 };
 use crate::workspace::Workspace;
 
+/// What content a newly split-off pane should hold. Keeps the split entry
+/// point free of a `bool`/`Option` flag pair (an invalid state would be
+/// unrepresentable): each variant maps to exactly one pane constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum NewPaneKind {
+    Terminal,
+    AgentChat,
+}
+
 impl Workspace {
     /// Set the user-visible window title (Window > Edit Window Title…).
     /// `None` clears the override so the title falls back to the
@@ -43,14 +52,16 @@ impl Workspace {
         // needs a live `&mut Window` this site lacks.
     }
 
-    /// Push per-pane dim onto the active tab's terminal views: inactive
-    /// panes blend toward gray (iTerm2-style), the focused pane stays
-    /// full color. Only dims when the active tab is actually split
-    /// (`leaf_count() > 1`) and no pane is zoomed; a lone pane (or a
-    /// zoomed leaf) is never dimmed. Single update site for
-    /// `TerminalView::set_dim_amount` — the MVU one-way-data-flow rule.
-    /// Notifies only the views whose amount changed (Pitfall #10: the
-    /// `.cached()` terminal must be dirtied for the new dim to paint).
+    /// Push per-pane dim onto the active tab's terminal *and* agent-chat views:
+    /// inactive panes blend toward gray (iTerm2-style), the focused pane stays
+    /// full color. Terminals dim their own cell colors (`set_dim_amount`); agent
+    /// chat panes carry the same amount and blend each rendered color through
+    /// `AgentChatView::dim` — both alpha-preserving, so the window translucency
+    /// survives. Only dims when the active tab is actually split
+    /// (`leaf_count() > 1`) and no pane is zoomed; a lone pane (or a zoomed
+    /// leaf) is never dimmed. Single update site for either `set_dim_amount` —
+    /// the MVU one-way-data-flow rule. Notifies only the views whose amount
+    /// changed (Pitfall #10: the `.cached()` view must be dirtied to repaint).
     pub(in crate::workspace) fn refresh_pane_dimming(&mut self, cx: &mut Context<Self>) {
         let Some(tab) = self
             .active_runtime()
@@ -69,17 +80,22 @@ impl Workspace {
             } else {
                 0.0
             };
-            let Some(view) = self
-                .active_runtime()
-                .panes
-                .iter()
-                .find(|p| p.id == pane_id)
-                .and_then(|p| p.terminal_view())
-            else {
+            let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id) else {
                 continue;
             };
-            let view = view.clone();
-            if (view.read(cx).dim_amount() - target).abs() > f32::EPSILON {
+            // Terminal and agent-chat panes are the two dimmable kinds; file /
+            // task panes have no dim. Clone the view out so the `panes` borrow
+            // ends before `update` re-enters.
+            if let Some(view) = pane.terminal_view().cloned() {
+                if (view.read(cx).dim_amount() - target).abs() > f32::EPSILON {
+                    view.update(cx, |v, cx| {
+                        v.set_dim_amount(target);
+                        cx.notify();
+                    });
+                }
+            } else if let Some(view) = pane.agent_chat_view().cloned()
+                && (view.read(cx).dim_amount - target).abs() > f32::EPSILON
+            {
                 view.update(cx, |v, cx| {
                     v.set_dim_amount(target);
                     cx.notify();
@@ -424,8 +440,33 @@ impl Workspace {
 
     // ---- Split management ----
 
-    pub(in crate::workspace) fn split_focused_pane(
+    /// The split kind the keyboard split shortcuts (Cmd+D / Cmd+Shift+D) use:
+    /// splitting an agent-chat pane spawns another agent chat, everything else
+    /// (terminal, file, task) spawns a terminal. The right-click menu offers
+    /// the explicit 2×2 matrix; this is only the shortcut default, keyed to the
+    /// focused pane's own kind.
+    pub(in crate::workspace) fn focused_pane_split_kind(&self) -> NewPaneKind {
+        let focused = self.active_runtime().focused_pane_id;
+        let is_agent_chat = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused)
+            .is_some_and(|p| p.agent_chat_view().is_some());
+        if is_agent_chat {
+            NewPaneKind::AgentChat
+        } else {
+            NewPaneKind::Terminal
+        }
+    }
+
+    /// Split the focused pane, filling the new leaf with `kind`. The layout
+    /// tree is content-agnostic (a leaf is just a [`PaneId`]), so terminal and
+    /// agent-chat splits share the same `insert_split_at` path; only the pane
+    /// constructor and the agent-chat-specific bottom-dock reveal differ.
+    pub(in crate::workspace) fn split_focused_pane_kind(
         &mut self,
+        kind: NewPaneKind,
         direction: SplitDirection,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -433,16 +474,26 @@ impl Workspace {
         // Reject when the active lane is inaccessible OR there is no real
         // focused pane (e.g. the empty-state of an inaccessible lane).
         // Without a focused pane the `insert_split_at` loop below would
-        // match no tab, leaving the new PTY orphaned in `panes` with no
+        // match no tab, leaving the new pane orphaned in `panes` with no
         // `TabEntry` referencing it.
         if self.active_lane_is_inaccessible() || !self.has_focused_pane() {
             return;
         }
-        let new_pane = match self.create_pane(window, cx) {
-            Ok(p) => p,
-            Err(e) => {
-                self.report_pane_error("split", e, cx);
-                return;
+        let new_pane = match kind {
+            NewPaneKind::Terminal => match self.create_pane(window, cx) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.report_pane_error("split", e, cx);
+                    return;
+                }
+            },
+            NewPaneKind::AgentChat => {
+                // The session roots at the active lane's cwd (same source as
+                // `open_agent_chat_pane`). `cwd` is `None` when there is no
+                // active lane; `create_agent_chat_pane` then parks the pane in
+                // `AgentSessionStatus::Error` rather than connecting.
+                let cwd = self.active_lane().map(|w| w.path.clone());
+                self.create_agent_chat_pane(cwd, window, cx)
             }
         };
         let new_pane_id = new_pane.id;
@@ -454,6 +505,22 @@ impl Workspace {
                 tab.last_focused_pane = new_pane_id;
                 break;
             }
+        }
+
+        // Agent chat's prompt input lives in the bottom dock; reveal it (and
+        // mark the pane active) before `focus_pane` activates the input panel
+        // and moves keyboard focus there. Mirrors `open_agent_chat_pane`;
+        // `focus_pane` also lazily connects the ACP session via
+        // `maybe_connect_agent_chat`.
+        if matches!(kind, NewPaneKind::AgentChat) {
+            if !self.bottom_dock.read(cx).is_open {
+                self.bottom_dock.update(cx, |d, cx| {
+                    d.toggle();
+                    cx.notify();
+                });
+                self.main_area.pending_resize = true;
+            }
+            self.bump_activity(new_pane_id);
         }
 
         self.set_focused_pane(new_pane_id, cx);

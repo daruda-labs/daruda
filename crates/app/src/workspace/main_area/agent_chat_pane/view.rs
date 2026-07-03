@@ -239,6 +239,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// `list()`), backing the region's 4px daruda thumb overlay. Runtime-only;
     /// never serialized.
     pub(in crate::workspace) plan_scroll: ScrollHandle,
+    /// Inactive-pane dim amount in `[0.0, 1.0]`: `0.0` = focused / full color,
+    /// `> 0.0` = unfocused leaf of a split, blended toward gray by this factor
+    /// (see [`Self::dim`]). The single write site is `Workspace::refresh_pane_dimming`
+    /// (MVU one-way flow), mirroring `TerminalView::set_dim_amount`. Transient /
+    /// session-only.
+    pub(in crate::workspace) dim_amount: f32,
     /// Observes the host `DarudaTheme` global so a light/dark toggle
     /// re-rasterizes cached mermaid diagrams for the new appearance. The cache
     /// is keyed by `(source, dark)` (see `mermaid_key`), so without this a
@@ -335,10 +341,27 @@ impl AgentChatView {
             session_updated_at: None,
             plan_collapsed: false,
             plan_scroll: ScrollHandle::new(),
+            dim_amount: 0.0,
             _theme_observer: theme_observer,
             #[cfg(test)]
             render_count: std::cell::Cell::new(0),
         }
+    }
+
+    /// Set the inactive-pane dim (`0.0` = focused / full color, `> 0.0` =
+    /// unfocused split leaf). Single write site: `Workspace::refresh_pane_dimming`
+    /// (MVU one-way flow). No `cx.notify` here — the caller notifies only the
+    /// views whose amount changed, mirroring `TerminalView::set_dim_amount`.
+    pub(in crate::workspace) fn set_dim_amount(&mut self, amount: f32) {
+        self.dim_amount = amount.clamp(0.0, 1.0);
+    }
+
+    /// Blend `c` toward gray by the current dim amount, alpha preserved. The
+    /// render wraps every color it applies with this so an unfocused pane grays
+    /// like an inactive terminal while keeping the window translucency (an
+    /// overlay scrim would fill the see-through instead).
+    pub(in crate::workspace) fn dim(&self, c: gpui::Hsla) -> gpui::Hsla {
+        crate::ui::theme::dim_toward_gray(c, self.dim_amount)
     }
 
     /// Whether the host UI surface is currently dark, read from the theme

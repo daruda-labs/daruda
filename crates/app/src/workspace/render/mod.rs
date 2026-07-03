@@ -22,6 +22,7 @@ use super::layout::DockSnapshot;
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_drag_ops::PaneHeaderDrag;
 use super::main_area::pane_tree::{DIVIDER_PX, SplitDirection};
+use super::main_area::tab_ops::NewPaneKind;
 use super::status_bar::{self, StatusBarData};
 use super::{
     FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, SaveFilePane, TAB_BAR_HEIGHT,
@@ -615,14 +616,15 @@ impl Render for Workspace {
                                         CItem::separator(),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::ctx_split_right(),
+                                            s::ctx_split_terminal_horizontal(),
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
                                                     if ws.active_runtime().active_tab_index != i {
                                                         ws.activate_tab(i, win, cx);
                                                     }
-                                                    ws.split_focused_pane(
+                                                    ws.split_focused_pane_kind(
+                                                        NewPaneKind::Terminal,
                                                         SplitDirection::Horizontal,
                                                         win,
                                                         cx,
@@ -632,14 +634,52 @@ impl Render for Workspace {
                                         ),
                                         ws_menu_item(
                                             ws.clone(),
-                                            s::ctx_split_down(),
+                                            s::ctx_split_terminal_vertical(),
                                             false,
                                             move |this, win, cx| {
                                                 this.mutate_durable_in(win, cx, |ws, win, cx| {
                                                     if ws.active_runtime().active_tab_index != i {
                                                         ws.activate_tab(i, win, cx);
                                                     }
-                                                    ws.split_focused_pane(
+                                                    ws.split_focused_pane_kind(
+                                                        NewPaneKind::Terminal,
+                                                        SplitDirection::Vertical,
+                                                        win,
+                                                        cx,
+                                                    );
+                                                });
+                                            },
+                                        ),
+                                        CItem::separator(),
+                                        ws_menu_item(
+                                            ws.clone(),
+                                            s::ctx_split_agent_chat_horizontal(),
+                                            false,
+                                            move |this, win, cx| {
+                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                    if ws.active_runtime().active_tab_index != i {
+                                                        ws.activate_tab(i, win, cx);
+                                                    }
+                                                    ws.split_focused_pane_kind(
+                                                        NewPaneKind::AgentChat,
+                                                        SplitDirection::Horizontal,
+                                                        win,
+                                                        cx,
+                                                    );
+                                                });
+                                            },
+                                        ),
+                                        ws_menu_item(
+                                            ws.clone(),
+                                            s::ctx_split_agent_chat_vertical(),
+                                            false,
+                                            move |this, win, cx| {
+                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                    if ws.active_runtime().active_tab_index != i {
+                                                        ws.activate_tab(i, win, cx);
+                                                    }
+                                                    ws.split_focused_pane_kind(
+                                                        NewPaneKind::AgentChat,
                                                         SplitDirection::Vertical,
                                                         win,
                                                         cx,

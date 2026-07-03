@@ -33,6 +33,10 @@ common:
   move_tab_right: "Move Tab Right"
   split_right: "Split Right"
   split_down: "Split Down"
+  split_terminal_horizontal: "Terminal — Split Horizontally"
+  split_terminal_vertical: "Terminal — Split Vertically"
+  split_agent_chat_horizontal: "Agent Chat — Split Horizontally"
+  split_agent_chat_vertical: "Agent Chat — Split Vertically"
 
 # Welcome screen
 welcome:

@@ -86,7 +86,8 @@ pub(in crate::workspace) fn render(
     // Clone the palette to an owned value so the render body can use `cx`
     // mutably (binding listeners) while reading theme colours — `current`
     // returns a borrow tied to `cx`.
-    let t = theme::current(cx).clone();
+    let dim = content.dim_amount;
+    let t = theme::current(cx).dimmed(dim);
 
     let status_banner = status_banner(&content.status, &t, cx);
 
@@ -98,6 +99,7 @@ pub(in crate::workspace) fn render(
         content.session_title.as_deref(),
         content.session_updated_at.as_deref(),
         !content.items.is_empty(),
+        dim,
         cx,
     );
 
@@ -119,7 +121,7 @@ pub(in crate::workspace) fn render(
             .items_center()
             .justify_center()
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .text_color(theme::agent_chat_fg_muted(cx))
+            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
             .child(SharedString::from(s::agent_chat_empty()))
             .into_any_element()
     } else {
@@ -179,7 +181,10 @@ pub(in crate::workspace) fn render(
         // 1.0 this is a plain fill. Applied only to the pane fill — message
         // bubbles and the header keep their own opaque backgrounds for
         // legibility.
-        .bg(crate::ui::theme::agent_chat_bg(cx).opacity(crate::ui::theme::background_alpha(cx)))
+        .bg(
+            crate::ui::theme::dim_toward_gray(crate::ui::theme::agent_chat_bg(cx), dim)
+                .opacity(crate::ui::theme::background_alpha(cx)),
+        )
         .children(status_banner)
         .child(bar)
         .child(body)
@@ -193,6 +198,7 @@ pub(in crate::workspace) fn render(
             content.plan_collapsed,
             &content.plan_scroll,
             &t,
+            dim,
             cx,
         ))
 }
@@ -216,7 +222,7 @@ fn render_row(
     let inner: AnyElement = match &row.kind {
         RowKind::User(i) => match this.items.get(*i) {
             Some(ChatItem::UserText(text)) => {
-                user_bubble(*i, text, &this.mermaid_images, cx).into_any_element()
+                user_bubble(*i, text, &this.mermaid_images, this.dim_amount, cx).into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -233,6 +239,7 @@ fn render_row(
                 &this.mermaid_images,
                 &this.fold,
                 t,
+                this.dim_amount,
                 cx,
             ),
             None => gpui::Empty.into_any_element(),
@@ -247,8 +254,16 @@ fn render_row(
             Some(item @ ChatItem::AssistantText { text, .. }) => {
                 let key = FoldKey::Assistant(*i);
                 let expanded = this.fold.is_expanded(&key, is_active(item));
-                conclusion_block(*i, key, expanded, text, &this.mermaid_images, cx)
-                    .into_any_element()
+                conclusion_block(
+                    *i,
+                    key,
+                    expanded,
+                    text,
+                    &this.mermaid_images,
+                    this.dim_amount,
+                    cx,
+                )
+                .into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -287,13 +302,14 @@ fn disclosure_row(
     base: impl Into<ElementId>,
     key: FoldKey,
     expanded: bool,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> gpui::Stateful<gpui::Div> {
     // One base id yields both the row's click target and the chevron glyph's
     // identity, so the two stay distinct yet stable across renders.
     let base: ElementId = base.into();
-    let chevron: Disclosure =
-        disclosure((base.clone(), "chevron"), expanded).color(theme::agent_chat_fg_subtle(cx));
+    let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
+        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
     div()
         .id((base, "row"))
         .w_full()
@@ -444,13 +460,14 @@ fn response_bar(
         SharedString::from(format!("agent-chat-response-{anchor}")),
         FoldKey::Response(anchor),
         !collapsed,
+        this.dim_amount,
         cx,
     )
     .child(
         div()
             .flex_none()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(theme::agent_chat_fg(cx))
+            .text_color(this.dim(theme::agent_chat_fg(cx)))
             .text_size(px(theme::agent_chat_font_size(cx)))
             .child(SharedString::from(s::agent_chat_label_agent())),
     );
@@ -465,7 +482,7 @@ fn response_bar(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_color(theme::agent_chat_fg_subtle(cx))
+                .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(line)),
         );
@@ -473,7 +490,7 @@ fn response_bar(
             row = row.child(
                 div()
                     .flex_none()
-                    .text_color(theme::agent_chat_fg_subtle(cx))
+                    .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(s::agent_chat_tool_group_count(tools))),
             );
@@ -519,12 +536,13 @@ fn tool_group_bar(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),
         FoldKey::ToolGroup(gid.to_string()),
         !collapsed,
+        this.dim_amount,
         cx,
     )
     .child(
         div()
             .flex_none()
-            .text_color(theme::agent_chat_fg_subtle(cx))
+            .text_color(this.dim(theme::agent_chat_fg_subtle(cx)))
             .text_size(px(theme::agent_chat_font_size(cx)))
             .child(SharedString::from("⚙")),
     )
@@ -532,7 +550,7 @@ fn tool_group_bar(
         div()
             .flex_1()
             .min_w_0()
-            .text_color(theme::agent_chat_fg_muted(cx))
+            .text_color(this.dim(theme::agent_chat_fg_muted(cx)))
             .text_size(px(theme::agent_chat_font_size(cx)))
             .child(SharedString::from(s::agent_chat_tool_group_count(count))),
     )
@@ -575,32 +593,46 @@ fn render_item(
     mermaid_images: &MermaidImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => user_bubble(ix, text, mermaid_images, cx).into_any_element(),
+        ChatItem::UserText(text) => {
+            user_bubble(ix, text, mermaid_images, dim, cx).into_any_element()
+        }
         // Under a response bar the speaker is already labeled "Agent"; render the
         // prose inline with no redundant per-block header/fold. A trivial / top-
         // level reply (no response bar) keeps the labeled, foldable block.
         ChatItem::AssistantText { text, .. } if under_response => {
-            assistant_markdown(ix, text, mermaid_images, cx)
+            assistant_markdown(ix, text, mermaid_images, dim, cx)
         }
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            assistant_block(ix, key, expanded, text, mermaid_images, cx).into_any_element()
+            assistant_block(ix, key, expanded, text, mermaid_images, dim, cx).into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            thinking_block(ix, key, expanded, text, mermaid_images, cx).into_any_element()
+            thinking_block(ix, key, expanded, text, mermaid_images, dim, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => {
             let key = FoldKey::Tool(tc.id.clone());
             let expanded = fold.is_expanded(&key, is_active(item));
-            tool_card(key, expanded, tc, diff_editors, diff_stats, fold, t, cx).into_any_element()
+            tool_card(
+                key,
+                expanded,
+                tc,
+                diff_editors,
+                diff_stats,
+                fold,
+                t,
+                dim,
+                cx,
+            )
+            .into_any_element()
         }
-        ChatItem::Permission(card) => permission_card(ix, card, t, cx).into_any_element(),
+        ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
         ChatItem::Error(message) => error_block(message, t, cx).into_any_element(),
     }
 }
@@ -630,11 +662,12 @@ pub(super) fn foldable_block<
     summary: Option<AnyElement>,
     body: AnyElement,
     header_chrome: F,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<Id, F> {
     // Same `disclosure_row` scaffold as the section bars (chevron + click), then
     // append this block's own header content.
-    let mut header_row = disclosure_row(id, key, expanded, cx).child(header);
+    let mut header_row = disclosure_row(id, key, expanded, dim, cx).child(header);
     // The collapsed-only inline summary sits after the header content, on the
     // same row, and is dropped entirely when expanded (the body carries the
     // detail then).
@@ -660,7 +693,12 @@ pub(super) fn foldable_block<
 /// hardcoded char limit) does the ellipsizing. `italic` matches the thinking
 /// block's treatment. `None` when the text has no non-empty line (nothing to
 /// summarize).
-pub(super) fn collapsed_text_summary(text: &str, italic: bool, cx: &App) -> Option<AnyElement> {
+pub(super) fn collapsed_text_summary(
+    text: &str,
+    italic: bool,
+    dim: f32,
+    cx: &App,
+) -> Option<AnyElement> {
     let line = text.lines().find(|l| !l.trim().is_empty())?;
     Some(
         div()
@@ -669,7 +707,7 @@ pub(super) fn collapsed_text_summary(text: &str, italic: bool, cx: &App) -> Opti
             .overflow_hidden()
             .whitespace_nowrap()
             .when(italic, |el| el.italic())
-            .text_color(theme::agent_chat_fg_subtle(cx))
+            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
             .text_size(px(theme::agent_chat_font_size(cx)))
             .child(SharedString::from(line.to_string()))
             .into_any_element(),

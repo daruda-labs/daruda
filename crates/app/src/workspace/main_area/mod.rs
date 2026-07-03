@@ -38,6 +38,7 @@ use self::file_view_pane::render::render_pane_file_viewer;
 use self::pane::Pane;
 use self::pane_drag_ops::{PaneHeaderDrag, PaneHeaderDragGhost};
 use self::pane_tree::{DIVIDER_PX, DropHalf, PaneId, PaneLayout, SplitDirection};
+use self::tab_ops::NewPaneKind;
 use super::Workspace;
 
 /// Flex child cell wrapping a pane or nested split in a Split layout.
@@ -190,21 +191,62 @@ fn pane_header(
                 let items: Vec<CItem> = vec![
                     crate::workspace::render::ws_menu_item(
                         ws.clone(),
-                        s::ctx_split_right(),
+                        s::ctx_split_terminal_horizontal(),
                         false,
                         |this, win, cx| {
                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane(SplitDirection::Horizontal, win, cx);
+                                ws.split_focused_pane_kind(
+                                    NewPaneKind::Terminal,
+                                    SplitDirection::Horizontal,
+                                    win,
+                                    cx,
+                                );
                             });
                         },
                     ),
                     crate::workspace::render::ws_menu_item(
                         ws.clone(),
-                        s::ctx_split_down(),
+                        s::ctx_split_terminal_vertical(),
                         false,
                         |this, win, cx| {
                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane(SplitDirection::Vertical, win, cx);
+                                ws.split_focused_pane_kind(
+                                    NewPaneKind::Terminal,
+                                    SplitDirection::Vertical,
+                                    win,
+                                    cx,
+                                );
+                            });
+                        },
+                    ),
+                    CItem::separator(),
+                    crate::workspace::render::ws_menu_item(
+                        ws.clone(),
+                        s::ctx_split_agent_chat_horizontal(),
+                        false,
+                        |this, win, cx| {
+                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                ws.split_focused_pane_kind(
+                                    NewPaneKind::AgentChat,
+                                    SplitDirection::Horizontal,
+                                    win,
+                                    cx,
+                                );
+                            });
+                        },
+                    ),
+                    crate::workspace::render::ws_menu_item(
+                        ws.clone(),
+                        s::ctx_split_agent_chat_vertical(),
+                        false,
+                        |this, win, cx| {
+                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                ws.split_focused_pane_kind(
+                                    NewPaneKind::AgentChat,
+                                    SplitDirection::Vertical,
+                                    win,
+                                    cx,
+                                );
                             });
                         },
                     ),
@@ -339,6 +381,13 @@ pub(in crate::workspace) fn render_layout(
                     // The view's own `cx.notify()` (scroll, fold, streaming)
                     // marks it dirty and forces a re-render. The view tracks its
                     // own focus handle, so no `track_focus` on this wrapper.
+                    //
+                    // Inactive-split dim is applied *inside* the view (per-color
+                    // blend toward gray, alpha preserved — `AgentChatView::dim`),
+                    // driven by `refresh_pane_dimming`, mirroring the terminal.
+                    // An overlay scrim is NOT used: it would composite gray over
+                    // the pane and fill in the window translucency the terminal
+                    // dim keeps.
                     .child(
                         AnyView::from(ac.view.clone())
                             .cached(StyleRefinement::default().size_full().flex()),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::main_area::pane::PaneContent;
 
 // ---- Split tests ----
 
@@ -13,7 +14,12 @@ async fn test_split_right(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -37,7 +43,7 @@ async fn test_split_down(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Vertical, window, cx);
+            ws.split_focused_pane_kind(NewPaneKind::Terminal, SplitDirection::Vertical, window, cx);
         });
     })
     .unwrap();
@@ -60,7 +66,12 @@ async fn test_close_pane_in_split(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -92,7 +103,12 @@ async fn test_focus_next_prev_pane(cx: &mut TestAppContext) {
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -137,7 +153,12 @@ async fn test_nested_split(cx: &mut TestAppContext) {
     // First split: H-split creates [A | B], focus on B.
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -145,7 +166,7 @@ async fn test_nested_split(cx: &mut TestAppContext) {
     // Second split: V-split on B creates [A | [B / C]], focus on C.
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Vertical, window, cx);
+            ws.split_focused_pane_kind(NewPaneKind::Terminal, SplitDirection::Vertical, window, cx);
         });
     })
     .unwrap();
@@ -185,7 +206,12 @@ async fn test_close_tab_removes_all_panes(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             ws.activate_tab(0, window, cx);
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
         });
     })
     .unwrap();
@@ -412,5 +438,141 @@ async fn test_close_tab_stale_history_fallback(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
         assert_eq!(ws.active_runtime().active_tab_index, 0);
+    });
+}
+
+/// Splitting with `NewPaneKind::AgentChat` fills the new leaf with an agent
+/// chat pane (not the default terminal), reusing the same split-tree path.
+#[gpui::test]
+async fn test_split_agent_chat(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                NewPaneKind::AgentChat,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        // One tab, two panes, split horizontally.
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().panes.len(), 2);
+        assert!(matches!(
+            ws.active_runtime().tabs[0].layout,
+            PaneLayout::Split {
+                direction: SplitDirection::Horizontal,
+                ..
+            }
+        ));
+        // The newly focused pane is the agent chat leaf; the original stays a
+        // terminal. The default test workspace has no lane cwd, so the chat
+        // pane parks offline (no subprocess) — see tests/agent_chat.rs.
+        let focused = ws.active_runtime().focused_pane_id;
+        let new_pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused)
+            .expect("focused pane present after split");
+        assert!(
+            matches!(new_pane.content, PaneContent::AgentChat(_)),
+            "split-off pane is an agent chat pane"
+        );
+        // The original pane must remain a terminal — splitting with an
+        // AgentChat kind converts only the new leaf, never the existing one.
+        let original = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id != focused)
+            .expect("original pane present after split");
+        assert!(
+            matches!(original.content, PaneContent::Terminal(_)),
+            "original pane stays a terminal after an agent-chat split"
+        );
+    });
+}
+
+/// A second `NewPaneKind::AgentChat` split (this time vertical, off an
+/// already-agent-chat-focused pane) yields two agent-chat panes coexisting in
+/// one tab — the "two agent chats side by side" scenario the feature enables.
+/// Confirms `direction` threads through for the AgentChat kind too, and that
+/// multiple AgentChat leaves compose in a single split tree.
+#[gpui::test]
+async fn test_split_agent_chat_twice_vertical(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                NewPaneKind::AgentChat,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+            // Focus is now on the first agent-chat pane; split it again.
+            ws.split_focused_pane_kind(
+                NewPaneKind::AgentChat,
+                SplitDirection::Vertical,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        // Original terminal + two agent-chat panes.
+        assert_eq!(ws.active_runtime().panes.len(), 3);
+        let agent_chat_count = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .filter(|p| matches!(p.content, PaneContent::AgentChat(_)))
+            .count();
+        assert_eq!(
+            agent_chat_count, 2,
+            "two agent-chat panes coexist in one tab"
+        );
+    });
+}
+
+/// The keyboard split shortcuts (Cmd+D / Cmd+Shift+D) key the new pane's kind
+/// to the focused pane via `focused_pane_split_kind`: a terminal-focused split
+/// makes a terminal, an agent-chat-focused split makes an agent chat.
+#[gpui::test]
+async fn focused_pane_split_kind_tracks_focused_content(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    // Fresh workspace: the focused pane is a terminal.
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.focused_pane_split_kind(), NewPaneKind::Terminal);
+    });
+
+    // Split into an agent chat; focus moves to the new agent-chat pane.
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                NewPaneKind::AgentChat,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    // With an agent chat focused, the shortcut now splits into an agent chat.
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.focused_pane_split_kind(), NewPaneKind::AgentChat);
     });
 }

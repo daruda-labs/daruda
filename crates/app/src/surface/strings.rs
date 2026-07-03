@@ -2217,11 +2217,17 @@ pub fn ctx_new_tab() -> String {
 pub fn ctx_new_agent_chat() -> String {
     rust_i18n::t!("common.new_agent_chat").into_owned()
 }
-pub fn ctx_split_right() -> String {
-    rust_i18n::t!("common.split_right").into_owned()
+pub fn ctx_split_terminal_horizontal() -> String {
+    rust_i18n::t!("common.split_terminal_horizontal").into_owned()
 }
-pub fn ctx_split_down() -> String {
-    rust_i18n::t!("common.split_down").into_owned()
+pub fn ctx_split_terminal_vertical() -> String {
+    rust_i18n::t!("common.split_terminal_vertical").into_owned()
+}
+pub fn ctx_split_agent_chat_horizontal() -> String {
+    rust_i18n::t!("common.split_agent_chat_horizontal").into_owned()
+}
+pub fn ctx_split_agent_chat_vertical() -> String {
+    rust_i18n::t!("common.split_agent_chat_vertical").into_owned()
 }
 pub fn ctx_copy_file_path() -> String {
     rust_i18n::t!("ctx.copy_file_path").into_owned()

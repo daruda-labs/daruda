@@ -36,6 +36,7 @@ use gpui::{AppContext, TestAppContext};
 use crate::test_support::init_gpui_component;
 // Re-export workspace-internal types needed by sub-modules.
 pub(super) use crate::workspace::main_area::pane_tree::{PaneLayout, SplitDirection};
+pub(super) use crate::workspace::main_area::tab_ops::NewPaneKind;
 
 /// Returns a unique temp directory path for each call so parallel tests
 /// never share persistence state. The directory is left on disk after

@@ -91,6 +91,11 @@ pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
 /// fill (cf. `accent-muted`, DESIGN §Accent — badge fill).
 pub const AGENT_CHAT_USER_TINT: Hsla = with_alpha(PRIMARY, 0.22);
 
+/// Mid-gray target the inactive-pane dim blends toward, matching
+/// `daruda_terminal`'s `DIM_GRAY_LEVEL`. Kept in step so an inactive agent-chat
+/// pane grays to the exact tone of an inactive terminal pane.
+pub const DIM_GRAY_LEVEL: f32 = 0.3;
+
 // ============================================================================
 // Design tokens — primitive colour literals (single source of truth)
 // ============================================================================

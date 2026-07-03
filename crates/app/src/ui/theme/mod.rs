@@ -40,6 +40,29 @@ pub fn current(cx: &gpui::App) -> &DarudaTheme {
     cx.global::<DarudaTheme>()
 }
 
+/// Blend `color`'s RGB toward `palette::DIM_GRAY_LEVEL` by `amount` in sRGB
+/// space, **preserving alpha**, so a translucent colour stays equally
+/// translucent — only the hue/lightness dulls. This is the retained-mode
+/// counterpart to the terminal's `dim_toward_gray`: applied per colour it
+/// dims an inactive pane while keeping the window see-through, which an
+/// overlay scrim cannot do (a scrim composites over the translucency and
+/// fills it in). `amount <= 0.0` returns the colour unchanged.
+pub fn dim_toward_gray(color: gpui::Hsla, amount: f32) -> gpui::Hsla {
+    if amount <= 0.0 {
+        return color;
+    }
+    let amount = amount.min(1.0);
+    let rgba = gpui::Rgba::from(color);
+    let g = palette::DIM_GRAY_LEVEL;
+    gpui::Rgba {
+        r: rgba.r * (1.0 - amount) + g * amount,
+        g: rgba.g * (1.0 - amount) + g * amount,
+        b: rgba.b * (1.0 - amount) + g * amount,
+        a: rgba.a,
+    }
+    .into()
+}
+
 /// JSON body for a built-in UI theme preset. Bundled with the binary
 /// via `include_str!` so the loader cannot fail with a missing file
 /// on a fresh install.

@@ -31,6 +31,7 @@ pub(super) fn diff_block(
     diff_stats: &DiffStats,
     fold: &FoldState,
     t: &theme::DarudaTheme,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let diff_key = diff_editor_key(tool_id, di);
@@ -75,6 +76,7 @@ pub(super) fn diff_block(
                     .py(px(theme::GAP_XS))
                     .bg(t.file_diff_hunk_bg)
             },
+            dim,
             cx,
         ))
 }

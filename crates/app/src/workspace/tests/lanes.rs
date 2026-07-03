@@ -1507,7 +1507,12 @@ fn split_noop_on_inaccessible_active_lane(cx: &mut TestAppContext) {
     let (wh, ws) = workspace_with_inaccessible_active_lane(cx, "/tmp/daruda_split_inaccessible");
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
             assert_eq!(
                 ws.active_runtime().panes.len(),
                 0,

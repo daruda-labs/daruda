@@ -62,6 +62,20 @@ macro_rules! daruda_theme_fields {
                 }
             }
         }
+
+        impl DarudaTheme {
+            /// Return a copy with every colour blended toward
+            /// `palette::DIM_GRAY_LEVEL` by `amount` (alpha preserved) — the
+            /// inactive-pane dim. `amount == 0.0` is an identity clone. Mirrors
+            /// the terminal's per-cell `dim_toward_gray`, so an inactive
+            /// agent-chat pane grays to the same tone while keeping the window
+            /// translucency (a scrim overlay cannot — it fills the see-through).
+            pub fn dimmed(&self, amount: f32) -> Self {
+                Self {
+                    $($field: super::dim_toward_gray(self.$field, amount),)*
+                }
+            }
+        }
     };
 }
 

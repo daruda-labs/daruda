@@ -80,10 +80,11 @@ pub(super) fn user_bubble(
     ix: usize,
     text: &str,
     mermaid_images: &MermaidImages,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
-        .color(theme::agent_chat_fg(cx))
+        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .full_width(false)
         .code_block_render(mermaid_code_block_render(mermaid_images));
@@ -96,10 +97,13 @@ pub(super) fn user_bubble(
         // turn off by hue while riding the pane background on any theme. Border
         // is the shared neutral hairline (same as code blocks / tool cards), so
         // accent stays on the fill alone — the card border system is uniform.
-        .bg(theme::AGENT_CHAT_USER_TINT)
+        .bg(theme::dim_toward_gray(theme::AGENT_CHAT_USER_TINT, dim))
         .border_1()
-        .border_color(theme::agent_chat_border_tint(cx))
-        .text_color(theme::agent_chat_fg(cx))
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
+        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(body);
     div().flex().flex_row().justify_end().child(inner)
@@ -112,10 +116,11 @@ pub(super) fn assistant_markdown(
     ix: usize,
     text: &str,
     mermaid_images: &MermaidImages,
+    dim: f32,
     cx: &App,
 ) -> AnyElement {
     crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(theme::agent_chat_fg(cx))
+        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element()
@@ -133,17 +138,18 @@ pub(super) fn assistant_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, cx);
+    let body_el = assistant_markdown(ix, text, mermaid_images, dim, cx);
     let header = div()
         .flex_none()
-        .text_color(theme::agent_chat_fg(cx))
+        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(s::agent_chat_label_agent()))
         .into_any_element();
-    let summary = collapsed_text_summary(text, false, cx);
+    let summary = collapsed_text_summary(text, false, dim, cx);
     foldable_block(
         ("agent-chat-assistant", ix),
         key,
@@ -152,6 +158,7 @@ pub(super) fn assistant_block(
         summary,
         body_el,
         |row| row,
+        dim,
         cx,
     )
 }
@@ -167,10 +174,11 @@ pub(super) fn conclusion_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, cx);
-    let summary = collapsed_text_summary(text, false, cx);
+    let body_el = assistant_markdown(ix, text, mermaid_images, dim, cx);
+    let summary = collapsed_text_summary(text, false, dim, cx);
     foldable_block(
         ("agent-chat-conclusion", ix),
         key,
@@ -179,6 +187,7 @@ pub(super) fn conclusion_block(
         summary,
         body_el,
         |row| row,
+        dim,
         cx,
     )
 }
@@ -199,21 +208,22 @@ pub(super) fn thinking_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
-        .color(theme::agent_chat_fg_subtle(cx))
+        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
         .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element();
     let header = div()
         .flex_none()
-        .text_color(theme::agent_chat_fg(cx))
+        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(s::agent_chat_thinking_label()))
         .into_any_element();
-    let summary = collapsed_text_summary(text, true, cx);
+    let summary = collapsed_text_summary(text, true, dim, cx);
     foldable_block(
         ("agent-chat-thinking", ix),
         key,
@@ -222,6 +232,7 @@ pub(super) fn thinking_block(
         summary,
         body_el,
         |row| row,
+        dim,
         cx,
     )
 }

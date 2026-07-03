@@ -365,7 +365,12 @@ fn test_save_restore_round_trip_preserves_layout(cx: &mut TestAppContext) {
             window,
             cx,
         );
-        ws.split_focused_pane(SplitDirection::Horizontal, window, cx);
+        ws.split_focused_pane_kind(
+            NewPaneKind::Terminal,
+            SplitDirection::Horizontal,
+            window,
+            cx,
+        );
         ws.add_tab(window, cx);
         ws
     });
