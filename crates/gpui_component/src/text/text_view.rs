@@ -752,7 +752,14 @@ impl Element for TextView {
                 highlight_theme,
                 rx,
                 tx_result,
-                Duration::from_millis(200),
+                // daruda patch: trailing debounce before a re-parse on text
+                // change. Upstream default 200ms makes streamed agent-chat
+                // markdown land in ~200ms steps ("chunky"); 33ms (~30Hz) lets
+                // it flow near-continuously like zed's eager reparse. Parsing
+                // is off the main thread, so a lower value only raises
+                // background-parse frequency (static content parses once and
+                // is unaffected). Tune here.
+                Duration::from_millis(33),
                 code_block_actions,
                 code_block_render,
             ))
