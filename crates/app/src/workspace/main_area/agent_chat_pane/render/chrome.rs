@@ -3,7 +3,7 @@
 //! with its animated pulse dots and elapsed clock.
 
 use daruda_acp::{ChatItem, ToolStatusView};
-use gpui::{Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -23,7 +23,6 @@ pub(super) fn activity_bar(
     session_title: Option<&str>,
     last_active: Option<&str>,
     has_items: bool,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let title: SharedString = session_title
@@ -74,8 +73,8 @@ pub(super) fn activity_bar(
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
-                .text_color(t.text_primary)
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .text_color(theme::agent_chat_fg(cx))
                 .child(title)
                 .when_some(last_active_tooltip, |el, tip| {
                     el.tooltip(crate::ui::tooltip::text(tip))
@@ -89,7 +88,7 @@ pub(super) fn activity_bar(
                     .flex_row()
                     .items_center()
                     .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                    .text_color(t.text_muted)
+                    .text_color(theme::agent_chat_fg_muted(cx))
                     .child(expand)
                     .child(collapse),
             )
@@ -124,6 +123,7 @@ fn runtime_prep_text(phase: RuntimePrepPhase) -> SharedString {
 pub(super) fn status_banner(
     status: &AgentSessionStatus,
     t: &theme::DarudaTheme,
+    cx: &App,
 ) -> Option<impl IntoElement + use<>> {
     let (text, bg, fg): (SharedString, Hsla, Hsla) = match status {
         AgentSessionStatus::Idle => (
@@ -156,7 +156,7 @@ pub(super) fn status_banner(
             .py(px(theme::AGENT_CHAT_PAD_Y))
             .bg(bg)
             .text_color(fg)
-            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+            .text_size(px(theme::agent_chat_font_size(cx)))
             .child(text),
     )
 }
@@ -220,7 +220,6 @@ fn working_status(content: &AgentChatView) -> SharedString {
 /// without a per-frame animation. Cancelling is the bottom-dock Stop button.
 pub(super) fn working_indicator(
     content: &AgentChatView,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let base = working_status(content);
@@ -241,16 +240,16 @@ pub(super) fn working_indicator(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_color(t.text_subtle)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_color(theme::agent_chat_fg_subtle(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(format!("{base}{dots}"))),
         );
     if let Some(elapsed) = elapsed_label {
         row.child(
             div()
                 .flex_none()
-                .text_color(t.text_muted)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_color(theme::agent_chat_fg_muted(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(elapsed)),
         )
     } else {

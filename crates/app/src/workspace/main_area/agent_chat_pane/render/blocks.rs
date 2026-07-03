@@ -3,7 +3,7 @@
 //! thinking, surfaced errors, plus the mermaid `code_block_render` hook shared
 //! by every markdown body.
 
-use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px, relative};
+use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
 use super::{MermaidImages, collapsed_text_summary, foldable_block};
 use crate::surface::strings as s;
@@ -80,12 +80,11 @@ pub(super) fn user_bubble(
     ix: usize,
     text: &str,
     mermaid_images: &MermaidImages,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
-        .color(t.text_primary)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .color(theme::agent_chat_fg(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .full_width(false)
         .code_block_render(mermaid_code_block_render(mermaid_images));
     let inner = div()
@@ -100,8 +99,8 @@ pub(super) fn user_bubble(
         .bg(theme::AGENT_CHAT_USER_TINT)
         .border_1()
         .border_color(theme::agent_chat_border_tint(cx))
-        .text_color(t.text_primary)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .text_color(theme::agent_chat_fg(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(body);
     div().flex().flex_row().justify_end().child(inner)
 }
@@ -113,11 +112,11 @@ pub(super) fn assistant_markdown(
     ix: usize,
     text: &str,
     mermaid_images: &MermaidImages,
-    t: &theme::DarudaTheme,
+    cx: &App,
 ) -> AnyElement {
     crate::ui::markdown(("agent-chat-md-assistant", ix), text.to_string())
-        .color(t.text_primary)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .color(theme::agent_chat_fg(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element()
 }
@@ -134,18 +133,17 @@ pub(super) fn assistant_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, t);
+    let body_el = assistant_markdown(ix, text, mermaid_images, cx);
     let header = div()
         .flex_none()
-        .text_color(t.text_body)
+        .text_color(theme::agent_chat_fg(cx))
         .font_weight(gpui::FontWeight::MEDIUM)
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(s::agent_chat_label_agent()))
         .into_any_element();
-    let summary = collapsed_text_summary(text, false, t);
+    let summary = collapsed_text_summary(text, false, cx);
     foldable_block(
         ("agent-chat-assistant", ix),
         key,
@@ -154,7 +152,6 @@ pub(super) fn assistant_block(
         summary,
         body_el,
         |row| row,
-        t,
         cx,
     )
 }
@@ -170,11 +167,10 @@ pub(super) fn conclusion_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body_el = assistant_markdown(ix, text, mermaid_images, t);
-    let summary = collapsed_text_summary(text, false, t);
+    let body_el = assistant_markdown(ix, text, mermaid_images, cx);
+    let summary = collapsed_text_summary(text, false, cx);
     foldable_block(
         ("agent-chat-conclusion", ix),
         key,
@@ -183,7 +179,6 @@ pub(super) fn conclusion_block(
         summary,
         body_el,
         |row| row,
-        t,
         cx,
     )
 }
@@ -191,7 +186,7 @@ pub(super) fn conclusion_block(
 /// Agent reasoning — dimmed, foldable block under a "Thinking" label (default
 /// collapsed once settled, expanded while streaming, handled by the fold
 /// derivation). The body renders as rendered, drag-selectable markdown via
-/// `crate::ui::markdown` (keyed by `ix`), dimmed via `t.text_subtle`. Collapsed,
+/// `crate::ui::markdown` (keyed by `ix`), dimmed via `theme::agent_chat_fg_subtle(cx)`. Collapsed,
 /// the header shows the first non-empty line of `text`, dimmed italic.
 //
 // NOTE: the previous italic treatment of the body is not preserved —
@@ -204,22 +199,21 @@ pub(super) fn thinking_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
-    t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let body_el = crate::ui::markdown(("agent-chat-md-thinking", ix), text.to_string())
-        .color(t.text_subtle)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .color(theme::agent_chat_fg_subtle(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .code_block_render(mermaid_code_block_render(mermaid_images))
         .into_any_element();
     let header = div()
         .flex_none()
-        .text_color(t.text_body)
+        .text_color(theme::agent_chat_fg(cx))
         .font_weight(gpui::FontWeight::MEDIUM)
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(s::agent_chat_thinking_label()))
         .into_any_element();
-    let summary = collapsed_text_summary(text, true, t);
+    let summary = collapsed_text_summary(text, true, cx);
     foldable_block(
         ("agent-chat-thinking", ix),
         key,
@@ -228,13 +222,16 @@ pub(super) fn thinking_block(
         summary,
         body_el,
         |row| row,
-        t,
         cx,
     )
 }
 
 /// Surfaced error item — error-tinted block.
-pub(super) fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoElement + use<> {
+pub(super) fn error_block(
+    message: &str,
+    t: &theme::DarudaTheme,
+    cx: &App,
+) -> impl IntoElement + use<> {
     div()
         .w_full()
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -242,6 +239,6 @@ pub(super) fn error_block(message: &str, t: &theme::DarudaTheme) -> impl IntoEle
         .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
         .bg(t.banner_error_bg)
         .text_color(t.banner_error_text)
-        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(message.to_string()))
 }

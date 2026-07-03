@@ -2,7 +2,7 @@
 //! collapsible bottom plan region.
 
 use daruda_acp::{PlanEntryView, PlanStatus};
-use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::pulse_opacity;
 use crate::surface::strings as s;
@@ -27,22 +27,23 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
 /// the filled ● glyph and are distinguished by colour alone. Mirrors
 /// [`super::rollup_glyph`]'s `(glyph, color)` shape; the completed green reuses
 /// the diff-stat add colour (there is no dedicated `success` theme token).
-fn plan_status_glyph(status: PlanStatus, t: &theme::DarudaTheme) -> (&'static str, Hsla) {
+fn plan_status_glyph(status: PlanStatus, t: &theme::DarudaTheme, cx: &App) -> (&'static str, Hsla) {
     match status {
         // file_diff_stat_add == SUCCESS (green); no dedicated plan-complete token.
         PlanStatus::Completed => ("●", t.file_diff_stat_add),
         PlanStatus::InProgress => ("●", t.status_executing_tool_dark),
-        PlanStatus::Pending => ("●", t.text_muted),
+        PlanStatus::Pending => ("●", theme::agent_chat_fg_muted(cx)),
     }
 }
 
 /// The content text colour for one plan entry: completed dims (muted, no
-/// strikethrough), in-progress emphasizes (primary), pending stays body.
-fn plan_entry_color(status: PlanStatus, t: &theme::DarudaTheme) -> Hsla {
+/// strikethrough), in-progress emphasizes (full foreground), pending stays
+/// foreground. All derive from the terminal-mirrored agent-chat foreground.
+fn plan_entry_color(status: PlanStatus, cx: &App) -> Hsla {
     match status {
-        PlanStatus::Completed => t.text_muted,
-        PlanStatus::InProgress => t.text_primary,
-        PlanStatus::Pending => t.text_body,
+        PlanStatus::Completed => theme::agent_chat_fg_muted(cx),
+        PlanStatus::InProgress => theme::agent_chat_fg(cx),
+        PlanStatus::Pending => theme::agent_chat_fg(cx),
     }
 }
 
@@ -71,7 +72,7 @@ pub(super) fn plan_region(
     let count_color = if done == total {
         t.file_diff_stat_add
     } else {
-        t.text_muted
+        theme::agent_chat_fg_muted(cx)
     };
 
     // Header: same chevron + clickable-row scaffold as the section bars, but the
@@ -82,7 +83,7 @@ pub(super) fn plan_region(
         SharedString::from(format!("agent-chat-plan-chevron-{pane_id}")),
         !collapsed,
     )
-    .color(t.text_subtle);
+    .color(theme::agent_chat_fg_subtle(cx));
     let mut header = div()
         .id(("agent-chat-plan-header", pane_id as usize))
         .w_full()
@@ -100,15 +101,15 @@ pub(super) fn plan_region(
             div()
                 .flex_none()
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(t.text_body)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_color(theme::agent_chat_fg(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::agent_chat_plan_label())),
         )
         .child(
             div()
                 .flex_none()
                 .text_color(count_color)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(format!("{done}/{total}"))),
         );
 
@@ -123,7 +124,7 @@ pub(super) fn plan_region(
                     .flex_none()
                     .opacity(pulse_opacity(cx))
                     .text_color(t.status_executing_tool_dark)
-                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from("●")),
             )
             .child(
@@ -133,8 +134,8 @@ pub(super) fn plan_region(
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .text_color(t.text_subtle)
-                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .text_color(theme::agent_chat_fg_subtle(cx))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!("· {}", active.content))),
             );
     }
@@ -145,11 +146,14 @@ pub(super) fn plan_region(
         .flex()
         .flex_col()
         .border_t_1()
-        .border_color(t.border)
-        // surface-1 panel background so the plan region reads as a distinct
-        // panel stepped above the conversation (DESIGN.md: depth via the
-        // surface ladder; `dock_bg` == BG_PANEL == SURFACE_1 == #0f1011).
-        .bg(t.dock_bg)
+        // Background-derived tint + hairline (not the fixed UI `dock_bg` /
+        // `border`): the plan region sits on the terminal-mirrored pane, so a
+        // fixed dark surface would clash with a light/custom terminal theme —
+        // and its terminal-foreground text would render dark-on-dark there. The
+        // translucent lift steps it one above the pane on any theme, matching
+        // the tool cards.
+        .border_color(theme::agent_chat_border_tint(cx))
+        .bg(theme::agent_chat_tint(cx))
         .child(header);
 
     if !collapsed {
@@ -170,7 +174,7 @@ pub(super) fn plan_region(
             .px(px(theme::AGENT_CHAT_PAD_X))
             .pb(px(theme::AGENT_CHAT_PAD_Y));
         for entry in plan {
-            let (glyph, glyph_color) = plan_status_glyph(entry.status, t);
+            let (glyph, glyph_color) = plan_status_glyph(entry.status, t, cx);
             let in_progress = entry.status == PlanStatus::InProgress;
             list = list.child(
                 div()
@@ -188,7 +192,7 @@ pub(super) fn plan_region(
                         div()
                             .flex_none()
                             .text_color(glyph_color)
-                            .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                            .text_size(px(theme::agent_chat_font_size(cx)))
                             // In-progress glyph pulses in lockstep with the section
                             // header rollup dot; settled glyphs stay solid.
                             .when(in_progress, |g| g.opacity(pulse_opacity(cx)))
@@ -198,8 +202,8 @@ pub(super) fn plan_region(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_color(plan_entry_color(entry.status, t))
-                            .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                            .text_color(plan_entry_color(entry.status, cx))
+                            .text_size(px(theme::agent_chat_font_size(cx)))
                             .child(SharedString::from(entry.content.clone())),
                     ),
             );

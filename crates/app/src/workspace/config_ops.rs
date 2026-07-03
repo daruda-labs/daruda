@@ -142,6 +142,16 @@ impl Workspace {
             (crate::ui::theme::editor_font_size(cx) - config.font.editor_size).abs() > f32::EPSILON;
         crate::ui::theme::set_editor_font_size(cx, config.font.editor_size);
 
+        // Agent-chat font size (config `font.agent_chat_size`), independent of
+        // the terminal and editor fonts. Mirror it to the GPUI-side global the
+        // agent-chat render path reads directly; on a change, the cached
+        // `AgentChatView`s are dirtied below (a bare workspace `cx.notify()`
+        // would not reach a cached child — render-cost rule §10).
+        let agent_chat_font_changed =
+            (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat_size).abs()
+                > f32::EPSILON;
+        crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat_size);
+
         // Background opacity (config `window.opacity`) drives both the terminal
         // pane fill (pushed per-view above) and the agent-chat pane background.
         // Mirror it to the GPUI-side global the agent-chat render path reads
@@ -155,7 +165,10 @@ impl Workspace {
         // uses, resolved above) so the agent-chat pane tracks the terminal
         // color theme on a live reload too.
         let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
-        if bg_alpha_changed || bg_color_changed {
+        // Mirror the terminal foreground too so the agent-chat pane's text color
+        // tracks the terminal color theme (counterpart to the background above).
+        let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
+        if bg_alpha_changed || bg_color_changed || fg_color_changed || agent_chat_font_changed {
             let views: Vec<_> = self
                 .main_area
                 .runtimes

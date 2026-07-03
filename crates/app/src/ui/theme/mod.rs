@@ -383,6 +383,33 @@ pub fn set_editor_font_size(cx: &mut App, size: f32) {
     cx.set_global(EditorFontSize(size));
 }
 
+/// Agent-chat font size in points, mirrored from config `font.agent_chat_size`.
+/// Drives the entire conversation pane — message bodies, headers, tool titles,
+/// and chrome share one size (body and label unified) that is independent of
+/// the terminal and editor fonts. Single update site:
+/// [`set_agent_chat_font_size`], called from the config-reload path.
+#[derive(Clone, Copy)]
+struct AgentChatFontSize(f32);
+
+impl gpui::Global for AgentChatFontSize {}
+
+/// Read the agent-chat font size (points). Defaults to
+/// [`AGENT_CHAT_MSG_FONT_SIZE`](p::AGENT_CHAT_MSG_FONT_SIZE) before any config
+/// load. Every agent-chat text size resolves through this so the whole pane
+/// scales as one.
+pub fn agent_chat_font_size(cx: &App) -> f32 {
+    cx.try_global::<AgentChatFontSize>()
+        .map(|g| g.0)
+        .unwrap_or(p::AGENT_CHAT_MSG_FONT_SIZE)
+}
+
+/// Mirror the resolved config `font.agent_chat_size` for the GPUI side. The
+/// config string stays the single source; this caches the value for the
+/// agent-chat render path.
+pub fn set_agent_chat_font_size(cx: &mut App, size: f32) {
+    cx.set_global(AgentChatFontSize(size));
+}
+
 /// Background opacity (0.1–1.0), mirrored from config `window.opacity` — the
 /// same value that drives terminal-pane background translucency. Lets the
 /// agent-chat pane render its background at the window opacity so it matches
@@ -446,6 +473,78 @@ pub fn agent_chat_bg(cx: &App) -> gpui::Hsla {
 pub fn set_agent_chat_bg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
     let next = AgentChatBg { r, g, b };
     let changed = cx.try_global::<AgentChatBg>() != Some(&next);
+    cx.set_global(next);
+    changed
+}
+
+/// Agent-chat foreground color, mirrored from the terminal color theme's
+/// `effective_colors().foreground` — the counterpart to [`AgentChatBg`]. The
+/// pane already renders its background on the terminal color theme; mirroring
+/// the terminal foreground for the pane's text (prose, headers, summaries)
+/// keeps glyph color consistent with the background instead of pulling from the
+/// UI theme's text ramp. Code-block syntax highlighting is intentionally
+/// unaffected — that follows the selectable syntax palette. Stored as raw RGB;
+/// converted to `Hsla` on read. Single update sites: the `globals` seed + the
+/// config-reload path.
+#[derive(Clone, Copy, PartialEq)]
+struct AgentChatFg {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+impl gpui::Global for AgentChatFg {}
+
+/// Read the agent-chat foreground color. Mirrors the terminal color theme's
+/// foreground, then lifts its lightness by [`AGENT_CHAT_FG_BRIGHTEN`](p::AGENT_CHAT_FG_BRIGHTEN)
+/// so chat text reads a touch brighter than the raw terminal glyph **without
+/// touching the terminal itself** (the terminal renders from `terminal_config`,
+/// not this global). The lift is scaled by how dark the pane background is
+/// (`1 - bg.l`), so it brightens light-on-dark text (the common case) but
+/// barely nudges dark-on-light text — where "brighter" would instead cut
+/// contrast. Defaults to [`TEXT_PRIMARY`](p::TEXT_PRIMARY) (already bright)
+/// before any config load.
+pub fn agent_chat_fg(cx: &App) -> gpui::Hsla {
+    match cx.try_global::<AgentChatFg>() {
+        Some(c) => {
+            let mut hsla: gpui::Hsla = gpui::Rgba {
+                r: f32::from(c.r) / 255.0,
+                g: f32::from(c.g) / 255.0,
+                b: f32::from(c.b) / 255.0,
+                a: 1.0,
+            }
+            .into();
+            let bg_l = agent_chat_bg(cx).l;
+            hsla.l = (hsla.l + p::AGENT_CHAT_FG_BRIGHTEN * (1.0 - bg_l)).min(1.0);
+            hsla
+        }
+        None => p::TEXT_PRIMARY,
+    }
+}
+
+/// Dimmed agent-chat foreground for secondary text (muted labels, status).
+/// Derived by blending the terminal foreground toward the pane background via
+/// alpha, so it dims relative to the *actual* terminal background on any theme
+/// (a fixed UI-theme grey would be wrong on a light or strongly tinted
+/// terminal). Replaces `DarudaTheme::text_muted` in the agent-chat pane.
+pub fn agent_chat_fg_muted(cx: &App) -> gpui::Hsla {
+    agent_chat_fg(cx).opacity(p::AGENT_CHAT_FG_MUTED_ALPHA)
+}
+
+/// Most-dimmed agent-chat foreground for tertiary text (collapsed summaries,
+/// disclosure chevrons). The subtle step of the terminal-foreground ramp;
+/// replaces `DarudaTheme::text_subtle` in the agent-chat pane. See
+/// [`agent_chat_fg_muted`] for why this blends toward the background.
+pub fn agent_chat_fg_subtle(cx: &App) -> gpui::Hsla {
+    agent_chat_fg(cx).opacity(p::AGENT_CHAT_FG_SUBTLE_ALPHA)
+}
+
+/// Mirror the resolved terminal foreground color for the agent-chat render
+/// path. Returns `true` when the value changed, so the reload path can decide
+/// whether to repaint the cached agent-chat views.
+pub fn set_agent_chat_fg(cx: &mut App, r: u8, g: u8, b: u8) -> bool {
+    let next = AgentChatFg { r, g, b };
+    let changed = cx.try_global::<AgentChatFg>() != Some(&next);
     cx.set_global(next);
     changed
 }

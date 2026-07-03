@@ -16,6 +16,11 @@ pub struct FontConfig {
     /// raw rows, line-number gutter). Independent of the terminal `size`.
     /// Clamped to 6.0–72.0 at load time.
     pub editor_size: f32,
+    /// Agent-chat font size in points — the whole conversation pane (message
+    /// bodies, headers, tool titles, and chrome share one size). Independent
+    /// of the terminal `size` and the `editor_size`. Clamped to 6.0–72.0 at
+    /// load time.
+    pub agent_chat_size: f32,
     /// Line height multiplier. 1.0 = natural line height.
     pub vertical_spacing: f32,
     /// Cell width multiplier. 1.0 = natural advance width.
@@ -34,6 +39,7 @@ impl Default for FontConfig {
             family: default_font_family().to_string(),
             size: 13.0,
             editor_size: 13.0,
+            agent_chat_size: 13.0,
             vertical_spacing: 1.0,
             horizontal_spacing: 1.0,
             inset_x: 4.0,
@@ -47,6 +53,7 @@ impl FontConfig {
     pub fn clamp(&mut self) {
         self.size = self.size.clamp(6.0, 72.0);
         self.editor_size = self.editor_size.clamp(6.0, 72.0);
+        self.agent_chat_size = self.agent_chat_size.clamp(6.0, 72.0);
         self.vertical_spacing = self.vertical_spacing.clamp(0.5, 2.0);
         self.horizontal_spacing = self.horizontal_spacing.clamp(0.5, 2.0);
         self.inset_x = self.inset_x.clamp(0.0, 32.0);

@@ -5,7 +5,7 @@ use daruda_acp::{
     PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, ToolCallItem,
     ToolOutputBlock, ToolStatusView,
 };
-use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
@@ -33,7 +33,7 @@ pub(super) fn tool_card(
     t: &theme::DarudaTheme,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let (badge_text, badge_fg) = tool_status_badge(tc.status, t);
+    let (badge_text, badge_fg) = tool_status_badge(tc.status, t, cx);
     // A running tool gets animated trailing dots (Running. / .. / ...) so the
     // in-progress state reads as live, not just a static amber label.
     let badge_text = if matches!(tc.status, ToolStatusView::InProgress) {
@@ -56,22 +56,22 @@ pub(super) fn tool_card(
             div()
                 .flex_1()
                 .min_w_0()
-                .text_color(t.text_primary)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .text_color(theme::agent_chat_fg(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(
                     crate::ui::selectable_text(
                         SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
                         tc.title.clone(),
                     )
-                    .color(t.text_primary)
-                    .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE)),
+                    .color(theme::agent_chat_fg(cx))
+                    .text_size(px(theme::agent_chat_font_size(cx))),
                 ),
         )
         .child(
             div()
                 .flex_none()
                 .text_color(badge_fg)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(badge_text),
         )
         .into_any_element();
@@ -87,12 +87,12 @@ pub(super) fn tool_card(
     if !tc.output.is_empty() {
         body = body.child(
             div()
-                .text_color(t.text_muted)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_color(theme::agent_chat_fg_muted(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::agent_chat_tool_output_label())),
         );
         for (ix, block) in tc.output.iter().enumerate() {
-            body = body.child(output_block_view(&tc.id, ix, block, t));
+            body = body.child(output_block_view(&tc.id, ix, block, cx));
         }
     }
 
@@ -118,7 +118,6 @@ pub(super) fn tool_card(
             None,
             body.into_any_element(),
             |row| row,
-            t,
             cx,
         ))
 }
@@ -127,19 +126,14 @@ pub(super) fn tool_card(
 /// block for stable selection state), or a resource link as an open button.
 /// The ACP spec says clients SHOULD render tool text as Markdown; code blocks
 /// keep their own monospace + syntax highlight.
-fn output_block_view(
-    tool_id: &str,
-    ix: usize,
-    block: &ToolOutputBlock,
-    t: &theme::DarudaTheme,
-) -> AnyElement {
+fn output_block_view(tool_id: &str, ix: usize, block: &ToolOutputBlock, cx: &App) -> AnyElement {
     match block {
         ToolOutputBlock::Text(text) => crate::ui::markdown(
             SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
             text.clone(),
         )
-        .color(t.text_body)
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .color(theme::agent_chat_fg(cx))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .into_any_element(),
         ToolOutputBlock::ResourceLink { uri, name } => {
             let uri = uri.clone();
@@ -154,9 +148,16 @@ fn output_block_view(
 }
 
 /// Map a tool status to its badge label + colour.
-fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedString, Hsla) {
+fn tool_status_badge(
+    status: ToolStatusView,
+    t: &theme::DarudaTheme,
+    cx: &App,
+) -> (SharedString, Hsla) {
     match status {
-        ToolStatusView::Pending => (s::agent_chat_tool_status_pending().into(), t.text_muted),
+        ToolStatusView::Pending => (
+            s::agent_chat_tool_status_pending().into(),
+            theme::agent_chat_fg_muted(cx),
+        ),
         // Amber accent so a running tool reads stronger than a settled
         // green ✓ / red ✗; `tool_card` appends animated dots to the label.
         ToolStatusView::InProgress => (
@@ -173,7 +174,10 @@ fn tool_status_badge(status: ToolStatusView, t: &theme::DarudaTheme) -> (SharedS
         ),
         // Stopped before settling — muted like Pending (no error red, no
         // success green): it neither failed nor completed.
-        ToolStatusView::Cancelled => (s::agent_chat_tool_status_cancelled().into(), t.text_muted),
+        ToolStatusView::Cancelled => (
+            s::agent_chat_tool_status_cancelled().into(),
+            theme::agent_chat_fg_muted(cx),
+        ),
     }
 }
 
@@ -203,17 +207,17 @@ pub(super) fn permission_card(
         .child(
             div()
                 .text_color(t.banner_warning_text)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::agent_chat_permission_title())),
         )
         .child(
             div()
-                .text_color(t.text_primary)
-                .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE))
+                .text_color(theme::agent_chat_fg(cx))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(
                     crate::ui::selectable_text(("agent-chat-perm-title", ix), title)
-                        .color(t.text_primary)
-                        .text_size(px(theme::AGENT_CHAT_MSG_FONT_SIZE)),
+                        .color(theme::agent_chat_fg(cx))
+                        .text_size(px(theme::agent_chat_font_size(cx))),
                 ),
         );
 
@@ -229,8 +233,8 @@ pub(super) fn permission_card(
                 .unwrap_or_else(|| option_id.clone());
             root = root.child(
                 div()
-                    .text_color(t.text_muted)
-                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .text_color(theme::agent_chat_fg_muted(cx))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!(
                         "{} {}",
                         s::agent_chat_permission_resolved_prefix(),
@@ -243,8 +247,8 @@ pub(super) fn permission_card(
             // buttons and surface that the request was cancelled.
             root = root.child(
                 div()
-                    .text_color(t.text_muted)
-                    .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                    .text_color(theme::agent_chat_fg_muted(cx))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(s::agent_chat_permission_cancelled())),
             );
         }

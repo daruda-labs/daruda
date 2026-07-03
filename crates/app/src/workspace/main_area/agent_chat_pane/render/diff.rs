@@ -3,7 +3,7 @@
 //! the collapsed `+N −M` summary, and the inline fallback lines.
 
 use daruda_acp::DiffView;
-use gpui::{AnyElement, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::{DiffStats, foldable_block};
 use crate::surface::strings as s;
@@ -45,14 +45,14 @@ pub(super) fn diff_block(
         .whitespace_nowrap()
         .text_color(t.file_diff_hunk_text)
         .font_family(theme::FONT_FAMILY_MONOSPACE)
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(diff.path.display().to_string()))
         .into_any_element();
 
     // Collapsed summary: `+N −M`. Absent entry ≡ no changes → show nothing.
     let summary = diff_stats
         .get(&diff_key)
-        .map(|stat| diff_stat_summary(stat, t));
+        .map(|stat| diff_stat_summary(stat, t, cx));
 
     let body = diff_body(diff, editor, t, cx).into_any_element();
 
@@ -75,7 +75,6 @@ pub(super) fn diff_block(
                     .py(px(theme::GAP_XS))
                     .bg(t.file_diff_hunk_bg)
             },
-            t,
             cx,
         ))
 }
@@ -110,8 +109,13 @@ fn diff_body(
                 .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
                 .py(px(theme::GAP_XS))
                 .bg(t.file_viewer_bg)
+                // Editor-surface island (mirrors the File viewer), so its text
+                // follows the UI/editor muted color — NOT the terminal
+                // foreground, which would render dark-on-dark here on a light
+                // terminal theme since `file_viewer_bg` is an opaque fixed
+                // editor surface (unlike the translucent pane tints).
                 .text_color(t.text_muted)
-                .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+                .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::file_viewer_empty_diff())),
         );
     }
@@ -123,6 +127,7 @@ fn diff_body(
                 t.file_diff_del_bg,
                 t.file_diff_del_text,
                 '-',
+                cx,
             ));
         }
     }
@@ -132,6 +137,7 @@ fn diff_body(
             t.file_diff_add_bg,
             t.file_diff_add_text,
             '+',
+            cx,
         ));
     }
     block
@@ -141,7 +147,7 @@ fn diff_body(
 /// (green), removed count in `file_diff_del_text` (red). Built from the
 /// [`DiffStat`] the ops layer caches alongside the editor (absent ≡ `0/0`, in
 /// which case the caller shows no summary at all).
-fn diff_stat_summary(stat: &DiffStat, t: &theme::DarudaTheme) -> AnyElement {
+fn diff_stat_summary(stat: &DiffStat, t: &theme::DarudaTheme, cx: &App) -> AnyElement {
     div()
         .flex_none()
         .flex()
@@ -149,7 +155,7 @@ fn diff_stat_summary(stat: &DiffStat, t: &theme::DarudaTheme) -> AnyElement {
         .items_center()
         .gap(px(theme::AGENT_CHAT_MSG_GAP))
         .font_family(theme::FONT_FAMILY_MONOSPACE)
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(
             div()
                 .text_color(t.file_diff_add_text)
@@ -163,7 +169,7 @@ fn diff_stat_summary(stat: &DiffStat, t: &theme::DarudaTheme) -> AnyElement {
         .into_any_element()
 }
 
-fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char) -> impl IntoElement + use<> {
+fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char, cx: &App) -> impl IntoElement + use<> {
     div()
         .w_full()
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -171,6 +177,6 @@ fn diff_line(line: &str, bg: Hsla, fg: Hsla, marker: char) -> impl IntoElement +
         .text_color(fg)
         .font_family(theme::FONT_FAMILY_MONOSPACE)
         .whitespace_normal()
-        .text_size(px(theme::AGENT_CHAT_LABEL_FONT_SIZE))
+        .text_size(px(theme::agent_chat_font_size(cx)))
         .child(SharedString::from(format!("{marker} {line}")))
 }

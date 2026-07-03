@@ -29,8 +29,11 @@ pub(crate) fn init_all(cx: &mut App) {
         let lang = user.general.language.clone();
         let syntax = user.file_viewer.syntax_theme.clone();
         let editor_font_size = user.font.editor_size;
+        let agent_chat_font_size = user.font.agent_chat_size;
         let window_opacity = user.window.opacity;
-        let term_bg = user.effective_colors().background;
+        let term_colors = user.effective_colors();
+        let term_bg = term_colors.background;
+        let term_fg = term_colors.foreground;
         ui::theme::apply_ui_theme(&preset, cx);
         apply_locale_str(&lang);
         // Seed the selected syntax palette so the editor highlight theme
@@ -42,6 +45,9 @@ pub(crate) fn init_all(cx: &mut App) {
         // Seed the file-viewer editor font size so raw / diff / markdown
         // rows render at the configured size from the first paint.
         ui::theme::set_editor_font_size(cx, editor_font_size);
+        // Seed the agent-chat font size so the conversation pane renders at the
+        // configured size from the first paint.
+        ui::theme::set_agent_chat_font_size(cx, agent_chat_font_size);
         // Seed the background opacity so the agent-chat pane renders at the
         // configured window opacity from the first paint (mirrors the terminal
         // pane, whose alpha is seeded via its own construction path).
@@ -50,6 +56,10 @@ pub(crate) fn init_all(cx: &mut App) {
         // the pane matches the terminal (not the UI theme's editor surface)
         // from the first paint.
         ui::theme::set_agent_chat_bg(cx, term_bg.r, term_bg.g, term_bg.b);
+        // Seed the agent-chat foreground from the same terminal color theme so
+        // the pane's text color matches its terminal-mirrored background from
+        // the first paint (counterpart to the background seed above).
+        ui::theme::set_agent_chat_fg(cx, term_fg.r, term_fg.g, term_fg.b);
     }
     crate::agent::skills::global::init(cx);
     crate::agent::mcp::global::init(cx);

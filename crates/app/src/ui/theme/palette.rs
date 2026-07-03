@@ -828,10 +828,25 @@ pub const AGENT_LOG_STATUS_MT: f32 = PAD_XS;
 pub const AGENT_LOG_STATUS_PAD_X: f32 = PAD_STANDARD;
 /// Agent activity log pinned status padding Y (px).
 pub const AGENT_LOG_STATUS_PAD_Y: f32 = PAD_XS;
-/// Agent chat message label font size (px).
-pub const AGENT_CHAT_LABEL_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Agent chat message body font size (px).
+/// Agent chat font size (px) — the whole conversation pane (message bodies,
+/// headers, tool titles, chrome) shares this one size. Compile-time default
+/// for the config-driven `font.agent_chat_size`; the render path resolves the
+/// live value via `theme::agent_chat_font_size(cx)`.
 pub const AGENT_CHAT_MSG_FONT_SIZE: f32 = FONT_SIZE_LG;
+/// Lightness lift applied to the terminal-mirrored agent-chat foreground so
+/// chat text reads slightly brighter than the raw terminal glyph, without
+/// altering the terminal itself. Applied as `l += this * (1 - bg.l)` in
+/// `theme::agent_chat_fg` (scaled by background darkness), then clamped to 1.0.
+/// 0.0 = exact terminal foreground. Tune here.
+pub const AGENT_CHAT_FG_BRIGHTEN: f32 = 0.24;
+/// Alpha for the muted (secondary) step of the agent-chat foreground ramp —
+/// the terminal foreground blended toward the pane background. Tuned so that
+/// over the default dark terminal background it lands near the old
+/// `TEXT_MUTE` lightness. See `theme::agent_chat_fg_muted`.
+pub const AGENT_CHAT_FG_MUTED_ALPHA: f32 = 0.62;
+/// Alpha for the subtle (tertiary) step of the agent-chat foreground ramp.
+/// See `theme::agent_chat_fg_subtle`.
+pub const AGENT_CHAT_FG_SUBTLE_ALPHA: f32 = 0.5;
 /// Agent chat message gap (px).
 pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;
 /// Agent chat message list gap (px).
