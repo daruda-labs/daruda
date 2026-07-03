@@ -15,7 +15,7 @@
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use daruda_store::tasks::{Task, TaskId, branch::derive_branch_name};
+use daruda_store::tasks::{Task, TaskAgentSurface, TaskId, branch::derive_branch_name};
 use gpui::{AppContext as _, BorrowAppContext as _, Context, Focusable as _, SharedString, Window};
 
 use crate::ui::select::{SelectOption, state_with_options};
@@ -141,13 +141,14 @@ impl Workspace {
     ) -> Pane {
         let pane_id = self.alloc_id();
 
-        let (title, prompt, notes, branch_name, auto_execute) = match &initial {
+        let (title, prompt, notes, branch_name, auto_execute, agent_surface) = match &initial {
             Some(t) => (
                 t.title.clone(),
                 t.prompt.clone(),
                 t.notes.clone(),
                 t.branch_name.clone(),
                 t.auto_execute,
+                t.agent_surface,
             ),
             None => (
                 String::new(),
@@ -155,6 +156,7 @@ impl Workspace {
                 String::new(),
                 String::new(),
                 true,
+                TaskAgentSurface::default(),
             ),
         };
 
@@ -277,6 +279,7 @@ impl Workspace {
             prompt: normalize_newlines(&prompt),
             notes: normalize_newlines(&notes),
             auto_execute,
+            agent_surface,
             base_value: base_initial
                 .as_ref()
                 .map(|s| s.to_string())
@@ -307,6 +310,7 @@ impl Workspace {
                 prompt_state,
                 notes_state,
                 auto_execute,
+                agent_surface,
                 focus_handle,
                 cached_title,
                 saved_snapshot,
@@ -639,6 +643,7 @@ impl Workspace {
                     form.prompt.clone(),
                     form.notes.clone(),
                     form.auto_execute,
+                    form.agent_surface,
                     base_path.clone(),
                     cx,
                 );
@@ -655,6 +660,7 @@ impl Workspace {
                 }
                 task.notes = form.notes.clone();
                 task.auto_execute = form.auto_execute;
+                task.agent_surface = form.agent_surface;
                 let new_id = task.id.clone();
                 cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
                     g.add(task);
@@ -674,6 +680,7 @@ impl Workspace {
                 prompt: normalize_newlines(&form.prompt),
                 notes: normalize_newlines(&form.notes),
                 auto_execute: form.auto_execute,
+                agent_surface: form.agent_surface,
                 base_value: form.base_value.clone(),
             };
         }
@@ -726,6 +733,7 @@ impl Workspace {
             prompt: te.prompt_state.read(cx).text().to_string(),
             notes: te.notes_state.read(cx).text().to_string(),
             auto_execute: te.auto_execute,
+            agent_surface: te.agent_surface,
             branch_validation: te.branch_validation.clone(),
             base_value: te
                 .base_select
@@ -746,6 +754,7 @@ struct TaskEditFormSnapshot {
     prompt: String,
     notes: String,
     auto_execute: bool,
+    agent_surface: TaskAgentSurface,
     branch_validation: BranchValidation,
     /// Selected `base_select` value — empty string sentinel for "use
     /// active lane", otherwise an absolute path string.

@@ -471,6 +471,19 @@ pub fn task_edit_auto_execute_label() -> String {
     rust_i18n::t!("task.edit_auto_execute_label").into_owned()
 }
 
+/// Field label for the execution-surface selector on the TaskEdit pane.
+pub fn task_edit_surface_label() -> String {
+    rust_i18n::t!("task.edit_surface_label").into_owned()
+}
+/// Option label — run the task on a terminal CLI session.
+pub fn task_edit_surface_terminal() -> String {
+    rust_i18n::t!("task.edit_surface_terminal").into_owned()
+}
+/// Option label — run the task on an in-app Agent chat (ACP) session.
+pub fn task_edit_surface_agent_chat() -> String {
+    rust_i18n::t!("task.edit_surface_agent_chat").into_owned()
+}
+
 /// Glyph appended to the status pill label as the dropdown chevron.
 /// Leading space provides the visual gap between the label and the
 /// triangle.
@@ -1729,6 +1742,9 @@ pub fn settings_label_font_size() -> String {
 pub fn settings_label_editor_font_size() -> String {
     rust_i18n::t!("settings.label_editor_font_size").into_owned()
 }
+pub fn settings_label_agent_chat_font_size() -> String {
+    rust_i18n::t!("settings.label_agent_chat_font_size").into_owned()
+}
 pub fn settings_label_vertical_spacing() -> String {
     rust_i18n::t!("settings.label_vertical_spacing").into_owned()
 }
@@ -1767,6 +1783,9 @@ pub fn settings_err_font_size() -> String {
 }
 pub fn settings_err_editor_font_size() -> String {
     rust_i18n::t!("settings.err_editor_font_size").into_owned()
+}
+pub fn settings_err_agent_chat_font_size() -> String {
+    rust_i18n::t!("settings.err_agent_chat_font_size").into_owned()
 }
 pub fn settings_err_spacing() -> String {
     rust_i18n::t!("settings.err_spacing").into_owned()
@@ -2328,8 +2347,11 @@ pub fn skills_saving_label() -> String {
 pub fn skills_invoke_placeholder_default() -> String {
     rust_i18n::t!("skills.invoke_placeholder_default").into_owned()
 }
-pub fn skills_invoke_no_terminal() -> String {
-    rust_i18n::t!("skills.invoke_no_terminal").into_owned()
+/// Shown when a skill can't be delivered to the captured pane — the
+/// pane is gone, is a kind that can't receive text (file / task editor),
+/// or the user switched lanes while the modal was open.
+pub fn skills_invoke_no_input_target() -> String {
+    rust_i18n::t!("skills.invoke_no_input_target").into_owned()
 }
 /// Empty-state hint in the skill picker when a plugin group exposes no
 /// invocable skills (the picker chains into the invocation modal).

@@ -1,10 +1,12 @@
 //! Skill invocation modal — `/<skill> <user input>` dispatcher.
 //!
 //! Opened when a user clicks a skill row in the right-bar Skills tab.
-//! The modal collects free-form input and on Submit writes
-//! `/<display_name> <user input>\n` straight into the focused terminal
-//! pane's PTY, mirroring how the user would type the slash command
-//! into the Claude Code TUI manually.
+//! The modal collects free-form input and on Submit routes
+//! `/<display_name> <user input>` through the pane-input funnel
+//! ([`Workspace::deliver_text_to_pane`]). A terminal pane receives the
+//! slash command typed into its PTY (mirroring the Claude Code TUI); an
+//! agent chat pane runs it as an ACP turn. Either way the pane captured
+//! at open time is the target.
 //!
 //! Plugin-scope skills carry a `<plugin_local>:<skill>` namespace per
 //! the Claude Code spec; the namespacing is baked into the
@@ -24,6 +26,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::pane_input_ops::PaneTextInput;
 
 /// Plain-data carrier used to populate the invocation modal. Built by
 /// `Workspace::open_skill_invocation_modal` from a `Skill`; the modal
@@ -50,6 +53,16 @@ pub struct SkillInvocationLabel {
     /// pane the user was looking at when they clicked, even if focus
     /// moves while the modal is up.
     pub target_pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    /// The active lane at open time. The captured `target_pane_id` is
+    /// only meaningful inside this lane's runtime, but the pane-input
+    /// funnel resolves against whatever lane is active at submit. The
+    /// modal's occluding backdrop blocks pointer-driven lane switches,
+    /// yet the `ActivateLane*` keyboard shortcuts stay reachable
+    /// (their handlers live on an ancestor of the dialog overlay), so
+    /// the user can still switch lanes while the modal is up. Submit
+    /// compares this against the live active ref and refuses delivery
+    /// on a mismatch rather than firing the skill into the wrong lane.
+    pub target_lane: daruda_store::project::LaneRef,
 }
 
 pub struct SkillInvocationModal {
@@ -110,13 +123,16 @@ impl SkillInvocationModal {
         cx.notify();
 
         let user_input = self.input.read(cx).value().to_string();
-        let cmd = if user_input.is_empty() {
-            format!("/{}\n", self.label.display_name)
+        // No trailing newline: the funnel's terminal branch appends the
+        // CR when `submit` is set, and the agent branch runs an ACP turn.
+        let body = if user_input.is_empty() {
+            format!("/{}", self.label.display_name)
         } else {
-            format!("/{} {}\n", self.label.display_name, user_input)
+            format!("/{} {}", self.label.display_name, user_input)
         };
 
         let target_pane = self.label.target_pane_id;
+        let target_lane = self.label.target_lane;
         let display_name = self.label.display_name.clone();
         let Some(ws) = self.workspace.upgrade() else {
             // Workspace already dropped — close ourselves.
@@ -124,16 +140,29 @@ impl SkillInvocationModal {
             return;
         };
 
-        let delivered = ws.update(cx, |ws, _cx| ws.send_to_pane(target_pane, cmd.as_bytes()));
+        let delivered = ws.update(cx, |ws, cx| {
+            // Guard against a lane switch while the modal was open: the
+            // captured pane only exists in the lane active at open time,
+            // but the funnel resolves against the live active lane.
+            if ws.active != target_lane {
+                return false;
+            }
+            ws.deliver_text_to_pane(
+                target_pane,
+                PaneTextInput { body, submit: true },
+                window,
+                cx,
+            )
+        });
 
         if !delivered {
             ws.update(cx, |ws, cx| {
                 let report = ErrorReport::new("Skill invocation failed")
                     .severity(ErrorSeverity::Warning)
-                    .message(strings::skills_invoke_no_terminal())
+                    .message(strings::skills_invoke_no_input_target())
                     .at(file!(), line!())
                     .with_context("skill", &display_name)
-                    .dedup("skills.invoke.no_terminal")
+                    .dedup("skills.invoke.no_input_target")
                     .build();
                 ws.report_error(report, cx);
             });

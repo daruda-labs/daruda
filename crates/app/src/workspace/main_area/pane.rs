@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use daruda_store::tasks::TaskId;
+use daruda_store::tasks::{TaskAgentSurface, TaskId};
 use daruda_terminal::ux::strings as term_strings;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
@@ -153,6 +153,11 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) auto_execute: bool,
+    /// Execution surface the task will run on when started — mirrors
+    /// `Task::agent_surface`. Terminal CLI (default) or in-app Agent
+    /// chat (ACP). Flipped in-place by the form's surface selector, the
+    /// same plain-data pattern as `auto_execute`.
+    pub(in crate::workspace) agent_surface: TaskAgentSurface,
     pub(in crate::workspace) focus_handle: FocusHandle,
     pub(in crate::workspace) cached_title: SharedString,
     /// Baseline snapshot for dirty comparison (R-25 / I-8). Reset to
@@ -227,6 +232,7 @@ pub(in crate::workspace) struct TaskEditSnapshot {
     pub(in crate::workspace) prompt: String,
     pub(in crate::workspace) notes: String,
     pub(in crate::workspace) auto_execute: bool,
+    pub(in crate::workspace) agent_surface: TaskAgentSurface,
     /// Empty string ↔ `Task::base_worktree_path == None`; non-empty ↔
     /// `Some(PathBuf::from(s))`. Plain `String` (not `Option<String>`)
     /// keeps the dirty-comparison `==` path trivial — the user-facing
@@ -254,6 +260,7 @@ impl TaskEditContent {
             prompt: normalize_newlines(self.prompt_state.read(cx).text().to_string().as_str()),
             notes: normalize_newlines(self.notes_state.read(cx).text().to_string().as_str()),
             auto_execute: self.auto_execute,
+            agent_surface: self.agent_surface,
             base_value: self
                 .base_select
                 .read(cx)

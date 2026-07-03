@@ -9,6 +9,7 @@
 //! single render cycle.
 
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
+use daruda_store::tasks::TaskAgentSurface;
 use gpui::{Context, Window};
 
 use super::LaneRuntime;
@@ -312,6 +313,7 @@ impl Workspace {
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
+        surface: TaskAgentSurface,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, String> {
@@ -325,9 +327,19 @@ impl Workspace {
             base_ref,
             description,
         } = plan;
-        let pane = self
-            .create_pane_with_cwd(Some(new_path.clone()), window, cx)
-            .map_err(|e| e.to_string())?;
+        // The lane's initial pane mirrors the requested surface: a terminal
+        // (default, incl. every manual lane creation) or an in-app Agent chat
+        // session rooted at the new checkout. `create_agent_chat_pane` parks
+        // Idle and connects lazily on first focus — the `activate_lane` below
+        // focuses it, which starts the ACP session.
+        let pane = match surface {
+            TaskAgentSurface::Terminal => self
+                .create_pane_with_cwd(Some(new_path.clone()), window, cx)
+                .map_err(|e| e.to_string())?,
+            TaskAgentSurface::AgentChat => {
+                self.create_agent_chat_pane(Some(new_path.clone()), window, cx)
+            }
+        };
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         let tab = pane::TabEntry {

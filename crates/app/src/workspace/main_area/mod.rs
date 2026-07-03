@@ -14,6 +14,7 @@ pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_drag_ops;
+pub(in crate::workspace) mod pane_input_ops;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;

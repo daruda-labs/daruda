@@ -251,6 +251,86 @@ fn apply_task_session_ended_with_error_uses_session_error_message(cx: &mut TestA
     });
 }
 
+/// A `Running` AgentChat-surfaced task (no hook session id — ACP sessions never
+/// write the status files) reconciles by lane cwd: a completed turn moves it to
+/// `Done`, keyed by `worktree_path == cwd`.
+#[gpui::test]
+fn apply_agent_chat_task_ended_completes_running_task_by_cwd(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    let id = workspace.update(cx, |_ws, cx| {
+        let mut task = Task::new("acp-task".into(), "".into(), None);
+        task.state = TaskState::Running {
+            worktree_path: PathBuf::from("/tmp/acp-wt"),
+        };
+        // No session_ids: an AgentChat task never gets a hook session.
+        let id = task.id.clone();
+        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
+            g.add(task);
+        });
+        id
+    });
+
+    workspace.update(cx, |ws, cx| {
+        // A non-matching cwd is a no-op — the task stays Running.
+        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/other"), SessionEndReason::Stop, cx);
+        assert!(matches!(
+            cx.global::<crate::agent::tasks_global::GlobalTasks>()
+                .get(&id)
+                .unwrap()
+                .state,
+            TaskState::Running { .. }
+        ));
+
+        // The matching cwd with a completion reason → Done.
+        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Stop, cx);
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        let t = g.get(&id).unwrap();
+        match &t.state {
+            TaskState::Done { end_reason, .. } => assert_eq!(*end_reason, SessionEndReason::Stop),
+            other => panic!("expected Done, got {other:?}"),
+        }
+        assert!(t.finished_at.is_some(), "completion stamps finished_at");
+    });
+}
+
+/// A terminal ACP error / connect failure moves a `Running` AgentChat task to
+/// `Error`, keyed by cwd (mirrors the session-id-keyed Error mapping).
+#[gpui::test]
+fn apply_agent_chat_task_ended_errors_on_error_reason(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    let id = workspace.update(cx, |_ws, cx| {
+        let mut task = Task::new("acp-task".into(), "".into(), None);
+        task.state = TaskState::Running {
+            worktree_path: PathBuf::from("/tmp/acp-wt"),
+        };
+        let id = task.id.clone();
+        cx.update_global::<crate::agent::tasks_global::GlobalTasks, _>(|g, _| {
+            g.add(task);
+        });
+        id
+    });
+
+    workspace.update(cx, |ws, cx| {
+        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Error, cx);
+        let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
+        match &g.get(&id).unwrap().state {
+            TaskState::Error { message, .. } => assert_eq!(message, "session error"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+
+        // Idempotent: a second call finds no Running task and no-ops (stays
+        // Error, not overwritten).
+        ws.apply_agent_chat_task_ended(&PathBuf::from("/tmp/acp-wt"), SessionEndReason::Stop, cx);
+        assert!(matches!(
+            cx.global::<crate::agent::tasks_global::GlobalTasks>()
+                .get(&id)
+                .unwrap()
+                .state,
+            TaskState::Error { .. }
+        ));
+    });
+}
+
 // ---------------------------------------------------------------------------
 // R-21 subtask ops
 // ---------------------------------------------------------------------------

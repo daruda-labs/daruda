@@ -277,6 +277,13 @@ impl Workspace {
                                     v.status = AgentSessionStatus::Connecting;
                                     cx.notify();
                                 }
+                                // Forward the first prompt submitted before the
+                                // handle existed (queued during the handshake or
+                                // dispatched into the pane before it connected).
+                                // One per turn: each `TurnEnded` pumps the next,
+                                // so the view tracks a single live turn. No-op
+                                // when nothing was buffered.
+                                v.pump_pending_prompt(cx);
                             });
                             true
                         } else {
@@ -311,11 +318,34 @@ impl Workspace {
                             // bottom-input placeholder when either fires.
                             let mode_before =
                                 view.read(cx).modes.as_ref().map(|m| m.current.clone());
+                            // AgentChat-surfaced tasks reconcile off the ACP turn
+                            // lifecycle (they never write the status-file hooks
+                            // the Terminal surface uses). Capture the outcome
+                            // before the event is consumed: a completed turn maps
+                            // to Done (via `Stop`), a terminal error to Error.
+                            let task_end_reason = match &event {
+                                daruda_acp::AcpEvent::TurnEnded { .. } => {
+                                    Some(daruda_store::tasks::SessionEndReason::Stop)
+                                }
+                                daruda_acp::AcpEvent::Error(_) => {
+                                    Some(daruda_store::tasks::SessionEndReason::Error)
+                                }
+                                _ => None,
+                            };
                             view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
                             if view.read(cx).to_session_status() != before {
                                 ws.notify_status_docks(cx);
+                            }
+                            // Reconcile the backing task (if any) keyed by the
+                            // pane's lane cwd. A no-op when no `Running` task
+                            // matches (plain agent-chat pane) or the cwd is
+                            // absent.
+                            if let Some(reason) = task_end_reason
+                                && let Some(cwd) = view.read(cx).cwd.clone()
+                            {
+                                ws.apply_agent_chat_task_ended(&cwd, reason, cx);
                             }
                             // Refresh placeholder when the active mode changed or
                             // modes became available (Connected). Only fires for
@@ -352,6 +382,16 @@ impl Workspace {
                             // Connecting badge doesn't linger after the pulse
                             // stops.
                             ws.notify_status_docks(cx);
+                            // A connect failure ends any AgentChat-surfaced task
+                            // rooted at this lane in `Error` (it can never run),
+                            // keyed by cwd since ACP writes no status-file hooks.
+                            if let Some(cwd) = view.read(cx).cwd.clone() {
+                                ws.apply_agent_chat_task_ended(
+                                    &cwd,
+                                    daruda_store::tasks::SessionEndReason::Error,
+                                    cx,
+                                );
+                            }
                         }
                         let report = ErrorReport::new("ACP session connect failed")
                             .severity(ErrorSeverity::Error)

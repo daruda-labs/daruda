@@ -24,8 +24,9 @@ use crate::surface::strings;
 use crate::ui::select::select;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, Sizable as _, button, button_close, button_primary,
-    checkbox, markdown_editor,
+    checkbox, markdown_editor, radio,
 };
+use daruda_store::tasks::TaskAgentSurface;
 
 /// Reserved footer height (px). Used to position the absolute scroll
 /// area's `bottom` offset and the absolute footer bar's `h` — the
@@ -103,7 +104,15 @@ pub(in crate::workspace) fn render(
 
     let editor_column = editor_column(pane_id, te, cx);
 
+    let surface_block = surface_selector(pane_id, te, cx, label_color);
+
     let auto_execute = te.auto_execute;
+    // `auto_execute` has no effect on the AgentChat surface: an ACP `submit`
+    // turn runs automatically and there is no dangerous-skip flag, so that
+    // surface is inherently auto-execute. Disable the toggle there so its
+    // affordance matches reality (the field/state is kept — only interactivity
+    // is gated).
+    let auto_execute_disabled = matches!(te.agent_surface, TaskAgentSurface::AgentChat);
     let auto_row = checkbox_row(
         checkbox(
             "task-edit-auto-execute",
@@ -111,6 +120,7 @@ pub(in crate::workspace) fn render(
             0,
         )
         .checked(auto_execute)
+        .disabled(auto_execute_disabled)
         .on_click(cx.listener(move |this, checked: &bool, _w, cx| {
             if let Some(te) = this.task_edit_content_mut_for_pane(pane_id) {
                 te.auto_execute = *checked;
@@ -187,6 +197,7 @@ pub(in crate::workspace) fn render(
         .child(title_block)
         .child(branch_block)
         .child(base_block)
+        .child(surface_block)
         .child(auto_row)
         .child(subtasks_block)
         .child(editor_column);
@@ -615,4 +626,57 @@ fn branch_error(reason: SharedString) -> impl IntoElement {
 
 fn checkbox_row(widget: impl IntoElement) -> impl IntoElement {
     div().flex().flex_row().items_center().child(widget)
+}
+
+/// Execution-surface selector: two radios (Terminal | Agent Chat) bound
+/// to `te.agent_surface`. Mirrors the `auto_execute` checkbox's
+/// plain-data flip — the click listener sets the enum on the focused
+/// pane's content and re-renders. Radios sit outside the Tab cycle
+/// (`()`), matching the subtask-row checkboxes, since the surrounding
+/// form fields own the numbered slots.
+fn surface_selector(
+    pane_id: PaneId,
+    te: &TaskEditContent,
+    cx: &mut Context<Workspace>,
+    label_color: gpui::Hsla,
+) -> gpui::AnyElement {
+    let current = te.agent_surface;
+    let terminal_radio = radio(
+        ("task-edit-surface-terminal", pane_id as usize),
+        strings::task_edit_surface_terminal(),
+        (),
+    )
+    .checked(matches!(current, TaskAgentSurface::Terminal))
+    .on_click(cx.listener(move |this, _checked: &bool, _w, cx| {
+        if let Some(te) = this.task_edit_content_mut_for_pane(pane_id) {
+            te.agent_surface = TaskAgentSurface::Terminal;
+        }
+        cx.notify();
+    }));
+    let agent_radio = radio(
+        ("task-edit-surface-agent-chat", pane_id as usize),
+        strings::task_edit_surface_agent_chat(),
+        (),
+    )
+    .checked(matches!(current, TaskAgentSurface::AgentChat))
+    .on_click(cx.listener(move |this, _checked: &bool, _w, cx| {
+        if let Some(te) = this.task_edit_content_mut_for_pane(pane_id) {
+            te.agent_surface = TaskAgentSurface::AgentChat;
+        }
+        cx.notify();
+    }));
+
+    labeled_field(
+        strings::task_edit_surface_label(),
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+            .child(terminal_radio)
+            .child(agent_radio)
+            .into_any_element(),
+        label_color,
+    )
+    .into_any_element()
 }

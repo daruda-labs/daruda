@@ -175,6 +175,7 @@ impl Workspace {
         prompt: String,
         notes: String,
         auto_execute: bool,
+        agent_surface: daruda_store::tasks::TaskAgentSurface,
         base_worktree_path: Option<std::path::PathBuf>,
         cx: &mut Context<Self>,
     ) {
@@ -184,6 +185,7 @@ impl Workspace {
                 task.prompt = prompt;
                 task.notes = notes;
                 task.auto_execute = auto_execute;
+                task.agent_surface = agent_surface;
                 task.base_worktree_path = base_worktree_path;
                 task.updated_at = Utc::now();
             }

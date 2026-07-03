@@ -33,10 +33,10 @@ pub(in crate::workspace) fn render(
         let tab_id = tab_id.clone();
         let widget_id = widget_id.clone();
         let ws = workspace.clone();
-        cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+        cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(w) = ws.upgrade() {
                 w.update(cx, |ws, cx| {
-                    ws.run_widget(tab_id.clone(), widget_id.clone(), cx)
+                    ws.run_widget(tab_id.clone(), widget_id.clone(), window, cx)
                 });
             }
         })

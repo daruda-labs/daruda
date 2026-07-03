@@ -145,6 +145,16 @@ pub(in crate::workspace) struct AgentChatView {
     /// `None` on a connect failure. Dropping it (pane close) closes the command
     /// channel and shuts the connection task down.
     pub(in crate::workspace) handle: Option<AcpSessionHandle>,
+    /// Prompts buffered because they could not be sent yet, in submission
+    /// order. A prompt is buffered when the session is not connected (`handle`
+    /// is still `None` — the lazy connect happens on first focus) **or** a turn
+    /// is already in flight. The session runs one turn at a time, so exactly one
+    /// buffered prompt is drained per turn-completion by
+    /// [`Self::pump_pending_prompt`]: the connect site pumps the first, and each
+    /// `TurnEnded` pumps the next, keeping only one turn tracked at a time.
+    /// Cleared on a connect failure / terminal `Error` (there is no reconnect
+    /// path, so buffered prompts can never be delivered); never serialized.
+    pub(in crate::workspace) pending_prompts: Vec<String>,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
@@ -296,6 +306,7 @@ impl AgentChatView {
             status,
             items: Vec::new(),
             handle: None,
+            pending_prompts: Vec::new(),
             _event_pump: None,
             pending_permission: None,
             turn_in_flight: false,
@@ -432,6 +443,16 @@ impl AgentChatView {
                 // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
+                // Drain the next buffered prompt (if any) now that the turn
+                // completed — one per `TurnEnded`, so the queue advances a single
+                // turn at a time and `turn_in_flight` keeps tracking exactly one
+                // live turn. A no-op when nothing is buffered or on a cancelled
+                // turn whose queue is empty. Pumping here (not inside
+                // `settle_turn`) is deliberate: `settle_turn` is also the Stop /
+                // `Error` teardown, and pumping from all three would double-drain
+                // (a cancelled turn's later idempotent `TurnEnded` re-runs
+                // settle) — only a natural completion should advance the queue.
+                self.pump_pending_prompt(cx);
                 // Auto-collapse the plan region so the completed checklist
                 // recedes to a one-line summary. The next `PlanChanged` will
                 // re-expand it (see below).
@@ -467,6 +488,10 @@ impl AgentChatView {
                 // forever and the response bar reads `Running` after the session
                 // is already dead.
                 self.settle_turn();
+                // The session is dead with no reconnect path, so any buffered
+                // prompts can never be delivered — drop them (they were already
+                // echoed locally) rather than leaving them to be pumped.
+                self.pending_prompts.clear();
             }
         }
         // Gate the full-conversation reconciles on what the event actually
@@ -547,10 +572,20 @@ impl AgentChatView {
         // Echo locally so the prompt shows immediately even before the agent
         // streams it back as a user-message chunk.
         self.items.push(ChatItem::UserText(text.clone()));
-        if let Some(handle) = &self.handle {
+        if let Some(handle) = &self.handle
+            && !self.turn_in_flight
+        {
+            // Connected and idle: send now and mark the turn in flight.
             handle.send_prompt(text);
             self.turn_in_flight = true;
             self.turn_started_at = Some(std::time::Instant::now());
+        } else {
+            // Not connected yet (lazy connect happens on first focus), or a turn
+            // is already in flight. Buffer the prompt in submission order — the
+            // local echo above already shows it — and drain it one-per-turn via
+            // `pump_pending_prompt` (at connect, then on each `TurnEnded`). Do
+            // *not* set `turn_in_flight`: nothing new is on the wire yet.
+            self.pending_prompts.push(text);
         }
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
         // be a no-op here; diff editors are reconciled solely on the event-pump
@@ -566,6 +601,32 @@ impl AgentChatView {
         // that lands at the bottom (gpui `list` re-arms following there), so the
         // streaming response keeps sticking — no manual stick flag needed.
         self.list_state.scroll_to_end();
+        cx.notify();
+    }
+
+    /// Send the next single buffered prompt iff the session is connected and no
+    /// turn is currently in flight. Pops the FRONT of the queue (FIFO), forwards
+    /// it over the handle, marks the turn in flight, and notifies. No-op when
+    /// there is no handle, a turn is already running, or the buffer is empty.
+    ///
+    /// This drains the queue one prompt per turn-completion (the connect site
+    /// pumps the first; each `TurnEnded` pumps the next) so the view never
+    /// tracks more than one turn at a time — the Stop / Send affordance then
+    /// reflects the single live turn instead of clearing while later queued
+    /// turns are still streaming. The echo was already appended when the prompt
+    /// was buffered in `send_prompt_text`, so this does not re-echo.
+    pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
+        if self.turn_in_flight || self.pending_prompts.is_empty() {
+            return;
+        }
+        let Some(handle) = self.handle.as_ref() else {
+            return;
+        };
+        // FIFO: the front of the queue is the oldest buffered prompt.
+        let text = self.pending_prompts.remove(0);
+        handle.send_prompt(text);
+        self.turn_in_flight = true;
+        self.turn_started_at = Some(std::time::Instant::now());
         cx.notify();
     }
 
@@ -586,6 +647,13 @@ impl AgentChatView {
             handle.cancel();
         }
         self.settle_turn();
+        // Stop halts everything queued, not just the live turn. Drop any
+        // buffered prompts so the cancelled turn's later `TurnEnded` finds an
+        // empty buffer and `pump_pending_prompt` no-ops — otherwise Stop would
+        // silently auto-fire the next queued prompt (the bottom-dock input does
+        // not gate Send on `turn_in_flight`). The clear runs now, before the
+        // cancelled `TurnEnded` arrives over the event pump.
+        self.pending_prompts.clear();
         // The settle above mutates items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing both fold visibility and
         // row heights, so reproject and remeasure before notifying.

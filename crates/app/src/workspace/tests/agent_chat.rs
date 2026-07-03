@@ -872,3 +872,300 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
     })
     .unwrap();
 }
+
+/// A prompt submitted before the session connects (`handle` is still `None`,
+/// the lazy-connect state) must be echoed locally *and* buffered — never
+/// silently dropped — with no turn marked in flight (nothing is on the wire
+/// yet). Buffering preserves submission order.
+#[gpui::test]
+async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                // A pane with a cwd parks in `Idle` with `handle: None` — the
+                // session connects lazily on first focus, which this test never
+                // triggers, so no `npx` adapter is spawned.
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.send_agent_prompt_text(id, "first".to_string(), cx);
+                ws.send_agent_prompt_text(id, "second".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        assert!(view.handle.is_none(), "not connected");
+        // Both prompts echoed locally so the user sees them immediately.
+        assert_eq!(view.items.len(), 2, "both prompts echoed as UserText");
+        // Buffered in FIFO order rather than dropped.
+        assert_eq!(
+            view.pending_prompts,
+            vec!["first".to_string(), "second".to_string()],
+            "disconnected prompts are queued in submission order"
+        );
+        // Nothing is on the wire, so no turn is in flight.
+        assert!(
+            !view.turn_in_flight,
+            "no turn until a handle carries a prompt"
+        );
+        assert!(view.turn_started_at.is_none());
+    });
+}
+
+/// Stop must halt everything queued, not just the live turn. With prompts
+/// buffered behind the running turn, `cancel_turn` clears the whole queue so the
+/// cancelled turn's later `TurnEnded` → `pump_pending_prompt` finds an empty
+/// buffer and cannot silently auto-fire the next prompt (the bottom-dock input
+/// does not gate Send on `turn_in_flight`, so this queue-behind-a-turn state is
+/// reachable in normal use).
+#[gpui::test]
+async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                // Disconnected (no handle): every prompt buffers, none is on the
+                // wire. Buffer several so there is a real queue behind Stop.
+                ws.send_agent_prompt_text(id, "a".to_string(), cx);
+                ws.send_agent_prompt_text(id, "b".to_string(), cx);
+                ws.send_agent_prompt_text(id, "c".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            v.pending_prompts.len(),
+            3,
+            "three prompts queued behind the turn"
+        );
+    });
+
+    // Stop.
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.cancel_agent_turn(pane_id, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    view.read_with(cx, |v, _| {
+        assert!(
+            v.pending_prompts.is_empty(),
+            "Stop clears the queued prompts so nothing auto-resumes"
+        );
+        assert!(!v.turn_in_flight, "Stop ends the turn");
+    });
+}
+
+/// Prompts submitted while disconnected buffer in FIFO order and never mark a
+/// turn in flight — the one-per-turn model buffers everything until a handle
+/// exists (drained one at a time by `pump_pending_prompt`, whose handle-send
+/// side needs a live `AcpSessionHandle` and so is covered by types/compile).
+#[gpui::test]
+async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.send_agent_prompt_text(id, "a".to_string(), cx);
+                ws.send_agent_prompt_text(id, "b".to_string(), cx);
+                ws.send_agent_prompt_text(id, "c".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            v.pending_prompts,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            "disconnected prompts buffer in submission (FIFO) order, none dropped"
+        );
+        assert_eq!(v.items.len(), 3, "all three echoed locally");
+        assert!(
+            !v.turn_in_flight,
+            "nothing is on the wire while disconnected"
+        );
+    });
+}
+
+/// `pump_pending_prompt` is guarded: with no live handle it cannot send, so it
+/// leaves the buffer intact and never marks a turn in flight (the send side is
+/// only reachable once a real `AcpSessionHandle` is stored). An empty buffer is
+/// likewise a no-op. This pins the guards that keep the one-per-turn drain from
+/// firing prematurely.
+#[gpui::test]
+async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.send_agent_prompt_text(id, "queued".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    cx.update(|cx| view.update(cx, |v, cx| v.pump_pending_prompt(cx)));
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            v.pending_prompts,
+            vec!["queued".to_string()],
+            "no handle → pump leaves the buffer intact"
+        );
+        assert!(!v.turn_in_flight, "no handle → no turn started");
+    });
+
+    // Empty buffer is also a no-op (does not panic / mark a turn).
+    let empty_view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    cx.update(|cx| {
+        empty_view.update(cx, |v, cx| {
+            v.pending_prompts.clear();
+            v.pump_pending_prompt(cx);
+        })
+    });
+    empty_view.read_with(cx, |v, _| {
+        assert!(v.pending_prompts.is_empty());
+        assert!(!v.turn_in_flight);
+    });
+}
+
+/// `deliver_text_to_pane` dispatch table: the funnel routes by pane kind at one
+/// place. An AgentChat submit with a non-empty body echoes/queues a prompt; a
+/// whitespace-only submit is an accepted no-op (no blank ACP turn — the
+/// "Enter-only" macro case); a non-text pane (TaskEdit) and a missing id both
+/// return `false`.
+#[gpui::test]
+async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            // AgentChat pane: non-empty submit → accepted + echoed/queued.
+            let chat = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let chat_id = chat.id;
+            ws.active_runtime_mut().panes.push(chat);
+            assert!(
+                ws.deliver_text_to_pane(
+                    chat_id,
+                    PaneTextInput {
+                        body: "  do the thing  ".to_string(),
+                        submit: true,
+                    },
+                    window,
+                    cx,
+                ),
+                "AgentChat submit is accepted"
+            );
+            {
+                let view = agent_view(ws, chat_id);
+                let view = view.read(cx);
+                assert_eq!(view.items.len(), 1, "non-empty submit echoes one prompt");
+                assert_eq!(
+                    view.items[0],
+                    daruda_acp::ChatItem::UserText("do the thing".to_string()),
+                    "the body is trimmed at the single dispatch point"
+                );
+            }
+
+            // Whitespace-only submit → accepted no-op: no new echo, no turn.
+            assert!(
+                ws.deliver_text_to_pane(
+                    chat_id,
+                    PaneTextInput {
+                        body: "   \n  ".to_string(),
+                        submit: true,
+                    },
+                    window,
+                    cx,
+                ),
+                "whitespace-only submit is an accepted no-op (returns true)"
+            );
+            {
+                let view = agent_view(ws, chat_id);
+                let view = view.read(cx);
+                assert_eq!(
+                    view.items.len(),
+                    1,
+                    "a blank submit adds no echo and fires no ACP turn"
+                );
+                assert!(!view.turn_in_flight);
+            }
+
+            // Missing pane id → false.
+            let bogus: PaneId = chat_id + 9999;
+            assert!(
+                !ws.deliver_text_to_pane(
+                    bogus,
+                    PaneTextInput {
+                        body: "x".to_string(),
+                        submit: true,
+                    },
+                    window,
+                    cx,
+                ),
+                "a missing pane id cannot receive text"
+            );
+
+            // TaskEdit pane → false (kind cannot receive delivered text).
+            ws.open_task_edit_pane(None, window, cx);
+            let te_id = ws
+                .active_runtime()
+                .panes
+                .last()
+                .expect("open_task_edit_pane pushed a pane")
+                .id;
+            assert!(
+                !ws.deliver_text_to_pane(
+                    te_id,
+                    PaneTextInput {
+                        body: "x".to_string(),
+                        submit: false,
+                    },
+                    window,
+                    cx,
+                ),
+                "a TaskEdit pane is not a text-delivery target"
+            );
+        });
+    })
+    .unwrap();
+}

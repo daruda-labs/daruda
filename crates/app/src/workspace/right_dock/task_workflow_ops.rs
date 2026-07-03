@@ -163,6 +163,7 @@ impl Workspace {
         };
 
         let task_id = task.id.clone();
+        let agent_surface = task.agent_surface;
         let me = cx.weak_entity();
         let plan_clone = plan.clone();
 
@@ -208,8 +209,13 @@ impl Workspace {
                                 ws.report_error(report, cx);
                             }
                             Ok(()) => {
-                                match ws.finalize_create_lane(plan.clone(), project_id, window, cx)
-                                {
+                                match ws.finalize_create_lane(
+                                    plan.clone(),
+                                    project_id,
+                                    agent_surface,
+                                    window,
+                                    cx,
+                                ) {
                                     Err(msg) => {
                                         let report = ErrorReport::new("Lane finalize failed")
                                             .severity(ErrorSeverity::Error)
@@ -268,30 +274,70 @@ impl Workspace {
             return;
         };
         let rendered = daruda_store::tasks::prompt_file::render_task_prompt(&task);
-        let prompt_path = match daruda_store::tasks::prompt_file::write_prompt_file(
-            worktree_path,
-            &task.branch_name,
-            &rendered,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                cx.update_global::<GlobalTasks, _>(|g, _| {
-                    if let Some(t) = g.get_mut(task_id) {
-                        t.state = daruda_store::tasks::TaskState::Error {
-                            worktree_path: worktree_path.to_path_buf(),
-                            message: format!("write prompt: {e}"),
-                        };
-                        t.updated_at = Utc::now();
+        // Whether the prompt reached the pane. Each surface reports it; a
+        // `false` (pane closed / kind can't receive) routes the task to `Error`
+        // instead of a `Running` state that would never be driven. This is
+        // currently unreachable — `dispatch_claude_for_task` runs synchronously
+        // right after `finalize_create_lane` spawned the pane, with no `await`
+        // in between — but capturing it makes a future async gap fail loudly
+        // rather than silently stranding the task in `Running`.
+        let delivered = match task.agent_surface {
+            daruda_store::tasks::TaskAgentSurface::Terminal => {
+                let prompt_path = match daruda_store::tasks::prompt_file::write_prompt_file(
+                    worktree_path,
+                    &task.branch_name,
+                    &rendered,
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.fail_task_dispatch(
+                            task_id,
+                            worktree_path,
+                            format!("write prompt: {e}"),
+                            cx,
+                        );
+                        return;
                     }
-                });
-                self.save_tasks_dirty(cx);
-                cx.notify();
-                return;
+                };
+                let cmd = daruda_store::tasks::prompt_file::build_claude_command(
+                    &prompt_path,
+                    task.auto_execute,
+                );
+                self.send_to_pane(pane_id, cmd.as_bytes())
+            }
+            daruda_store::tasks::TaskAgentSurface::AgentChat => {
+                // The ACP session *is* the agent — there is no `claude …` CLI
+                // wrapper to build. Deliver the rendered prompt (the same text
+                // the Terminal path writes into `task-<branch>.md`) as an ACP
+                // turn. `finalize_create_lane` already spawned + focused the
+                // agent-chat pane, which started the lazy connect; the pane's
+                // pending-prompt queue buffers this turn and drains it one-per-
+                // turn once the session connects.
+                //
+                // `auto_execute` has no analogue here: a `submit: true` turn
+                // runs automatically, and ACP has no dangerous-skip flag, so
+                // the AgentChat surface is inherently "auto-execute".
+                self.deliver_text_to_pane(
+                    pane_id,
+                    crate::workspace::main_area::pane_input_ops::PaneTextInput {
+                        body: rendered,
+                        submit: true,
+                    },
+                    window,
+                    cx,
+                )
             }
         };
-        let cmd =
-            daruda_store::tasks::prompt_file::build_claude_command(&prompt_path, task.auto_execute);
-        self.send_to_pane(pane_id, cmd.as_bytes());
+
+        if !delivered {
+            self.fail_task_dispatch(
+                task_id,
+                worktree_path,
+                "prompt could not reach the pane (pane closed)".to_string(),
+                cx,
+            );
+            return;
+        }
 
         cx.update_global::<GlobalTasks, _>(|g, _| {
             if let Some(t) = g.get_mut(task_id) {
@@ -303,13 +349,38 @@ impl Workspace {
         });
         self.save_tasks_dirty(cx);
 
-        // R-20 dynamic install: if a TaskEdit pane for this task is
-        // already open (the user clicked Start from the pane footer),
-        // the prompt file just landed on disk for the first time —
-        // install the FS watcher now instead of waiting for the user
-        // to close-and-reopen the pane.
+        // R-20 dynamic install: for the Terminal surface, if a TaskEdit pane for
+        // this task is already open (the user clicked Start from the pane
+        // footer), the prompt file just landed on disk for the first time —
+        // install the FS watcher now instead of waiting for the user to
+        // close-and-reopen the pane. The AgentChat surface writes no prompt
+        // file, so this is a harmless no-op there (no path to watch).
         self.attach_prompt_watcher_if_pane_open(task_id, window, cx);
 
+        cx.notify();
+    }
+
+    /// Shared failure exit for [`Self::dispatch_claude_for_task`]: mark `task_id`
+    /// `Error { worktree_path, message }`, then persist + notify. Extracted so
+    /// the prompt-file-write failure and the pane-delivery failure set the same
+    /// fields through one path.
+    fn fail_task_dispatch(
+        &mut self,
+        task_id: &str,
+        worktree_path: &Path,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        cx.update_global::<GlobalTasks, _>(|g, _| {
+            if let Some(t) = g.get_mut(task_id) {
+                t.state = daruda_store::tasks::TaskState::Error {
+                    worktree_path: worktree_path.to_path_buf(),
+                    message,
+                };
+                t.updated_at = Utc::now();
+            }
+        });
+        self.save_tasks_dirty(cx);
         cx.notify();
     }
 
@@ -523,6 +594,62 @@ impl Workspace {
                 // and the operation is a no-op when the vec is already
                 // empty (cancel/reopen path drained it).
                 task.session_ids.retain(|s| s != session_id);
+            }
+            dirty
+        });
+        if dirty {
+            self.save_tasks_dirty(cx);
+            cx.notify();
+        }
+    }
+
+    /// Reconcile an **AgentChat-surfaced** task's lifecycle from its ACP
+    /// session, keyed by the lane working directory `cwd`.
+    ///
+    /// Terminal tasks reconcile through the `~/.daruda/status/*.json` hook files
+    /// the `claude` CLI writes, matched by `session_id`
+    /// ([`Self::apply_task_session_ended`]). ACP sessions never write those
+    /// files, so an AgentChat task would otherwise sit in `Running` forever.
+    /// The ACP event pump instead calls this on `TurnEnded` (→ `Done`) and on a
+    /// terminal `Error` / connect failure (→ `Error`).
+    ///
+    /// Every `Running` task whose lane matches `cwd` transitions per `reason`
+    /// (the same reason→state mapping as `apply_task_session_ended`). AgentChat
+    /// tasks are single-turn — one dispatched prompt is the whole task — so the
+    /// first `TurnEnded` completes it; later turns find no `Running` match and
+    /// no-op. A pane with no backing task (a manually-opened agent chat) also
+    /// matches nothing, so this is a safe no-op there.
+    pub(in crate::workspace) fn apply_agent_chat_task_ended(
+        &mut self,
+        cwd: &Path,
+        reason: daruda_store::tasks::SessionEndReason,
+        cx: &mut Context<Self>,
+    ) {
+        let dirty = cx.update_global::<GlobalTasks, bool>(|g, _| {
+            let mut dirty = false;
+            for task in g.tasks.iter_mut() {
+                let daruda_store::tasks::TaskState::Running { worktree_path } = task.state.clone()
+                else {
+                    continue;
+                };
+                if worktree_path != cwd {
+                    continue;
+                }
+                task.state = match reason {
+                    daruda_store::tasks::SessionEndReason::Error => {
+                        daruda_store::tasks::TaskState::Error {
+                            worktree_path,
+                            message: "session error".into(),
+                        }
+                    }
+                    other => daruda_store::tasks::TaskState::Done {
+                        worktree_path,
+                        end_reason: other,
+                    },
+                };
+                task.finished_at = Some(Utc::now());
+                task.updated_at = Utc::now();
+                dirty = true;
             }
             dirty
         });

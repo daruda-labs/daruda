@@ -468,54 +468,6 @@ fn build_new_tab_starts_with_empty_widgets() {
 }
 
 #[test]
-fn button_payload_appends_cr_when_auto_enter() {
-    let btn = ButtonWidget {
-        id: "w".to_string(),
-        label: "Claude".to_string(),
-        send: "claude".to_string(),
-        auto_enter: true,
-        display: daruda_store::panels::ButtonDisplay::Text,
-        icon: None,
-        shortcut: None,
-        style: None,
-        builtin: false,
-    };
-    assert_eq!(button_payload(&btn), "claude\r");
-}
-
-#[test]
-fn button_payload_no_cr_when_auto_enter_false() {
-    let btn = ButtonWidget {
-        id: "w".to_string(),
-        label: "Branch".to_string(),
-        send: "git checkout ".to_string(),
-        auto_enter: false,
-        display: daruda_store::panels::ButtonDisplay::Text,
-        icon: None,
-        shortcut: None,
-        style: None,
-        builtin: false,
-    };
-    assert_eq!(button_payload(&btn), "git checkout ");
-}
-
-#[test]
-fn button_payload_empty_send_with_auto_enter_is_just_cr() {
-    let btn = ButtonWidget {
-        id: "w".to_string(),
-        label: "Enter".to_string(),
-        send: String::new(),
-        auto_enter: true,
-        display: daruda_store::panels::ButtonDisplay::Text,
-        icon: None,
-        shortcut: None,
-        style: None,
-        builtin: false,
-    };
-    assert_eq!(button_payload(&btn), "\r");
-}
-
-#[test]
 fn panels_state_eq_detects_changes() {
     let mut a = PanelsState::default();
     let mut b = PanelsState::default();

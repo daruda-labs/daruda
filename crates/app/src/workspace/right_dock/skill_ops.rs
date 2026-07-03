@@ -62,8 +62,9 @@ impl Workspace {
     /// Open the [`SkillInvocationModal`](super::skills::SkillInvocationModal)
     /// for `skill`. Translates the on-disk model into the modal's
     /// scope-agnostic `SkillInvocationLabel` carrier and captures the
-    /// active terminal pane id so submit lands in the pane the user
-    /// was looking at when they clicked.
+    /// focused pane id plus its owning lane so submit lands in the pane
+    /// the user was looking at when they clicked (and refuses to fire
+    /// into a different lane if the user switched away meanwhile).
     pub fn open_skill_invocation_modal(
         &mut self,
         skill: &crate::agent::skills::Skill,
@@ -86,6 +87,7 @@ impl Workspace {
             argument_hint: skill.frontmatter.argument_hint.clone(),
             scope: skill.scope,
             target_pane_id: self.active_runtime().focused_pane_id,
+            target_lane: self.active,
         };
 
         let workspace = cx.weak_entity();

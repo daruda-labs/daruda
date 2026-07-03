@@ -13,7 +13,8 @@ use super::prompt_file::{
 };
 use super::sanitize::sanitize_branch_name;
 use super::task::{
-    AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskFilter, TaskState, TasksState,
+    AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
+    TaskState, TasksState,
 };
 
 fn sample_task() -> Task {
@@ -191,6 +192,7 @@ fn task_serde_round_trip_preserves_all_fields() {
     t.session_ids = vec!["abc12345".into(), "def67890".into()];
     t.finished_at = Some(Utc::now());
     t.auto_execute = false;
+    t.agent_surface = TaskAgentSurface::AgentChat;
     t.state = TaskState::Done {
         worktree_path: PathBuf::from("/repo/main-fix-auth"),
         end_reason: SessionEndReason::Stop,
@@ -199,6 +201,19 @@ fn task_serde_round_trip_preserves_all_fields() {
     let json = serde_json::to_string_pretty(&t).expect("serialize");
     let back: Task = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(t, back);
+}
+
+#[test]
+fn task_new_defaults_agent_surface_to_terminal() {
+    assert_eq!(sample_task().agent_surface, TaskAgentSurface::Terminal);
+}
+
+#[test]
+fn agent_surface_serializes_as_snake_case() {
+    let json = serde_json::to_string(&TaskAgentSurface::AgentChat).expect("serialize");
+    assert_eq!(json, "\"agent_chat\"");
+    let back: TaskAgentSurface = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, TaskAgentSurface::AgentChat);
 }
 
 #[test]
@@ -220,6 +235,11 @@ fn task_loads_with_default_for_new_optional_fields() {
     assert!(t.notes.is_empty());
     assert!(t.base_worktree_path.is_none());
     assert_eq!(t.agent_type, AgentType::Claude);
+    assert_eq!(
+        t.agent_surface,
+        TaskAgentSurface::Terminal,
+        "agent_surface default is Terminal"
+    );
     assert!(t.auto_execute, "auto_execute default is true");
     assert!(t.subtasks.is_empty(), "subtasks defaults to empty vec");
 }

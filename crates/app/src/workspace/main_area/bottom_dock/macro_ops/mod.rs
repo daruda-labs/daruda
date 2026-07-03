@@ -16,18 +16,8 @@ use daruda_store::panels::{
 };
 use gpui::{Context, KeyBinding, Keystroke, SharedString, Window};
 
+use crate::workspace::main_area::pane_input_ops::PaneTextInput;
 use crate::workspace::{RunMacroByShortcut, Workspace};
-
-/// Build the byte payload for a button widget. `auto_enter` appends
-/// `\r` (CR — what a real Enter keystroke produces; never `\n`,
-/// which would skip line discipline interpretation in cooked mode).
-fn button_payload(btn: &ButtonWidget) -> String {
-    if btn.auto_enter {
-        format!("{}\r", btn.send)
-    } else {
-        btn.send.clone()
-    }
-}
 
 /// Remove the tab with `tab_id` from `tabs`, returning the removed
 /// tab on success. `None` when the id was not present (caller should
@@ -535,27 +525,20 @@ impl Workspace {
         // Submitted text is no longer a draft — drop the saved entry so
         // switching back to this lane after send shows an empty input.
         self.input_drafts.remove(&lane_ref);
-        // When an Agent chat pane is focused, the bottom-dock input drives
-        // its ACP session as a prompt rather than a terminal's PTY.
-        let focused_id = self.active_runtime().focused_pane_id;
-        if self.is_agent_chat_pane(focused_id) {
-            let text = trimmed.trim().to_string();
-            if !text.is_empty() {
-                self.send_agent_prompt_text(focused_id, text, cx);
-            }
-            self.terminal_input
-                .update(cx, |s, cx_state| s.set_value("", window, cx_state));
-            return;
-        }
-        // Convert embedded newlines to CR so each line is treated as a
-        // separate command by the shell's line discipline; then a
-        // single trailing `\r` submits the final line.
-        let mut payload: String = trimmed
-            .chars()
-            .map(|c| if c == '\n' { '\r' } else { c })
-            .collect();
-        payload.push('\r');
-        self.send_to_focused_pane(payload.as_bytes(), cx);
+        // Route through the single pane-delivery funnel. It branches on the
+        // focused pane's kind: a Terminal receives the bytes (embedded `\n` →
+        // `\r`, trailing `\r` on submit — identical to the former inline
+        // path), an Agent chat pane submits the text as an ACP turn. `trimmed`
+        // already dropped trailing `\n`/`\r`, so the funnel adds exactly one
+        // submitting `\r` for terminals.
+        self.deliver_text_to_focused_pane(
+            PaneTextInput {
+                body: trimmed.to_string(),
+                submit: true,
+            },
+            window,
+            cx,
+        );
         self.terminal_input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
     }
@@ -656,6 +639,7 @@ impl Workspace {
         &mut self,
         tab_id: TabId,
         widget_id: WidgetId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(tab) = self.panels.tabs.iter().find(|t| t.id == tab_id) else {
@@ -670,30 +654,20 @@ impl Workspace {
         };
         match widget {
             MacroKey::Button(btn) => {
-                let payload = button_payload(btn);
-                self.send_to_focused_pane(payload.as_bytes(), cx);
+                self.deliver_text_to_focused_pane(
+                    PaneTextInput {
+                        body: btn.send.clone(),
+                        submit: btn.auto_enter,
+                    },
+                    window,
+                    cx,
+                );
             }
             MacroKey::Unknown(_) => {
                 // Forward-compat: a widget type defined by a newer
                 // daruda — we round-trip the JSON but cannot dispatch.
             }
         }
-    }
-
-    fn send_to_focused_pane(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let focused_id = self.active_runtime().focused_pane_id;
-        let Some(view) = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == focused_id)
-            .and_then(|p| p.terminal_view().cloned())
-        else {
-            return;
-        };
-        view.update(cx, |view, _| view.send_input(bytes));
-        self.bump_activity(focused_id);
-        cx.notify();
     }
 
     /// Reload panels from disk. Compares structurally (PanelsState:
@@ -763,7 +737,7 @@ impl Workspace {
         else {
             return;
         };
-        self.run_widget(tab_id, widget_id, cx);
+        self.run_widget(tab_id, widget_id, window, cx);
     }
 }
 

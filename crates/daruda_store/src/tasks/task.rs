@@ -46,6 +46,24 @@ pub enum AgentType {
     Claude,
 }
 
+/// Execution surface a started task's lane runs on.
+///
+/// - `Terminal` — drive the Claude CLI over the lane's PTY (the
+///   historical behaviour): a `claude "$(cat prompt-file)"` command is
+///   dispatched into a terminal pane.
+/// - `AgentChat` — attach an in-app ACP agent-chat session to the lane
+///   and deliver the task prompt as an ACP turn.
+///
+/// `#[default] Terminal` keeps every pre-existing task (and any task
+/// created without an explicit choice) on the CLI path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAgentSurface {
+    #[default]
+    Terminal,
+    AgentChat,
+}
+
 /// One row in the per-task subtask checklist (R-21). `source_session_id`
 /// distinguishes hook-injected items (R-22 TodoWrite merge) from
 /// manually-added ones; the two never coalesce — duplicates with the
@@ -165,6 +183,12 @@ pub struct Task {
     #[serde(default)]
     pub agent_type: AgentType,
 
+    /// Execution surface for this task's lane — Terminal CLI (default)
+    /// or in-app Agent Chat (ACP). `#[serde(default)]` so task JSON
+    /// written before this field existed loads as `Terminal`.
+    #[serde(default)]
+    pub agent_surface: TaskAgentSurface,
+
     /// `false` skips the trailing newline so the user must press Enter
     /// in the terminal to dispatch the command (UX opt-out).
     #[serde(default = "default_auto_execute")]
@@ -198,6 +222,7 @@ impl Task {
             base_worktree_path,
             branch_name,
             agent_type: AgentType::default(),
+            agent_surface: TaskAgentSurface::default(),
             auto_execute: true,
             subtasks: Vec::new(),
         }
