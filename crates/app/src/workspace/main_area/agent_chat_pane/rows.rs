@@ -15,7 +15,7 @@
 //! lets `rebuild_rows` find the longest unchanged prefix and splice only the
 //! tail, preserving scroll.
 
-use daruda_acp::ChatItem;
+use daruda_acp::{ChatItem, ToolCallItem};
 
 use super::agent_chat_helpers::fold_active;
 use super::fold::{FoldKey, FoldState};
@@ -248,17 +248,17 @@ fn project_run(
         // (see `tool_card`), so it earns no row of its own here — skip it. The
         // Claude adapter flattens subagent activity into the one session and
         // links a child to its parent only via `parent_tool_id`.
-        if matches!(&items[k], ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some()) {
+        if matches!(&items[k], ChatItem::ToolCall(tc) if is_nested_child(items, tc)) {
             k += 1;
             continue;
         }
         if matches!(items[k], ChatItem::ToolCall(_)) {
             let gstart = k;
             k += 1;
-            // Extend the group over consecutive *top-level* tool calls; a child
-            // call belongs to the preceding parent, so it ends the run.
+            // Extend the group over consecutive *top-level* tool calls; a nested
+            // child belongs to the preceding parent, so it ends the run.
             while k < run.end
-                && matches!(&items[k], ChatItem::ToolCall(t) if t.parent_tool_id.is_none())
+                && matches!(&items[k], ChatItem::ToolCall(t) if !is_nested_child(items, t))
             {
                 k += 1;
             }
@@ -317,6 +317,21 @@ fn project_run(
             k += 1;
         }
     }
+}
+
+/// Whether `tc` is a subagent's inner call whose parent is present in `items`.
+/// Such a child renders nested inside its parent's card (see `tool_card`), so it
+/// earns no row of its own. A child whose `parent_tool_id` matches no tool call
+/// in `items` (a dangling ref — parent never arrived, or a malformed adapter) is
+/// NOT nested by anyone, so it is treated as a top-level call and keeps its row
+/// rather than being silently dropped.
+fn is_nested_child(items: &[ChatItem], tc: &ToolCallItem) -> bool {
+    let Some(pid) = tc.parent_tool_id.as_deref() else {
+        return false;
+    };
+    items
+        .iter()
+        .any(|it| matches!(it, ChatItem::ToolCall(p) if p.id == pid))
 }
 
 /// First tool call's id for a `ToolCall` item (the group's stable key); empty
@@ -775,6 +790,58 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. })),
             "a parent + its child are not a sibling tool group"
+        );
+    }
+
+    #[test]
+    fn multiple_subagent_children_all_skip_and_parent_stays_single() {
+        use ToolStatusView::Completed;
+        // Two inner calls under one parent: both skipped, and the parent renders
+        // as a single card (not a "2 tool calls" group with its own children).
+        let mut c1 = tool("c1", Completed);
+        let mut c2 = tool("c2", Completed);
+        for c in [&mut c1, &mut c2] {
+            if let ChatItem::ToolCall(tc) = c {
+                tc.parent_tool_id = Some("parent".to_owned());
+            }
+        }
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("parent", Completed),
+            c1,
+            c2,
+        ];
+        let rows = project(&items, &FoldState::default(), false);
+        assert!(rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))));
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::AgentItem(2) | RowKind::AgentItem(3))),
+            "both subagent children are skipped from the main flow"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. })),
+            "a parent + its children are not a sibling tool group"
+        );
+    }
+
+    #[test]
+    fn orphan_child_keeps_its_row() {
+        use ToolStatusView::Completed;
+        // A child whose `parent_tool_id` matches no tool call in `items` (a
+        // dangling ref) is nested by nobody, so it must keep a top-level row
+        // rather than vanish silently.
+        let mut orphan = tool("orphan", Completed);
+        if let ChatItem::ToolCall(tc) = &mut orphan {
+            tc.parent_tool_id = Some("missing-parent".to_owned());
+        }
+        let items = [ChatItem::UserText("q".into()), orphan];
+        let rows = project(&items, &FoldState::default(), false);
+        assert!(
+            rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
+            "an orphan child (no present parent) still renders as a row"
         );
     }
 

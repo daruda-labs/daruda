@@ -663,6 +663,7 @@ fn render_item(
                 fold,
                 t,
                 dim,
+                0,
                 cx,
             )
             .into_any_element()

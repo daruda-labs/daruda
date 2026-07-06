@@ -19,6 +19,11 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
+/// Recursion cap for nested subagent tool cards. Real subagent nesting is one
+/// or two levels; the cap only fires on a malformed / cyclic `parentToolUseId`
+/// from the adapter, bounding the stack instead of overflowing it.
+const MAX_SUBAGENT_NEST_DEPTH: usize = 8;
+
 /// Tool invocation card — foldable (default collapsed once done, expanded while
 /// in progress). The header is the existing title + status-badge row, which
 /// already reads as the summary, so no extra inline summary line is added. The
@@ -36,6 +41,7 @@ pub(super) fn tool_card(
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
+    depth: usize,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let (badge_text, badge_fg) = tool_status_badge(tc.status, t, dim, cx);
@@ -188,13 +194,26 @@ pub(super) fn tool_card(
     // via `parent_tool_id`. `rows::project` skips those children in the main
     // flow; render them nested here (recursively — a child may itself spawn one)
     // so the subagent reads as one unit that folds with its parent card.
-    let children: Vec<&ToolCallItem> = items
-        .iter()
-        .filter_map(|it| match it {
-            ChatItem::ToolCall(c) if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) => Some(c),
-            _ => None,
-        })
-        .collect();
+    //
+    // `depth` bounds the recursion: real `parentToolUseId`s are unique and
+    // acyclic (a parent always precedes its children), but this id comes from a
+    // subprocess pipe, so a malformed / cyclic ref (a self-parent, or A→B→A)
+    // would otherwise recurse until the stack overflows — an uncatchable abort
+    // that takes the whole window down. Past the cap the children are simply not
+    // nested (the parent card still renders), which no real conversation hits.
+    let children: Vec<&ToolCallItem> = if depth < MAX_SUBAGENT_NEST_DEPTH {
+        items
+            .iter()
+            .filter_map(|it| match it {
+                ChatItem::ToolCall(c) if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) => {
+                    Some(c)
+                }
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if !children.is_empty() {
         body = body.child(
             div()
@@ -216,6 +235,7 @@ pub(super) fn tool_card(
                     fold,
                     t,
                     dim,
+                    depth + 1,
                     cx,
                 )
                 .into_any_element(),
