@@ -56,12 +56,8 @@ pub(super) fn tool_card(
 
     // Title + status badge: the header IS the summary. A tool-kind icon leads
     // (so a bash call reads differently from a file read at a glance), then the
-    // title fills the row and the badge pins right. For an Execute (terminal)
-    // tool the ACP `title` is the shell command, so it renders in the monospace
-    // family — the ambient font cascades into the selectable text (zed's
-    // command-code-block model), setting the command off from prose labels.
+    // title fills the row and the badge pins right.
     let fg = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
-    let is_execute = matches!(tc.kind, ToolKindView::Execute);
     let failed = matches!(tc.status, ToolStatusView::Failed);
     let font_size = px(theme::agent_chat_font_size(cx));
     let header = div()
@@ -87,7 +83,6 @@ pub(super) fn tool_card(
                         .min_w_0()
                         .text_color(fg)
                         .text_size(font_size)
-                        .when(is_execute, |d| d.font_family(theme::FONT_FAMILY_MONOSPACE))
                         .child(
                             crate::ui::selectable_text(
                                 SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
