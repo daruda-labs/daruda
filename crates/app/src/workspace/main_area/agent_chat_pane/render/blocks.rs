@@ -5,7 +5,7 @@
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
-use super::{MermaidImages, collapsed_text_summary, foldable_block};
+use super::{MermaidImages, ToggleTarget, collapsed_text_summary, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{IconName, button_bare};
@@ -154,6 +154,7 @@ pub(super) fn assistant_block(
         ("agent-chat-assistant", ix),
         key,
         expanded,
+        ToggleTarget::Row,
         header,
         summary,
         body_el,
@@ -183,6 +184,7 @@ pub(super) fn conclusion_block(
         ("agent-chat-conclusion", ix),
         key,
         expanded,
+        ToggleTarget::Row,
         gpui::Empty.into_any_element(),
         summary,
         body_el,
@@ -228,6 +230,7 @@ pub(super) fn thinking_block(
         ("agent-chat-thinking", ix),
         key,
         expanded,
+        ToggleTarget::Row,
         header,
         summary,
         body_el,

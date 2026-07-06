@@ -9,7 +9,7 @@ use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
-use super::{DiffEditors, DiffStats, foldable_block};
+use super::{DiffEditors, DiffStats, ToggleTarget, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
@@ -84,7 +84,7 @@ pub(super) fn tool_card(
                         .child(
                             crate::ui::selectable_text(
                                 SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
-                                tc.title.clone(),
+                                tool_title_summary(tc.kind, &tc.title),
                             )
                             .color(fg)
                             .text_size(font_size),
@@ -155,6 +155,7 @@ pub(super) fn tool_card(
             SharedString::from(format!("agent-chat-rawin-{}", tc.id)),
             raw_key,
             raw_expanded,
+            ToggleTarget::Chevron,
             raw_header,
             None,
             raw_json,
@@ -209,6 +210,7 @@ pub(super) fn tool_card(
             SharedString::from(format!("agent-chat-tool-{}", tc.id)),
             key,
             expanded,
+            ToggleTarget::Chevron,
             header,
             None,
             body.into_any_element(),
@@ -246,6 +248,24 @@ fn output_block_view(
             .on_click(move |_, _, cx| cx.open_url(&uri))
             .into_any_element()
         }
+    }
+}
+
+/// Collapse a multiline tool title to its first line + "…" so the card header
+/// stays a single line. `Execute` (shell command) titles are exempt — the
+/// command *is* the title and has no other home, so truncating would hide lines
+/// the user needs; every other kind's title is a description whose second-line
+/// detail (when it exists) is recoverable from the body / raw-input disclosure.
+/// Mirrors zed's kind-gated title in `ToolCall::from_acp`. A single-line title —
+/// or one whose only newline is trailing (no real second line) — is returned
+/// unchanged, so the "…" only appears when content is actually hidden.
+fn tool_title_summary(kind: ToolKindView, title: &str) -> String {
+    if matches!(kind, ToolKindView::Execute) {
+        return title.to_string();
+    }
+    match title.split_once('\n') {
+        Some((first, rest)) if !rest.trim().is_empty() => format!("{first}…"),
+        _ => title.to_string(),
     }
 }
 
@@ -413,4 +433,46 @@ fn permission_button(
     button.on_click(cx.listener(move |this, _, _window, cx| {
         this.respond_permission(option_id.clone(), kind, cx);
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiline_non_execute_title_summarizes_to_first_line() {
+        assert_eq!(
+            tool_title_summary(ToolKindView::Read, "Read src/main.rs\nlines 1-40"),
+            "Read src/main.rs…"
+        );
+    }
+
+    #[test]
+    fn single_line_title_is_unchanged() {
+        assert_eq!(
+            tool_title_summary(ToolKindView::Search, "Search TODO"),
+            "Search TODO"
+        );
+    }
+
+    #[test]
+    fn trailing_only_newline_does_not_add_ellipsis() {
+        // A trailing newline (or a blank/whitespace second line) hides no real
+        // content, so the title is returned as-is — no misleading "…".
+        assert_eq!(
+            tool_title_summary(ToolKindView::Read, "Read foo\n"),
+            "Read foo\n"
+        );
+        assert_eq!(
+            tool_title_summary(ToolKindView::Read, "Read foo\n   "),
+            "Read foo\n   "
+        );
+    }
+
+    #[test]
+    fn execute_title_keeps_every_line() {
+        // The shell command is the title and has no other home — never truncate.
+        let cmd = "cd /repo &&\n  cargo build\n  cargo test";
+        assert_eq!(tool_title_summary(ToolKindView::Execute, cmd), cmd);
+    }
 }

@@ -297,16 +297,33 @@ fn render_row(
         .into_any_element()
 }
 
+/// Where the fold-toggle click lives on a [`disclosure_row`] / [`foldable_block`]
+/// header. `Row` makes the whole header a generous click target; `Chevron` binds
+/// the toggle to the chevron glyph alone and leaves the rest of the header inert.
+#[derive(Clone, Copy)]
+pub(super) enum ToggleTarget {
+    /// The whole header row toggles the fold (default: section bars, text
+    /// blocks). Generous hit area.
+    Row,
+    /// Only the chevron toggles; the rest of the header is inert — so a header
+    /// carrying its own selectable content (the tool-card title) doesn't fight
+    /// text selection. Used by the tool card and its nested raw-input / diff
+    /// disclosures.
+    Chevron,
+}
+
 /// The shared scaffold for every collapsible header in the pane: a full-width,
-/// borderless clickable row that toggles `key` and leads with the disclosure
-/// chevron. Callers append their own label / summary / trailing glyph. One
-/// source for the row's layout + click target, so the section bars
-/// (`response_bar` / `tool_group_bar`) and the inline blocks (`foldable_block`)
-/// can never drift apart — e.g. one growing box chrome the others lack.
+/// borderless row that toggles `key` and leads with the disclosure chevron.
+/// Callers append their own label / summary / trailing glyph. `target` picks
+/// where the click lives (whole row vs chevron only). One source for the row's
+/// layout + click target, so the section bars (`response_bar` /
+/// `tool_group_bar`) and the inline blocks (`foldable_block`) can never drift
+/// apart — e.g. one growing box chrome the others lack.
 fn disclosure_row(
     base: impl Into<ElementId>,
     key: FoldKey,
     expanded: bool,
+    target: ToggleTarget,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> gpui::Stateful<gpui::Div> {
@@ -315,17 +332,25 @@ fn disclosure_row(
     let base: ElementId = base.into();
     let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
         .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
-    div()
+    let row = div()
         .id((base, "row"))
         .w_full()
         .min_w_0()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
-        .child(chevron)
+        .gap(px(theme::AGENT_CHAT_MSG_GAP));
+    match target {
+        ToggleTarget::Row => row
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)))
+            .child(chevron),
+        // Bind the click to the chevron itself; the row carries no click
+        // handler, so selectable header content stays freely selectable.
+        ToggleTarget::Chevron => row.child(chevron.on_toggle(
+            cx.listener(move |this, _ev, _window, cx| this.toggle_fold(key.clone(), cx)),
+        )),
+    }
 }
 
 /// The status-rollup glyph trailing a section header: ● running (in progress /
@@ -465,6 +490,7 @@ fn response_bar(
         SharedString::from(format!("agent-chat-response-{anchor}")),
         FoldKey::Response(anchor),
         !collapsed,
+        ToggleTarget::Row,
         this.dim_amount,
         cx,
     )
@@ -541,6 +567,7 @@ fn tool_group_bar(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),
         FoldKey::ToolGroup(gid.to_string()),
         !collapsed,
+        ToggleTarget::Row,
         this.dim_amount,
         cx,
     )
@@ -663,6 +690,7 @@ pub(super) fn foldable_block<
     id: Id,
     key: FoldKey,
     expanded: bool,
+    target: ToggleTarget,
     header: AnyElement,
     summary: Option<AnyElement>,
     body: AnyElement,
@@ -672,7 +700,7 @@ pub(super) fn foldable_block<
 ) -> impl IntoElement + use<Id, F> {
     // Same `disclosure_row` scaffold as the section bars (chevron + click), then
     // append this block's own header content.
-    let mut header_row = disclosure_row(id, key, expanded, dim, cx).child(header);
+    let mut header_row = disclosure_row(id, key, expanded, target, dim, cx).child(header);
     // The collapsed-only inline summary sits after the header content, on the
     // same row, and is dropped entirely when expanded (the body carries the
     // detail then).

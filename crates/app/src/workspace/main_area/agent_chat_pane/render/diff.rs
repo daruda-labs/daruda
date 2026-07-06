@@ -5,7 +5,7 @@
 use daruda_acp::DiffView;
 use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
-use super::{DiffStats, foldable_block};
+use super::{DiffStats, ToggleTarget, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{DiffStat, diff_editor_key};
@@ -68,6 +68,7 @@ pub(super) fn diff_block(
             SharedString::from(format!("agent-chat-diff-{diff_key}")),
             key,
             expanded,
+            ToggleTarget::Chevron,
             header,
             summary,
             body,
