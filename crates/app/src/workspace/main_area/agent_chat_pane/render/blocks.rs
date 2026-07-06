@@ -9,7 +9,7 @@ use super::{MermaidImages, ToggleTarget, collapsed_text_summary, foldable_block}
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{IconName, button_bare};
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::mermaid_key;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::mermaid_key;
 use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 

@@ -17,7 +17,7 @@
 
 use daruda_acp::ChatItem;
 
-use super::agent_chat_ops::is_active;
+use super::agent_chat_helpers::fold_active;
 use super::fold::{FoldKey, FoldState};
 
 /// Minimum consecutive tool-call run length that earns a collapsible group. A
@@ -168,7 +168,6 @@ pub(in crate::workspace) fn project(
             .filter(|&k| matches!(items[k], ChatItem::ToolCall(_)))
             .count();
         let non_trivial = anchor.is_some() && (tools >= 1 || run.len() >= RESPONSE_MIN_BLOCKS);
-        let run_active = run.clone().any(|k| is_active(&items[k]));
         // The run's final assistant-text block is the turn's conclusion: it
         // stays visible when the response is collapsed (see `project_run`).
         let conclusion_ix = run
@@ -179,7 +178,10 @@ pub(in crate::workspace) fn project(
         // Indent of this turn's run, reused to place the trailing working
         // indicator at the same nesting as the run's conclusion.
         let run_indent = if let (true, Some(a)) = (non_trivial, anchor) {
-            let collapsed = !fold.is_expanded(&FoldKey::Response(a), is_last_turn || run_active);
+            let collapsed = !fold.is_expanded(
+                &FoldKey::Response(a),
+                fold_active(&FoldKey::Response(a), items),
+            );
             rows.push(RenderRow {
                 kind: RowKind::ResponseHeader {
                     anchor: a,
@@ -250,8 +252,8 @@ fn project_run(
             let grun = gstart..k;
             if grun.len() >= TOOL_GROUP_MIN {
                 let gid = tool_id(&items[gstart]);
-                let active = grun.clone().any(|j| is_active(&items[j]));
-                let group_collapsed = !fold.is_expanded(&FoldKey::ToolGroup(gid.clone()), active);
+                let group_key = FoldKey::ToolGroup(gid.clone());
+                let group_collapsed = !fold.is_expanded(&group_key, fold_active(&group_key, items));
                 rows.push(RenderRow {
                     kind: RowKind::ToolGroupHeader {
                         gid,

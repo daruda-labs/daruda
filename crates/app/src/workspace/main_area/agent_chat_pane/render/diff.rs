@@ -8,7 +8,7 @@ use gpui::{AnyElement, App, Entity, Hsla, IntoElement, SharedString, div, prelud
 use super::{DiffStats, ToggleTarget, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{DiffStat, diff_editor_key};
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{DiffStat, diff_editor_key};
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 

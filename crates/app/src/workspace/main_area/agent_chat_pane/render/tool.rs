@@ -13,7 +13,7 @@ use super::{DiffEditors, DiffStats, ToggleTarget, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     diff_editor_key, renders_raw_input,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};

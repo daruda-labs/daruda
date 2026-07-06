@@ -68,7 +68,7 @@ use tool::{permission_card, tool_card};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, IconName, StatusPulseClock, button_bare, disclosure};
-use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::{
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, activity_bar_title, is_active,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};

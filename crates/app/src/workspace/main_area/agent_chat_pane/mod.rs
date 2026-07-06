@@ -13,10 +13,12 @@
 //!   owns `report_error`), and the bottom-dock prompt / cancel routing. Plus
 //!   the GPUI-free helpers the view's reconcilers reuse.
 
+pub(in crate::workspace) mod agent_chat_helpers;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(in crate::workspace) mod config_chip;
 pub(in crate::workspace) mod fold;
 pub(in crate::workspace) mod mode_chip;
+pub(in crate::workspace) mod reconcile;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod rows;
 pub(in crate::workspace) mod view;
