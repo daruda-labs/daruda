@@ -1066,6 +1066,13 @@ pub fn agent_chat_permission_cancelled() -> String {
     rust_i18n::t!("agent_chat.permission_cancelled").into_owned()
 }
 
+/// Description for the daruda-injected `/clear` slash command, shown in the
+/// completion menu's detail column when the connected agent doesn't advertise
+/// its own `clear` command.
+pub fn agent_chat_clear_command_desc() -> String {
+    rust_i18n::t!("agent_chat.clear_command_desc").into_owned()
+}
+
 pub fn file_viewer_search_no_match() -> String {
     rust_i18n::t!("file_viewer.search_no_match").into_owned()
 }

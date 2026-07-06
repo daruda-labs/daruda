@@ -1387,3 +1387,72 @@ async fn restoring_cleared_on_error_and_abort(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+/// `reset_for_new_session` (the `/clear` teardown) wipes the conversation
+/// model, the fold overrides, and the persisted session id, and parks the view
+/// back in `Connecting` so a fresh `session/new` can supersede it. Only the
+/// local reset is exercised here — `Workspace::reset_agent_chat_session`'s
+/// `connect_agent_chat` call is async and needs a real adapter, so it is not
+/// covered by this test.
+#[gpui::test]
+async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::agent_chat_pane::fold::FoldKey;
+    use daruda_acp::{ChatItem, PlanEntryView, PlanPriority, PlanStatus};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let tmp = std::env::temp_dir();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(tmp.clone()),
+                Some("abc".to_string()),
+                None,
+                window,
+                cx,
+            );
+            let id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            let view = agent_view(ws, id);
+
+            // Seed mutable state a live session would have accumulated.
+            view.update(cx, |v, _cx| {
+                v.items.push(ChatItem::UserText("hi".into()));
+                v.items.push(ChatItem::UserText("again".into()));
+                v.turn_in_flight = true;
+                v.plan.push(PlanEntryView {
+                    content: "step 1".into(),
+                    priority: PlanPriority::Medium,
+                    status: PlanStatus::Pending,
+                });
+                // Explicit fold override — the default is `ExpandedWhileActive`
+                // (expanded while active=true); collapse it explicitly so the
+                // reset's `FoldState::default()` is observably different.
+                v.fold.toggle(FoldKey::Tool("call-1".into()), true);
+                assert!(
+                    !v.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                    "sanity: override collapsed the block while active"
+                );
+            });
+
+            view.update(cx, |v, cx| v.reset_for_new_session(cx));
+
+            let v = view.read(cx);
+            assert!(v.items.is_empty(), "reset clears the conversation items");
+            assert!(v.rows.is_empty(), "reset splices the projected rows to 0");
+            assert_eq!(v.session_id, None, "reset clears the persisted session id");
+            assert_eq!(
+                v.status,
+                AgentSessionStatus::Connecting,
+                "reset parks the view in Connecting for the fresh session/new"
+            );
+            assert!(!v.turn_in_flight, "reset clears the in-flight turn flag");
+            assert!(v.plan.is_empty(), "reset clears the execution plan");
+            assert!(
+                v.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
+                "reset drops fold overrides back to the natural default"
+            );
+        })
+    })
+    .unwrap();
+}

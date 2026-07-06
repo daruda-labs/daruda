@@ -40,6 +40,7 @@ use futures::channel::mpsc::unbounded;
 use gpui::{AppContext as _, Context, Entity, Window};
 
 use super::agent_chat_helpers::next_mode_id;
+use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -555,6 +556,27 @@ impl Workspace {
         }
     }
 
+    /// Full local reset for the `/clear` slash command: wipe the conversation
+    /// UI, tear down the live ACP session, clear the persisted session id, and
+    /// start a fresh `session/new`. No-op when `pane_id` is gone or has no
+    /// lane cwd (a cwd-less pane never had a session to reset).
+    pub(in crate::workspace) fn reset_agent_chat_session(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let Some(cwd) = view.read(cx).cwd.clone() else {
+            return; // no cwd → never had a session
+        };
+        view.update(cx, |v, cx| v.reset_for_new_session(cx));
+        self.mark_dirty_and_save(cx);
+        self.notify_status_docks(cx);
+        self.connect_agent_chat(pane_id, cwd, None, cx);
+    }
+
     /// Send `text` as a prompt to an Agent chat pane. Shim for the bottom-dock
     /// input: routes into the view, which echoes the prompt locally, forwards it
     /// over the session, and marks a turn in flight.
@@ -564,8 +586,15 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, cx| v.send_prompt_text(text, cx));
+        match classify_slash(&text) {
+            SlashDispatch::Local(LocalSlashCommand::Clear) => {
+                self.reset_agent_chat_session(pane_id, cx);
+            }
+            SlashDispatch::Forward => {
+                if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                    view.update(cx, |v, cx| v.send_prompt_text(text, cx));
+                }
+            }
         }
     }
 

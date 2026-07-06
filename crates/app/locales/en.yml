@@ -239,6 +239,7 @@ agent_chat:
   working: "Working"
   working_tool: "Running %{name}"
   awaiting_permission: "Waiting for your approval"
+  clear_command_desc: "Clear conversation and start a new session"
 
 # Generic UI
 ui:

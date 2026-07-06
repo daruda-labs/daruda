@@ -239,6 +239,7 @@ agent_chat:
   working: "작업 중"
   working_tool: "%{name} 실행 중"
   awaiting_permission: "승인을 기다리는 중"
+  clear_command_desc: "대화를 지우고 새 세션 시작"
 
 # Generic UI
 ui:

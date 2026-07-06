@@ -875,6 +875,46 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Full local reset for the `/clear` slash command: wipe the conversation
+    /// model and every runtime cache, dropping the live handle and event pump
+    /// so the ACP command channel closes and the pump loop ends — the same
+    /// teardown a pane close performs. The caller (`Workspace::reset_agent_chat_session`)
+    /// then calls `connect_agent_chat` to supersede this with a fresh
+    /// `session/new`, so the view never sits handle-less for a render.
+    pub(in crate::workspace) fn reset_for_new_session(&mut self, cx: &mut Context<Self>) {
+        // Same teardown as a pane close: dropping the handle closes the ACP
+        // command channel (connection task exits) and dropping the pump ends
+        // its loop. connect_agent_chat then supersedes with a fresh session.
+        self.handle = None;
+        self._event_pump = None;
+        self.items.clear();
+        self.pending_prompts.clear();
+        self.pending_permission = None;
+        self.turn_in_flight = false;
+        self.turn_started_at = None;
+        self.diff_editors.clear();
+        self.diff_stats.clear();
+        self.mermaid_inflight.clear();
+        if let Ok(mut m) = self.mermaid_images.lock() {
+            m.clear();
+        }
+        self.fold = FoldState::default();
+        self.modes = None;
+        self.config_options.clear();
+        self.available_commands.clear();
+        self.plan.clear();
+        self.plan_collapsed = false;
+        self.session_title = None;
+        self.session_updated_at = None;
+        // Clear the persisted id so a restart resumes the fresh session, not
+        // the cleared conversation (Connected re-persists the new id).
+        self.session_id = None;
+        self.restoring = false;
+        self.status = AgentSessionStatus::Connecting;
+        self.rebuild_rows(); // diff-splices list_state down to 0 rows
+        cx.notify();
+    }
+
     /// Jump the conversation list to the bottom and re-engage `Tail` follow.
     /// Backs the floating scroll-to-bottom button. The list internally re-arms
     /// tail-following once it lands at the end, so a fresh streaming chunk keeps

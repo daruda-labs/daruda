@@ -21,8 +21,29 @@ use lsp_types::{
     Range, TextEdit,
 };
 
+use super::super::agent_chat_pane::slash_dispatch::CLEAR_COMMAND_NAME;
+use crate::surface::strings as s;
 use crate::ui::{CompletionProvider, InputState, Rope, RopeExt as _};
 use crate::workspace::Workspace;
+
+/// Removes any agent-advertised `/clear` entry and prepends daruda's own
+/// built-in one. Dispatch (`classify_slash`) always intercepts `/clear`
+/// locally and ignores arguments — regardless of what the agent advertises —
+/// so daruda's entry (with its own description and `NoInput`) must be the
+/// only one shown, or the menu misrepresents what actually happens on
+/// submit.
+fn with_builtin_clear(mut commands: Vec<SlashCommand>) -> Vec<SlashCommand> {
+    commands.retain(|c| c.name != CLEAR_COMMAND_NAME);
+    commands.insert(
+        0,
+        SlashCommand {
+            name: CLEAR_COMMAND_NAME.to_string(),
+            description: s::agent_chat_clear_command_desc(),
+            input: SlashCommandInput::NoInput,
+        },
+    );
+    commands
+}
 
 /// Completion provider that surfaces ACP slash commands in the bottom-dock
 /// input. Holds a weak reference to the workspace so it can read the focused
@@ -97,10 +118,11 @@ impl CompletionProvider for SlashCommandProvider {
         };
         let ws = ws.read(cx);
         let focused = ws.active_runtime().focused_pane_id;
-        let commands: Vec<SlashCommand> = ws
-            .agent_chat_view(focused)
-            .map(|v| v.read(cx).available_commands.clone())
-            .unwrap_or_default();
+        let commands: Vec<SlashCommand> = with_builtin_clear(
+            ws.agent_chat_view(focused)
+                .map(|v| v.read(cx).available_commands.clone())
+                .unwrap_or_default(),
+        );
 
         // Replace range = the `/<prefix>` token on the current line: from the
         // `/` (offset - prefix bytes - 1) through the end of the token.
@@ -205,6 +227,40 @@ mod tests {
         assert_eq!(token_end_len("\nx"), 0);
         // Leading spaces: immediate boundary.
         assert_eq!(token_end_len("  x"), 0);
+    }
+
+    #[test]
+    fn with_builtin_clear_prepends_when_absent() {
+        let cmds = vec![cmd("commit", SlashCommandInput::NoInput)];
+        let merged = with_builtin_clear(cmds);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].name, "clear");
+        assert!(matches!(merged[0].input, SlashCommandInput::NoInput));
+        assert_eq!(merged[1].name, "commit");
+    }
+
+    #[test]
+    fn with_builtin_clear_replaces_agent_advertised_entry() {
+        let cmds = vec![
+            cmd("commit", SlashCommandInput::NoInput),
+            cmd(
+                "clear",
+                SlashCommandInput::FreeText {
+                    hint: "what".to_string(),
+                },
+            ),
+        ];
+        let merged = with_builtin_clear(cmds);
+        // Daruda's own `/clear` replaces the agent-advertised entry — dispatch
+        // always intercepts `/clear` locally with no argument, regardless of
+        // what the agent advertises, so exactly one `clear` remains and it's
+        // daruda's `NoInput` entry with daruda's description.
+        assert_eq!(merged.len(), 2);
+        let clear_count = merged.iter().filter(|c| c.name == "clear").count();
+        assert_eq!(clear_count, 1);
+        let clear = merged.iter().find(|c| c.name == "clear").unwrap();
+        assert!(matches!(clear.input, SlashCommandInput::NoInput));
+        assert_eq!(clear.description, s::agent_chat_clear_command_desc());
     }
 
     #[test]
