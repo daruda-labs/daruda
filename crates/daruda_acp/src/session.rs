@@ -50,7 +50,7 @@ use agent_client_protocol::schema::v1::{
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
-use agent_client_protocol::{AcpAgent, Agent, ConnectionTo};
+use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -254,6 +254,46 @@ impl AcpSessionHandle {
     }
 }
 
+/// Dev-build ACP wire tap. When the `DARUDA_ACP_WIRE_LOG` environment variable
+/// names a file, every raw JSON-RPC line exchanged with the adapter — client →
+/// adapter (`stdin`), adapter → client (`stdout`), and the adapter's own
+/// `stderr` — is appended there with a millisecond timestamp and a direction
+/// marker, so tool-call / subagent traffic can be inspected off-line. Identity
+/// (no tap) when the variable is unset or the file can't be opened, so the
+/// shipping build never touches the wire unless explicitly asked. The app sets
+/// the variable in debug builds (see `bootstrap::init_observability`); it can
+/// also be set by hand to capture from any build.
+fn attach_wire_log(agent: AcpAgent) -> AcpAgent {
+    let Some(path) = std::env::var_os("DARUDA_ACP_WIRE_LOG") else {
+        return agent;
+    };
+    // Open once (append) and share the handle with the debug closure; a per-line
+    // reopen would thrash under streaming turns.
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(f) => Arc::new(Mutex::new(f)),
+        Err(_) => return agent,
+    };
+    agent.with_debug(move |line, direction| {
+        use std::io::Write as _;
+        let marker = match direction {
+            LineDirection::Stdin => "-> stdin ",
+            LineDirection::Stdout => "<- stdout",
+            LineDirection::Stderr => "!! stderr",
+        };
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        if let Ok(mut f) = file.lock() {
+            let _ = writeln!(f, "{ts} {marker} {line}");
+        }
+    })
+}
+
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
 /// `initial_mode` is an optional ACP mode id (e.g. `"bypassPermissions"`) to
@@ -273,8 +313,9 @@ pub fn connect_session(
     cwd: PathBuf,
     initial_mode: Option<String>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let agent =
-        AcpAgent::from_str(&command.0).map_err(|e| AcpClientError::Command(format!("{e:?}")))?;
+    let agent = AcpAgent::from_str(&command.0)
+        .map_err(|e| AcpClientError::Command(format!("{e:?}")))
+        .map(attach_wire_log)?;
 
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, event_rx) = unbounded::<AcpEvent>();

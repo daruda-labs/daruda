@@ -34,6 +34,20 @@ pub(crate) fn init_observability() {
         max_file_size: logs_cfg.max_file_size_bytes(),
     };
     daruda_store::observability::log_writer::LogWriter::init(log_policy);
+    // Dev-build ACP wire tap: point `daruda_acp`'s wire logger at a file next to
+    // the NDJSON logs so tool-call / subagent JSON-RPC traffic is captured
+    // automatically in debug builds. Release builds never set this (the tap
+    // stays off); either build can still opt in by exporting the var by hand.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("DARUDA_ACP_WIRE_LOG").is_none()
+        && let Some(dir) = daruda_store::observability::log_writer::log_dir()
+    {
+        // SAFETY: startup runs single-threaded before any task / thread that
+        // reads the environment is spawned (same contract as `shell_env`).
+        unsafe {
+            std::env::set_var("DARUDA_ACP_WIRE_LOG", dir.join("acp-wire.log"));
+        }
+    }
     std::panic::set_hook(Box::new(|info| {
         let report = daruda_store::observability::error_report::ErrorReport::from_panic(info);
         eprintln!("[daruda panic] {}", report.message);
