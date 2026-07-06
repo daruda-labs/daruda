@@ -206,17 +206,28 @@ pub struct SerializedFileContent {
     pub view_mode: SerializedFileViewMode,
 }
 
-/// Persisted state for a `PaneContent::AgentChat` leaf. The ACP session
-/// and its conversation are *not* persisted — a restart starts a fresh
-/// session — so only the lane working directory the chat is anchored to
-/// is saved, enough to re-attach the pane to the right lane on the next
-/// launch.
+/// Persisted state for a `PaneContent::AgentChat` leaf. The lane working
+/// directory anchors the pane to the right lane on the next launch; the
+/// ACP `session_id` (when present) lets the pane resume the prior
+/// conversation via `session/load` on first focus rather than starting a
+/// fresh session. The conversation itself is not stored — the adapter
+/// replays it from the resumed session.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedAgentChatContent {
     /// Lane working directory the agent session is rooted at. `None`
     /// when the pane was opened without a resolvable lane cwd.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
+    /// Persisted ACP session id. `Some` once a live session has been
+    /// established; on the next launch the pane resumes it via
+    /// `session/load` (replaying the prior conversation) instead of
+    /// starting a fresh session. `None` for a pane that never connected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Agent-provided session title, cached so a restored dormant pane
+    /// shows its label before the session loads. `None` = fallback label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

@@ -71,6 +71,8 @@ impl Workspace {
     pub(in crate::workspace) fn create_agent_chat_pane(
         &mut self,
         cwd: Option<std::path::PathBuf>,
+        session_id: Option<String>,
+        title: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
@@ -85,17 +87,24 @@ impl Workspace {
             Some(_) => AgentSessionStatus::Idle,
             None => AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()),
         };
+        // Seed the tab title from the persisted session title (when present) so
+        // a restored dormant pane shows its label before the session loads;
+        // fall back to the static default for a freshly opened pane.
+        let cached_title = match &title {
+            Some(t) if !t.is_empty() => t.clone().into(),
+            _ => s::agent_chat_tab_title().into(),
+        };
         // The view owns its own `cwd` (for connect / persistence); the wrapper
         // caches a copy so `Pane::cwd()` stays cx-free.
         let view = cx.new({
             let cwd = cwd.clone();
-            move |cx| AgentChatView::new(pane_id, window_handle, cwd, status, cx)
+            move |cx| AgentChatView::new(pane_id, window_handle, cwd, status, session_id, title, cx)
         });
         Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
                 view,
-                cached_title: s::agent_chat_tab_title().into(),
+                cached_title,
                 cwd,
             }),
         }
@@ -115,7 +124,7 @@ impl Workspace {
             return;
         }
         let cwd = self.active_lane().map(|w| w.path.clone());
-        let pane = self.create_agent_chat_pane(cwd, window, cx);
+        let pane = self.create_agent_chat_pane(cwd, None, None, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
@@ -161,7 +170,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        let cwd = {
+        let (cwd, resume) = {
             let Some(view) = self.agent_chat_view(pane_id) else {
                 return;
             };
@@ -172,20 +181,25 @@ impl Workspace {
             let Some(cwd) = v.cwd.clone() else {
                 return;
             };
-            cwd
+            // A persisted session id (restored pane) resumes the prior
+            // conversation via `session/load`; `None` starts a fresh session.
+            (cwd, v.session_id.clone())
         };
         // Flip to `Connecting` before spawning so a second focus during the
-        // handshake doesn't start a duplicate session.
+        // handshake doesn't start a duplicate session. Mark `restoring` when a
+        // resume is in flight so `apply_event` coalesces the load's replay.
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            let resuming = resume.is_some();
             view.update(cx, |v, cx| {
                 v.status = AgentSessionStatus::Connecting;
+                v.restoring = resuming;
                 cx.notify();
             });
             // Idle → Connecting is a dock-badge status change; the cached
             // docks need an explicit dirty (see `notify_status_docks`).
             self.notify_status_docks(cx);
         }
-        self.connect_agent_chat(pane_id, cwd, cx);
+        self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
     /// Open the live ACP session for an already-pushed Agent chat pane and store
@@ -196,13 +210,28 @@ impl Workspace {
     /// The spawned task is stored in the view's `_event_pump`, so closing the
     /// pane drops it (ending the loop) in addition to dropping the session
     /// handle (which closes the connection).
+    /// `resume` carries the persisted ACP session id when the pane is restoring
+    /// a prior conversation: `Some` branches `session/load` (the adapter replays
+    /// history before the `Connected` reply), `None` starts a fresh
+    /// `session/new`. A failed *resume* retries once as a fresh session so the
+    /// pane stays usable; the stale id is left persisted (a successful new
+    /// session overwrites it via the `Connected` persist trigger).
     pub(in crate::workspace) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
         cwd: std::path::PathBuf,
+        resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
+        // A fresh session starts in the app's default permission mode; a resume
+        // preserves whatever mode the loaded session already had (pass `None` so
+        // `run_connection` skips the initial `set_mode`), so reattaching never
+        // silently overrides a mode the user set in the prior session.
+        let initial_mode = if resume.is_some() {
+            None
+        } else {
+            Some(self.agent.default_permission_mode.mode_id().to_string())
+        };
         let node_root = daruda_store::persistence::node_install_dir();
 
         // Runtime provisioning (see `connect_session_with_node`) can download
@@ -243,6 +272,10 @@ impl Workspace {
         })
         .detach();
 
+        // Kept for a fresh-session fallback if a resume fails (the resume attempt
+        // moves its own clones into the background closure below).
+        let retry_cwd = cwd.clone();
+        let was_resume = resume.is_some();
         let pump = cx.spawn(async move |this, cx| {
             // `connect_session_with_node` is synchronous (it provisions node,
             // parses the command, and spawns the connection task); run it on the
@@ -253,7 +286,15 @@ impl Workspace {
                 .background_executor()
                 .spawn(async move {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
-                    connect_session_with_node(node_root, cwd, initial_mode, &mut progress)
+                    // `Some` resumes the persisted session (`session/load`);
+                    // `None` starts a fresh session (`session/new`).
+                    connect_session_with_node(
+                        node_root,
+                        cwd,
+                        initial_mode,
+                        resume.map(daruda_acp::SessionId::new),
+                        &mut progress,
+                    )
                 })
                 .await;
 
@@ -292,7 +333,49 @@ impl Workspace {
                     // Pump the event stream until end-of-stream (handle dropped
                     // on pane close, or terminal protocol error). Each event is
                     // folded through the view, which notifies itself.
+                    let mut connected_seen = false;
                     while let Some(event) = events.next().await {
+                        // A rejected `session/load` (stale / expired / unknown
+                        // persisted id) surfaces as `AcpEvent::Error` on the
+                        // stream — `run_connection` runs detached, so the sync
+                        // `Err` arm below never sees it. Before any `Connected`,
+                        // treat a resume's error as a failed load and retry once
+                        // as a fresh session. Bounded: the retry runs with
+                        // `resume = None`, so its own error can't loop back here.
+                        // The stale id is left persisted — a successful fresh
+                        // session overwrites it via the `Connected` persist trigger.
+                        if was_resume
+                            && !connected_seen
+                            && let daruda_acp::AcpEvent::Error(detail) = &event
+                        {
+                            let detail = detail.clone();
+                            // SILENT-OK: workspace/window dropped before the resume retry could start
+                            let _ = this.update(cx, |ws, cx| {
+                                if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
+                                    view.update(cx, |v, cx| {
+                                        // Release the replay gate and return to a
+                                        // plain connecting state before the retry.
+                                        v.restoring = false;
+                                        v.status = AgentSessionStatus::Connecting;
+                                        cx.notify();
+                                    });
+                                }
+                                let report = ErrorReport::new(
+                                    "ACP session/load resume failed; retrying fresh",
+                                )
+                                .severity(ErrorSeverity::Warning)
+                                .with_context("detail", detail)
+                                .at(file!(), line!())
+                                .dedup("agent_chat.resume_fallback")
+                                .build();
+                                daruda_store::observability::log_writer::LogWriter::log(report);
+                                // Fresh retry → `session/new`; spawns a new pump on
+                                // the view, superseding this one.
+                                ws.connect_agent_chat(pane_id, retry_cwd.clone(), None, cx);
+                            });
+                            return;
+                        }
+                        let is_connected = matches!(&event, daruda_acp::AcpEvent::Connected { .. });
                         let cont = this.update(cx, |ws, cx| {
                             let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
                             let Some(view) = ws.agent_chat_view(pane_id).cloned() else {
@@ -307,6 +390,14 @@ impl Workspace {
                             // frame once the pulse stops. Gated on change so
                             // token-streaming events don't repaint the docks.
                             let before = view.read(cx).to_session_status();
+                            // Capture the persisted session identity before the
+                            // event: `Connected` establishes the live session id
+                            // and `SessionInfoChanged` sets the title. Both are
+                            // persisted (the id lets a later launch resume via
+                            // `session/load`; the title names the tab), so a save
+                            // is triggered below when either changes.
+                            let session_id_before = view.read(cx).session_id.clone();
+                            let title_before = view.read(cx).session_title.clone();
                             // Capture current mode before the event so we can
                             // detect `Connected` (modes arriving) and
                             // `ModeChanged` (current switching) and refresh the
@@ -333,6 +424,19 @@ impl Workspace {
                             if view.read(cx).to_session_status() != before {
                                 ws.notify_status_docks(cx);
                             }
+                            // Persist when the session id is newly established
+                            // (or changed) or the title changed. Both change
+                            // rarely — once at connect, then on the occasional
+                            // `SessionInfoChanged` — so this never thrashes on
+                            // token-streaming events.
+                            {
+                                let v = view.read(cx);
+                                if v.session_id != session_id_before
+                                    || v.session_title != title_before
+                                {
+                                    ws.mark_dirty_and_save(cx);
+                                }
+                            }
                             // Reconcile the backing task (if any) keyed by the
                             // pane's lane cwd. A no-op when no `Running` task
                             // matches (plain agent-chat pane) or the cwd is
@@ -354,12 +458,57 @@ impl Workspace {
                             }
                             true
                         });
+                        if is_connected {
+                            connected_seen = true;
+                        }
                         // Workspace/window gone (Err) or view gone (Ok(false)) —
                         // stop pumping.
                         if !matches!(cont, Ok(true)) {
                             break;
                         }
                     }
+                    // The stream ended. If a resume was still replaying (no
+                    // Connected/Error arrived — a misbehaving adapter), release
+                    // the gate so the accumulated items render instead of the
+                    // pane freezing mid-restore.
+                    // SILENT-OK: view/window already gone at end-of-stream — nothing to release
+                    let _ = this.update(cx, |ws, cx| {
+                        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
+                            view.update(cx, |v, cx| v.abort_restore(cx));
+                        }
+                    });
+                }
+                Err(err) if was_resume => {
+                    // A failed *resume* (`session/load`) retries once as a fresh
+                    // session so the pane stays usable. The persisted session id
+                    // is intentionally left untouched: a successful new session
+                    // overwrites it via the `Connected` persist trigger above,
+                    // and a transient error must never wipe a still-valid id.
+                    let message = format!("{err}");
+                    // SILENT-OK: workspace/window dropped before the resume retry could start
+                    let _ = this.update(cx, |ws, cx| {
+                        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
+                            view.update(cx, |v, cx| {
+                                // No load will happen now — release the replay
+                                // gate and return to a plain connecting state
+                                // before the fresh retry.
+                                v.restoring = false;
+                                v.status = AgentSessionStatus::Connecting;
+                                cx.notify();
+                            });
+                        }
+                        let report = ErrorReport::new("ACP session resume failed; retrying fresh")
+                            .severity(ErrorSeverity::Warning)
+                            .with_context("detail", message)
+                            .at(file!(), line!())
+                            .dedup("agent_chat.resume_fallback")
+                            .build();
+                        daruda_store::observability::log_writer::LogWriter::log(report);
+                        // Re-enter with no resume → `session/new`. This spawns a
+                        // fresh pump on the view; the current task then returns,
+                        // dropping this (now superseded) pump.
+                        ws.connect_agent_chat(pane_id, retry_cwd.clone(), None, cx);
+                    });
                 }
                 Err(err) => {
                     let message = format!("{err}");

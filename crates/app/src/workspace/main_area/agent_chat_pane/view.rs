@@ -127,6 +127,18 @@ pub(in crate::workspace) struct AgentChatView {
     /// Connection lifecycle state. Drives the status line + input/cancel
     /// affordance.
     pub(in crate::workspace) status: AgentSessionStatus,
+    /// Persisted ACP session id, `Some` once a live session has been
+    /// established (set by the `Connected` event) or seeded from persisted
+    /// state on a restored pane. When present, the lazy connect resumes it
+    /// via `session/load` instead of starting a fresh session. Persisted so
+    /// the conversation comes back across restarts.
+    pub(in crate::workspace) session_id: Option<String>,
+    /// `true` while a resume (`session/load`) is replaying its history: the
+    /// adapter streams many `session/update`s before the `Connected` reply.
+    /// While set, `apply_event` accumulates items but skips the per-event
+    /// `rebuild_rows()` + `cx.notify()` (O(n²) over the replay); the single
+    /// catch-up runs when `Connected` fires and clears this. Transient.
+    pub(in crate::workspace) restoring: bool,
     /// Conversation render model, in arrival order. The event pump
     /// appends/folds into this; the renderer reads it.
     //
@@ -290,6 +302,8 @@ impl AgentChatView {
         window_handle: AnyWindowHandle,
         cwd: Option<PathBuf>,
         status: AgentSessionStatus,
+        session_id: Option<String>,
+        title: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
         // Re-rasterize mermaid diagrams for the new appearance when the host
@@ -306,6 +320,11 @@ impl AgentChatView {
             focus_handle: cx.focus_handle(),
             cwd,
             status,
+            session_id,
+            // A restored pane connects lazily; the resume decision (and the
+            // `restoring` flag that coalesces the replay) is made at connect
+            // time by `maybe_connect_agent_chat`, not here.
+            restoring: false,
             items: Vec::new(),
             handle: None,
             pending_prompts: Vec::new(),
@@ -333,7 +352,12 @@ impl AgentChatView {
             config_options: Vec::new(),
             available_commands: Vec::new(),
             plan: Vec::new(),
-            session_title: None,
+            // Seed the persisted title so a restored dormant pane shows its
+            // label before the session loads; the agent replaces it on the
+            // first `SessionInfoChanged` after resume. An empty string is
+            // treated as absent, matching the tab-label seed in
+            // `create_agent_chat_pane` so the header and tab agree.
+            session_title: title.filter(|t| !t.is_empty()),
             session_updated_at: None,
             plan_collapsed: false,
             plan_scroll: ScrollHandle::new(),
@@ -411,21 +435,38 @@ impl AgentChatView {
         // these; every other event leaves both false.
         let mut touched_tool = false;
         let mut touched_text = false;
+        // Set only when a `session/load` replay just finished (the `Connected`
+        // reply cleared `restoring`), so the tail runs the single catch-up.
+        let mut finished_restore = false;
 
         match event {
             AcpEvent::Connected {
+                session_id,
                 modes,
                 config_options,
             } => {
                 self.status = AgentSessionStatus::Connected;
                 self.modes = modes;
                 self.config_options = config_options;
-                // Clear stale plan/title from a previous session so they don't
-                // flash before the new agent sends its first updates.
-                self.plan.clear();
-                self.session_title = None;
-                self.session_updated_at = None;
-                self.plan_collapsed = false;
+                // Record the live session id so it persists — and so a later
+                // launch resumes this session instead of starting fresh.
+                self.session_id = Some(session_id);
+                if self.restoring {
+                    // Resume (`session/load`): the replayed `session/update`s
+                    // already populated the conversation, plan, and title
+                    // before this reply — keep them. Clear the replay gate and
+                    // let the tail run the single coalesced catch-up.
+                    self.restoring = false;
+                    finished_restore = true;
+                } else {
+                    // Fresh session (`session/new`): clear stale plan/title so
+                    // they don't flash before the new agent sends its first
+                    // updates.
+                    self.plan.clear();
+                    self.session_title = None;
+                    self.session_updated_at = None;
+                    self.plan_collapsed = false;
+                }
             }
             AcpEvent::ConfigOptionsChanged(options) => {
                 self.config_options = options;
@@ -501,6 +542,9 @@ impl AgentChatView {
             }
             AcpEvent::Error(message) => {
                 self.status = AgentSessionStatus::Error(message);
+                // A load that fails mid-replay must still render whatever was
+                // replayed — release the coalescing gate so the tail rebuilds.
+                self.restoring = false;
                 // A mid-turn failure must settle the turn like a Stop would —
                 // otherwise a streaming block stays `streaming: true` and an
                 // `InProgress` tool stays live, so the rollup glyph blinks
@@ -523,10 +567,41 @@ impl AgentChatView {
         if touched_text {
             self.reconcile_mermaid(!is_light, cx);
         }
+        // During a `session/load` replay the adapter streams the whole prior
+        // conversation as many `session/update`s before the `Connected` reply.
+        // The reconciles above still run per-event (so diff editors / mermaid
+        // for replayed content are built as they arrive), but the row rebuild +
+        // repaint is deferred until the `Connected` reply releases the gate — one
+        // catch-up instead of a rebuild per replayed event. (The per-event
+        // reconciles are unchanged, so replay cost is no better than live-
+        // streaming the same events; this only removes the redundant rebuilds.)
+        if self.restoring {
+            return;
+        }
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
         self.rebuild_rows();
+        // The coalesced replay spliced many rows at once; force a full
+        // remeasure so the list has heights for all of them before the paint.
+        if finished_restore {
+            self.list_state.remeasure();
+        }
         cx.notify();
+    }
+
+    /// Release a stuck replay gate. A `session/load` normally ends in either a
+    /// `Connected` reply or an `Error`, both of which clear `restoring`; but if
+    /// a misbehaving adapter closes the event stream mid-load without either,
+    /// the gate would stay set and the accumulated items would never be
+    /// projected — a pane frozen mid-restore. The pump calls this once its loop
+    /// exits so whatever arrived still renders. No-op when not restoring.
+    pub(in crate::workspace) fn abort_restore(&mut self, cx: &mut Context<Self>) {
+        if self.restoring {
+            self.restoring = false;
+            self.rebuild_rows();
+            self.list_state.remeasure();
+            cx.notify();
+        }
     }
 
     /// Recompute the projected render rows from `items` + `fold` and sync the

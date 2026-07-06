@@ -24,7 +24,7 @@ fn main() {
     let cwd = std::env::current_dir().expect("current dir");
 
     smol::block_on(async move {
-        let (handle, mut events) = match connect_session(Default::default(), cwd, None) {
+        let (handle, mut events) = match connect_session(Default::default(), cwd, None, None) {
             Ok(pair) => pair,
             Err(err) => {
                 eprintln!("connect failed: {err}");
@@ -42,9 +42,11 @@ fn main() {
         while let Some(event) = events.next().await {
             match event {
                 AcpEvent::Connected {
+                    session_id,
                     modes,
                     config_options,
                 } => {
+                    eprintln!("[session-id] {session_id}");
                     eprintln!(
                         "[connected] modes={modes:?} config_options={config_options:?} \
                          sending prompt 1"

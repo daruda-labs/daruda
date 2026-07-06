@@ -16,6 +16,7 @@ pub mod node;
 pub(crate) mod output_highlight;
 pub mod session;
 
+pub use agent_client_protocol::schema::v1::SessionId;
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
 pub use mapping::{
     UpdateEffect, apply_update, cancel_pending_tools, finalize_streaming, permission_item,

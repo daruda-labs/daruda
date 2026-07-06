@@ -493,7 +493,7 @@ impl Workspace {
                 // active lane; `create_agent_chat_pane` then parks the pane in
                 // `AgentSessionStatus::Error` rather than connecting.
                 let cwd = self.active_lane().map(|w| w.path.clone());
-                self.create_agent_chat_pane(cwd, window, cx)
+                self.create_agent_chat_pane(cwd, None, None, window, cx)
             }
         };
         let new_pane_id = new_pane.id;

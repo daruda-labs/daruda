@@ -45,8 +45,8 @@ use std::sync::atomic::Ordering;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, NewSessionRequest,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
@@ -126,6 +126,10 @@ pub enum AcpEvent {
     /// config options (model / effort / etc.); empty when the agent advertises
     /// none.
     Connected {
+        /// The live session id — from `session/new`, or the id passed to
+        /// `session/load` on a resume. The host persists it so a later launch
+        /// can resume the same session via [`connect_session`]'s `resume` arg.
+        session_id: String,
         modes: Option<ModeStateView>,
         config_options: Vec<ConfigOptionView>,
     },
@@ -312,6 +316,7 @@ pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
     initial_mode: Option<String>,
+    resume: Option<SessionId>,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent = AcpAgent::from_str(&command.0)
         .map_err(|e| AcpClientError::Command(format!("{e:?}")))
@@ -332,6 +337,7 @@ pub fn connect_session(
             agent,
             cwd,
             initial_mode,
+            resume,
             command_rx,
             task_event_tx.clone(),
             permission_parks,
@@ -362,10 +368,11 @@ pub fn connect_session_with_node(
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_mode: Option<String>,
+    resume: Option<SessionId>,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let runtime = crate::node::ensure_node(&node_install_dir, progress)?;
-    connect_session(runtime.adapter_command(), cwd, initial_mode)
+    connect_session(runtime.adapter_command(), cwd, initial_mode, resume)
 }
 
 /// Drive the whole connection: handshake, session creation, then the prompt /
@@ -374,6 +381,7 @@ async fn run_connection(
     agent: AcpAgent,
     cwd: PathBuf,
     initial_mode: Option<String>,
+    resume: Option<SessionId>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
     permission_parks: PermissionParks,
@@ -466,16 +474,44 @@ async fn run_connection(
                 .block_task()
                 .await?;
 
-            let new_session = connection
-                .send_request(NewSessionRequest::new(cwd))
-                .block_task()
-                .await?;
-            let session_id = new_session.session_id.clone();
-            let mut modes: Option<ModeStateView> = new_session.modes.as_ref().map(Into::into);
-            // Select config options advertised at connect (model / effort / …).
-            // Non-select kinds are dropped by `from_protocol`.
-            let config_options =
-                config_options_from_protocol(new_session.config_options.as_deref().unwrap_or(&[]));
+            // New session, or resume an existing one via session/load. A load
+            // replays the prior conversation as session/update notifications
+            // (handled by the notification handler above) before the response
+            // resolves, so the host rebuilds its items exactly as for a live
+            // turn. Both paths yield the same (session_id, modes, config_options)
+            // and share the set_mode + Connected tail below.
+            let (session_id, mut modes, config_options): (
+                SessionId,
+                Option<ModeStateView>,
+                Vec<ConfigOptionView>,
+            ) = match resume {
+                Some(id) => {
+                    let loaded = connection
+                        .send_request(LoadSessionRequest::new(id.clone(), cwd))
+                        .block_task()
+                        .await?;
+                    (
+                        id,
+                        loaded.modes.as_ref().map(Into::into),
+                        config_options_from_protocol(
+                            loaded.config_options.as_deref().unwrap_or(&[]),
+                        ),
+                    )
+                }
+                None => {
+                    let new_session = connection
+                        .send_request(NewSessionRequest::new(cwd))
+                        .block_task()
+                        .await?;
+                    (
+                        new_session.session_id.clone(),
+                        new_session.modes.as_ref().map(Into::into),
+                        config_options_from_protocol(
+                            new_session.config_options.as_deref().unwrap_or(&[]),
+                        ),
+                    )
+                }
+            };
 
             // Apply the configured initial mode when the adapter advertised it,
             // the requested id is in the available list, and it differs from
@@ -509,6 +545,7 @@ async fn run_connection(
             }
 
             let _ = event_tx.unbounded_send(AcpEvent::Connected {
+                session_id: session_id.to_string(),
                 modes,
                 config_options,
             });

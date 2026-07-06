@@ -122,7 +122,7 @@ impl Workspace {
                     s.tabs = tabs_src
                         .iter()
                         .map(|tab| daruda_store::project::SerializedTab {
-                            layout: serialize_layout(&tab.layout, panes_src),
+                            layout: serialize_layout(&tab.layout, panes_src, cx),
                             last_focused_pane: tab.last_focused_pane,
                             user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                         })
@@ -686,13 +686,19 @@ impl Workspace {
                         cx,
                     )
                 } else if let Some(ac) = agent_chat {
-                    // AgentChat pane — the ACP session itself is not
-                    // persisted; restore re-opens at the saved lane cwd in
-                    // the dormant `Idle` state. The live session is *not*
-                    // started here — `focus_pane` connects it lazily on
-                    // first focus, so cold restore doesn't spin up an agent
-                    // process per restored pane. Items begin empty.
-                    self.create_agent_chat_pane(ac.cwd.clone(), window, cx)
+                    // AgentChat pane — restore re-opens at the saved lane cwd in
+                    // the dormant `Idle` state, seeded with the persisted session
+                    // id + title. The live session is *not* started here —
+                    // `focus_pane` connects it lazily on first focus; when a
+                    // session id is present that lazy connect resumes the prior
+                    // conversation via `session/load` instead of starting fresh.
+                    self.create_agent_chat_pane(
+                        ac.cwd.clone(),
+                        ac.session_id.clone(),
+                        ac.title.clone(),
+                        window,
+                        cx,
+                    )
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
                     self.create_pane_with_cwd(effective, window, cx)?
@@ -856,6 +862,7 @@ fn anchor_lane_paths_to_project_root(
 fn serialize_layout(
     layout: &pane_tree::PaneLayout,
     panes: &[pane::Pane],
+    cx: &App,
 ) -> daruda_store::project::SerializedLayout {
     match layout {
         pane_tree::PaneLayout::Pane(id) => {
@@ -872,12 +879,17 @@ fn serialize_layout(
                     view_mode: serialize_view_mode(fv.view_mode),
                 }
             });
-            // AgentChat panes serialize their anchored lane cwd (the
-            // session + conversation are intentionally not persisted).
+            // AgentChat panes serialize their anchored lane cwd plus the live
+            // ACP session id + title (read from the view), so a later launch
+            // resumes the prior conversation via `session/load`. The
+            // conversation itself is not stored — the adapter replays it.
             // Mutually exclusive with `file`.
             let agent_chat = pane.and_then(|p| p.agent_chat_content()).map(|ac| {
+                let v = ac.view.read(cx);
                 daruda_store::project::SerializedAgentChatContent {
                     cwd: ac.cwd.clone(),
+                    session_id: v.session_id.clone(),
+                    title: v.session_title.clone(),
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {
@@ -909,7 +921,7 @@ fn serialize_layout(
                 direction: dir,
                 children: children
                     .iter()
-                    .map(|c| serialize_layout(c, panes))
+                    .map(|c| serialize_layout(c, panes, cx))
                     .collect(),
                 ratios: ratios.clone(),
             }

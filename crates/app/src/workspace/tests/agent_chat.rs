@@ -89,7 +89,7 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 // Each prompt echoes one `UserText` item (no live handle, so no
@@ -142,7 +142,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
@@ -266,7 +266,7 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
                 // `create_agent_chat_pane` builds the pane but does not open a
                 // connection — that is the caller's job — so this never spawns
                 // an adapter. Push it directly into the tree.
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 // The prompt arrives from the shared bottom-dock input via the
@@ -309,7 +309,7 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
@@ -388,7 +388,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 agent_view(ws, id).update(cx, |v, cx| {
@@ -464,7 +464,7 @@ async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppC
     let status = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(None, window, cx);
+                let pane = ws.create_agent_chat_pane(None, None, None, window, cx);
                 match &pane.content {
                     PaneContent::AgentChat(ac) => ac.view.read(cx).status.clone(),
                     _ => panic!("expected an AgentChat pane"),
@@ -498,7 +498,7 @@ async fn agent_chat_pane_with_cwd_is_idle_until_focus(cx: &mut TestAppContext) {
     let status = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 match &pane.content {
                     PaneContent::AgentChat(ac) => ac.view.read(cx).status.clone(),
                     _ => panic!("expected an AgentChat pane"),
@@ -526,7 +526,7 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
@@ -578,7 +578,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
@@ -635,7 +635,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
@@ -706,7 +706,7 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
     let tmp = std::env::temp_dir();
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
             let id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
 
@@ -786,7 +786,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
             // open action to skip `focus_pane`'s lazy `maybe_connect` (which
             // would spawn a real adapter). `create_agent_chat_pane` itself
             // opens no connection.
-            let pane = ws.create_agent_chat_pane(Some(root_a.clone()), window, cx);
+            let pane = ws.create_agent_chat_pane(Some(root_a.clone()), None, None, window, cx);
             let id = pane.id;
             let tab_id = ws.alloc_id();
             ws.active_runtime_mut().panes.push(pane);
@@ -832,7 +832,7 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
     let tmp = std::env::temp_dir();
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
             let id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
             assert!(
@@ -892,7 +892,7 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
                 // A pane with a cwd parks in `Idle` with `handle: None` — the
                 // session connects lazily on first focus, which this test never
                 // triggers, so no `npx` adapter is spawned.
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 ws.send_agent_prompt_text(id, "first".to_string(), cx);
@@ -939,7 +939,7 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 // Disconnected (no handle): every prompt buffers, none is on the
@@ -991,7 +991,7 @@ async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 ws.send_agent_prompt_text(id, "a".to_string(), cx);
@@ -1032,7 +1032,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 ws.send_agent_prompt_text(id, "queued".to_string(), cx);
@@ -1083,7 +1083,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             // AgentChat pane: non-empty submit → accepted + echoed/queued.
-            let chat = ws.create_agent_chat_pane(Some(tmp.clone()), window, cx);
+            let chat = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
             let chat_id = chat.id;
             ws.active_runtime_mut().panes.push(chat);
             assert!(
@@ -1169,6 +1169,221 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                 "a TaskEdit pane is not a text-delivery target"
             );
         });
+    })
+    .unwrap();
+}
+
+/// Save → restore round-trip: an AgentChat pane's persisted `session_id` and
+/// `title` survive `snapshot_for_disk` → `restore_from_disk`, so a later launch
+/// can resume the prior conversation via `session/load` and show its label
+/// before loading. The pane is placed in a *non-active* tab so the restore's
+/// focus-pane never triggers the lazy connect — the suite stays offline (no
+/// adapter subprocess).
+#[gpui::test]
+async fn agent_chat_session_id_and_title_survive_save_restore(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::TabEntry;
+    use crate::workspace::main_area::pane_tree::PaneLayout;
+
+    let config = daruda_config::Config::default();
+    let project_root = std::env::temp_dir().join("daruda_agent_chat_restore_roundtrip");
+    let _ = std::fs::create_dir_all(&project_root);
+    let project = daruda_store::project::Project::from_path(&project_root);
+
+    // 1) Build a workspace with a real project (so the agent chat pane carries a
+    //    resolvable lane cwd), inject an AgentChat pane into a second tab, and
+    //    stamp a live session id + title on its view as a connect would.
+    let (window_handle, workspace) = super::build_workspace_with(cx, &config, Some(project));
+    cx.run_until_parked();
+
+    let (workspace_state, project_states) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let cwd = ws.active_lane().map(|w| w.path.clone());
+                let pane = ws.create_agent_chat_pane(cwd, None, None, window, cx);
+                let pane_id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                // Append as a new, *non-active* tab (active_tab_index stays on
+                // the boot terminal tab) so restore focuses the terminal, not
+                // this pane — its lazy connect never fires.
+                let tab_id = ws.alloc_id();
+                ws.active_runtime_mut().tabs.push(TabEntry {
+                    id: tab_id,
+                    layout: PaneLayout::Pane(pane_id),
+                    last_focused_pane: pane_id,
+                    user_label: None,
+                });
+
+                // Stamp the session identity as a connected session would.
+                let view = ws
+                    .agent_chat_view(pane_id)
+                    .cloned()
+                    .expect("agent chat view present");
+                view.update(cx, |v, cx| {
+                    v.session_id = Some("sess-restore-123".to_string());
+                    v.session_title = Some("Investigate flaky test".to_string());
+                    cx.notify();
+                });
+
+                ws.snapshot_for_disk(cx).expect("snapshot")
+            })
+        })
+        .unwrap();
+
+    // 2) Restore into a fresh, empty workspace.
+    let restored_handle = cx.add_window(|window, cx| {
+        let mut ws = Workspace::new_with_project_for_test(
+            &config,
+            None,
+            super::fresh_test_data_dir(),
+            window,
+            cx,
+        );
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    });
+    let restored = restored_handle.root(cx).unwrap();
+
+    // 3) The restored AgentChat pane's view carries the persisted id + title,
+    //    and stays dormant (no live session, not yet loading).
+    restored.read_with(cx, |ws, cx| {
+        let view = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| p.agent_chat_view())
+            .cloned()
+            .expect("restored agent chat pane present");
+        let view = view.read(cx);
+        assert_eq!(
+            view.session_id.as_deref(),
+            Some("sess-restore-123"),
+            "persisted session id must round-trip"
+        );
+        assert_eq!(
+            view.session_title.as_deref(),
+            Some("Investigate flaky test"),
+            "persisted title must round-trip (seeds the tab label before load)"
+        );
+        assert!(
+            !view.restoring,
+            "a restored dormant pane is not yet loading"
+        );
+        assert!(
+            view.handle.is_none(),
+            "no live session until first focus connects"
+        );
+    });
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+/// While `restoring` (a `session/load` replay in flight), `apply_event`
+/// accumulates model state but coalesces the row rebuild: the projection is not
+/// rebuilt per replayed event, only once when the finishing `Connected` clears
+/// the gate.
+#[gpui::test]
+async fn restoring_gate_defers_rebuild_until_connected(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let tmp = std::env::temp_dir();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let view = agent_view(ws, id);
+                view.update(cx, |v, cx| {
+                    // Simulate a resume mid-replay: gate set, items populated by
+                    // the replayed updates, rows not yet projected.
+                    v.restoring = true;
+                    v.items = vec![
+                        ChatItem::UserText("q".into()),
+                        ChatItem::AssistantText {
+                            text: "a".into(),
+                            streaming: false,
+                            message_id: None,
+                        },
+                    ];
+                    v.rows.clear();
+
+                    // A non-terminal event during the replay must NOT rebuild the
+                    // rows (the gate defers it).
+                    v.apply_event(AcpEvent::Notice("still loading".into()), "", false, cx);
+                    assert!(v.restoring, "gate stays set until Connected/Error");
+                    assert!(
+                        v.rows.is_empty(),
+                        "row rebuild is coalesced while restoring"
+                    );
+                    assert_eq!(v.items.len(), 2, "items still accumulate during replay");
+
+                    // The finishing Connected reply clears the gate and runs the
+                    // single catch-up rebuild, keeping the replayed items.
+                    v.apply_event(
+                        AcpEvent::Connected {
+                            session_id: "sess-1".into(),
+                            modes: None,
+                            config_options: Vec::new(),
+                        },
+                        "",
+                        false,
+                        cx,
+                    );
+                    assert!(!v.restoring, "Connected releases the gate");
+                    assert_eq!(v.session_id.as_deref(), Some("sess-1"));
+                    assert!(
+                        !v.rows.is_empty(),
+                        "the catch-up rebuild projects the replayed items"
+                    );
+                    assert_eq!(v.items.len(), 2, "resume keeps the replayed conversation");
+                });
+                id
+            })
+        })
+        .unwrap();
+    let _ = pane_id;
+}
+
+/// The replay gate is also released on a terminal `Error` and by the pump's
+/// end-of-stream `abort_restore` guard, so a load that never reaches `Connected`
+/// can't freeze the pane mid-restore.
+#[gpui::test]
+async fn restoring_cleared_on_error_and_abort(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let tmp = std::env::temp_dir();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(Some(tmp.clone()), None, None, window, cx);
+            let id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            let view = agent_view(ws, id);
+
+            // A terminal error mid-restore clears the gate.
+            view.update(cx, |v, cx| {
+                v.restoring = true;
+                v.apply_event(AcpEvent::Error("load rejected".into()), "", false, cx);
+                assert!(!v.restoring, "Error releases the restore gate");
+            });
+
+            // The end-of-stream guard releases a gate stuck with no
+            // Connected/Error, projecting whatever accumulated.
+            view.update(cx, |v, cx| {
+                v.restoring = true;
+                v.items = vec![ChatItem::UserText("q".into())];
+                v.rows.clear();
+                v.abort_restore(cx);
+                assert!(!v.restoring, "abort_restore releases the gate");
+                assert!(
+                    !v.rows.is_empty(),
+                    "abort_restore projects the accumulated items"
+                );
+            });
+        })
     })
     .unwrap();
 }

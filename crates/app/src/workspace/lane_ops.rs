@@ -337,7 +337,7 @@ impl Workspace {
                 .create_pane_with_cwd(Some(new_path.clone()), window, cx)
                 .map_err(|e| e.to_string())?,
             TaskAgentSurface::AgentChat => {
-                self.create_agent_chat_pane(Some(new_path.clone()), window, cx)
+                self.create_agent_chat_pane(Some(new_path.clone()), None, None, window, cx)
             }
         };
         let pane_id = pane.id;

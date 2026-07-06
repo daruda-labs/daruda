@@ -116,15 +116,17 @@ fn file_leaf_skips_serialization_when_terminal() {
 
 #[test]
 fn agent_chat_leaf_round_trip_preserves_cwd() {
-    // AgentChat panes persist only the anchored lane cwd — the ACP
-    // session and conversation are not saved. A restart restores the
-    // pane kind + cwd, then starts a fresh session on attach.
+    // AgentChat panes persist the anchored lane cwd plus the ACP
+    // session id + title, so a restart restores the pane kind + cwd and
+    // resumes the prior session via `session/load` on attach.
     let leaf = SerializedLayout::Leaf {
         pane_id: 9,
         cwd: None,
         file: None,
         agent_chat: Some(SerializedAgentChatContent {
             cwd: Some(PathBuf::from("/repo/lane")),
+            session_id: Some("sess-abc123".to_string()),
+            title: Some("Fix the parser".to_string()),
         }),
     };
 
@@ -137,7 +139,29 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             ..
         } => {
             assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
+            assert_eq!(ac.session_id, Some("sess-abc123".to_string()));
+            assert_eq!(ac.title, Some("Fix the parser".to_string()));
             assert!(file.is_none(), "agent_chat and file are mutually exclusive");
+        }
+        _ => panic!("expected Leaf with agent_chat content"),
+    }
+}
+
+#[test]
+fn agent_chat_leaf_without_session_fields_loads_as_none() {
+    // Back-compat: state files written before session persistence existed
+    // carry an `agent_chat` object with only `cwd` — the new `session_id`
+    // and `title` fields must default to `None`.
+    let legacy_json = r#"{"type":"Leaf","pane_id":9,"agent_chat":{"cwd":"/repo/lane"}}"#;
+    let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            agent_chat: Some(ac),
+            ..
+        } => {
+            assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
+            assert_eq!(ac.session_id, None);
+            assert_eq!(ac.title, None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }
