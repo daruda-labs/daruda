@@ -55,14 +55,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Swap the bottom-dock draft only when focus moves to a pane that
-        // consumes the shared input (Terminal / AgentChat). The visible
-        // text is saved to its owner — the pane it was typed for, tracked
-        // by `input_owner`, not the outgoing `focused_pane_id` — then the
-        // incoming pane's draft is restored (empty when it has none).
-        // Non-input panes (File / TaskEdit) leave the text and owner in
-        // place: they do not read the bottom input.
-        if self.pane_consumes_bottom_input(id) {
+        // Swap the bottom-dock draft only when focus moves to a *different*
+        // pane that consumes the shared input (Terminal / AgentChat). The
+        // visible text is saved to its owner — the pane it was typed for,
+        // tracked by `input_owner`, not the outgoing `focused_pane_id` — then
+        // the incoming pane's draft is restored (empty when it has none).
+        // Non-input panes (File / TaskEdit) leave the text and owner in place:
+        // they do not read the bottom input.
+        //
+        // Re-focusing the pane that already owns the visible text is a no-op:
+        // `InputState::set_value` clears the selection and scroll offset even
+        // for identical text, so swapping to the same draft would jump the
+        // cursor to the start mid-edit (reachable by closing a background tab
+        // while typing).
+        if self.pane_consumes_bottom_input(id) && self.input_owner != Some(id) {
             let current = self.terminal_input.read(cx).value().to_string();
             if let Some(owner) = self.input_owner {
                 if current.is_empty() {
@@ -84,10 +90,10 @@ impl Workspace {
         // color and its former-focused sibling dims (or, after a split /
         // close, the whole tab's dim state is recomputed).
         self.refresh_pane_dimming(cx);
-        // The bottom input's placeholder + panel activation are synced on
-        // the windowed focus path (`focus_pane`), which `set_focused_pane`
-        // is always paired with on interactive entry — `set_placeholder`
-        // needs a live `&mut Window` this site lacks.
+        // The bottom input's placeholder + panel activation stay on the
+        // `focus_pane` path (which this is paired with on interactive entry),
+        // not here: this method only tracks the focused pane + swaps the draft,
+        // keeping the focus-vs-placeholder concerns separated.
     }
 
     /// Drop a removed pane's bottom-dock input draft and, when it was the

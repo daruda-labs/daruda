@@ -1198,8 +1198,9 @@ impl Workspace {
         // pane, so on each (re-)entry surface its panel and sync the
         // placeholder to the focused pane kind. Done here — the canonical
         // windowed focus path — so it fires on click, keyboard pane nav,
-        // and tab switch alike (`set_focused_pane` has no `&mut Window`,
-        // which `set_placeholder` requires).
+        // and tab switch alike; `set_focused_pane` deliberately keeps only
+        // focus-tracking + the draft swap, leaving placeholder sync to this
+        // path.
         //
         // `apply_input_placeholder` reads mode state and modifier policy
         // and writes to `terminal_input` using the live `window` — avoids
