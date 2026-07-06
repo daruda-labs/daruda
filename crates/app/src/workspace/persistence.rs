@@ -592,6 +592,16 @@ impl Workspace {
         if let Some(focus) = active_focus {
             self.bump_activity(focus);
             self.focus_pane(focus, window, cx);
+            // Seed the input-draft owner so text typed into the bottom input
+            // before the first focus change is attributed to the restored
+            // focused pane (and saved on the next pane switch). Drafts aren't
+            // persisted, so there's nothing to restore — only the owner needs
+            // seeding. `set_focused_pane` is deliberately avoided here: it would
+            // notify a not-yet-cached view (see its doc), and `focused_pane_id`
+            // is already restored from the persisted runtime.
+            if self.pane_consumes_bottom_input(focus) {
+                self.input_owner = Some(focus);
+            }
         }
         self.main_area.pending_resize = true;
 

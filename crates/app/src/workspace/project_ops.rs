@@ -266,6 +266,12 @@ impl Workspace {
             .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
             .collect();
         self.release_pane_tracking(&owned_pane_ids, cx);
+        // Bottom-dock drafts are keyed per pane, not per lane, so drop the
+        // entry for every pane the closing project owned; clear
+        // `input_owner` if it pointed at one of them.
+        for pane_id in &owned_pane_ids {
+            self.forget_pane_input_draft(*pane_id);
+        }
         // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.
         self.git_status_cache

@@ -152,7 +152,7 @@ impl Workspace {
             });
             self.main_area.pending_resize = true;
         }
-        self.set_focused_pane(pane_id, cx);
+        self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);

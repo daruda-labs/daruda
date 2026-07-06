@@ -131,7 +131,7 @@ impl Workspace {
                 .unwrap_or(false)
         });
         if moved {
-            self.set_focused_pane(dragged, cx);
+            self.set_focused_pane(dragged, window, cx);
             self.focus_pane(dragged, window, cx);
             self.resize_all_tabs(window, cx);
         }

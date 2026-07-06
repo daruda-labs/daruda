@@ -698,7 +698,7 @@ fn finalize_remove_lane_releases_pane_tracking(cx: &mut TestAppContext) {
 /// - Typing in lane B and switching back to lane A restores A's draft.
 /// - Submitting (`send_terminal_input`) drops the lane's saved draft.
 #[gpui::test]
-fn input_draft_is_per_lane(cx: &mut TestAppContext) {
+fn input_draft_is_per_pane(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let root_a = std::path::PathBuf::from("/tmp/test_input_draft_a");
     let root_b = std::path::PathBuf::from("/tmp/test_input_draft_b");
@@ -736,55 +736,350 @@ fn input_draft_is_per_lane(cx: &mut TestAppContext) {
 
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            // Lane 0 is active; type a draft into the input.
+            // The test constructor skips the construction `add_tab`, so seed
+            // lane 0's terminal pane explicitly; that pane becomes the draft
+            // owner (drafts are keyed per input pane, not per lane).
+            ws.add_tab(window, cx);
+            let pane0 = ws.active_runtime().focused_pane_id;
+
+            // Lane 0's terminal pane is focused; type a draft into the input.
             ws.terminal_input
                 .update(cx, |s, cx_state| s.set_value("draft-a", window, cx_state));
 
-            // Switch to lane 1 — draft-a should be saved for lane 0,
-            // and the input should be cleared (lane 1 has no draft).
+            // Switch to lane 1 — its seeded pane takes focus, so draft-a is
+            // saved for pane 0 and the input is cleared (lane 1's pane has no
+            // draft).
             ws.activate_lane(lane1, window, cx);
             assert_eq!(ws.active, lane1);
+            let pane1 = ws.active_runtime().focused_pane_id;
+            assert_ne!(pane1, pane0, "each lane seeds its own input pane");
             let after_switch = ws.terminal_input.read(cx).value().to_string();
             assert_eq!(
                 after_switch, "",
-                "input must be empty after switching to a lane with no draft"
+                "input must be empty after focusing a pane with no draft"
             );
-            // The saved draft for lane 0 must be in the map.
+            // The saved draft for pane 0 must be in the map.
             assert_eq!(
-                ws.input_drafts.get(&lane0).map(String::as_str),
+                ws.input_drafts.get(&pane0).map(String::as_str),
                 Some("draft-a"),
-                "lane 0 draft must be persisted on switch away"
+                "pane 0 draft must be persisted on focus away"
             );
 
-            // Type a draft for lane 1.
+            // Type a draft for lane 1's pane.
             ws.terminal_input
                 .update(cx, |s, cx_state| s.set_value("draft-b", window, cx_state));
 
-            // Switch back to lane 0 — lane 1's draft must be saved and
-            // lane 0's draft ("draft-a") must be restored.
+            // Switch back to lane 0 — pane 1's draft must be saved and
+            // pane 0's draft ("draft-a") must be restored.
             ws.activate_lane(lane0, window, cx);
             assert_eq!(ws.active, lane0);
             let restored = ws.terminal_input.read(cx).value().to_string();
             assert_eq!(
                 restored, "draft-a",
-                "lane 0 draft must be restored on switch back"
+                "pane 0 draft must be restored on focus back"
             );
             assert_eq!(
-                ws.input_drafts.get(&lane1).map(String::as_str),
+                ws.input_drafts.get(&pane1).map(String::as_str),
                 Some("draft-b"),
-                "lane 1 draft must be persisted on switch away"
+                "pane 1 draft must be persisted on focus away"
             );
 
-            // Submit lane 0's draft — the saved entry must be cleared.
+            // Submit pane 0's draft — the saved entry must be cleared.
             ws.send_terminal_input(window, cx);
             assert_eq!(
-                ws.input_drafts.get(&lane0),
+                ws.input_drafts.get(&pane0),
                 None,
-                "submitting must drop the lane's saved draft"
+                "submitting must drop the owner pane's saved draft"
             );
             // The input widget itself must also be empty after send.
             let after_send = ws.terminal_input.read(cx).value().to_string();
             assert_eq!(after_send, "", "input must be empty after send");
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
+/// Two input-capable panes in the *same* lane keep independent drafts:
+/// text typed for pane A is saved on focus-away and restored when A is
+/// focused again, while pane B shows only its own (empty) draft.
+#[gpui::test]
+fn input_draft_round_trips_between_panes(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_input_draft_roundtrip");
+    let _ = std::fs::create_dir_all(&root);
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Two terminal panes in the same lane, one per tab: the
+            // constructor opens tab 0, and a second `add_tab` opens tab 1.
+            let pane_a = ws.active_runtime().focused_pane_id;
+            ws.add_tab(window, cx);
+            let pane_b = ws.active_runtime().focused_pane_id;
+            assert_ne!(pane_a, pane_b, "each tab seeds its own input pane");
+
+            // Focus A and type a draft.
+            ws.activate_tab(0, window, cx);
+            assert_eq!(ws.active_runtime().focused_pane_id, pane_a);
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
+
+            // Focus B — "foo" is saved for A; B has no draft, input clears.
+            ws.activate_tab(1, window, cx);
+            assert_eq!(ws.active_runtime().focused_pane_id, pane_b);
+            assert_eq!(
+                ws.terminal_input.read(cx).value().to_string(),
+                "",
+                "pane B shows its own (empty) draft"
+            );
+            assert_eq!(
+                ws.input_drafts.get(&pane_a).map(String::as_str),
+                Some("foo"),
+                "pane A draft persisted on focus away"
+            );
+
+            // Focus A again — "foo" restored; B never gained a draft.
+            ws.activate_tab(0, window, cx);
+            assert_eq!(
+                ws.terminal_input.read(cx).value().to_string(),
+                "foo",
+                "pane A draft restored on focus back"
+            );
+            assert_eq!(
+                ws.input_drafts.get(&pane_b),
+                None,
+                "pane B has no stored draft"
+            );
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Focusing a non-input pane (File / TaskEdit) is a no-op for the shared
+/// draft: the visible text and its `input_owner` are left in place, and a
+/// later edit still saves to the original owner when an input pane is
+/// focused again.
+#[gpui::test]
+fn focusing_non_input_pane_keeps_draft(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::FileViewMode;
+
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_input_draft_noninput");
+    let _ = std::fs::create_dir_all(&root);
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            let pane_a = ws.active_runtime().focused_pane_id;
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
+            assert_eq!(ws.input_owner, Some(pane_a));
+
+            // A File pane is not input-capable. Focusing it must not touch
+            // the visible draft or the owner pointer.
+            let lane_id = ws.active.lane;
+            let file_pane = ws.create_file_pane(
+                lane_id,
+                root.join("note.txt"),
+                false,
+                None,
+                FileViewMode::Preview,
+                window,
+                cx,
+            );
+            let file_id = file_pane.id;
+            ws.active_runtime_mut().panes.push(file_pane);
+            ws.set_focused_pane(file_id, window, cx);
+
+            assert_eq!(
+                ws.terminal_input.read(cx).value().to_string(),
+                "foo",
+                "non-input focus leaves the visible draft untouched"
+            );
+            assert_eq!(
+                ws.input_owner,
+                Some(pane_a),
+                "non-input focus leaves the owner pointer at pane A"
+            );
+
+            // Edit the still-visible text, then focus a fresh input pane —
+            // the edit must be saved to pane A (the owner), never the file.
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("foobar", window, cx_state));
+            ws.add_tab(window, cx);
+            let pane_b = ws.active_runtime().focused_pane_id;
+            assert_ne!(pane_b, file_id);
+            assert_eq!(
+                ws.input_drafts.get(&pane_a).map(String::as_str),
+                Some("foobar"),
+                "edit made while a non-input pane held focus saves to owner A"
+            );
+            assert_eq!(
+                ws.input_drafts.get(&file_id),
+                None,
+                "the file pane never stores a draft"
+            );
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Closing a pane drops its stored draft and clears `input_owner` if it
+/// pointed at that pane — no lingering entry until the lane is deleted.
+#[gpui::test]
+fn closing_pane_drops_its_draft(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = std::path::PathBuf::from("/tmp/test_input_draft_close");
+    let _ = std::fs::create_dir_all(&root);
+    let project = daruda_store::project::Project::from_path(&root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            // Two single-leaf tabs so closing pane A does not close the
+            // window (last-tab close removes the window): the constructor
+            // opens tab 0 (pane A), a second `add_tab` opens tab 1.
+            let pane_a = ws.active_runtime().focused_pane_id;
+            ws.add_tab(window, cx);
+
+            // Give pane A a stored draft: type on A, focus B (saves), back to A.
+            ws.activate_tab(0, window, cx);
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("foo", window, cx_state));
+            ws.activate_tab(1, window, cx);
+            ws.activate_tab(0, window, cx);
+            assert_eq!(ws.input_owner, Some(pane_a));
+            assert_eq!(
+                ws.input_drafts.get(&pane_a).map(String::as_str),
+                Some("foo"),
+                "pane A has a stored draft before close"
+            );
+
+            ws.close_pane_by_id(pane_a, window, cx);
+            assert_eq!(
+                ws.input_drafts.get(&pane_a),
+                None,
+                "closing pane A drops its draft"
+            );
+            assert_ne!(
+                ws.input_owner,
+                Some(pane_a),
+                "owner no longer points at the closed pane"
+            );
+        });
+    })
+    .unwrap();
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Per-pane drafts survive a lane switch (they ride the focus chokepoint,
+/// not any lane-scoped store): distinct drafts on two lanes' panes are
+/// each preserved across activating the other lane and back.
+#[gpui::test]
+fn input_drafts_survive_lane_switch(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root_a = std::path::PathBuf::from("/tmp/test_input_draft_switch_a");
+    let root_b = std::path::PathBuf::from("/tmp/test_input_draft_switch_b");
+    let _ = std::fs::create_dir_all(&root_a);
+    let _ = std::fs::create_dir_all(&root_b);
+    let project = daruda_store::project::Project::from_path(&root_a);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test_full(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+
+    ws.update(cx, |ws, _| {
+        if let Some(p) = ws.active_project_mut() {
+            p.lanes
+                .push(crate::lane::Lane::default_for_project(1, root_b.clone()));
+        }
+    });
+
+    let proj = ws.read_with(cx, |ws, _| ws.active_ref().project);
+    let lane0 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 0,
+    };
+    let lane1 = daruda_store::project::LaneRef {
+        project: proj,
+        lane: 1,
+    };
+
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            let pane0 = ws.active_runtime().focused_pane_id;
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("draft-a", window, cx_state));
+
+            ws.activate_lane(lane1, window, cx);
+            let pane1 = ws.active_runtime().focused_pane_id;
+            assert_ne!(pane1, pane0);
+            ws.terminal_input
+                .update(cx, |s, cx_state| s.set_value("draft-b", window, cx_state));
+
+            // Round-trip back to lane 0 — its draft is restored and both
+            // panes' drafts are still in the map.
+            ws.activate_lane(lane0, window, cx);
+            assert_eq!(ws.terminal_input.read(cx).value().to_string(), "draft-a");
+            assert_eq!(
+                ws.input_drafts.get(&pane0).map(String::as_str),
+                Some("draft-a"),
+                "lane 0 pane draft survives the switch"
+            );
+            assert_eq!(
+                ws.input_drafts.get(&pane1).map(String::as_str),
+                Some("draft-b"),
+                "lane 1 pane draft survives the switch"
+            );
+
+            // And forward to lane 1 again shows its own draft.
+            ws.activate_lane(lane1, window, cx);
+            assert_eq!(ws.terminal_input.read(cx).value().to_string(), "draft-b");
         });
     })
     .unwrap();

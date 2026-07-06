@@ -32,14 +32,52 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Focus-change chokepoint for `main_area.focused_pane_id`. The left
+    /// Focus-change chokepoint for `main_area.focused_pane_id`, and the
+    /// single site that swaps the shared bottom-dock input draft. The left
     /// dock derives `focused_file_selection` and `agent_active_session_id`
     /// from the focused pane and is `.cached()`, so every focus change must
     /// render the workspace; the render staging diff then invalidates the
     /// dock. `restore_from_disk` writes the field directly during initial
     /// construction (`cx.new`) — no prior cache exists at that point, so
     /// no explicit notify is needed.
-    pub(in crate::workspace) fn set_focused_pane(&mut self, id: PaneId, cx: &mut Context<Self>) {
+    ///
+    /// Takes `&mut Window` because the draft swap calls
+    /// `InputState::set_value`, which needs a live window. A windowless
+    /// re-entry via `window_handle` is not an option here: every caller
+    /// already holds the window (it is `.take()`n from its slot for the
+    /// in-flight update), so `cx.update_window(self.window_handle, …)`
+    /// would fail with "window not found" and the restore would silently
+    /// no-op (same reason `apply_input_placeholder` exists next to the
+    /// windowless `refresh_terminal_input_placeholder`).
+    pub(in crate::workspace) fn set_focused_pane(
+        &mut self,
+        id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Swap the bottom-dock draft only when focus moves to a pane that
+        // consumes the shared input (Terminal / AgentChat). The visible
+        // text is saved to its owner — the pane it was typed for, tracked
+        // by `input_owner`, not the outgoing `focused_pane_id` — then the
+        // incoming pane's draft is restored (empty when it has none).
+        // Non-input panes (File / TaskEdit) leave the text and owner in
+        // place: they do not read the bottom input.
+        if self.pane_consumes_bottom_input(id) {
+            let current = self.terminal_input.read(cx).value().to_string();
+            if let Some(owner) = self.input_owner {
+                if current.is_empty() {
+                    self.input_drafts.remove(&owner);
+                } else {
+                    self.input_drafts.insert(owner, current);
+                }
+            }
+            let incoming = self.input_drafts.get(&id).cloned().unwrap_or_default();
+            let terminal_input = self.terminal_input.clone();
+            terminal_input.update(cx, |state, cx_state| {
+                state.set_value(&incoming, window, cx_state);
+            });
+            self.input_owner = Some(id);
+        }
         self.active_runtime_mut().focused_pane_id = id;
         cx.notify();
         // Re-evaluate inactive-pane dim: the focused pane drops to full
@@ -50,6 +88,39 @@ impl Workspace {
         // the windowed focus path (`focus_pane`), which `set_focused_pane`
         // is always paired with on interactive entry — `set_placeholder`
         // needs a live `&mut Window` this site lacks.
+    }
+
+    /// Drop a removed pane's bottom-dock input draft and, when it was the
+    /// pane whose text is currently shown (`input_owner`), clear that
+    /// pointer so the next input-pane focus does not save the stale visible
+    /// text back to a pane that no longer exists. The single place every
+    /// pane-removal path (close pane / close tab / remove lane / close
+    /// project) forgets a draft, so `input_drafts` never keeps entries for
+    /// panes that are gone. Empty-string drafts are never stored, so a
+    /// missing entry is a no-op `remove`.
+    pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
+        self.input_drafts.remove(&pane_id);
+        if self.input_owner == Some(pane_id) {
+            self.input_owner = None;
+        }
+    }
+
+    /// True when `id` names a pane that reads the shared bottom-dock input:
+    /// a Terminal (PTY stdin) or an AgentChat (ACP prompt). File and
+    /// TaskEdit panes return `false`, so focusing them keeps the visible
+    /// draft (and its owner) untouched. Scans the active runtime's panes;
+    /// unknown ids yield `false`.
+    pub(in crate::workspace) fn pane_consumes_bottom_input(&self, id: PaneId) -> bool {
+        self.active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == id)
+            .is_some_and(|p| {
+                matches!(
+                    p.content,
+                    PaneContent::Terminal(_) | PaneContent::AgentChat(_)
+                )
+            })
     }
 
     /// Push per-pane dim onto the active tab's terminal *and* agent-chat views:
@@ -115,7 +186,7 @@ impl Workspace {
         if self.active_runtime().focused_pane_id == id {
             return;
         }
-        self.set_focused_pane(id, cx);
+        self.set_focused_pane(id, window, cx);
         if let Some(tab) = self.active_tab_mut() {
             tab.last_focused_pane = id;
         }
@@ -156,7 +227,7 @@ impl Workspace {
         self.active_runtime_mut().tab_history.push(cur_tab);
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
-        self.set_focused_pane(pane_id, cx);
+        self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
@@ -198,6 +269,7 @@ impl Workspace {
             .retain(|p| !pane_ids.contains(&p.id));
         for id in &pane_ids {
             self.main_area.activity_counter.remove(id);
+            self.forget_pane_input_draft(*id);
         }
 
         // Adjust history for the removed tab: drop direct references to it
@@ -239,7 +311,7 @@ impl Workspace {
             .get(self.active_runtime().active_tab_index)
             .map(|tab| tab.last_focused_pane)
         {
-            self.set_focused_pane(focused, cx);
+            self.set_focused_pane(focused, window, cx);
             self.bump_activity(focused);
             self.focus_pane(focused, window, cx);
         }
@@ -274,11 +346,10 @@ impl Workspace {
             }
             self.active_runtime_mut().active_tab_index = index;
             let focused = self.active_runtime().tabs[index].last_focused_pane;
-            self.active_runtime_mut().focused_pane_id = focused;
-            // New active tab may have a different split structure — recompute
-            // dim across its panes (the previous tab's views keep their dim;
-            // they are not visible).
-            self.refresh_pane_dimming(cx);
+            // Switching tabs changes the focused pane — route through the
+            // chokepoint so the bottom-dock draft swaps to the new tab's
+            // pane. `set_focused_pane` also runs `refresh_pane_dimming`.
+            self.set_focused_pane(focused, window, cx);
             self.mutate_durable_in(window, cx, |ws, window, cx| {
                 ws.bump_activity(focused);
                 ws.focus_pane(focused, window, cx);
@@ -345,7 +416,7 @@ impl Workspace {
         };
         if let Some(next) = tab.layout.next_pane(focused) {
             tab.last_focused_pane = next;
-            self.set_focused_pane(next, cx);
+            self.set_focused_pane(next, window, cx);
             self.focus_pane(next, window, cx);
             cx.notify();
         }
@@ -362,7 +433,7 @@ impl Workspace {
         };
         if let Some(prev) = tab.layout.prev_pane(focused) {
             tab.last_focused_pane = prev;
-            self.set_focused_pane(prev, cx);
+            self.set_focused_pane(prev, window, cx);
             self.focus_pane(prev, window, cx);
             cx.notify();
         }
@@ -390,7 +461,7 @@ impl Workspace {
             dir,
             &self.main_area.activity_counter,
         ) {
-            self.set_focused_pane(target, cx);
+            self.set_focused_pane(target, window, cx);
             if let Some(t) = self.active_tab_mut() {
                 t.last_focused_pane = target;
             }
@@ -523,7 +594,7 @@ impl Workspace {
             self.bump_activity(new_pane_id);
         }
 
-        self.set_focused_pane(new_pane_id, cx);
+        self.set_focused_pane(new_pane_id, window, cx);
         self.focus_pane(new_pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
@@ -566,9 +637,10 @@ impl Workspace {
         self.release_pane_tracking(&[pane_id], cx);
         self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
         self.main_area.activity_counter.remove(&pane_id);
+        self.forget_pane_input_draft(pane_id);
 
         if tab_index == self.active_runtime().active_tab_index {
-            self.set_focused_pane(next_focus, cx);
+            self.set_focused_pane(next_focus, window, cx);
             self.bump_activity(next_focus);
             self.focus_pane(next_focus, window, cx);
         }

@@ -225,13 +225,13 @@ impl Workspace {
         // empty case) `target` is still the active lane, and dropping
         // its runtime would violate the "active runtime always present"
         // invariant. The window is closing in that case, so leave it.
+        let removed_pane_ids: Vec<_> = self
+            .main_area
+            .runtimes
+            .get(&target)
+            .map(|runtime| runtime.panes.iter().map(|p| p.id).collect::<Vec<_>>())
+            .unwrap_or_default();
         if target != self.active {
-            let removed_pane_ids: Vec<_> = self
-                .main_area
-                .runtimes
-                .get(&target)
-                .map(|runtime| runtime.panes.iter().map(|p| p.id).collect())
-                .unwrap_or_default();
             self.release_pane_tracking(&removed_pane_ids, cx);
             self.main_area.runtimes.remove(&target);
         }
@@ -250,7 +250,13 @@ impl Workspace {
         self.git_status_cache.remove(&target);
         self.git_collapsed_dirs.remove(&target);
         self.git_changes_cursor.remove(&target);
-        self.input_drafts.remove(&target);
+        // Bottom-dock drafts are keyed per pane, so drop the entry for
+        // every pane that lived in the removed lane; clear `input_owner`
+        // if it pointed at one of them (the visible text then belongs to
+        // no live pane).
+        for pane_id in &removed_pane_ids {
+            self.forget_pane_input_draft(*pane_id);
+        }
         self.input_history.remove(&target);
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
             project.lanes.retain(|w| w.id != target.lane);
@@ -475,22 +481,13 @@ impl Workspace {
         // linger on the newly-activated lane. The notify paths below cover it.
         self.main_area.pane_drop_hover = None;
 
-        // Save the outgoing lane's unsent draft. Empty drafts are discarded
-        // (remove rather than insert) to avoid accumulating empty entries.
-        let outgoing_draft = self.terminal_input.read(cx).value().to_string();
-        if outgoing_draft.is_empty() {
-            self.input_drafts.remove(&previous);
-        } else {
-            self.input_drafts.insert(previous, outgoing_draft);
-        }
-
         self.active = target;
 
-        // Restore the incoming lane's saved draft (empty string when none).
-        let incoming_draft = self.input_drafts.get(&target).cloned().unwrap_or_default();
-        self.terminal_input.update(cx, |s, cx_state| {
-            s.set_value(&incoming_draft, window, cx_state)
-        });
+        // The bottom-dock draft is swapped per input pane by
+        // `set_focused_pane`, not per lane: a lane switch changes the
+        // focused pane, so the swap runs on the focus path below
+        // (`set_focused_pane` for an existing focused pane, or inside
+        // `seed_initial_tab` for a freshly-seeded one).
 
         // Update the project's last-active-lane hint so clicking
         // the project header in the left dock snaps to the same
@@ -533,13 +530,19 @@ impl Workspace {
 
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
+        //    Route through `set_focused_pane` so the bottom-dock draft
+        //    swaps to the newly-focused pane (a freshly-seeded lane
+        //    already swapped inside `seed_initial_tab`; this covers the
+        //    common case of a lane that already had tabs).
         if self
             .active_runtime()
             .panes
             .iter()
             .any(|p| p.id == self.active_runtime().focused_pane_id)
         {
-            self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
+            let focused = self.active_runtime().focused_pane_id;
+            self.set_focused_pane(focused, window, cx);
+            self.focus_pane(focused, window, cx);
         }
         // The incoming lane's runtime carries its own panes/split state;
         // recompute inactive-pane dim against the now-live focused pane.
@@ -657,7 +660,7 @@ impl Workspace {
                     user_label: None,
                 });
                 self.active_runtime_mut().active_tab_index = 0;
-                self.active_runtime_mut().focused_pane_id = pane_id;
+                self.set_focused_pane(pane_id, window, cx);
                 self.bump_activity(pane_id);
             }
             Err(e) => {

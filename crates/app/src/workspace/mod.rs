@@ -569,13 +569,23 @@ pub struct Workspace {
         daruda_store::project::LaneRef,
         crate::lane::history::HistoryBuffer,
     >,
-    /// Per-lane unsent draft text for the bottom-dock input. Saved on
-    /// lane switch (outgoing lane) and restored on activation (incoming
-    /// lane), so each lane keeps its own in-progress text. Empty strings
-    /// are never stored — `remove` is used instead to avoid leaking
-    /// entries for empty drafts or deleted lanes.
+    /// Per-pane unsent draft text for the shared bottom-dock input. Keyed
+    /// by the workspace-global `PaneId` of the input-capable pane
+    /// (Terminal / AgentChat) the text was typed for. Swapped in/out by
+    /// `set_focused_pane` on every focus change: the outgoing pane's text
+    /// is saved to its `input_owner` and the incoming pane's draft is
+    /// restored, so each pane keeps its own in-progress text. Empty
+    /// strings are never stored — `remove` is used instead to avoid
+    /// leaking entries for empty drafts or closed panes.
     pub(in crate::workspace) input_drafts:
-        std::collections::HashMap<daruda_store::project::LaneRef, String>,
+        std::collections::HashMap<main_area::pane_tree::PaneId, String>,
+    /// The input-capable pane whose draft is currently visible in
+    /// `terminal_input` — the last-focused Terminal / AgentChat pane.
+    /// Draft saves key off this rather than the outgoing `focused_pane_id`,
+    /// so text typed while a non-input pane (File / TaskEdit) held focus
+    /// still saves to the pane it was meant for on the next input-pane
+    /// focus. `None` until the first input-capable pane is focused.
+    pub(in crate::workspace) input_owner: Option<main_area::pane_tree::PaneId>,
 }
 
 impl Workspace {
@@ -1069,6 +1079,7 @@ impl Workspace {
             window_handle: window.window_handle(),
             input_history: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
+            input_owner: None,
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

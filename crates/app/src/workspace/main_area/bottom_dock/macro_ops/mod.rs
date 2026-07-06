@@ -522,9 +522,12 @@ impl Workspace {
             .entry(lane_ref)
             .or_default()
             .push(&history_text);
-        // Submitted text is no longer a draft — drop the saved entry so
-        // switching back to this lane after send shows an empty input.
-        self.input_drafts.remove(&lane_ref);
+        // Submitted text is no longer a draft — drop the saved entry for
+        // the pane whose text is visible (`input_owner`) so returning to
+        // it after send shows an empty input.
+        if let Some(owner) = self.input_owner {
+            self.input_drafts.remove(&owner);
+        }
         // Route through the single pane-delivery funnel. It branches on the
         // focused pane's kind: a Terminal receives the bytes (embedded `\n` →
         // `\r`, trailing `\r` on submit — identical to the former inline

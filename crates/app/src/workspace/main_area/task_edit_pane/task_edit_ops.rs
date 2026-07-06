@@ -111,7 +111,7 @@ impl Workspace {
         self.active_runtime_mut().tab_history.push(cur_tab);
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
-        self.set_focused_pane(pane_id, cx);
+        self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         cx.notify();
