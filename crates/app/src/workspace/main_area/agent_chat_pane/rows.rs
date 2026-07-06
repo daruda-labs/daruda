@@ -60,8 +60,10 @@ pub(in crate::workspace) enum RowKind {
     /// turn's run for the whole time a turn is in flight (through tool execution
     /// and streaming), so the live "working … + elapsed" signal stays
     /// consistently present in the conversation flow. Carries no payload; at
-    /// most one exists (always the last row). Suppressed on a permission prompt
-    /// or a manually-collapsed run.
+    /// most one exists (always the last row). Suppressed only while blocked on a
+    /// permission prompt (via `awaiting_response`); it stays visible even when
+    /// the response is manually collapsed — pinned below the still-visible
+    /// conclusion — so a folded in-flight turn still shows the live signal.
     WorkingIndicator,
 }
 
@@ -126,7 +128,8 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 /// stays for the whole turn — through tool execution and streaming — so the
 /// "working … + elapsed" signal is consistently present, not just in the gap
 /// between blocks. Suppressed only when blocked on a permission prompt (the
-/// card carries that state) or when the turn's response is manually collapsed.
+/// card carries that state); it stays visible even when the turn's response is
+/// manually collapsed, pinned below the still-visible conclusion.
 pub(in crate::workspace) fn project(
     items: &[ChatItem],
     fold: &FoldState,
@@ -173,9 +176,9 @@ pub(in crate::workspace) fn project(
             .rev()
             .find(|&k| matches!(items[k], ChatItem::AssistantText { .. }));
 
-        // Indent + collapsed state of this turn's run, reused to place the
-        // trailing working indicator inside the same fold scope.
-        let (run_indent, run_collapsed) = if let (true, Some(a)) = (non_trivial, anchor) {
+        // Indent of this turn's run, reused to place the trailing working
+        // indicator at the same nesting as the run's conclusion.
+        let run_indent = if let (true, Some(a)) = (non_trivial, anchor) {
             let collapsed = !fold.is_expanded(&FoldKey::Response(a), is_last_turn || run_active);
             rows.push(RenderRow {
                 kind: RowKind::ResponseHeader {
@@ -194,23 +197,24 @@ pub(in crate::workspace) fn project(
                 conclusion_ix,
                 &mut rows,
             );
-            (1u8, collapsed)
+            1u8
         } else {
             project_run(items, fold, run.clone(), 0, false, conclusion_ix, &mut rows);
-            (0u8, false)
+            0u8
         };
 
         // While a turn is in flight (and not blocked on a permission prompt),
         // pin a live "agent is working" indicator to the last turn's tail — for
         // the whole turn, through tool execution and streaming alike — so the
         // "working … + elapsed" signal is consistently present instead of
-        // flickering out whenever a block is active. Last turn only; hidden with
-        // the run when the response is manually collapsed so a folded turn stays
-        // quiet.
+        // flickering out whenever a block is active. Last turn only; it stays
+        // visible even when the response is manually collapsed (pinned below the
+        // still-visible conclusion, at the run's indent) so a folded in-flight
+        // turn still shows it's working.
         if awaiting_response && is_last_turn {
             rows.push(RenderRow {
                 kind: RowKind::WorkingIndicator,
-                hidden: run_collapsed,
+                hidden: false,
                 indent: run_indent,
             });
         }
@@ -511,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn working_indicator_hidden_when_response_collapsed() {
+    fn working_indicator_visible_when_response_collapsed() {
         use ToolStatusView::Completed;
         let items = [
             ChatItem::UserText("q".into()),
@@ -528,9 +532,11 @@ mod tests {
             .find(|r| matches!(r.kind, RowKind::WorkingIndicator))
             .expect("indicator still projected");
         assert!(
-            working.hidden,
-            "a manually-collapsed response hides its working indicator too"
+            !working.hidden,
+            "an in-flight turn keeps its working indicator even when the response is collapsed"
         );
+        // Pinned at the run's indent (1), aligned under the still-visible conclusion.
+        assert_eq!(working.indent, 1);
     }
 
     #[test]
