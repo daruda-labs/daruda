@@ -294,6 +294,7 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            parent_tool_id: None,
         })
     }
 

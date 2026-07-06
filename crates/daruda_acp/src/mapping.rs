@@ -216,6 +216,21 @@ fn append_streaming(
     }
 }
 
+/// The parent tool-call id the Claude adapter stamps on a subagent's inner tool
+/// calls: `_meta.claudeCode.parentToolUseId`. The adapter flattens subagent
+/// activity into the single session, so this is the only link from a child call
+/// back to the `Task`/`Agent` call that spawned it. `None` for a top-level call
+/// (no such meta) or any other adapter that doesn't set it.
+fn parent_tool_id_from_meta(
+    meta: &Option<agent_client_protocol::schema::v1::Meta>,
+) -> Option<String> {
+    meta.as_ref()?
+        .get("claudeCode")?
+        .get("parentToolUseId")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
     let id = tool_call.tool_call_id.0.to_string();
     let (diffs, output) = split_content(&tool_call.content);
@@ -227,6 +242,7 @@ fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
         diffs,
         output,
         raw_input: tool_call.raw_input.clone(),
+        parent_tool_id: parent_tool_id_from_meta(&tool_call.meta),
     };
     highlight_tool_output(&mut item);
     match find_tool_call(items, &id) {
@@ -389,6 +405,26 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         Content, ContentChunk, Diff, ResourceLink, TextContent, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn parent_tool_id_read_from_claude_meta() {
+        let obj = |v: serde_json::Value| Some(v.as_object().unwrap().clone());
+        // The Claude adapter stamps the parent id here on a subagent's inner call.
+        assert_eq!(
+            parent_tool_id_from_meta(&obj(
+                serde_json::json!({"claudeCode": {"parentToolUseId": "toolu_parent"}})
+            )),
+            Some("toolu_parent".to_owned())
+        );
+        // No meta, or meta without the parent key → top-level call.
+        assert_eq!(parent_tool_id_from_meta(&None), None);
+        assert_eq!(
+            parent_tool_id_from_meta(&obj(
+                serde_json::json!({"claudeCode": {"toolName": "Bash"}})
+            )),
+            None
+        );
+    }
 
     #[test]
     fn split_content_types_output_blocks() {
@@ -621,6 +657,7 @@ mod tests {
                 diffs: Vec::new(),
                 output: Vec::new(),
                 raw_input: None,
+                parent_tool_id: None,
             }),
             ChatItem::AssistantText {
                 text: "done".to_string(),
@@ -655,6 +692,7 @@ mod tests {
                 diffs: Vec::new(),
                 output: Vec::new(),
                 raw_input: None,
+                parent_tool_id: None,
             })
         };
         let mut items = vec![

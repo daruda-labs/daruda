@@ -2,8 +2,8 @@
 //! and the inline permission cards with their per-choice buttons.
 
 use daruda_acp::{
-    PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution, ToolCallItem,
-    ToolKindView, ToolOutputBlock, ToolStatusView,
+    ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
 };
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
@@ -14,7 +14,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    diff_editor_key, renders_raw_input,
+    diff_editor_key, fold_active, renders_raw_input,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
@@ -30,6 +30,7 @@ pub(super) fn tool_card(
     key: FoldKey,
     expanded: bool,
     tc: &ToolCallItem,
+    items: &[ChatItem],
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
     fold: &FoldState,
@@ -179,6 +180,46 @@ pub(super) fn tool_card(
         );
         for (ix, block) in tc.output.iter().enumerate() {
             body = body.child(output_block_view(&tc.id, ix, block, dim, cx));
+        }
+    }
+
+    // Subagent activity: the Claude adapter flattens a spawned subagent's inner
+    // tool calls into this session, linking each to this Task/Agent call only
+    // via `parent_tool_id`. `rows::project` skips those children in the main
+    // flow; render them nested here (recursively — a child may itself spawn one)
+    // so the subagent reads as one unit that folds with its parent card.
+    let children: Vec<&ToolCallItem> = items
+        .iter()
+        .filter_map(|it| match it {
+            ChatItem::ToolCall(c) if c.parent_tool_id.as_deref() == Some(tc.id.as_str()) => Some(c),
+            _ => None,
+        })
+        .collect();
+    if !children.is_empty() {
+        body = body.child(
+            div()
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(SharedString::from(s::agent_chat_subagent_label())),
+        );
+        for child in children {
+            let child_key = FoldKey::Tool(child.id.clone());
+            let child_expanded = fold.is_expanded(&child_key, fold_active(&child_key, items));
+            body = body.child(
+                tool_card(
+                    child_key,
+                    child_expanded,
+                    child,
+                    items,
+                    diff_editors,
+                    diff_stats,
+                    fold,
+                    t,
+                    dim,
+                    cx,
+                )
+                .into_any_element(),
+            );
         }
     }
 

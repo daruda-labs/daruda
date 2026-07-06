@@ -231,6 +231,7 @@ agent_chat:
   tool_status_failed: "Failed"
   tool_status_cancelled: "Cancelled"
   tool_background: "Background"
+  subagent_label: "Subagent"
   permission_title: "Permission required"
   permission_resolved_prefix: "Selected:"
   permission_cancelled: "Cancelled."

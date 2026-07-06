@@ -244,9 +244,22 @@ fn project_run(
 ) {
     let mut k = run.start;
     while k < run.end {
+        // A subagent's inner tool call renders nested inside its parent's card
+        // (see `tool_card`), so it earns no row of its own here — skip it. The
+        // Claude adapter flattens subagent activity into the one session and
+        // links a child to its parent only via `parent_tool_id`.
+        if matches!(&items[k], ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some()) {
+            k += 1;
+            continue;
+        }
         if matches!(items[k], ChatItem::ToolCall(_)) {
             let gstart = k;
-            while k < run.end && matches!(items[k], ChatItem::ToolCall(_)) {
+            k += 1;
+            // Extend the group over consecutive *top-level* tool calls; a child
+            // call belongs to the preceding parent, so it ends the run.
+            while k < run.end
+                && matches!(&items[k], ChatItem::ToolCall(t) if t.parent_tool_id.is_none())
+            {
                 k += 1;
             }
             let grun = gstart..k;
@@ -331,6 +344,7 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            parent_tool_id: None,
         })
     }
     /// A permission card — `resolved=false` makes it pending (actionable).
@@ -728,6 +742,39 @@ mod tests {
         assert!(
             perm_row.hidden,
             "a resolved permission folds with the process"
+        );
+    }
+
+    #[test]
+    fn subagent_child_tool_calls_get_no_row() {
+        use ToolStatusView::Completed;
+        // A top-level Task/Agent parent plus one inner child linked by
+        // `parent_tool_id`. The child renders nested inside the parent card
+        // (see `tool_card`), so it must not appear as its own row — and the
+        // parent + child must not collapse into a "2 tool calls" group.
+        let mut child = tool("child", Completed);
+        if let ChatItem::ToolCall(tc) = &mut child {
+            tc.parent_tool_id = Some("parent".to_owned());
+        }
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("parent", Completed),
+            child,
+        ];
+        let rows = project(&items, &FoldState::default(), false);
+        assert!(
+            rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
+            "the parent tool call still renders as a row"
+        );
+        assert!(
+            !rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(2))),
+            "the subagent child earns no row of its own"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. })),
+            "a parent + its child are not a sibling tool group"
         );
     }
 

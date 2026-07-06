@@ -55,6 +55,13 @@ pub struct ToolCallItem {
     pub output: Vec<ToolOutputBlock>,
     /// Raw tool input, kept for an expandable "details" affordance.
     pub raw_input: Option<serde_json::Value>,
+    /// The id of the parent tool call that spawned this one, when the adapter
+    /// reports it (`_meta.claudeCode.parentToolUseId`). Set on a subagent's
+    /// inner tool calls — the Claude adapter flattens subagent activity into the
+    /// one session, so a child is linked to its parent `Task`/`Agent` call only
+    /// through this field. `None` for a top-level call. The renderer nests
+    /// children inside the parent card instead of listing them as siblings.
+    pub parent_tool_id: Option<String>,
 }
 
 impl ToolCallItem {
@@ -450,6 +457,7 @@ mod tests {
             diffs: vec![],
             output: vec![],
             raw_input,
+            parent_tool_id: None,
         }
     }
 

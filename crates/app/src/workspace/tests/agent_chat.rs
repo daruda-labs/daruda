@@ -135,6 +135,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            parent_tool_id: None,
         })
     };
 
@@ -380,6 +381,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: None,
+            parent_tool_id: None,
         })
     };
 
@@ -657,6 +659,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                             diffs: Vec::new(),
                             output: Vec::new(),
                             raw_input: None,
+                            parent_tool_id: None,
                         }),
                     ];
                 });

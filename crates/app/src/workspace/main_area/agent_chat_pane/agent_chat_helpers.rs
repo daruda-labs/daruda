@@ -778,6 +778,7 @@ mod tests {
                 .collect(),
             output: Vec::new(),
             raw_input: None,
+            parent_tool_id: None,
         }
     }
 
@@ -1014,6 +1015,7 @@ mod tests {
             diffs: Vec::new(),
             output: Vec::new(),
             raw_input: Some(serde_json::json!({ "pattern": "foo" })),
+            parent_tool_id: None,
         };
         // Generic tool with args and no diffs → disclosure shown, and the fold
         // key is collected (expand/collapse-all reaches it).

@@ -1030,6 +1030,11 @@ pub fn agent_chat_tool_background() -> String {
     rust_i18n::t!("agent_chat.tool_background").into_owned()
 }
 
+/// Label above a Task/Agent card's nested subagent tool calls.
+pub fn agent_chat_subagent_label() -> String {
+    rust_i18n::t!("agent_chat.subagent_label").into_owned()
+}
+
 /// Pinned working-footer label while the agent is generating a response.
 pub fn agent_chat_working() -> String {
     rust_i18n::t!("agent_chat.working").into_owned()
