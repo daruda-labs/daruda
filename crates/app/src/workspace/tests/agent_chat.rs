@@ -14,7 +14,7 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 use super::build_workspace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
-use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus};
+use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus, Turn};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -313,7 +313,7 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
             daruda_acp::ChatItem::UserText("hello agent".to_string())
         );
         // No live handle → the turn is not marked in flight.
-        assert!(!view.turn_in_flight);
+        assert!(!view.turn.is_in_flight());
     });
 }
 
@@ -713,8 +713,9 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                 // exactly the state a hung agent would leave (it never sends a
                 // stop reason, so `TurnEnded` would never clear this).
                 view.update(cx, |v, _| {
-                    v.turn_in_flight = true;
-                    v.turn_started_at = Some(std::time::Instant::now());
+                    v.turn = Turn::InFlight {
+                        started_at: std::time::Instant::now(),
+                    };
                     v.items = vec![
                         ChatItem::AssistantText {
                             text: "working".into(),
@@ -746,11 +747,11 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert!(
-            !view.turn_in_flight,
+            !view.turn.is_in_flight(),
             "Stop ends the turn without an agent reply"
         );
         assert!(
-            view.turn_started_at.is_none(),
+            view.turn.started_at().is_none(),
             "the elapsed timer is cleared"
         );
         let ChatItem::AssistantText { streaming, .. } = &view.items[0] else {
@@ -795,7 +796,11 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
             );
 
             // Simulate a turn in flight, as `send_prompt` would.
-            agent_view(ws, id).update(cx, |v, _| v.turn_in_flight = true);
+            agent_view(ws, id).update(cx, |v, _| {
+                v.turn = Turn::InFlight {
+                    started_at: std::time::Instant::now(),
+                }
+            });
             assert!(
                 ws.cancel_agent_turn_if_in_flight(id, cx),
                 "cancels and reports handled when a turn is in flight"
@@ -884,7 +889,9 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
                 });
             agent_view(ws, id).update(cx, |v, _| {
                 v.status = AgentSessionStatus::Connected;
-                v.turn_in_flight = true;
+                v.turn = Turn::InFlight {
+                    started_at: std::time::Instant::now(),
+                };
             });
 
             // Switch away → lane 0 is now parked, lane 1 active.
@@ -1015,10 +1022,10 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
         );
         // Nothing is on the wire, so no turn is in flight.
         assert!(
-            !view.turn_in_flight,
+            !view.turn.is_in_flight(),
             "no turn until a handle carries a prompt"
         );
-        assert!(view.turn_started_at.is_none());
+        assert!(view.turn.started_at().is_none());
     });
 }
 
@@ -1079,7 +1086,7 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
             v.pending_prompts.is_empty(),
             "Stop clears the queued prompts so nothing auto-resumes"
         );
-        assert!(!v.turn_in_flight, "Stop ends the turn");
+        assert!(!v.turn.is_in_flight(), "Stop ends the turn");
     });
 }
 
@@ -1124,7 +1131,7 @@ async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext
         );
         assert_eq!(v.items.len(), 3, "all three echoed locally");
         assert!(
-            !v.turn_in_flight,
+            !v.turn.is_in_flight(),
             "nothing is on the wire while disconnected"
         );
     });
@@ -1169,7 +1176,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
             vec!["queued".to_string()],
             "no handle → pump leaves the buffer intact"
         );
-        assert!(!v.turn_in_flight, "no handle → no turn started");
+        assert!(!v.turn.is_in_flight(), "no handle → no turn started");
     });
 
     // Empty buffer is also a no-op (does not panic / mark a turn).
@@ -1182,7 +1189,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     });
     empty_view.read_with(cx, |v, _| {
         assert!(v.pending_prompts.is_empty());
-        assert!(!v.turn_in_flight);
+        assert!(!v.turn.is_in_flight());
     });
 }
 
@@ -1256,7 +1263,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     1,
                     "a blank submit adds no echo and fires no ACP turn"
                 );
-                assert!(!view.turn_in_flight);
+                assert!(!view.turn.is_in_flight());
             }
 
             // Missing pane id → false.
@@ -1748,7 +1755,9 @@ async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext
             view.update(cx, |v, _cx| {
                 v.items.push(ChatItem::UserText("hi".into()));
                 v.items.push(ChatItem::UserText("again".into()));
-                v.turn_in_flight = true;
+                v.turn = Turn::InFlight {
+                    started_at: std::time::Instant::now(),
+                };
                 v.plan.push(PlanEntryView {
                     content: "step 1".into(),
                     priority: PlanPriority::Medium,
@@ -1775,7 +1784,10 @@ async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext
                 AgentSessionStatus::Connecting,
                 "reset parks the view in Connecting for the fresh session/new"
             );
-            assert!(!v.turn_in_flight, "reset clears the in-flight turn flag");
+            assert!(
+                !v.turn.is_in_flight(),
+                "reset clears the in-flight turn flag"
+            );
             assert!(v.plan.is_empty(), "reset clears the execution plan");
             assert!(
                 v.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),

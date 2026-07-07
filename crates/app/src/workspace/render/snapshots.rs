@@ -185,7 +185,7 @@ impl Workspace {
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .filter(|view| view.read(cx).turn_in_flight)
+            .filter(|view| view.read(cx).turn.is_in_flight())
             .map(|_| focused_id);
         // The mode chip shows in the bottom input only when the focused pane is
         // an Agent chat pane that advertises modes — independent of

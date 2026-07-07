@@ -1521,7 +1521,7 @@ impl Workspace {
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())
-            .any(|v| v.read(cx).turn_in_flight)
+            .any(|v| v.read(cx).turn.is_in_flight())
     }
 
     /// Dirty every in-flight AgentChat view so its `.cached()` subtree
@@ -1534,7 +1534,7 @@ impl Workspace {
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())
-            .filter(|v| v.read(cx).turn_in_flight)
+            .filter(|v| v.read(cx).turn.is_in_flight())
             .map(|v| v.entity_id())
             .collect();
         for id in ids {

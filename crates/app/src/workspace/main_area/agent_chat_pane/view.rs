@@ -99,6 +99,29 @@ pub(in crate::workspace) enum AgentSessionStatus {
     Error(String),
 }
 
+/// Whether a `session/prompt` turn is currently in flight. `InFlight` carries
+/// the wall-clock start instant (runtime-only; never persisted) so the enum
+/// can't represent "in flight but no start time" or "idle with a start time".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum Turn {
+    Idle,
+    InFlight { started_at: std::time::Instant },
+}
+
+impl Turn {
+    /// True while a prompt turn is on the wire (Send ↔ Stop affordance, badge).
+    pub(in crate::workspace) fn is_in_flight(&self) -> bool {
+        matches!(self, Turn::InFlight { .. })
+    }
+    /// The current turn's start instant, or `None` when idle.
+    pub(in crate::workspace) fn started_at(&self) -> Option<std::time::Instant> {
+        match self {
+            Turn::InFlight { started_at } => Some(*started_at),
+            Turn::Idle => None,
+        }
+    }
+}
+
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
 ///
 /// Owns the live session: the [`daruda_acp::AcpSessionHandle`] the workspace
@@ -176,13 +199,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// previous pending id (the agent only asks one at a time within a turn).
     /// Cleared once the user responds.
     pub(in crate::workspace) pending_permission: Option<u64>,
-    /// `true` between submitting a prompt and the matching `TurnEnded`. Drives
-    /// the input affordance (Send ↔ Stop) and disables re-submit while the
-    /// agent is busy.
-    pub(in crate::workspace) turn_in_flight: bool,
-    /// Wall-clock instant when the current turn started; `None` when idle.
-    /// Runtime-only — not persisted.
-    pub(in crate::workspace) turn_started_at: Option<std::time::Instant>,
+    /// Whether a prompt turn is in flight (between submit and the matching
+    /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
+    /// re-submit while the agent is busy, and carries the turn's start instant
+    /// (runtime-only, never persisted) for the elapsed-time display.
+    pub(in crate::workspace) turn: Turn,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
     /// Built once per diff by `reconcile_diff_editors` — the same
@@ -285,7 +306,7 @@ impl AgentChatView {
                 Some(SessionStatus::Connecting)
             }
             AgentSessionStatus::Connected => {
-                if self.turn_in_flight {
+                if self.turn.is_in_flight() {
                     if self.pending_permission.is_some() {
                         Some(SessionStatus::NeedsAttention)
                     } else {
@@ -338,8 +359,7 @@ impl AgentChatView {
             pending_prompts: Vec::new(),
             _event_pump: None,
             pending_permission: None,
-            turn_in_flight: false,
-            turn_started_at: None,
+            turn: Turn::Idle,
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
@@ -656,7 +676,7 @@ impl AgentChatView {
         let old = std::mem::take(&mut self.rows);
         // The inline working indicator means "answering" — suppress it while
         // blocked on a permission prompt (the card + footer already say so).
-        let awaiting_response = self.turn_in_flight && self.pending_permission.is_none();
+        let awaiting_response = self.turn.is_in_flight() && self.pending_permission.is_none();
         self.rows = project(&self.items, &self.fold, awaiting_response);
 
         if let Some(at) = old
@@ -701,12 +721,13 @@ impl AgentChatView {
         // streams it back as a user-message chunk.
         self.items.push(ChatItem::UserText(text.clone()));
         if let Some(handle) = &self.handle
-            && !self.turn_in_flight
+            && !self.turn.is_in_flight()
         {
             // Connected and idle: send now and mark the turn in flight.
             handle.send_prompt(text);
-            self.turn_in_flight = true;
-            self.turn_started_at = Some(std::time::Instant::now());
+            self.turn = Turn::InFlight {
+                started_at: std::time::Instant::now(),
+            };
         } else {
             // Not connected yet (lazy connect happens on first focus), or a turn
             // is already in flight. Buffer the prompt in submission order — the
@@ -744,7 +765,7 @@ impl AgentChatView {
     /// turns are still streaming. The echo was already appended when the prompt
     /// was buffered in `send_prompt_text`, so this does not re-echo.
     pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
-        if self.turn_in_flight || self.pending_prompts.is_empty() {
+        if self.turn.is_in_flight() || self.pending_prompts.is_empty() {
             return;
         }
         let Some(handle) = self.handle.as_ref() else {
@@ -753,8 +774,9 @@ impl AgentChatView {
         // FIFO: the front of the queue is the oldest buffered prompt.
         let text = self.pending_prompts.remove(0);
         handle.send_prompt(text);
-        self.turn_in_flight = true;
-        self.turn_started_at = Some(std::time::Instant::now());
+        self.turn = Turn::InFlight {
+            started_at: std::time::Instant::now(),
+        };
         cx.notify();
     }
 
@@ -798,8 +820,7 @@ impl AgentChatView {
     /// and can never drift (e.g. one leaving streaming/tools live so the rollup
     /// blinks forever). Idempotent: a later `TurnEnded` after a Stop is a no-op.
     fn settle_turn(&mut self) {
-        self.turn_in_flight = false;
-        self.turn_started_at = None;
+        self.turn = Turn::Idle;
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);
@@ -924,8 +945,7 @@ impl AgentChatView {
         self.items.clear();
         self.pending_prompts.clear();
         self.pending_permission = None;
-        self.turn_in_flight = false;
-        self.turn_started_at = None;
+        self.turn = Turn::Idle;
         self.diff_editors.clear();
         self.diff_stats.clear();
         self.mermaid_inflight.clear();

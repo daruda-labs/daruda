@@ -803,7 +803,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return false;
         };
-        if !view.read(cx).turn_in_flight {
+        if !view.read(cx).turn.is_in_flight() {
             return false;
         }
         view.update(cx, |v, cx| v.cancel_turn(cx));

@@ -229,7 +229,8 @@ pub(super) fn working_indicator(
     let base = working_status(content);
     let dots = pulse_dots(cx);
     let elapsed_label = content
-        .turn_started_at
+        .turn
+        .started_at()
         .map(|start| format_elapsed(start.elapsed()));
     let row = div()
         .w_full()
