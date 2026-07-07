@@ -71,7 +71,7 @@ fn main() {
                     };
                     handle.respond_permission(id, decision);
                 }
-                AcpEvent::TurnEnded { stop_reason } => {
+                AcpEvent::TurnEnded { stop_reason, .. } => {
                     turns_completed += 1;
                     eprintln!("[turn {turns_completed} ended] stop_reason={stop_reason}");
                     if next_prompt < prompts.len() {

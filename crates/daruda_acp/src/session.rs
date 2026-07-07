@@ -48,7 +48,7 @@ use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, NewSessionRequest,
     PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TextContent,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
 use futures::FutureExt;
@@ -149,7 +149,13 @@ pub enum AcpEvent {
         request: Box<RequestPermissionRequest>,
     },
     /// A `session/prompt` turn completed; carries the protocol stop reason.
-    TurnEnded { stop_reason: String },
+    /// `completed_normally` distinguishes a normal completion (any stop reason
+    /// other than `Cancelled`) from a client-initiated cancellation, so the host
+    /// need not parse the Debug-formatted `stop_reason` string.
+    TurnEnded {
+        stop_reason: String,
+        completed_normally: bool,
+    },
     /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
     /// `set_mode` request was confirmed. `mode_id` is the new active mode.
     ModeChanged { mode_id: String },
@@ -687,9 +693,18 @@ async fn run_turn(
     };
 
     let _ = event_tx.unbounded_send(AcpEvent::TurnEnded {
+        completed_normally: turn_completed_normally(&stop_reason),
         stop_reason: format!("{stop_reason:?}"),
     });
     Ok(handle_dropped)
+}
+
+/// Whether a turn's stop reason represents a normal completion rather than a
+/// client-initiated cancellation. Every stop reason except `Cancelled` (a normal
+/// `EndTurn`, hitting `MaxTokens` / `MaxTurnRequests`, or a `Refusal`) is a turn
+/// that ran to its own conclusion.
+fn turn_completed_normally(sr: &StopReason) -> bool {
+    !matches!(sr, StopReason::Cancelled)
 }
 
 /// Send a `session/set_mode`, downgrading a rejected switch to a non-fatal
@@ -775,6 +790,19 @@ fn config_options_from_protocol(
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::PermissionOptionId;
+
+    #[test]
+    fn cancelled_is_not_a_normal_completion() {
+        assert!(!turn_completed_normally(&StopReason::Cancelled));
+    }
+
+    #[test]
+    fn non_cancelled_stop_reasons_are_normal_completions() {
+        assert!(turn_completed_normally(&StopReason::EndTurn));
+        assert!(turn_completed_normally(&StopReason::MaxTokens));
+        assert!(turn_completed_normally(&StopReason::MaxTurnRequests));
+        assert!(turn_completed_normally(&StopReason::Refusal));
+    }
 
     #[test]
     fn allow_decision_maps_to_selected_outcome() {
