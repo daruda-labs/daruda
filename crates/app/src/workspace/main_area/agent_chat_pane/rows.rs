@@ -122,8 +122,9 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 /// expanded, settled past responses collapse; a settled tool group collapses.
 /// Pure and total.
 ///
-/// `awaiting_response` (the view's "a turn is in flight and not blocked on user
-/// input" flag — `turn_in_flight && pending_permission.is_none()`) drives a
+/// `awaiting_response` (the view's "the agent is actively working" flag —
+/// `activity_state() == Working`, which folds in background-tool activity as
+/// well as an in-flight prompt turn) drives a
 /// trailing [`RowKind::WorkingIndicator`] pinned to the last turn's tail: it
 /// stays for the whole turn — through tool execution and streaming — so the
 /// "working … + elapsed" signal is consistently present, not just in the gap
@@ -522,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn working_indicator_only_when_turn_in_flight() {
+    fn working_indicator_only_when_awaiting_response() {
         use ToolStatusView::Completed;
         let items = [
             ChatItem::UserText("q".into()),

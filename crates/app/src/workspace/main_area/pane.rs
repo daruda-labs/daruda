@@ -496,7 +496,7 @@ impl Pane {
 
     /// The AgentChat pane's view entity. Used by the Workspace ops + pump (via
     /// `Workspace::agent_chat_view`) to drive the session, and by the snapshot
-    /// builder to read `turn_in_flight`. Mutation goes through `view.update`,
+    /// builder to read `turn.is_in_flight()`. Mutation goes through `view.update`,
     /// which notifies the view's own cached subtree.
     pub(in crate::workspace) fn agent_chat_view(&self) -> Option<&Entity<AgentChatView>> {
         match &self.content {

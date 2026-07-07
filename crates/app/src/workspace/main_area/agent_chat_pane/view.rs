@@ -123,7 +123,7 @@ impl Turn {
 }
 
 /// The pane's derived activity, the single source consumed by the working
-/// indicator, the lane badge, and (later) the completion notification edge.
+/// indicator, the lane badge, and the status-pulse gate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum ActivityState {
     Idle,
@@ -322,18 +322,24 @@ impl AgentChatView {
         }
     }
 
-    /// The pane's derived activity — the single source of "is the agent busy".
-    /// A pending permission takes precedence (it needs the user, not the
-    /// agent); otherwise the agent is [`ActivityState::Working`] while the
-    /// prompt turn is in flight **or** a background subagent's child tool is
-    /// still running past the turn's `end_turn` (see
-    /// [`daruda_acp::has_running_background_tool`]).
+    /// Whether the agent is doing work right now — the prompt turn is in flight
+    /// **or** a background subagent's child tool is still running past the turn's
+    /// `end_turn` (see [`daruda_acp::has_running_background_tool`]). This is the
+    /// animation-liveness predicate the status-pulse gate reads, kept distinct
+    /// from [`Self::activity_state`]: a pending permission changes the badge
+    /// *label* but must not stop a still-live tool badge from animating.
+    pub(in crate::workspace) fn is_busy(&self) -> bool {
+        self.turn.is_in_flight() || has_running_background_tool(&self.items)
+    }
+
+    /// The pane's derived activity — the single source of the badge label. A
+    /// pending permission takes precedence (it needs the user, not the agent);
+    /// otherwise the agent is [`ActivityState::Working`] while [`Self::is_busy`].
     pub(in crate::workspace) fn activity_state(&self) -> ActivityState {
         if self.pending_permission.is_some() {
             return ActivityState::AwaitingPermission;
         }
-        let busy = self.turn.is_in_flight() || has_running_background_tool(&self.items);
-        if busy {
+        if self.is_busy() {
             ActivityState::Working
         } else {
             ActivityState::Idle
@@ -580,8 +586,8 @@ impl AgentChatView {
                 self.settle_turn();
                 // Drain the next buffered prompt (if any) now that the turn
                 // completed — one per `TurnEnded`, so the queue advances a single
-                // turn at a time and `turn_in_flight` keeps tracking exactly one
-                // live turn. A no-op when nothing is buffered or on a cancelled
+                // turn at a time and `turn.is_in_flight()` keeps tracking exactly
+                // one live turn. A no-op when nothing is buffered or on a cancelled
                 // turn whose queue is empty. Pumping here (not inside
                 // `settle_turn`) is deliberate: `settle_turn` is also the Stop /
                 // `Error` teardown, and pumping from all three would double-drain
@@ -754,7 +760,7 @@ impl AgentChatView {
             // is already in flight. Buffer the prompt in submission order — the
             // local echo above already shows it — and drain it one-per-turn via
             // `pump_pending_prompt` (at connect, then on each `TurnEnded`). Do
-            // *not* set `turn_in_flight`: nothing new is on the wire yet.
+            // *not* mark the turn in flight: nothing new is on the wire yet.
             self.pending_prompts.push(text);
         }
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
@@ -806,7 +812,7 @@ impl AgentChatView {
     ///
     /// `session/cancel` is only cooperative: a hung or dead agent may never
     /// return a `Cancelled` stop reason, and `AcpEvent::TurnEnded` (the sole
-    /// other place `turn_in_flight` clears) would then never arrive — leaving
+    /// other place the in-flight turn clears) would then never arrive — leaving
     /// the turn pulsing forever with the input stuck on "Stop". So Stop is
     /// authoritative here: clear the in-flight state, settle streaming text and
     /// still-running tool calls, and drain any pending permission. A later
@@ -822,7 +828,7 @@ impl AgentChatView {
         // buffered prompts so the cancelled turn's later `TurnEnded` finds an
         // empty buffer and `pump_pending_prompt` no-ops — otherwise Stop would
         // silently auto-fire the next queued prompt (the bottom-dock input does
-        // not gate Send on `turn_in_flight`). The clear runs now, before the
+        // not gate Send on `turn.is_in_flight()`). The clear runs now, before the
         // cancelled `TurnEnded` arrives over the event pump.
         self.pending_prompts.clear();
         // The settle above mutates items (streaming → done, running tools →

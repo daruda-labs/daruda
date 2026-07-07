@@ -25,7 +25,7 @@ impl Workspace {
         // `agent_chat_statuses`. Reading each view here (during render)
         // registers the dependency that makes a view's `cx.notify()` dirty
         // this snapshot, the same pattern the bottom-dock snapshot uses for
-        // `turn_in_flight`.
+        // `turn.is_in_flight()`.
         let acp_statuses = self.agent_chat_statuses(cx);
         let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
@@ -172,7 +172,7 @@ impl Workspace {
         //
         // Reading the `AgentChatView` entity here registers it in the
         // Workspace window's `tracked_entities`, so the bottom-dock snapshot
-        // (and the Stop/Send button) refreshes when `turn_in_flight` flips.
+        // (and the Stop/Send button) refreshes when `turn.is_in_flight()` flips.
         // This does NOT widen the scroll-repaint cost: the embedded view is an
         // element-tree descendant of the Workspace, so its `cx.notify()`
         // already marks the Workspace dirty via ancestor propagation
@@ -189,7 +189,7 @@ impl Workspace {
             .map(|_| focused_id);
         // The mode chip shows in the bottom input only when the focused pane is
         // an Agent chat pane that advertises modes — independent of
-        // `turn_in_flight`, so the mode can be set before the first prompt. A
+        // `turn.is_in_flight()`, so the mode can be set before the first prompt. A
         // terminal-pane focus yields `None` (the input is shared across pane
         // kinds, so the chip must stay agent-only).
         let agent_mode = self

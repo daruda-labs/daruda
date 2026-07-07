@@ -1513,19 +1513,23 @@ impl Workspace {
         cx.notify();
     }
 
-    /// `true` when any AgentChat pane has a turn in flight. Gates the
-    /// status-pulse pump so its Working footer's animated badge keeps ticking
-    /// (the pump only runs for windows that actually show motion).
+    /// `true` when any AgentChat pane is busy (a prompt turn in flight OR a
+    /// background subagent tool still running — [`AgentChatView::is_busy`]).
+    /// Gates the status-pulse pump so animated badges keep ticking (the pump
+    /// only runs for windows that actually show motion). Uses the raw busy
+    /// predicate, not `activity_state()`: a pending permission must not stop a
+    /// still-live tool badge from animating.
     pub(crate) fn has_in_flight_agent_chat(&self, cx: &gpui::App) -> bool {
         self.active_runtime()
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())
-            .any(|v| v.read(cx).turn.is_in_flight())
+            .any(|v| v.read(cx).is_busy())
     }
 
-    /// Dirty every in-flight AgentChat view so its `.cached()` subtree
-    /// re-renders on each status-pulse tick — otherwise the Working footer's
+    /// Dirty every busy AgentChat view ([`AgentChatView::is_busy`] — a prompt
+    /// turn in flight OR a background subagent tool still running) so its
+    /// `.cached()` subtree re-renders on each status-pulse tick — otherwise the
     /// badge animation freezes (root CLAUDE.md Pitfall #10). Lease-free
     /// (`App::notify` by id), like the dock notifiers.
     pub(crate) fn notify_in_flight_agent_chats(&self, cx: &mut Context<Self>) {
@@ -1534,7 +1538,7 @@ impl Workspace {
             .panes
             .iter()
             .filter_map(|p| p.agent_chat_view())
-            .filter(|v| v.read(cx).turn.is_in_flight())
+            .filter(|v| v.read(cx).is_busy())
             .map(|v| v.entity_id())
             .collect();
         for id in ids {

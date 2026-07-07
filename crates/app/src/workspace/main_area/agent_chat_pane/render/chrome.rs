@@ -189,10 +189,11 @@ fn format_elapsed(d: std::time::Duration) -> String {
 }
 
 /// Animated trailing dots (".", "..", "...") for any "in progress" label. Cycles
-/// off the shared, CPU-gated `StatusPulseClock` — the pulse pump dirties the
-/// in-flight agent chat view each tick (`Workspace::notify_in_flight_agent_chats`),
-/// so callers advance without a per-frame animation. Shared by the working
-/// footer / indicator and the running tool-call badge.
+/// off the shared, CPU-gated `StatusPulseClock` — the pulse pump dirties each
+/// agent chat view in the Working activity state (incl. background subagent
+/// activity) every tick (`Workspace::notify_in_flight_agent_chats`), so callers
+/// advance without a per-frame animation. Shared by the working footer /
+/// indicator and the running tool-call badge.
 pub(super) fn pulse_dots(cx: &gpui::App) -> String {
     let tick = cx
         .try_global::<StatusPulseClock>()
@@ -219,9 +220,10 @@ fn working_status(content: &AgentChatView) -> SharedString {
 /// streaming) — see `rows::project`'s gate. It lives *in* the conversation
 /// flow, so the progress signal sits where the next response will appear. The
 /// label gets animated trailing dots (".", "..", "...") off the shared
-/// `StatusPulseClock` — the pulse pump dirties this view while the turn is in
-/// flight (`Workspace::notify_in_flight_agent_chats`), so they advance without
-/// a per-frame animation. Cancelling is the bottom-dock Stop button.
+/// `StatusPulseClock` — the pulse pump dirties this view while it is in the
+/// Working activity state (incl. background subagent activity)
+/// (`Workspace::notify_in_flight_agent_chats`), so they advance without a
+/// per-frame animation. Cancelling is the bottom-dock Stop button.
 pub(super) fn working_indicator(
     content: &AgentChatView,
     cx: &mut Context<AgentChatView>,

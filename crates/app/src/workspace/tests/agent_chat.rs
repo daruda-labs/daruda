@@ -1167,7 +1167,7 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
 /// buffered behind the running turn, `cancel_turn` clears the whole queue so the
 /// cancelled turn's later `TurnEnded` → `pump_pending_prompt` finds an empty
 /// buffer and cannot silently auto-fire the next prompt (the bottom-dock input
-/// does not gate Send on `turn_in_flight`, so this queue-behind-a-turn state is
+/// does not gate Send on `turn.is_in_flight()`, so this queue-behind-a-turn state is
 /// reachable in normal use).
 #[gpui::test]
 async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
