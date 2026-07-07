@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ModeStateView, PermissionDecision,
     PermissionKindView, PlanEntryView, SlashCommand, apply_update, cancel_pending_tools,
-    finalize_streaming, permission_item,
+    finalize_streaming, has_running_background_tool, permission_item,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -120,6 +120,15 @@ impl Turn {
             Turn::Idle => None,
         }
     }
+}
+
+/// The pane's derived activity, the single source consumed by the working
+/// indicator, the lane badge, and (later) the completion notification edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum ActivityState {
+    Idle,
+    Working,
+    AwaitingPermission,
 }
 
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
@@ -305,17 +314,29 @@ impl AgentChatView {
             AgentSessionStatus::PreparingRuntime(_) | AgentSessionStatus::Connecting => {
                 Some(SessionStatus::Connecting)
             }
-            AgentSessionStatus::Connected => {
-                if self.turn.is_in_flight() {
-                    if self.pending_permission.is_some() {
-                        Some(SessionStatus::NeedsAttention)
-                    } else {
-                        Some(SessionStatus::Working)
-                    }
-                } else {
-                    Some(SessionStatus::Idle)
-                }
-            }
+            AgentSessionStatus::Connected => Some(match self.activity_state() {
+                ActivityState::AwaitingPermission => SessionStatus::NeedsAttention,
+                ActivityState::Working => SessionStatus::Working,
+                ActivityState::Idle => SessionStatus::Idle,
+            }),
+        }
+    }
+
+    /// The pane's derived activity — the single source of "is the agent busy".
+    /// A pending permission takes precedence (it needs the user, not the
+    /// agent); otherwise the agent is [`ActivityState::Working`] while the
+    /// prompt turn is in flight **or** a background subagent's child tool is
+    /// still running past the turn's `end_turn` (see
+    /// [`daruda_acp::has_running_background_tool`]).
+    pub(in crate::workspace) fn activity_state(&self) -> ActivityState {
+        if self.pending_permission.is_some() {
+            return ActivityState::AwaitingPermission;
+        }
+        let busy = self.turn.is_in_flight() || has_running_background_tool(&self.items);
+        if busy {
+            ActivityState::Working
+        } else {
+            ActivityState::Idle
         }
     }
 
@@ -676,7 +697,7 @@ impl AgentChatView {
         let old = std::mem::take(&mut self.rows);
         // The inline working indicator means "answering" — suppress it while
         // blocked on a permission prompt (the card + footer already say so).
-        let awaiting_response = self.turn.is_in_flight() && self.pending_permission.is_none();
+        let awaiting_response = matches!(self.activity_state(), ActivityState::Working);
         self.rows = project(&self.items, &self.fold, awaiting_response);
 
         if let Some(at) = old

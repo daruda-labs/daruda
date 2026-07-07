@@ -14,7 +14,9 @@ use gpui::{AppContext as _, Entity, TestAppContext};
 use super::build_workspace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
-use crate::workspace::main_area::agent_chat_pane::view::{AgentChatView, AgentSessionStatus, Turn};
+use crate::workspace::main_area::agent_chat_pane::view::{
+    ActivityState, AgentChatView, AgentSessionStatus, Turn,
+};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -913,6 +915,138 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
 
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
+}
+
+/// `activity_state()` (and the lane badge it drives via `to_session_status`) is
+/// derived from turn-in-flight OR a background subagent's child tool still
+/// running — with a pending permission taking precedence. Covers the four
+/// state combinations, including the regression the whole task fixes: the turn
+/// has ended but a background child tool is still running, so the pane must
+/// still read `Working`.
+#[gpui::test]
+async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppContext) {
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    // A child tool call (parent_tool_id = Some) with the given status.
+    let child = |status| {
+        ChatItem::ToolCall(ToolCallItem {
+            id: "child".into(),
+            title: "child".into(),
+            kind: ToolKindView::Read,
+            status,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: Some("parent".into()),
+        })
+    };
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(tmp.clone()),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                // Connected so `to_session_status` maps activity (not a
+                // connecting / dormant status).
+                agent_view(ws, id).update(cx, |v, _| {
+                    v.status = AgentSessionStatus::Connected;
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+
+    // 1) Turn in flight, no permission, no background tool → Working.
+    view.update(cx, |v, _| {
+        v.turn = Turn::InFlight {
+            started_at: std::time::Instant::now(),
+        };
+        v.items.clear();
+    });
+    view.read_with(cx, |v, _| {
+        assert_eq!(v.activity_state(), ActivityState::Working);
+        assert_eq!(
+            v.to_session_status(),
+            Some(daruda_claude::SessionStatus::Working)
+        );
+    });
+
+    // 2) Turn idle, but a background subagent's child tool still running → the
+    //    regression: the pane must stay Working past the turn boundary.
+    view.update(cx, |v, _| {
+        v.turn = Turn::Idle;
+        v.items = vec![child(ToolStatusView::InProgress)];
+    });
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            v.activity_state(),
+            ActivityState::Working,
+            "a running background child tool keeps the pane Working after end_turn"
+        );
+        assert_eq!(
+            v.to_session_status(),
+            Some(daruda_claude::SessionStatus::Working)
+        );
+    });
+
+    // 3) Pending permission takes precedence over everything else.
+    view.update(cx, |v, _| {
+        v.turn = Turn::Idle;
+        v.items.clear();
+        v.pending_permission = Some(7);
+    });
+    view.read_with(cx, |v, _| {
+        assert_eq!(v.activity_state(), ActivityState::AwaitingPermission);
+        assert_eq!(
+            v.to_session_status(),
+            Some(daruda_claude::SessionStatus::NeedsAttention)
+        );
+    });
+
+    // 4) Idle: no turn, no permission, only a top-level or completed tool.
+    view.update(cx, |v, _| {
+        v.turn = Turn::Idle;
+        v.pending_permission = None;
+        v.items = vec![
+            child(ToolStatusView::Completed),
+            ChatItem::ToolCall(ToolCallItem {
+                id: "top".into(),
+                title: "top".into(),
+                kind: ToolKindView::Read,
+                status: ToolStatusView::InProgress,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: None,
+                parent_tool_id: None,
+            }),
+        ];
+    });
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            v.activity_state(),
+            ActivityState::Idle,
+            "a completed child and a top-level running tool are not background activity"
+        );
+        assert_eq!(
+            v.to_session_status(),
+            Some(daruda_claude::SessionStatus::Idle)
+        );
+    });
 }
 
 #[gpui::test]

@@ -132,6 +132,18 @@ pub fn cancel_pending_tools(items: &mut [ChatItem]) {
     }
 }
 
+/// True when a background subagent's child tool call is still running — a
+/// `parent_tool_id`-linked tool in a live state. The Claude adapter flattens
+/// subagent activity into the one session, and such children keep running
+/// after the parent turn's `end_turn`, so this is what tells the host the
+/// agent is still working past the turn boundary.
+pub fn has_running_background_tool(items: &[ChatItem]) -> bool {
+    items.iter().any(|it| {
+        matches!(it,
+            ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some() && tc.status.is_live())
+    })
+}
+
 /// Fold a `UserMessageChunk` into the item list.
 ///
 /// The host echoes the user's prompt locally on send (a `UserText` pushed
@@ -718,6 +730,55 @@ mod tests {
             "completed is terminal"
         );
         assert_eq!(status(3), ToolStatusView::Failed, "failed is terminal");
+    }
+
+    #[test]
+    fn has_running_background_tool_tracks_live_child_calls() {
+        let child = |status| {
+            ChatItem::ToolCall(ToolCallItem {
+                id: "child".to_string(),
+                title: "child".to_string(),
+                kind: ToolKindView::Read,
+                status,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: None,
+                parent_tool_id: Some("parent".to_string()),
+            })
+        };
+        // A subagent's child call in a live state → still working.
+        assert!(has_running_background_tool(&[child(
+            ToolStatusView::InProgress
+        )]));
+        assert!(has_running_background_tool(&[child(
+            ToolStatusView::Pending
+        )]));
+        // A settled / stopped child no longer counts.
+        assert!(!has_running_background_tool(&[child(
+            ToolStatusView::Completed
+        )]));
+        assert!(!has_running_background_tool(&[child(
+            ToolStatusView::Failed
+        )]));
+        assert!(!has_running_background_tool(&[child(
+            ToolStatusView::Cancelled
+        )]));
+        // A top-level (parent-less) live call is the turn's own work, not a
+        // background subagent — excluded so it doesn't double-count the turn.
+        assert!(!has_running_background_tool(&[ChatItem::ToolCall(
+            ToolCallItem {
+                id: "top".to_string(),
+                title: "top".to_string(),
+                kind: ToolKindView::Read,
+                status: ToolStatusView::InProgress,
+                diffs: Vec::new(),
+                output: Vec::new(),
+                raw_input: None,
+                parent_tool_id: None,
+            }
+        )]));
+        // Empty conversation → nothing running.
+        assert!(!has_running_background_tool(&[]));
     }
 
     #[test]
