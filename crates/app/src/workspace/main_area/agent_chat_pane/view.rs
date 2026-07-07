@@ -384,6 +384,32 @@ impl AgentChatView {
         self.dim_amount = amount.clamp(0.0, 1.0);
     }
 
+    /// Enter the `Connecting` status and repaint. Self-notifying so the event
+    /// pump can't advance the connection state without dirtying the pane.
+    pub(in crate::workspace) fn set_connecting(&mut self, cx: &mut Context<Self>) {
+        self.status = AgentSessionStatus::Connecting;
+        cx.notify();
+    }
+
+    /// Enter the `Error` status carrying `message` and repaint. Self-notifying
+    /// so the event pump can't surface a failure without dirtying the pane.
+    pub(in crate::workspace) fn set_error(&mut self, message: String, cx: &mut Context<Self>) {
+        self.status = AgentSessionStatus::Error(message);
+        cx.notify();
+    }
+
+    /// Enter the `PreparingRuntime` status at `phase` and repaint.
+    /// Self-notifying so the runtime-progress drain can't advance the banner
+    /// without dirtying the pane.
+    pub(in crate::workspace) fn set_preparing(
+        &mut self,
+        phase: RuntimePrepPhase,
+        cx: &mut Context<Self>,
+    ) {
+        self.status = AgentSessionStatus::PreparingRuntime(phase);
+        cx.notify();
+    }
+
     /// Blend `c` toward gray by the current dim amount, alpha preserved. The
     /// render wraps every color it applies with this so an unfocused pane grays
     /// like an inactive terminal while keeping the window translucency (an

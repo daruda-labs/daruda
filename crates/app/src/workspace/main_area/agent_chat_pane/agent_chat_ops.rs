@@ -337,9 +337,8 @@ impl Workspace {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let resuming = resume.is_some();
             view.update(cx, |v, cx| {
-                v.status = AgentSessionStatus::Connecting;
                 v.restoring = resuming;
-                cx.notify();
+                v.set_connecting(cx);
             });
             // Idle → Connecting is a dock-badge status change; the cached
             // docks need an explicit dirty (see `notify_status_docks`).
@@ -443,8 +442,7 @@ impl Workspace {
                             AgentSessionStatus::Connecting
                                 | AgentSessionStatus::PreparingRuntime(_)
                         ) {
-                            v.status = AgentSessionStatus::PreparingRuntime(phase);
-                            cx.notify();
+                            v.set_preparing(phase, cx);
                         }
                     });
                     true
@@ -495,8 +493,7 @@ impl Workspace {
                             view.update(cx, |v, cx| {
                                 v.handle = Some(handle);
                                 if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
-                                    v.status = AgentSessionStatus::Connecting;
-                                    cx.notify();
+                                    v.set_connecting(cx);
                                 }
                                 // Forward the first prompt submitted before the
                                 // handle existed (queued during the handshake or
@@ -541,8 +538,7 @@ impl Workspace {
                                         // Release the replay gate and return to a
                                         // plain connecting state before the retry.
                                         v.restoring = false;
-                                        v.status = AgentSessionStatus::Connecting;
-                                        cx.notify();
+                                        v.set_connecting(cx);
                                     });
                                 }
                                 let report = ErrorReport::new(
@@ -678,8 +674,7 @@ impl Workspace {
                                 // gate and return to a plain connecting state
                                 // before the fresh retry.
                                 v.restoring = false;
-                                v.status = AgentSessionStatus::Connecting;
-                                cx.notify();
+                                v.set_connecting(cx);
                             });
                         }
                         let report = ErrorReport::new("ACP session resume failed; retrying fresh")
@@ -703,8 +698,7 @@ impl Workspace {
                     let _ = this.update(cx, |ws, cx| {
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
                             view.update(cx, |v, cx| {
-                                v.status = AgentSessionStatus::Error(message.clone());
-                                cx.notify();
+                                v.set_error(message.clone(), cx);
                             });
                             // Connecting → Error clears the badge (maps to
                             // `None`); dirty the cached docks so the stale
