@@ -264,6 +264,14 @@ fn project_run(
                 k += 1;
             }
             let grun = gstart..k;
+            // A tool group with a still-running member (or a live subagent
+            // descendant) stays surfaced even when the response is collapsed —
+            // its header pops out (still folded) below the conclusion so a
+            // folded in-flight turn shows *what* is running; the members stay
+            // hidden until the user expands the group.
+            let group_live = grun.clone().any(
+                |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(items, tc)),
+            );
             if grun.len() >= TOOL_GROUP_MIN {
                 let gid = tool_id(&items[gstart]);
                 let group_key = FoldKey::ToolGroup(gid.clone());
@@ -275,7 +283,7 @@ fn project_run(
                         count: grun.len(),
                         collapsed: group_collapsed,
                     },
-                    hidden: response_collapsed,
+                    hidden: response_collapsed && !group_live,
                     indent: base_indent,
                 });
                 for j in grun {
@@ -288,7 +296,7 @@ fn project_run(
             } else {
                 rows.push(RenderRow {
                     kind: RowKind::AgentItem(gstart),
-                    hidden: response_collapsed,
+                    hidden: response_collapsed && !group_live,
                     indent: base_indent,
                 });
             }
@@ -333,6 +341,45 @@ fn is_nested_child(items: &[ChatItem], tc: &ToolCallItem) -> bool {
     items
         .iter()
         .any(|it| matches!(it, ChatItem::ToolCall(p) if p.id == pid))
+}
+
+/// Recursion cap for walking flattened subagent nesting (`parent_tool_id`
+/// links). Real nesting is one or two levels; the cap only fires on a malformed
+/// / cyclic id from the adapter, bounding the stack instead of overflowing it.
+/// Shared by the render's card nesting and `subagent_subtree_live`.
+pub(in crate::workspace) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
+
+/// Whether a tool call is still working as a unit — its own status is live, or
+/// (for a subagent parent the adapter marked `Completed` when its SDK call
+/// returned) a flattened descendant is still running. Keeps a running tool /
+/// group visible under a collapsed response and its card badge reading as
+/// in-progress.
+pub(in crate::workspace) fn tool_or_subtree_live(items: &[ChatItem], tc: &ToolCallItem) -> bool {
+    tc.status.is_live() || subagent_subtree_live(items, &tc.id, SUBAGENT_NEST_DEPTH_CAP)
+}
+
+/// Whether the subagent unit rooted at `parent_id` is still working — some
+/// (transitive, depth-bounded) descendant tool call linked via `parent_tool_id`
+/// is live. `remaining_depth` bounds the walk exactly like the render's nesting
+/// cap, so a malformed / cyclic `parent_tool_id` from the adapter can't recurse
+/// without bound. The tool card reads this so a subagent parent the adapter
+/// marked `Completed` when its SDK call returned — while the flattened child
+/// tool calls stream in and run afterward — still reads as running, not "done".
+pub(in crate::workspace) fn subagent_subtree_live(
+    items: &[ChatItem],
+    parent_id: &str,
+    remaining_depth: usize,
+) -> bool {
+    if remaining_depth == 0 {
+        return false;
+    }
+    items.iter().any(|it| {
+        matches!(it,
+            ChatItem::ToolCall(c)
+                if c.parent_tool_id.as_deref() == Some(parent_id)
+                    && (c.status.is_live()
+                        || subagent_subtree_live(items, &c.id, remaining_depth - 1)))
+    })
 }
 
 /// First tool call's id for a `ToolCall` item (the group's stable key); empty
@@ -843,6 +890,123 @@ mod tests {
         assert!(
             rows.iter().any(|r| matches!(r.kind, RowKind::AgentItem(1))),
             "an orphan child (no present parent) still renders as a row"
+        );
+    }
+
+    fn child_of(id: &str, parent: &str, status: ToolStatusView) -> ChatItem {
+        let mut c = tool(id, status);
+        if let ChatItem::ToolCall(tc) = &mut c {
+            tc.parent_tool_id = Some(parent.to_owned());
+        }
+        c
+    }
+
+    #[test]
+    fn subagent_parent_reads_live_while_a_child_runs() {
+        use ToolStatusView::{Completed, InProgress};
+        // The reported bug: adapter marks the parent Task `Completed` (its SDK
+        // call returned) while a flattened child keeps running — the unit is
+        // still working, so the subtree must read live.
+        let items = [
+            tool("task", Completed),
+            child_of("child", "task", InProgress),
+        ];
+        assert!(
+            subagent_subtree_live(&items, "task", 8),
+            "a live child keeps the subagent parent reading as running"
+        );
+    }
+
+    #[test]
+    fn subagent_parent_settles_when_all_children_terminal() {
+        use ToolStatusView::{Completed, Failed};
+        let items = [
+            tool("task", Completed),
+            child_of("a", "task", Completed),
+            child_of("b", "task", Failed),
+        ];
+        assert!(
+            !subagent_subtree_live(&items, "task", 8),
+            "no live descendant → the parent unit is done"
+        );
+    }
+
+    #[test]
+    fn subagent_liveness_is_transitive() {
+        use ToolStatusView::{Completed, InProgress};
+        // parent → child(done) → grandchild(running): the running grandchild
+        // still makes the whole unit live.
+        let items = [
+            tool("task", Completed),
+            child_of("child", "task", Completed),
+            child_of("grand", "child", InProgress),
+        ];
+        assert!(subagent_subtree_live(&items, "task", 8));
+    }
+
+    #[test]
+    fn subagent_liveness_no_children_is_false() {
+        let items = [tool("task", ToolStatusView::Completed)];
+        assert!(!subagent_subtree_live(&items, "task", 8));
+    }
+
+    #[test]
+    fn subagent_liveness_depth_cap_terminates_on_cycle() {
+        use ToolStatusView::Completed;
+        // A malformed self-parent (id == parent_tool_id) with a terminal status
+        // must not recurse without bound; the depth budget forces `false`.
+        let items = [child_of("x", "x", Completed)];
+        assert!(!subagent_subtree_live(&items, "x", 8));
+    }
+
+    #[test]
+    fn collapsed_response_surfaces_a_live_tool_group() {
+        use ToolStatusView::{Completed, InProgress};
+        // A non-trivial response (a 2-tool group) with one live member, response
+        // manually collapsed: the group header pops out (still folded) so a
+        // folded in-flight turn shows *what* is running; members stay hidden.
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("t1", InProgress),
+            tool("t2", Completed),
+        ];
+        let mut fold = FoldState::default();
+        fold.set_all([FoldKey::Response(0)], false); // force the response collapsed
+        let rows = project(&items, &fold, false);
+        let header = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+            .expect("group header present");
+        assert!(
+            !header.hidden,
+            "a collapsed response still surfaces a live tool group header"
+        );
+        assert!(
+            rows.iter()
+                .filter(|r| matches!(r.kind, RowKind::AgentItem(_)))
+                .all(|r| r.hidden),
+            "the live group's members stay folded under the collapsed response"
+        );
+    }
+
+    #[test]
+    fn collapsed_response_hides_a_settled_tool_group() {
+        use ToolStatusView::Completed;
+        let items = [
+            ChatItem::UserText("q".into()),
+            tool("t1", Completed),
+            tool("t2", Completed),
+        ];
+        let mut fold = FoldState::default();
+        fold.set_all([FoldKey::Response(0)], false);
+        let rows = project(&items, &fold, false);
+        let header = rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::ToolGroupHeader { .. }))
+            .expect("group header present");
+        assert!(
+            header.hidden,
+            "a settled tool group folds away with the collapsed response"
         );
     }
 

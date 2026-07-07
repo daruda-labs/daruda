@@ -129,10 +129,10 @@ fn spawn_status_pulse(cx: &mut App) {
                     ws.notify_left_dock(cx);
                 }
                 // AgentChat panes are separately-cached main-area entities, so
-                // their in-flight Working-footer badge needs its own dirty.
-                if ws.has_in_flight_agent_chat(cx) {
-                    ws.notify_in_flight_agent_chats(cx);
-                }
+                // their in-flight rollup dot / working row needs its own dirty —
+                // plus one trailing frame when a pane settles, or its last
+                // "running" frame freezes (see `pulse_agent_chats`).
+                ws.pulse_agent_chats(cx);
             });
         },
         cx,

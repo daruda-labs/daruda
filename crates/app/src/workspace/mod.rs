@@ -423,6 +423,16 @@ pub struct Workspace {
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
     pub(in crate::workspace) last_agent_id: Option<String>,
+    /// AgentChat view ids that were in the Working state on the previous
+    /// status-pulse tick. The pulse pump repaints busy views each tick; the
+    /// moment a view settles (leaves Working) the pump would stop and its last
+    /// "running" frame — an amber rollup dot / working row — freezes, because a
+    /// cached view can miss the settling event's own notify (the gpui
+    /// `detect_accessed_entities` lost-wakeup, see
+    /// `lane_switch_scroll_dead_rootcause`). Remembering the previous busy set
+    /// lets the pump paint one final settled frame for the just-settled views.
+    /// Runtime-only; never serialized.
+    pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
     /// True while a git commit or push operation is running. Prevents
     /// duplicate submissions when the user double-clicks Commit/Push.
     pub(in crate::workspace) git_op_in_flight: bool,
@@ -1008,6 +1018,7 @@ impl Workspace {
             agent: config.agent.clone(),
             agents: config.agents.clone(),
             last_agent_id: None,
+            agent_pulse_prev: Vec::new(),
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
@@ -1513,27 +1524,25 @@ impl Workspace {
         cx.notify();
     }
 
-    /// `true` when any AgentChat pane is busy (a prompt turn in flight OR a
-    /// background subagent tool still running — [`AgentChatView::is_busy`]).
-    /// Gates the status-pulse pump so animated badges keep ticking (the pump
-    /// only runs for windows that actually show motion). Uses the raw busy
-    /// predicate, not `activity_state()`: a pending permission must not stop a
-    /// still-live tool badge from animating.
-    pub(crate) fn has_in_flight_agent_chat(&self, cx: &gpui::App) -> bool {
-        self.active_runtime()
-            .panes
-            .iter()
-            .filter_map(|p| p.agent_chat_view())
-            .any(|v| v.read(cx).is_busy())
-    }
-
-    /// Dirty every busy AgentChat view ([`AgentChatView::is_busy`] — a prompt
-    /// turn in flight OR a background subagent tool still running) so its
-    /// `.cached()` subtree re-renders on each status-pulse tick — otherwise the
-    /// badge animation freezes (root CLAUDE.md Pitfall #10). Lease-free
-    /// (`App::notify` by id), like the dock notifiers.
-    pub(crate) fn notify_in_flight_agent_chats(&self, cx: &mut Context<Self>) {
-        let ids: Vec<_> = self
+    /// Drive the AgentChat status pulse and paint one final settled frame for a
+    /// pane that just left the Working state. Called every status-pulse tick.
+    ///
+    /// A busy AgentChat view ([`AgentChatView::is_busy`] — a prompt turn in
+    /// flight OR a background subagent tool still running) is dirtied each tick
+    /// so its animated rollup dot / working row keeps ticking (root CLAUDE.md
+    /// Pitfall #10). Crucially, a view that was busy on the *previous* tick but
+    /// no longer is gets one more dirty here — otherwise its last "running"
+    /// frame (amber rollup dot / working row) freezes: during a silent
+    /// background-subagent stretch the pulse pump is the only repaint driver,
+    /// and the settling event's own self-notify can miss a cached view that
+    /// fell out of the window's tracked set (gpui `detect_accessed_entities`
+    /// lost-wakeup, see `lane_switch_scroll_dead_rootcause`). We re-render the
+    /// workspace (so its snapshot re-reads / re-tracks the views) and dirty each
+    /// view by id — the same pair the busy ticks do — for one trailing tick so
+    /// the settled (idle / done) frame actually paints. Returns nothing; updates
+    /// [`Self::agent_pulse_prev`] in place.
+    pub(crate) fn pulse_agent_chats(&mut self, cx: &mut Context<Self>) {
+        let now: Vec<gpui::EntityId> = self
             .active_runtime()
             .panes
             .iter()
@@ -1541,9 +1550,19 @@ impl Workspace {
             .filter(|v| v.read(cx).is_busy())
             .map(|v| v.entity_id())
             .collect();
-        for id in ids {
-            gpui::App::notify(cx, id);
+        // Nothing animating and nothing just settled — fully at rest, no work.
+        if now.is_empty() && self.agent_pulse_prev.is_empty() {
+            return;
         }
+        // Re-render the workspace so the snapshot re-reads (re-tracks) the
+        // cached AgentChat views before we dirty them by id — mirrors the
+        // animating path's workspace notify, and is what lets the trailing
+        // settled frame reach a view that had fallen out of the tracked set.
+        cx.notify();
+        for id in now.iter().chain(self.agent_pulse_prev.iter()) {
+            gpui::App::notify(cx, *id);
+        }
+        self.agent_pulse_prev = now;
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

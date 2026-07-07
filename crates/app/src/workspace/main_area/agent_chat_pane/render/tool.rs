@@ -17,12 +17,10 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     diff_editor_key, fold_active, renders_raw_input,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
+use crate::workspace::main_area::agent_chat_pane::rows::{
+    SUBAGENT_NEST_DEPTH_CAP, subagent_subtree_live,
+};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
-
-/// Recursion cap for nested subagent tool cards. Real subagent nesting is one
-/// or two levels; the cap only fires on a malformed / cyclic `parentToolUseId`
-/// from the adapter, bounding the stack instead of overflowing it.
-const MAX_SUBAGENT_NEST_DEPTH: usize = 8;
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
 /// in progress). The header is the existing title + status-badge row, which
@@ -44,11 +42,23 @@ pub(super) fn tool_card(
     depth: usize,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let (badge_text, badge_fg) = tool_status_badge(tc.status, t, dim, cx);
+    // A subagent parent (Task/Agent) whose flattened children keep running past
+    // its own completion must not read "done": the adapter marks the parent
+    // `Completed` when its SDK call returns, but the child tool calls stream in
+    // and run afterward (see `subagent_subtree_live`). While any nested
+    // descendant is live the unit is still working, so the badge reads
+    // in-progress until the whole subtree settles.
+    let effective_status =
+        if !tc.status.is_live() && subagent_subtree_live(items, &tc.id, SUBAGENT_NEST_DEPTH_CAP) {
+            ToolStatusView::InProgress
+        } else {
+            tc.status
+        };
+    let (badge_text, badge_fg) = tool_status_badge(effective_status, t, dim, cx);
     // A live tool gets animated trailing dots (Running. / .. / ...) so the
     // in-progress state reads as live, not just a static amber label. `Pending`
     // counts as live too (see `ToolStatusView::is_live`).
-    let badge_text = if tc.status.is_live() {
+    let badge_text = if effective_status.is_live() {
         SharedString::from(format!("{badge_text}{}", pulse_dots(cx)))
     } else {
         badge_text
@@ -196,7 +206,7 @@ pub(super) fn tool_card(
     // would otherwise recurse until the stack overflows — an uncatchable abort
     // that takes the whole window down. Past the cap the children are simply not
     // nested (the parent card still renders), which no real conversation hits.
-    let children: Vec<&ToolCallItem> = if depth < MAX_SUBAGENT_NEST_DEPTH {
+    let children: Vec<&ToolCallItem> = if depth < SUBAGENT_NEST_DEPTH_CAP {
         items
             .iter()
             .filter_map(|it| match it {
