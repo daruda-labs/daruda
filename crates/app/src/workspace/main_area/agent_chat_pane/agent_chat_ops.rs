@@ -99,7 +99,65 @@ pub(in crate::workspace) fn resolve_open_agent_id(
         .unwrap_or_else(|| catalog_default_id(agents))
 }
 
+/// Whether to raise the notification: the channel must be enabled, and it is
+/// suppressed only when the app is foreground AND the firing pane is the
+/// focused one (the user is already looking at it). Mirrors the hook-
+/// notification focus gate.
+fn should_notify_agent_event(
+    enabled: bool,
+    skip_focused_pane: bool,
+    app_active: bool,
+    is_focused_pane: bool,
+) -> bool {
+    enabled && !(skip_focused_pane && app_active && is_focused_pane)
+}
+
 impl Workspace {
+    /// Fire a desktop notification for an agent-chat completion / wait event
+    /// when the channel is enabled and the pane isn't the focused one. Called
+    /// from the event pump BEFORE the event is folded into the view. A no-op
+    /// for every other event and when gated out.
+    fn maybe_notify_agent_event(
+        &self,
+        pane_id: PaneId,
+        event: &daruda_acp::AcpEvent,
+        cx: &Context<Self>,
+    ) {
+        let (enabled, body) = match event {
+            daruda_acp::AcpEvent::TurnEnded {
+                completed_normally: true,
+                ..
+            } => (
+                self.notifications.agent_completion_enabled,
+                s::agent_notification_completed(),
+            ),
+            daruda_acp::AcpEvent::PermissionRequested { .. } => (
+                self.notifications.agent_waiting_enabled,
+                s::agent_notification_waiting(),
+            ),
+            _ => return,
+        };
+        // The firing pane is "focused" only when it is the active lane's focused
+        // pane. A pane in a parked (non-active) lane never matches this global
+        // pane id, so a background lane's completion / wait always fires — the
+        // desired behavior, since the user cannot be looking at it.
+        let is_focused = self.active_runtime().focused_pane_id == pane_id;
+        if !should_notify_agent_event(
+            enabled,
+            self.notifications.skip_focused_pane,
+            crate::platform::attention::is_app_active(),
+            is_focused,
+        ) {
+            return;
+        }
+        // Title = the session's title, or the static fallback label.
+        let title = self
+            .agent_chat_view(pane_id)
+            .and_then(|v| v.read(cx).session_title.clone())
+            .unwrap_or_else(s::agent_chat_tab_title);
+        crate::platform::notifications::show(&title, &body);
+    }
+
     /// Construct an Agent chat `Pane` (no tab side-effects). Allocates the pane
     /// id and builds the `Entity<AgentChatView>`, seeding the conversation as
     /// empty and parking the session in `Idle` (or `Error` when there is no
@@ -599,6 +657,10 @@ impl Workspace {
                                 }
                                 _ => None,
                             };
+                            // Desktop notification for turn-completion / wait,
+                            // gated by focus. Must borrow `&event` before the
+                            // move into `apply_event` below.
+                            ws.maybe_notify_agent_event(pane_id, &event, cx);
                             view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
@@ -921,8 +983,35 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_open_agent_id, resolve_restored_agent};
+    use super::{resolve_open_agent_id, resolve_restored_agent, should_notify_agent_event};
     use daruda_config::AgentDefinition;
+
+    #[test]
+    fn should_notify_disabled_channel_never_fires() {
+        assert!(!should_notify_agent_event(false, true, true, true));
+        assert!(!should_notify_agent_event(false, false, false, false));
+    }
+
+    #[test]
+    fn should_notify_foreground_focused_pane_is_suppressed() {
+        assert!(!should_notify_agent_event(true, true, true, true));
+    }
+
+    #[test]
+    fn should_notify_backgrounded_pane_fires() {
+        // App is active but the firing pane is not the focused one.
+        assert!(should_notify_agent_event(true, true, true, false));
+    }
+
+    #[test]
+    fn should_notify_app_inactive_fires_even_for_focused_pane() {
+        assert!(should_notify_agent_event(true, true, false, true));
+    }
+
+    #[test]
+    fn should_notify_skip_focused_disabled_always_fires() {
+        assert!(should_notify_agent_event(true, false, true, true));
+    }
 
     fn default_catalog() -> Vec<AgentDefinition> {
         vec![AgentDefinition::claude_default()]

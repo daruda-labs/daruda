@@ -2300,6 +2300,16 @@ pub fn notification_hook_elicitation_title() -> String {
     rust_i18n::t!("notification.hook_elicitation_title").into_owned()
 }
 
+/// Body for the "agent finished a turn" desktop notification.
+pub fn agent_notification_completed() -> String {
+    rust_i18n::t!("notification.agent_completed").into_owned()
+}
+
+/// Body for the "agent is waiting for input / permission" desktop notification.
+pub fn agent_notification_waiting() -> String {
+    rust_i18n::t!("notification.agent_waiting").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold

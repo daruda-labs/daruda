@@ -694,6 +694,8 @@ notification:
   hook_permission_title: "Permission required"
   hook_idle_title: "Waiting for your input"
   hook_elicitation_title: "Waiting for your response"
+  agent_completed: "Agent finished responding"
+  agent_waiting: "Agent is waiting for your input"
 
 # Terminal annotations (SP-1)
 terminal:

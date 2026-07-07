@@ -37,6 +37,11 @@ pub struct NotificationsConfig {
     /// into a persistent attention state — they surface once, here.
     /// Gated by `skip_focused_pane` like the other channels.
     pub hook_notification_enabled: bool,
+    /// Raise a desktop notification when an agent-chat turn completes normally.
+    pub agent_completion_enabled: bool,
+    /// Raise a desktop notification when an agent-chat session enters a
+    /// permission / input wait.
+    pub agent_waiting_enabled: bool,
 }
 
 const LONG_RUNNING_DEFAULT_SECS: u64 = 30;
@@ -51,6 +56,38 @@ impl Default for NotificationsConfig {
             long_running_threshold_secs: LONG_RUNNING_DEFAULT_SECS,
             skip_focused_pane: true,
             hook_notification_enabled: true,
+            agent_completion_enabled: true,
+            agent_waiting_enabled: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_channels_default_true() {
+        let cfg = NotificationsConfig::default();
+        assert!(cfg.agent_completion_enabled);
+        assert!(cfg.agent_waiting_enabled);
+    }
+
+    #[test]
+    fn toml_round_trip_preserves_explicit_false() {
+        let toml_src = "\
+agent_completion_enabled = false
+agent_waiting_enabled = false
+";
+        let cfg: NotificationsConfig = toml::from_str(toml_src).unwrap();
+        assert!(!cfg.agent_completion_enabled);
+        assert!(!cfg.agent_waiting_enabled);
+        // Unspecified fields fall back to their defaults via `#[serde(default)]`.
+        assert!(cfg.hook_notification_enabled);
+
+        let serialized = toml::to_string(&cfg).unwrap();
+        let reparsed: NotificationsConfig = toml::from_str(&serialized).unwrap();
+        assert!(!reparsed.agent_completion_enabled);
+        assert!(!reparsed.agent_waiting_enabled);
     }
 }
