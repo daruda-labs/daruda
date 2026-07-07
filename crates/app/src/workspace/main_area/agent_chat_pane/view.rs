@@ -124,6 +124,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// Lane working directory the agent session is rooted at. `None` when the
     /// pane was opened without a resolvable lane cwd.
     pub(in crate::workspace) cwd: Option<PathBuf>,
+    /// The agent this pane runs under — an id from the config `[[agents]]`
+    /// catalog. Resolved to a launch command at connect time. Set at
+    /// create/restore (default = catalog[0]) and persisted so the pane comes
+    /// back under the same agent, whose session id is then resumable.
+    pub(in crate::workspace) agent_id: String,
     /// Connection lifecycle state. Drives the status line + input/cancel
     /// affordance.
     pub(in crate::workspace) status: AgentSessionStatus,
@@ -297,12 +302,14 @@ impl AgentChatView {
     /// connects it lazily on first focus (`maybe_connect_agent_chat`), so cold
     /// restore doesn't spin up an agent process per pane. `status` is decided
     /// by the caller (Idle when a cwd is present, Error otherwise).
+    #[allow(clippy::too_many_arguments)] // Restore/create seed values — bundling them into a struct only wraps callers.
     pub(in crate::workspace) fn new(
         pane_id: PaneId,
         window_handle: AnyWindowHandle,
         cwd: Option<PathBuf>,
         status: AgentSessionStatus,
         session_id: Option<String>,
+        agent_id: String,
         title: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -321,6 +328,7 @@ impl AgentChatView {
             cwd,
             status,
             session_id,
+            agent_id,
             // A restored pane connects lazily; the resume decision (and the
             // `restoring` flag that coalesces the replay) is made at connect
             // time by `maybe_connect_agent_chat`, not here.

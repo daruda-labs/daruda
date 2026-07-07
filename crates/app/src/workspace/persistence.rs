@@ -702,9 +702,20 @@ impl Workspace {
                     // `focus_pane` connects it lazily on first focus; when a
                     // session id is present that lazy connect resumes the prior
                     // conversation via `session/load` instead of starting fresh.
+                    //
+                    // Resolve which agent the pane relaunches under: its own
+                    // owning agent when still in the catalog (session id kept,
+                    // resume valid), else the default agent (session id dropped —
+                    // it belongs to a now-absent agent and could not resume).
+                    let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
                     self.create_agent_chat_pane(
                         ac.cwd.clone(),
-                        ac.session_id.clone(),
+                        if keep_session {
+                            ac.session_id.clone()
+                        } else {
+                            None
+                        },
+                        agent_id,
                         ac.title.clone(),
                         window,
                         cx,
@@ -900,6 +911,7 @@ fn serialize_layout(
                     cwd: ac.cwd.clone(),
                     session_id: v.session_id.clone(),
                     title: v.session_title.clone(),
+                    agent_id: Some(v.agent_id.clone()),
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {

@@ -50,6 +50,37 @@ impl DefaultPermissionMode {
     }
 }
 
+/// A selectable ACP agent: an id, a display name, and the command that launches
+/// its ACP adapter. The command is a bash-style string or a JSON stdio config —
+/// daruda_acp parses it and provisions Node.js only for npx/node-family commands.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AgentDefinition {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+}
+
+impl AgentDefinition {
+    /// The built-in Claude Code agent, used when config declares no `[[agents]]`.
+    /// The command mirrors daruda_acp's default adapter launch; the "@latest"
+    /// tag keeps us on the newest adapter (which advertises model/effort/mode as
+    /// session config options). Keep this policy comment here — daruda_config is
+    /// the single source now that the default command lives in config.
+    pub fn claude_default() -> Self {
+        Self {
+            id: "claude".to_string(),
+            name: "Claude Code".to_string(),
+            command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+        }
+    }
+}
+
+/// Default agent catalog: a single Claude entry. Used as the serde field default
+/// (missing `[[agents]]`) AND to normalize an explicitly-empty catalog.
+pub(crate) fn default_agents() -> Vec<AgentDefinition> {
+    vec![AgentDefinition::claude_default()]
+}
+
 /// Agent chat configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -198,6 +229,34 @@ mod tests {
         let omitted: AgentConfig =
             toml::from_str("default_permission_mode = \"plan\"").expect("deserialize");
         assert!(!omitted.use_modifier_to_send);
+    }
+
+    #[test]
+    fn claude_default_has_expected_fields() {
+        let d = AgentDefinition::claude_default();
+        assert_eq!(d.id, "claude");
+        assert_eq!(d.name, "Claude Code");
+        assert_eq!(
+            d.command,
+            "npx -y @agentclientprotocol/claude-agent-acp@latest"
+        );
+    }
+
+    #[test]
+    fn default_agents_is_single_claude() {
+        assert_eq!(default_agents(), vec![AgentDefinition::claude_default()]);
+    }
+
+    #[test]
+    fn agent_definition_field_round_trip() {
+        let d = AgentDefinition {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            command: "codex acp".to_string(),
+        };
+        let toml_str = toml::to_string(&d).expect("serialize");
+        let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back, d);
     }
 
     #[test]

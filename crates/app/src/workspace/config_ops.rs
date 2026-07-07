@@ -49,6 +49,7 @@ impl Workspace {
         self.notifications = config.notifications.clone();
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
+        self.agents = config.agents.clone();
         // Keep the `InputState`'s auto-grow cap in sync with the new
         // `input_max_rows` value. The cap is also baked in at construction
         // (`workspace/mod.rs`); without this update a live reload would leave

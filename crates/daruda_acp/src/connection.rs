@@ -25,11 +25,14 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, LineDirection};
 use futures::channel::mpsc::UnboundedSender;
 
-/// npm package (with `@latest`) for the ACP Claude agent adapter. Single source
-/// for both the default `npx` command and the managed-node command in
-/// [`crate::node`]. `@latest` keeps us on the newest adapter, which advertises
-/// model / effort / mode as session config options; see ../CLAUDE.md for the
-/// upstream-version policy.
+/// npm package (with `@latest`) for the ACP Claude agent adapter, used by this
+/// crate's examples and tests only (via [`AdapterCommand::default`]). The shipped
+/// app does **not** launch through this const — its default agent command lives
+/// in `daruda_config::AgentDefinition::claude_default()`; the managed-node path is
+/// the generic [`crate::node::NodeRuntime::wrap_command`], which wraps whatever
+/// command string it is handed. `@latest` keeps the examples/tests on the newest
+/// adapter, which advertises model / effort / mode as session config options; see
+/// ../CLAUDE.md for the upstream-version policy.
 pub(crate) const ADAPTER_NPM_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp@latest";
 
 /// How to launch the ACP agent adapter.
@@ -45,8 +48,9 @@ impl Default for AdapterCommand {
     fn default() -> Self {
         // Auth (subscription or API key) is the adapter's responsibility —
         // daruda passes no credentials. Assumes `npx` / `node` are on `PATH`
-        // (the System runtime case); the managed-node case rewrites this via
-        // [`crate::node::NodeRuntime::adapter_command`].
+        // (the System runtime case); the managed-node case rewrites this by
+        // passing the command string through
+        // [`crate::node::NodeRuntime::wrap_command`].
         Self(format!("npx -y {ADAPTER_NPM_PACKAGE}"))
     }
 }

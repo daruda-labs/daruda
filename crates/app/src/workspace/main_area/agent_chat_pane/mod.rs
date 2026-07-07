@@ -15,6 +15,7 @@
 
 pub(in crate::workspace) mod agent_chat_helpers;
 pub(in crate::workspace) mod agent_chat_ops;
+pub(in crate::workspace) mod agent_chip;
 pub(in crate::workspace) mod config_chip;
 pub(in crate::workspace) mod fold;
 pub(in crate::workspace) mod mode_chip;

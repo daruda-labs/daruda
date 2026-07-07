@@ -17,6 +17,7 @@ use super::ToggleLaneSwitcher;
 use super::Workspace;
 use super::command::lane_switcher::LaneCandidate;
 use crate::lane::availability::LaneAvailability;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -343,7 +344,17 @@ impl Workspace {
                 .create_pane_with_cwd(Some(new_path.clone()), window, cx)
                 .map_err(|e| e.to_string())?,
             TaskAgentSurface::AgentChat => {
-                self.create_agent_chat_pane(Some(new_path.clone()), None, None, window, cx)
+                // No source agent-chat pane here (a new lane), so open under the
+                // session-sticky default — matching `open_agent_chat_pane`.
+                let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+                self.create_agent_chat_pane(
+                    Some(new_path.clone()),
+                    None,
+                    agent_id,
+                    None,
+                    window,
+                    cx,
+                )
             }
         };
         let pane_id = pane.id;

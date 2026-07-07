@@ -354,25 +354,34 @@ pub fn connect_session(
     Ok((handle, event_rx))
 }
 
-/// Ensure a usable Node.js runtime, then open a session against the ACP adapter
-/// running on it — the entry point the host uses instead of building an
-/// [`AdapterCommand`] by hand.
+/// Launch an ACP agent from an arbitrary `command` string, provisioning a
+/// Node.js runtime only when the command needs one, then open a session — the
+/// entry point the host uses instead of building an [`AdapterCommand`] by hand.
 ///
-/// Reuses the user's system Node.js when present; otherwise downloads a managed
-/// Node.js into `node_install_dir` (see [`crate::node::ensure_node`]). A
+/// When `command` is an `npx` / `node` launcher (see
+/// [`crate::node::command_needs_node`]), a usable Node.js is ensured: the user's
+/// system Node.js when present, otherwise a managed Node.js downloaded into
+/// `node_install_dir` (see [`crate::node::ensure_node`]), and the command is
+/// rewritten to run on it. Any other command (a self-contained JSON stdio config
+/// or a standalone binary) is launched verbatim without touching Node.js. A
 /// provisioning failure is surfaced as [`AcpClientError::Runtime`], whose
 /// `Display` carries a user-facing remedy. `progress` reports runtime-prep
 /// milestones so the host can show a status line during the (first-run only)
 /// download.
-pub fn connect_session_with_node(
+pub fn connect_agent_session(
+    command: String,
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_mode: Option<String>,
     resume: Option<SessionId>,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let runtime = crate::node::ensure_node(&node_install_dir, progress)?;
-    connect_session(runtime.adapter_command(), cwd, initial_mode, resume)
+    let adapter = if crate::node::command_needs_node(&command) {
+        crate::node::ensure_node(&node_install_dir, progress)?.wrap_command(&command)
+    } else {
+        AdapterCommand(command)
+    };
+    connect_session(adapter, cwd, initial_mode, resume)
 }
 
 /// Drive the whole connection: handshake, session creation, then the prompt /

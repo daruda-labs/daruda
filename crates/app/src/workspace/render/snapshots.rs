@@ -228,6 +228,28 @@ impl Workspace {
             })
             .filter(|opts| !opts.is_empty())
             .map(|opts| (focused_id, opts));
+        // The agent switcher chip shows only when the focused pane is an Agent
+        // chat pane AND the catalog has >= 2 agents. A single-agent setup keeps
+        // today's UX (no chip). Carries the pane id, its current agent id, and
+        // the full catalog as (id, name) pairs.
+        let agent_switcher = (self.agents.len() >= 2)
+            .then(|| {
+                self.active_runtime()
+                    .panes
+                    .iter()
+                    .find(|p| p.id == focused_id)
+                    .and_then(|p| p.agent_chat_view())
+                    .map(|view| {
+                        let current = view.read(cx).agent_id.clone();
+                        let catalog = self
+                            .agents
+                            .iter()
+                            .map(|a| (a.id.clone(), a.name.clone()))
+                            .collect::<Vec<_>>();
+                        (focused_id, current, catalog)
+                    })
+            })
+            .flatten();
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
@@ -239,6 +261,7 @@ impl Workspace {
             agent_stop_pane,
             agent_mode,
             agent_config_options,
+            agent_switcher,
             shell,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }

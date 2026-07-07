@@ -29,6 +29,6 @@ pub use model::{
 };
 pub use node::{NodeError, NodeProgress, NodeRuntime, ensure_node};
 pub use session::{
-    AcpEvent, AcpSessionHandle, InfoFieldChange, PermissionDecision, connect_session,
-    connect_session_with_node,
+    AcpEvent, AcpSessionHandle, InfoFieldChange, PermissionDecision, connect_agent_session,
+    connect_session,
 };

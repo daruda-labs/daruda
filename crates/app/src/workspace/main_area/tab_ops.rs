@@ -7,6 +7,7 @@ use super::pane_tree::{
     remove_pane_from_layout,
 };
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
 
 /// What content a newly split-off pane should hold. Keeps the split entry
 /// point free of a `bool`/`Option` flag pair (an invalid state would be
@@ -570,7 +571,19 @@ impl Workspace {
                 // active lane; `create_agent_chat_pane` then parks the pane in
                 // `AgentSessionStatus::Error` rather than connecting.
                 let cwd = self.active_lane().map(|w| w.path.clone());
-                self.create_agent_chat_pane(cwd, None, None, window, cx)
+                // The split was chosen *because* the focused pane is an
+                // agent-chat pane, so inherit its agent — splitting a `codex`
+                // chat must open another `codex`, not reset to the catalog
+                // default. Fall back to the session-sticky default only if the
+                // source agent id can't be read.
+                let focused = self.active_runtime().focused_pane_id;
+                let agent_id = self
+                    .agent_chat_view(focused)
+                    .map(|v| v.read(cx).agent_id.clone())
+                    .unwrap_or_else(|| {
+                        resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
+                    });
+                self.create_agent_chat_pane(cwd, None, agent_id, None, window, cx)
             }
         };
         let new_pane_id = new_pane.id;
@@ -586,9 +599,10 @@ impl Workspace {
 
         // Agent chat's prompt input lives in the bottom dock; reveal it (and
         // mark the pane active) before `focus_pane` activates the input panel
-        // and moves keyboard focus there. Mirrors `open_agent_chat_pane`;
-        // `focus_pane` also lazily connects the ACP session via
-        // `maybe_connect_agent_chat`.
+        // and moves keyboard focus there. Mirrors `open_agent_chat_pane`'s
+        // bottom-dock reveal + lazy connect (`focus_pane` →
+        // `maybe_connect_agent_chat`); the agent, though, is inherited from the
+        // source pane above rather than the session default `open_*` uses.
         if matches!(kind, NewPaneKind::AgentChat) {
             if !self.bottom_dock.read(cx).is_open {
                 self.bottom_dock.update(cx, |d, cx| {

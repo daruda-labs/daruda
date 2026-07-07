@@ -127,6 +127,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             cwd: Some(PathBuf::from("/repo/lane")),
             session_id: Some("sess-abc123".to_string()),
             title: Some("Fix the parser".to_string()),
+            agent_id: Some("claude".to_string()),
         }),
     };
 
@@ -141,6 +142,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
             assert_eq!(ac.session_id, Some("sess-abc123".to_string()));
             assert_eq!(ac.title, Some("Fix the parser".to_string()));
+            assert_eq!(ac.agent_id, Some("claude".to_string()));
             assert!(file.is_none(), "agent_chat and file are mutually exclusive");
         }
         _ => panic!("expected Leaf with agent_chat content"),
@@ -150,8 +152,8 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
 #[test]
 fn agent_chat_leaf_without_session_fields_loads_as_none() {
     // Back-compat: state files written before session persistence existed
-    // carry an `agent_chat` object with only `cwd` — the new `session_id`
-    // and `title` fields must default to `None`.
+    // carry an `agent_chat` object with only `cwd` — the new `session_id`,
+    // `title`, and `agent_id` fields must default to `None`.
     let legacy_json = r#"{"type":"Leaf","pane_id":9,"agent_chat":{"cwd":"/repo/lane"}}"#;
     let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
     match restored {
@@ -162,6 +164,7 @@ fn agent_chat_leaf_without_session_fields_loads_as_none() {
             assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
             assert_eq!(ac.session_id, None);
             assert_eq!(ac.title, None);
+            assert_eq!(ac.agent_id, None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }

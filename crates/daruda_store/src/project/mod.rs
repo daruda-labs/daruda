@@ -228,6 +228,10 @@ pub struct SerializedAgentChatContent {
     /// shows its label before the session loads. `None` = fallback label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Agent this chat runs under (id from the config `[[agents]]` catalog).
+    /// `None` = a pre-feature save, treated as the built-in Claude agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

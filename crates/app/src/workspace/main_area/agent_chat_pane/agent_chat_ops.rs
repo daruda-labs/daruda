@@ -21,7 +21,7 @@
 //!         │  first focus only: status Idle → Connecting
 //!         ▼
 //!   connect_agent_chat (cx.spawn, weak Workspace)
-//!         │  connect_session on bg executor → (handle, rx)
+//!         │  connect_agent_session on bg executor → (handle, rx)
 //!         │  store handle on the view, fold events through view.apply_event
 //!         ▼
 //!   event pump: while rx.next().await:
@@ -33,7 +33,7 @@
 //! drops them: the handle drop closes the command channel (the connection task
 //! exits) and the pump-task drop ends the loop. No explicit teardown is needed.
 
-use daruda_acp::{NodeProgress, connect_session_with_node};
+use daruda_acp::{NodeProgress, connect_agent_session};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
@@ -59,6 +59,46 @@ fn runtime_prep_phase(progress: NodeProgress) -> Option<RuntimePrepPhase> {
     }
 }
 
+/// The catalog's default agent id — the first entry, or the built-in Claude id
+/// if the catalog is somehow empty (the config layer guarantees non-empty, so
+/// the fallback is purely defensive).
+fn catalog_default_id(agents: &[daruda_config::AgentDefinition]) -> String {
+    agents
+        .first()
+        .map(|a| a.id.clone())
+        .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id)
+}
+
+/// Pure core of [`Workspace::resolve_restored_agent`] — decide the effective
+/// agent for a restored pane and whether its persisted session id survives.
+/// Factored out of the workspace so it is unit-testable without gpui.
+fn resolve_restored_agent(
+    agents: &[daruda_config::AgentDefinition],
+    persisted_agent_id: Option<String>,
+) -> (String, bool) {
+    let owner =
+        persisted_agent_id.unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id);
+    if agents.iter().any(|a| a.id == owner) {
+        (owner, true)
+    } else {
+        (catalog_default_id(agents), false)
+    }
+}
+
+/// Pure core of the agent-id choice for a freshly opened pane: keep `last` when
+/// it is still in the catalog, otherwise fall back to the catalog default
+/// (`agents[0]`, or the built-in Claude id if the catalog is somehow empty).
+/// Factored out of [`Workspace::open_agent_chat_pane`] so it is unit-testable
+/// without gpui.
+pub(in crate::workspace) fn resolve_open_agent_id(
+    agents: &[daruda_config::AgentDefinition],
+    last: Option<&str>,
+) -> String {
+    last.filter(|id| agents.iter().any(|a| a.id == *id))
+        .map(str::to_owned)
+        .unwrap_or_else(|| catalog_default_id(agents))
+}
+
 impl Workspace {
     /// Construct an Agent chat `Pane` (no tab side-effects). Allocates the pane
     /// id and builds the `Entity<AgentChatView>`, seeding the conversation as
@@ -73,6 +113,7 @@ impl Workspace {
         &mut self,
         cwd: Option<std::path::PathBuf>,
         session_id: Option<String>,
+        agent_id: String,
         title: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -99,7 +140,18 @@ impl Workspace {
         // caches a copy so `Pane::cwd()` stays cx-free.
         let view = cx.new({
             let cwd = cwd.clone();
-            move |cx| AgentChatView::new(pane_id, window_handle, cwd, status, session_id, title, cx)
+            move |cx| {
+                AgentChatView::new(
+                    pane_id,
+                    window_handle,
+                    cwd,
+                    status,
+                    session_id,
+                    agent_id,
+                    title,
+                    cx,
+                )
+            }
         });
         Pane {
             id: pane_id,
@@ -111,21 +163,63 @@ impl Workspace {
         }
     }
 
-    /// Open a fresh Agent chat pane in a new tab, anchored at the active lane's
-    /// working directory. Mirrors `open_task_edit_pane`'s tab-append + focus
-    /// flow.
+    /// The launch command for `agent_id`, looked up in the catalog. `None` when
+    /// the id is not in the catalog (e.g. a persisted id whose agent was removed).
+    pub(in crate::workspace) fn agent_command_for(&self, agent_id: &str) -> Option<String> {
+        self.agents
+            .iter()
+            .find(|a| a.id == agent_id)
+            .map(|a| a.command.clone())
+    }
+
+    /// Resolve the agent a restored pane should launch under, and whether its
+    /// persisted session id is still resumable. A pre-feature save (`agent_id`
+    /// None) was created by the built-in Claude agent. If that owning agent is
+    /// still in the catalog we relaunch it and keep the session id (resume works);
+    /// if it was removed we fall back to the default agent and drop the session id
+    /// (its session belongs to a now-absent agent — resuming it would be invalid).
+    pub(in crate::workspace) fn resolve_restored_agent(
+        &self,
+        persisted_agent_id: Option<String>,
+    ) -> (String, bool /* keep session id */) {
+        resolve_restored_agent(&self.agents, persisted_agent_id)
+    }
+
+    /// Open a fresh Agent chat pane in a new tab under the session's last-chosen
+    /// agent (falling back to the catalog default). Thin wrapper over
+    /// [`Self::open_agent_chat_pane_with_agent`] so there is one construction
+    /// path.
     pub(in crate::workspace) fn open_agent_chat_pane(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Default to the last agent the user opened (session-local), falling
+        // back to the catalog default. A stale last id (agent removed from
+        // config) also falls back.
+        let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        self.open_agent_chat_pane_with_agent(agent_id, window, cx);
+    }
+
+    /// Open a fresh Agent chat pane in a new tab under `agent_id`, anchored at
+    /// the active lane's working directory. Mirrors `open_task_edit_pane`'s
+    /// tab-append + focus flow, and records `agent_id` as the session's last
+    /// choice so the next fresh pane defaults to it.
+    pub(in crate::workspace) fn open_agent_chat_pane_with_agent(
+        &mut self,
+        agent_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // An inaccessible active lane renders the empty-state; opening a pane
-        // there would escape that state (mirrors `add_tab`).
+        // there would escape that state (mirrors `add_tab`). Guard first, before
+        // recording the choice, so a rejected open does not mutate last_agent_id.
         if self.active_lane_is_inaccessible() {
             return;
         }
+        self.last_agent_id = Some(agent_id.clone());
         let cwd = self.active_lane().map(|w| w.path.clone());
-        let pane = self.create_agent_chat_pane(cwd, None, None, window, cx);
+        let pane = self.create_agent_chat_pane(cwd, None, agent_id, None, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
@@ -158,6 +252,57 @@ impl Workspace {
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
         cx.notify();
+    }
+
+    /// Handle the agent chip selecting a *different* agent: confirm, then open a
+    /// new pane under that agent. The current pane + conversation are preserved
+    /// — a backend swap means a fresh conversation (Zed's agent = thread model),
+    /// so we never reuse the existing session. No-op when `target_agent_id` is
+    /// not in the catalog, or when it already matches the focused pane's current
+    /// agent (re-selecting the current agent must not open a fresh conversation
+    /// — the chip guards this too, but enforce it at the op boundary regardless
+    /// of the caller).
+    pub(in crate::workspace) fn request_switch_agent(
+        &mut self,
+        target_agent_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Re-selecting the focused pane's current agent is a no-op.
+        let focused = self.active_runtime().focused_pane_id;
+        if self
+            .agent_chat_view(focused)
+            .is_some_and(|v| v.read(cx).agent_id == target_agent_id)
+        {
+            return;
+        }
+        // Look up the display name for the dialog body; ignore an unknown id.
+        let Some(name) = self
+            .agents
+            .iter()
+            .find(|a| a.id == target_agent_id)
+            .map(|a| a.name.clone())
+        else {
+            return;
+        };
+        let weak = cx.weak_entity();
+        crate::workspace::dialog_helpers::open_confirm_dialog(
+            s::agent_chat_switch_confirm_title(),
+            s::agent_chat_switch_confirm_body(&name),
+            s::agent_chat_switch_confirm_ok(),
+            // Neutral confirm — this opens a new chat, it is not destructive.
+            crate::ui::ButtonVariant::Primary,
+            move |_ev, window, app| {
+                if let Some(ws) = weak.upgrade() {
+                    let target = target_agent_id.clone();
+                    ws.update(app, |ws, cx| {
+                        ws.open_agent_chat_pane_with_agent(target, window, cx)
+                    });
+                }
+            },
+            window,
+            cx,
+        );
     }
 
     /// Lazy-connect entry point: start the ACP session for `pane_id` iff it is
@@ -203,6 +348,34 @@ impl Workspace {
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
+    /// Resolve the launch command for `pane_id`'s agent, reconciling the view
+    /// when its `agent_id` is stale. Happy path (allocation-free beyond the
+    /// command clone): the view's `agent_id` is still in the catalog, so return
+    /// its command unchanged. Miss: the persisted `agent_id` now points at an
+    /// agent a live config reload removed/renamed, so it lies about which agent
+    /// is running — rewrite the view to the session-sticky default, persist, and
+    /// launch that agent instead. Returns `None` only when the pane is gone.
+    fn resolve_pane_launch(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> Option<String> {
+        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
+        // Happy path: the view's agent is still in the catalog.
+        if let Some(command) = self.agent_command_for(&agent_id) {
+            return Some(command);
+        }
+        // Stale id — reconcile so the chip / persisted state stop lying, then
+        // launch the effective agent. `resolve_open_agent_id` yields a catalog
+        // entry (or the built-in Claude id when the catalog is somehow empty).
+        let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            let id = effective_id.clone();
+            view.update(cx, |v, _| v.agent_id = id);
+            self.mark_dirty_and_save(cx);
+        }
+        Some(
+            self.agent_command_for(&effective_id)
+                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().command),
+        )
+    }
+
     /// Open the live ACP session for an already-pushed Agent chat pane and store
     /// the event-pump task on its view. Runs the (synchronous-to-parse, then
     /// async) connect on the background executor, then re-enters the workspace
@@ -235,7 +408,17 @@ impl Workspace {
         };
         let node_root = daruda_store::persistence::node_install_dir();
 
-        // Runtime provisioning (see `connect_session_with_node`) can download
+        // Resolve the pane's agent_id → launch command, reconciling the view
+        // when its agent_id no longer names a catalog entry (a live config
+        // reload removed/renamed that agent). Returns `None` only when the pane
+        // is already gone — fall back to the catalog default command so the
+        // (soon-to-be-dropped) task still has a valid command to parse.
+        let command = self.resolve_pane_launch(pane_id, cx).unwrap_or_else(|| {
+            self.agent_command_for(&catalog_default_id(&self.agents))
+                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().command)
+        });
+
+        // Runtime provisioning (see `connect_agent_session`) can download
         // Node.js on the first run of a machine without a usable system install.
         // Milestones flow over this channel to a foreground drain that shows a
         // "preparing runtime…" banner, so a slow first-run download doesn't look
@@ -278,7 +461,7 @@ impl Workspace {
         let retry_cwd = cwd.clone();
         let was_resume = resume.is_some();
         let pump = cx.spawn(async move |this, cx| {
-            // `connect_session_with_node` is synchronous (it provisions node,
+            // `connect_agent_session` is synchronous (it provisions node,
             // parses the command, and spawns the connection task); run it on the
             // background executor so the download / smol `spawn` bind to a worker
             // thread rather than the main loop. The progress sender is moved in
@@ -289,7 +472,8 @@ impl Workspace {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
-                    connect_session_with_node(
+                    connect_agent_session(
+                        command,
                         node_root,
                         cwd,
                         initial_mode,
@@ -738,5 +922,100 @@ impl Workspace {
             .flat_map(|rt| rt.panes.iter())
             .find(|p| p.id == pane_id)?
             .agent_chat_view()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_open_agent_id, resolve_restored_agent};
+    use daruda_config::AgentDefinition;
+
+    fn default_catalog() -> Vec<AgentDefinition> {
+        vec![AgentDefinition::claude_default()]
+    }
+
+    #[test]
+    fn restored_agent_kept_when_owner_present() {
+        let claude = AgentDefinition::claude_default().id;
+        let (agent, keep) = resolve_restored_agent(&default_catalog(), Some(claude.clone()));
+        assert_eq!(agent, claude);
+        assert!(
+            keep,
+            "session id resumable when owning agent is in the catalog"
+        );
+    }
+
+    #[test]
+    fn restored_none_falls_back_to_claude_and_keeps_session() {
+        // Backward compat: a pre-feature save (agent_id None) was created by the
+        // built-in Claude agent, which is always in the no-`[[agents]]` default,
+        // so its session must still resume.
+        let (agent, keep) = resolve_restored_agent(&default_catalog(), None);
+        assert_eq!(agent, AgentDefinition::claude_default().id);
+        assert!(keep, "pre-feature Claude session stays resumable");
+    }
+
+    #[test]
+    fn restored_removed_agent_falls_back_and_drops_session() {
+        // The persisted owner is no longer in the catalog — fall back to the
+        // default agent and drop the session id (resuming it would be invalid).
+        let (agent, keep) = resolve_restored_agent(&default_catalog(), Some("ghost".to_string()));
+        assert_eq!(agent, AgentDefinition::claude_default().id);
+        assert!(!keep, "session id dropped when owning agent was removed");
+    }
+
+    #[test]
+    fn restored_selects_owner_among_multiple_agents() {
+        let agents = vec![
+            AgentDefinition {
+                id: "other".to_string(),
+                name: "Other".to_string(),
+                command: "run-other".to_string(),
+            },
+            AgentDefinition::claude_default(),
+        ];
+        // The default (catalog[0]) is "other", but a persisted claude owner that
+        // is still present is kept, not overridden by the default.
+        let (agent, keep) =
+            resolve_restored_agent(&agents, Some(AgentDefinition::claude_default().id));
+        assert_eq!(agent, AgentDefinition::claude_default().id);
+        assert!(keep);
+        // A removed owner falls back to catalog[0] = "other".
+        let (agent, keep) = resolve_restored_agent(&agents, Some("gone".to_string()));
+        assert_eq!(agent, "other");
+        assert!(!keep);
+    }
+
+    fn two_agent_catalog() -> Vec<AgentDefinition> {
+        vec![
+            AgentDefinition {
+                id: "other".to_string(),
+                name: "Other".to_string(),
+                command: "run-other".to_string(),
+            },
+            AgentDefinition::claude_default(),
+        ]
+    }
+
+    #[test]
+    fn open_agent_keeps_valid_last_id() {
+        // A last id still in the catalog is kept, not overridden by catalog[0].
+        let claude = AgentDefinition::claude_default().id;
+        let agents = two_agent_catalog();
+        assert_eq!(resolve_open_agent_id(&agents, Some(&claude)), claude);
+    }
+
+    #[test]
+    fn open_agent_stale_last_id_falls_back_to_catalog_head() {
+        // A last id no longer in the catalog falls back to catalog[0] = "other".
+        let agents = two_agent_catalog();
+        assert_eq!(resolve_open_agent_id(&agents, Some("gone")), "other");
+    }
+
+    #[test]
+    fn open_agent_none_falls_back_to_catalog_head() {
+        // No prior choice falls back to catalog[0] = "other".
+        let agents = two_agent_catalog();
+        assert_eq!(resolve_open_agent_id(&agents, None), "other");
     }
 }

@@ -34,7 +34,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub use agent::{AgentConfig, DefaultPermissionMode};
+pub use agent::{AgentConfig, AgentDefinition, DefaultPermissionMode};
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
@@ -90,7 +90,7 @@ impl Default for ThemeConfig {
 /// Top-level configuration. Every section uses `#[serde(default)]` so
 /// a partial TOML file (or even an empty file) produces a valid config
 /// with sensible defaults for all missing fields.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub general: GeneralConfig,
@@ -112,7 +112,49 @@ pub struct Config {
     pub logs: LogsConfig,
     pub render: RenderConfig,
     pub agent: AgentConfig,
+    /// Selectable ACP agent catalog. Absent `[[agents]]` seeds a single Claude
+    /// default (see [`agent::default_agents`]); an explicitly-empty catalog is
+    /// normalized back to that default in [`Config::clamp`].
+    #[serde(default = "agent::default_agents")]
+    pub agents: Vec<AgentDefinition>,
     pub update: UpdateConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        // Every field defaults normally EXCEPT `agents`, which seeds the
+        // built-in Claude entry so the catalog is never empty. This is the
+        // single source of the non-empty-catalog invariant the whole app relies
+        // on (`catalog[0]` must exist) — both `Config::default()` and every
+        // deserialize path (`#[serde(default = "agent::default_agents")]`) yield
+        // a non-empty catalog. Fields are constructed directly, never by
+        // deserializing a TOML string: the container `#[serde(default)]` calls
+        // this `Config::default()` for missing-field fallbacks, so a
+        // deserializing Default would recurse infinitely.
+        Self {
+            general: Default::default(),
+            font: Default::default(),
+            cursor: Default::default(),
+            window: Default::default(),
+            colors: Default::default(),
+            theme: Default::default(),
+            scrollback: Default::default(),
+            keybindings: Default::default(),
+            shell: Default::default(),
+            left_dock: Default::default(),
+            file_viewer: Default::default(),
+            claude_status: Default::default(),
+            notifications: Default::default(),
+            clipboard: Default::default(),
+            usage: Default::default(),
+            panels: Default::default(),
+            logs: Default::default(),
+            render: Default::default(),
+            agent: Default::default(),
+            agents: agent::default_agents(),
+            update: Default::default(),
+        }
+    }
 }
 
 impl Config {
@@ -130,7 +172,11 @@ impl Config {
                 cfg.clamp();
                 cfg
             }
-            Err(_) => Self::default(),
+            Err(_) => {
+                let mut cfg = Self::default();
+                cfg.clamp();
+                cfg
+            }
         }
     }
 
@@ -143,6 +189,15 @@ impl Config {
         self.panels.clamp();
         self.render.clamp();
         self.agent.clamp();
+        // A missing `[[agents]]` is handled by the serde field default, and the
+        // manual `Config::default()` (used on load errors) seeds the Claude
+        // default directly (since a232e44). This guard exists for the remaining
+        // case: an explicit `agents = []` in user TOML, which deserializes to the
+        // provided empty array (not the field default) — normalize it back to the
+        // Claude default so every load path hands the app a non-empty catalog.
+        if self.agents.is_empty() {
+            self.agents = agent::default_agents();
+        }
     }
 
     /// Return the effective `ColorConfig` for this configuration.

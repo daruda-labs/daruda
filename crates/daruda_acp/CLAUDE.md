@@ -35,12 +35,19 @@ config-options example below).
 
 - Repo: <https://github.com/agentclientprotocol/claude-agent-acp>
 - npm: `@agentclientprotocol/claude-agent-acp` — the adapter that wraps
-  Anthropic's Claude Agent SDK and speaks ACP. Spawned via
-  `AdapterCommand::default()` in `connection.rs` (`npx -y <pkg>@latest`).
+  Anthropic's Claude Agent SDK and speaks ACP.
 - **Latest as of 2026-06-30**: `0.53.0` (uses ACP SDK `@agentclientprotocol/sdk`
   `1.0.0` — the same 1.0 line as our Rust crate, so they stay in sync).
-- Keep current: the `@latest` tag in the `npx` command already pulls the newest
-  adapter at spawn time. When pinning a version, raise it to the newest release.
+- **Where the production launch command lives**: the shipped app reads its agent
+  launch command from config — `daruda_config::AgentDefinition::claude_default()`
+  (`crates/daruda_config/src/agent.rs`) — and passes it to
+  `connect_agent_session`. That is the **one place to edit** the `@latest` pin /
+  npm package for the shipped app. This crate's own `AdapterCommand::default()` /
+  `ADAPTER_NPM_PACKAGE` in `connection.rs` are used only by `daruda_acp`'s
+  examples and tests — editing them does **not** change what the app launches.
+- Keep current: the `@latest` tag in the command already pulls the newest adapter
+  at spawn time. When pinning a version, raise it in
+  `AgentDefinition::claude_default()`.
 
 ### Why latest matters — config options
 

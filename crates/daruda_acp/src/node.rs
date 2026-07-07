@@ -27,7 +27,7 @@ use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
 use semver::Version;
 use sha2::{Digest, Sha256};
 
-use crate::connection::{ADAPTER_NPM_PACKAGE, AdapterCommand};
+use crate::connection::AdapterCommand;
 
 /// Pinned Node.js version for the managed install. A single pinned version keeps
 /// the download URL and integrity check deterministic; bump it periodically to a
@@ -63,25 +63,50 @@ pub enum NodeRuntime {
     Managed { node_dir: PathBuf },
 }
 
+/// `true` when launching `command` needs a Node.js runtime provisioned.
+///
+/// A JSON stdio config (trimmed string starts with `{`) is a self-contained
+/// transport that names its own executable, so it needs nothing. Any other
+/// binary is assumed already runnable. Only a leading `npx` / `node` token —
+/// the Node-family launchers — triggers provisioning.
+#[must_use]
+pub fn command_needs_node(command: &str) -> bool {
+    let trimmed = command.trim_start();
+    if trimmed.starts_with('{') {
+        return false;
+    }
+    matches!(trimmed.split_whitespace().next(), Some("npx" | "node"))
+}
+
 impl NodeRuntime {
-    /// The adapter launch command for this runtime.
+    /// Wrap an agent launch `command` for this runtime.
     ///
-    /// System reuses the default bash command (`node` / `npx` are on the
-    /// hydrated `PATH`). Managed emits a JSON stdio config with the **absolute**
-    /// `npx` path and a `PATH` that prepends the managed `bin/` — so `npx`, and
-    /// the adapter it spawns, find the managed `node`. JSON (not a bash string)
-    /// is used because the managed path can contain spaces (macOS
-    /// `Application Support`), which bash-word splitting would break.
+    /// System passes the command through unchanged — `node` / `npx` are on the
+    /// hydrated `PATH`. Managed, for an `npx` / `node` command, rewrites it to a
+    /// JSON stdio config: the leading launcher token becomes the **absolute**
+    /// path inside the managed `bin/`, the remaining tokens are its args, and a
+    /// `PATH` prepending the managed `bin/` is injected so the launcher, and the
+    /// adapter it spawns, find the managed `node`. JSON (not a bash string) is
+    /// used because the managed path can contain spaces (macOS
+    /// `Application Support`), which bash-word splitting would break. A Managed
+    /// runtime with any other command passes it through unchanged.
+    ///
+    /// Only simple whitespace-tokenized `npx -y <pkg>` / `node <script> …` forms
+    /// are rewritten; a caller needing more control supplies a JSON stdio config
+    /// directly.
     #[must_use]
-    pub fn adapter_command(&self) -> AdapterCommand {
+    pub fn wrap_command(&self, command: &str) -> AdapterCommand {
         match self {
-            NodeRuntime::System => AdapterCommand::default(),
-            NodeRuntime::Managed { node_dir } => {
+            NodeRuntime::System => AdapterCommand(command.to_string()),
+            NodeRuntime::Managed { node_dir } if command_needs_node(command) => {
                 let bin_dir = node_dir.join("bin");
-                let npx = bin_dir.join("npx");
+                let mut tokens = command.split_whitespace();
+                let launcher = tokens.next().unwrap_or_default();
+                let abs_launcher = bin_dir.join(launcher);
+                let args = tokens.map(str::to_string).collect::<Vec<_>>();
                 let path = prepend_to_path(&bin_dir);
-                let stdio = McpServerStdio::new("claude-agent-acp", npx)
-                    .args(vec!["-y".to_string(), ADAPTER_NPM_PACKAGE.to_string()])
+                let stdio = McpServerStdio::new("acp-agent", abs_launcher)
+                    .args(args)
                     .env(vec![EnvVariable::new("PATH", path)]);
                 // `AcpAgent::from_str` parses a leading `{` as a JSON `McpServer`,
                 // so serializing the schema type gives a forward-compatible,
@@ -90,6 +115,7 @@ impl NodeRuntime {
                     .expect("McpServer::Stdio serializes to JSON");
                 AdapterCommand(json)
             }
+            NodeRuntime::Managed { .. } => AdapterCommand(command.to_string()),
         }
     }
 }
@@ -410,24 +436,43 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<(), NodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection::ADAPTER_NPM_PACKAGE;
     use agent_client_protocol::AcpAgent;
     use std::str::FromStr;
 
     #[test]
-    fn system_runtime_uses_default_bash_command() {
-        assert_eq!(
-            NodeRuntime::System.adapter_command().0,
-            AdapterCommand::default().0
-        );
+    fn command_needs_node_only_for_npx_and_node_launchers() {
+        assert!(command_needs_node(
+            "npx -y @agentclientprotocol/claude-agent-acp@latest"
+        ));
+        assert!(command_needs_node("node /path/adapter.js"));
+        // Leading whitespace before the launcher must not hide it.
+        assert!(command_needs_node("   npx -y pkg"));
+
+        // A non-Node binary runs itself.
+        assert!(!command_needs_node("/usr/local/bin/codex-acp"));
+        // A JSON stdio config is a self-contained transport.
+        assert!(!command_needs_node(
+            r#"{"type":"stdio","command":"codex","args":[]}"#
+        ));
+        // Empty string needs nothing.
+        assert!(!command_needs_node(""));
+    }
+
+    #[test]
+    fn system_runtime_passes_the_command_through_unchanged() {
+        let cmd = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+        assert_eq!(NodeRuntime::System.wrap_command(cmd).0, cmd);
     }
 
     #[test]
     fn managed_runtime_command_round_trips_to_absolute_npx_with_path_env() {
         let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let cmd = format!("npx -y {ADAPTER_NPM_PACKAGE}");
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .adapter_command();
+        .wrap_command(&cmd);
 
         // The command must be JSON (leading `{`) so no shell splitting happens.
         assert!(command.0.trim_start().starts_with('{'), "{}", command.0);
@@ -456,16 +501,41 @@ mod tests {
     }
 
     #[test]
+    fn managed_runtime_rewrites_the_node_launcher_token() {
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let command = NodeRuntime::Managed {
+            node_dir: node_dir.clone(),
+        }
+        .wrap_command("node /path/adapter.js --flag");
+        let agent = AcpAgent::from_str(&command.0).expect("managed node command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, node_dir.join("bin").join("node"));
+                assert_eq!(stdio.args, vec!["/path/adapter.js", "--flag"]);
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn managed_runtime_passes_non_node_command_through() {
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let cmd = "/usr/local/bin/codex-acp";
+        assert_eq!(NodeRuntime::Managed { node_dir }.wrap_command(cmd).0, cmd);
+    }
+
+    #[test]
     fn managed_command_survives_a_path_with_spaces() {
         // macOS `Application Support` has a space — the JSON form must keep the
         // absolute npx path intact where a bash string would split it.
         let node_dir = PathBuf::from(
             "/Users/x/Library/Application Support/daruda/node/node-v24.11.0-darwin-arm64",
         );
+        let cmd = format!("npx -y {ADAPTER_NPM_PACKAGE}");
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .adapter_command();
+        .wrap_command(&cmd);
         let agent = AcpAgent::from_str(&command.0).expect("command with spaces parses");
         match agent.into_server() {
             McpServer::Stdio(stdio) => {

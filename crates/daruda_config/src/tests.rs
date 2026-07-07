@@ -66,6 +66,68 @@ fn empty_toml_produces_defaults() {
 }
 
 #[test]
+fn missing_agents_seeds_single_claude_default() {
+    let cfg: Config = toml::from_str("").unwrap();
+    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
+    assert_eq!(cfg.agents[0].id, "claude");
+}
+
+#[test]
+fn explicit_agents_wholesale_replace_the_default() {
+    let input = "\
+[[agents]]\n\
+id = \"codex\"\n\
+name = \"Codex\"\n\
+command = \"codex acp\"\n\
+\n\
+[[agents]]\n\
+id = \"custom\"\n\
+name = \"My Agent\"\n\
+command = \"my-agent --acp\"\n";
+    let cfg: Config = toml::from_str(input).unwrap();
+    assert_eq!(cfg.agents.len(), 2);
+    assert_eq!(cfg.agents[0].id, "codex");
+    assert_eq!(cfg.agents[1].id, "custom");
+    // The Claude default is gone — a provided array replaces, not merges.
+    assert!(cfg.agents.iter().all(|a| a.id != "claude"));
+}
+
+#[test]
+fn agents_round_trip_through_toml() {
+    let cfg = Config {
+        agents: vec![
+            AgentDefinition {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                command: "codex acp".to_string(),
+            },
+            AgentDefinition::claude_default(),
+        ],
+        ..Config::default()
+    };
+    let toml_str = toml::to_string(&cfg).expect("serialize");
+    let back: Config = toml::from_str(&toml_str).expect("deserialize");
+    assert_eq!(back.agents, cfg.agents);
+}
+
+#[test]
+fn load_from_missing_path_normalizes_agents() {
+    // The error branch returns Config::default(), which seeds the Claude default
+    // directly (since a232e44), and still clamps — so the normalized non-empty
+    // catalog holds regardless. Proves normalization runs on every load path.
+    let cfg = Config::load_from(std::path::Path::new("/nonexistent/daruda/config.toml"));
+    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
+}
+
+#[test]
+fn explicitly_empty_agents_normalizes_to_claude_default() {
+    let mut cfg: Config = toml::from_str("agents = []").unwrap();
+    assert!(cfg.agents.is_empty());
+    cfg.clamp();
+    assert_eq!(cfg.agents, vec![AgentDefinition::claude_default()]);
+}
+
+#[test]
 fn font_inset_defaults_to_4_and_2() {
     let cfg = Config::default();
     assert_eq!(cfg.font.inset_x, 4.0);

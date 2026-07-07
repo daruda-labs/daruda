@@ -414,6 +414,15 @@ pub struct Workspace {
     pub(in crate::workspace) clipboard: daruda_config::ClipboardConfig,
     /// Agent chat configuration — permission mode applied on connect.
     pub(in crate::workspace) agent: daruda_config::AgentConfig,
+    /// The agent catalog mirrored from config `[[agents]]`. A newly opened
+    /// pane runs under `agents[0]`; each pane resolves its `agent_id` to a
+    /// launch command here at connect time. Guaranteed non-empty by the
+    /// config layer.
+    pub(in crate::workspace) agents: Vec<daruda_config::AgentDefinition>,
+    /// The agent the user most recently opened a chat pane under (session-local,
+    /// not persisted). A fresh pane defaults to this so switching agents "sticks"
+    /// for the window; falls back to the catalog default when unset or stale.
+    pub(in crate::workspace) last_agent_id: Option<String>,
     /// True while a git commit or push operation is running. Prevents
     /// duplicate submissions when the user double-clicks Commit/Push.
     pub(in crate::workspace) git_op_in_flight: bool,
@@ -997,6 +1006,8 @@ impl Workspace {
             notifications: config.notifications.clone(),
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),
+            agents: config.agents.clone(),
+            last_agent_id: None,
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
