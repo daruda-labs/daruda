@@ -1527,6 +1527,11 @@ impl Workspace {
     /// Drive the AgentChat status pulse and paint one final settled frame for a
     /// pane that just left the Working state. Called every status-pulse tick.
     ///
+    /// Scans every lane's runtime, not just the active one — a subagent run
+    /// keeps ticking in a parked (non-active) lane, and that lane's pane still
+    /// needs its trailing settle frame so its badge/pulse actually stops when
+    /// the run quiesces.
+    ///
     /// A busy AgentChat view ([`AgentChatView::is_busy`] — a prompt turn in
     /// flight OR a background subagent tool still running) is dirtied each tick
     /// so its animated rollup dot / working row keeps ticking (root CLAUDE.md
@@ -1543,9 +1548,10 @@ impl Workspace {
     /// [`Self::agent_pulse_prev`] in place.
     pub(crate) fn pulse_agent_chats(&mut self, cx: &mut Context<Self>) {
         let now: Vec<gpui::EntityId> = self
-            .active_runtime()
-            .panes
-            .iter()
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
             .filter_map(|p| p.agent_chat_view())
             .filter(|v| v.read(cx).is_busy())
             .map(|v| v.entity_id())
