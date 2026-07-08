@@ -5,6 +5,9 @@
 //! that drive the conversation view; plan, slash-command, mode, config, info,
 //! and usage updates are intentionally ignored.
 
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
+
 use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionRequest,
     SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
@@ -142,6 +145,64 @@ pub fn has_running_background_tool(items: &[ChatItem]) -> bool {
         matches!(it,
             ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some() && tc.status.is_live())
     })
+}
+
+/// Aggregate run-state over the background subagents in a conversation.
+pub struct SubagentActivity {
+    /// Number of distinct subagents (parent Task/Agent tool calls).
+    pub total: usize,
+    /// Subagents that are no longer running.
+    pub settled: usize,
+    /// At least one subagent is still running.
+    pub any_running: bool,
+}
+
+/// Derive subagent run-state. A *subagent* is a tool call whose id is
+/// referenced by some other tool's `parent_tool_id` (its parent Task/Agent
+/// call). A subagent P is *running* while it has a live child
+/// (`parent_tool_id == P && status.is_live()`) OR its last child activity was
+/// within `quiescence` of `now`. The quiescence window bridges the gaps
+/// between a subagent's sequential child tool calls: the parent's own status
+/// completes early and there is no clean terminal signal, so "no live child
+/// right now" does not mean the run ended.
+pub fn subagent_activity(
+    items: &[ChatItem],
+    last_activity: &HashMap<String, Instant>,
+    now: Instant,
+    quiescence: Duration,
+) -> SubagentActivity {
+    let parents: HashSet<&str> = items
+        .iter()
+        .filter_map(|it| match it {
+            ChatItem::ToolCall(tc) => tc.parent_tool_id.as_deref(),
+            _ => None,
+        })
+        .collect();
+
+    let has_live_child = |parent: &str| {
+        items.iter().any(|it| {
+            matches!(it,
+                ChatItem::ToolCall(tc)
+                    if tc.parent_tool_id.as_deref() == Some(parent) && tc.status.is_live())
+        })
+    };
+    let recent = |parent: &str| {
+        last_activity
+            .get(parent)
+            .is_some_and(|t| now.saturating_duration_since(*t) < quiescence)
+    };
+
+    let total = parents.len();
+    let running_count = parents
+        .iter()
+        .filter(|parent| has_live_child(parent) || recent(parent))
+        .count();
+
+    SubagentActivity {
+        total,
+        settled: total - running_count,
+        any_running: running_count > 0,
+    }
 }
 
 /// Fold a `UserMessageChunk` into the item list.
@@ -779,6 +840,100 @@ mod tests {
         )]));
         // Empty conversation → nothing running.
         assert!(!has_running_background_tool(&[]));
+    }
+
+    fn subagent_child(parent: &str, status: ToolStatusView) -> ChatItem {
+        ChatItem::ToolCall(ToolCallItem {
+            id: format!("{parent}-child"),
+            title: "child".to_string(),
+            kind: ToolKindView::Read,
+            status,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: Some(parent.to_string()),
+        })
+    }
+
+    #[test]
+    fn subagent_activity_counts_live_child_as_running() {
+        let items = [subagent_child("p1", ToolStatusView::InProgress)];
+        let last_activity = HashMap::new();
+        let activity = subagent_activity(
+            &items,
+            &last_activity,
+            Instant::now(),
+            Duration::from_secs(8),
+        );
+        assert_eq!(activity.total, 1);
+        assert_eq!(activity.settled, 0);
+        assert!(activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_treats_recent_activity_as_running() {
+        let items = [subagent_child("p1", ToolStatusView::Completed)];
+        let now = Instant::now();
+        let mut last_activity = HashMap::new();
+        last_activity.insert("p1".to_string(), now - Duration::from_secs(2));
+        let activity = subagent_activity(&items, &last_activity, now, Duration::from_secs(8));
+        assert_eq!(activity.total, 1);
+        assert_eq!(activity.settled, 0, "recent activity keeps it running");
+        assert!(activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_settles_after_quiescence_elapses() {
+        let items = [subagent_child("p1", ToolStatusView::Completed)];
+        let now = Instant::now();
+        let mut last_activity = HashMap::new();
+        last_activity.insert("p1".to_string(), now - Duration::from_secs(20));
+        let activity = subagent_activity(&items, &last_activity, now, Duration::from_secs(8));
+        assert_eq!(activity.total, 1);
+        assert_eq!(activity.settled, 1);
+        assert!(!activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_mixes_running_and_settled_parents() {
+        let now = Instant::now();
+        let items = [
+            subagent_child("running", ToolStatusView::InProgress),
+            subagent_child("quiesced", ToolStatusView::Completed),
+        ];
+        let mut last_activity = HashMap::new();
+        last_activity.insert("quiesced".to_string(), now - Duration::from_secs(20));
+        let activity = subagent_activity(&items, &last_activity, now, Duration::from_secs(8));
+        assert_eq!(activity.total, 2);
+        assert_eq!(activity.settled, 1);
+        assert!(activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_empty_items_is_all_zero() {
+        let last_activity = HashMap::new();
+        let activity =
+            subagent_activity(&[], &last_activity, Instant::now(), Duration::from_secs(8));
+        assert_eq!(activity.total, 0);
+        assert_eq!(activity.settled, 0);
+        assert!(!activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_counts_untracked_settled_parent() {
+        // A parent id with no live child and no last_activity entry at all
+        // (never recorded, or the map predates it) is settled, not running.
+        let items = [subagent_child("p1", ToolStatusView::Completed)];
+        let last_activity = HashMap::new();
+        let activity = subagent_activity(
+            &items,
+            &last_activity,
+            Instant::now(),
+            Duration::from_secs(8),
+        );
+        assert_eq!(activity.total, 1);
+        assert_eq!(activity.settled, 1);
+        assert!(!activity.any_running);
     }
 
     #[test]
