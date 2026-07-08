@@ -45,11 +45,12 @@ fn main() {
                     session_id,
                     modes,
                     config_options,
+                    capabilities,
                 } => {
                     eprintln!("[session-id] {session_id}");
                     eprintln!(
                         "[connected] modes={modes:?} config_options={config_options:?} \
-                         sending prompt 1"
+                         capabilities={capabilities:?} sending prompt 1"
                     );
                     handle.send_prompt(prompts[next_prompt].to_string());
                     next_prompt += 1;
@@ -59,6 +60,9 @@ fn main() {
                 }
                 AcpEvent::Update(update) => {
                     eprintln!("[update] {update:?}");
+                }
+                AcpEvent::UsageChanged(usage) => {
+                    eprintln!("[usage] {usage:?}");
                 }
                 AcpEvent::PermissionRequested { id, request } => {
                     // Auto-approve the first option, mirroring the spike.

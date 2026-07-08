@@ -78,6 +78,20 @@ impl ToolCallItem {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true)
     }
+
+    /// The spawned subagent's type when this call is a subagent launch (Claude
+    /// Code's `Task` tool carries `subagent_type` in its input). Read
+    /// defensively from `raw_input` — `None` for a regular tool call or when the
+    /// adapter omits the field — so the renderer can name the subagent on the
+    /// parent card (e.g. "Subagent: code-reviewer") and fall back to the generic
+    /// label when the type is unavailable.
+    pub fn subagent_type(&self) -> Option<&str> {
+        self.raw_input
+            .as_ref()?
+            .get("subagent_type")?
+            .as_str()
+            .filter(|s| !s.is_empty())
+    }
 }
 
 /// A single block of tool-call output. Typed so non-text content (resource
@@ -264,6 +278,59 @@ pub struct ModeStateView {
     pub available: Vec<SessionModeView>,
     /// `id` of the mode the agent is currently in.
     pub current: String,
+}
+
+/// Which optional session methods the agent advertised at `initialize`
+/// (`AgentCapabilities`). Each flag gates the matching host affordance
+/// (resume, list, close, fork). All-false is the baseline agent that supports
+/// only `session/new` + `session/prompt` + `session/cancel` + `session/update`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionCapabilitiesView {
+    /// `session/load` — replay a prior session's history on connect.
+    pub load: bool,
+    /// `session/list` — enumerate resumable sessions.
+    pub list: bool,
+    /// `session/resume` — resume a session without replaying its history.
+    pub resume: bool,
+    /// `session/close` — explicitly end a session.
+    pub close: bool,
+    // `session/fork` is intentionally absent: it is gated behind the schema's
+    // `unstable_session_fork` feature, which daruda does not enable, so the
+    // protocol field is not compiled in and the capability is unreachable.
+}
+
+/// Live token/context accounting from a `session/update` `UsageUpdate`
+/// notification. `used`/`size` describe the **current context-window fill**
+/// (distinct from the CLI's cumulative account usage shown in the Usage tab),
+/// so the host can render a "context: used / size" meter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageView {
+    /// Tokens currently held in the context window.
+    pub used: u64,
+    /// Total context window size in tokens.
+    pub size: u64,
+    /// Cumulative session cost, when the agent reports it.
+    pub cost: Option<CostView>,
+}
+
+/// Session cost carried by an [`UsageView`] (mirror of the protocol's `Cost`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CostView {
+    pub amount: f64,
+    pub currency: String,
+}
+
+impl From<&agent_client_protocol::schema::v1::UsageUpdate> for UsageView {
+    fn from(u: &agent_client_protocol::schema::v1::UsageUpdate) -> Self {
+        Self {
+            used: u.used,
+            size: u.size,
+            cost: u.cost.as_ref().map(|c| CostView {
+                amount: c.amount,
+                currency: c.currency.clone(),
+            }),
+        }
+    }
 }
 
 /// A slash command the agent advertises via `AvailableCommandsUpdate`
@@ -459,6 +526,30 @@ mod tests {
             raw_input,
             parent_tool_id: None,
         }
+    }
+
+    #[test]
+    fn subagent_type_reads_task_input_field() {
+        use serde_json::json;
+        let tc = tool(
+            ToolKindView::Other,
+            Some(json!({ "subagent_type": "code-reviewer", "description": "review" })),
+        );
+        assert_eq!(tc.subagent_type(), Some("code-reviewer"));
+    }
+
+    #[test]
+    fn subagent_type_is_none_without_the_field() {
+        use serde_json::json;
+        let tc = tool(ToolKindView::Execute, Some(json!({ "command": "ls" })));
+        assert_eq!(tc.subagent_type(), None);
+    }
+
+    #[test]
+    fn subagent_type_ignores_empty_string() {
+        use serde_json::json;
+        let tc = tool(ToolKindView::Other, Some(json!({ "subagent_type": "" })));
+        assert_eq!(tc.subagent_type(), None, "empty type is not a real label");
     }
 
     #[test]

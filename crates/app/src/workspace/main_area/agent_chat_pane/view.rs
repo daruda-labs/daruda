@@ -40,8 +40,9 @@ use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ModeStateView, PermissionDecision,
-    PermissionKindView, PlanEntryView, SlashCommand, apply_update, cancel_pending_tools,
-    finalize_streaming, permission_item, subagent_activity, touched_tool_id,
+    PermissionKindView, PlanEntryView, SessionCapabilitiesView, SlashCommand, UsageView,
+    apply_update, cancel_pending_tools, finalize_streaming, permission_item, subagent_activity,
+    touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -263,6 +264,15 @@ pub(in crate::workspace) struct AgentChatView {
     /// busy→idle edge so the completion signal fires at the true settle point.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
+    /// True between a Stop and its `cancelled` `TurnEnded` ack. Stop settles the
+    /// turn locally (responsive + hung-safe) and fires `Stopped`, but the cancel
+    /// is still outstanding on the wire. While set, `send_prompt_text` buffers a
+    /// re-prompt into `pending_prompts` (client-side, so a second Stop can clear
+    /// it) instead of racing it onto the wire ahead of the cancel; the ack then
+    /// clears this flag and `pump_pending_prompt` drains the buffered prompt as a
+    /// fresh turn. Cleared by the first `TurnEnded`/`Error` after the Stop, or on
+    /// session reset. Runtime-only.
+    pub(in crate::workspace) cancel_in_flight: bool,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
     /// Built once per diff by `reconcile_diff_editors` — the same
@@ -312,6 +322,21 @@ pub(in crate::workspace) struct AgentChatView {
     /// `Mode`-category options are intentionally not kept here — mode is
     /// rendered through [`Self::modes`] and the existing mode chip.
     pub(in crate::workspace) config_options: Vec<ConfigOptionView>,
+    /// Which optional session methods the agent advertised at connect
+    /// (`session/load` / `list` / `resume` / `close`). The active consumer today
+    /// is resume gating, applied in the connection core (`resolve_resume` in
+    /// `daruda_acp`) before this event — a resume against a non-`load` agent
+    /// downgrades to a fresh session. Held here as the app-layer source of truth
+    /// for capability-gated UI (resume / session-list affordances) added later,
+    /// mirroring `available_commands`. Runtime-only; never serialized (re-read
+    /// each connect from `initialize`). Default = baseline agent (nothing extra).
+    pub(in crate::workspace) session_capabilities: SessionCapabilitiesView,
+    /// Live context-window / cost accounting from the agent's `UsageUpdate`
+    /// notifications (`AcpEvent::UsageChanged`). `None` until the agent reports
+    /// usage; drives the context meter in the chat chrome. Distinct from the
+    /// cumulative Usage tab (this is the current context fill). Runtime-only;
+    /// never serialized. Cleared on a fresh session.
+    pub(in crate::workspace) session_usage: Option<UsageView>,
     /// Slash commands advertised by the agent via `AvailableCommandsChanged`.
     /// Runtime-only; never serialized. Consumed by the slash-command
     /// autocomplete provider (later task).
@@ -372,14 +397,6 @@ impl AgentChatView {
     #[cfg(test)]
     pub(in crate::workspace) fn turn_is_idle(&self) -> bool {
         !self.turn.is_in_flight()
-    }
-
-    /// Test-only hook: attach a detached session handle so `handle.is_some()`
-    /// branches (a live session is present) are reachable offline — e.g. that a
-    /// live-turn Stop keeps the turn in-flight rather than force-settling.
-    #[cfg(test)]
-    pub(in crate::workspace) fn attach_detached_session_for_test(&mut self) {
-        self.handle = Some(daruda_acp::AcpSessionHandle::detached_for_test());
     }
 
     /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
@@ -552,6 +569,7 @@ impl AgentChatView {
             activity_started_at: None,
             was_busy: false,
             pending_completion: None,
+            cancel_in_flight: false,
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
@@ -570,6 +588,8 @@ impl AgentChatView {
             rows: Vec::new(),
             modes: None,
             config_options: Vec::new(),
+            session_capabilities: SessionCapabilitiesView::default(),
+            session_usage: None,
             available_commands: Vec::new(),
             plan: Vec::new(),
             // Seed the persisted title so a restored dormant pane shows its
@@ -698,19 +718,30 @@ impl AgentChatView {
                 session_id,
                 modes,
                 config_options,
+                capabilities,
             } => {
                 self.status = AgentSessionStatus::Connected;
                 self.modes = modes;
                 self.config_options = config_options;
+                self.session_capabilities = capabilities;
+                // A real resume (`session/load`) returns the same id we asked to
+                // load; a resume the agent couldn't load was downgraded to a fresh
+                // `session/new` with a NEW id. `self.restoring` was set
+                // optimistically at connect and can't tell those apart, so decide
+                // by id match — otherwise a downgraded resume keeps the prior
+                // session's title and skips fresh-session setup. Compare before
+                // overwriting `session_id`.
+                let resumed =
+                    self.restoring && self.session_id.as_deref() == Some(session_id.as_str());
+                self.restoring = false;
                 // Record the live session id so it persists — and so a later
                 // launch resumes this session instead of starting fresh.
                 self.session_id = Some(session_id);
-                if self.restoring {
+                if resumed {
                     // Resume (`session/load`): the replayed `session/update`s
-                    // already populated the conversation, plan, and title
-                    // before this reply — keep them. Clear the replay gate and
-                    // let the tail run the single coalesced catch-up.
-                    self.restoring = false;
+                    // already populated the conversation, plan, and title before
+                    // this reply — keep them. Let the tail run the single
+                    // coalesced catch-up.
                     finished_restore = true;
                 } else {
                     // Fresh session (`session/new`): clear stale plan/title so
@@ -721,16 +752,21 @@ impl AgentChatView {
                     self.session_title = None;
                     self.session_updated_at = None;
                     self.plan_collapsed = false;
+                    self.session_usage = None;
                     self.subagent_last_activity.clear();
                     // Reset the activity-span tracker so a prior session's edge
                     // state / captured outcome can't leak into the fresh one.
                     self.activity_started_at = None;
                     self.was_busy = false;
                     self.pending_completion = None;
+                    self.cancel_in_flight = false;
                 }
             }
             AcpEvent::ConfigOptionsChanged(options) => {
                 self.config_options = options;
+            }
+            AcpEvent::UsageChanged(usage) => {
+                self.session_usage = Some(usage);
             }
             AcpEvent::ModeChanged { mode_id } => {
                 if let Some(m) = &mut self.modes {
@@ -774,6 +810,17 @@ impl AgentChatView {
                 self.items.push(permission_item(&request));
                 self.pending_permission = Some(id);
             }
+            AcpEvent::TurnEnded { .. } if self.cancel_in_flight => {
+                // The `cancelled` `TurnEnded` for a turn a Stop already settled
+                // locally (its `Stopped` fired at cancel time). Don't re-settle or
+                // re-complete — just close the cancel window and drain any
+                // re-prompt the user buffered while it was open (as a fresh turn).
+                // A buffered re-prompt was never put on the wire (see
+                // `send_prompt_text`'s `cancel_in_flight` guard), so nothing raced
+                // this ack and a second Stop could still have cleared it.
+                self.cancel_in_flight = false;
+                self.pump_pending_prompt(cx);
+            }
             AcpEvent::TurnEnded {
                 completed_normally, ..
             } => {
@@ -784,10 +831,7 @@ impl AgentChatView {
                 turn_settled = true;
                 // Capture the outcome; it fires only when the pane settles
                 // busy→idle (via `reconcile_activity`), which may trail this
-                // `end_turn` while trailing subagents finish. A user Stop's
-                // outcome was already stashed by `cancel_turn` before its
-                // `TurnEnded` arrives, so a `completed_normally: false` here that
-                // rides on a Stop keeps the `Stopped` outcome either way.
+                // `end_turn` while trailing subagents finish.
                 self.pending_completion = Some(if completed_normally {
                     TurnOutcome::Completed
                 } else {
@@ -832,6 +876,10 @@ impl AgentChatView {
             }
             AcpEvent::Error(message) => {
                 self.status = AgentSessionStatus::Error(message);
+                // A session-level error terminates every outstanding turn,
+                // including any cancel we were still awaiting an ack for — close
+                // the cancel window so a post-reconnect turn isn't misread.
+                self.cancel_in_flight = false;
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
                 self.restoring = false;
@@ -1031,6 +1079,7 @@ impl AgentChatView {
         self.items.push(ChatItem::UserText(text.clone()));
         if let Some(handle) = &self.handle
             && !self.turn.is_in_flight()
+            && !self.cancel_in_flight
         {
             // Connected and idle: send now and mark the turn in flight.
             handle.send_prompt(text);
@@ -1038,11 +1087,14 @@ impl AgentChatView {
                 started_at: std::time::Instant::now(),
             };
         } else {
-            // Not connected yet (lazy connect happens on first focus), or a turn
-            // is already in flight. Buffer the prompt in submission order — the
-            // local echo above already shows it — and drain it one-per-turn via
-            // `pump_pending_prompt` (at connect, then on each `TurnEnded`). Do
-            // *not* mark the turn in flight: nothing new is on the wire yet.
+            // Not connected yet (lazy connect happens on first focus), a turn is
+            // already in flight, or a Stop's cancel is still outstanding
+            // (`cancel_in_flight` — buffer client-side so a second Stop can clear
+            // it and it can't race the cancel's ack onto the wire). Buffer in
+            // submission order — the local echo above already shows it — and drain
+            // it one-per-turn via `pump_pending_prompt` (at connect, on each
+            // `TurnEnded`, and when the cancel window closes). Do *not* mark the
+            // turn in flight: nothing new is on the wire yet.
             self.pending_prompts.push(text);
         }
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
@@ -1074,7 +1126,10 @@ impl AgentChatView {
     /// turns are still streaming. The echo was already appended when the prompt
     /// was buffered in `send_prompt_text`, so this does not re-echo.
     pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
-        if self.turn.is_in_flight() || self.pending_prompts.is_empty() {
+        // Hold the queue while a cancel is still outstanding (`cancel_in_flight`):
+        // the buffered re-prompt drains only once that window closes, via the
+        // `TurnEnded` ack path that clears the flag and calls this.
+        if self.turn.is_in_flight() || self.cancel_in_flight || self.pending_prompts.is_empty() {
             return;
         }
         let Some(handle) = self.handle.as_ref() else {
@@ -1102,47 +1157,30 @@ impl AgentChatView {
     /// `AcpThread::cancel`, which takes `running_turn` and marks pending tools
     /// cancelled without awaiting the agent.
     pub(in crate::workspace) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
-        // A live session settles this turn via the authoritative `cancelled`
-        // `TurnEnded` the agent MUST send; capture whether one exists before the
-        // borrow ends.
-        let has_session = self.handle.is_some();
         if let Some(handle) = &self.handle {
             handle.cancel();
         }
-        // Settle the *items* for a responsive Stop (finalize streaming, mark
-        // running tool calls cancelled, resolve any pending permission — the
-        // ACP spec's "client SHOULD preemptively mark cancelled" behaviour) but,
-        // when a session is live, KEEP the turn in-flight: the `cancelled`
-        // `TurnEnded` drives the real `settle_turn` + queue drain. Settling the
-        // turn locally would let an immediate re-prompt see an idle turn and race
-        // turn-2 onto the wire ahead of turn-1's cancel — the adapter then
-        // stashes turn-2 behind turn-1, and turn-1's stale `TurnEnded` gets
-        // misattributed to turn-2 (early task-done + lost completion). Keeping the
-        // turn in-flight routes a re-prompt through `pending_prompts` (the
-        // `!turn.is_in_flight()` guard in `send_prompt_text`), so it is issued
-        // only after the cancel completes — mirroring the wire serialization. No
-        // `pending_completion` stash on this path: the real `cancelled`
-        // `TurnEnded` (`completed_normally == false`) records `Stopped` at the
-        // settle edge; a trailing-subagent Stop (turn already idle) keeps the
-        // foreground turn's already-captured outcome and fires it via
-        // `cancel_agent_turn`'s reconcile once the tools settle.
-        self.settle_items();
-        if !has_session {
-            // No live session → no `cancelled` `TurnEnded` will arrive (a hung or
-            // handle-less pane), so force the local turn settle here so Stop still
-            // ends it. Record `Stopped` only when a live foreground turn was
-            // actually cancelled — never clobber a trailing-subagent's
-            // already-captured completion.
-            if self.turn.is_in_flight() {
-                self.pending_completion = Some(TurnOutcome::Stopped);
-            }
-            self.turn = Turn::Idle;
+        // Settle the turn *locally and immediately* — responsive and hung-safe: a
+        // connected agent that never returns the `cancelled` `TurnEnded` (or
+        // returns it much later) can't leave the pane stuck busy. When a live
+        // foreground turn is being cancelled, stash its `Stopped` (fired at the
+        // busy→idle edge by `cancel_agent_turn`'s reconcile) and open the cancel
+        // window (`cancel_in_flight`): until the cancel is acked, a re-prompt
+        // buffers *client-side* (see `send_prompt_text`) rather than racing onto
+        // the wire, so it can't be misattributed to the cancelled turn's ack and
+        // a second Stop can still clear it. A trailing-subagent Stop (turn already
+        // idle) neither stashes nor opens the window: the foreground turn's
+        // already-captured outcome is preserved and fires when the tools settle.
+        if self.turn.is_in_flight() {
+            self.pending_completion = Some(TurnOutcome::Stopped);
+            self.cancel_in_flight = true;
         }
-        // Stop halts everything queued *before* it: drop prompts buffered prior
-        // to this Stop. A prompt the user types *after* Stop is pushed after this
-        // clear and drains once the cancel's `TurnEnded` pumps the queue.
+        self.settle_turn();
+        // Stop halts everything queued *before* it: drop prompts buffered prior to
+        // this Stop. A prompt the user types *after* Stop is pushed after this
+        // clear and runs as a fresh turn.
         self.pending_prompts.clear();
-        // `settle_items` mutated items (streaming → done, running tools →
+        // `settle_turn` mutated items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing fold visibility and row
         // heights, so reproject and remeasure before notifying.
         self.rebuild_rows();
@@ -1310,6 +1348,8 @@ impl AgentChatView {
         self.activity_started_at = None;
         self.was_busy = false;
         self.pending_completion = None;
+        self.cancel_in_flight = false;
+        self.session_usage = None;
         self.diff_editors.clear();
         self.diff_stats.clear();
         self.mermaid_inflight.clear();

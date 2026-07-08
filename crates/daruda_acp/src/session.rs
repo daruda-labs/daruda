@@ -57,7 +57,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::channel::oneshot;
 
 use crate::connection::{AcpClientError, AdapterCommand};
-use crate::model::{ConfigOptionView, ModeStateView};
+use crate::model::{ConfigOptionView, ModeStateView, SessionCapabilitiesView};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
 /// the oneshot sender that unparks the connection's `on_receive_request`
@@ -132,6 +132,10 @@ pub enum AcpEvent {
         session_id: String,
         modes: Option<ModeStateView>,
         config_options: Vec<ConfigOptionView>,
+        /// Which optional session methods the agent advertised at `initialize`
+        /// (`session/load` / `list` / `resume` / `close`). The host gates the
+        /// matching affordances on these flags.
+        capabilities: SessionCapabilitiesView,
     },
     /// The agent replaced its session config option state (the protocol carries
     /// the full option set), from either source: the reply to our
@@ -142,6 +146,10 @@ pub enum AcpEvent {
     /// A `session/update` notification arrived. The host folds it into its
     /// chat model via [`crate::mapping::apply_update`].
     Update(Box<SessionUpdate>),
+    /// The agent reported live token/context accounting (`UsageUpdate`): the
+    /// current context-window fill and optional cumulative cost. Full
+    /// replacement of the host's cached usage.
+    UsageChanged(crate::model::UsageView),
     /// The agent requested tool permission. The host renders the request, then
     /// calls [`AcpSessionHandle::respond_permission`] with the matching `id`.
     PermissionRequested {
@@ -220,20 +228,6 @@ impl AcpSessionHandle {
     /// surfaced as a normal [`AcpEvent::TurnEnded`].
     pub fn cancel(&self) {
         let _ = self.commands.unbounded_send(Command::Cancel);
-    }
-
-    /// A detached handle for host-side tests: its command channel has no live
-    /// receiver, so `send_prompt`/`cancel`/… become no-ops. Lets a host test
-    /// hold `Some(handle)` (to exercise the "a live session is present" branches)
-    /// without spawning a real agent connection.
-    #[doc(hidden)]
-    pub fn detached_for_test() -> Self {
-        Self {
-            commands: futures::channel::mpsc::unbounded().0,
-            permission_parks: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
-        }
     }
 
     /// Request a mode switch via `session/set_mode`. Returns immediately; the
@@ -462,6 +456,14 @@ async fn run_connection(
                     SessionUpdate::ConfigOptionUpdate(u) => AcpEvent::ConfigOptionsChanged(
                         config_options_from_protocol(&u.config_options),
                     ),
+                    // Live context-window / cost accounting. Surfaced as a typed
+                    // event (like mode / plan / config) rather than raw `Update`
+                    // so the host renders a context meter without parsing
+                    // protocol types. Distinct from the CLI's cumulative Usage
+                    // tab: this is the current context fill.
+                    SessionUpdate::UsageUpdate(u) => {
+                        AcpEvent::UsageChanged(crate::model::UsageView::from(&u))
+                    }
                     update => AcpEvent::Update(Box::new(update)),
                 };
                 let _ = notif_tx.unbounded_send(event);
@@ -498,10 +500,26 @@ async fn run_connection(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
-            connection
+            let init = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
                 .block_task()
                 .await?;
+            let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
+
+            // Gate the requested resume on advertised `session/load` support:
+            // downgrade to a fresh session (with a Notice) when the agent can't
+            // replay history, so a resume against a non-load agent no longer
+            // fails the whole connect.
+            let (resume, resume_notice) = resolve_resume(resume, capabilities.load);
+            if let Some(notice) = resume_notice {
+                let _ = event_tx.unbounded_send(AcpEvent::Notice(notice));
+            }
+            // Whether this connect ends up creating a *fresh* session (either no
+            // resume was requested, or a requested resume was downgraded because
+            // the agent doesn't advertise `session/load`). The configured initial
+            // mode is applied only on a fresh session; a real load preserves the
+            // resumed session's own mode.
+            let fresh = resume.is_none();
 
             // New session, or resume an existing one via session/load. A load
             // replays the prior conversation as session/update notifications
@@ -542,17 +560,18 @@ async fn run_connection(
                 }
             };
 
-            // Apply the configured initial mode when the adapter advertised it,
-            // the requested id is in the available list, and it differs from
-            // the session's current mode. Skipped silently when any condition
-            // is false so a misconfigured or non-advertising adapter is
-            // forward-compatible.
+            // Apply the configured initial mode on a *fresh* session (including a
+            // resume downgraded to session/new), when the adapter advertised it,
+            // the requested id is in the available list, and it differs from the
+            // session's current mode. Skipped on a real load (preserve the resumed
+            // mode) and silently when any condition is false, so a misconfigured
+            // or non-advertising adapter is forward-compatible.
             //
             // A set_mode failure is NON-FATAL: the session/new already
             // succeeded and the session is usable. Leave mode_state.current
             // at the adapter's real current mode (the chip will reflect that),
             // emit a Notice so the host can log it, and continue to Connected.
-            if let (Some(id), Some(ref mut mode_state)) = (initial_mode, modes.as_mut()) {
+            if fresh && let (Some(id), Some(ref mut mode_state)) = (initial_mode, modes.as_mut()) {
                 let available = mode_state.available.iter().any(|m| m.id == id);
                 if available && mode_state.current != id {
                     match connection
@@ -577,6 +596,7 @@ async fn run_connection(
                 session_id: session_id.to_string(),
                 modes,
                 config_options,
+                capabilities,
             });
 
             prompt_loop(&connection, session_id, command_rx, &event_tx).await?;
@@ -800,6 +820,48 @@ fn config_options_from_protocol(
         .collect()
 }
 
+/// Read the agent's advertised session capabilities from the `initialize`
+/// response into the host view model. `session/load` support is a top-level
+/// `AgentCapabilities` bool; the rest are presence of the matching optional
+/// sub-capability. Called once at connect to gate host affordances (resume /
+/// list / close) without the host touching protocol types.
+fn session_capabilities_from_protocol(
+    caps: &agent_client_protocol::schema::v1::AgentCapabilities,
+) -> SessionCapabilitiesView {
+    let session = &caps.session_capabilities;
+    SessionCapabilitiesView {
+        load: caps.load_session,
+        list: session.list.is_some(),
+        resume: session.resume.is_some(),
+        close: session.close.is_some(),
+    }
+}
+
+/// Decide whether a requested resume can proceed against the agent's advertised
+/// capabilities. Returns the session id to `session/load` when resume was
+/// requested *and* the agent supports `session/load`; otherwise `None` (start a
+/// fresh session). The second element is an advisory message, `Some` only when a
+/// requested resume had to be downgraded to a fresh session because the agent
+/// does not advertise load support — surfaced as a [`AcpEvent::Notice`] so the
+/// user learns the prior conversation can't be replayed.
+fn resolve_resume(
+    resume: Option<SessionId>,
+    supports_load: bool,
+) -> (Option<SessionId>, Option<String>) {
+    match resume {
+        Some(id) if supports_load => (Some(id), None),
+        Some(_) => (
+            None,
+            Some(
+                "resume requested but the agent does not advertise session/load — \
+                 starting a fresh session; the prior conversation will not be replayed"
+                    .to_string(),
+            ),
+        ),
+        None => (None, None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,6 +959,75 @@ mod tests {
             InfoFieldChange::from(MaybeUndefined::Value("Fix parser bug".to_string())),
             InfoFieldChange::Set("Fix parser bug".to_string())
         );
+    }
+
+    #[test]
+    fn session_capabilities_reads_advertised_flags() {
+        use agent_client_protocol::schema::v1::{
+            AgentCapabilities, SessionCapabilities, SessionCloseCapabilities,
+            SessionResumeCapabilities,
+        };
+        // Advertise load (top-level bool) + resume + close; leave list/fork off.
+        let caps = AgentCapabilities::new()
+            .load_session(true)
+            .session_capabilities(
+                SessionCapabilities::new()
+                    .resume(SessionResumeCapabilities::new())
+                    .close(SessionCloseCapabilities::new()),
+            );
+        let v = session_capabilities_from_protocol(&caps);
+        assert!(v.load, "load_session bool must map to load");
+        assert!(v.resume, "advertised resume must map");
+        assert!(v.close, "advertised close must map");
+        assert!(!v.list, "unadvertised list must be false");
+    }
+
+    #[test]
+    fn usage_view_maps_tokens_and_cost() {
+        use agent_client_protocol::schema::v1::{Cost, UsageUpdate};
+        let u = UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD"));
+        let v = crate::model::UsageView::from(&u);
+        assert_eq!(v.used, 53_000);
+        assert_eq!(v.size, 200_000);
+        let cost = v.cost.expect("cost must map when present");
+        assert_eq!(cost.currency, "USD");
+        assert!((cost.amount - 0.045).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn usage_view_without_cost_is_none() {
+        use agent_client_protocol::schema::v1::UsageUpdate;
+        let v = crate::model::UsageView::from(&UsageUpdate::new(10, 100));
+        assert!(v.cost.is_none(), "absent cost must stay None");
+    }
+
+    #[test]
+    fn resolve_resume_loads_when_supported() {
+        let id = SessionId::from("sess-1");
+        let (to_load, notice) = resolve_resume(Some(id.clone()), true);
+        assert_eq!(to_load, Some(id));
+        assert!(notice.is_none(), "supported resume needs no notice");
+    }
+
+    #[test]
+    fn resolve_resume_downgrades_to_fresh_when_load_unsupported() {
+        let (to_load, notice) = resolve_resume(Some(SessionId::from("sess-1")), false);
+        assert!(to_load.is_none(), "must start fresh when load unsupported");
+        assert!(notice.is_some(), "downgrade must advise the user");
+    }
+
+    #[test]
+    fn resolve_resume_fresh_session_is_silent() {
+        let (to_load, notice) = resolve_resume(None, true);
+        assert!(to_load.is_none());
+        assert!(notice.is_none(), "a plain fresh session is not a downgrade");
+    }
+
+    #[test]
+    fn session_capabilities_default_agent_advertises_nothing() {
+        use agent_client_protocol::schema::v1::AgentCapabilities;
+        let v = session_capabilities_from_protocol(&AgentCapabilities::new());
+        assert_eq!(v, SessionCapabilitiesView::default());
     }
 
     #[test]

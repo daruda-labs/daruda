@@ -995,6 +995,21 @@ pub fn agent_chat_last_active_tooltip(time: &str) -> String {
     rust_i18n::t!("agent_chat.last_active_tooltip", time = time).into_owned()
 }
 
+/// Tooltip on the context meter: the current context-window fill and, when the
+/// agent reports it, cumulative session cost. `used`/`size` are pre-formatted
+/// token counts; `percent` is the fill ratio; `cost` is a pre-formatted cost
+/// string (already `" · <amount currency>"`) or empty when unavailable.
+pub fn agent_chat_context_tooltip(used: &str, size: &str, percent: u8, cost: &str) -> String {
+    rust_i18n::t!(
+        "agent_chat.context_tooltip",
+        used = used,
+        size = size,
+        percent = percent.to_string(),
+        cost = cost
+    )
+    .into_owned()
+}
+
 /// Label for a collapsed agent reasoning ("thinking") block.
 pub fn agent_chat_thinking_label() -> String {
     rust_i18n::t!("agent_chat.thinking_label").into_owned()
@@ -1060,6 +1075,13 @@ pub fn agent_chat_tool_background() -> String {
 /// Label above a Task/Agent card's nested subagent tool calls.
 pub fn agent_chat_subagent_label() -> String {
     rust_i18n::t!("agent_chat.subagent_label").into_owned()
+}
+
+/// Subagent label naming the spawned agent's type (Claude Code's `Task`
+/// `subagent_type`), e.g. "Subagent: code-reviewer". Used in place of the
+/// generic [`agent_chat_subagent_label`] when the type is known.
+pub fn agent_chat_subagent_label_typed(kind: &str) -> String {
+    rust_i18n::t!("agent_chat.subagent_label_typed", kind = kind).into_owned()
 }
 
 /// Pinned working-footer label while the agent is generating a response.

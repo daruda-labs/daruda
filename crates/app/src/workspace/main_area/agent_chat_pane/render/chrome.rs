@@ -2,7 +2,7 @@
 //! bar (title + expand/collapse), and the inline "agent is working" indicator
 //! with its animated pulse dots and elapsed clock.
 
-use daruda_acp::ChatItem;
+use daruda_acp::{ChatItem, UsageView};
 use gpui::{App, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::surface::strings as s;
@@ -24,6 +24,7 @@ pub(super) fn activity_bar(
     pane_id: PaneId,
     title: Option<&str>,
     last_active: Option<&str>,
+    usage: Option<&UsageView>,
     has_items: bool,
     dim: f32,
     cx: &mut Context<AgentChatView>,
@@ -86,6 +87,41 @@ pub(super) fn activity_bar(
                     el.tooltip(crate::ui::tooltip::text(tip))
                 }),
         )
+        // Context-window meter (from `UsageUpdate`): current fill on the right,
+        // detail + optional cost in the tooltip. Distinct from the cumulative
+        // Usage tab. Shown only once the agent reports usage.
+        .when_some(usage, |row, u| {
+            let pct = if u.size > 0 {
+                (u.used.saturating_mul(100) / u.size).min(100) as u8
+            } else {
+                0
+            };
+            let cost = u
+                .cost
+                .as_ref()
+                .map(|c| format!(" \u{00b7} {:.2} {}", c.amount, c.currency))
+                .unwrap_or_default();
+            let label = format!(
+                "{} / {}",
+                format_token_count(u.used),
+                format_token_count(u.size)
+            );
+            let tip = s::agent_chat_context_tooltip(
+                &format_token_count(u.used),
+                &format_token_count(u.size),
+                pct,
+                &cost,
+            );
+            row.child(
+                div()
+                    .id(("agent-chat-context-meter", pane_id as usize))
+                    .flex_none()
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .child(SharedString::from(label))
+                    .tooltip(crate::ui::tooltip::text(SharedString::from(tip))),
+            )
+        })
         .when(has_items, |row| {
             row.child(
                 div()
@@ -188,6 +224,18 @@ fn format_elapsed(d: std::time::Duration) -> String {
     }
 }
 
+/// Compact token count for the context meter: exact below 1000, otherwise
+/// rounded to the nearest thousand with a `k` suffix (e.g. 53_000 → `53k`,
+/// 200_000 → `200k`). Precision loss at the low end is irrelevant for a
+/// context-window gauge whose values run in the tens of thousands.
+fn format_token_count(n: u64) -> String {
+    if n < 1000 {
+        n.to_string()
+    } else {
+        format!("{}k", (n + 500) / 1000)
+    }
+}
+
 /// Animated trailing dots (".", "..", "...") for any "in progress" label. Cycles
 /// off the shared, CPU-gated `StatusPulseClock` — the pulse pump dirties each
 /// agent chat view in the Working activity state (incl. background subagent
@@ -273,7 +321,7 @@ pub(super) fn working_indicator(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_elapsed, format_last_active, running_tool_title};
+    use super::{format_elapsed, format_last_active, format_token_count, running_tool_title};
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
 
     #[test]
@@ -360,5 +408,20 @@ mod tests {
             format_elapsed(std::time::Duration::from_secs(600)),
             "10m00s"
         );
+    }
+
+    #[test]
+    fn format_token_count_is_exact_below_one_thousand() {
+        assert_eq!(format_token_count(0), "0");
+        assert_eq!(format_token_count(512), "512");
+        assert_eq!(format_token_count(999), "999");
+    }
+
+    #[test]
+    fn format_token_count_rounds_to_nearest_thousand_with_k() {
+        assert_eq!(format_token_count(1000), "1k");
+        assert_eq!(format_token_count(1500), "2k");
+        assert_eq!(format_token_count(53_000), "53k");
+        assert_eq!(format_token_count(200_000), "200k");
     }
 }

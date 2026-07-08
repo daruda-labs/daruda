@@ -1776,6 +1776,7 @@ async fn restoring_gate_defers_rebuild_until_connected(cx: &mut TestAppContext) 
                             session_id: "sess-1".into(),
                             modes: None,
                             config_options: Vec::new(),
+                            capabilities: Default::default(),
                         },
                         "",
                         false,
@@ -2330,59 +2331,74 @@ async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAp
         );
     });
 
-    // Case 2: an in-flight turn with NO live session (hung / handle-less) —
-    // no `cancelled` TurnEnded can arrive, so Stop force-settles locally and
-    // records `Stopped` itself.
+    // Case 2: a real in-flight foreground turn — Stop settles it locally and
+    // stashes `Stopped` (fired at the settle edge), overwriting any prior capture.
     view.update(cx, |v, cx| {
         v.pending_completion = None;
         v.set_turn_in_flight();
         v.cancel_turn(cx);
-        assert!(v.turn_is_idle(), "handle-less Stop force-settles the turn");
+        assert!(v.turn_is_idle(), "Stop settles the live turn locally");
         assert_eq!(
             v.pending_completion,
             Some(TurnOutcome::Stopped),
-            "handle-less Stop of a live turn stashes Stopped locally"
+            "Stop of a live turn stashes Stopped"
         );
     });
 }
 
-/// #2 regression: with a **live session**, Stop must NOT settle the turn — it
-/// stays in-flight so a re-prompt buffers behind it (mirroring the wire) and only
-/// the real `cancelled` `TurnEnded` settles + drains the queue. This stops turn-2
-/// from racing turn-1's cancel and turn-1's stale event misattributing to turn-2.
+/// Regression for the Stop-then-reprompt(-then-Stop) race. Stop settles the turn
+/// locally (responsive + hung-safe) and opens the cancel window; a re-prompt then
+/// buffers **client-side** (not raced onto the wire), so it can't be
+/// misattributed to the cancelled turn's ack AND a *second* Stop can still clear
+/// it. The first `TurnEnded` after the Stop closes the window and drains the
+/// queue (as a fresh turn).
 #[gpui::test]
-async fn cancel_of_live_turn_keeps_it_in_flight_and_buffers_reprompt(cx: &mut TestAppContext) {
+async fn stop_buffers_reprompt_and_second_stop_clears_it(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
     let view = make_activity_view(cx, window_handle, &workspace);
 
     view.update(cx, |v, cx| {
-        v.attach_detached_session_for_test();
+        // Turn-1 in flight, then Stop: settle locally + open the cancel window.
         v.set_turn_in_flight();
-
-        // Stop a live turn: the turn stays in-flight (no local force-settle) and
-        // no `Stopped` is stashed — the real cancelled `TurnEnded` owns it.
         v.cancel_turn(cx);
         assert!(
-            !v.turn_is_idle(),
-            "a live-session Stop keeps the turn in-flight until its TurnEnded"
+            v.turn_is_idle(),
+            "Stop settles the turn locally (hung-safe)"
+        );
+        assert!(
+            v.cancel_in_flight,
+            "the cancel window stays open until the ack"
         );
         assert_eq!(
-            v.pending_completion, None,
-            "no local Stopped stash on the live-session path"
+            v.pending_completion,
+            Some(TurnOutcome::Stopped),
+            "the cancelled turn's Stopped is stashed to fire at the settle edge"
         );
 
-        // A re-prompt now buffers behind the cancelling turn instead of racing
-        // onto the wire (the `!turn.is_in_flight()` guard in `send_prompt_text`).
+        // A re-prompt during the cancel window buffers client-side — NOT put on
+        // the wire (turn stays idle), so it can't race the cancel's ack.
         v.send_prompt_text("again".into(), cx);
+        assert!(
+            v.turn_is_idle(),
+            "the re-prompt is buffered, not raced onto the wire, during cancel"
+        );
         assert_eq!(
             v.pending_prompts,
             vec!["again".to_string()],
-            "re-prompt buffers behind the cancelling turn"
+            "the re-prompt buffers client-side"
         );
 
-        // The real cancelled `TurnEnded` arrives: settle + pump drains the
-        // buffered prompt as turn-2 (turn back in-flight, queue empty).
+        // Because it's client-side, a SECOND Stop can still clear it — the case a
+        // wire-side stash (the pre-fix behaviour) would have made unstoppable.
+        v.cancel_turn(cx);
+        assert!(
+            v.pending_prompts.is_empty(),
+            "a second Stop clears the buffered re-prompt"
+        );
+
+        // The cancel's `TurnEnded` ack closes the window (and would drain the
+        // queue — empty here). It neither re-settles nor re-completes.
         v.apply_event(
             daruda_acp::AcpEvent::TurnEnded {
                 completed_normally: false,
@@ -2392,13 +2408,7 @@ async fn cancel_of_live_turn_keeps_it_in_flight_and_buffers_reprompt(cx: &mut Te
             false,
             cx,
         );
-        assert!(
-            !v.turn_is_idle(),
-            "the buffered re-prompt is pumped as turn-2 after the cancel settles"
-        );
-        assert!(
-            v.pending_prompts.is_empty(),
-            "the queue drained the buffered re-prompt"
-        );
+        assert!(!v.cancel_in_flight, "the ack closes the cancel window");
+        assert!(v.turn_is_idle(), "nothing left to run after both Stops");
     });
 }

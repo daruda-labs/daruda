@@ -499,15 +499,14 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // A fresh session starts in the app's default permission mode; a resume
-        // preserves whatever mode the loaded session already had (pass `None` so
-        // `run_connection` skips the initial `set_mode`), so reattaching never
-        // silently overrides a mode the user set in the prior session.
-        let initial_mode = if resume.is_some() {
-            None
-        } else {
-            Some(self.agent.default_permission_mode.mode_id().to_string())
-        };
+        // Always offer the app's default permission mode; `run_connection`
+        // applies it only when it creates a *fresh* session (no resume, or a
+        // resume the agent can't `session/load` and so downgrades to
+        // session/new) and skips it on a real load, which preserves the resumed
+        // session's own mode. Passing it unconditionally is what lets a
+        // downgraded resume still get the configured default (a `None` here would
+        // leave the fresh session in the adapter's default).
+        let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
         let node_root = daruda_store::persistence::node_install_dir();
 
         // Resolve the pane's agent_id → launch command, reconciling the view
@@ -910,12 +909,10 @@ impl Workspace {
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.cancel_turn(cx));
-            // `cancel_turn` keeps a live foreground turn in-flight (its real
-            // `cancelled` `TurnEnded` settles it + fires `Stopped` at the pump
-            // tail), so this reconcile is a no-op then. It fires here only for a
-            // trailing-subagent Stop (turn already idle): cancelling the subagent
-            // tools produces the busy→idle edge now, marking the backing task
-            // done via the single completion firing point.
+            // `cancel_turn` settles the turn locally, so this reconcile hits the
+            // busy→idle edge and fires the stashed outcome (a live-turn Stop's
+            // `Stopped`, or a trailing-subagent Stop's preserved completion) via
+            // the single completion firing point.
             let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
             if let Some(outcome) = edge {
                 self.fire_activity_completion(pane_id, outcome, cx);

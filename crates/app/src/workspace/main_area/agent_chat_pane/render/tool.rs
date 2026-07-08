@@ -220,11 +220,17 @@ pub(super) fn tool_card(
         Vec::new()
     };
     if !children.is_empty() {
+        // Name the spawned subagent when the Task input carries its type
+        // (`subagent_type`); fall back to the generic label otherwise.
+        let subagent_label = match tc.subagent_type() {
+            Some(kind) => s::agent_chat_subagent_label_typed(kind),
+            None => s::agent_chat_subagent_label(),
+        };
         body = body.child(
             div()
                 .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
-                .child(SharedString::from(s::agent_chat_subagent_label())),
+                .child(SharedString::from(subagent_label)),
         );
         for child in children {
             let child_key = FoldKey::Tool(child.id.clone());

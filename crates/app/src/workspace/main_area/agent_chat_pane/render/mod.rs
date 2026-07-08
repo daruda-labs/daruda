@@ -103,6 +103,7 @@ pub(in crate::workspace) fn render(
         pane_id,
         title.as_deref(),
         content.session_updated_at.as_deref(),
+        content.session_usage.as_ref(),
         !content.items.is_empty(),
         dim,
         cx,
