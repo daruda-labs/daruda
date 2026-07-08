@@ -979,6 +979,11 @@ pub fn agent_chat_plan_label() -> String {
     rust_i18n::t!("agent_chat.plan_label").into_owned()
 }
 
+/// Tooltip on the × button that dismisses a completed plan region.
+pub fn agent_chat_plan_dismiss() -> String {
+    rust_i18n::t!("agent_chat.plan_dismiss").into_owned()
+}
+
 /// Tooltip on the activity-bar title showing the session's last-activity time
 /// (`SessionInfoUpdate.updated_at`). `time` is a pre-formatted timestamp.
 pub fn agent_chat_last_active_tooltip(time: &str) -> String {

@@ -7,7 +7,7 @@ use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px
 use super::pulse_opacity;
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{Disclosure, disclosure};
+use crate::ui::{ButtonVariants as _, Disclosure, IconName, button_bare, disclosure};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -147,6 +147,27 @@ pub(super) fn plan_region(
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!("· {}", active.content))),
             );
+    }
+
+    // Every entry done: the plan no longer changes, so offer an explicit × to
+    // dismiss the finished checklist instead of leaving it lingering as a
+    // collapsed header with no clear close point. `done == total` implies no
+    // in-progress entry, so the collapsed trailing block above never coexists
+    // with this — one `flex_1` spacer pushes the × to the trailing edge. The
+    // click stops propagation so it dismisses without also toggling the header.
+    if done == total {
+        header = header.child(div().flex_1().min_w_0()).child(
+            button_bare(SharedString::from(format!(
+                "agent-chat-plan-dismiss-{pane_id}"
+            )))
+            .ghost()
+            .icon(IconName::Close)
+            .tooltip(s::agent_chat_plan_dismiss())
+            .on_click(cx.listener(|this, _ev, _window, cx| {
+                cx.stop_propagation();
+                this.dismiss_plan(cx);
+            })),
+        );
     }
 
     let mut region = div()

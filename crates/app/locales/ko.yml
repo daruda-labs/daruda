@@ -223,6 +223,7 @@ agent_chat:
   collapse_all: "모두 접기"
   last_active_tooltip: "마지막 활동: %{time}"
   plan_label: "계획"
+  plan_dismiss: "계획 닫기"
   thinking_label: "생각 중"
   switch_confirm_title: "에이전트를 전환할까요?"
   switch_confirm_body: "새 %{agent} 대화를 시작할까요? 현재 대화는 해당 탭에 그대로 유지됩니다."
