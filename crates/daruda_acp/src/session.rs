@@ -222,6 +222,20 @@ impl AcpSessionHandle {
         let _ = self.commands.unbounded_send(Command::Cancel);
     }
 
+    /// A detached handle for host-side tests: its command channel has no live
+    /// receiver, so `send_prompt`/`cancel`/… become no-ops. Lets a host test
+    /// hold `Some(handle)` (to exercise the "a live session is present" branches)
+    /// without spawning a real agent connection.
+    #[doc(hidden)]
+    pub fn detached_for_test() -> Self {
+        Self {
+            commands: futures::channel::mpsc::unbounded().0,
+            permission_parks: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+        }
+    }
+
     /// Request a mode switch via `session/set_mode`. Returns immediately; the
     /// connection task issues the request on the next idle cycle. The agent
     /// confirms by emitting a `CurrentModeUpdate` notification, which surfaces

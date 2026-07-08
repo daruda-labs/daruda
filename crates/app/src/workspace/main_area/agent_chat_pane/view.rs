@@ -374,6 +374,14 @@ impl AgentChatView {
         !self.turn.is_in_flight()
     }
 
+    /// Test-only hook: attach a detached session handle so `handle.is_some()`
+    /// branches (a live session is present) are reachable offline — e.g. that a
+    /// live-turn Stop keeps the turn in-flight rather than force-settling.
+    #[cfg(test)]
+    pub(in crate::workspace) fn attach_detached_session_for_test(&mut self) {
+        self.handle = Some(daruda_acp::AcpSessionHandle::detached_for_test());
+    }
+
     /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
     /// the lane indicator aggregation. Returns `None` for states that should
     /// not contribute an indicator (dormant `Idle` — session not yet started —
@@ -1094,33 +1102,49 @@ impl AgentChatView {
     /// `AcpThread::cancel`, which takes `running_turn` and marks pending tools
     /// cancelled without awaiting the agent.
     pub(in crate::workspace) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
+        // A live session settles this turn via the authoritative `cancelled`
+        // `TurnEnded` the agent MUST send; capture whether one exists before the
+        // borrow ends.
+        let has_session = self.handle.is_some();
         if let Some(handle) = &self.handle {
             handle.cancel();
         }
-        // Stash the Stop outcome before settling so the busy→idle edge (next
-        // `reconcile_activity`) carries it — but only when there is actually a
-        // live foreground turn to cancel. Stop is also offered (gated on
-        // `is_busy()`) during the trailing-subagent window *after* the foreground
-        // turn already ended normally and stashed `Completed`; overwriting that
-        // with `Stopped` would silently drop the completion notification. When no
-        // turn is in flight, leave the already-captured outcome
-        // (`Completed`/`Errored`) intact — both map to task `Stop` anyway, so
-        // task state is unaffected either way. Checked before `settle_turn`,
-        // which resets the turn to `Idle`.
-        if self.turn.is_in_flight() {
-            self.pending_completion = Some(TurnOutcome::Stopped);
+        // Settle the *items* for a responsive Stop (finalize streaming, mark
+        // running tool calls cancelled, resolve any pending permission — the
+        // ACP spec's "client SHOULD preemptively mark cancelled" behaviour) but,
+        // when a session is live, KEEP the turn in-flight: the `cancelled`
+        // `TurnEnded` drives the real `settle_turn` + queue drain. Settling the
+        // turn locally would let an immediate re-prompt see an idle turn and race
+        // turn-2 onto the wire ahead of turn-1's cancel — the adapter then
+        // stashes turn-2 behind turn-1, and turn-1's stale `TurnEnded` gets
+        // misattributed to turn-2 (early task-done + lost completion). Keeping the
+        // turn in-flight routes a re-prompt through `pending_prompts` (the
+        // `!turn.is_in_flight()` guard in `send_prompt_text`), so it is issued
+        // only after the cancel completes — mirroring the wire serialization. No
+        // `pending_completion` stash on this path: the real `cancelled`
+        // `TurnEnded` (`completed_normally == false`) records `Stopped` at the
+        // settle edge; a trailing-subagent Stop (turn already idle) keeps the
+        // foreground turn's already-captured outcome and fires it via
+        // `cancel_agent_turn`'s reconcile once the tools settle.
+        self.settle_items();
+        if !has_session {
+            // No live session → no `cancelled` `TurnEnded` will arrive (a hung or
+            // handle-less pane), so force the local turn settle here so Stop still
+            // ends it. Record `Stopped` only when a live foreground turn was
+            // actually cancelled — never clobber a trailing-subagent's
+            // already-captured completion.
+            if self.turn.is_in_flight() {
+                self.pending_completion = Some(TurnOutcome::Stopped);
+            }
+            self.turn = Turn::Idle;
         }
-        self.settle_turn();
-        // Stop halts everything queued, not just the live turn. Drop any
-        // buffered prompts so the cancelled turn's later `TurnEnded` finds an
-        // empty buffer and `pump_pending_prompt` no-ops — otherwise Stop would
-        // silently auto-fire the next queued prompt (the bottom-dock input does
-        // not gate Send on `turn.is_in_flight()`). The clear runs now, before the
-        // cancelled `TurnEnded` arrives over the event pump.
+        // Stop halts everything queued *before* it: drop prompts buffered prior
+        // to this Stop. A prompt the user types *after* Stop is pushed after this
+        // clear and drains once the cancel's `TurnEnded` pumps the queue.
         self.pending_prompts.clear();
-        // The settle above mutates items (streaming → done, running tools →
-        // cancelled, pending card → resolved), changing both fold visibility and
-        // row heights, so reproject and remeasure before notifying.
+        // `settle_items` mutated items (streaming → done, running tools →
+        // cancelled, pending card → resolved), changing fold visibility and row
+        // heights, so reproject and remeasure before notifying.
         self.rebuild_rows();
         self.list_state.remeasure();
         cx.notify();
@@ -1135,6 +1159,15 @@ impl AgentChatView {
     /// blinks forever). Idempotent: a later `TurnEnded` after a Stop is a no-op.
     fn settle_turn(&mut self) {
         self.turn = Turn::Idle;
+        self.settle_items();
+    }
+
+    /// Settle every still-live *item* — finalize streaming text, mark running
+    /// tool calls cancelled, drain any pending permission — without touching the
+    /// prompt `turn`. [`Self::settle_turn`] is this plus `turn = Idle`;
+    /// [`Self::cancel_turn`] calls this alone so the turn stays in-flight until
+    /// its real (`cancelled`) `TurnEnded` drives the settle + queue drain.
+    fn settle_items(&mut self) {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);

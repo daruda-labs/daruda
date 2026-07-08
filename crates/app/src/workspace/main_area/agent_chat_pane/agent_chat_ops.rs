@@ -910,9 +910,12 @@ impl Workspace {
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.cancel_turn(cx));
-            // A user Stop settles the span: `cancel_turn` stashed `Stopped`, so
-            // the busy→idle edge here marks the backing task done via the single
-            // completion firing point.
+            // `cancel_turn` keeps a live foreground turn in-flight (its real
+            // `cancelled` `TurnEnded` settles it + fires `Stopped` at the pump
+            // tail), so this reconcile is a no-op then. It fires here only for a
+            // trailing-subagent Stop (turn already idle): cancelling the subagent
+            // tools produces the busy→idle edge now, marking the backing task
+            // done via the single completion firing point.
             let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
             if let Some(outcome) = edge {
                 self.fire_activity_completion(pane_id, outcome, cx);
