@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ModeStateView, PermissionDecision,
     PermissionKindView, PlanEntryView, SlashCommand, apply_update, cancel_pending_tools,
-    finalize_streaming, has_running_background_tool, permission_item,
+    finalize_streaming, permission_item, subagent_activity, touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{
@@ -57,6 +57,13 @@ use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+/// How long a background subagent's run stays "active" after its last child
+/// tool event, bridging the gaps between a subagent's sequential child tool
+/// calls (observed ~4s). The parent Task's own status completes early and
+/// there is no clean terminal signal, so we treat a subagent as still running
+/// until it has been quiet for this long.
+const SUBAGENT_QUIESCENCE: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Debug gate for agent-chat list-measurement tracing (`trace_remeasure`).
 /// Reads `DARUDA_DEBUG_AGENT_LIST` once and caches it. Off by default so the
@@ -223,6 +230,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// re-submit while the agent is busy, and carries the turn's start instant
     /// (runtime-only, never persisted) for the elapsed-time display.
     pub(in crate::workspace) turn: Turn,
+    /// Per-subagent last-activity timestamps, keyed by the parent tool id every
+    /// child tool stamps in its `parent_tool_id`. Bumped in `apply_event` each
+    /// time one of a subagent's child tools produces a tool-call event, and read
+    /// by [`daruda_acp::subagent_activity`] to hold the subagent's run "active"
+    /// across the gaps between its sequential child calls (see
+    /// [`SUBAGENT_QUIESCENCE`]). Runtime-only; never serialized.
+    pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
     /// Built once per diff by `reconcile_diff_editors` — the same
@@ -333,13 +347,40 @@ impl AgentChatView {
     }
 
     /// Whether the agent is doing work right now — the prompt turn is in flight
-    /// **or** a background subagent's child tool is still running past the turn's
-    /// `end_turn` (see [`daruda_acp::has_running_background_tool`]). This is the
-    /// animation-liveness predicate the status-pulse gate reads, kept distinct
-    /// from [`Self::activity_state`]: a pending permission changes the badge
-    /// *label* but must not stop a still-live tool badge from animating.
+    /// **or** at least one background subagent is still inside its run span. A
+    /// subagent's span (see [`daruda_acp::subagent_activity`]) stays active while
+    /// it has a live child tool OR its last child event was within
+    /// [`SUBAGENT_QUIESCENCE`], which bridges the gaps between a subagent's
+    /// sequential child calls so this predicate does not flicker off in them.
+    /// This is the animation-liveness predicate the status-pulse gate reads, kept
+    /// distinct from [`Self::activity_state`]: a pending permission changes the
+    /// badge *label* but must not stop a still-live subagent badge from animating.
     pub(in crate::workspace) fn is_busy(&self) -> bool {
-        self.turn.is_in_flight() || has_running_background_tool(&self.items)
+        self.turn.is_in_flight()
+            || subagent_activity(
+                &self.items,
+                &self.subagent_last_activity,
+                std::time::Instant::now(),
+                SUBAGENT_QUIESCENCE,
+            )
+            .any_running
+    }
+
+    /// `(settled, total)` subagent counts for the working-indicator progress
+    /// label (`subagent N/M`); `None` when there are no subagents. Uses the same
+    /// span derivation as `is_busy`.
+    // Forward-declared for the working-indicator label wiring (a later task,
+    // which adds the i18n `subagent N/M` string that consumes this); no reader
+    // yet, so `-D warnings` would otherwise flag it dead.
+    #[allow(dead_code)]
+    pub(in crate::workspace) fn subagent_progress(&self) -> Option<(usize, usize)> {
+        let a = subagent_activity(
+            &self.items,
+            &self.subagent_last_activity,
+            std::time::Instant::now(),
+            SUBAGENT_QUIESCENCE,
+        );
+        (a.total > 0).then_some((a.settled, a.total))
     }
 
     /// The pane's derived activity — the single source of the badge label. A
@@ -397,6 +438,7 @@ impl AgentChatView {
             _event_pump: None,
             pending_permission: None,
             turn: Turn::Idle,
+            subagent_last_activity: HashMap::new(),
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
@@ -560,11 +602,13 @@ impl AgentChatView {
                 } else {
                     // Fresh session (`session/new`): clear stale plan/title so
                     // they don't flash before the new agent sends its first
-                    // updates.
+                    // updates, and drop the prior session's subagent activity so
+                    // its timestamps can't hold the new session's badge "busy".
                     self.plan.clear();
                     self.session_title = None;
                     self.session_updated_at = None;
                     self.plan_collapsed = false;
+                    self.subagent_last_activity.clear();
                 }
             }
             AcpEvent::ConfigOptionsChanged(options) => {
@@ -592,6 +636,21 @@ impl AgentChatView {
                 let effect = apply_update(&mut self.items, &update);
                 touched_tool = effect.touched_tool;
                 touched_text = effect.touched_text;
+                // Bump the subagent (parent) whose child just produced this
+                // tool-call event, so its run span stays "active" across the
+                // gaps between the subagent's sequential child calls. Only child
+                // tools carry a `parent_tool_id`; a top-level tool has none, so
+                // nothing is bumped for the turn's own (foreground) work.
+                if let Some(tool_id) = touched_tool_id(&update) {
+                    let parent = self.items.iter().rev().find_map(|it| match it {
+                        ChatItem::ToolCall(tc) if tc.id == tool_id => tc.parent_tool_id.clone(),
+                        _ => None,
+                    });
+                    if let Some(parent) = parent {
+                        self.subagent_last_activity
+                            .insert(parent, std::time::Instant::now());
+                    }
+                }
             }
             AcpEvent::PermissionRequested { id, request } => {
                 self.items.push(permission_item(&request));
@@ -1012,6 +1071,19 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Dismiss the plan region: drop the entries so `plan_region` renders
+    /// nothing. The plan is a derived render of `plan` (full-replaced by the
+    /// agent), so clearing it is a pure local presentation reset — a later
+    /// turn's `PlanChanged` repopulates it (expanded, since `plan_collapsed` is
+    /// reset here). Wired to the header's × button, shown only once every entry
+    /// is completed, so the finished checklist no longer lingers as a collapsed
+    /// header with no clear close point.
+    pub(in crate::workspace) fn dismiss_plan(&mut self, cx: &mut Context<Self>) {
+        self.plan.clear();
+        self.plan_collapsed = false;
+        cx.notify();
+    }
+
     /// Switch the active session mode. Optimistically updates `modes.current`
     /// so the chip reflects the selection immediately; the adapter reconciles
     /// via a `ModeChanged` event if it disagrees. Sends `session/set_mode` over
@@ -1062,6 +1134,7 @@ impl AgentChatView {
         self.pending_prompts.clear();
         self.pending_permission = None;
         self.turn = Turn::Idle;
+        self.subagent_last_activity.clear();
         self.diff_editors.clear();
         self.diff_stats.clear();
         self.mermaid_inflight.clear();

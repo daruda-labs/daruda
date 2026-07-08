@@ -135,16 +135,17 @@ pub fn cancel_pending_tools(items: &mut [ChatItem]) {
     }
 }
 
-/// True when a background subagent's child tool call is still running — a
-/// `parent_tool_id`-linked tool in a live state. The Claude adapter flattens
-/// subagent activity into the one session, and such children keep running
-/// after the parent turn's `end_turn`, so this is what tells the host the
-/// agent is still working past the turn boundary.
-pub fn has_running_background_tool(items: &[ChatItem]) -> bool {
-    items.iter().any(|it| {
-        matches!(it,
-            ChatItem::ToolCall(tc) if tc.parent_tool_id.is_some() && tc.status.is_live())
-    })
+/// The `tool_call_id` a `session/update` targets, if it is a tool-call event
+/// (a `ToolCall` insert or a `ToolCallUpdate`); `None` for every other update
+/// kind. The host uses this to find the `ChatItem::ToolCall` that `apply_update`
+/// just mutated and bump its parent subagent's last-activity timestamp — without
+/// itself reaching into protocol types (the host consumes only the render model).
+pub fn touched_tool_id(update: &SessionUpdate) -> Option<String> {
+    match update {
+        SessionUpdate::ToolCall(tc) => Some(tc.tool_call_id.0.to_string()),
+        SessionUpdate::ToolCallUpdate(u) => Some(u.tool_call_id.0.to_string()),
+        _ => None,
+    }
 }
 
 /// Aggregate run-state over the background subagents in a conversation.
@@ -793,55 +794,6 @@ mod tests {
         assert_eq!(status(3), ToolStatusView::Failed, "failed is terminal");
     }
 
-    #[test]
-    fn has_running_background_tool_tracks_live_child_calls() {
-        let child = |status| {
-            ChatItem::ToolCall(ToolCallItem {
-                id: "child".to_string(),
-                title: "child".to_string(),
-                kind: ToolKindView::Read,
-                status,
-                diffs: Vec::new(),
-                output: Vec::new(),
-                raw_input: None,
-                parent_tool_id: Some("parent".to_string()),
-            })
-        };
-        // A subagent's child call in a live state → still working.
-        assert!(has_running_background_tool(&[child(
-            ToolStatusView::InProgress
-        )]));
-        assert!(has_running_background_tool(&[child(
-            ToolStatusView::Pending
-        )]));
-        // A settled / stopped child no longer counts.
-        assert!(!has_running_background_tool(&[child(
-            ToolStatusView::Completed
-        )]));
-        assert!(!has_running_background_tool(&[child(
-            ToolStatusView::Failed
-        )]));
-        assert!(!has_running_background_tool(&[child(
-            ToolStatusView::Cancelled
-        )]));
-        // A top-level (parent-less) live call is the turn's own work, not a
-        // background subagent — excluded so it doesn't double-count the turn.
-        assert!(!has_running_background_tool(&[ChatItem::ToolCall(
-            ToolCallItem {
-                id: "top".to_string(),
-                title: "top".to_string(),
-                kind: ToolKindView::Read,
-                status: ToolStatusView::InProgress,
-                diffs: Vec::new(),
-                output: Vec::new(),
-                raw_input: None,
-                parent_tool_id: None,
-            }
-        )]));
-        // Empty conversation → nothing running.
-        assert!(!has_running_background_tool(&[]));
-    }
-
     fn subagent_child(parent: &str, status: ToolStatusView) -> ChatItem {
         ChatItem::ToolCall(ToolCallItem {
             id: format!("{parent}-child"),
@@ -959,6 +911,27 @@ mod tests {
         assert_eq!(tc.status, ToolStatusView::Completed);
         assert_eq!(tc.diffs.len(), 1);
         assert_eq!(tc.diffs[0].new_text, "hi\n");
+    }
+
+    #[test]
+    fn touched_tool_id_extracts_only_tool_call_events() {
+        // A `ToolCall` insert and a `ToolCallUpdate` both carry the target id.
+        assert_eq!(
+            touched_tool_id(&SessionUpdate::ToolCall(ToolCall::new("t1", "Read"))),
+            Some("t1".to_string())
+        );
+        assert_eq!(
+            touched_tool_id(&SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "t2",
+                ToolCallUpdateFields::default()
+            ))),
+            Some("t2".to_string())
+        );
+        // A text chunk is not a tool-call event → no id.
+        assert_eq!(
+            touched_tool_id(&SessionUpdate::AgentMessageChunk(text_chunk("hi"))),
+            None
+        );
     }
 
     #[test]
