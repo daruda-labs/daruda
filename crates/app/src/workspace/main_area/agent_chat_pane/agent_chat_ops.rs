@@ -41,7 +41,7 @@ use gpui::{AppContext as _, Context, Entity, Window};
 
 use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
-use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase};
+use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase, TurnOutcome};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
@@ -113,34 +113,15 @@ fn should_notify_agent_event(
 }
 
 impl Workspace {
-    /// Fire a desktop notification for an agent-chat completion / wait event
-    /// when the channel is enabled and the pane isn't the focused one. Called
-    /// from the event pump BEFORE the event is folded into the view. A no-op
-    /// for every other event and when gated out.
-    fn maybe_notify_agent_event(
-        &self,
-        pane_id: PaneId,
-        event: &daruda_acp::AcpEvent,
-        cx: &Context<Self>,
-    ) {
-        let (enabled, body) = match event {
-            daruda_acp::AcpEvent::TurnEnded {
-                completed_normally: true,
-                ..
-            } => (
-                self.notifications.agent_completion_enabled,
-                s::agent_notification_completed(),
-            ),
-            daruda_acp::AcpEvent::PermissionRequested { .. } => (
-                self.notifications.agent_waiting_enabled,
-                s::agent_notification_waiting(),
-            ),
-            _ => return,
-        };
-        // The firing pane is "focused" only when it is the active lane's focused
-        // pane. A pane in a parked (non-active) lane never matches this global
-        // pane id, so a background lane's completion / wait always fires — the
-        // desired behavior, since the user cannot be looking at it.
+    /// Show a desktop notification `body` for agent-chat pane `pane_id`, gated
+    /// by `enabled` and the shared focus rule. The single place the focus gate +
+    /// title lookup live.
+    ///
+    /// The firing pane is "focused" only when it is the active lane's focused
+    /// pane. A pane in a parked (non-active) lane never matches this global pane
+    /// id, so a background lane's completion / wait always fires — the desired
+    /// behavior, since the user cannot be looking at it.
+    fn notify_agent_pane(&self, pane_id: PaneId, enabled: bool, body: String, cx: &Context<Self>) {
         let is_focused = self.active_runtime().focused_pane_id == pane_id;
         if !should_notify_agent_event(
             enabled,
@@ -156,6 +137,70 @@ impl Workspace {
             .and_then(|v| v.read(cx).session_title.clone())
             .unwrap_or_else(s::agent_chat_tab_title);
         crate::platform::notifications::show(&title, &body);
+    }
+
+    /// Fire the "waiting for input" desktop notification when the agent requests
+    /// a permission decision. Called from the event pump BEFORE the event is
+    /// folded into the view. This is a wait signal, distinct from turn
+    /// completion — completion fires at the activity-settle edge via
+    /// [`Self::fire_activity_completion`], not from the raw event. A no-op for
+    /// every other event and when gated out.
+    fn maybe_notify_agent_event(
+        &self,
+        pane_id: PaneId,
+        event: &daruda_acp::AcpEvent,
+        cx: &Context<Self>,
+    ) {
+        if !matches!(event, daruda_acp::AcpEvent::PermissionRequested { .. }) {
+            return;
+        }
+        self.notify_agent_pane(
+            pane_id,
+            self.notifications.agent_waiting_enabled,
+            s::agent_notification_waiting(),
+            cx,
+        );
+    }
+
+    /// Fire the "completed" desktop notification for a settled turn. Called only
+    /// from [`Self::fire_activity_completion`] on a `Completed` outcome at the
+    /// busy→idle activity-settle edge (not on the raw `TurnEnded` event, which
+    /// may still have trailing subagents running).
+    fn maybe_notify_agent_completed(&self, pane_id: PaneId, cx: &Context<Self>) {
+        self.notify_agent_pane(
+            pane_id,
+            self.notifications.agent_completion_enabled,
+            s::agent_notification_completed(),
+            cx,
+        );
+    }
+
+    /// Fire the completion signals for a pane whose activity span just settled:
+    /// the "completed" desktop notification (only for `Completed`) and the
+    /// backing task's terminal reconcile. The single completion firing point,
+    /// driven by every [`AgentChatView::reconcile_activity`] caller when it
+    /// returns `Some` on the busy→idle edge.
+    pub(in crate::workspace) fn fire_activity_completion(
+        &mut self,
+        pane_id: PaneId,
+        outcome: TurnOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(outcome, TurnOutcome::Completed) {
+            self.maybe_notify_agent_completed(pane_id, cx);
+        }
+        let reason = match outcome {
+            TurnOutcome::Completed | TurnOutcome::Stopped => {
+                daruda_store::tasks::SessionEndReason::Stop
+            }
+            TurnOutcome::Errored => daruda_store::tasks::SessionEndReason::Error,
+        };
+        if let Some(cwd) = self
+            .agent_chat_view(pane_id)
+            .and_then(|v| v.read(cx).cwd.clone())
+        {
+            self.apply_agent_chat_task_ended(&cwd, reason, cx);
+        }
     }
 
     /// Construct an Agent chat `Pane` (no tab side-effects). Allocates the pane
@@ -547,24 +592,39 @@ impl Workspace {
                     // until the event pump reports it live. If the view/window is
                     // already gone, drop the handle (closing the session).
                     let stored = this.update(cx, |ws, cx| {
-                        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
-                            view.update(cx, |v, cx| {
-                                v.handle = Some(handle);
-                                if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
-                                    v.set_connecting(cx);
-                                }
-                                // Forward the first prompt submitted before the
-                                // handle existed (queued during the handshake or
-                                // dispatched into the pane before it connected).
-                                // One per turn: each `TurnEnded` pumps the next,
-                                // so the view tracks a single live turn. No-op
-                                // when nothing was buffered.
-                                v.pump_pending_prompt(cx);
-                            });
-                            true
-                        } else {
-                            false
+                        let Some(view) = ws.agent_chat_view(pane_id).cloned() else {
+                            return false;
+                        };
+                        view.update(cx, |v, cx| {
+                            v.handle = Some(handle);
+                            if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
+                                v.set_connecting(cx);
+                            }
+                            // Forward the first prompt submitted before the
+                            // handle existed (queued during the handshake or
+                            // dispatched into the pane before it connected).
+                            // One per turn: each `TurnEnded` pumps the next,
+                            // so the view tracks a single live turn. No-op
+                            // when nothing was buffered.
+                            v.pump_pending_prompt(cx);
+                        });
+                        // `pump_pending_prompt` may have flipped the turn
+                        // Idle→InFlight. Reconcile immediately — exactly as the
+                        // prompt-send driver does — so the idle→busy edge stamps
+                        // `was_busy`. Without this, if the pane buffered its first
+                        // prompt and the first ACP event is `TurnEnded`, the pump
+                        // event's later reconcile would see `was_busy == false`,
+                        // miss the busy→idle edge, and strand `pending_completion`
+                        // forever (task stuck `Running`, no notification). A
+                        // returned `Some` on this open edge is unexpected but
+                        // harmless — firing it keeps the single completion point
+                        // consistent.
+                        let edge =
+                            view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                        if let Some(outcome) = edge {
+                            ws.fire_activity_completion(pane_id, outcome, cx);
                         }
+                        true
                     });
                     if !matches!(stored, Ok(true)) {
                         return;
@@ -643,27 +703,29 @@ impl Workspace {
                             // bottom-input placeholder when either fires.
                             let mode_before =
                                 view.read(cx).modes.as_ref().map(|m| m.current.clone());
-                            // AgentChat-surfaced tasks reconcile off the ACP turn
-                            // lifecycle (they never write the status-file hooks
-                            // the Terminal surface uses). Capture the outcome
-                            // before the event is consumed: a completed turn maps
-                            // to Done (via `Stop`), a terminal error to Error.
-                            let task_end_reason = match &event {
-                                daruda_acp::AcpEvent::TurnEnded { .. } => {
-                                    Some(daruda_store::tasks::SessionEndReason::Stop)
-                                }
-                                daruda_acp::AcpEvent::Error(_) => {
-                                    Some(daruda_store::tasks::SessionEndReason::Error)
-                                }
-                                _ => None,
-                            };
-                            // Desktop notification for turn-completion / wait,
-                            // gated by focus. Must borrow `&event` before the
-                            // move into `apply_event` below.
+                            // Desktop notification for a permission wait, gated by
+                            // focus. Must borrow `&event` before the move into
+                            // `apply_event` below. Turn *completion* fires later,
+                            // at the activity-settle edge (see the reconcile below).
                             ws.maybe_notify_agent_event(pane_id, &event, cx);
                             view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
+                            // Advance the activity span now that the event folded
+                            // in. When this event drove the last busy→idle
+                            // transition (the turn ended and no subagent is still
+                            // running), `reconcile_activity` returns the captured
+                            // outcome and the completion signals fire exactly once.
+                            // A still-running subagent leaves the pane busy, so the
+                            // firing defers to the pulse tick that catches the
+                            // quiescence settle. AgentChat-surfaced tasks reconcile
+                            // off this edge (they never write the status-file hooks
+                            // the Terminal surface uses).
+                            let edge = view
+                                .update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                            if let Some(outcome) = edge {
+                                ws.fire_activity_completion(pane_id, outcome, cx);
+                            }
                             if view.read(cx).to_session_status() != before {
                                 ws.notify_status_docks(cx);
                             }
@@ -679,15 +741,6 @@ impl Workspace {
                                 {
                                     ws.mark_dirty_and_save(cx);
                                 }
-                            }
-                            // Reconcile the backing task (if any) keyed by the
-                            // pane's lane cwd. A no-op when no `Running` task
-                            // matches (plain agent-chat pane) or the cwd is
-                            // absent.
-                            if let Some(reason) = task_end_reason
-                                && let Some(cwd) = view.read(cx).cwd.clone()
-                            {
-                                ws.apply_agent_chat_task_ended(&cwd, reason, cx);
                             }
                             // Refresh placeholder when the active mode changed or
                             // modes became available (Connected). Only fires for
@@ -833,6 +886,15 @@ impl Workspace {
             SlashDispatch::Forward => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                     view.update(cx, |v, cx| v.send_prompt_text(text, cx));
+                    // Open the activity span on the idle→busy edge (stamps the
+                    // working-indicator elapsed anchor at send). A returned
+                    // `Some` is unexpected on open but harmless to fire — the
+                    // single completion firing point stays consistent.
+                    let edge =
+                        view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                    if let Some(outcome) = edge {
+                        self.fire_activity_completion(pane_id, outcome, cx);
+                    }
                 }
             }
         }
@@ -848,16 +910,23 @@ impl Workspace {
     ) {
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.cancel_turn(cx));
+            // A user Stop settles the span: `cancel_turn` stashed `Stopped`, so
+            // the busy→idle edge here marks the backing task done via the single
+            // completion firing point.
+            let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+            if let Some(outcome) = edge {
+                self.fire_activity_completion(pane_id, outcome, cx);
+            }
         }
     }
 
-    /// Cancel `pane_id`'s turn only when one is actually in flight. Backs the
-    /// Escape shortcut (the keyboard counterpart of the "Stop" button): returns
-    /// `true` when it cancelled, `false` when `pane_id` is not an Agent chat
-    /// pane or has no turn running — in which case the caller lets Escape
-    /// propagate as usual. Mirrors the `agent_stop_pane` snapshot condition that
-    /// shows the Stop button.
-    pub(in crate::workspace) fn cancel_agent_turn_if_in_flight(
+    /// Cancel `pane_id`'s turn only when the pane is actually busy (a prompt turn
+    /// in flight OR a background subagent still running). Backs the Escape
+    /// shortcut (the keyboard counterpart of the "Stop" button): returns `true`
+    /// when it cancelled, `false` when `pane_id` is not an Agent chat pane or is
+    /// idle — in which case the caller lets Escape propagate as usual. Mirrors
+    /// the `agent_stop_pane` snapshot condition that shows the Stop button.
+    pub(in crate::workspace) fn cancel_agent_turn_if_active(
         &mut self,
         pane_id: PaneId,
         cx: &mut Context<Self>,
@@ -865,10 +934,15 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return false;
         };
-        if !view.read(cx).turn.is_in_flight() {
+        if !view.read(cx).is_busy() {
             return false;
         }
         view.update(cx, |v, cx| v.cancel_turn(cx));
+        // Same settle-edge firing as `cancel_agent_turn`.
+        let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+        if let Some(outcome) = edge {
+            self.fire_activity_completion(pane_id, outcome, cx);
+        }
         true
     }
 

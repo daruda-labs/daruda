@@ -230,10 +230,7 @@ pub(super) fn working_indicator(
 ) -> impl IntoElement + use<> {
     let base = working_status(content);
     let dots = pulse_dots(cx);
-    let elapsed_label = content
-        .turn
-        .started_at()
-        .map(|start| format_elapsed(start.elapsed()));
+    let elapsed_label = content.activity_elapsed().map(format_elapsed);
     let mut row = div()
         .w_full()
         .min_w_0()

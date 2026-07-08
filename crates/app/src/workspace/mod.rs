@@ -786,16 +786,16 @@ impl Workspace {
                         ws.update(app, |ws, cx| ws.cycle_agent_mode(focused, cx))
                     })
                 })
-                // Escape cancels the focused agent pane's in-flight turn — the
+                // Escape cancels the focused agent pane's activity — the
                 // keyboard counterpart of the bottom-dock "Stop" button. Returns
-                // true only when a turn was actually running (so Escape keeps
+                // true only when the pane was actually busy (so Escape keeps
                 // propagating normally otherwise). Fires only as a fallback after
                 // the input's own Escape handling (see `InputState::on_escape`),
                 // so an open completion menu still closes on the first Escape.
                 .on_escape(move |_window, app| {
                     ws_for_escape.upgrade().is_some_and(|ws| {
                         let focused = ws.read(app).active_runtime().focused_pane_id;
-                        ws.update(app, |ws, cx| ws.cancel_agent_turn_if_in_flight(focused, cx))
+                        ws.update(app, |ws, cx| ws.cancel_agent_turn_if_active(focused, cx))
                     })
                 })
                 // ↑/↓ at the boundary of the multi-line input navigates the
@@ -1547,20 +1547,54 @@ impl Workspace {
     /// the settled (idle / done) frame actually paints. Returns nothing; updates
     /// [`Self::agent_pulse_prev`] in place.
     pub(crate) fn pulse_agent_chats(&mut self, cx: &mut Context<Self>) {
-        let now: Vec<gpui::EntityId> = self
+        let tick_now = std::time::Instant::now();
+        // Collect the candidate panes (clone the entity + its pane id) first so
+        // the `self` borrow is dropped before any `view.update` / `self.fire_*`
+        // below. A candidate is any pane that was busy at the last tick (so its
+        // settle edge is still owed a fire) or could be busy now (`maybe_active`
+        // — the cheap O(1) pre-check); idle-and-quiet panes are skipped so the
+        // per-tick cost stays bounded.
+        type PulseCandidate = (
+            main_area::pane_tree::PaneId,
+            gpui::Entity<main_area::agent_chat_pane::view::AgentChatView>,
+        );
+        let candidates: Vec<PulseCandidate> = self
             .main_area
             .runtimes
             .values()
             .flat_map(|rt| rt.panes.iter())
-            .filter_map(|p| p.agent_chat_view())
-            .filter(|v| {
+            .filter_map(|p| p.agent_chat_view().map(|v| (p.id, v.clone())))
+            .filter(|(_, v)| {
                 let vr = v.read(cx);
-                vr.maybe_active() && vr.is_busy()
+                vr.was_busy || vr.maybe_active()
             })
-            .map(|v| v.entity_id())
             .collect();
+
+        // Reconcile each candidate: an edge fires completion; the post-reconcile
+        // busy level drives the repaint set. The pulse tick is the time-driven
+        // settle driver — it catches a background subagent's quiescence that no
+        // ACP event announces.
+        let mut busy_ids: Vec<gpui::EntityId> = Vec::new();
+        let mut completions = Vec::new();
+        for (pane_id, view) in &candidates {
+            let edge = view.update(cx, |v, _| v.reconcile_activity(tick_now));
+            // `reconcile_activity` just recomputed the busy level with `tick_now`
+            // and stored it in `was_busy`; read that instead of calling
+            // `is_busy()` again (a second O(items) `subagent_activity` scan with a
+            // fresh `Instant::now()`) so the whole tick uses one consistent `now`.
+            if view.read(cx).was_busy {
+                busy_ids.push(view.entity_id());
+            }
+            if let Some(outcome) = edge {
+                completions.push((*pane_id, outcome));
+            }
+        }
+        for (pane_id, outcome) in completions {
+            self.fire_activity_completion(pane_id, outcome, cx);
+        }
+
         // Nothing animating and nothing just settled — fully at rest, no work.
-        if now.is_empty() && self.agent_pulse_prev.is_empty() {
+        if busy_ids.is_empty() && self.agent_pulse_prev.is_empty() {
             return;
         }
         // Re-render the workspace so the snapshot re-reads (re-tracks) the
@@ -1568,10 +1602,10 @@ impl Workspace {
         // animating path's workspace notify, and is what lets the trailing
         // settled frame reach a view that had fallen out of the tracked set.
         cx.notify();
-        for id in now.iter().chain(self.agent_pulse_prev.iter()) {
+        for id in busy_ids.iter().chain(self.agent_pulse_prev.iter()) {
             gpui::App::notify(cx, *id);
         }
-        self.agent_pulse_prev = now;
+        self.agent_pulse_prev = busy_ids;
     }
 
     pub(in crate::workspace) fn set_right_dock_view(

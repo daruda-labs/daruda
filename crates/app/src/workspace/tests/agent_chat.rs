@@ -15,7 +15,7 @@ use super::build_workspace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::rows::RowKind;
 use crate::workspace::main_area::agent_chat_pane::view::{
-    ActivityState, AgentChatView, AgentSessionStatus, Turn,
+    ActivityState, AgentChatView, AgentSessionStatus, TurnOutcome,
 };
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -315,7 +315,7 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
             daruda_acp::ChatItem::UserText("hello agent".to_string())
         );
         // No live handle → the turn is not marked in flight.
-        assert!(!view.turn.is_in_flight());
+        assert!(view.turn_is_idle());
     });
 }
 
@@ -715,9 +715,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                 // exactly the state a hung agent would leave (it never sends a
                 // stop reason, so `TurnEnded` would never clear this).
                 view.update(cx, |v, _| {
-                    v.turn = Turn::InFlight {
-                        started_at: std::time::Instant::now(),
-                    };
+                    v.set_turn_in_flight();
                     v.items = vec![
                         ChatItem::AssistantText {
                             text: "working".into(),
@@ -749,13 +747,10 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert!(
-            !view.turn.is_in_flight(),
+            view.turn_is_idle(),
             "Stop ends the turn without an agent reply"
         );
-        assert!(
-            view.turn.started_at().is_none(),
-            "the elapsed timer is cleared"
-        );
+        assert!(view.turn_is_idle(), "the turn is settled to idle");
         let ChatItem::AssistantText { streaming, .. } = &view.items[0] else {
             panic!("expected the streamed assistant text");
         };
@@ -790,29 +785,26 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
             let id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
 
-            // No turn running yet → the Escape shim is a no-op and reports it
-            // did not handle the key, so Escape can propagate normally.
+            // Not busy yet → the Escape shim is a no-op and reports it did not
+            // handle the key, so Escape can propagate normally.
             assert!(
-                !ws.cancel_agent_turn_if_in_flight(id, cx),
-                "no-op when no turn is in flight"
+                !ws.cancel_agent_turn_if_active(id, cx),
+                "no-op when the pane is idle"
             );
 
-            // Simulate a turn in flight, as `send_prompt` would.
-            agent_view(ws, id).update(cx, |v, _| {
-                v.turn = Turn::InFlight {
-                    started_at: std::time::Instant::now(),
-                }
-            });
+            // Simulate a turn in flight, as `send_prompt` would. A turn in
+            // flight makes `is_busy()` true.
+            agent_view(ws, id).update(cx, |v, _| v.set_turn_in_flight());
             assert!(
-                ws.cancel_agent_turn_if_in_flight(id, cx),
-                "cancels and reports handled when a turn is in flight"
+                ws.cancel_agent_turn_if_active(id, cx),
+                "cancels and reports handled when the pane is busy"
             );
 
             // An id that is not an agent chat pane reports not-handled, so
             // Escape keeps propagating to ancestors.
             let bogus: PaneId = id + 999;
             assert!(
-                !ws.cancel_agent_turn_if_in_flight(bogus, cx),
+                !ws.cancel_agent_turn_if_active(bogus, cx),
                 "no-op for an id that is not an agent chat pane"
             );
         });
@@ -891,9 +883,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
                 });
             agent_view(ws, id).update(cx, |v, _| {
                 v.status = AgentSessionStatus::Connected;
-                v.turn = Turn::InFlight {
-                    started_at: std::time::Instant::now(),
-                };
+                v.set_turn_in_flight();
             });
 
             // Switch away → lane 0 is now parked, lane 1 active.
@@ -973,9 +963,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
 
     // 1) Turn in flight, no permission, no background tool → Working.
     view.update(cx, |v, _| {
-        v.turn = Turn::InFlight {
-            started_at: std::time::Instant::now(),
-        };
+        v.set_turn_in_flight();
         v.items.clear();
     });
     view.read_with(cx, |v, _| {
@@ -989,7 +977,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
     // 2) Turn idle, but a background subagent's child tool still running → the
     //    regression: the pane must stay Working past the turn boundary.
     view.update(cx, |v, _| {
-        v.turn = Turn::Idle;
+        v.set_turn_idle();
         v.items = vec![child(ToolStatusView::InProgress)];
     });
     view.read_with(cx, |v, _| {
@@ -1006,7 +994,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
 
     // 3) Pending permission takes precedence over everything else.
     view.update(cx, |v, _| {
-        v.turn = Turn::Idle;
+        v.set_turn_idle();
         v.items.clear();
         v.pending_permission = Some(7);
     });
@@ -1020,7 +1008,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
 
     // 4) Idle: no turn, no permission, only a top-level or completed tool.
     view.update(cx, |v, _| {
-        v.turn = Turn::Idle;
+        v.set_turn_idle();
         v.pending_permission = None;
         v.items = vec![
             child(ToolStatusView::Completed),
@@ -1156,10 +1144,10 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
         );
         // Nothing is on the wire, so no turn is in flight.
         assert!(
-            !view.turn.is_in_flight(),
+            view.turn_is_idle(),
             "no turn until a handle carries a prompt"
         );
-        assert!(view.turn.started_at().is_none());
+        assert!(view.turn_is_idle());
     });
 }
 
@@ -1220,7 +1208,7 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
             v.pending_prompts.is_empty(),
             "Stop clears the queued prompts so nothing auto-resumes"
         );
-        assert!(!v.turn.is_in_flight(), "Stop ends the turn");
+        assert!(v.turn_is_idle(), "Stop ends the turn");
     });
 }
 
@@ -1265,7 +1253,7 @@ async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext
         );
         assert_eq!(v.items.len(), 3, "all three echoed locally");
         assert!(
-            !v.turn.is_in_flight(),
+            v.turn_is_idle(),
             "nothing is on the wire while disconnected"
         );
     });
@@ -1310,7 +1298,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
             vec!["queued".to_string()],
             "no handle → pump leaves the buffer intact"
         );
-        assert!(!v.turn.is_in_flight(), "no handle → no turn started");
+        assert!(v.turn_is_idle(), "no handle → no turn started");
     });
 
     // Empty buffer is also a no-op (does not panic / mark a turn).
@@ -1323,7 +1311,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     });
     empty_view.read_with(cx, |v, _| {
         assert!(v.pending_prompts.is_empty());
-        assert!(!v.turn.is_in_flight());
+        assert!(v.turn_is_idle());
     });
 }
 
@@ -1397,7 +1385,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     1,
                     "a blank submit adds no echo and fires no ACP turn"
                 );
-                assert!(!view.turn.is_in_flight());
+                assert!(view.turn_is_idle());
             }
 
             // Missing pane id → false.
@@ -1889,9 +1877,7 @@ async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext
             view.update(cx, |v, _cx| {
                 v.items.push(ChatItem::UserText("hi".into()));
                 v.items.push(ChatItem::UserText("again".into()));
-                v.turn = Turn::InFlight {
-                    started_at: std::time::Instant::now(),
-                };
+                v.set_turn_in_flight();
                 v.plan.push(PlanEntryView {
                     content: "step 1".into(),
                     priority: PlanPriority::Medium,
@@ -1918,10 +1904,7 @@ async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext
                 AgentSessionStatus::Connecting,
                 "reset parks the view in Connecting for the fresh session/new"
             );
-            assert!(
-                !v.turn.is_in_flight(),
-                "reset clears the in-flight turn flag"
-            );
+            assert!(v.turn_is_idle(), "reset clears the in-flight turn flag");
             assert!(v.plan.is_empty(), "reset clears the execution plan");
             assert!(
                 v.fold.is_expanded(&FoldKey::Tool("call-1".into()), true),
@@ -2119,4 +2102,244 @@ async fn split_agent_chat_inherits_source_agent(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
+}
+
+/// Build an offline AgentChat view (a cwd so it parks `Idle` with `handle:
+/// None`, no adapter spawned) and return its entity so the activity-span edge
+/// logic can be driven directly.
+fn make_activity_view(
+    cx: &mut TestAppContext,
+    window_handle: gpui::WindowHandle<gpui_component::Root>,
+    workspace: &Entity<Workspace>,
+) -> Entity<AgentChatView> {
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(tmp.clone()),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| agent_view(ws, pane_id))
+}
+
+/// The idle→busy edge stamps the activity-span start: `reconcile_activity`
+/// returns `None` (no completion on the way *in*) and `activity_elapsed`
+/// flips from `None` to `Some`.
+#[gpui::test]
+async fn reconcile_activity_idle_to_busy_stamps_span_start(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, _| {
+        assert!(v.activity_elapsed().is_none(), "idle → no span");
+        // Turn in flight makes `is_busy()` true without a live handle.
+        v.set_turn_in_flight();
+        let edge = v.reconcile_activity(std::time::Instant::now());
+        assert_eq!(edge, None, "the busy edge fires no completion");
+        assert!(v.was_busy, "reconcile records the busy level");
+        assert!(
+            v.activity_elapsed().is_some(),
+            "the span start is stamped on idle→busy"
+        );
+    });
+}
+
+/// The busy→idle edge returns the stashed outcome once and clears the span
+/// start (so `activity_elapsed` goes back to `None`).
+#[gpui::test]
+async fn reconcile_activity_busy_to_idle_returns_pending_once(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, _| {
+        // Enter the span.
+        v.set_turn_in_flight();
+        assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
+        // A completion was captured while busy (as `TurnEnded` would), and the
+        // turn settled.
+        v.pending_completion = Some(TurnOutcome::Completed);
+        v.set_turn_idle();
+        let edge = v.reconcile_activity(std::time::Instant::now());
+        assert_eq!(
+            edge,
+            Some(TurnOutcome::Completed),
+            "the busy→idle edge returns the stashed outcome"
+        );
+        assert!(
+            v.activity_elapsed().is_none(),
+            "the span start clears on settle"
+        );
+        // A second reconcile while still idle is a no-op — no re-fire.
+        assert_eq!(
+            v.reconcile_activity(std::time::Instant::now()),
+            None,
+            "the outcome fires exactly once"
+        );
+    });
+}
+
+/// A busy→idle settle with nothing captured returns `None` (no phantom
+/// completion when the pane just goes quiet without a turn/session ending).
+#[gpui::test]
+async fn reconcile_activity_settle_without_pending_returns_none(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, _| {
+        v.set_turn_in_flight();
+        assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
+        // Go idle with no captured outcome.
+        v.set_turn_idle();
+        assert_eq!(
+            v.reconcile_activity(std::time::Instant::now()),
+            None,
+            "a settle with no pending outcome fires nothing"
+        );
+    });
+}
+
+/// Two turns that never let the pane fall idle between them are one activity
+/// span: the outcome is overwritten to the latest and fires exactly once, at
+/// the final settle.
+#[gpui::test]
+async fn reconcile_activity_two_turns_one_span_fires_latest_once(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, _| {
+        // Turn 1 starts → span begins.
+        v.set_turn_in_flight();
+        assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
+
+        // Turn 1 ends and turn 2 starts before any idle reconcile: the pane
+        // never leaves the busy level, so no edge — the first outcome is
+        // captured but not fired.
+        v.pending_completion = Some(TurnOutcome::Stopped);
+        v.set_turn_in_flight();
+        assert_eq!(
+            v.reconcile_activity(std::time::Instant::now()),
+            None,
+            "still busy across the turn boundary → no settle edge"
+        );
+
+        // Turn 2 ends → the latest outcome overwrites, then the pane settles.
+        v.pending_completion = Some(TurnOutcome::Completed);
+        v.set_turn_idle();
+        assert_eq!(
+            v.reconcile_activity(std::time::Instant::now()),
+            Some(TurnOutcome::Completed),
+            "the span fires the latest outcome exactly once at the final settle"
+        );
+    });
+}
+
+/// Regression for FIX-1: at connect the buffered first prompt is pumped
+/// (turn Idle→InFlight) and the connect path now reconciles immediately,
+/// stamping `was_busy`. So when the very first ACP event on the stream is
+/// `TurnEnded` (turn → Idle, outcome stashed), the busy→idle edge is still
+/// detected and the completion fires — instead of being stranded forever (task
+/// stuck `Running`, no notification) because `was_busy` never became `true`.
+/// Drives the view-level sequence the connect callback performs; the connect
+/// path itself needs a live adapter subprocess, so it is not exercised here.
+#[gpui::test]
+async fn connect_time_pump_then_turn_end_fires_completion(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, _| {
+        // Connect pumps the buffered prompt → turn in flight.
+        v.set_turn_in_flight();
+        // FIX-1: the connect path reconciles right after the pump, stamping the
+        // busy level so a later settle edge is detectable.
+        assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
+        assert!(
+            v.was_busy,
+            "the connect-time reconcile stamps the busy level"
+        );
+
+        // The first ACP event is `TurnEnded`: settle + stash the outcome.
+        v.pending_completion = Some(TurnOutcome::Completed);
+        v.set_turn_idle();
+        // The busy→idle edge is detected (not stranded) and fires exactly once.
+        assert_eq!(
+            v.reconcile_activity(std::time::Instant::now()),
+            Some(TurnOutcome::Completed),
+            "the completion fires at the settle edge instead of being stranded"
+        );
+    });
+}
+
+/// Regression for FIX-5: `cancel_turn` must not clobber an already-captured
+/// completion. Stop is offered (gated on `is_busy()`) during the trailing-
+/// subagent window even after the foreground turn ended normally and stashed
+/// `Completed`; stopping then must leave that outcome intact rather than
+/// overwriting it with `Stopped` (which would drop the completion signal). A
+/// real in-flight turn still stashes `Stopped`.
+#[gpui::test]
+async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAppContext) {
+    use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    let running_child = || {
+        ChatItem::ToolCall(ToolCallItem {
+            id: "child".into(),
+            title: "child".into(),
+            kind: ToolKindView::Read,
+            status: ToolStatusView::InProgress,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: Some("parent".into()),
+        })
+    };
+
+    // Case 1: the foreground turn already ended normally (Completed stashed) but
+    // a background subagent's child tool is still running, so the pane is busy
+    // and the dock still offers Stop. Stopping keeps the captured Completed.
+    view.update(cx, |v, cx| {
+        v.set_turn_idle();
+        v.items = vec![running_child()];
+        v.pending_completion = Some(TurnOutcome::Completed);
+        assert!(v.is_busy(), "a running child subagent keeps the pane busy");
+
+        v.cancel_turn(cx);
+        assert_eq!(
+            v.pending_completion,
+            Some(TurnOutcome::Completed),
+            "Stop with no foreground turn keeps the already-captured completion"
+        );
+    });
+
+    // Case 2: a real in-flight foreground turn — Stop is authoritatively
+    // `Stopped` from this moment, overwriting any prior capture.
+    view.update(cx, |v, cx| {
+        v.pending_completion = None;
+        v.set_turn_in_flight();
+        v.cancel_turn(cx);
+        assert_eq!(
+            v.pending_completion,
+            Some(TurnOutcome::Stopped),
+            "Stop on a live turn stashes Stopped"
+        );
+    });
 }

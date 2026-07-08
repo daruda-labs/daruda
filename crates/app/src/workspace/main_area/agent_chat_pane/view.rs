@@ -120,23 +120,26 @@ pub(in crate::workspace) enum AgentSessionStatus {
 /// the wall-clock start instant (runtime-only; never persisted) so the enum
 /// can't represent "in flight but no start time" or "idle with a start time".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Turn {
+enum Turn {
     Idle,
     InFlight { started_at: std::time::Instant },
 }
 
 impl Turn {
     /// True while a prompt turn is on the wire (Send ↔ Stop affordance, badge).
-    pub(in crate::workspace) fn is_in_flight(&self) -> bool {
+    fn is_in_flight(&self) -> bool {
         matches!(self, Turn::InFlight { .. })
     }
-    /// The current turn's start instant, or `None` when idle.
-    pub(in crate::workspace) fn started_at(&self) -> Option<std::time::Instant> {
-        match self {
-            Turn::InFlight { started_at } => Some(*started_at),
-            Turn::Idle => None,
-        }
-    }
+}
+
+/// Terminal outcome of an activity span, captured when the turn/session ends
+/// but fired (notification + backing-task done) only when the pane actually
+/// settles busy→idle (which may trail `end_turn` while subagents finish).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum TurnOutcome {
+    Completed,
+    Errored,
+    Stopped,
 }
 
 /// The pane's derived activity, the single source consumed by the working
@@ -229,7 +232,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
     /// re-submit while the agent is busy, and carries the turn's start instant
     /// (runtime-only, never persisted) for the elapsed-time display.
-    pub(in crate::workspace) turn: Turn,
+    ///
+    /// Confined to this module: `Turn` is the prompt-queue sequencing state, not
+    /// the pane's activity signal. Production code outside `view.rs` must never
+    /// read it — "is the pane working / did it just finish" decisions go through
+    /// [`Self::is_busy`] / [`Self::activity_state`] / [`Self::activity_elapsed`],
+    /// and completion fires only via `fire_activity_completion` at the busy→idle
+    /// edge. Tests reach it through the `#[cfg(test)]` hooks below.
+    turn: Turn,
     /// Per-subagent last-activity timestamps, keyed by the parent tool id every
     /// child tool stamps in its `parent_tool_id`. Bumped in `apply_event` each
     /// time one of a subagent's child tools produces a tool-call event, and read
@@ -237,6 +247,22 @@ pub(in crate::workspace) struct AgentChatView {
     /// across the gaps between its sequential child calls (see
     /// [`SUBAGENT_QUIESCENCE`]). Runtime-only; never serialized.
     pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
+    /// Wall-clock start of the current busy activity span (turn + any trailing
+    /// subagents), set on the idle→busy edge and cleared on busy→idle by
+    /// [`Self::reconcile_activity`]. Anchors the working-indicator elapsed timer
+    /// across the whole span rather than just the foreground turn. Runtime-only;
+    /// never serialized.
+    pub(in crate::workspace) activity_started_at: Option<std::time::Instant>,
+    /// Whether the pane was busy at the last [`Self::reconcile_activity`] tick —
+    /// the edge-detection memory that turns the `is_busy` level signal into
+    /// idle→busy / busy→idle transitions. Runtime-only; never serialized.
+    pub(in crate::workspace) was_busy: bool,
+    /// The outcome captured when the turn/session ended, held until the pane
+    /// actually settles busy→idle (which may trail `end_turn` while subagents
+    /// finish). Taken and returned by [`Self::reconcile_activity`] on the
+    /// busy→idle edge so the completion signal fires at the true settle point.
+    /// Runtime-only; never serialized.
+    pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
     /// Built once per diff by `reconcile_diff_editors` — the same
@@ -326,6 +352,28 @@ pub(in crate::workspace) struct AgentChatView {
 }
 
 impl AgentChatView {
+    /// Test-only hook: mark a prompt turn in flight (as `send_prompt_text` does).
+    /// The `Turn` field is module-private so production code cannot read it; tests
+    /// drive it through these sanctioned accessors instead of touching the field.
+    #[cfg(test)]
+    pub(in crate::workspace) fn set_turn_in_flight(&mut self) {
+        self.turn = Turn::InFlight {
+            started_at: std::time::Instant::now(),
+        };
+    }
+
+    /// Test-only hook: return the turn to idle (as `settle_turn` does).
+    #[cfg(test)]
+    pub(in crate::workspace) fn set_turn_idle(&mut self) {
+        self.turn = Turn::Idle;
+    }
+
+    /// Test-only hook: whether the turn is idle (no prompt in flight).
+    #[cfg(test)]
+    pub(in crate::workspace) fn turn_is_idle(&self) -> bool {
+        !self.turn.is_in_flight()
+    }
+
     /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
     /// the lane indicator aggregation. Returns `None` for states that should
     /// not contribute an indicator (dormant `Idle` — session not yet started —
@@ -373,6 +421,55 @@ impl AgentChatView {
                 SUBAGENT_QUIESCENCE,
             )
             .any_running
+    }
+
+    /// Advance the activity span for the current `now`, returning the pending
+    /// completion outcome exactly on the busy→idle edge (else `None`). Drives the
+    /// working-indicator elapsed anchor and the completion firing. Mutating
+    /// (updates `was_busy`/`activity_started_at`); callers are the prompt-send
+    /// path, the event-pump tail, the pulse tick, and the user-cancel path.
+    pub(in crate::workspace) fn reconcile_activity(
+        &mut self,
+        now: std::time::Instant,
+    ) -> Option<TurnOutcome> {
+        let busy = self.turn.is_in_flight()
+            || subagent_activity(
+                &self.items,
+                &self.subagent_last_activity,
+                now,
+                SUBAGENT_QUIESCENCE,
+            )
+            .any_running;
+        let edge = match (self.was_busy, busy) {
+            (false, true) => {
+                self.activity_started_at = Some(now);
+                None
+            }
+            (true, false) => {
+                self.activity_started_at = None;
+                // The run is over: the `subagent_last_activity` map is only
+                // meaningful during an active run (the `subagent N/M` indicator
+                // is hidden when idle, and a later subagent event re-populates
+                // it), so clear it. This bounds the map and makes `maybe_active`
+                // return false once the pane is truly idle, so `pulse_agent_chats`
+                // stops re-scanning a finished-subagent pane every tick. Safe for
+                // `is_busy`: this arm is only reached when `busy` is false — no
+                // child is live — so clearing the timestamps cannot change
+                // `any_running`.
+                self.subagent_last_activity.clear();
+                self.pending_completion.take()
+            }
+            _ => None,
+        };
+        self.was_busy = busy;
+        edge
+    }
+
+    /// Elapsed time since the current activity span began (busy→…), or `None` when
+    /// idle. Anchors the working-indicator timer to the whole activity span
+    /// (turn + trailing subagents), replacing the turn-scoped `turn.started_at()`.
+    pub(in crate::workspace) fn activity_elapsed(&self) -> Option<std::time::Duration> {
+        self.activity_started_at.map(|t| t.elapsed())
     }
 
     /// `(settled, total)` subagent counts for the working-indicator progress
@@ -444,6 +541,9 @@ impl AgentChatView {
             pending_permission: None,
             turn: Turn::Idle,
             subagent_last_activity: HashMap::new(),
+            activity_started_at: None,
+            was_busy: false,
+            pending_completion: None,
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
@@ -614,6 +714,11 @@ impl AgentChatView {
                     self.session_updated_at = None;
                     self.plan_collapsed = false;
                     self.subagent_last_activity.clear();
+                    // Reset the activity-span tracker so a prior session's edge
+                    // state / captured outcome can't leak into the fresh one.
+                    self.activity_started_at = None;
+                    self.was_busy = false;
+                    self.pending_completion = None;
                 }
             }
             AcpEvent::ConfigOptionsChanged(options) => {
@@ -661,12 +766,25 @@ impl AgentChatView {
                 self.items.push(permission_item(&request));
                 self.pending_permission = Some(id);
             }
-            AcpEvent::TurnEnded { .. } => {
+            AcpEvent::TurnEnded {
+                completed_normally, ..
+            } => {
                 // Settle the turn: finalize streaming, cancel any tool the agent
                 // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
                 turn_settled = true;
+                // Capture the outcome; it fires only when the pane settles
+                // busy→idle (via `reconcile_activity`), which may trail this
+                // `end_turn` while trailing subagents finish. A user Stop's
+                // outcome was already stashed by `cancel_turn` before its
+                // `TurnEnded` arrives, so a `completed_normally: false` here that
+                // rides on a Stop keeps the `Stopped` outcome either way.
+                self.pending_completion = Some(if completed_normally {
+                    TurnOutcome::Completed
+                } else {
+                    TurnOutcome::Stopped
+                });
                 // Drain the next buffered prompt (if any) now that the turn
                 // completed — one per `TurnEnded`, so the queue advances a single
                 // turn at a time and `turn.is_in_flight()` keeps tracking exactly
@@ -716,6 +834,9 @@ impl AgentChatView {
                 // is already dead.
                 self.settle_turn();
                 turn_settled = true;
+                // Capture the failure outcome; it fires on the busy→idle settle
+                // edge (via `reconcile_activity`), same as a normal completion.
+                self.pending_completion = Some(TurnOutcome::Errored);
                 // The session is dead with no reconnect path, so any buffered
                 // prompts can never be delivered — drop them (they were already
                 // echoed locally) rather than leaving them to be pumped.
@@ -976,6 +1097,19 @@ impl AgentChatView {
         if let Some(handle) = &self.handle {
             handle.cancel();
         }
+        // Stash the Stop outcome before settling so the busy→idle edge (next
+        // `reconcile_activity`) carries it — but only when there is actually a
+        // live foreground turn to cancel. Stop is also offered (gated on
+        // `is_busy()`) during the trailing-subagent window *after* the foreground
+        // turn already ended normally and stashed `Completed`; overwriting that
+        // with `Stopped` would silently drop the completion notification. When no
+        // turn is in flight, leave the already-captured outcome
+        // (`Completed`/`Errored`) intact — both map to task `Stop` anyway, so
+        // task state is unaffected either way. Checked before `settle_turn`,
+        // which resets the turn to `Idle`.
+        if self.turn.is_in_flight() {
+            self.pending_completion = Some(TurnOutcome::Stopped);
+        }
         self.settle_turn();
         // Stop halts everything queued, not just the live turn. Drop any
         // buffered prompts so the cancelled turn's later `TurnEnded` finds an
@@ -1140,6 +1274,9 @@ impl AgentChatView {
         self.pending_permission = None;
         self.turn = Turn::Idle;
         self.subagent_last_activity.clear();
+        self.activity_started_at = None;
+        self.was_busy = false;
+        self.pending_completion = None;
         self.diff_editors.clear();
         self.diff_stats.clear();
         self.mermaid_inflight.clear();

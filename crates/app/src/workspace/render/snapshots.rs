@@ -25,7 +25,7 @@ impl Workspace {
         // `agent_chat_statuses`. Reading each view here (during render)
         // registers the dependency that makes a view's `cx.notify()` dirty
         // this snapshot, the same pattern the bottom-dock snapshot uses for
-        // `turn.is_in_flight()`.
+        // `is_busy()`.
         let acp_statuses = self.agent_chat_statuses(cx);
         let (agent_status_per_lane, agent_per_session_per_lane) =
             crate::workspace::claude_status_aggregate::aggregate_over_panes(
@@ -166,13 +166,14 @@ impl Workspace {
             .map(crate::shell_quote::Shell::detect_from_program)
             .unwrap_or_default();
         let bottom_dock_size = self.bottom_dock.read(cx).size;
-        // When the focused pane is an Agent chat pane mid-turn, the
-        // bottom-input button toggles to "Stop" and cancels that pane's
-        // turn instead of sending. `None` in every other state.
+        // When the focused pane is an Agent chat pane that is busy (a turn in
+        // flight OR a background subagent still running), the bottom-input
+        // button toggles to "Stop" and cancels that pane's activity instead of
+        // sending. `None` in every other state.
         //
         // Reading the `AgentChatView` entity here registers it in the
         // Workspace window's `tracked_entities`, so the bottom-dock snapshot
-        // (and the Stop/Send button) refreshes when `turn.is_in_flight()` flips.
+        // (and the Stop/Send button) refreshes when `is_busy()` flips.
         // This does NOT widen the scroll-repaint cost: the embedded view is an
         // element-tree descendant of the Workspace, so its `cx.notify()`
         // already marks the Workspace dirty via ancestor propagation
@@ -185,11 +186,11 @@ impl Workspace {
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .filter(|view| view.read(cx).turn.is_in_flight())
+            .filter(|view| view.read(cx).is_busy())
             .map(|_| focused_id);
         // The mode chip shows in the bottom input only when the focused pane is
-        // an Agent chat pane that advertises modes — independent of
-        // `turn.is_in_flight()`, so the mode can be set before the first prompt. A
+        // an Agent chat pane that advertises modes — independent of the pane's
+        // busy state, so the mode can be set before the first prompt. A
         // terminal-pane focus yields `None` (the input is shared across pane
         // kinds, so the chip must stay agent-only).
         let agent_mode = self
