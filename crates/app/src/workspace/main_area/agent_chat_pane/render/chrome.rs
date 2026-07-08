@@ -234,7 +234,7 @@ pub(super) fn working_indicator(
         .turn
         .started_at()
         .map(|start| format_elapsed(start.elapsed()));
-    let row = div()
+    let mut row = div()
         .w_full()
         .min_w_0()
         .flex()
@@ -251,17 +251,27 @@ pub(super) fn working_indicator(
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(format!("{base}{dots}"))),
         );
+    if let Some((settled, total)) = content.subagent_progress() {
+        row = row.child(
+            div()
+                .flex_none()
+                .text_color(content.dim(theme::agent_chat_fg_muted(cx)))
+                .text_size(px(theme::agent_chat_font_size(cx)))
+                .child(SharedString::from(s::agent_chat_subagent_progress(
+                    settled, total,
+                ))),
+        );
+    }
     if let Some(elapsed) = elapsed_label {
-        row.child(
+        row = row.child(
             div()
                 .flex_none()
                 .text_color(content.dim(theme::agent_chat_fg_muted(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(elapsed)),
-        )
-    } else {
-        row
+        );
     }
+    row
 }
 
 #[cfg(test)]

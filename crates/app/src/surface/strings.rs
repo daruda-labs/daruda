@@ -984,6 +984,11 @@ pub fn agent_chat_plan_dismiss() -> String {
     rust_i18n::t!("agent_chat.plan_dismiss").into_owned()
 }
 
+/// Progress label in the working indicator: completed / total subagents.
+pub fn agent_chat_subagent_progress(n: usize, m: usize) -> String {
+    rust_i18n::t!("agent_chat.subagent_progress", n => n, m => m).into_owned()
+}
+
 /// Tooltip on the activity-bar title showing the session's last-activity time
 /// (`SessionInfoUpdate.updated_at`). `time` is a pre-formatted timestamp.
 pub fn agent_chat_last_active_tooltip(time: &str) -> String {

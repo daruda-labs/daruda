@@ -369,10 +369,6 @@ impl AgentChatView {
     /// `(settled, total)` subagent counts for the working-indicator progress
     /// label (`subagent N/M`); `None` when there are no subagents. Uses the same
     /// span derivation as `is_busy`.
-    // Forward-declared for the working-indicator label wiring (a later task,
-    // which adds the i18n `subagent N/M` string that consumes this); no reader
-    // yet, so `-D warnings` would otherwise flag it dead.
-    #[allow(dead_code)]
     pub(in crate::workspace) fn subagent_progress(&self) -> Option<(usize, usize)> {
         let a = subagent_activity(
             &self.items,

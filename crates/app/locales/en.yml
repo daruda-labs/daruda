@@ -224,6 +224,7 @@ agent_chat:
   last_active_tooltip: "Last active: %{time}"
   plan_label: "Plan"
   plan_dismiss: "Dismiss plan"
+  subagent_progress: "subagent %{n}/%{m}"
   thinking_label: "Thinking"
   switch_confirm_title: "Switch agent?"
   switch_confirm_body: "Start a new %{agent} conversation? Your current chat stays open in its tab."
