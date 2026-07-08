@@ -54,9 +54,19 @@ use super::agent_chat_helpers::{
     trailing_unresolved_permission,
 };
 use super::fold::{FoldKey, FoldState};
-use super::rows::{RenderRow, project};
+use super::rows::{RenderRow, RowKind, project};
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
+
+/// Debug gate for agent-chat list-measurement tracing (`trace_remeasure`).
+/// Reads `DARUDA_DEBUG_AGENT_LIST` once and caches it. Off by default so the
+/// trace is silent in normal builds; set the env var to capture the remeasure
+/// timeline when the intermittent oversized-gap bug recurs.
+fn debug_list_trace_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("DARUDA_DEBUG_AGENT_LIST").is_some())
+}
 
 /// A user-visible milestone of the one-time Node.js runtime provisioning shown
 /// in the connecting banner. A closed set of only the slow, user-facing phases
@@ -519,6 +529,14 @@ impl AgentChatView {
         // Set only when a `session/load` replay just finished (the `Connected`
         // reply cleared `restoring`), so the tail runs the single catch-up.
         let mut finished_restore = false;
+        // Set when a turn just settled (natural completion or a session error).
+        // The turn's streamed rows may have changed height via the *trailing*
+        // async markdown reparse — `TextView` re-parses ~one debounce after the
+        // final chunk, off the outer list's per-chunk remeasure path — so their
+        // cached heights can be stale. The tail forces a full remeasure to
+        // re-derive them (defensive: prevents a stale streaming height from
+        // lingering and inflating the scroll geometry into an oversized gap).
+        let mut turn_settled = false;
 
         match event {
             AcpEvent::Connected {
@@ -584,6 +602,7 @@ impl AgentChatView {
                 // left non-terminal (e.g. a `Cancelled` stop reason), and drain a
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
+                turn_settled = true;
                 // Drain the next buffered prompt (if any) now that the turn
                 // completed — one per `TurnEnded`, so the queue advances a single
                 // turn at a time and `turn.is_in_flight()` keeps tracking exactly
@@ -632,6 +651,7 @@ impl AgentChatView {
                 // forever and the response bar reads `Running` after the session
                 // is already dead.
                 self.settle_turn();
+                turn_settled = true;
                 // The session is dead with no reconnect path, so any buffered
                 // prompts can never be delivered — drop them (they were already
                 // echoed locally) rather than leaving them to be pumped.
@@ -662,10 +682,28 @@ impl AgentChatView {
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
         self.rebuild_rows();
-        // The coalesced replay spliced many rows at once; force a full
-        // remeasure so the list has heights for all of them before the paint.
+        // Re-measure after a structural settle so no row keeps a stale streaming
+        // height. Two triggers, two anchor policies:
+        // (a) a `session/load` replay just spliced many rows at once — force a
+        //     full `remeasure()` so the list has heights for all of them before
+        //     the paint. A cold restore anchors to the tail, so the proportional
+        //     re-anchor `remeasure()` performs is irrelevant here.
+        // (b) a turn just settled — its streamed rows may have changed height via
+        //     the trailing async markdown reparse. Re-derive every row's height,
+        //     but through the span API (`remeasure_items`, Absolute anchor) rather
+        //     than `remeasure()` (Proportional): if the user has scrolled back to
+        //     read history, a Proportional re-anchor shifts their viewport when the
+        //     anchored row's height changes, whereas Absolute keeps it fixed.
+        // Cheap: at most once per restore / turn.
         if finished_restore {
             self.list_state.remeasure();
+        }
+        if turn_settled {
+            // Span is all rows and the count is unchanged, so `to` and `prev_rows`
+            // both equal the current row count.
+            let n = self.rows.len();
+            self.list_state.remeasure_items(0..n);
+            self.trace_list_sync("turn-settled", 0, n, n);
         }
         cx.notify();
     }
@@ -712,11 +750,13 @@ impl AgentChatView {
             .position(|(a, b)| !a.same_slot(b))
         {
             self.list_state.splice(at..old.len(), self.rows.len() - at);
+            self.trace_list_sync("splice-divergent", at, self.rows.len(), old.len());
             return;
         }
         if old.len() != self.rows.len() {
             let at = old.len().min(self.rows.len());
             self.list_state.splice(at..old.len(), self.rows.len() - at);
+            self.trace_list_sync("splice-count", at, self.rows.len(), old.len());
             return;
         }
         // Same slots & count: only `hidden` flipped or item content grew.
@@ -731,13 +771,62 @@ impl AgentChatView {
                 (lo.min(i), hi.max(i))
             });
         if lo == usize::MAX {
+            // No `hidden` flip: a streamed chunk grew a row's content in place.
+            // During an active turn the *last* row is a fixed-height
+            // `WorkingIndicator` (`rows::project` pins it to the tail), so the row
+            // that actually grew is the last non-indicator row. Remeasuring only
+            // `n-1` would re-measure the indicator and leave the grown content row
+            // at its stale (shorter) cached height — which then inflates the
+            // scroll geometry the moment that row scrolls into the overdraw zone
+            // (the intermittent oversized-gap bug). Remeasure from the last
+            // content row through the end so both the grown row and the indicator
+            // are covered.
             let n = self.rows.len();
             if n > 0 {
-                self.list_state.remeasure_items(n - 1..n);
+                let start = self.rows[..n]
+                    .iter()
+                    .rposition(|r| !matches!(r.kind, RowKind::WorkingIndicator))
+                    .unwrap_or(n - 1);
+                self.list_state.remeasure_items(start..n);
+                self.trace_list_sync("tail-grow", start, n, old.len());
             }
         } else {
             self.list_state.remeasure_items(lo..hi + 1);
+            self.trace_list_sync("hidden-span", lo, hi + 1, old.len());
         }
+    }
+
+    /// Trace one list-sync decision — a splice or a remeasure — to the NDJSON
+    /// log, silent unless `DARUDA_DEBUG_AGENT_LIST` is set in the environment.
+    /// The intermittent oversized-gap ("~3 page") bug is a virtualized-list
+    /// height-cache staleness issue: a row's height changes (async markdown
+    /// reparse, fold, tool-result landing) without the matching row being
+    /// re-measured, so its stale cached height inflates the scroll geometry.
+    /// This stays compiled in (near-zero cost when off) so, on recurrence,
+    /// flipping the env var captures the sync timeline — `branch` + the
+    /// `[from, to)` span touched vs. the total row count — to confirm whether a
+    /// content change slipped through without a remeasure.
+    ///
+    /// `prev_rows` is the row count *before* this sync; it equals the current
+    /// count for a remeasure (which never changes the count) and differs only on
+    /// a splice, so a count delta is visible in the trace.
+    fn trace_list_sync(&self, branch: &str, from: usize, to: usize, prev_rows: usize) {
+        if !debug_list_trace_enabled() {
+            return;
+        }
+        daruda_store::observability::log_writer::LogWriter::log(
+            ErrorReport::new("agent-chat list sync")
+                .severity(ErrorSeverity::Info)
+                .with_context("pane", self.pane_id.to_string())
+                .with_context("branch", branch.to_string())
+                .with_context("from", from.to_string())
+                .with_context("to", to.to_string())
+                .with_context("rows", self.rows.len().to_string())
+                .with_context("prev_rows", prev_rows.to_string())
+                .at(file!(), line!())
+                .dedup("agent_chat.list_sync_trace")
+                .build(),
+        );
     }
 
     /// Send `text` as a prompt: echo it locally, forward it over the session,
