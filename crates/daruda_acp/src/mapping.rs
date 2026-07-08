@@ -172,21 +172,22 @@ pub fn subagent_activity(
     now: Instant,
     quiescence: Duration,
 ) -> SubagentActivity {
-    let parents: HashSet<&str> = items
-        .iter()
-        .filter_map(|it| match it {
-            ChatItem::ToolCall(tc) => tc.parent_tool_id.as_deref(),
-            _ => None,
-        })
-        .collect();
+    // Single pass over `items` collects both the set of every parent seen and
+    // the subset whose child tool is currently live — O(N) instead of scanning
+    // `items` once per parent (the old O(P·N) `has_live_child` per parent).
+    let mut parents: HashSet<&str> = HashSet::new();
+    let mut live_parents: HashSet<&str> = HashSet::new();
+    for it in items {
+        if let ChatItem::ToolCall(tc) = it
+            && let Some(parent) = tc.parent_tool_id.as_deref()
+        {
+            parents.insert(parent);
+            if tc.status.is_live() {
+                live_parents.insert(parent);
+            }
+        }
+    }
 
-    let has_live_child = |parent: &str| {
-        items.iter().any(|it| {
-            matches!(it,
-                ChatItem::ToolCall(tc)
-                    if tc.parent_tool_id.as_deref() == Some(parent) && tc.status.is_live())
-        })
-    };
     let recent = |parent: &str| {
         last_activity
             .get(parent)
@@ -196,7 +197,7 @@ pub fn subagent_activity(
     let total = parents.len();
     let running_count = parents
         .iter()
-        .filter(|parent| has_live_child(parent) || recent(parent))
+        .filter(|parent| live_parents.contains(*parent) || recent(parent))
         .count();
 
     SubagentActivity {
@@ -843,6 +844,26 @@ mod tests {
         let activity = subagent_activity(&items, &last_activity, now, Duration::from_secs(8));
         assert_eq!(activity.total, 1);
         assert_eq!(activity.settled, 1);
+        assert!(!activity.any_running);
+    }
+
+    #[test]
+    fn subagent_activity_boundary_is_exclusive_at_quiescence() {
+        // Exactly `quiescence` old is the `<` boundary: `now - t == quiescence`
+        // is NOT within the window (the check is strict `<`), so a subagent whose
+        // only child is settled and whose last activity lands exactly on the
+        // boundary is treated as settled, not running.
+        let items = [subagent_child("p1", ToolStatusView::Completed)];
+        let quiescence = Duration::from_secs(8);
+        let now = Instant::now();
+        let mut last_activity = HashMap::new();
+        last_activity.insert("p1".to_string(), now - quiescence);
+        let activity = subagent_activity(&items, &last_activity, now, quiescence);
+        assert_eq!(activity.total, 1);
+        assert_eq!(
+            activity.settled, 1,
+            "activity exactly quiescence old is outside the window"
+        );
         assert!(!activity.any_running);
     }
 

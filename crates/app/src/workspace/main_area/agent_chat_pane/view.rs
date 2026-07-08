@@ -355,6 +355,15 @@ impl AgentChatView {
     /// This is the animation-liveness predicate the status-pulse gate reads, kept
     /// distinct from [`Self::activity_state`]: a pending permission changes the
     /// badge *label* but must not stop a still-live subagent badge from animating.
+    /// Cheap O(1) pre-check: could this pane possibly be busy? A prompt turn in
+    /// flight, or at least one subagent has been seen this session (so the
+    /// `subagent_last_activity` map is non-empty). When false, `is_busy()` is
+    /// guaranteed false without scanning `items` — the gate the pulse uses to
+    /// avoid an O(items) scan of idle/terminated conversations every tick.
+    pub(in crate::workspace) fn maybe_active(&self) -> bool {
+        self.turn.is_in_flight() || !self.subagent_last_activity.is_empty()
+    }
+
     pub(in crate::workspace) fn is_busy(&self) -> bool {
         self.turn.is_in_flight()
             || subagent_activity(

@@ -1553,7 +1553,10 @@ impl Workspace {
             .values()
             .flat_map(|rt| rt.panes.iter())
             .filter_map(|p| p.agent_chat_view())
-            .filter(|v| v.read(cx).is_busy())
+            .filter(|v| {
+                let vr = v.read(cx);
+                vr.maybe_active() && vr.is_busy()
+            })
             .map(|v| v.entity_id())
             .collect();
         // Nothing animating and nothing just settled — fully at rest, no work.
