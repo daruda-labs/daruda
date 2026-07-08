@@ -1127,16 +1127,33 @@ impl Node {
                                                             |this| this.justify_end(),
                                                         )
                                                         .w(Length::Definite(relative(len as f32)))
+                                                        // Let the cell shrink to its proportional
+                                                        // width inside the flex row instead of
+                                                        // holding its min-content size; without
+                                                        // this the row overflows and cells never
+                                                        // reach a width the text can wrap into.
+                                                        .min_w_0()
                                                         .px_2()
                                                         .py_1()
                                                         .when(!is_last_col, |this| {
                                                             this.border_r_1()
                                                                 .border_color(line_color)
                                                         })
-                                                        .truncate()
+                                                        // Wrap the text (not `.truncate()`, which
+                                                        // forces `white-space: nowrap` + ellipsis):
+                                                        // a `min_w_0` inner div can shrink below its
+                                                        // content so the text wraps to the cell
+                                                        // width, while the cell's `justify_*` still
+                                                        // aligns it when it's narrower than the cell.
                                                         .child(
-                                                            cell.children
-                                                                .render(node_cx, window, cx),
+                                                            div()
+                                                                .min_w_0()
+                                                                .overflow_hidden()
+                                                                .child(
+                                                                    cell.children.render(
+                                                                        node_cx, window, cx,
+                                                                    ),
+                                                                ),
                                                         ),
                                                 )
                                             }
