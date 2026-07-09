@@ -227,7 +227,7 @@ agent_chat:
   context_tooltip: "Context: %{used} / %{size} tokens (%{percent}%)%{cost}"
   plan_label: "Plan"
   plan_dismiss: "Dismiss plan"
-  subagent_progress: "subagent %{n}/%{m}"
+  subagent_progress: "%{n} subagents"
   thinking_label: "Thinking"
   tool_output_label: "Output"
   raw_input_label: "Raw Input"

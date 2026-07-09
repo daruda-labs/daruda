@@ -501,17 +501,22 @@ impl AgentChatView {
         self.activity_started_at.map(|t| t.elapsed())
     }
 
-    /// `(settled, total)` subagent counts for the working-indicator progress
-    /// label (`subagent N/M`); `None` when there are no subagents. Uses the same
-    /// span derivation as `is_busy`.
-    pub(in crate::workspace) fn subagent_progress(&self) -> Option<(usize, usize)> {
+    /// Count of subagents running *right now* for the working-indicator label
+    /// (`N subagents`); `None` when none are currently running. This is the live
+    /// in-flight count (`total - settled`), not a cumulative "done of total ever"
+    /// tally — the chip disappears the moment the last subagent settles. Uses the
+    /// same span derivation as `is_busy`: a subagent counts as running while it
+    /// has a live child tool or its last child activity was within
+    /// `SUBAGENT_QUIESCENCE`.
+    pub(in crate::workspace) fn subagent_progress(&self) -> Option<usize> {
         let a = subagent_activity(
             &self.items,
             &self.subagent_last_activity,
             std::time::Instant::now(),
             SUBAGENT_QUIESCENCE,
         );
-        (a.total > 0).then_some((a.settled, a.total))
+        let running = a.total - a.settled;
+        (running > 0).then_some(running)
     }
 
     /// The pane's derived activity — the single source of the badge label. A

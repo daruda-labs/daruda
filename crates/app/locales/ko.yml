@@ -227,7 +227,7 @@ agent_chat:
   context_tooltip: "컨텍스트: %{used} / %{size} 토큰 (%{percent}%)%{cost}"
   plan_label: "계획"
   plan_dismiss: "계획 닫기"
-  subagent_progress: "서브에이전트 %{n}/%{m}"
+  subagent_progress: "서브에이전트 %{n}개"
   thinking_label: "생각 중"
   tool_output_label: "출력"
   raw_input_label: "입력값"
