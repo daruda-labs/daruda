@@ -27,7 +27,7 @@ common:
   name_required: "Name is required."
   new_agent_chat: "New Agent Chat"
   new_terminal: "New Terminal"
-  new_agent_chat_named: "New %{name} Chat"
+  new_agent_chat_named: "New %{name}"
   new_tab: "New Tab"
   close_tab: "Close Tab"
   close_pane: "Close Pane"
