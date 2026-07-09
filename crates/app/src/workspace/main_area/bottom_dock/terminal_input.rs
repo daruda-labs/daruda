@@ -88,24 +88,11 @@ pub(in crate::workspace) fn render_body(
     };
     // When the focused pane is an Agent chat pane, selector chips sit to the
     // left of the Submit button (all in the input's right-hand action column):
-    // the agent chip (only with >= 2 configured agents), then the mode chip
-    // (permission mode), then one chip per Model / ThoughtLevel config option
-    // (model, effort). All agent-only: a terminal-pane focus carries `None`, so
-    // only Submit shows. Selecting dispatches through
-    // `Workspace::request_switch_agent` / `set_agent_mode` /
-    // `set_agent_config_option` (one-way data flow).
+    // the mode chip (permission mode), then one chip per Model / ThoughtLevel
+    // config option (model, effort). All agent-only: a terminal-pane focus
+    // carries `None`, so only Submit shows. Selecting dispatches through
+    // `Workspace::set_agent_mode` / `set_agent_config_option` (one-way data flow).
     let mut chips: Vec<AnyElement> = Vec::new();
-    if let Some((pane_id, current, catalog)) = &snap.agent_switcher {
-        chips.push(
-            super::super::agent_chat_pane::agent_chip::agent_chip(
-                *pane_id,
-                current,
-                catalog,
-                snap.workspace.clone(),
-            )
-            .into_any_element(),
-        );
-    }
     if let Some((pane_id, modes)) = &snap.agent_mode {
         chips.push(
             super::super::agent_chat_pane::mode_chip::mode_chip(

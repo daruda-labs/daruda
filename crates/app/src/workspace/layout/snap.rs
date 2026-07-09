@@ -205,14 +205,6 @@ impl LeftDockSnapshot {
 // Bottom dock
 // ----------------------------------------------------------------
 
-/// Payload for the bottom-dock agent-switcher chip: the focused pane id, its
-/// current agent id, and the full catalog as (id, name) pairs.
-pub(in crate::workspace) type AgentSwitcherSnapshot = (
-    crate::workspace::main_area::pane_tree::PaneId,
-    String,
-    Vec<(String, String)>,
-);
-
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
 ///
@@ -261,12 +253,6 @@ pub(in crate::workspace) struct BottomDockSnapshot {
         crate::workspace::main_area::pane_tree::PaneId,
         Vec<daruda_acp::ConfigOptionView>,
     )>,
-    /// Set when the focused pane is an Agent chat pane AND the config catalog
-    /// has >= 2 agents (a single-agent setup hides the switcher entirely,
-    /// keeping the prior UX). Carries the pane id, the pane's current agent id,
-    /// and the full catalog as (id, name) pairs so the bottom input renders the
-    /// agent chip.
-    pub agent_switcher: Option<AgentSwitcherSnapshot>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.

@@ -367,57 +367,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Handle the agent chip selecting a *different* agent: confirm, then open a
-    /// new pane under that agent. The current pane + conversation are preserved
-    /// — a backend swap means a fresh conversation (Zed's agent = thread model),
-    /// so we never reuse the existing session. No-op when `target_agent_id` is
-    /// not in the catalog, or when it already matches the focused pane's current
-    /// agent (re-selecting the current agent must not open a fresh conversation
-    /// — the chip guards this too, but enforce it at the op boundary regardless
-    /// of the caller).
-    pub(in crate::workspace) fn request_switch_agent(
-        &mut self,
-        target_agent_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Re-selecting the focused pane's current agent is a no-op.
-        let focused = self.active_runtime().focused_pane_id;
-        if self
-            .agent_chat_view(focused)
-            .is_some_and(|v| v.read(cx).agent_id == target_agent_id)
-        {
-            return;
-        }
-        // Look up the display name for the dialog body; ignore an unknown id.
-        let Some(name) = self
-            .agents
-            .iter()
-            .find(|a| a.id == target_agent_id)
-            .map(|a| a.name.clone())
-        else {
-            return;
-        };
-        let weak = cx.weak_entity();
-        crate::workspace::dialog_helpers::open_confirm_dialog(
-            s::agent_chat_switch_confirm_title(),
-            s::agent_chat_switch_confirm_body(&name),
-            s::agent_chat_switch_confirm_ok(),
-            // Neutral confirm — this opens a new chat, it is not destructive.
-            crate::ui::ButtonVariant::Primary,
-            move |_ev, window, app| {
-                if let Some(ws) = weak.upgrade() {
-                    let target = target_agent_id.clone();
-                    ws.update(app, |ws, cx| {
-                        ws.open_agent_chat_pane_with_agent(target, window, cx)
-                    });
-                }
-            },
-            window,
-            cx,
-        );
-    }
-
     /// Lazy-connect entry point: start the ACP session for `pane_id` iff it is
     /// an Agent chat pane still parked in [`AgentSessionStatus::Idle`] with a
     /// working directory. Called from [`Self::focus_pane`] so the session

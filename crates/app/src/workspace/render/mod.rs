@@ -7,6 +7,9 @@
 //!                                   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`.
 
 use crate::ui::theme;
+use crate::ui::{
+    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, menu_builder,
+};
 use gpui::{
     ClickEvent, ClipboardItem, Context, CursorStyle, Focusable as _, IntoElement, KeyContext,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString, Window, div,
@@ -115,6 +118,93 @@ pub(in crate::workspace) fn ws_clipboard_item(
         }
         app.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
     })
+}
+
+/// `true` when the `+` menu lists agent entries flat; `false` when it should
+/// fold them into a `New Agent Chat` submenu (too many to list inline).
+fn agent_menu_is_flat(agent_count: usize) -> bool {
+    agent_count <= crate::ui::theme::AGENT_MENU_FLAT_MAX
+}
+
+/// Build the `+` tab-add dropdown: New Terminal, then one agent-chat entry per
+/// configured agent — flat when `agents.len() <= AGENT_MENU_FLAT_MAX`, else
+/// folded into a `New Agent Chat` submenu. All handlers dispatch into
+/// `Workspace` (one-way data flow) and wrap in `mutate_durable_in` so the new
+/// tab is persisted.
+fn build_new_tab_menu(
+    menu: PopupMenu,
+    ws: &gpui::WeakEntity<Workspace>,
+    agents: &[(String, String)],
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<PopupMenu>,
+) -> PopupMenu {
+    // New Terminal.
+    let menu = {
+        let ws = ws.clone();
+        menu.item(
+            PopupMenuItem::new(crate::surface::strings::ctx_new_terminal()).on_click(
+                move |_, window, app| {
+                    if let Some(w) = ws.upgrade() {
+                        w.update(app, |this, cx| {
+                            this.mutate_durable_in(window, cx, |ws, w, cx| ws.add_tab(w, cx));
+                        });
+                    }
+                },
+            ),
+        )
+    }
+    .separator();
+
+    if agent_menu_is_flat(agents.len()) {
+        // Flat: New {name} Chat per agent.
+        agents.iter().fold(menu, |m, (id, name)| {
+            let ws = ws.clone();
+            let agent_id = id.clone();
+            m.item(
+                PopupMenuItem::new(crate::surface::strings::new_agent_chat_named(name)).on_click(
+                    move |_, window, app| {
+                        if let Some(w) = ws.upgrade() {
+                            let agent_id = agent_id.clone();
+                            w.update(app, |this, cx| {
+                                this.mutate_durable_in(window, cx, |ws, w, cx| {
+                                    ws.open_agent_chat_pane_with_agent(agent_id, w, cx)
+                                });
+                            });
+                        }
+                    },
+                ),
+            )
+        })
+    } else {
+        // Submenu: New Agent Chat ▸ { agent display name per item }.
+        let agents: Vec<(String, String)> = agents.to_vec();
+        let ws = ws.clone();
+        menu.submenu(
+            crate::surface::strings::ctx_new_agent_chat(),
+            window,
+            cx,
+            move |sub, _w, _c| {
+                agents.iter().fold(sub, |m, (id, name)| {
+                    let ws = ws.clone();
+                    let agent_id = id.clone();
+                    m.item(
+                        PopupMenuItem::new(gpui::SharedString::from(name.clone())).on_click(
+                            move |_, window, app| {
+                                if let Some(w) = ws.upgrade() {
+                                    let agent_id = agent_id.clone();
+                                    w.update(app, |this, cx| {
+                                        this.mutate_durable_in(window, cx, |ws, w, cx| {
+                                            ws.open_agent_chat_pane_with_agent(agent_id, w, cx)
+                                        });
+                                    });
+                                }
+                            },
+                        ),
+                    )
+                })
+            },
+        )
+    }
 }
 
 /// Small icon button in the tab bar for toggling docks.
@@ -240,7 +330,6 @@ impl Render for Workspace {
         let tab_inactive_bg = t.tab_inactive_bg;
         let tab_inactive_text = t.text_muted;
         let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
-        let muted_text = t.text_muted;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         // User-set label (Window > Edit Tab Title…) wins; otherwise fall
@@ -743,51 +832,30 @@ impl Render for Workspace {
                         .child(close_button)
                 },
             ))
-            .child(
-                div()
-                    .id("new-tab-btn")
+            .child({
+                // "+" opens a dropdown so a new tab can be a terminal or an Agent
+                // chat pane under a chosen agent. Left-click dropdowns attach to a
+                // Button (`impl DropdownMenu for Button`), so this is a ghost button
+                // sized to match the tab bar via the NEW_TAB_* metrics, not a div.
+                let ws = cx.entity().downgrade();
+                // Snapshot the catalog as owned (id, name) pairs for the 'static
+                // menu closure.
+                let agents: Vec<(String, String)> = self
+                    .agents
+                    .iter()
+                    .map(|a| (a.id.clone(), a.name.clone()))
+                    .collect();
+                button("new-tab-btn", "+")
+                    .ghost()
                     .px(px(theme::NEW_TAB_PAD_X))
                     .py(px(theme::NEW_TAB_PAD_Y))
                     .mx(px(theme::NEW_TAB_MARGIN_X))
                     .rounded(px(theme::NEW_TAB_RADIUS))
                     .text_size(px(theme::NEW_TAB_FONT_SIZE))
-                    .cursor_pointer()
-                    .text_color(muted_text)
-                    .hover(move |d| d.text_color(tab_active_text).bg(tab_active_bg))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, ev: &MouseDownEvent, _window, cx| {
-                            // "+" opens a chooser so a new tab can be a
-                            // terminal or an Agent chat pane — same menu
-                            // component as the lane right-click menu.
-                            let ws = cx.entity().downgrade();
-                            let items = vec![
-                                ws_menu_item(
-                                    ws.clone(),
-                                    crate::surface::strings::ctx_new_tab(),
-                                    false,
-                                    |this, win, cx| {
-                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                            ws.add_tab(win, cx);
-                                        });
-                                    },
-                                ),
-                                ws_menu_item(
-                                    ws.clone(),
-                                    crate::surface::strings::ctx_new_agent_chat(),
-                                    false,
-                                    |this, win, cx| {
-                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                            ws.open_agent_chat_pane(win, cx);
-                                        });
-                                    },
-                                ),
-                            ];
-                            this.open_context_menu(ev.position, items, cx);
-                        }),
-                    )
-                    .child("+"),
-            )
+                    .dropdown_menu(menu_builder(move |menu, window, cx| {
+                        build_new_tab_menu(menu, &ws, &agents, window, cx)
+                    }))
+            })
             .child(
                 div()
                     .absolute()
@@ -1304,5 +1372,19 @@ impl Render for Workspace {
             .children(gpui_component::Root::render_sheet_layer(window, cx))
             .children(gpui_component::Root::render_dialog_layer(window, cx))
             .children(gpui_component::Root::render_notification_layer(window, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agent_menu_is_flat;
+
+    #[test]
+    fn agent_menu_flat_boundary() {
+        // 0..=5 flat, 6+ submenu (AGENT_MENU_FLAT_MAX = 5).
+        assert!(agent_menu_is_flat(1));
+        assert!(agent_menu_is_flat(5));
+        assert!(!agent_menu_is_flat(6));
+        assert!(!agent_menu_is_flat(20));
     }
 }

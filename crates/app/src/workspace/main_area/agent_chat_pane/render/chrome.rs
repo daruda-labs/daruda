@@ -88,7 +88,7 @@ pub(super) fn activity_bar(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(6.))
+                .gap(px(theme::AGENT_CHAT_HEADER_ICON_GAP))
                 .child(agent_icon(props.agent_id, props.dim, cx))
                 .child(
                     div()
@@ -166,8 +166,8 @@ fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyE
     match agent_icon_path(agent_id) {
         Some(path) => svg()
             .flex_none()
-            .w(px(16.))
-            .h(px(16.))
+            .w(px(theme::AGENT_CHAT_HEADER_ICON_SIZE))
+            .h(px(theme::AGENT_CHAT_HEADER_ICON_SIZE))
             .path(path)
             .text_color(color)
             .into_any_element(),

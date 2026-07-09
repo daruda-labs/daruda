@@ -637,6 +637,9 @@ pub const INPUT_PANEL_MIN_H: f32 = 48.0;
 pub const INPUT_PANEL_FLOATING_BAR_H: f32 = 32.0;
 /// Command palette max visible entries.
 pub const PALETTE_MAX_VISIBLE: usize = 12;
+/// Max configured-agent count that renders the `+` menu's agent entries
+/// flat. Above this the menu folds them into a `New Agent Chat` submenu.
+pub const AGENT_MENU_FLAT_MAX: usize = 5;
 /// Command palette corner radius (px).
 pub const PALETTE_RADIUS: f32 = RADIUS_LG;
 /// Tab label font size (px).
@@ -867,6 +870,10 @@ pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;
 /// definite-height parent; the tool-card diff body has none, so it sets an
 /// explicit `rows × this` height to reveal the whole diff.
 pub const AGENT_CHAT_DIFF_ROW_H: f32 = 20.0;
+/// Agent chat header: gap between the agent icon and the label/text (px).
+pub const AGENT_CHAT_HEADER_ICON_GAP: f32 = GAP_STANDARD;
+/// Agent chat header: agent icon square size (px).
+pub const AGENT_CHAT_HEADER_ICON_SIZE: f32 = 16.0;
 /// Agent chat container padding X (px).
 pub const AGENT_CHAT_PAD_X: f32 = PAD_STANDARD;
 /// Agent chat container padding Y (px).

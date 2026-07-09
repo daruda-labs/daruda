@@ -132,6 +132,7 @@ pub(super) fn assistant_markdown(
 /// its partial markdown fine (no per-message caret — the streaming signal lives
 /// on the input dock). Collapsed, the header shows the first non-empty line of
 /// `text`, dimmed and single-line ellipsized.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn assistant_block(
     ix: usize,
     key: FoldKey,

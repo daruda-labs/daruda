@@ -1015,23 +1015,6 @@ pub fn agent_chat_thinking_label() -> String {
     rust_i18n::t!("agent_chat.thinking_label").into_owned()
 }
 
-/// Title for the confirm dialog shown when the agent chip selects a different
-/// agent (switching means starting a fresh conversation).
-pub fn agent_chat_switch_confirm_title() -> String {
-    rust_i18n::t!("agent_chat.switch_confirm_title").into_owned()
-}
-
-/// Body for the switch-agent confirm dialog. `agent_name` is the display name
-/// of the target agent (config data, not translated).
-pub fn agent_chat_switch_confirm_body(agent_name: &str) -> String {
-    rust_i18n::t!("agent_chat.switch_confirm_body", agent = agent_name).into_owned()
-}
-
-/// OK-button label for the switch-agent confirm dialog.
-pub fn agent_chat_switch_confirm_ok() -> String {
-    rust_i18n::t!("agent_chat.switch_confirm_ok").into_owned()
-}
-
 /// Label above a tool call's plain-text output.
 pub fn agent_chat_tool_output_label() -> String {
     rust_i18n::t!("agent_chat.tool_output_label").into_owned()
@@ -2324,6 +2307,12 @@ pub fn ctx_new_tab() -> String {
 }
 pub fn ctx_new_agent_chat() -> String {
     rust_i18n::t!("common.new_agent_chat").into_owned()
+}
+pub fn ctx_new_terminal() -> String {
+    rust_i18n::t!("common.new_terminal").into_owned()
+}
+pub fn new_agent_chat_named(name: &str) -> String {
+    rust_i18n::t!("common.new_agent_chat_named", name = name).into_owned()
 }
 pub fn ctx_split_terminal_horizontal() -> String {
     rust_i18n::t!("common.split_terminal_horizontal").into_owned()
