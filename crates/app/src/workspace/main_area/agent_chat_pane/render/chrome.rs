@@ -298,6 +298,15 @@ fn running_tool_title(items: &[ChatItem]) -> Option<String> {
     })
 }
 
+/// Collapse an adapter-supplied tool-call title to a single clean line for the
+/// status label: runs of whitespace (incl. newlines and tabs) become one space
+/// and the ends are trimmed, so a multi-line command title can never force a
+/// line break or leak a raw `\n`. Horizontal length is left to the label's
+/// `overflow_hidden` + ellipsis, so no arbitrary character cap is imposed here.
+fn single_line_title(title: &str) -> String {
+    title.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Human-readable elapsed time for the working indicator.
 /// Formats as `"5s"` under a minute, `"1m05s"` at or over a minute.
 fn format_elapsed(d: std::time::Duration) -> String {
@@ -346,7 +355,7 @@ fn working_status(content: &AgentChatView) -> SharedString {
     } else if let Some(running) = content.subagent_progress() {
         s::agent_chat_subagent_progress(running).into()
     } else if let Some(title) = running_tool_title(&content.items) {
-        s::agent_chat_working_tool(&title).into()
+        s::agent_chat_working_tool(&single_line_title(&title)).into()
     } else {
         s::agent_chat_working().into()
     }
@@ -381,6 +390,7 @@ pub(super) fn working_indicator(
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
+                .text_ellipsis()
                 .text_color(content.dim(theme::agent_chat_fg_subtle(cx)))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(format!("{base}{dots}"))),
@@ -399,8 +409,21 @@ pub(super) fn working_indicator(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_elapsed, format_last_active, format_token_count, running_tool_title};
+    use super::{
+        format_elapsed, format_last_active, format_token_count, running_tool_title,
+        single_line_title,
+    };
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+
+    #[test]
+    fn single_line_title_collapses_newlines_tabs_and_runs() {
+        assert_eq!(
+            single_line_title("git commit -m \"line one\nline two\""),
+            "git commit -m \"line one line two\""
+        );
+        assert_eq!(single_line_title("  foo\t\tbar \n baz  "), "foo bar baz");
+        assert_eq!(single_line_title("already clean"), "already clean");
+    }
 
     #[test]
     fn format_last_active_slices_canonical_iso_to_date_and_hh_mm() {
