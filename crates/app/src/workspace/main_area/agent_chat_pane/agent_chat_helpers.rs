@@ -127,10 +127,10 @@ const FALLBACK_TITLE_HEAD: usize = 69;
 
 /// The activity-bar title: the agent-supplied session title when set, else a
 /// fallback derived from the first user prompt (whitespace-normalized and
-/// glyph-truncated), else `None` for a still-empty session (the caller renders a
-/// blank bar — no placeholder). Precedence mirrors Superset's session-selector
-/// (`session title → first-message fallback → blank`); zed's constant-string
-/// fallback is intentionally *not* copied.
+/// glyph-truncated), else `None` for a still-empty session (the caller supplies
+/// the pane's agent name fallback). Precedence mirrors Superset's
+/// session-selector (`session title → first-message fallback → agent name`);
+/// zed's constant-string fallback is intentionally *not* copied.
 pub(in crate::workspace) fn activity_bar_title(
     session_title: Option<&str>,
     items: &[daruda_acp::ChatItem],

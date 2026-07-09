@@ -38,7 +38,7 @@ mod sections;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ui::theme;
 use daruda_config::BuiltinSection;
@@ -88,7 +88,9 @@ pub struct SettingsWindow {
     cursor_blinking: bool,
     // Agent
     default_permission_mode_select: Entity<SelectState>,
+    agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
+    agent_rows: Vec<AgentCatalogRow>,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -177,9 +179,99 @@ pub(super) enum PluginSkillBodyState {
     Error(SharedString),
 }
 
+#[derive(Clone)]
+pub(super) struct AgentCatalogRow {
+    pub(super) id_input: Entity<InputState>,
+    pub(super) name_input: Entity<InputState>,
+    pub(super) command_input: Entity<InputState>,
+}
+
 impl SettingsWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_section(BuiltinSection::default(), window, cx)
+    }
+
+    fn subscribe_input_state(
+        state: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(
+            state,
+            window,
+            |this, _, ev: &InputEvent, window, cx| match ev {
+                InputEvent::PressEnter { .. } => this.submit(window, cx),
+                InputEvent::Change => {
+                    if this.error.is_some() {
+                        this.error = None;
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus | InputEvent::Blur => {}
+            },
+        )
+    }
+
+    fn agent_row_from_definition(
+        definition: &daruda_config::AgentDefinition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AgentCatalogRow {
+        let id = definition.id.clone();
+        let name = definition.name.clone();
+        let command = definition.command.clone();
+        AgentCatalogRow {
+            id_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("agent-id")
+                    .default_value(id)
+            }),
+            name_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("Display name")
+                    .default_value(name)
+            }),
+            command_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("command --acp")
+                    .default_value(command)
+            }),
+        }
+    }
+
+    fn subscribe_agent_row(
+        &mut self,
+        row: &AgentCatalogRow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self._input_subscriptions
+            .push(Self::subscribe_input_state(&row.id_input, window, cx));
+        self._input_subscriptions
+            .push(Self::subscribe_input_state(&row.name_input, window, cx));
+        self._input_subscriptions
+            .push(Self::subscribe_input_state(&row.command_input, window, cx));
+    }
+
+    pub(super) fn add_agent_row(
+        &mut self,
+        definition: daruda_config::AgentDefinition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let row = Self::agent_row_from_definition(&definition, window, cx);
+        self.subscribe_agent_row(&row, window, cx);
+        self.agent_rows.push(row);
+        self.error = None;
+        cx.notify();
+    }
+
+    pub(super) fn remove_agent_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.agent_rows.len() {
+            self.agent_rows.remove(index);
+            self.error = None;
+            cx.notify();
+        }
     }
 
     pub fn new_with_section(
@@ -334,6 +426,23 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&permission_mode_str), window, cx)
         });
 
+        let agent_preset = SharedString::from("codex-acp");
+        let agent_preset_select = cx.new(|cx| {
+            let opts = daruda_config::ACP_REGISTRY_AGENT_PRESETS
+                .iter()
+                .map(|preset| {
+                    SelectOption::new(preset.id, format!("{} ({})", preset.name, preset.id))
+                })
+                .collect();
+            select::state_with_options(opts, Some(&agent_preset), window, cx)
+        });
+
+        let agent_rows = config
+            .agents
+            .iter()
+            .map(|agent| Self::agent_row_from_definition(agent, window, cx))
+            .collect::<Vec<_>>();
+
         let max_fps_str: SharedString = config.render.max_fps.to_string().into();
         let max_fps_select = cx.new(|cx| {
             let opts = daruda_config::ALLOWED_MAX_FPS
@@ -373,35 +482,18 @@ impl SettingsWindow {
         let clipboard_streaming_fh = clipboard_streaming_input.read(cx).focus_handle(cx);
         let panels_grid_columns_fh = panels_grid_columns_input.read(cx).focus_handle(cx);
 
-        let make_sub = |state: &Entity<InputState>, this_cx: &mut Context<Self>| {
-            this_cx.subscribe_in(
-                state,
-                window,
-                |this, _, ev: &InputEvent, window, cx| match ev {
-                    InputEvent::PressEnter { .. } => this.submit(window, cx),
-                    InputEvent::Change => {
-                        if this.error.is_some() {
-                            this.error = None;
-                            cx.notify();
-                        }
-                    }
-                    InputEvent::Focus | InputEvent::Blur => {}
-                },
-            )
-        };
-
-        let _input_subscriptions = vec![
-            make_sub(&font_size_input, cx),
-            make_sub(&editor_font_size_input, cx),
-            make_sub(&agent_chat_font_size_input, cx),
-            make_sub(&vertical_spacing_input, cx),
-            make_sub(&horizontal_spacing_input, cx),
-            make_sub(&opacity_input, cx),
-            make_sub(&scrollback_input, cx),
-            make_sub(&inset_x_input, cx),
-            make_sub(&inset_y_input, cx),
-            make_sub(&clipboard_streaming_input, cx),
-            make_sub(&panels_grid_columns_input, cx),
+        let mut _input_subscriptions = vec![
+            Self::subscribe_input_state(&font_size_input, window, cx),
+            Self::subscribe_input_state(&editor_font_size_input, window, cx),
+            Self::subscribe_input_state(&agent_chat_font_size_input, window, cx),
+            Self::subscribe_input_state(&vertical_spacing_input, window, cx),
+            Self::subscribe_input_state(&horizontal_spacing_input, window, cx),
+            Self::subscribe_input_state(&opacity_input, window, cx),
+            Self::subscribe_input_state(&scrollback_input, window, cx),
+            Self::subscribe_input_state(&inset_x_input, window, cx),
+            Self::subscribe_input_state(&inset_y_input, window, cx),
+            Self::subscribe_input_state(&clipboard_streaming_input, window, cx),
+            Self::subscribe_input_state(&panels_grid_columns_input, window, cx),
             // Theme dropdowns apply live on pick (no Save needed): the
             // commit persists just that one field, and the existing config
             // fan-out repaints every open editor / diff view / pane.
@@ -445,6 +537,11 @@ impl SettingsWindow {
                 },
             ),
         ];
+        for row in &agent_rows {
+            _input_subscriptions.push(Self::subscribe_input_state(&row.id_input, window, cx));
+            _input_subscriptions.push(Self::subscribe_input_state(&row.name_input, window, cx));
+            _input_subscriptions.push(Self::subscribe_input_state(&row.command_input, window, cx));
+        }
 
         // Map each section to the focus target it should land on when
         // jumped to from outside the window. Sections without a text
@@ -456,6 +553,12 @@ impl SettingsWindow {
         section_focus.insert(BuiltinSection::Terminal, scrollback_fh.clone());
         section_focus.insert(BuiltinSection::Clipboard, clipboard_streaming_fh.clone());
         section_focus.insert(BuiltinSection::Panels, panels_grid_columns_fh.clone());
+        if let Some(row) = agent_rows.first() {
+            section_focus.insert(
+                BuiltinSection::Agent,
+                row.id_input.read(cx).focus_handle(cx),
+            );
+        }
 
         let _updater_subscription =
             crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
@@ -477,7 +580,9 @@ impl SettingsWindow {
             cursor_style_select,
             cursor_blinking: config.cursor.blinking,
             default_permission_mode_select,
+            agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
+            agent_rows,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -678,6 +783,32 @@ impl SettingsWindow {
             .unwrap_or_default();
         config.agent.use_modifier_to_send = self.agent_use_modifier_to_send;
 
+        let mut agents = Vec::with_capacity(self.agent_rows.len());
+        let mut seen_agent_ids = HashSet::new();
+        for (index, row) in self.agent_rows.iter().enumerate() {
+            let id = row.id_input.read(cx).value().trim().to_string();
+            let name = row.name_input.read(cx).value().trim().to_string();
+            let command = row.command_input.read(cx).value().trim().to_string();
+            if id.is_empty() || name.is_empty() || command.is_empty() {
+                return Err(SharedString::from(s::settings_err_agent_catalog_field(
+                    index + 1,
+                )));
+            }
+            if !is_valid_agent_id(&id) {
+                return Err(SharedString::from(s::settings_err_agent_catalog_id(&id)));
+            }
+            if !seen_agent_ids.insert(id.clone()) {
+                return Err(SharedString::from(s::settings_err_agent_catalog_duplicate(
+                    &id,
+                )));
+            }
+            agents.push(daruda_config::AgentDefinition { id, name, command });
+        }
+        if agents.is_empty() {
+            return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
+        }
+        config.agents = agents;
+
         config.render.max_fps = self
             .max_fps_select
             .read(cx)
@@ -811,23 +942,37 @@ impl SettingsWindow {
         // Cycle only through inputs that belong to the *active* section
         // — Tab on the Font page must not jump into the Window page's
         // opacity input while it is hidden.
-        let handles: Vec<&FocusHandle> = match self.active_section {
+        let handles: Vec<FocusHandle> = match self.active_section {
             BuiltinSection::Font => vec![
-                &self.font_size_fh,
-                &self.vertical_spacing_fh,
-                &self.horizontal_spacing_fh,
+                self.font_size_fh.clone(),
+                self.vertical_spacing_fh.clone(),
+                self.horizontal_spacing_fh.clone(),
             ],
-            BuiltinSection::Window => vec![&self.opacity_fh],
+            BuiltinSection::Window => vec![self.opacity_fh.clone()],
             BuiltinSection::Terminal => {
-                vec![&self.scrollback_fh, &self.inset_x_fh, &self.inset_y_fh]
+                vec![
+                    self.scrollback_fh.clone(),
+                    self.inset_x_fh.clone(),
+                    self.inset_y_fh.clone(),
+                ]
             }
-            BuiltinSection::Clipboard => vec![&self.clipboard_streaming_fh],
-            BuiltinSection::Panels => vec![&self.panels_grid_columns_fh],
+            BuiltinSection::Clipboard => vec![self.clipboard_streaming_fh.clone()],
+            BuiltinSection::Panels => vec![self.panels_grid_columns_fh.clone()],
+            BuiltinSection::Agent => self
+                .agent_rows
+                .iter()
+                .flat_map(|row| {
+                    [
+                        row.id_input.read(cx).focus_handle(cx),
+                        row.name_input.read(cx).focus_handle(cx),
+                        row.command_input.read(cx).focus_handle(cx),
+                    ]
+                })
+                .collect(),
             BuiltinSection::General
             | BuiltinSection::Cursor
             | BuiltinSection::Shell
             | BuiltinSection::LeftDock
-            | BuiltinSection::Agent
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Notifications
             | BuiltinSection::Keymap
@@ -911,6 +1056,13 @@ fn syntax_theme_label(value: &str) -> String {
         "darcula" => s::settings_syntax_theme_darcula(),
         _ => s::settings_syntax_theme_daruda(),
     }
+}
+
+fn is_valid_agent_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Return all font family names available on this system, sorted alphabetically.

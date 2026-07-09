@@ -50,6 +50,30 @@ impl Workspace {
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
         self.agents = config.agents.clone();
+        let agent_names = self
+            .agents
+            .iter()
+            .map(|agent| (agent.id.clone(), agent.name.clone()))
+            .collect::<Vec<_>>();
+        for view in self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .filter_map(|pane| pane.agent_chat_content().map(|ac| ac.view.clone()))
+        {
+            view.update(cx, |view, cx| {
+                let name = agent_names
+                    .iter()
+                    .find(|(id, _)| id == &view.agent_id)
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or_else(|| view.agent_id.clone());
+                if view.agent_name != name {
+                    view.agent_name = name;
+                    cx.notify();
+                }
+            });
+        }
         // Keep the `InputState`'s auto-grow cap in sync with the new
         // `input_max_rows` value. The cap is also baked in at construction
         // (`workspace/mod.rs`); without this update a live reload would leave

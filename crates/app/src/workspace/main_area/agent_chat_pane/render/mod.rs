@@ -61,7 +61,7 @@ pub(super) type MermaidImages = std::sync::Arc<
 use blocks::{
     assistant_block, assistant_markdown, conclusion_block, error_block, thinking_block, user_bubble,
 };
-use chrome::{activity_bar, status_banner, working_indicator};
+use chrome::{ActivityBarProps, activity_bar, status_banner, working_indicator};
 use plan::plan_region;
 use tool::{permission_card, tool_card};
 
@@ -96,16 +96,24 @@ pub(in crate::workspace) fn render(
     // Activity bar: session title on the left, fold buttons on the right.
     // Always visible — it holds the fold buttons even while the conversation is
     // empty or still connecting. The title resolves to the agent's session
-    // title, else the first prompt, else blank (no placeholder). Fold buttons
+    // title, else the first prompt, else the configured agent name. Fold buttons
     // appear only once there are items.
     let title = activity_bar_title(content.session_title.as_deref(), &content.items);
+    let agent_title = if content.agent_name.trim().is_empty() {
+        content.agent_id.as_str()
+    } else {
+        content.agent_name.as_str()
+    };
     let bar = activity_bar(
-        pane_id,
-        title.as_deref(),
-        content.session_updated_at.as_deref(),
-        content.session_usage.as_ref(),
-        !content.items.is_empty(),
-        dim,
+        ActivityBarProps {
+            pane_id,
+            agent_id: &content.agent_id,
+            title: title.as_deref().or(Some(agent_title)),
+            last_active: content.session_updated_at.as_deref(),
+            usage: content.session_usage.as_ref(),
+            has_items: !content.items.is_empty(),
+            dim,
+        },
         cx,
     );
 
@@ -209,6 +217,15 @@ pub(in crate::workspace) fn render(
         ))
 }
 
+fn agent_display_name(view: &AgentChatView) -> &str {
+    let name = view.agent_name.trim();
+    if name.is_empty() {
+        view.agent_id.as_str()
+    } else {
+        name
+    }
+}
+
 /// Render one projected row: an item, a synthetic fold header, or — when
 /// collapsed under an ancestor fold — a zero-height `Empty` (the row stays in
 /// the sequence so the count is fold-stable). Applies per-row padding (top on
@@ -247,6 +264,7 @@ fn render_row(
                 &this.fold,
                 t,
                 this.dim_amount,
+                agent_display_name(this),
                 cx,
             ),
             None => gpui::Empty.into_any_element(),
@@ -433,8 +451,8 @@ fn rollup_glyph(
 
 /// Collapsible header for an agent response (the run of agent items under a
 /// user message). The whole row toggles `FoldKey::Response`; shows a chevron +
-/// "Agent" label, and — when collapsed — the response's first line, a tool
-/// count, and a status-rollup glyph (see [`rollup_glyph`]). The
+/// agent label, and — when collapsed — the response's first line, a tool count,
+/// and a status-rollup glyph (see [`rollup_glyph`]). The
 /// user prompt stays visible above, so the summary doesn't repeat it.
 fn response_bar(
     this: &AgentChatView,
@@ -502,7 +520,7 @@ fn response_bar(
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(this.dim(theme::agent_chat_fg(cx)))
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(s::agent_chat_label_agent())),
+            .child(SharedString::from(agent_display_name(this).to_string())),
     );
 
     // Collapsed: the response's first line (ellipsized) + tool count fill the
@@ -629,22 +647,33 @@ fn render_item(
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
+    agent_label: &str,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match item {
         ChatItem::UserText(text) => {
             user_bubble(ix, text, mermaid_images, dim, cx).into_any_element()
         }
-        // Under a response bar the speaker is already labeled "Agent"; render the
-        // prose inline with no redundant per-block header/fold. A trivial / top-
-        // level reply (no response bar) keeps the labeled, foldable block.
+        // Under a response bar the speaker is already labeled with the agent
+        // name; render the prose inline with no redundant per-block header/fold.
+        // A trivial / top-level reply keeps the labeled, foldable block.
         ChatItem::AssistantText { text, .. } if under_response => {
             assistant_markdown(ix, text, mermaid_images, dim, cx)
         }
         ChatItem::AssistantText { text, .. } => {
             let key = FoldKey::Assistant(ix);
             let expanded = fold.is_expanded(&key, is_active(item));
-            assistant_block(ix, key, expanded, text, mermaid_images, dim, cx).into_any_element()
+            assistant_block(
+                ix,
+                key,
+                expanded,
+                text,
+                mermaid_images,
+                agent_label,
+                dim,
+                cx,
+            )
+            .into_any_element()
         }
         ChatItem::Thinking { text, .. } => {
             let key = FoldKey::Thinking(ix);

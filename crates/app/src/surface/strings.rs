@@ -2098,6 +2098,54 @@ pub fn settings_label_agent_use_modifier_to_send() -> String {
 pub fn settings_agent_use_modifier_to_send_description() -> String {
     rust_i18n::t!("settings.agent_use_modifier_to_send_description").into_owned()
 }
+pub fn settings_section_agent_catalog() -> String {
+    rust_i18n::t!("settings.section_agent_catalog").into_owned()
+}
+pub fn settings_agent_catalog_description() -> String {
+    rust_i18n::t!("settings.agent_catalog_description").into_owned()
+}
+pub fn settings_agent_catalog_empty() -> String {
+    rust_i18n::t!("settings.agent_catalog_empty").into_owned()
+}
+pub fn settings_agent_catalog_row_label(index: usize) -> String {
+    rust_i18n::t!("settings.agent_catalog_row_label", index = index).into_owned()
+}
+pub fn settings_agent_field_id() -> String {
+    rust_i18n::t!("settings.agent_field_id").into_owned()
+}
+pub fn settings_agent_field_name() -> String {
+    rust_i18n::t!("settings.agent_field_name").into_owned()
+}
+pub fn settings_agent_field_command() -> String {
+    rust_i18n::t!("settings.agent_field_command").into_owned()
+}
+
+pub fn settings_agent_preset() -> String {
+    rust_i18n::t!("settings.agent_preset").into_owned()
+}
+
+pub fn settings_agent_add_preset() -> String {
+    rust_i18n::t!("settings.agent_add_preset").into_owned()
+}
+
+pub fn settings_agent_add_custom() -> String {
+    rust_i18n::t!("settings.agent_add_custom").into_owned()
+}
+pub fn settings_agent_remove() -> String {
+    rust_i18n::t!("settings.agent_remove").into_owned()
+}
+pub fn settings_err_agent_catalog_empty() -> String {
+    rust_i18n::t!("settings.err_agent_catalog_empty").into_owned()
+}
+pub fn settings_err_agent_catalog_field(index: usize) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_field", index = index).into_owned()
+}
+pub fn settings_err_agent_catalog_id(id: &str) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_id", id = id).into_owned()
+}
+pub fn settings_err_agent_catalog_duplicate(id: &str) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_duplicate", id = id).into_owned()
+}
 
 // Plugin section — install / uninstall UI labels
 pub fn settings_plugin_installed_header() -> String {

@@ -34,7 +34,10 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub use agent::{AgentConfig, AgentDefinition, DefaultPermissionMode};
+pub use agent::{
+    ACP_REGISTRY_AGENT_PRESETS, ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig,
+    AgentDefinition, AgentPreset, DefaultPermissionMode,
+};
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
@@ -348,6 +351,25 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     patch_section(&mut doc, "claude_status", |t| {
         t["enable"] = toml_edit::value(config.claude_status.enable);
     });
+
+    patch_section(&mut doc, "agent", |t| {
+        t["default_permission_mode"] =
+            toml_edit::value(config.agent.default_permission_mode.mode_id());
+        t["use_modifier_to_send"] = toml_edit::value(config.agent.use_modifier_to_send);
+        t["input_max_rows"] = toml_edit::value(i64::from(config.agent.input_max_rows));
+    });
+
+    if doc.contains_key("agents") || config.agents != agent::default_agents() {
+        let mut agents = toml_edit::ArrayOfTables::new();
+        for agent in &config.agents {
+            let mut table = toml_edit::Table::new();
+            table["id"] = toml_edit::value(agent.id.clone());
+            table["name"] = toml_edit::value(agent.name.clone());
+            table["command"] = toml_edit::value(agent.command.clone());
+            agents.push(table);
+        }
+        doc.insert("agents", toml_edit::Item::ArrayOfTables(agents));
+    }
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

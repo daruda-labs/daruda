@@ -138,6 +138,7 @@ pub(super) fn assistant_block(
     expanded: bool,
     text: &str,
     mermaid_images: &MermaidImages,
+    agent_label: &str,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
@@ -147,7 +148,7 @@ pub(super) fn assistant_block(
         .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(SharedString::from(s::agent_chat_label_agent()))
+        .child(SharedString::from(agent_label.to_string()))
         .into_any_element();
     let summary = collapsed_text_summary(text, false, dim, cx);
     foldable_block(
@@ -166,7 +167,7 @@ pub(super) fn assistant_block(
 
 /// The turn's conclusion — the run's final assistant message rendered under a
 /// response bar. Same drag-selectable markdown body as [`assistant_block`] but
-/// with no "Agent" label (the response bar above already names the speaker):
+/// with no speaker label (the response bar above already names the speaker):
 /// just the bare disclosure chevron, so the conclusion folds to its first-line
 /// summary independently of the response's process fold.
 pub(super) fn conclusion_block(

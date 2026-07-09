@@ -3,11 +3,11 @@
 //! with its animated pulse dots and elapsed clock.
 
 use daruda_acp::{ChatItem, UsageView};
-use gpui::{App, Hsla, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px, svg};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Sizable as _, StatusPulseClock};
+use crate::ui::{ButtonVariants as _, Icon, IconName, Sizable as _, StatusPulseClock};
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AgentSessionStatus, RuntimePrepPhase,
 };
@@ -16,38 +16,45 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// Pane activity bar: resolved session title on the LEFT, "Expand all" /
 /// "Collapse all" ghost buttons on the RIGHT. Always rendered — it holds the
 /// fold buttons even while the conversation is empty or still connecting. The
-/// `title` is already resolved by the caller (`activity_bar_title`); `None`
-/// renders a blank left slot rather than a placeholder. The fold buttons appear
-/// only when `has_items` is true (render purity: no logic here, just `.when()`).
+/// `title` is already resolved by the caller (`activity_bar_title`, falling
+/// back to the agent name). The fold buttons appear only when `has_items` is
+/// true (render purity: no logic here, just `.when()`).
 /// A bottom hairline separates the bar from the conversation body.
+pub(super) struct ActivityBarProps<'a> {
+    pub pane_id: PaneId,
+    pub agent_id: &'a str,
+    pub title: Option<&'a str>,
+    pub last_active: Option<&'a str>,
+    pub usage: Option<&'a UsageView>,
+    pub has_items: bool,
+    pub dim: f32,
+}
+
 pub(super) fn activity_bar(
-    pane_id: PaneId,
-    title: Option<&str>,
-    last_active: Option<&str>,
-    usage: Option<&UsageView>,
-    has_items: bool,
-    dim: f32,
+    props: ActivityBarProps<'_>,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let title: SharedString = title
+    let title: SharedString = props
+        .title
         .map(|s| SharedString::from(s.to_string()))
         .unwrap_or_default();
     // Last-activity timestamp (from `SessionInfoUpdate.updated_at`) surfaces as a
     // tooltip on the title rather than inline text — it's low-frequency detail
     // and the bar is width-constrained (title ellipsizes).
-    let last_active_tooltip: Option<SharedString> = last_active
+    let last_active_tooltip: Option<SharedString> = props
+        .last_active
         .map(format_last_active)
         .map(|when| SharedString::from(s::agent_chat_last_active_tooltip(&when)));
 
     let expand = crate::ui::button(
-        ("agent-chat-expand-all", pane_id as usize),
+        ("agent-chat-expand-all", props.pane_id as usize),
         SharedString::from(s::agent_chat_expand_all()),
     )
     .ghost()
     .xsmall()
     .on_click(cx.listener(move |this, _ev, _window, cx| this.set_all_folds(true, cx)));
     let collapse = crate::ui::button(
-        ("agent-chat-collapse-all", pane_id as usize),
+        ("agent-chat-collapse-all", props.pane_id as usize),
         SharedString::from(s::agent_chat_collapse_all()),
     )
     .ghost()
@@ -70,19 +77,30 @@ pub(super) fn activity_bar(
         // hairline is near-invisible. Matches the tool-card / code-block edges.
         .border_color(theme::dim_toward_gray(
             theme::agent_chat_border_tint(cx),
-            dim,
+            props.dim,
         ))
         .child(
             div()
-                .id(("agent-chat-title", pane_id as usize))
+                .id(("agent-chat-title", props.pane_id as usize))
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .text_size(px(theme::agent_chat_font_size(cx)))
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-                .child(title)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.))
+                .child(agent_icon(props.agent_id, props.dim, cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(theme::agent_chat_font_size(cx)))
+                        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), props.dim))
+                        .child(title),
+                )
                 .when_some(last_active_tooltip, |el, tip| {
                     el.tooltip(crate::ui::tooltip::text(tip))
                 }),
@@ -90,7 +108,7 @@ pub(super) fn activity_bar(
         // Context-window meter (from `UsageUpdate`): current fill on the right,
         // detail + optional cost in the tooltip. Distinct from the cumulative
         // Usage tab. Shown only once the agent reports usage.
-        .when_some(usage, |row, u| {
+        .when_some(props.usage, |row, u| {
             let pct = if u.size > 0 {
                 (u.used.saturating_mul(100) / u.size).min(100) as u8
             } else {
@@ -114,15 +132,18 @@ pub(super) fn activity_bar(
             );
             row.child(
                 div()
-                    .id(("agent-chat-context-meter", pane_id as usize))
+                    .id(("agent-chat-context-meter", props.pane_id as usize))
                     .flex_none()
                     .text_size(px(theme::agent_chat_font_size(cx)))
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_color(theme::dim_toward_gray(
+                        theme::agent_chat_fg_muted(cx),
+                        props.dim,
+                    ))
                     .child(SharedString::from(label))
                     .tooltip(crate::ui::tooltip::text(SharedString::from(tip))),
             )
         })
-        .when(has_items, |row| {
+        .when(props.has_items, |row| {
             row.child(
                 div()
                     .flex_none()
@@ -130,11 +151,75 @@ pub(super) fn activity_bar(
                     .flex_row()
                     .items_center()
                     .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_color(theme::dim_toward_gray(
+                        theme::agent_chat_fg_muted(cx),
+                        props.dim,
+                    ))
                     .child(expand)
                     .child(collapse),
             )
         })
+}
+
+fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {
+    let color = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
+    match agent_icon_path(agent_id) {
+        Some(path) => svg()
+            .flex_none()
+            .w(px(16.))
+            .h(px(16.))
+            .path(path)
+            .text_color(color)
+            .into_any_element(),
+        None => Icon::new(IconName::Bot)
+            .xsmall()
+            .text_color(color)
+            .into_any_element(),
+    }
+}
+
+fn agent_icon_path(agent_id: &str) -> Option<&'static str> {
+    Some(match agent_id {
+        "claude" | "claude-acp" => "icons/agents/claude-acp.svg",
+        "codex" | "codex-acp" => "icons/agents/codex-acp.svg",
+        "agoragentic-acp" => "icons/agents/agoragentic-acp.svg",
+        "amp-acp" => "icons/agents/amp-acp.svg",
+        "auggie" => "icons/agents/auggie.svg",
+        "autohand" => "icons/agents/autohand.svg",
+        "cline" => "icons/agents/cline.svg",
+        "codebuddy-code" => "icons/agents/codebuddy-code.svg",
+        "cortex-code" => "icons/agents/cortex-code.svg",
+        "corust-agent" => "icons/agents/corust-agent.svg",
+        "crow-cli" => "icons/agents/crow-cli.svg",
+        "cursor" => "icons/agents/cursor.svg",
+        "deepagents" => "icons/agents/deepagents.svg",
+        "devin" => "icons/agents/devin.svg",
+        "dimcode" => "icons/agents/dimcode.svg",
+        "dirac" => "icons/agents/dirac.svg",
+        "factory-droid" => "icons/agents/factory-droid.svg",
+        "fast-agent" => "icons/agents/fast-agent.svg",
+        "gemini" => "icons/agents/gemini.svg",
+        "github-copilot-cli" => "icons/agents/github-copilot-cli.svg",
+        "glm-acp-agent" => "icons/agents/glm-acp-agent.svg",
+        "goose" => "icons/agents/goose.svg",
+        "grok-build" => "icons/agents/grok-build.svg",
+        "harn" => "icons/agents/harn.svg",
+        "junie" => "icons/agents/junie.svg",
+        "kilo" => "icons/agents/kilo.svg",
+        "kimi" => "icons/agents/kimi.svg",
+        "minion-code" => "icons/agents/minion-code.svg",
+        "mistral-vibe" => "icons/agents/mistral-vibe.svg",
+        "nova" => "icons/agents/nova.svg",
+        "opencode" => "icons/agents/opencode.svg",
+        "pi-acp" => "icons/agents/pi-acp.svg",
+        "poolside" => "icons/agents/poolside.svg",
+        "qoder" => "icons/agents/qoder.svg",
+        "qwen-code" => "icons/agents/qwen-code.svg",
+        "sigit" => "icons/agents/sigit.svg",
+        "stakpak" => "icons/agents/stakpak.svg",
+        "vtcode" => "icons/agents/vtcode.svg",
+        _ => return None,
+    })
 }
 
 /// Format an ISO 8601 timestamp (`2026-07-01T14:32:05.000Z`) into a compact

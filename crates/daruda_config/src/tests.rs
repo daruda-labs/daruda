@@ -448,6 +448,63 @@ fn patch_config_file_creates_missing_file() {
 }
 
 #[test]
+fn patch_config_file_writes_agent_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let cfg = Config {
+        agent: AgentConfig {
+            default_permission_mode: DefaultPermissionMode::Plan,
+            use_modifier_to_send: true,
+            ..AgentConfig::default()
+        },
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let reloaded = Config::load_from(&path);
+    assert_eq!(
+        reloaded.agent.default_permission_mode,
+        DefaultPermissionMode::Plan
+    );
+    assert!(reloaded.agent.use_modifier_to_send);
+}
+
+#[test]
+fn patch_config_file_writes_non_default_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let cfg = Config {
+        agents: vec![
+            AgentDefinition::claude_default(),
+            AgentDefinition::codex_default(),
+        ],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.contains("[[agents]]"));
+    assert!(on_disk.contains("@agentclientprotocol/codex-acp"));
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.agents, cfg.agents);
+}
+
+#[test]
+fn patch_config_file_preserves_implicit_default_agents_when_unmanaged() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    patch_config_file_to(&Config::default(), &path).unwrap();
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(!on_disk.contains("[[agents]]"));
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.agents, vec![AgentDefinition::claude_default()]);
+}
+
+#[test]
 fn patch_config_file_clamps_out_of_range_values() {
     // The Settings UI may construct a Config with values outside the
     // valid range (e.g., a slider bug). patch_config_file_to clamps

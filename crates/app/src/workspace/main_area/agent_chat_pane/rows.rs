@@ -105,7 +105,7 @@ impl RenderRow {
 
 /// Threshold for a response to earn its own collapsible bar: at least one tool
 /// call, or ≥ this many agent blocks. A lone short reply renders inline (no
-/// bureaucratic "Agent" bar on every trivial answer).
+/// response bar on every trivial answer).
 const RESPONSE_MIN_BLOCKS: usize = 2;
 
 /// Project the flat `items` into renderable rows, deciding each row's

@@ -75,7 +75,50 @@ pub fn command_needs_node(command: &str) -> bool {
     if trimmed.starts_with('{') {
         return false;
     }
-    matches!(trimmed.split_whitespace().next(), Some("npx" | "node"))
+    matches!(launcher_after_env_prefix(trimmed), Some("npx" | "node"))
+}
+
+fn launcher_after_env_prefix(command: &str) -> Option<&str> {
+    let (_, tokens) = split_env_prefixed_tokens(command);
+    tokens.first().copied()
+}
+
+fn split_env_prefixed_tokens(command: &str) -> (Vec<(&str, &str)>, Vec<&str>) {
+    let mut env = Vec::new();
+    let mut command_tokens = Vec::new();
+    let mut saw_command = false;
+
+    for token in command.split_whitespace() {
+        if !saw_command && let Some((name, value)) = parse_env_assignment(token) {
+            env.push((name, value));
+            continue;
+        }
+        saw_command = true;
+        command_tokens.push(token);
+    }
+
+    (env, command_tokens)
+}
+
+fn parse_env_assignment(token: &str) -> Option<(&str, &str)> {
+    let eq_pos = token.find('=')?;
+    if eq_pos == 0 {
+        return None;
+    }
+
+    let name = &token[..eq_pos];
+    let value = &token[eq_pos + 1..];
+
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+
+    Some((name, value))
 }
 
 impl NodeRuntime {
@@ -100,14 +143,23 @@ impl NodeRuntime {
             NodeRuntime::System => AdapterCommand(command.to_string()),
             NodeRuntime::Managed { node_dir } if command_needs_node(command) => {
                 let bin_dir = node_dir.join("bin");
-                let mut tokens = command.split_whitespace();
-                let launcher = tokens.next().unwrap_or_default();
+                let (env_assignments, tokens) = split_env_prefixed_tokens(command);
+                let launcher = tokens.first().copied().unwrap_or_default();
                 let abs_launcher = bin_dir.join(launcher);
-                let args = tokens.map(str::to_string).collect::<Vec<_>>();
+                let args = tokens
+                    .iter()
+                    .skip(1)
+                    .map(|arg| (*arg).to_string())
+                    .collect::<Vec<_>>();
                 let path = prepend_to_path(&bin_dir);
+                let mut env = env_assignments
+                    .into_iter()
+                    .map(|(name, value)| EnvVariable::new(name, value))
+                    .collect::<Vec<_>>();
+                env.push(EnvVariable::new("PATH", path));
                 let stdio = McpServerStdio::new("acp-agent", abs_launcher)
                     .args(args)
-                    .env(vec![EnvVariable::new("PATH", path)]);
+                    .env(env);
                 // `AcpAgent::from_str` parses a leading `{` as a JSON `McpServer`,
                 // so serializing the schema type gives a forward-compatible,
                 // shell-safe command. serde can't fail on this owned value.
@@ -448,9 +500,16 @@ mod tests {
         assert!(command_needs_node("node /path/adapter.js"));
         // Leading whitespace before the launcher must not hide it.
         assert!(command_needs_node("   npx -y pkg"));
+        // Registry commands may prefix environment assignments before npx.
+        assert!(command_needs_node(
+            "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y pkg --acp"
+        ));
+        assert!(command_needs_node("A=1 B=false node /path/adapter.js"));
 
         // A non-Node binary runs itself.
         assert!(!command_needs_node("/usr/local/bin/codex-acp"));
+        assert!(!command_needs_node("A=1 /usr/local/bin/codex-acp"));
+        assert!(!command_needs_node("A=1"));
         // A JSON stdio config is a self-contained transport.
         assert!(!command_needs_node(
             r#"{"type":"stdio","command":"codex","args":[]}"#
@@ -512,6 +571,37 @@ mod tests {
             McpServer::Stdio(stdio) => {
                 assert_eq!(stdio.command, node_dir.join("bin").join("node"));
                 assert_eq!(stdio.args, vec!["/path/adapter.js", "--flag"]);
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn managed_runtime_preserves_env_prefix_when_rewriting_npx() {
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let command = NodeRuntime::Managed {
+            node_dir: node_dir.clone(),
+        }
+        .wrap_command("AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@0.32.0 --acp");
+        let agent = AcpAgent::from_str(&command.0).expect("managed env command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, node_dir.join("bin").join("npx"));
+                assert_eq!(
+                    stdio.args,
+                    vec!["-y", "@augmentcode/auggie@0.32.0", "--acp"]
+                );
+                assert!(
+                    stdio
+                        .env
+                        .iter()
+                        .any(|e| { e.name == "AUGMENT_DISABLE_AUTO_UPDATE" && e.value == "1" }),
+                    "registry env var must be preserved"
+                );
+                assert!(
+                    stdio.env.iter().any(|e| e.name == "PATH"),
+                    "managed Node PATH must still be injected"
+                );
             }
             other => panic!("expected stdio transport, got {other:?}"),
         }

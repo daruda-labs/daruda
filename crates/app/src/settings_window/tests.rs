@@ -1,6 +1,6 @@
 use super::*;
 use daruda_config::BuiltinSection;
-use gpui::{Entity, TestAppContext, WindowHandle};
+use gpui::{BorrowAppContext, Entity, TestAppContext, WindowHandle};
 
 use crate::test_support::init_gpui_component;
 
@@ -10,7 +10,20 @@ use crate::test_support::init_gpui_component;
 fn build_window(
     cx: &mut TestAppContext,
 ) -> (WindowHandle<gpui_component::Root>, Entity<SettingsWindow>) {
+    build_window_with_config(cx, daruda_config::Config::default())
+}
+
+fn build_window_with_config(
+    cx: &mut TestAppContext,
+    config: daruda_config::Config,
+) -> (WindowHandle<gpui_component::Root>, Entity<SettingsWindow>) {
     init_gpui_component(cx);
+    cx.update(|cx| {
+        crate::settings_store::SettingsStore::init(cx);
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            store.set_user_for_testing(config);
+        });
+    });
     let settings_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
         let settings = cx.new(|cx| SettingsWindow::new(window, cx));
@@ -107,6 +120,71 @@ fn validate_accepts_grid_columns_in_range(cx: &mut TestAppContext) {
     win.read_with(cx, |w, cx| {
         let cfg = w.validate(cx).expect("8 columns must validate");
         assert_eq!(cfg.panels.grid_columns, 8);
+    });
+}
+
+#[gpui::test]
+fn validate_collects_agent_catalog(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let win_for_add = win.clone();
+    cx.update_window(wh.into(), |_, window, cx| {
+        win_for_add.update(cx, |w, cx| {
+            w.add_agent_row(daruda_config::AgentDefinition::codex_default(), window, cx);
+        });
+    })
+    .unwrap();
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w.validate(cx).expect("agent catalog must validate");
+        assert_eq!(
+            cfg.agents,
+            vec![
+                daruda_config::AgentDefinition::claude_default(),
+                daruda_config::AgentDefinition::codex_default(),
+            ]
+        );
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_empty_agent_catalog(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.update(cx, |w, cx| w.remove_agent_row(0, cx));
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("agent") || err.contains("에이전트"));
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_duplicate_agent_id(cx: &mut TestAppContext) {
+    let config = daruda_config::Config {
+        agents: vec![
+            daruda_config::AgentDefinition::codex_default(),
+            daruda_config::AgentDefinition::codex_default(),
+        ],
+        ..daruda_config::Config::default()
+    };
+    let (_wh, win) = build_window_with_config(cx, config);
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("codex"));
+    });
+}
+
+#[gpui::test]
+fn validate_rejects_invalid_agent_id(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    let id_input = win.read_with(cx, |w, _| w.agent_rows[0].id_input.clone());
+    wh.update(cx, |_root, window, cx| {
+        id_input.update(cx, |i, cx_state| {
+            i.set_value("bad id".to_owned(), window, cx_state)
+        });
+    })
+    .unwrap();
+    win.read_with(cx, |w, cx| {
+        let err = w.validate(cx).unwrap_err();
+        assert!(err.contains("bad id"));
     });
 }
 

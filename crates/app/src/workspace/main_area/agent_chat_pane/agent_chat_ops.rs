@@ -69,6 +69,14 @@ fn catalog_default_id(agents: &[daruda_config::AgentDefinition]) -> String {
         .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id)
 }
 
+fn agent_name_for(agents: &[daruda_config::AgentDefinition], agent_id: &str) -> String {
+    agents
+        .iter()
+        .find(|a| a.id == agent_id)
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| agent_id.to_string())
+}
+
 /// Pure core of [`Workspace::resolve_restored_agent`] — decide the effective
 /// agent for a restored pane and whether its persisted session id survives.
 /// Factored out of the workspace so it is unit-testable without gpui.
@@ -243,6 +251,7 @@ impl Workspace {
         // caches a copy so `Pane::cwd()` stays cx-free.
         let view = cx.new({
             let cwd = cwd.clone();
+            let agent_name = agent_name_for(&self.agents, &agent_id);
             move |cx| {
                 AgentChatView::new(
                     pane_id,
@@ -251,6 +260,7 @@ impl Workspace {
                     status,
                     session_id,
                     agent_id,
+                    agent_name,
                     title,
                     cx,
                 )
@@ -469,7 +479,11 @@ impl Workspace {
         let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
-            view.update(cx, |v, _| v.agent_id = id);
+            let name = agent_name_for(&self.agents, &effective_id);
+            view.update(cx, |v, _| {
+                v.agent_id = id;
+                v.agent_name = name;
+            });
             self.mark_dirty_and_save(cx);
         }
         Some(

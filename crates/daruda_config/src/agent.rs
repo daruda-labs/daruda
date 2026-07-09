@@ -60,6 +60,150 @@ pub struct AgentDefinition {
     pub command: String,
 }
 
+/// A built-in ACP registry preset that can be inserted into the user catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentPreset {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub command: &'static str,
+}
+
+impl AgentPreset {
+    pub fn definition(self) -> AgentDefinition {
+        AgentDefinition {
+            id: self.id.to_string(),
+            name: self.name.to_string(),
+            command: self.command.to_string(),
+        }
+    }
+}
+
+/// ACP registry snapshot used to seed the Settings preset list.
+pub const ACP_REGISTRY_URL: &str =
+    "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+pub const ACP_REGISTRY_VERSION: &str = "1.0.0";
+
+/// Presets generated from registry entries with directly runnable `npx`/`uvx`
+/// distributions. Registry entries that only publish per-platform binary
+/// archives need a downloader/extractor before they can be exposed here.
+pub const ACP_REGISTRY_AGENT_PRESETS: &[AgentPreset] = &[
+    AgentPreset {
+        id: "agoragentic-acp",
+        name: "Agoragentic",
+        command: "npx -y agoragentic-mcp@1.3.0 --acp",
+    },
+    AgentPreset {
+        id: "auggie",
+        name: "Auggie CLI",
+        command: "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@0.32.0 --acp",
+    },
+    AgentPreset {
+        id: "autohand",
+        name: "Autohand Code",
+        command: "npx -y @autohandai/autohand-acp@0.2.1",
+    },
+    AgentPreset {
+        id: "claude-acp",
+        name: "Claude Agent",
+        command: "npx -y @agentclientprotocol/claude-agent-acp@0.57.0",
+    },
+    AgentPreset {
+        id: "cline",
+        name: "Cline",
+        command: "npx -y cline@3.0.38 --acp",
+    },
+    AgentPreset {
+        id: "codebuddy-code",
+        name: "Codebuddy Code",
+        command: "npx -y @tencent-ai/codebuddy-code@2.106.7 --acp",
+    },
+    AgentPreset {
+        id: "codex-acp",
+        name: "Codex",
+        command: "npx -y @agentclientprotocol/codex-acp@1.1.0",
+    },
+    AgentPreset {
+        id: "deepagents",
+        name: "DeepAgents",
+        command: "npx -y deepagents-acp@0.1.7",
+    },
+    AgentPreset {
+        id: "dimcode",
+        name: "DimCode",
+        command: "npx -y dimcode@0.2.22 acp",
+    },
+    AgentPreset {
+        id: "dirac",
+        name: "Dirac",
+        command: "npx -y dirac-cli@0.4.13 --acp",
+    },
+    AgentPreset {
+        id: "factory-droid",
+        name: "Factory Droid",
+        command: "DROID_DISABLE_AUTO_UPDATE=true FACTORY_DROID_AUTO_UPDATE_ENABLED=false npx -y droid@0.167.0 exec --output-format acp-daemon",
+    },
+    AgentPreset {
+        id: "fast-agent",
+        name: "fast-agent",
+        command: "uvx fast-agent-acp==0.9.2 -x",
+    },
+    AgentPreset {
+        id: "gemini",
+        name: "Gemini CLI",
+        command: "npx -y @google/gemini-cli@0.49.0 --acp",
+    },
+    AgentPreset {
+        id: "github-copilot-cli",
+        name: "GitHub Copilot",
+        command: "npx -y @github/copilot@1.0.69 --acp",
+    },
+    AgentPreset {
+        id: "glm-acp-agent",
+        name: "GLM Agent",
+        command: "npx -y glm-acp-agent@1.1.4",
+    },
+    AgentPreset {
+        id: "grok-build",
+        name: "Grok Build",
+        command: "npx -y @xai-official/grok@0.2.92 agent stdio",
+    },
+    AgentPreset {
+        id: "kilo",
+        name: "Kilo",
+        command: "npx -y @kilocode/cli@7.4.1 acp",
+    },
+    AgentPreset {
+        id: "minion-code",
+        name: "Minion Code",
+        command: "uvx minion-code@0.1.44 acp",
+    },
+    AgentPreset {
+        id: "nova",
+        name: "Nova",
+        command: "npx -y @compass-ai/nova@1.1.25 acp",
+    },
+    AgentPreset {
+        id: "pi-acp",
+        name: "pi ACP",
+        command: "npx -y pi-acp@0.0.31",
+    },
+    AgentPreset {
+        id: "qoder",
+        name: "Qoder CLI",
+        command: "npx -y @qoder-ai/qodercli@0.2.14 --acp",
+    },
+    AgentPreset {
+        id: "qwen-code",
+        name: "Qwen Code",
+        command: "npx -y @qwen-code/qwen-code@0.19.7 --acp --experimental-skills",
+    },
+    AgentPreset {
+        id: "sigit",
+        name: "siGit Code",
+        command: "npx -y @smbcloud/sigit@1.4.0",
+    },
+];
+
 impl AgentDefinition {
     /// The built-in Claude Code agent, used when config declares no `[[agents]]`.
     /// The command mirrors daruda_acp's default adapter launch; the "@latest"
@@ -72,6 +216,27 @@ impl AgentDefinition {
             name: "Claude Code".to_string(),
             command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
         }
+    }
+
+    /// The built-in Codex ACP agent preset exposed by the Settings UI.
+    pub fn codex_default() -> Self {
+        Self::registry_preset("codex-acp").expect("codex-acp registry preset exists")
+    }
+
+    pub fn registry_presets() -> Vec<Self> {
+        ACP_REGISTRY_AGENT_PRESETS
+            .iter()
+            .copied()
+            .map(AgentPreset::definition)
+            .collect()
+    }
+
+    pub fn registry_preset(id: &str) -> Option<Self> {
+        ACP_REGISTRY_AGENT_PRESETS
+            .iter()
+            .copied()
+            .find(|preset| preset.id == id)
+            .map(AgentPreset::definition)
     }
 }
 
@@ -240,6 +405,27 @@ mod tests {
             d.command,
             "npx -y @agentclientprotocol/claude-agent-acp@latest"
         );
+    }
+
+    #[test]
+    fn codex_default_has_expected_fields() {
+        let d = AgentDefinition::codex_default();
+        assert_eq!(d.id, "codex-acp");
+        assert_eq!(d.name, "Codex");
+        assert_eq!(d.command, "npx -y @agentclientprotocol/codex-acp@1.1.0");
+    }
+
+    #[test]
+    fn registry_presets_include_directly_runnable_agents() {
+        let presets = AgentDefinition::registry_presets();
+        assert_eq!(ACP_REGISTRY_VERSION, "1.0.0");
+        assert_eq!(ACP_REGISTRY_AGENT_PRESETS.len(), 23);
+        assert_eq!(presets.len(), ACP_REGISTRY_AGENT_PRESETS.len());
+        assert!(presets.iter().any(|p| p.id == "claude-acp"));
+        assert!(presets.iter().any(|p| p.id == "codex-acp"));
+        assert!(presets.iter().any(|p| {
+            p.id == "factory-droid" && p.command.starts_with("DROID_DISABLE_AUTO_UPDATE=true ")
+        }));
     }
 
     #[test]

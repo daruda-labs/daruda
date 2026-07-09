@@ -15,7 +15,7 @@ mod plugin;
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{button, checkbox, checkbox_row, field_row};
+use crate::ui::{button, button_danger, checkbox, checkbox_row, field_row};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
@@ -310,7 +310,7 @@ impl SettingsWindow {
             M::Plan => s::settings_agent_mode_plan(),
             M::BypassPermissions => s::settings_agent_mode_bypass(),
         };
-        div()
+        let mut body = div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
@@ -342,7 +342,122 @@ impl SettingsWindow {
                     .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                     .text_color(description_color)
                     .child(s::settings_agent_use_modifier_to_send_description()),
+            );
+
+        body = body
+            .child(Self::section_label(s::settings_section_agent_catalog(), cx))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings_agent_catalog_description()),
             )
+            .child(field_row(
+                s::settings_agent_preset(),
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(div().flex_1().child(crate::ui::select::select(
+                        &self.agent_preset_select,
+                        cx,
+                        (),
+                    )))
+                    .child(
+                        button("settings-agent-add-preset", s::settings_agent_add_preset())
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                let selected = this
+                                    .agent_preset_select
+                                    .read(cx)
+                                    .selected_value()
+                                    .map(|id| id.to_string());
+                                if let Some(definition) = selected.and_then(|id| {
+                                    daruda_config::AgentDefinition::registry_preset(&id)
+                                }) {
+                                    this.add_agent_row(definition, window, cx);
+                                }
+                            })),
+                    )
+                    .child(
+                        button("settings-agent-add-custom", s::settings_agent_add_custom())
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.add_agent_row(
+                                    daruda_config::AgentDefinition {
+                                        id: String::new(),
+                                        name: String::new(),
+                                        command: String::new(),
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    ),
+            ));
+
+        if self.agent_rows.is_empty() {
+            body = body.child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings_agent_catalog_empty()),
+            );
+        }
+        for (index, row) in self.agent_rows.iter().enumerate() {
+            body = body.child(self.render_agent_catalog_row(index, row, cx));
+        }
+
+        body.into_any_element()
+    }
+
+    fn render_agent_catalog_row(
+        &self,
+        index: usize,
+        row: &super::AgentCatalogRow,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let t = theme::current(cx);
+        let remove_id = format!("settings-agent-remove-{index}");
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::MODAL_PANEL_GAP))
+            .p(px(theme::MODAL_PANEL_GAP))
+            .border_1()
+            .border_color(t.border)
+            .rounded(px(theme::RADIUS_MD))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(t.text_primary)
+                            .child(s::settings_agent_catalog_row_label(index + 1)),
+                    )
+                    .child(
+                        button_danger(remove_id, s::settings_agent_remove()).on_click(cx.listener(
+                            move |this, _: &ClickEvent, _window, cx| {
+                                this.remove_agent_row(index, cx);
+                            },
+                        )),
+                    ),
+            )
+            .child(field_row(
+                s::settings_agent_field_id(),
+                crate::ui::input(&row.id_input, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_agent_field_name(),
+                crate::ui::input(&row.name_input, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_agent_field_command(),
+                crate::ui::input(&row.command_input, cx, ()),
+            ))
             .into_any_element()
     }
 

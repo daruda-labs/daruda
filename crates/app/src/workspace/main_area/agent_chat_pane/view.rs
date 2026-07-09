@@ -182,6 +182,10 @@ pub(in crate::workspace) struct AgentChatView {
     /// create/restore (default = catalog[0]) and persisted so the pane comes
     /// back under the same agent, whose session id is then resumable.
     pub(in crate::workspace) agent_id: String,
+    /// Display name for `agent_id`, copied from the config catalog at pane
+    /// creation/restore and refreshed on config reload. Used as the activity
+    /// bar title fallback before the session reports its own title.
+    pub(in crate::workspace) agent_name: String,
     /// Connection lifecycle state. Drives the status line + input/cancel
     /// affordance.
     pub(in crate::workspace) status: AgentSessionStatus,
@@ -536,6 +540,7 @@ impl AgentChatView {
         status: AgentSessionStatus,
         session_id: Option<String>,
         agent_id: String,
+        agent_name: String,
         title: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -555,6 +560,7 @@ impl AgentChatView {
             status,
             session_id,
             agent_id,
+            agent_name,
             // A restored pane connects lazily; the resume decision (and the
             // `restoring` flag that coalesces the replay) is made at connect
             // time by `maybe_connect_agent_chat`, not here.
