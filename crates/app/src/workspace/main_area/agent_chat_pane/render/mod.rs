@@ -245,7 +245,7 @@ fn render_row(
     let inner: AnyElement = match &row.kind {
         RowKind::User(i) => match this.items.get(*i) {
             Some(ChatItem::UserText(text)) => {
-                user_bubble(*i, text, &this.mermaid_images, this.dim_amount, cx).into_any_element()
+                user_bubble(*i, text, this.dim_amount, cx).into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -652,7 +652,7 @@ fn render_item(
 ) -> AnyElement {
     match item {
         ChatItem::UserText(text) => {
-            user_bubble(ix, text, mermaid_images, dim, cx).into_any_element()
+            user_bubble(ix, text, dim, cx).into_any_element()
         }
         // Under a response bar the speaker is already labeled with the agent
         // name; render the prose inline with no redundant per-block header/fold.

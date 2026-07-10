@@ -288,4 +288,56 @@ mod tests {
             })
             .unwrap();
     }
+
+    /// Reproduction: composing a Korean syllable via the macOS IME when the
+    /// composition sits at a non-zero document offset (here, on the second line
+    /// after a newline). macOS drives this through `EntityInputHandler`:
+    /// `set_marked_text` → `replace_and_mark_text_in_range(replacementRange,
+    /// text, selectedRange)` where `selectedRange` is RELATIVE to the marked
+    /// text (per NSTextInputClient), then `insert_text` → `replace_text_in_range`
+    /// on commit. We drive the exact same calls to check the syllable survives.
+    #[gpui::test]
+    fn korean_ime_compose_after_newline_preserves_syllable(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler as _;
+        init_gpui_component(cx);
+        let window = cx.add_window(|window, cx| InputState::new(window, cx).multi_line(true));
+        window
+            .update(cx, |state, window, cx| {
+                // Line 1 = "가", then a newline; compose on line 2 so the marked
+                // text is at a non-zero offset.
+                state.set_value("가\n", window, cx);
+                state.move_cursor_to_end(cx);
+
+                // Compose 한 = ㅎ → 하 → 한. selectedRange {1,0} (cursor after the
+                // single-unit marked text), replacementRange = None (continuing
+                // composition relies on the app's markedRange).
+                state.replace_and_mark_text_in_range(None, "ㅎ", Some(1..1), window, cx);
+                state.replace_and_mark_text_in_range(None, "하", Some(1..1), window, cx);
+                state.replace_and_mark_text_in_range(None, "한", Some(1..1), window, cx);
+
+                // While marking, the text is "가\n한" and the marked range is the
+                // trailing 한 (UTF-16 offsets 2..3).
+                assert_eq!(state.value().as_ref(), "가\n한", "marked value");
+                assert_eq!(
+                    state.marked_text_range(window, cx),
+                    Some(2..3),
+                    "marked range (utf-16)"
+                );
+                // The cursor / selection must stay within the document.
+                let utf16_len = state.value().encode_utf16().count();
+                let sel = state
+                    .selected_text_range(false, window, cx)
+                    .expect("selection")
+                    .range;
+                assert!(
+                    sel.start <= utf16_len && sel.end <= utf16_len,
+                    "selection {sel:?} out of bounds (utf-16 len {utf16_len})"
+                );
+
+                // Commit (insertText with NSNotFound replacementRange → None).
+                state.replace_text_in_range(None, "한", window, cx);
+                assert_eq!(state.value().as_ref(), "가\n한", "committed value");
+            })
+            .unwrap();
+    }
 }

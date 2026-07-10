@@ -73,21 +73,22 @@ fn mermaid_code_block_render(
 }
 
 /// User prompt — right-aligned accent-tinted bubble. The body renders as
-/// selectable markdown via `crate::ui::markdown` inside the bubble chrome
-/// (bg / padding / rounded), keyed by `ix` for stable selection identity.
-/// Mermaid fences render as diagrams via the `code_block_render` hook.
+/// selectable **plain text** via `crate::ui::selectable_text` (verbatim, no
+/// markdown interpretation) inside the bubble chrome (bg / padding / rounded),
+/// keyed by `ix` for stable selection identity. A user prompt is a
+/// question/instruction, not authored markup, so `#`, `---` (setext heading),
+/// lists, and code fences must display literally rather than being promoted to
+/// headings / rules / blocks the way the assistant's markdown reply is.
 pub(super) fn user_bubble(
     ix: usize,
     text: &str,
-    mermaid_images: &MermaidImages,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
-    let body = crate::ui::markdown(("agent-chat-md-user", ix), text.to_string())
+    let body = crate::ui::selectable_text(("agent-chat-user", ix), text.to_string())
         .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .full_width(false)
-        .code_block_render(mermaid_code_block_render(mermaid_images));
+        .full_width(false);
     let inner = div()
         .max_w(relative(0.85))
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
