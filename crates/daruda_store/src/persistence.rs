@@ -153,6 +153,10 @@ pub fn default_data_dir() -> PathBuf {
     let override_env = std::env::var(DARUDA_DATA_DIR_ENV).ok();
     let profile_env = std::env::var(crate::profile::DARUDA_PROFILE_ENV).ok();
 
+    // This is the one legitimate caller `clippy.toml`'s `disallowed-methods`
+    // entry for `dirs::config_dir` refers to — every other daruda-owned
+    // path must come from this function's return value, not a fresh call.
+    #[allow(clippy::disallowed_methods)]
     let base = dirs::config_dir().unwrap_or_else(|| {
         LogWriter::log(
             ErrorReport::new("Config directory unresolved — using ./daruda")
@@ -196,6 +200,10 @@ pub fn node_install_dir() -> PathBuf {
             return PathBuf::from(trimmed).join("node");
         }
     }
+    // Deliberately independent of `default_data_dir` (see the doc comment
+    // above) — this is the second, allowed exception to the
+    // `disallowed-methods` `dirs::config_dir` entry.
+    #[allow(clippy::disallowed_methods)]
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("daruda").join("node")
 }

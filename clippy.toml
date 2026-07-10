@@ -1,4 +1,5 @@
 disallowed-methods = [
     { path = "serde_json::from_reader", reason = "buffer parsing is slower than reading into a Vec/String first; use serde_json::from_slice" },
     { path = "smol::Timer::after", reason = "introduces non-determinism in tests; use gpui::BackgroundExecutor::timer" },
+    { path = "dirs::config_dir", reason = "bypasses profile isolation (release/debug/named share the same on-disk state) — use daruda_store::persistence::default_data_dir instead; the only legitimate caller is that function's own implementation" },
 ]

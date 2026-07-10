@@ -54,6 +54,7 @@ scripts/lint-no-eprintln.sh
 scripts/lint-no-silent-update.sh
 scripts/lint-viewport-row-scroll.sh
 scripts/lint-agent-activity.sh
+scripts/lint-daruda-path-literals.sh
 ```
 
 ## Visual verification
@@ -280,6 +281,45 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
 on-disk file (config, logs, workspaces, panels, hook status) resolves
 through, so a debug/test run never reads or writes a real release
 install's state.
+
+### Cross-profile data isolation
+
+**Rule: any path or identifier for something daruda itself writes and
+reads back across restarts must go through
+`daruda_store::persistence::default_data_dir()`** (or
+`profile_suffix()` for a non-path identifier, e.g. a Keychain service
+name) — never a fresh `dirs::config_dir()` / hardcoded `daruda`
+directory literal.
+
+**Why this is called out explicitly:** four separate places
+independently re-derived a `daruda`/`.daruda` path instead of calling
+the shared resolver — `daruda_config::config_path`,
+`daruda_config::project::project_config_dir`,
+`daruda_claude::hooks::status_file::default_dir`, and
+`workspace::sync::limits::activity_paths`'s cache path — so a debug
+build silently read and overwrote a real release install's
+`config.toml`, hook-status files, and activity cache. A fifth case
+(the Telegram bridge's Keychain-stored bot token sharing one service
+name across profiles) caused two profiles to 409-conflict polling
+Telegram with the same token, since Telegram's `getUpdates` rejects a
+second concurrent poller on one token. Each was fixed independently
+before the pattern was named — this section and the guardrails below
+exist so the next one is caught before it ships, not after a live
+incident.
+
+**Enforcement:**
+- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir`
+  call outside `daruda_store::persistence`'s own two call sites (each
+  marked `#[allow(clippy::disallowed_methods)]` with a comment).
+- `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled
+  `.join("daruda")` / `.join(".daruda")` outside the canonical files
+  (`persistence.rs`, `profile.rs`, `observability/log_writer.rs`) and a
+  short, explicit allow-list of genuinely non-profile-scoped exceptions
+  (the per-repo `.daruda/task-*.md` files, the single global
+  `~/.daruda/hooks/notify.sh`).
+- Neither tool catches a hardcoded Keychain/OS-credential-store service
+  name (not a directory path) — review any new one by hand against
+  `crates/app/src/telegram/keychain.rs`'s `service_name()`.
 
 ### UI component hierarchy
 
