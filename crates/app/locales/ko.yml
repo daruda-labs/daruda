@@ -509,6 +509,7 @@ settings:
   telegram_clear_token: "지우기"
   telegram_not_paired: "페어링되지 않음"
   telegram_paired: "페어링됨 (chat ID: %{chat_id})"
+  telegram_check_pairing: "페어링 상태 확인"
   telegram_generate_code: "페어링 코드 생성"
   telegram_pair_instructions: "휴대폰에서 봇에게 /pair %{code}를 보내세요"
   telegram_unpair: "페어링 해제"

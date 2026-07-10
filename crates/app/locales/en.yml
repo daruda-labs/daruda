@@ -509,6 +509,7 @@ settings:
   telegram_clear_token: "Clear"
   telegram_not_paired: "Not paired"
   telegram_paired: "Paired (chat ID: %{chat_id})"
+  telegram_check_pairing: "Check Pairing Status"
   telegram_generate_code: "Generate Pairing Code"
   telegram_pair_instructions: "Send /pair %{code} to the bot from your phone"
   telegram_unpair: "Unpair"

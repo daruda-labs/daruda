@@ -618,12 +618,37 @@ impl SettingsWindow {
             )
             .child(
                 div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(body_color)
-                    .child(match authorized_chat_id {
-                        Some(chat_id) => s::settings_telegram_paired(chat_id),
-                        None => s::settings_telegram_not_paired(),
-                    }),
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(
+                        div()
+                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                            .text_color(body_color)
+                            .child(match authorized_chat_id {
+                                Some(chat_id) => s::settings_telegram_paired(chat_id),
+                                None => s::settings_telegram_not_paired(),
+                            }),
+                    )
+                    .child(
+                        // The bridge's poll loop pairs a phone in the background
+                        // (via `/pair <code>`) — this section only re-reads
+                        // `authorized_chat_id` when IT re-renders, and nothing
+                        // currently subscribes this window to that background
+                        // change. This button forces a repaint with no state
+                        // mutation of its own, so the status line above picks up
+                        // whatever `SettingsStore`'s live config already has.
+                        button(
+                            "settings-telegram-check-pairing",
+                            s::settings_telegram_check_pairing(),
+                        )
+                        .on_click(cx.listener(
+                            |_this, _: &ClickEvent, _window, cx| {
+                                cx.notify();
+                            },
+                        )),
+                    ),
             )
             .when_some(pair_code, |body, code| {
                 let copy_label = if self.telegram_pair_command_copied {

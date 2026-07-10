@@ -2087,6 +2087,9 @@ pub fn settings_telegram_not_paired() -> String {
 pub fn settings_telegram_paired(chat_id: i64) -> String {
     rust_i18n::t!("settings.telegram_paired", chat_id = chat_id).into_owned()
 }
+pub fn settings_telegram_check_pairing() -> String {
+    rust_i18n::t!("settings.telegram_check_pairing").into_owned()
+}
 pub fn settings_telegram_generate_code() -> String {
     rust_i18n::t!("settings.telegram_generate_code").into_owned()
 }
