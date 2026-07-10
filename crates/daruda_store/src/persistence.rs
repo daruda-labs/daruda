@@ -168,6 +168,19 @@ pub fn default_data_dir() -> PathBuf {
     default_data_dir_from(override_env.as_deref(), profile_env.as_deref(), &base)
 }
 
+/// The active profile's suffix for non-path resources that need the same
+/// release/debug/named-profile isolation [`default_data_dir`] gives
+/// on-disk paths — e.g. a macOS Keychain service name, so a debug build
+/// and a release install never share (and long-poll-conflict on) the
+/// same stored secret. `None` for the release profile (keeps the
+/// existing unsuffixed name); `Some(profile)` otherwise.
+pub fn profile_suffix() -> Option<&'static str> {
+    match crate::profile::active_profile() {
+        crate::profile::RELEASE_PROFILE => None,
+        other => Some(other),
+    }
+}
+
 /// Directory holding the app-managed Node.js runtime for the ACP adapter.
 ///
 /// Deliberately **profile-independent**: the runtime's version is pinned in

@@ -19,13 +19,36 @@ use daruda_store::observability::log_writer::LogWriter;
 const SERVICE: &str = "daruda-telegram-bot";
 const ACCOUNT: &str = "token";
 
+/// `SERVICE`, suffixed with the active build profile (mirrors
+/// `daruda_store::persistence::default_data_dir`'s release/debug/named
+/// split) — release keeps the bare name, so a debug or named-profile
+/// daruda never shares the same Keychain-stored bot token as a real
+/// release install. Sharing one token meant both processes long-polled
+/// `getUpdates` simultaneously, and Telegram 409-conflicts whichever one
+/// isn't already holding the poll — confirmed live (both logs showed
+/// `status code 409` at the same timestamps while a debug and a release
+/// build were open at once).
+fn service_name() -> String {
+    match daruda_store::persistence::profile_suffix() {
+        Some(suffix) => format!("{SERVICE}-{suffix}"),
+        None => SERVICE.to_string(),
+    }
+}
+
 /// Read the bot token from the Keychain. Returns `None` when no token
 /// is stored, the `security` CLI is unavailable or fails, or the
 /// build is not macOS.
 #[cfg(target_os = "macos")]
 pub fn read_token() -> Option<String> {
     let out = Command::new("security")
-        .args(["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            &service_name(),
+            "-a",
+            ACCOUNT,
+            "-w",
+        ])
         .stderr(Stdio::null())
         .output()
         .ok()?;
@@ -65,7 +88,7 @@ pub fn write_token(token: &str) -> std::io::Result<()> {
             "add-generic-password",
             "-U",
             "-s",
-            SERVICE,
+            &service_name(),
             "-a",
             ACCOUNT,
             "-w",
@@ -114,7 +137,13 @@ pub fn write_token(_token: &str) -> std::io::Result<()> {
 #[cfg(target_os = "macos")]
 pub fn delete_token() -> std::io::Result<()> {
     let output = Command::new("security")
-        .args(["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT])
+        .args([
+            "delete-generic-password",
+            "-s",
+            &service_name(),
+            "-a",
+            ACCOUNT,
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output();
@@ -163,6 +192,18 @@ pub fn delete_token() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_name_is_suffixed_off_release() {
+        // Test binaries compile with debug_assertions, so the active
+        // profile here is "debug" (never "release") — asserts the
+        // fix's whole point: a non-release build's Keychain service name
+        // must differ from the bare `SERVICE`, or it would share (and
+        // 409-conflict) the same stored token as a real release install.
+        let name = service_name();
+        assert_ne!(name, SERVICE);
+        assert!(name.starts_with(SERVICE));
+    }
 
     #[test]
     fn normalize_token_trims_and_accepts_valid_token() {
