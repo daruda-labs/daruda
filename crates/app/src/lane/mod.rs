@@ -42,6 +42,10 @@ pub struct Lane {
     pub base_ref: Option<String>,
     /// Free-form description shown as the dock row sublabel.
     pub description: Option<String>,
+    /// Path on a *different* machine this lane's session connects to
+    /// (e.g. an SSH-reachable VM). `None` means the lane runs against
+    /// the local filesystem. Persisted.
+    pub remote_cwd: Option<String>,
     /// Runtime-only. Whether this lane's root directory can be read on
     /// disk. Recomputed from the live filesystem on restore / activate /
     /// failed load; never serialized. Defaults to `Present`.
@@ -65,6 +69,7 @@ impl Lane {
             is_main: false,
             base_ref: None,
             description: None,
+            remote_cwd: None,
             availability: LaneAvailability::Present,
         }
     }
@@ -105,6 +110,7 @@ impl Lane {
             is_main,
             base_ref: None,
             description: None,
+            remote_cwd: None,
             availability: LaneAvailability::Present,
         }
     }
@@ -217,6 +223,7 @@ impl Lane {
             is_main,
             base_ref: s.base_ref.clone(),
             description: s.description.clone(),
+            remote_cwd: s.remote_cwd.clone(),
             // Recomputed from disk by the workspace restore path; the
             // serialized form carries no availability.
             availability: LaneAvailability::Present,
@@ -262,6 +269,7 @@ impl Lane {
             last_activity: self.last_activity,
             base_ref: self.base_ref.clone(),
             description: self.description.clone(),
+            remote_cwd: self.remote_cwd.clone(),
             tabs: Vec::new(),
             active_tab_index: 0,
         }
@@ -305,6 +313,13 @@ impl Lane {
     /// sublabel. `None` removes it and reverts to the lane path.
     pub fn set_description(&mut self, description: Option<String>) {
         self.description = description;
+    }
+
+    /// Overwrite the remote path this lane's session connects to.
+    /// `None` reverts the lane to running against the local
+    /// filesystem.
+    pub fn set_remote_cwd(&mut self, remote_cwd: Option<String>) {
+        self.remote_cwd = remote_cwd;
     }
 
     /// `true` when this lane is git-backed.
@@ -514,6 +529,7 @@ mod tests {
             is_main: false,
             base_ref: Some("origin/main".into()),
             description: Some("PR #123".into()),
+            remote_cwd: Some("/remote/path".into()),
             // Runtime-only — must not survive the round-trip; the
             // assertion below proves it resets to the default.
             availability: LaneAvailability::Missing,
@@ -535,9 +551,29 @@ mod tests {
         // Serialized form carries no tabs yet (W-3 wires them).
         assert!(s.tabs.is_empty());
         assert_eq!(s.active_tab_index, 0);
-        // base_ref + description survive the round-trip.
+        // base_ref + description + remote_cwd survive the round-trip.
         assert_eq!(back.base_ref, Some("origin/main".to_string()));
         assert_eq!(back.description, Some("PR #123".to_string()));
+        assert_eq!(back.remote_cwd, Some("/remote/path".to_string()));
+    }
+
+    #[test]
+    fn remote_cwd_defaults_to_none_when_absent() {
+        let w = Lane::default_for_project(0, PathBuf::from("/tmp"));
+        assert_eq!(w.remote_cwd, None);
+        let s = w.to_serialized();
+        assert_eq!(s.remote_cwd, None);
+        let back = Lane::from_serialized(&s);
+        assert_eq!(back.remote_cwd, None);
+    }
+
+    #[test]
+    fn set_remote_cwd_overwrites_and_clears() {
+        let mut w = Lane::default_for_project(0, PathBuf::from("/tmp"));
+        w.set_remote_cwd(Some("/remote/vm/path".into()));
+        assert_eq!(w.remote_cwd, Some("/remote/vm/path".to_string()));
+        w.set_remote_cwd(None);
+        assert_eq!(w.remote_cwd, None);
     }
 
     #[test]
@@ -560,6 +596,7 @@ mod tests {
             is_main: false, // intentionally wrong — from_serialized must correct it
             base_ref: None,
             description: None,
+            remote_cwd: None,
             availability: LaneAvailability::Present,
         };
         let s = w.to_serialized();

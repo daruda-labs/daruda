@@ -1174,6 +1174,7 @@ fn test_restore_state_rebuilds_all_lanes(cx: &mut TestAppContext) {
                     active_tab_index: 0,
                     base_ref: None,
                     description: None,
+                    remote_cwd: None,
                 },
                 daruda_store::project::SerializedLane {
                     id: 5,
@@ -1190,6 +1191,7 @@ fn test_restore_state_rebuilds_all_lanes(cx: &mut TestAppContext) {
                     active_tab_index: 1,
                     base_ref: None,
                     description: None,
+                    remote_cwd: None,
                 },
             ],
             active_lane_id: 5,
@@ -1305,6 +1307,7 @@ fn test_restore_state_reads_tabs_from_active_lane(cx: &mut TestAppContext) {
             active_tab_index: 0,
             base_ref: None,
             description: None,
+            remote_cwd: None,
         };
         let project_uuid = ProjectUuid::new();
         let project_state = ProjectState {
@@ -1401,6 +1404,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             active_tab_index: 0,
             base_ref: None,
             description: None,
+            remote_cwd: None,
         };
         let project_uuid = ProjectUuid::new();
         let project_state = ProjectState {

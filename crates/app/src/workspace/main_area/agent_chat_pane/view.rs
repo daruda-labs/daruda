@@ -35,7 +35,6 @@
 //! exception, the same one `TerminalView` and `ToastLayer` take.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
@@ -45,6 +44,7 @@ use daruda_acp::{
     touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::project::PaneCwd;
 use gpui::{
     AnyWindowHandle, App, Context, Entity, FocusHandle, Focusable, FollowMode, ListAlignment,
     ListState, ScrollHandle, Subscription, Task, Window, prelude::*, px,
@@ -175,8 +175,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// `None` for this content kind.
     pub(in crate::workspace) focus_handle: FocusHandle,
     /// Lane working directory the agent session is rooted at. `None` when the
-    /// pane was opened without a resolvable lane cwd.
-    pub(in crate::workspace) cwd: Option<PathBuf>,
+    /// pane was opened without a resolvable lane cwd; `Some(PaneCwd::Remote)`
+    /// for a session rooted on a different machine. Local-only consumers
+    /// must go through `PaneCwd::as_local` / `into_local` — see that type's
+    /// docs.
+    pub(in crate::workspace) cwd: Option<PaneCwd>,
     /// The agent this pane runs under — an id from the config `[[agents]]`
     /// catalog. Resolved to a launch command at connect time. Set at
     /// create/restore (default = catalog[0]) and persisted so the pane comes
@@ -541,7 +544,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn new(
         pane_id: PaneId,
         window_handle: AnyWindowHandle,
-        cwd: Option<PathBuf>,
+        cwd: Option<PaneCwd>,
         status: AgentSessionStatus,
         session_id: Option<String>,
         agent_id: String,

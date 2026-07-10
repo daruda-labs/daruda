@@ -206,6 +206,82 @@ pub struct SerializedFileContent {
     pub view_mode: SerializedFileViewMode,
 }
 
+/// Private wire representation for [`PaneCwd`]. **Not** the internally
+/// tagged `#[serde(tag = "type")]` shape used elsewhere in this crate for a
+/// similarly-shaped local/remote split ([`LaneKind`]): that shape requires
+/// serde to merge the tag key into the variant's serialized form, which
+/// works for struct variants but not for a newtype variant whose payload is
+/// itself a bare scalar — both `PathBuf` and `String` serialize as a plain
+/// JSON string, and serde errors ("cannot serialize tagged newtype variant
+/// ... containing a string") rather than emitting one. Untagged dispatch
+/// instead: `Remote` is tried first (it only matches an object with a
+/// `remote` key) and falls through to `Local` (any bare string) otherwise —
+/// which is also exactly the pre-existing on-disk shape of the
+/// `Option<PathBuf>` this field replaced, so an old saved `cwd` string loads
+/// unchanged as `Local`.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum PaneCwdRepr {
+    Remote { remote: String },
+    Local(PathBuf),
+}
+
+impl From<PaneCwd> for PaneCwdRepr {
+    fn from(v: PaneCwd) -> Self {
+        match v {
+            PaneCwd::Local(p) => PaneCwdRepr::Local(p),
+            PaneCwd::Remote(s) => PaneCwdRepr::Remote { remote: s },
+        }
+    }
+}
+
+impl From<PaneCwdRepr> for PaneCwd {
+    fn from(v: PaneCwdRepr) -> Self {
+        match v {
+            PaneCwdRepr::Local(p) => PaneCwd::Local(p),
+            PaneCwdRepr::Remote { remote } => PaneCwd::Remote(remote),
+        }
+    }
+}
+
+/// The working directory an agent-chat pane's session is rooted at: either
+/// a path on this machine, or an opaque remote-side identifier this machine
+/// cannot resolve, canonicalize, or validate directly (e.g. an
+/// SSH-reachable host path) — mirroring the local/remote split
+/// [`SerializedLane::remote_cwd`] makes for lanes.
+///
+/// Every consumer that spawns a local process, derives a `Cmd+T` inherited
+/// cwd, or matches a local [`crate::tasks::Task`]'s `worktree_path` is
+/// local-only by construction, so it must go through [`PaneCwd::as_local`] /
+/// [`PaneCwd::into_local`] rather than assuming the value is a `PathBuf` —
+/// the gate that keeps a `Remote` value from leaking into a call that
+/// expects a real filesystem path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "PaneCwdRepr", into = "PaneCwdRepr")]
+pub enum PaneCwd {
+    Local(PathBuf),
+    Remote(String),
+}
+
+impl PaneCwd {
+    /// Borrow the local path, or `None` for a [`PaneCwd::Remote`] value.
+    pub fn as_local(&self) -> Option<&Path> {
+        match self {
+            PaneCwd::Local(p) => Some(p),
+            PaneCwd::Remote(_) => None,
+        }
+    }
+
+    /// Consume into the local path, or `None` for a [`PaneCwd::Remote`]
+    /// value.
+    pub fn into_local(self) -> Option<PathBuf> {
+        match self {
+            PaneCwd::Local(p) => Some(p),
+            PaneCwd::Remote(_) => None,
+        }
+    }
+}
+
 /// Persisted state for a `PaneContent::AgentChat` leaf. The lane working
 /// directory anchors the pane to the right lane on the next launch; the
 /// ACP `session_id` (when present) lets the pane resume the prior
@@ -217,7 +293,7 @@ pub struct SerializedAgentChatContent {
     /// Lane working directory the agent session is rooted at. `None`
     /// when the pane was opened without a resolvable lane cwd.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<PathBuf>,
+    pub cwd: Option<PaneCwd>,
     /// Persisted ACP session id. `Some` once a live session has been
     /// established; on the next launch the pane resumes it via
     /// `session/load` (replaying the prior conversation) instead of

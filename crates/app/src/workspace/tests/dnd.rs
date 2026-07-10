@@ -24,6 +24,7 @@ fn push_worktree(project: &mut crate::project::Project, id: LaneId, tab_order: u
         is_main: false,
         base_ref: None,
         description: None,
+        remote_cwd: None,
         availability: crate::lane::availability::LaneAvailability::Present,
     });
 }

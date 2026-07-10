@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::*;
 
@@ -124,7 +124,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
         cwd: None,
         file: None,
         agent_chat: Some(SerializedAgentChatContent {
-            cwd: Some(PathBuf::from("/repo/lane")),
+            cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
             session_id: Some("sess-abc123".to_string()),
             title: Some("Fix the parser".to_string()),
             agent_id: Some("claude".to_string()),
@@ -139,11 +139,50 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             file,
             ..
         } => {
-            assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
+            assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
             assert_eq!(ac.session_id, Some("sess-abc123".to_string()));
             assert_eq!(ac.title, Some("Fix the parser".to_string()));
             assert_eq!(ac.agent_id, Some("claude".to_string()));
             assert!(file.is_none(), "agent_chat and file are mutually exclusive");
+        }
+        _ => panic!("expected Leaf with agent_chat content"),
+    }
+}
+
+#[test]
+fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
+    // A `PaneCwd::Remote` cwd (Task 4+ — no pane constructs one yet, but
+    // the wire shape must round-trip and stay distinguishable from
+    // `Local` so a future remote-backed pane doesn't get silently
+    // reinterpreted as a local path on restore.
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 9,
+        cwd: None,
+        file: None,
+        agent_chat: Some(SerializedAgentChatContent {
+            cwd: Some(PaneCwd::Remote("host:/repo/lane".to_string())),
+            session_id: None,
+            title: None,
+            agent_id: None,
+        }),
+    };
+
+    let json = serde_json::to_string(&leaf).unwrap();
+    // The wire shape distinguishes Remote from a bare-string Local path —
+    // otherwise a Remote value round-tripping through disk could silently
+    // become indistinguishable from a filesystem path.
+    assert!(
+        json.contains(r#""remote":"host:/repo/lane""#),
+        "Remote must serialize as a distinguishable shape, got: {json}"
+    );
+    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+    match restored {
+        SerializedLayout::Leaf {
+            agent_chat: Some(ac),
+            ..
+        } => {
+            assert_eq!(ac.cwd, Some(PaneCwd::Remote("host:/repo/lane".to_string())));
+            assert_eq!(ac.cwd.as_ref().and_then(PaneCwd::as_local), None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }
@@ -161,13 +200,34 @@ fn agent_chat_leaf_without_session_fields_loads_as_none() {
             agent_chat: Some(ac),
             ..
         } => {
-            assert_eq!(ac.cwd, Some(PathBuf::from("/repo/lane")));
+            assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
             assert_eq!(ac.session_id, None);
             assert_eq!(ac.title, None);
             assert_eq!(ac.agent_id, None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }
+}
+
+#[test]
+fn pane_cwd_local_serializes_as_bare_string_for_back_compat() {
+    // The pre-`PaneCwd` on-disk shape of `cwd` was a bare
+    // `Option<PathBuf>` string. `Local` must keep that exact shape so
+    // existing saved state (all of it necessarily local — `Remote` never
+    // existed before this type) loads without a migration step.
+    let json = serde_json::to_string(&PaneCwd::Local(PathBuf::from("/repo/lane"))).unwrap();
+    assert_eq!(json, r#""/repo/lane""#);
+}
+
+#[test]
+fn pane_cwd_as_local_and_into_local_gate_remote() {
+    let local = PaneCwd::Local(PathBuf::from("/repo/lane"));
+    assert_eq!(local.as_local(), Some(Path::new("/repo/lane")));
+    assert_eq!(local.into_local(), Some(PathBuf::from("/repo/lane")));
+
+    let remote = PaneCwd::Remote("host:/repo/lane".to_string());
+    assert_eq!(remote.as_local(), None);
+    assert_eq!(remote.into_local(), None);
 }
 
 #[test]
@@ -300,6 +360,7 @@ fn serialized_worktree_display_name_uses_branch_for_git() {
         active_tab_index: 0,
         base_ref: None,
         description: None,
+        remote_cwd: None,
     };
     assert_eq!(w.display_name(), "feat/sidebar");
 }
@@ -322,6 +383,7 @@ fn serialized_worktree_display_name_detached_head() {
         active_tab_index: 0,
         base_ref: None,
         description: None,
+        remote_cwd: None,
     };
     assert_eq!(w.display_name(), "(detached)");
 }
@@ -351,6 +413,9 @@ fn serialized_worktree_loads_legacy_json_with_old_field_names() {
     let w: SerializedLane = serde_json::from_str(json).unwrap();
     assert!(w.base_ref.is_none());
     assert!(w.description.is_none());
+    // `remote_cwd` didn't exist when this JSON was saved either —
+    // #[serde(default)] must fill it in as `None`.
+    assert!(w.remote_cwd.is_none());
 }
 
 #[test]
@@ -358,10 +423,18 @@ fn serialized_worktree_round_trips_base_ref_and_description() {
     let mut w = SerializedLane::default_for_path(0, PathBuf::from("/tmp/scratch"));
     w.base_ref = Some("origin/main".into());
     w.description = Some("PR #123 review".into());
+    w.remote_cwd = Some("/remote/path".into());
     let json = serde_json::to_string(&w).unwrap();
     let back: SerializedLane = serde_json::from_str(&json).unwrap();
     assert_eq!(back.base_ref.as_deref(), Some("origin/main"));
     assert_eq!(back.description.as_deref(), Some("PR #123 review"));
+    assert_eq!(back.remote_cwd.as_deref(), Some("/remote/path"));
+}
+
+#[test]
+fn serialized_worktree_remote_cwd_defaults_to_none() {
+    let w = SerializedLane::default_for_path(0, PathBuf::from("/tmp/scratch"));
+    assert!(w.remote_cwd.is_none());
 }
 
 // ---- Dock / right-panel / usage view enums ----
@@ -755,6 +828,7 @@ fn serialized_lane_git_json_snapshot() {
         active_tab_index: 0,
         base_ref: Some("main".into()),
         description: Some("PR #123 review".into()),
+        remote_cwd: None,
     };
     insta::assert_snapshot!(serde_json::to_string_pretty(&lane).unwrap());
 }

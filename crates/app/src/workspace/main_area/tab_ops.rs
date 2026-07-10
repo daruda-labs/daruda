@@ -567,10 +567,11 @@ impl Workspace {
             },
             NewPaneKind::AgentChat => {
                 // The session roots at the active lane's cwd (same source as
-                // `open_agent_chat_pane`). `cwd` is `None` when there is no
-                // active lane; `create_agent_chat_pane` then parks the pane in
-                // `AgentSessionStatus::Error` rather than connecting.
-                let cwd = self.active_lane().map(|w| w.path.clone());
+                // `open_agent_chat_pane`). `local_cwd`/`remote_cwd` are both
+                // `None` when there is no active lane; `create_new_agent_chat_pane`
+                // then parks the pane in `AgentSessionStatus::Error` rather
+                // than connecting.
+                let (local_cwd, remote_cwd) = self.active_lane_cwds();
                 // The split was chosen *because* the focused pane is an
                 // agent-chat pane, so inherit its agent — splitting a `codex`
                 // chat must open another `codex`, not reset to the catalog
@@ -583,7 +584,7 @@ impl Workspace {
                     .unwrap_or_else(|| {
                         resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref())
                     });
-                self.create_agent_chat_pane(cwd, None, agent_id, None, window, cx)
+                self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx)
             }
         };
         let new_pane_id = new_pane.id;

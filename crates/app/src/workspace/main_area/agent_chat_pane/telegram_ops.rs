@@ -102,7 +102,7 @@ impl Workspace {
 
     /// Compose the turn-completion ping body: project name, agent name,
     /// then the agent's actual last response (see [`preview_for`] for the
-    /// >2000-char head/tail truncation) — so the phone shows what the
+    /// head/tail truncation past 2000 chars) — so the phone shows what the
     /// agent actually said, not just a bare "completed" line. Falls back
     /// to the generic "finished responding" text when the turn produced no
     /// assistant text at all (e.g. a tool-only turn) or the pane's view is
@@ -267,6 +267,7 @@ mod tests {
 
     use super::{pick_allow_reject, preview_for};
     use daruda_acp::{PermissionChoice, PermissionKindView};
+    use daruda_store::project::PaneCwd;
 
     fn choice(option_id: &str, name: &str, kind: PermissionKindView) -> PermissionChoice {
         PermissionChoice {
@@ -438,7 +439,7 @@ mod tests {
             .update_window(handle_a.into(), |_, window, cx| {
                 workspace_a.update(cx, |ws, cx| {
                     let pane = ws.create_agent_chat_pane(
-                        Some(tmp.clone()),
+                        Some(PaneCwd::Local(tmp.clone())),
                         None,
                         daruda_config::AgentDefinition::claude_default().id,
                         None,
@@ -455,7 +456,7 @@ mod tests {
             .update_window(handle_b.into(), |_, window, cx| {
                 workspace_b.update(cx, |ws, cx| {
                     let pane = ws.create_agent_chat_pane(
-                        Some(tmp.clone()),
+                        Some(PaneCwd::Local(tmp.clone())),
                         None,
                         daruda_config::AgentDefinition::claude_default().id,
                         None,

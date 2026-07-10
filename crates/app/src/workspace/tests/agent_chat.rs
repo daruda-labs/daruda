@@ -9,6 +9,7 @@
 //! host-side state transitions still run.
 
 use daruda_acp::{ModeStateView, SessionModeView};
+use daruda_store::project::PaneCwd;
 use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::build_workspace;
@@ -78,6 +79,66 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
     });
 }
 
+/// `Pane::cwd()` is the read every local-only consumer trusts —
+/// `resolve_default_cwd`'s `Cmd+T` inheritance tier chief among them (see
+/// `pane.rs::default_cwd_for_new_pane`). A `PaneCwd::Remote` value must
+/// never surface through it: `pane.cwd()` has to come back `None` so
+/// `resolve_default_cwd` falls through to the next tier (the active lane's
+/// local path) instead of handing a remote-host string to `spawn_pty`'s
+/// local-existence check (which would silently fall back further, to
+/// `$HOME`).
+#[gpui::test]
+async fn pane_cwd_returns_none_for_remote(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Remote("host:/repo/lane".to_string())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            assert_eq!(
+                pane.cwd(),
+                None,
+                "PaneCwd::Remote must not surface through Pane::cwd()"
+            );
+            ws.active_runtime_mut().panes.push(pane);
+        });
+    })
+    .unwrap();
+}
+
+/// Companion to the Remote case above: a `PaneCwd::Local` pane's cwd must
+/// keep surfacing through `Pane::cwd()` exactly as before — this task is a
+/// pure refactor, so an existing local pane's behavior must not change.
+#[gpui::test]
+async fn pane_cwd_returns_path_for_local(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            assert_eq!(pane.cwd(), Some(tmp.as_path()));
+            ws.active_runtime_mut().panes.push(pane);
+        });
+    })
+    .unwrap();
+}
+
 /// Task 2's core virtualization invariant: `sync_list_after` keeps the
 /// `ListState` item count exactly in step with `items`. A desync would make the
 /// virtualized `list` render the wrong rows (or index out of range), so this
@@ -92,7 +153,7 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -152,7 +213,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -283,7 +344,7 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
                 // connection — that is the caller's job — so this never spawns
                 // an adapter. Push it directly into the tree.
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -333,7 +394,7 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -419,7 +480,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -543,7 +604,7 @@ async fn agent_chat_pane_with_cwd_is_idle_until_focus(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -578,7 +639,7 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -637,7 +698,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -701,7 +762,7 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -775,7 +836,7 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -863,7 +924,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
             // would spawn a real adapter). `create_agent_chat_pane` itself
             // opens no connection.
             let pane = ws.create_agent_chat_pane(
-                Some(root_a.clone()),
+                Some(PaneCwd::Local(root_a.clone())),
                 None,
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -939,7 +1000,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1046,7 +1107,7 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -1113,7 +1174,7 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
                 // session connects lazily on first focus, which this test never
                 // triggers, so no `npx` adapter is spawned.
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1167,7 +1228,7 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1226,7 +1287,7 @@ async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1274,7 +1335,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1332,7 +1393,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
         workspace.update(cx, |ws, cx| {
             // AgentChat pane: non-empty submit → accepted + echoed/queued.
             let chat = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -1453,7 +1514,7 @@ async fn agent_chat_session_id_and_title_survive_save_restore(cx: &mut TestAppCo
     let (workspace_state, project_states) = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let cwd = ws.active_lane().map(|w| w.path.clone());
+                let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
                 let pane = ws.create_agent_chat_pane(
                     cwd,
                     None,
@@ -1572,7 +1633,7 @@ async fn agent_chat_agent_id_survives_restore_when_agent_present(cx: &mut TestAp
     let (workspace_state, project_states) = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let cwd = ws.active_lane().map(|w| w.path.clone());
+                let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
                 // Pane owned by `codex` (a non-default agent), with a session id
                 // stamped as a connected session would.
                 let pane = ws.create_agent_chat_pane(
@@ -1658,7 +1719,7 @@ async fn agent_chat_removed_agent_drops_session_on_restore(cx: &mut TestAppConte
     let (workspace_state, project_states) = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let cwd = ws.active_lane().map(|w| w.path.clone());
+                let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
                 let pane = ws.create_agent_chat_pane(
                     cwd,
                     Some("sess-codex-2".to_string()),
@@ -1735,7 +1796,7 @@ async fn restoring_gate_defers_rebuild_until_connected(cx: &mut TestAppContext) 
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,
@@ -1810,7 +1871,7 @@ async fn restoring_cleared_on_error_and_abort(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -1863,7 +1924,7 @@ async fn reset_for_new_session_clears_conversation_state(cx: &mut TestAppContext
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             let pane = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 Some("abc".to_string()),
                 daruda_config::AgentDefinition::claude_default().id,
                 None,
@@ -1985,7 +2046,7 @@ async fn switch_agent_preserves_the_source_pane(cx: &mut TestAppContext) {
 
             // The original agent-chat pane, chatting under the default agent.
             let src = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 claude_id.clone(),
                 None,
@@ -2058,7 +2119,7 @@ async fn split_agent_chat_inherits_source_agent(cx: &mut TestAppContext) {
             // directly rather than calling `focus_pane`, which would lazily
             // connect the source (real cwd → Idle → adapter spawn).
             let src = ws.create_agent_chat_pane(
-                Some(tmp.clone()),
+                Some(PaneCwd::Local(tmp.clone())),
                 None,
                 "codex".to_string(),
                 None,
@@ -2118,7 +2179,7 @@ fn make_activity_view(
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let pane = ws.create_agent_chat_pane(
-                    Some(tmp.clone()),
+                    Some(PaneCwd::Local(tmp.clone())),
                     None,
                     daruda_config::AgentDefinition::claude_default().id,
                     None,

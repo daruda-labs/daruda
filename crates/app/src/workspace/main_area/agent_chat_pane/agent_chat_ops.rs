@@ -40,10 +40,13 @@
 //! exits) and the pump-task drop ends the loop. No explicit teardown is needed.
 
 use daruda_acp::{NodeProgress, connect_agent_session};
+use daruda_config::agent::{CWD_TOKEN, command_needs_remote_cwd, substitute_tokens};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::project::PaneCwd;
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::{AppContext as _, Context, Entity, Window};
+use std::path::PathBuf;
 
 use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
@@ -111,6 +114,55 @@ pub(in crate::workspace) fn resolve_open_agent_id(
     last.filter(|id| agents.iter().any(|a| a.id == *id))
         .map(str::to_owned)
         .unwrap_or_else(|| catalog_default_id(agents))
+}
+
+/// Cwd outcome fed into [`Workspace::build_agent_chat_pane`]'s status
+/// derivation. Kept as one enum — rather than a `cwd: Option<PaneCwd>` +
+/// separate error-reason field, which could disagree — so an "unattachable"
+/// pane (an agent whose command needs `{{cwd}}` but the lane has no
+/// `remote_cwd`) is a variant of its own with its own reason, instead of
+/// being represented as `Ready(None)` with an ambiguous or overridden reason.
+enum PaneCwdOutcome {
+    /// A cwd resolution that completed normally: `Some` parks the pane
+    /// `Idle` with that cwd; `None` parks it in the generic "no working
+    /// directory" error (restore's genuinely cwd-less case).
+    Ready(Option<PaneCwd>),
+    /// The cwd could not be resolved at all — parks the pane in `Error`
+    /// with the given (already-localized) reason, cwd `None`.
+    Blocked(String),
+}
+
+/// Pure core of [`Workspace::resolve_new_pane_cwd`] — decide whether a fresh
+/// Agent chat pane should attach a `Local` or `Remote` cwd, given the
+/// candidate agent's launch `command` and the active lane's local/remote
+/// paths. Factored out of the workspace so it is unit-testable without gpui.
+///
+/// - `command` needs a remote cwd (`{{cwd}}` token present, see
+///   [`command_needs_remote_cwd`]) and `remote_cwd` is set → `Ok(Some(Remote))`.
+/// - `command` needs a remote cwd but `remote_cwd` is `None` (or blank —
+///   empty or whitespace-only, e.g. a lane whose remote path field was left
+///   as spaces) → `Err(())`: the agent has nowhere to attach, and the caller
+///   must not attempt a connect.
+/// - `command` does not need a remote cwd → `Ok(local_cwd.map(Local))`,
+///   `None` when there is no active lane at all (mirrors the pre-existing
+///   no-lane-cwd case).
+fn resolve_new_pane_cwd_core(
+    command: &str,
+    local_cwd: Option<PathBuf>,
+    remote_cwd: Option<String>,
+) -> Result<Option<PaneCwd>, ()> {
+    if command_needs_remote_cwd(command) {
+        // A blank remote_cwd has nothing to substitute for `{{cwd}}` — treat
+        // it the same as `None` rather than letting it flow into
+        // `substitute_tokens` and produce a broken `cd  && ...` command.
+        remote_cwd
+            .filter(|cwd| !cwd.trim().is_empty())
+            .map(PaneCwd::Remote)
+            .map(Some)
+            .ok_or(())
+    } else {
+        Ok(local_cwd.map(PaneCwd::Local))
+    }
 }
 
 /// Whether to raise the notification: the channel must be enabled, and it is
@@ -228,9 +280,14 @@ impl Workspace {
             }
             TurnOutcome::Errored => daruda_store::tasks::SessionEndReason::Error,
         };
+        // Task tracking is a local-filesystem concept (`worktree_path` is
+        // matched against a real path) — a `PaneCwd::Remote` pane has
+        // nothing to match, so `into_local` skips it rather than passing a
+        // remote id where a `Path` is expected.
         if let Some(cwd) = self
             .agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).cwd.clone())
+            .and_then(PaneCwd::into_local)
         {
             self.apply_agent_chat_task_ended(&cwd, reason, cx);
         }
@@ -247,24 +304,55 @@ impl Workspace {
     /// window handle the view stores for later diff-editor creation.
     pub(in crate::workspace) fn create_agent_chat_pane(
         &mut self,
-        cwd: Option<std::path::PathBuf>,
+        cwd: Option<PaneCwd>,
         session_id: Option<String>,
         agent_id: String,
         title: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
-        let pane_id = self.alloc_id();
-        let window_handle = window.window_handle();
+        self.build_agent_chat_pane(
+            PaneCwdOutcome::Ready(cwd),
+            session_id,
+            agent_id,
+            title,
+            window,
+            cx,
+        )
+    }
+
+    /// Shared pane-construction core behind [`Self::create_agent_chat_pane`]
+    /// and [`Self::create_new_agent_chat_pane`]: builds the view + wraps it
+    /// in a `Pane` for an already-decided cwd `outcome`. Factored out (and
+    /// `outcome` kept as one enum rather than a `cwd` + separate error-reason
+    /// pair) so a resolved-but-unattachable cwd (an agent whose command
+    /// needs `{{cwd}}` but the lane has no `remote_cwd` configured) can still
+    /// go through the single pane-construction path while carrying its own
+    /// actionable error reason — distinct from the generic "no working
+    /// directory" reason a genuinely cwd-less pane uses.
+    fn build_agent_chat_pane(
+        &mut self,
+        outcome: PaneCwdOutcome,
+        session_id: Option<String>,
+        agent_id: String,
+        title: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Pane {
         // The connection roots at the lane cwd; without one there is no working
         // directory to attach the agent to. Park such a pane in an error state
         // rather than a dormant `Idle` that could never connect. The cwd case
         // stays `Idle` until first focus. The status banner re-adds the error
         // prefix, so carry the bare reason here — not the prefix.
-        let status = match &cwd {
-            Some(_) => AgentSessionStatus::Idle,
-            None => AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()),
+        let (cwd, status) = match outcome {
+            PaneCwdOutcome::Ready(Some(cwd)) => (Some(cwd), AgentSessionStatus::Idle),
+            PaneCwdOutcome::Ready(None) => {
+                (None, AgentSessionStatus::Error(s::agent_chat_no_lane_cwd()))
+            }
+            PaneCwdOutcome::Blocked(reason) => (None, AgentSessionStatus::Error(reason)),
         };
+        let pane_id = self.alloc_id();
+        let window_handle = window.window_handle();
         // Seed the tab title from the persisted session title (when present) so
         // a restored dormant pane shows its label before the session loads;
         // fall back to the static default for a freshly opened pane.
@@ -298,6 +386,61 @@ impl Workspace {
                 cached_title,
                 cwd,
             }),
+        }
+    }
+
+    /// Resolve whether a freshly-created Agent chat pane for `agent_id`
+    /// should attach a `Local` or `Remote` cwd. Looks up `agent_id`'s launch
+    /// command in the catalog and defers to [`resolve_new_pane_cwd_core`];
+    /// an id no longer in the catalog behaves as a command with no `{{cwd}}`
+    /// token (falls back to `local_cwd`), matching `agent_command_for`'s
+    /// existing "id not found" handling elsewhere in this file.
+    pub(in crate::workspace) fn resolve_new_pane_cwd(
+        &self,
+        agent_id: &str,
+        local_cwd: Option<PathBuf>,
+        remote_cwd: Option<String>,
+    ) -> Result<Option<PaneCwd>, ()> {
+        let command = self.agent_command_for(agent_id).unwrap_or_default();
+        resolve_new_pane_cwd_core(&command, local_cwd, remote_cwd)
+    }
+
+    /// Construct a fresh Agent chat pane for `agent_id`, resolving Local vs.
+    /// Remote cwd via [`Self::resolve_new_pane_cwd`]. The single entry point
+    /// every fresh-creation call site uses (`open_agent_chat_pane_with_agent`,
+    /// `split_focused_pane_kind`, `finalize_create_lane`), so the
+    /// no-remote-cwd fallback lives in one place instead of duplicated at
+    /// each call site. `session_id`/`title` are always `None` here — a fresh
+    /// pane never resumes a prior conversation; only restore
+    /// (`persistence.rs`) passes those, and it calls
+    /// [`Self::create_agent_chat_pane`] directly with an already-resolved
+    /// `PaneCwd` from disk, skipping this resolution entirely (a persisted
+    /// `Remote` pane's remote path was valid when saved and needs no
+    /// re-derivation against a lane that may since have changed).
+    pub(in crate::workspace) fn create_new_agent_chat_pane(
+        &mut self,
+        agent_id: String,
+        local_cwd: Option<PathBuf>,
+        remote_cwd: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Pane {
+        let outcome = match self.resolve_new_pane_cwd(&agent_id, local_cwd, remote_cwd) {
+            Ok(cwd) => PaneCwdOutcome::Ready(cwd),
+            Err(()) => PaneCwdOutcome::Blocked(s::agent_chat_no_remote_cwd()),
+        };
+        self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
+    }
+
+    /// The active lane's local path and remote cwd, or `(None, None)` when
+    /// there is no active lane. The single source both fresh-pane cwd call
+    /// sites (`open_agent_chat_pane_with_agent`, `split_focused_pane_kind`)
+    /// read from, so they can't drift on how a lane-less workspace is
+    /// represented.
+    pub(in crate::workspace) fn active_lane_cwds(&self) -> (Option<PathBuf>, Option<String>) {
+        match self.active_lane() {
+            Some(lane) => (Some(lane.path.clone()), lane.remote_cwd.clone()),
+            None => (None, None),
         }
     }
 
@@ -356,8 +499,8 @@ impl Workspace {
             return;
         }
         self.last_agent_id = Some(agent_id.clone());
-        let cwd = self.active_lane().map(|w| w.path.clone());
-        let pane = self.create_agent_chat_pane(cwd, None, agent_id, None, window, cx);
+        let (local_cwd, remote_cwd) = self.active_lane_cwds();
+        let pane = self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
@@ -411,6 +554,11 @@ impl Workspace {
             if !matches!(v.status, AgentSessionStatus::Idle) {
                 return;
             }
+            // Both `Local` and `Remote` panes are connectable: `connect_agent_chat`
+            // substitutes the `{{cwd}}` token and rewrites the spawn cwd for a
+            // `Remote` pane. A pane with no cwd at all was already parked in
+            // `Error` at construction (`create_agent_chat_pane` /
+            // `create_new_agent_chat_pane`) and never reaches `Idle`.
             let Some(cwd) = v.cwd.clone() else {
                 return;
             };
@@ -483,7 +631,7 @@ impl Workspace {
     pub(in crate::workspace) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
-        cwd: std::path::PathBuf,
+        cwd: PaneCwd,
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
@@ -506,6 +654,22 @@ impl Workspace {
             self.agent_command_for(&catalog_default_id(&self.agents))
                 .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().command)
         });
+
+        // A `Remote` cwd's command references the `{{cwd}}` token
+        // (`resolve_new_pane_cwd` only ever assigns `Remote` when
+        // `command_needs_remote_cwd` is true) — substitute the lane's remote
+        // path into the command and spawn there instead of the in-process
+        // local path. A `Local` cwd needs no rewrite; this is the only place
+        // a connect resolves the actual command/cwd pair to spawn, so a
+        // restored `Remote` pane (which skips `resolve_new_pane_cwd`, see
+        // `persistence.rs`) still gets substituted here on its lazy connect.
+        let (command, connect_cwd) = match &cwd {
+            PaneCwd::Remote(remote_path) => (
+                substitute_tokens(&command, &[(CWD_TOKEN, remote_path)]),
+                PathBuf::from(remote_path),
+            ),
+            PaneCwd::Local(path) => (command, path.clone()),
+        };
 
         // Runtime provisioning (see `connect_agent_session`) can download
         // Node.js on the first run of a machine without a usable system install.
@@ -563,7 +727,7 @@ impl Workspace {
                     connect_agent_session(
                         command,
                         node_root,
-                        cwd,
+                        connect_cwd,
                         initial_mode,
                         resume.map(daruda_acp::SessionId::new),
                         &mut progress,
@@ -810,7 +974,9 @@ impl Workspace {
                             // A connect failure ends any AgentChat-surfaced task
                             // rooted at this lane in `Error` (it can never run),
                             // keyed by cwd since ACP writes no status-file hooks.
-                            if let Some(cwd) = view.read(cx).cwd.clone() {
+                            if let Some(cwd) =
+                                view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
+                            {
                                 ws.apply_agent_chat_task_ended(
                                     &cwd,
                                     daruda_store::tasks::SessionEndReason::Error,
@@ -848,6 +1014,9 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
+        // Same gate as `maybe_connect_agent_chat`: both `Local` and `Remote`
+        // reconnect through `connect_agent_chat` here; only a genuinely
+        // cwd-less pane (never had a session) no-ops.
         let Some(cwd) = view.read(cx).cwd.clone() else {
             return; // no cwd → never had a session
         };
@@ -1045,8 +1214,71 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_open_agent_id, resolve_restored_agent, should_notify_agent_event};
+    use super::{
+        resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
+        should_notify_agent_event,
+    };
     use daruda_config::AgentDefinition;
+    use daruda_store::project::PaneCwd;
+    use std::path::PathBuf;
+
+    const REMOTE_COMMAND: &str = "ssh vm-work 'cd {{cwd}} && npx acp-adapter'";
+    const LOCAL_COMMAND: &str = "npx acp-adapter";
+
+    #[test]
+    fn resolve_new_pane_cwd_token_with_remote_cwd_is_remote() {
+        let result = resolve_new_pane_cwd_core(
+            REMOTE_COMMAND,
+            Some(PathBuf::from("/local/lane")),
+            Some("/remote/lane".to_string()),
+        );
+        assert_eq!(
+            result,
+            Ok(Some(PaneCwd::Remote("/remote/lane".to_string())))
+        );
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_token_without_remote_cwd_is_err() {
+        let result =
+            resolve_new_pane_cwd_core(REMOTE_COMMAND, Some(PathBuf::from("/local/lane")), None);
+        assert_eq!(result, Err(()));
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_token_with_blank_remote_cwd_is_err() {
+        // An empty or whitespace-only `remote_cwd` (e.g. a lane whose remote
+        // path field was set to just spaces) has nothing to substitute for
+        // `{{cwd}}` — it must behave exactly like `None`, not flow through as
+        // a bogus `Remote("")`/`Remote("   ")`.
+        for blank in ["", "   ", "\t"] {
+            let result = resolve_new_pane_cwd_core(
+                REMOTE_COMMAND,
+                Some(PathBuf::from("/local/lane")),
+                Some(blank.to_string()),
+            );
+            assert_eq!(result, Err(()), "blank remote_cwd {blank:?} should be Err");
+        }
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_no_token_uses_local() {
+        let result = resolve_new_pane_cwd_core(
+            LOCAL_COMMAND,
+            Some(PathBuf::from("/local/lane")),
+            Some("/remote/lane".to_string()),
+        );
+        assert_eq!(
+            result,
+            Ok(Some(PaneCwd::Local(PathBuf::from("/local/lane"))))
+        );
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_no_token_no_local_is_none() {
+        let result = resolve_new_pane_cwd_core(LOCAL_COMMAND, None, None);
+        assert_eq!(result, Ok(None));
+    }
 
     #[test]
     fn should_notify_disabled_channel_never_fires() {

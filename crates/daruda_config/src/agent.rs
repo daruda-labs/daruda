@@ -57,7 +57,34 @@ impl DefaultPermissionMode {
 pub struct AgentDefinition {
     pub id: String,
     pub name: String,
+    /// Bash-style launch command or JSON stdio config. May contain the
+    /// [`CWD_TOKEN`] placeholder (e.g. to `cd` into a remote path over `ssh`
+    /// before launching the adapter); substituted via [`substitute_tokens`]
+    /// at connect time, and its presence marks the agent as remote — see
+    /// [`command_needs_remote_cwd`].
     pub command: String,
+}
+
+/// Placeholder token in [`AgentDefinition::command`] substituted with the
+/// working directory to launch the adapter in.
+pub const CWD_TOKEN: &str = "{{cwd}}";
+
+/// Replace each `(name, value)` token pair in `command`, in order. Tokens not
+/// present in `command` are ignored; a `command` with no tokens is returned
+/// unchanged.
+pub fn substitute_tokens(command: &str, tokens: &[(&str, &str)]) -> String {
+    let mut result = command.to_string();
+    for (name, value) in tokens {
+        result = result.replace(name, value);
+    }
+    result
+}
+
+/// Whether `command` references [`CWD_TOKEN`] and therefore needs a working
+/// directory substituted in before it can be launched (i.e. the agent runs
+/// remotely rather than in-process next to daruda).
+pub fn command_needs_remote_cwd(command: &str) -> bool {
+    command.contains(CWD_TOKEN)
 }
 
 /// A built-in ACP registry preset that can be inserted into the user catalog.
@@ -443,6 +470,53 @@ mod tests {
         let toml_str = toml::to_string(&d).expect("serialize");
         let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn substitute_tokens_replaces_single_token() {
+        let result = substitute_tokens(
+            "ssh vm-work \"cd {{cwd}} && run\"",
+            &[(CWD_TOKEN, "/tmp/x")],
+        );
+        assert_eq!(result, "ssh vm-work \"cd /tmp/x && run\"");
+    }
+
+    #[test]
+    fn substitute_tokens_replaces_multiple_tokens() {
+        let result = substitute_tokens(
+            "cd {{cwd}} && export HOST={{host}}",
+            &[(CWD_TOKEN, "/tmp/x"), ("{{host}}", "vm-work")],
+        );
+        assert_eq!(result, "cd /tmp/x && export HOST=vm-work");
+    }
+
+    #[test]
+    fn substitute_tokens_returns_original_when_no_tokens_present() {
+        let command = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+        assert_eq!(
+            substitute_tokens(command, &[(CWD_TOKEN, "/tmp/x")]),
+            command
+        );
+    }
+
+    #[test]
+    fn substitute_tokens_with_empty_token_list_returns_original() {
+        let command = "cd {{cwd}} && run";
+        assert_eq!(substitute_tokens(command, &[]), command);
+    }
+
+    #[test]
+    fn command_needs_remote_cwd_detects_token() {
+        assert!(command_needs_remote_cwd(
+            "ssh vm-work \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
+        ));
+    }
+
+    #[test]
+    fn command_needs_remote_cwd_false_without_token() {
+        assert!(!command_needs_remote_cwd(
+            "npx -y @agentclientprotocol/claude-agent-acp@latest"
+        ));
     }
 
     #[test]

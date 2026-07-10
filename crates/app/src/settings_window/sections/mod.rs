@@ -483,10 +483,25 @@ impl SettingsWindow {
                 s::settings_agent_field_name(),
                 crate::ui::input(&row.name_input, cx, ()),
             ))
-            .child(field_row(
-                s::settings_agent_field_command(),
-                crate::ui::input(&row.command_input, cx, ()),
-            ))
+            .child({
+                let command_text = row.command_input.read(cx).value().to_string();
+                let is_remote = daruda_config::agent::command_needs_remote_cwd(&command_text);
+                let mut command_field = div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(crate::ui::input(&row.command_input, cx, ())),
+                    );
+                if is_remote {
+                    command_field = command_field
+                        .child(crate::ui::Badge::new(s::settings_agent_remote_badge()));
+                }
+                field_row(s::settings_agent_field_command(), command_field)
+            })
             .into_any_element()
     }
 

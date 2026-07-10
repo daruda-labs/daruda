@@ -954,6 +954,16 @@ pub fn agent_chat_no_lane_cwd() -> String {
     rust_i18n::t!("agent_chat.no_lane_cwd").into_owned()
 }
 
+/// Status-line reason shown when a fresh Agent chat pane's agent command
+/// needs a remote working directory (`{{cwd}}` token — see
+/// `daruda_config::agent::command_needs_remote_cwd`) but the active lane has
+/// no `remote_cwd` configured. Unlike `agent_chat_no_lane_cwd`, this names
+/// the fix (right-click the lane in the sidebar) rather than just stating
+/// the symptom.
+pub fn agent_chat_no_remote_cwd() -> String {
+    rust_i18n::t!("agent_chat.no_remote_cwd").into_owned()
+}
+
 /// Prefix for the connection-error status line.
 pub fn agent_chat_error_prefix() -> String {
     rust_i18n::t!("agent_chat.error_prefix").into_owned()
@@ -1167,6 +1177,17 @@ pub fn ctx_copy_path() -> String {
 pub fn ctx_edit_description() -> String {
     rust_i18n::t!("ctx.edit_description").into_owned()
 }
+pub fn ctx_edit_remote_cwd() -> String {
+    rust_i18n::t!("ctx.edit_remote_cwd").into_owned()
+}
+/// Hover tooltip on the "Set Remote Path…" context-menu item, spelling
+/// out that the setting only takes effect for panes created *after*
+/// the change — an already-created (but not yet connected) agent-chat
+/// pane keeps whatever cwd was resolved when it was created
+/// (`resolve_new_pane_cwd` runs once, at pane-creation time).
+pub fn ctx_edit_remote_cwd_hint() -> String {
+    rust_i18n::t!("ctx.edit_remote_cwd_hint").into_owned()
+}
 pub fn ctx_rename() -> String {
     rust_i18n::t!("common.btn_rename").into_owned()
 }
@@ -1175,6 +1196,12 @@ pub fn edit_description_modal_title() -> String {
 }
 pub fn edit_description_placeholder() -> String {
     rust_i18n::t!("modal.edit_description_placeholder").into_owned()
+}
+pub fn edit_remote_cwd_modal_title() -> String {
+    rust_i18n::t!("modal.edit_remote_cwd_title").into_owned()
+}
+pub fn edit_remote_cwd_placeholder() -> String {
+    rust_i18n::t!("modal.edit_remote_cwd_placeholder").into_owned()
 }
 pub fn rename_modal_title() -> String {
     rust_i18n::t!("modal.rename_worktree_title").into_owned()
@@ -2144,6 +2171,14 @@ pub fn settings_agent_field_command() -> String {
     rust_i18n::t!("settings.agent_field_command").into_owned()
 }
 
+/// Badge shown next to the command field of an agent catalog row whose
+/// current command text contains the `{{cwd}}` token (see
+/// `daruda_config::agent::command_needs_remote_cwd`), marking the entry as
+/// remote-only without requiring the user to read the raw command string.
+pub fn settings_agent_remote_badge() -> String {
+    rust_i18n::t!("settings.agent_remote_badge").into_owned()
+}
+
 pub fn settings_agent_preset() -> String {
     rust_i18n::t!("settings.agent_preset").into_owned()
 }
@@ -2354,6 +2389,13 @@ pub fn ctx_new_terminal() -> String {
 }
 pub fn new_agent_chat_named(name: &str) -> String {
     rust_i18n::t!("common.new_agent_chat_named", name = name).into_owned()
+}
+/// Suffix appended to a `+`-menu agent entry's label when the entry is
+/// disabled because the agent's command needs a remote working directory but
+/// the active lane has none set. `PopupMenuItem` has no tooltip API, so the
+/// reason has to live in the label text itself.
+pub fn agent_needs_remote_cwd_suffix() -> String {
+    rust_i18n::t!("common.agent_needs_remote_cwd_suffix").into_owned()
 }
 pub fn ctx_split_terminal_horizontal() -> String {
     rust_i18n::t!("common.split_terminal_horizontal").into_owned()

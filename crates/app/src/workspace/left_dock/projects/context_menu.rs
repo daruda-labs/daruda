@@ -23,6 +23,7 @@ pub(in crate::workspace) struct CtxMenuArgs {
     pub wt_id: LaneId,
     pub path_str: String,
     pub current_description: Option<String>,
+    pub current_remote_cwd: Option<String>,
     pub current_name: Option<String>,
     pub workspace: gpui::WeakEntity<crate::workspace::Workspace>,
     pub is_git: bool,
@@ -51,6 +52,7 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
         wt_id,
         path_str,
         current_description,
+        current_remote_cwd,
         current_name,
         workspace,
         is_git,
@@ -142,6 +144,37 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
         },
     );
 
+    let workspace_for_remote_cwd = workspace.clone();
+    let edit_remote_cwd_item = ContextMenuItem::new(
+        surface_strings::ctx_edit_remote_cwd(),
+        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
+            if let Some(ws) = workspace_for_remote_cwd.upgrade() {
+                let current = current_remote_cwd.clone();
+                let callback_ws = workspace_for_remote_cwd.clone();
+                ws.update(app_cx, |ws, cx| {
+                    ws.close_context_menu(cx);
+                    crate::workspace::dialog_helpers::open_single_field_dialog(
+                        callback_ws.clone(),
+                        surface_strings::edit_remote_cwd_modal_title(),
+                        surface_strings::edit_remote_cwd_placeholder(),
+                        current.as_deref(),
+                        move |workspace, value, _window, cx| {
+                            workspace.set_lane_remote_cwd(wt_id, value, cx);
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            }
+        },
+    )
+    // The setting only takes hold for panes created after this edit —
+    // an already-created (but not yet connected) agent-chat pane keeps
+    // whatever cwd it resolved at creation time. Surfaced as a hover
+    // tooltip rather than new modal chrome, mirroring how the disabled
+    // Merge item explains itself elsewhere in this menu.
+    .with_tooltip(surface_strings::ctx_edit_remote_cwd_hint());
+
     let workspace_for_rename = workspace.clone();
     let rename_item = ContextMenuItem::new(
         surface_strings::ctx_rename(),
@@ -167,7 +200,13 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
         },
     );
 
-    let mut items = vec![reveal_item, copy_item, edit_description_item, rename_item];
+    let mut items = vec![
+        reveal_item,
+        copy_item,
+        edit_description_item,
+        edit_remote_cwd_item,
+        rename_item,
+    ];
 
     // Inaccessible lane (Missing / AccessDenied): git-only actions
     // (Merge into…) are meaningless on a root that can't be read, so
@@ -343,6 +382,7 @@ mod tests {
             wt_id: 1,
             path_str: "/tmp/repo-feat".to_string(),
             current_description: None,
+            current_remote_cwd: None,
             current_name: None,
             workspace: gpui::WeakEntity::new_invalid(),
             is_git,

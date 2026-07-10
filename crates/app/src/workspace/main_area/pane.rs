@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{TaskAgentSurface, TaskId};
 use daruda_terminal::ux::strings as term_strings;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
@@ -298,7 +299,7 @@ pub(in crate::workspace) struct AgentChatContent {
     /// pane was opened without a resolvable lane cwd. Cached here (it never
     /// changes after construction) so `Pane::cwd()` stays cx-free and can hand
     /// back a borrow; the view holds its own copy for connect / persistence.
-    pub(in crate::workspace) cwd: Option<PathBuf>,
+    pub(in crate::workspace) cwd: Option<PaneCwd>,
 }
 
 pub(in crate::workspace) struct Pane {
@@ -376,12 +377,21 @@ impl Pane {
     /// have a meaningful cwd until the task transitions to `Running`
     /// and a lane is materialised — return `None` so dock
     /// affordances skip TaskEdit panes.
+    ///
+    /// **AgentChat is `None` for `PaneCwd::Remote`.** This is a local
+    /// filesystem accessor — every consumer (`resolve_default_cwd`'s
+    /// `Cmd+T` inheritance tier, `display_cwd`, the Files-view affordance,
+    /// the MCP cwd-change watcher) expects a real path on this machine. A
+    /// remote pane's cwd string leaking through here would otherwise reach
+    /// `spawn_pty`'s existence check, silently fall back to `$HOME`, and
+    /// skip the lane-local fallback tier `resolve_default_cwd` would
+    /// otherwise have used.
     pub(in crate::workspace) fn cwd(&self) -> Option<&Path> {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
             PaneContent::File(f) => f.view.path.parent(),
             PaneContent::TaskEditPane(_) => None,
-            PaneContent::AgentChat(ac) => ac.cwd.as_deref(),
+            PaneContent::AgentChat(ac) => ac.cwd.as_ref().and_then(PaneCwd::as_local),
         }
     }
 

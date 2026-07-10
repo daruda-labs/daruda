@@ -346,15 +346,13 @@ impl Workspace {
             TaskAgentSurface::AgentChat => {
                 // No source agent-chat pane here (a new lane), so open under the
                 // session-sticky default — matching `open_agent_chat_pane`.
+                // `CreateWorktreePlan` carries no `remote_cwd` (a brand-new lane
+                // only gets one via the sidebar's right-click, after creation),
+                // so an agent whose command needs `{{cwd}}` parks in the
+                // actionable "no remote path set" error here rather than
+                // connecting.
                 let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
-                self.create_agent_chat_pane(
-                    Some(new_path.clone()),
-                    None,
-                    agent_id,
-                    None,
-                    window,
-                    cx,
-                )
+                self.create_new_agent_chat_pane(agent_id, Some(new_path.clone()), None, window, cx)
             }
         };
         let pane_id = pane.id;
@@ -773,6 +771,20 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_active_lane(id, |wt| wt.set_description(description), cx);
+    }
+
+    /// Update the remote path the active project's lane `id` connects
+    /// its session to. `None` reverts the lane to the local
+    /// filesystem. Only affects panes created *after* this call —
+    /// `resolve_new_pane_cwd` resolves the remote cwd once, at
+    /// pane-creation time, and never re-runs for panes already open.
+    pub(in crate::workspace) fn set_lane_remote_cwd(
+        &mut self,
+        id: LaneId,
+        remote_cwd: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.mutate_active_lane(id, |wt| wt.set_remote_cwd(remote_cwd), cx);
     }
 
     /// Update the user-visible display name for the active project's

@@ -128,6 +128,13 @@ pub struct SerializedLane {
     /// from last week is still self-describing.
     #[serde(default, alias = "task")]
     pub description: Option<String>,
+    /// Path on a *different* machine this lane's session connects
+    /// to (e.g. an SSH-reachable VM). Plain `String`, not `PathBuf` —
+    /// the local filesystem has no opinion on whether a remote path
+    /// exists, so it must not be validated or canonicalized locally.
+    /// `None` means the lane runs against the local filesystem.
+    #[serde(default)]
+    pub remote_cwd: Option<String>,
 }
 
 impl SerializedLane {
@@ -146,6 +153,7 @@ impl SerializedLane {
             active_tab_index: 0,
             base_ref: None,
             description: None,
+            remote_cwd: None,
         }
     }
 
