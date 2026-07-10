@@ -16,6 +16,32 @@ use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
+/// Below this char count, [`preview_for`] sends the text verbatim.
+const TELEGRAM_PREVIEW_THRESHOLD: usize = 2000;
+/// How many leading/trailing characters survive when a response is
+/// truncated — the head carries what was asked/done, the tail carries the
+/// final result; the middle is usually tool-output detail already visible
+/// in the app.
+const TELEGRAM_PREVIEW_HEAD_CHARS: usize = 1000;
+const TELEGRAM_PREVIEW_TAIL_CHARS: usize = 1000;
+
+/// Keep `text` verbatim under [`TELEGRAM_PREVIEW_THRESHOLD`] characters;
+/// past it, keep the first [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last
+/// [`TELEGRAM_PREVIEW_TAIL_CHARS`] characters around `marker` (the
+/// caller's localized "…(truncated)…" string). Counts `char`s, not bytes,
+/// so a multi-byte response (Korean, emoji, …) never splits mid-character.
+fn preview_for(text: &str, marker: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= TELEGRAM_PREVIEW_THRESHOLD {
+        return text.to_string();
+    }
+    let head: String = chars[..TELEGRAM_PREVIEW_HEAD_CHARS].iter().collect();
+    let tail: String = chars[chars.len() - TELEGRAM_PREVIEW_TAIL_CHARS..]
+        .iter()
+        .collect();
+    format!("{head}\n{marker}\n{tail}")
+}
+
 /// Pick the Allow/Reject button pair from a permission card's choices (the
 /// same `daruda_acp::PermissionChoice` view-model list
 /// `AgentChatView::apply_event` renders as in-app buttons — see
@@ -58,6 +84,54 @@ impl Workspace {
         tail: &str,
     ) -> String {
         format!("{}\n{}", self.pane_title(pane_id, cx), tail)
+    }
+
+    /// The owning project's display name for `pane_id`, if it belongs to
+    /// one (`main_area.runtimes` is keyed by `LaneRef { project, lane }`,
+    /// so the project id comes from whichever runtime's pane list contains
+    /// this pane). `None` for a pane whose lane/project has since gone away.
+    fn project_name_for_pane(&self, pane_id: PaneId) -> Option<String> {
+        let project_id = self
+            .main_area
+            .runtimes
+            .iter()
+            .find(|(_, rt)| rt.panes.iter().any(|p| p.id == pane_id))
+            .map(|(lane_ref, _)| lane_ref.project)?;
+        self.project_for(project_id).map(|p| p.name.clone())
+    }
+
+    /// Compose the turn-completion ping body: project name, agent name,
+    /// then the agent's actual last response (see [`preview_for`] for the
+    /// >2000-char head/tail truncation) — so the phone shows what the
+    /// agent actually said, not just a bare "completed" line. Falls back
+    /// to the generic "finished responding" text when the turn produced no
+    /// assistant text at all (e.g. a tool-only turn) or the pane's view is
+    /// already gone.
+    pub(in crate::workspace) fn telegram_completion_body(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> String {
+        let project_line = self.project_name_for_pane(pane_id);
+        let Some(view) = self.agent_chat_view(pane_id) else {
+            return self.telegram_ping_body(pane_id, cx, &s::agent_notification_completed());
+        };
+        let view = view.read(cx);
+        let header = match project_line {
+            Some(project) => format!("{project}\n{}", view.agent_name),
+            None => view.agent_name.clone(),
+        };
+        let last_response = view.items.iter().rev().find_map(|item| match item {
+            daruda_acp::ChatItem::AssistantText { text, .. } => Some(text.as_str()),
+            _ => None,
+        });
+        match last_response {
+            Some(text) => format!(
+                "{header}\n{}",
+                preview_for(text, &s::agent_notification_telegram_truncated_marker())
+            ),
+            None => format!("{header}\n{}", s::agent_notification_completed()),
+        }
     }
 
     /// Relay a permission-wait ping with Allow/Reject buttons, extracting
@@ -191,7 +265,7 @@ impl Workspace {
 mod tests {
     use gpui::AppContext as _;
 
-    use super::pick_allow_reject;
+    use super::{pick_allow_reject, preview_for};
     use daruda_acp::{PermissionChoice, PermissionKindView};
 
     fn choice(option_id: &str, name: &str, kind: PermissionKindView) -> PermissionChoice {
@@ -200,6 +274,34 @@ mod tests {
             name: name.to_string(),
             kind,
         }
+    }
+
+    #[test]
+    fn preview_for_under_threshold_is_verbatim() {
+        let text = "a".repeat(2000);
+        assert_eq!(preview_for(&text, "…(marker)…"), text);
+    }
+
+    #[test]
+    fn preview_for_over_threshold_keeps_head_and_tail_around_marker() {
+        // 1000 'a's + 1000 'b's = 2001 chars, one over the threshold.
+        let text = format!("{}{}", "a".repeat(1000), "b".repeat(1001));
+        let result = preview_for(&text, "…(marker)…");
+        assert_eq!(
+            result,
+            format!("{}\n…(marker)…\n{}", "a".repeat(1000), "b".repeat(1000))
+        );
+    }
+
+    #[test]
+    fn preview_for_is_char_safe_with_multibyte_text() {
+        // Korean text well past the threshold — must not panic on a
+        // byte-boundary split, and must actually keep 1000 *characters*
+        // (not bytes) on each side.
+        let text = "가".repeat(2500);
+        let result = preview_for(&text, "…(중략)…");
+        let expected = format!("{}\n…(중략)…\n{}", "가".repeat(1000), "가".repeat(1000));
+        assert_eq!(result, expected);
     }
 
     #[test]

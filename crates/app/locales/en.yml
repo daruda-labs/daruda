@@ -727,6 +727,7 @@ notification:
   hook_elicitation_title: "Waiting for your response"
   agent_completed: "Agent finished responding"
   agent_waiting: "Agent is waiting for your input"
+  telegram_truncated_marker: "…(truncated)…"
 
 # Terminal annotations (SP-1)
 terminal:

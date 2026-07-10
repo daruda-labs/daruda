@@ -2419,6 +2419,9 @@ pub fn agent_notification_completed() -> String {
 pub fn agent_notification_waiting() -> String {
     rust_i18n::t!("notification.agent_waiting").into_owned()
 }
+pub fn agent_notification_telegram_truncated_marker() -> String {
+    rust_i18n::t!("notification.telegram_truncated_marker").into_owned()
+}
 
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,

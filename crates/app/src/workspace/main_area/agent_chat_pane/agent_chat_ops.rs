@@ -219,7 +219,7 @@ impl Workspace {
     ) {
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
-            let body = self.telegram_ping_body(pane_id, cx, &s::agent_notification_completed());
+            let body = self.telegram_completion_body(pane_id, cx);
             self.relay_to_telegram(pane_id, body, None, cx);
         }
         let reason = match outcome {
