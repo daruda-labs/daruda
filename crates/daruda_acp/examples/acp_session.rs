@@ -105,6 +105,11 @@ fn main() {
                 AcpEvent::Notice(msg) => {
                     eprintln!("[notice] {msg}");
                 }
+                AcpEvent::TurnFailed(msg) => {
+                    // A per-turn failure (e.g. session/usage limit): the session
+                    // stays alive, so the user could re-prompt.
+                    eprintln!("[turn-failed] {msg}");
+                }
                 AcpEvent::Error(err) => {
                     eprintln!("[error] {err}");
                     std::process::exit(1);

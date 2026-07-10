@@ -164,6 +164,13 @@ pub enum AcpEvent {
         stop_reason: String,
         completed_normally: bool,
     },
+    /// A `session/prompt` returned a JSON-RPC error (e.g. the adapter hit a
+    /// usage / session limit → `-32603`). This is a TURN-level failure, not a
+    /// connection failure: the error is a normal response, so the ACP session
+    /// stays alive. The host surfaces the message inline and keeps the session
+    /// usable, so the user can re-prompt (e.g. once the limit resets) without
+    /// reconnecting — distinct from the terminal [`AcpEvent::Error`].
+    TurnFailed(String),
     /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
     /// `set_mode` request was confirmed. `mode_id` is the new active mode.
     ModeChanged { mode_id: String },
@@ -690,7 +697,30 @@ async fn run_turn(
     let mut handle_dropped = false;
     let stop_reason = loop {
         futures::select! {
-            resp = response => break resp?.stop_reason,
+            resp = response => match resp {
+                Ok(r) => break r.stop_reason,
+                Err(e) => {
+                    // A `session/prompt` that returns a JSON-RPC error (e.g. the
+                    // adapter hit a usage / session limit → `-32603`) is a
+                    // TURN-level failure, NOT a connection failure: the error is
+                    // a normal response, so the stdio connection stays alive.
+                    // Surface it as `TurnFailed` and let `prompt_loop` continue,
+                    // so the session stays usable and the user can re-prompt
+                    // (e.g. once the limit resets) without reconnecting. This is
+                    // the one prompt-error path that must NOT propagate `?` and
+                    // tear the whole session down.
+                    //
+                    // A genuine connection death also surfaces here as an `Err`
+                    // (the library resolves the pending request with an internal
+                    // error when the transport closes); the connection's
+                    // background task then ends and `run_connection` returns,
+                    // emitting a terminal `Error` on top of this. Re-prompting a
+                    // dead connection just yields another immediate `TurnFailed`
+                    // — never a hang, since the request errors at once.
+                    let _ = event_tx.unbounded_send(AcpEvent::TurnFailed(format!("{e}")));
+                    return Ok(handle_dropped);
+                }
+            },
             command = command_rx.next() => match command {
                 Some(Command::Cancel) => {
                     connection.send_notification(CancelNotification::new(session_id.clone()))?;

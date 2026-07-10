@@ -1858,6 +1858,66 @@ async fn restoring_gate_defers_rebuild_until_connected(cx: &mut TestAppContext) 
     let _ = pane_id;
 }
 
+/// A `session/prompt` that returns a JSON-RPC error (adapter usage / session
+/// limit → `-32603`) arrives as `AcpEvent::TurnFailed`, NOT the terminal
+/// `Error`: the ACP session stays alive. The failure shows inline, the turn
+/// settles, but `status` stays `Connected` so the user can re-prompt on the same
+/// session once the limit resets — the fix for the "-32603 then stuck" report.
+#[gpui::test]
+async fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    let tmp = std::env::temp_dir();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let pane = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let id = pane.id;
+            ws.active_runtime_mut().panes.push(pane);
+            let view = agent_view(ws, id);
+
+            view.update(cx, |v, cx| {
+                // A live, working session: connected with a prompt turn in flight.
+                v.status = AgentSessionStatus::Connected;
+                v.set_turn_in_flight();
+
+                v.apply_event(
+                    AcpEvent::TurnFailed("session limit reached".into()),
+                    "",
+                    false,
+                    cx,
+                );
+
+                // The session is NOT torn down — it stays Connected and usable.
+                assert!(
+                    matches!(v.status, AgentSessionStatus::Connected),
+                    "a per-turn failure must not kill the session, got {:?}",
+                    v.status
+                );
+                // The failed turn settles so the working indicator stops.
+                assert!(v.turn_is_idle(), "the failed turn must settle to idle");
+                // The failure shows inline in the conversation.
+                assert_eq!(
+                    v.items.last(),
+                    Some(&ChatItem::Error("session limit reached".to_string())),
+                    "the failure is surfaced as an inline Error item"
+                );
+                // Recorded as an errored outcome (fires at the busy→idle edge).
+                assert_eq!(v.pending_completion, Some(TurnOutcome::Errored));
+            });
+        })
+    })
+    .unwrap();
+}
+
 /// The replay gate is also released on a terminal `Error` and by the pump's
 /// end-of-stream `abort_restore` guard, so a load that never reaches `Connected`
 /// can't freeze the pane mid-restore.

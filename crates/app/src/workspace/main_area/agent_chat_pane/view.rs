@@ -215,8 +215,11 @@ pub(in crate::workspace) struct AgentChatView {
     // otherwise mis-target) and would also break markdown selection identity.
     pub(in crate::workspace) items: Vec<ChatItem>,
     /// Live ACP session handle. `None` until `connect_session` resolves; stays
-    /// `None` on a connect failure. Dropping it (pane close) closes the command
-    /// channel and shuts the connection task down.
+    /// `None` on a connect failure, and is cleared back to `None` on a terminal
+    /// [`AcpEvent::Error`] (the connection task has ended, so the handle is dead).
+    /// A per-turn [`AcpEvent::TurnFailed`] does NOT clear it — the connection is
+    /// still alive there. Dropping it (pane close) closes the command channel and
+    /// shuts the connection task down.
     pub(in crate::workspace) handle: Option<AcpSessionHandle>,
     /// Prompts buffered because they could not be sent yet, in submission
     /// order. A prompt is buffered when the session is not connected (`handle`
@@ -824,14 +827,16 @@ impl AgentChatView {
                 self.items.push(permission_item(&request));
                 self.pending_permission = Some(id);
             }
-            AcpEvent::TurnEnded { .. } if self.cancel_in_flight => {
-                // The `cancelled` `TurnEnded` for a turn a Stop already settled
-                // locally (its `Stopped` fired at cancel time). Don't re-settle or
-                // re-complete — just close the cancel window and drain any
-                // re-prompt the user buffered while it was open (as a fresh turn).
-                // A buffered re-prompt was never put on the wire (see
-                // `send_prompt_text`'s `cancel_in_flight` guard), so nothing raced
-                // this ack and a second Stop could still have cleared it.
+            AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_) if self.cancel_in_flight => {
+                // The terminal signal (a `cancelled` `TurnEnded`, or a
+                // `TurnFailed` if the prompt errored as the cancel raced it) for a
+                // turn a Stop already settled locally — its `Stopped` fired at
+                // cancel time. Don't re-settle, re-complete, or push an error
+                // item: just close the cancel window and drain any re-prompt the
+                // user buffered while it was open (as a fresh turn). A buffered
+                // re-prompt was never put on the wire (see `send_prompt_text`'s
+                // `cancel_in_flight` guard), so nothing raced this ack and a
+                // second Stop could still have cleared it.
                 self.cancel_in_flight = false;
                 self.pump_pending_prompt(cx);
             }
@@ -888,6 +893,34 @@ impl AgentChatView {
             AcpEvent::Notice(_) => {
                 // Logged above; no status change.
             }
+            AcpEvent::TurnFailed(message) => {
+                // A single `session/prompt` failed (e.g. the adapter hit a usage
+                // / session limit → `-32603`), but the ACP connection is alive —
+                // the error was a normal JSON-RPC response, not a transport
+                // failure. So unlike the terminal `Error` arm below, DO NOT set
+                // `status = Error` and DO NOT drop the handle: keep the session
+                // Connected and usable so the user can re-prompt (e.g. once the
+                // limit resets) without reconnecting.
+                //
+                // Surface the failure inline in the conversation, then settle the
+                // turn exactly as a `TurnEnded` would — otherwise a streaming
+                // block stays `streaming: true` and an `InProgress` tool stays
+                // live, so the rollup glyph blinks forever and the footer reads
+                // `Running` after the turn is already over.
+                self.items.push(ChatItem::Error(message));
+                // (A `TurnFailed` while `cancel_in_flight` is handled by the
+                // guarded arm above; here the turn was not being cancelled.)
+                self.settle_turn();
+                turn_settled = true;
+                // Capture the errored outcome; it fires (notification +
+                // backing-task done) on the busy→idle settle edge that
+                // `reconcile_activity` detects, same as a normal completion.
+                self.pending_completion = Some(TurnOutcome::Errored);
+                // Advance the prompt queue one turn like a natural completion, so
+                // a prompt the user buffered while this turn ran still runs. No-op
+                // when nothing is buffered (the common single-prompt case).
+                self.pump_pending_prompt(cx);
+            }
             AcpEvent::Error(message) => {
                 self.status = AgentSessionStatus::Error(message);
                 // A session-level error terminates every outstanding turn,
@@ -911,6 +944,15 @@ impl AgentChatView {
                 // prompts can never be delivered — drop them (they were already
                 // echoed locally) rather than leaving them to be pumped.
                 self.pending_prompts.clear();
+                // Drop the now-dead handle. The connection task has ended (this
+                // `Error` is its terminal signal), so its command channel is
+                // closed — a lingering `Some(handle)` would let `send_prompt_text`
+                // send into a dead channel (silently dropped) and mark a turn
+                // in-flight that never ends, stranding the pane on a phantom
+                // "Working". With `None`, a post-error prompt buffers instead of
+                // stranding. (Distinct from `TurnFailed`, which keeps the handle:
+                // there the connection is still alive.)
+                self.handle = None;
             }
         }
         // Gate the full-conversation reconciles on what the event actually
