@@ -10,6 +10,7 @@ description = "TOML configuration loader for daruda"
 workspace = true
 
 [dependencies]
+daruda_store = { path = "../daruda_store" }
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

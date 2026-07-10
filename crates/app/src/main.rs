@@ -29,6 +29,7 @@ mod shell_env;
 pub(crate) mod shell_quote;
 mod slot_actions;
 pub mod surface;
+mod telegram;
 #[cfg(test)]
 mod test_support;
 pub mod ui;
@@ -209,6 +210,7 @@ fn main() {
         window_startup::open_first_window(config, window_opts, cx);
 
         watchers_lifecycle::spawn_all(cx);
+        crate::telegram::global::install(cx);
 
         // `--screenshot <path>`: capture the live window to a PNG, then quit.
         // `--screenshot-terminal-widen` swaps the restored-workspace capture

@@ -1,6 +1,7 @@
 //! Workspace ops for the Agent chat pane — pane/tab construction, the live
-//! ACP connection + event pump, the bottom-dock prompt / cancel routing, plus
-//! the GPUI-free helpers the view's reconcilers reuse.
+//! ACP connection + event pump, the desktop-notification pipeline, the
+//! bottom-dock prompt / cancel routing, plus the GPUI-free helpers the
+//! view's reconcilers reuse.
 //!
 //! The per-event folding and every render-listener op (`toggle_fold`,
 //! `on_scroll`, `respond_permission`, `set_mode`, …) live on
@@ -10,6 +11,11 @@
 //! reads `agent.default_permission_mode`; the pump reads `syntax_theme` per
 //! event and owns the error pipeline (`report_error`) — and the construction
 //! that mutates the pane/tab tree.
+//!
+//! The Telegram relay domain (outbound pings, inbound reply/permission
+//! injection) lives in the sibling [`super::telegram_ops`] module; this file
+//! keeps only the two tee points — `maybe_notify_agent_event` and
+//! `fire_activity_completion` — that call into it.
 //!
 //! ## Connection + pump shape
 //!
@@ -139,12 +145,18 @@ impl Workspace {
         ) {
             return;
         }
-        // Title = the session's title, or the static fallback label.
-        let title = self
-            .agent_chat_view(pane_id)
+        crate::platform::notifications::show(&self.pane_title(pane_id, cx), &body);
+    }
+
+    /// The pane's display title for a notification: its live session title,
+    /// or the static tab-title fallback before the session reports one.
+    /// Also read by `telegram_ops::Workspace::telegram_ping_body`, which is
+    /// why this stays `pub(in crate::workspace)` rather than private —
+    /// both files are `impl Workspace` blocks under the same module tree.
+    pub(in crate::workspace) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
+        self.agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).session_title.clone())
-            .unwrap_or_else(s::agent_chat_tab_title);
-        crate::platform::notifications::show(&title, &body);
+            .unwrap_or_else(s::agent_chat_tab_title)
     }
 
     /// Fire the "waiting for input" desktop notification when the agent requests
@@ -159,15 +171,26 @@ impl Workspace {
         event: &daruda_acp::AcpEvent,
         cx: &Context<Self>,
     ) {
-        if !matches!(event, daruda_acp::AcpEvent::PermissionRequested { .. }) {
+        let daruda_acp::AcpEvent::PermissionRequested { id, request } = event else {
             return;
-        }
+        };
         self.notify_agent_pane(
             pane_id,
             self.notifications.agent_waiting_enabled,
             s::agent_notification_waiting(),
             cx,
         );
+        // Reuse the same protocol→view-model conversion
+        // `AgentChatView::apply_event` uses to render the in-app
+        // permission card, so this relay never has to name the raw ACP
+        // protocol type — `daruda_acp`'s boundary is "host never
+        // touches protocol types" (see `daruda_acp::mapping` module
+        // docs). `permission_item` always returns `ChatItem::Permission`
+        // for a `RequestPermissionRequest`; the `let else` is defensive.
+        let daruda_acp::ChatItem::Permission(card) = daruda_acp::permission_item(request) else {
+            return;
+        };
+        self.relay_permission_wait_to_telegram(pane_id, *id, &card.options, cx);
     }
 
     /// Fire the "completed" desktop notification for a settled turn. Called only
@@ -196,6 +219,8 @@ impl Workspace {
     ) {
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
+            let body = self.telegram_ping_body(pane_id, cx, &s::agent_notification_completed());
+            self.relay_to_telegram(pane_id, body, None, cx);
         }
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {

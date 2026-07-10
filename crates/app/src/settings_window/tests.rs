@@ -251,6 +251,122 @@ fn new_with_section_lands_on_target(cx: &mut TestAppContext) {
     });
 }
 
+/// Regression: `validate()` must never let clicking Save revert a
+/// Telegram pairing that completed asynchronously (the bridge's poll
+/// loop, via `InboundAction::Paired`) while the Settings window was
+/// still open. `base_config` is a snapshot taken at window-open time,
+/// so the fix re-reads `authorized_chat_id` live from `SettingsStore`
+/// instead of trusting that stale snapshot.
+#[gpui::test]
+fn validate_does_not_revert_background_pairing(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    // Simulate the poll loop's `InboundAction::Paired` persist step —
+    // it mutates `SettingsStore`'s live config directly, bypassing this
+    // window entirely, exactly as `telegram::global::dispatch_action`
+    // does. Uses `set_user_for_testing` (in-memory only), NOT the real
+    // `patch_user` — `patch_user` calls `daruda_config::patch_config_file`,
+    // which writes to the actual `config_path()` on disk regardless of
+    // test context (there is no test-mode redirect), so calling it here
+    // would silently overwrite the developer's real `~/Library/Application
+    // Support/daruda/config.toml` on every test run. This bug shipped and
+    // was caught by a live user report of a repeatedly-clobbered config file.
+    cx.update(|cx| {
+        use gpui::BorrowAppContext as _;
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user_arc()).clone();
+            cfg.telegram.authorized_chat_id = Some(42);
+            store.set_user_for_testing(cfg);
+        });
+    });
+
+    win.read_with(cx, |w, cx| {
+        let cfg = w
+            .validate(cx)
+            .expect("defaults plus a live pairing must still validate");
+        assert_eq!(
+            cfg.telegram.authorized_chat_id,
+            Some(42),
+            "Save must not revert a pairing that completed while Settings was open"
+        );
+    });
+}
+
+#[gpui::test]
+fn telegram_enabled_toggle_round_trips_through_validate(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+    win.read_with(cx, |w, cx| {
+        assert!(!w.validate(cx).unwrap().telegram.enabled);
+    });
+
+    win.update(cx, |w, cx| {
+        w.telegram_enabled = true;
+        cx.notify();
+    });
+
+    win.read_with(cx, |w, cx| {
+        assert!(w.validate(cx).unwrap().telegram.enabled);
+    });
+}
+
+#[gpui::test]
+async fn copy_telegram_pair_command_writes_full_command_to_clipboard(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    // Write something else first so we can verify the copy overwrites it.
+    cx.update(|cx| {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("sentinel".to_string()));
+    });
+
+    cx.update(|cx| {
+        win.update(cx, |w, cx| {
+            w.copy_telegram_pair_command_for_test("AB12CD", cx)
+        });
+    });
+
+    let actual = cx.read_from_clipboard().expect("clipboard populated");
+    let text = actual.text().expect("clipboard item is text");
+    assert_eq!(text, "/pair AB12CD");
+
+    win.read_with(cx, |w, _cx| {
+        assert!(
+            w.telegram_pair_command_copied(),
+            "Copied confirmation should be active"
+        );
+    });
+}
+
+#[gpui::test]
+async fn copy_telegram_pair_command_copied_label_reverts_after_one_second(cx: &mut TestAppContext) {
+    let (_wh, win) = build_window(cx);
+
+    cx.update(|cx| {
+        win.update(cx, |w, cx| {
+            w.copy_telegram_pair_command_for_test("AB12CD", cx)
+        });
+    });
+
+    win.read_with(cx, |w, _cx| {
+        assert!(
+            w.telegram_pair_command_copied(),
+            "Copied label should be up immediately"
+        );
+    });
+
+    // Past the 1 s revert window — virtual clock so the test is
+    // deterministic.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1500));
+    cx.run_until_parked();
+
+    win.read_with(cx, |w, _cx| {
+        assert!(
+            !w.telegram_pair_command_copied(),
+            "Copied label should have reverted to Copy"
+        );
+    });
+}
+
 #[gpui::test]
 fn focus_section_resets_scroll(cx: &mut TestAppContext) {
     let (wh, win) = build_window(cx);

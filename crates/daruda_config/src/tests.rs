@@ -587,6 +587,41 @@ fn resolve_section_replace_drops_user_subkeys() {
     assert!(effective.shell.close_pane_on_exit);
 }
 
+// ---- telegram round-trip ----
+
+#[test]
+fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let mut cfg = Config::default();
+    cfg.telegram.enabled = true;
+    cfg.telegram.authorized_chat_id = Some(999888777);
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    let reloaded = Config::load_from(&path);
+    assert!(reloaded.telegram.enabled);
+    assert_eq!(reloaded.telegram.authorized_chat_id, Some(999888777));
+}
+
+#[test]
+fn patch_config_file_clears_telegram_chat_id_when_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let mut cfg = Config::default();
+    cfg.telegram.enabled = true;
+    cfg.telegram.authorized_chat_id = Some(111);
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    // Unpair: authorized_chat_id goes back to None.
+    cfg.telegram.authorized_chat_id = None;
+    crate::patch_config_file_to(&cfg, &path).unwrap();
+
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.telegram.authorized_chat_id, None);
+}
+
 // ---- general.language round-trip ----
 
 #[test]

@@ -19,9 +19,15 @@ use crate::ui::{button, button_danger, checkbox, checkbox_row, field_row};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
-use gpui::{AnyElement, ClickEvent, IntoElement, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, ClipboardItem, IntoElement, div, prelude::*, px};
 
 use super::SettingsWindow;
+
+/// How long the pairing-command "Copied!" label stays before reverting
+/// to "Copy" — mirrors `ErrorReportModal::COPIED_LABEL_DURATION`
+/// (`workspace/error/modal.rs`), duplicated locally since it's a
+/// trivial, single-use UI-timing constant not worth centralizing.
+const TELEGRAM_PAIR_COPY_LABEL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Build a `file://` URL from `path`, percent-encoding any byte that is
 /// not safe in a URL path segment (RFC 3986 §3.3). Handles spaces in
@@ -76,6 +82,29 @@ fn path_to_file_url(path: &std::path::Path) -> String {
 }
 
 impl SettingsWindow {
+    /// Copy `/pair <code>` to the clipboard so the user can paste it
+    /// straight into the Telegram app on their phone instead of retyping
+    /// it. Mirrors `ErrorReportModal::copy_to_clipboard`'s copied/revert
+    /// shape (`workspace/error/modal.rs`).
+    fn copy_telegram_pair_command(&mut self, code: &str, cx: &mut gpui::Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(format!("/pair {code}")));
+        self.telegram_pair_command_copied = true;
+        cx.notify();
+
+        self._telegram_pair_copy_revert_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(TELEGRAM_PAIR_COPY_LABEL_DURATION)
+                .await;
+            // SILENT-OK: settings window may close before the revert timer fires
+            let _ = this.update(cx, |this, cx| {
+                if this.telegram_pair_command_copied {
+                    this.telegram_pair_command_copied = false;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     pub(super) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
         // Phase 3-D ships two UI presets (`daruda_dark` / `daruda_light`)
         // so the dropdown becomes interactive. It still renders as
@@ -484,11 +513,206 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_notifications(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        Self::render_placeholder(
-            s::settings_section_notifications(),
-            s::settings_placeholder_notifications(),
-            cx,
-        )
+        let body_color = theme::current(cx).text_primary;
+        let telegram_enabled = self.telegram_enabled;
+        let token_configured = self.telegram_token_configured;
+        let authorized_chat_id = crate::settings_store::SettingsStore::global(cx)
+            .user_arc()
+            .telegram
+            .authorized_chat_id;
+        let pair_code = self.telegram_pair_code.clone();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::MODAL_PANEL_GAP))
+            .child(Self::section_label(s::settings_section_notifications(), cx))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(body_color)
+                    .child(s::settings_telegram_heading()),
+            )
+            .child(checkbox_row(
+                checkbox(
+                    "settings-telegram-enabled",
+                    s::settings_telegram_enabled_label(),
+                    (),
+                )
+                .checked(telegram_enabled)
+                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                    this.telegram_enabled = *checked;
+                    cx.notify();
+                })),
+            ))
+            .child(field_row(
+                s::settings_telegram_token_label(),
+                crate::ui::input(&self.telegram_token_input, cx, ()),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(
+                        button(
+                            "settings-telegram-save-token",
+                            s::settings_telegram_save_token(),
+                        )
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, window, cx| {
+                                let token = this
+                                    .telegram_token_input
+                                    .read(cx)
+                                    .value()
+                                    .trim()
+                                    .to_string();
+                                if token.is_empty() {
+                                    return;
+                                }
+                                match crate::telegram::keychain::write_token(&token) {
+                                    Ok(()) => {
+                                        this.telegram_token_configured = true;
+                                        this.telegram_token_input.update(cx, |input, cx_state| {
+                                            input.set_value(String::new(), window, cx_state);
+                                        });
+                                    }
+                                    Err(_) => {
+                                        // `keychain::write_token` already logs the
+                                        // failure via `LogWriter::log` — nothing left
+                                        // to do here beyond the UI state below.
+                                    }
+                                }
+                                cx.notify();
+                            },
+                        )),
+                    )
+                    .when(token_configured, |row| {
+                        row.child(
+                            div()
+                                .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                                .text_color(body_color)
+                                .child(s::settings_telegram_token_configured()),
+                        )
+                        .child(
+                            button_danger(
+                                "settings-telegram-clear-token",
+                                s::settings_telegram_clear_token(),
+                            )
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, _window, cx| {
+                                    // `keychain::delete_token` already logs any
+                                    // failure via `LogWriter::log`. Only flip the
+                                    // "configured" state on success — but still
+                                    // notify unconditionally, matching the other
+                                    // Telegram button handlers.
+                                    if crate::telegram::keychain::delete_token().is_ok() {
+                                        this.telegram_token_configured = false;
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(body_color)
+                    .child(match authorized_chat_id {
+                        Some(chat_id) => s::settings_telegram_paired(chat_id),
+                        None => s::settings_telegram_not_paired(),
+                    }),
+            )
+            .when_some(pair_code, |body, code| {
+                let copy_label = if self.telegram_pair_command_copied {
+                    s::error_modal_button_copied()
+                } else {
+                    s::error_modal_button_copy()
+                };
+                body.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(theme::MODAL_FOOTER_GAP))
+                        .child(
+                            div()
+                                .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                                .text_color(body_color)
+                                .child(s::settings_telegram_pair_instructions(&code)),
+                        )
+                        .child(
+                            button("settings-telegram-copy-pair-command", copy_label).on_click(
+                                cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                                    this.copy_telegram_pair_command(&code, cx);
+                                }),
+                            ),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::MODAL_FOOTER_GAP))
+                    .child(
+                        button(
+                            "settings-telegram-generate-code",
+                            s::settings_telegram_generate_code(),
+                        )
+                        .on_click(cx.listener(
+                            |this, _: &ClickEvent, _window, cx| {
+                                let code =
+                                    crate::telegram::global::TelegramBridge::generate_pair_code(cx);
+                                this.telegram_pair_code = Some(code);
+                                cx.notify();
+                            },
+                        )),
+                    )
+                    .when(authorized_chat_id.is_some(), |row| {
+                        row.child(
+                            button_danger(
+                                "settings-telegram-unpair",
+                                s::settings_telegram_unpair(),
+                            )
+                            .on_click(cx.listener(
+                                |_this, _: &ClickEvent, _window, cx| {
+                                    use gpui::BorrowAppContext as _;
+                                    let result = cx
+                                        .update_global::<crate::settings_store::SettingsStore, _>(
+                                            |store, _| {
+                                                store.patch_user(|cfg| {
+                                                    cfg.telegram.authorized_chat_id = None
+                                                })
+                                            },
+                                        );
+                                    if let Err(e) = result {
+                                        LogWriter::log(
+                                            ErrorReport::new("Failed to clear Telegram pairing")
+                                                .severity(ErrorSeverity::Warning)
+                                                .message(e)
+                                                .at(file!(), line!())
+                                                .dedup("telegram.unpair")
+                                                .build(),
+                                        );
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(body_color)
+                    .child(s::settings_placeholder_notifications()),
+            )
+            .child(Self::render_open_config_button(cx))
+            .into_any_element()
     }
 
     pub(super) fn render_keymap(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
@@ -519,27 +743,56 @@ impl SettingsWindow {
                     .text_color(body_color)
                     .child(body.into()),
             )
-            .child(div().flex().flex_row().child(
-                button("settings-open-config", s::settings_open_config_file()).on_click(
-                    cx.listener(|_this, _: &ClickEvent, _window, cx| {
-                        let path = daruda_config::config_path();
-                        if let Some(parent) = path.parent()
-                            && let Err(e) = std::fs::create_dir_all(parent)
-                        {
-                            LogWriter::log(
-                                ErrorReport::new("Failed to create config directory")
-                                    .severity(ErrorSeverity::Warning)
-                                    .from_error(&e)
-                                    .at(file!(), line!())
-                                    .with_context("path", redact_home(parent))
-                                    .dedup("config.mkdir")
-                                    .build(),
-                            );
-                        }
-                        cx.open_url(&path_to_file_url(&path));
-                    }),
-                ),
-            ))
+            .child(Self::render_open_config_button(cx))
             .into_any_element()
+    }
+
+    /// "Open Config File" button — creates the config directory if
+    /// missing, then opens `config.toml` in the user's default editor
+    /// for the file type. Shared by [`render_placeholder`] (sections
+    /// with no GUI yet) and [`render_notifications`] (the Telegram
+    /// block's "everything else" fallback).
+    fn render_open_config_button(cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().flex().flex_row().child(
+            button("settings-open-config", s::settings_open_config_file()).on_click(cx.listener(
+                |_this, _: &ClickEvent, _window, cx| {
+                    let path = daruda_config::config_path();
+                    if let Some(parent) = path.parent()
+                        && let Err(e) = std::fs::create_dir_all(parent)
+                    {
+                        LogWriter::log(
+                            ErrorReport::new("Failed to create config directory")
+                                .severity(ErrorSeverity::Warning)
+                                .from_error(&e)
+                                .at(file!(), line!())
+                                .with_context("path", redact_home(parent))
+                                .dedup("config.mkdir")
+                                .build(),
+                        );
+                    }
+                    cx.open_url(&path_to_file_url(&path));
+                },
+            )),
+        )
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)] // exposed for tests that exercise the section without rendering it.
+impl SettingsWindow {
+    pub(in crate::settings_window) fn telegram_pair_command_copied(&self) -> bool {
+        self.telegram_pair_command_copied
+    }
+
+    /// Test-only entry into [`Self::copy_telegram_pair_command`] — the
+    /// click handler that drives it lives inside a closure and isn't
+    /// directly callable from tests. Mirrors
+    /// `ErrorReportModal::copy_to_clipboard_for_test`.
+    pub(in crate::settings_window) fn copy_telegram_pair_command_for_test(
+        &mut self,
+        code: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.copy_telegram_pair_command(code, cx);
     }
 }

@@ -22,6 +22,7 @@ pub mod render;
 pub mod scrollback;
 pub mod settings_section;
 pub mod shell;
+pub mod telegram;
 pub mod theme_presets;
 pub mod ui_theme_presets;
 pub mod update;
@@ -55,6 +56,7 @@ pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
+pub use telegram::TelegramConfig;
 pub use theme_presets::{PRESETS as THEME_PRESETS, ThemePreset};
 pub use ui_theme_presets::{PRESETS as UI_THEME_PRESETS, UiThemePreset};
 pub use update::UpdateConfig;
@@ -121,6 +123,7 @@ pub struct Config {
     #[serde(default = "agent::default_agents")]
     pub agents: Vec<AgentDefinition>,
     pub update: UpdateConfig,
+    pub telegram: TelegramConfig,
 }
 
 impl Default for Config {
@@ -156,6 +159,7 @@ impl Default for Config {
             agent: Default::default(),
             agents: agent::default_agents(),
             update: Default::default(),
+            telegram: Default::default(),
         }
     }
 }
@@ -233,12 +237,17 @@ impl Config {
     }
 }
 
-/// Resolve the config file path using platform conventions.
+/// Resolve the config file path — same profile-scoped data directory as
+/// logs, workspaces, and every other persisted file
+/// (`daruda_store::persistence::default_data_dir`): the release build
+/// keeps the existing un-suffixed `daruda/config.toml` (no migration for
+/// existing users), while a debug build or any `DARUDA_PROFILE`-named
+/// run (tests, staging, etc.) gets its own `daruda-<profile>/config.toml`,
+/// isolated from the release file. Previously this hardcoded
+/// `dirs::config_dir()/daruda` unconditionally, so a debug/test run could
+/// silently read and overwrite a real user's config.
 pub fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("daruda")
-        .join("config.toml")
+    daruda_store::persistence::default_data_dir().join("config.toml")
 }
 
 /// Surgically update the Settings-UI-controlled keys in the config file,
@@ -357,6 +366,16 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             toml_edit::value(config.agent.default_permission_mode.mode_id());
         t["use_modifier_to_send"] = toml_edit::value(config.agent.use_modifier_to_send);
         t["input_max_rows"] = toml_edit::value(i64::from(config.agent.input_max_rows));
+    });
+
+    patch_section(&mut doc, "telegram", |t| {
+        t["enabled"] = toml_edit::value(config.telegram.enabled);
+        match config.telegram.authorized_chat_id {
+            Some(id) => t["authorized_chat_id"] = toml_edit::value(id),
+            None => {
+                t.remove("authorized_chat_id");
+            }
+        }
     });
 
     if doc.contains_key("agents") || config.agents != agent::default_agents() {

@@ -2059,6 +2059,44 @@ pub fn settings_placeholder_notifications() -> String {
     rust_i18n::t!("settings.placeholder_notifications").into_owned()
 }
 
+// Notifications section — Telegram bridge subsection.
+pub fn settings_telegram_heading() -> String {
+    rust_i18n::t!("settings.telegram_heading").into_owned()
+}
+pub fn settings_telegram_enabled_label() -> String {
+    rust_i18n::t!("settings.telegram_enabled_label").into_owned()
+}
+pub fn settings_telegram_token_label() -> String {
+    rust_i18n::t!("settings.telegram_token_label").into_owned()
+}
+pub fn settings_telegram_token_placeholder() -> String {
+    rust_i18n::t!("settings.telegram_token_placeholder").into_owned()
+}
+pub fn settings_telegram_save_token() -> String {
+    rust_i18n::t!("settings.telegram_save_token").into_owned()
+}
+pub fn settings_telegram_token_configured() -> String {
+    rust_i18n::t!("settings.telegram_token_configured").into_owned()
+}
+pub fn settings_telegram_clear_token() -> String {
+    rust_i18n::t!("settings.telegram_clear_token").into_owned()
+}
+pub fn settings_telegram_not_paired() -> String {
+    rust_i18n::t!("settings.telegram_not_paired").into_owned()
+}
+pub fn settings_telegram_paired(chat_id: i64) -> String {
+    rust_i18n::t!("settings.telegram_paired", chat_id = chat_id).into_owned()
+}
+pub fn settings_telegram_generate_code() -> String {
+    rust_i18n::t!("settings.telegram_generate_code").into_owned()
+}
+pub fn settings_telegram_pair_instructions(code: &str) -> String {
+    rust_i18n::t!("settings.telegram_pair_instructions", code = code).into_owned()
+}
+pub fn settings_telegram_unpair() -> String {
+    rust_i18n::t!("settings.telegram_unpair").into_owned()
+}
+
 // Agent section — default permission mode dropdown
 pub fn settings_label_agent_mode() -> String {
     rust_i18n::t!("settings.label_agent_mode").into_owned()

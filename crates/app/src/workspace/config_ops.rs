@@ -47,6 +47,7 @@ impl Workspace {
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.notifications = config.notifications.clone();
+        self.telegram = config.telegram.clone();
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
         self.agents = config.agents.clone();

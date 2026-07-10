@@ -102,9 +102,11 @@ impl StatusFile {
 pub enum StatusFileError {
     Io(std::io::Error),
     Json(serde_json::Error),
-    /// `dirs::home_dir()` returned `None` — extremely rare on a real
-    /// macOS install, but the hook handler still needs to exit
-    /// gracefully so this is a recoverable signal.
+    /// Retained for the hook handler's error match even though
+    /// `default_dir()` (via `daruda_store::persistence::default_data_dir`)
+    /// no longer has an unresolvable-home code path — kept so a future
+    /// resolver change has somewhere to signal it without a breaking
+    /// enum change.
     NoHome,
 }
 
@@ -140,10 +142,13 @@ impl From<serde_json::Error> for StatusFileError {
     }
 }
 
-/// Default status directory: `~/.daruda/status/`.
+/// Default status directory: `<profile-scoped data dir>/status/` — same
+/// base as `daruda_store::persistence::default_data_dir` (logs,
+/// workspaces, panels), so a debug build's hook writes never land in
+/// (or get read back by) a real release install's status directory.
+/// Release keeps the pre-existing unsuffixed path.
 pub fn default_dir() -> Result<PathBuf, StatusFileError> {
-    let home = dirs::home_dir().ok_or(StatusFileError::NoHome)?;
-    Ok(home.join(".daruda").join("status"))
+    Ok(daruda_store::persistence::default_data_dir().join("status"))
 }
 
 /// Path for a single session's status file inside `dir`.

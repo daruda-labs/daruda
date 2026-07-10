@@ -175,12 +175,17 @@ pub(in crate::workspace) fn fetch_activity() -> Option<ActivityStats> {
     activity::update_activity(&projects_root, &cache_path).ok()
 }
 
-/// `(~/.claude/projects, ~/.daruda/cache/activity.json)`. The cache is
-/// a pure derivative of the account-wide JSONL logs, so it is not
-/// profile-scoped (unlike the per-profile log dir).
+/// `(~/.claude/projects, <profile-scoped data dir>/cache/activity.json)`.
+/// `projects_root` is Claude Code's own account-wide JSONL logs — never
+/// profile-scoped, every profile reads the same real source. `cache_path`
+/// is daruda's own derived cache; profile-scoped like every other
+/// on-disk file so a debug/test run recomputes its own cache from that
+/// same source instead of overwriting the release build's.
 fn activity_paths() -> Option<(PathBuf, PathBuf)> {
     let home = dirs::home_dir()?;
     let projects_root = home.join(".claude").join("projects");
-    let cache_path = home.join(".daruda").join("cache").join("activity.json");
+    let cache_path = daruda_store::persistence::default_data_dir()
+        .join("cache")
+        .join("activity.json");
     Some((projects_root, cache_path))
 }

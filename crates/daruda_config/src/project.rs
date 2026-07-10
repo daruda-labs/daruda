@@ -70,12 +70,15 @@ pub fn project_id(repo_root: &Path) -> String {
     format!("{:016x}", fnv1a_64(bytes.as_bytes()))
 }
 
-/// `~/.config/daruda/projects/<basename>-<hash>/`. Returns `None` only
-/// when both `dirs::config_dir()` is unset (rare — no `$HOME`) and the
-/// system has no usable config base; in that case callers fall back
-/// to the default `ProjectConfig`.
+/// `<profile-scoped data dir>/projects/<basename>-<hash>/` — same
+/// profile-scoped base as [`crate::config_path`], so a debug/test run's
+/// project layer never lands in (or overwrites) a real release
+/// project's config. `Option` is kept for signature stability even
+/// though `daruda_store::persistence::default_data_dir` is effectively
+/// infallible (it falls back to `./daruda` with a logged warning rather
+/// than failing).
 pub fn project_config_dir(repo_root: &Path) -> Option<PathBuf> {
-    let base = dirs::config_dir()?.join("daruda").join("projects");
+    let base = daruda_store::persistence::default_data_dir().join("projects");
     Some(base.join(project_dir_name(repo_root)))
 }
 

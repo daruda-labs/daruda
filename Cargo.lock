@@ -1352,6 +1352,8 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-highlight",
  "unicode-segmentation",
+ "ureq",
+ "uuid",
  "which",
 ]
 
@@ -1392,6 +1394,7 @@ dependencies = [
 name = "daruda_config"
 version = "0.2.4"
 dependencies = [
+ "daruda_store",
  "dirs",
  "serde",
  "tempfile",
@@ -6634,6 +6637,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

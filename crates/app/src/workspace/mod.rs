@@ -409,6 +409,12 @@ pub struct Workspace {
     /// `TerminalViewEvent` subscriptions and by the long-running command
     /// timer.
     pub(in crate::workspace) notifications: daruda_config::NotificationsConfig,
+    /// Telegram bot bridge settings — gates `relay_to_telegram` (both
+    /// `enabled` and a completed pairing are required before a ping is
+    /// queued). Mirrored from the live config the same way
+    /// `notifications` is, so a Settings-window toggle takes effect
+    /// without any extra plumbing.
+    pub(in crate::workspace) telegram: daruda_config::TelegramConfig,
     /// Clipboard write limits — caps streaming OSC 1337 `Copy=` /
     /// `EndCopy` payloads so a runaway shell cannot exhaust memory.
     pub(in crate::workspace) clipboard: daruda_config::ClipboardConfig,
@@ -1014,6 +1020,7 @@ impl Workspace {
             syntax_theme: config.file_viewer.syntax_theme.clone(),
             file_viewer_preview_tab: config.file_viewer.preview_tab,
             notifications: config.notifications.clone(),
+            telegram: config.telegram.clone(),
             clipboard: config.clipboard.clone(),
             agent: config.agent.clone(),
             agents: config.agents.clone(),

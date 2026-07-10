@@ -268,11 +268,18 @@ Input:  GPUI KeyDown → TerminalInput → stdin_tx → PTY → Shell
 
 ```
 daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
-             →  daruda_config
+             →  daruda_config     →  daruda_store
              →  daruda_store
-             →  daruda_claude
+             →  daruda_claude     →  daruda_store
              →  gpui, portable-pty
 ```
+
+`daruda_config` and `daruda_claude` both depend on `daruda_store` for
+`persistence::default_data_dir()` — the single profile-scoped (release
+`daruda/` vs. debug/named `daruda-<profile>/`) base directory every
+on-disk file (config, logs, workspaces, panels, hook status) resolves
+through, so a debug/test run never reads or writes a real release
+install's state.
 
 ### UI component hierarchy
 

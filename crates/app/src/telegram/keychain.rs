@@ -1,0 +1,207 @@
+//! macOS Keychain storage for the Telegram bot token.
+//!
+//! Mirrors `daruda_claude::limits`'s Anthropic OAuth token read: shell
+//! out to `/usr/bin/security` rather than link a Keychain crate. The
+//! bot token is a secret and never touches `config.toml` — see
+//! `daruda_config::TelegramConfig` for the non-secret settings that do
+//! (master switch, paired chat id).
+//!
+//! `read_token` / `write_token` / `delete_token` are called from the
+//! Settings window's Telegram section (`settings_window::sections`) —
+//! "Save Token" / "Clear" — and `read_token` is also polled by the
+//! bridge's poll/send loops (`telegram::global`).
+
+use std::process::{Command, Stdio};
+
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
+
+const SERVICE: &str = "daruda-telegram-bot";
+const ACCOUNT: &str = "token";
+
+/// Read the bot token from the Keychain. Returns `None` when no token
+/// is stored, the `security` CLI is unavailable or fails, or the
+/// build is not macOS.
+#[cfg(target_os = "macos")]
+pub fn read_token() -> Option<String> {
+    let out = Command::new("security")
+        .args(["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    normalize_token(&out.stdout)
+}
+
+/// Decode raw Keychain output into a usable token: UTF-8 decode, trim
+/// surrounding whitespace, and treat an empty (or whitespace-only)
+/// result as "no token". Split from `read_token` so the parsing logic
+/// is plain and unit-testable without shelling out to `security` —
+/// mirrors `daruda_claude::limits::parse_keychain_credentials`.
+fn normalize_token(raw: &[u8]) -> Option<String> {
+    let token = std::str::from_utf8(raw).ok()?;
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_token() -> Option<String> {
+    None
+}
+
+/// Write (or replace) the bot token in the Keychain. `-U` updates the
+/// item in place if it already exists, so re-pairing from Settings
+/// does not leave stale duplicate entries.
+#[cfg(target_os = "macos")]
+pub fn write_token(token: &str) -> std::io::Result<()> {
+    let output = Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            SERVICE,
+            "-a",
+            ACCOUNT,
+            "-w",
+            token,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            LogWriter::log(
+                ErrorReport::new("Telegram token keychain write failed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("telegram.keychain.write")
+                    .build(),
+            );
+            return Err(e);
+        }
+    };
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let err = std::io::Error::other(format!("security add-generic-password failed: {stderr}"));
+    LogWriter::log(
+        ErrorReport::new("Telegram token keychain write failed")
+            .severity(ErrorSeverity::Warning)
+            .from_error(&err)
+            .at(file!(), line!())
+            .dedup("telegram.keychain.write")
+            .build(),
+    );
+    Err(err)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn write_token(_token: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Delete the bot token from the Keychain (the Settings "clear"
+/// affordance).
+#[cfg(target_os = "macos")]
+pub fn delete_token() -> std::io::Result<()> {
+    let output = Command::new("security")
+        .args(["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            LogWriter::log(
+                ErrorReport::new("Telegram token keychain delete failed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("telegram.keychain.delete")
+                    .build(),
+            );
+            return Err(e);
+        }
+    };
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let err = std::io::Error::other(format!("security delete-generic-password failed: {stderr}"));
+    LogWriter::log(
+        ErrorReport::new("Telegram token keychain delete failed")
+            .severity(ErrorSeverity::Warning)
+            .from_error(&err)
+            .at(file!(), line!())
+            .dedup("telegram.keychain.delete")
+            .build(),
+    );
+    Err(err)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn delete_token() -> std::io::Result<()> {
+    Ok(())
+}
+
+// `normalize_token` tests run unconditionally (it's a plain function,
+// no subprocess). The `read_token` / `write_token` / `delete_token`
+// no-op tests exercise the non-macOS fallback path, so only those
+// individual test functions are gated off macOS (matching
+// `daruda_claude::limits`'s `read_keychain_credentials_returns_no_token_off_macos`
+// pattern) rather than the whole module — keeping the module itself
+// compiling and selectable by `cargo test` on macOS CI.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_token_trims_and_accepts_valid_token() {
+        assert_eq!(
+            normalize_token(b"  abc123-token  \n"),
+            Some("abc123-token".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_token_rejects_empty_after_trim() {
+        assert_eq!(normalize_token(b"   \n\t  "), None);
+    }
+
+    #[test]
+    fn normalize_token_rejects_fully_empty_input() {
+        assert_eq!(normalize_token(b""), None);
+    }
+
+    #[test]
+    fn normalize_token_rejects_invalid_utf8() {
+        assert_eq!(normalize_token(&[0xff, 0xfe, 0xfd]), None);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn read_token_returns_none_off_macos() {
+        assert_eq!(read_token(), None);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn write_token_is_noop_ok_off_macos() {
+        assert!(write_token("fake-token").is_ok());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn delete_token_is_noop_ok_off_macos() {
+        assert!(delete_token().is_ok());
+    }
+}

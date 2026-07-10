@@ -63,6 +63,8 @@ toml = "0.8"
 tree-sitter = "0.25"
 tree-sitter-highlight = "0.25"
 unicode-segmentation = "1"
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+uuid = { version = "1.10", features = ["v4"] }
 open = "5.3.5"
 which = "6"
 nucleo-matcher = "0.3.1"
