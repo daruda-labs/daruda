@@ -38,6 +38,22 @@ pub(in crate::workspace) fn next_mode_id(modes: &daruda_acp::ModeStateView) -> O
     Some(modes.available[next].id.clone())
 }
 
+/// The fold key for a tool call's card. A subagent launch — Claude's `Task`
+/// tool, which carries `subagent_type` — gets [`FoldKey::Subagent`] so its card
+/// defaults collapsed: the subagent's flattened inner tool calls nest inside the
+/// card and would otherwise fill the transcript while it runs. Every other tool
+/// call gets the standard [`FoldKey::Tool`]. Single source shared by the
+/// renderer (top-level and nested cards) and [`collect_foldable_keys`] so a
+/// subagent's card, its click toggle, and expand/collapse-all all agree on one
+/// key — a mismatch would make the toggle write an override the card never reads.
+pub(in crate::workspace) fn tool_fold_key(tc: &daruda_acp::ToolCallItem) -> FoldKey {
+    if tc.subagent_type().is_some() {
+        FoldKey::Subagent(tc.id.clone())
+    } else {
+        FoldKey::Tool(tc.id.clone())
+    }
+}
+
 /// The visible foldable-key set for a conversation: each assistant / thinking
 /// item by index, each tool call by id plus one `Diff` key per diff it carries
 /// (the same `diff_editor_key` the renderer embeds with). User / permission /
@@ -84,7 +100,7 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
             daruda_acp::ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
             daruda_acp::ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
             daruda_acp::ChatItem::ToolCall(tc) => {
-                keys.push(FoldKey::Tool(tc.id.clone()));
+                keys.push(tool_fold_key(tc));
                 for di in 0..tc.diffs.len() {
                     keys.push(FoldKey::Diff(diff_editor_key(&tc.id, di)));
                 }
@@ -439,8 +455,9 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
                     .any(is_active)
             })
             .unwrap_or(false),
-        // Diff (DefaultExpanded) and raw-input (DefaultCollapsed) ignore `active`.
-        FoldKey::Diff(_) | FoldKey::ToolRawInput(_) => false,
+        // Diff (DefaultExpanded), raw-input and subagent (DefaultCollapsed) all
+        // ignore `active` in their policy, so the value is irrelevant here.
+        FoldKey::Diff(_) | FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => false,
     }
 }
 
@@ -780,6 +797,27 @@ mod tests {
             raw_input: None,
             parent_tool_id: None,
         }
+    }
+
+    /// A subagent launch (`Task` tool carrying `subagent_type`) keys to
+    /// `FoldKey::Subagent` (collapsed by default); every other tool call keys to
+    /// `FoldKey::Tool`.
+    #[test]
+    fn tool_fold_key_routes_subagent_launch_to_subagent_variant() {
+        use daruda_acp::ToolStatusView::InProgress;
+
+        let plain = tool_call("c1", InProgress, 0);
+        assert_eq!(tool_fold_key(&plain), FoldKey::Tool("c1".to_owned()));
+
+        let mut task = tool_call("task-1", InProgress, 0);
+        task.raw_input = Some(serde_json::json!({ "subagent_type": "code-reviewer" }));
+        assert_eq!(tool_fold_key(&task), FoldKey::Subagent("task-1".to_owned()));
+
+        // An empty `subagent_type` is treated as absent (see `subagent_type`), so
+        // it stays a plain tool rather than a subagent box.
+        let mut empty = tool_call("task-2", InProgress, 0);
+        empty.raw_input = Some(serde_json::json!({ "subagent_type": "" }));
+        assert_eq!(tool_fold_key(&empty), FoldKey::Tool("task-2".to_owned()));
     }
 
     /// `is_active` is true while a block is streaming, or a tool call is live

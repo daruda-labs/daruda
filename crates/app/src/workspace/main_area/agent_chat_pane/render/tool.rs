@@ -14,7 +14,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    diff_editor_key, fold_active, renders_raw_input,
+    diff_editor_key, fold_active, renders_raw_input, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{
@@ -233,7 +233,10 @@ pub(super) fn tool_card(
                 .child(SharedString::from(subagent_label)),
         );
         for child in children {
-            let child_key = FoldKey::Tool(child.id.clone());
+            // A nested child may itself be a subagent launch (a subagent that
+            // spawns its own subagent), so key it the same way as a top-level
+            // card — collapsed by default when it is one.
+            let child_key = tool_fold_key(child);
             let child_expanded = fold.is_expanded(&child_key, fold_active(&child_key, items));
             body = body.child(
                 tool_card(

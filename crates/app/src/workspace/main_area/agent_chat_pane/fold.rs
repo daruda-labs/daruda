@@ -35,6 +35,11 @@ pub(in crate::workspace) enum FoldKey {
     Diff(String),
     /// A tool call's raw-input (JSON args) disclosure, keyed by tool-call id.
     ToolRawInput(String),
+    /// A subagent-launch tool call (Claude's `Task` tool, which carries
+    /// `subagent_type`), keyed by tool-call id. Distinct from `Tool` so it can
+    /// default collapsed: the subagent's flattened inner activity nests inside
+    /// the card and would otherwise fill the transcript while it runs.
+    Subagent(String),
     /// A consecutive tool-call group, keyed by the group's first tool-call id.
     ToolGroup(String),
     /// An agent response (the run of agent items under a user message), keyed by
@@ -64,8 +69,12 @@ impl FoldKey {
             | FoldKey::Tool(_)
             | FoldKey::ToolGroup(_)
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
-            // Raw-input JSON is supplementary detail — collapsed until asked for.
-            FoldKey::ToolRawInput(_) => FoldPolicy::DefaultCollapsed,
+            // Raw-input JSON is supplementary detail, and a subagent launch's
+            // nested activity is bulky — both stay collapsed until asked for. A
+            // subagent uses `DefaultCollapsed` (not `ExpandedWhileActive`) so
+            // the box is folded from the start AND stays folded while the
+            // subagent runs; the user expands it to watch.
+            FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => FoldPolicy::DefaultCollapsed,
         }
     }
 }
@@ -162,6 +171,27 @@ mod tests {
         let state = FoldState::default();
         assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), true));
         assert!(!state.is_expanded(&FoldKey::ToolRawInput("call-1".into()), false));
+    }
+
+    #[test]
+    fn subagent_is_collapsed_by_default_even_while_active() {
+        let state = FoldState::default();
+        let key = FoldKey::Subagent("task-1".into());
+        // Unlike a plain Tool (expanded while active), a subagent box is folded
+        // from the start and stays folded while it runs.
+        assert!(!state.is_expanded(&key, true));
+        assert!(!state.is_expanded(&key, false));
+    }
+
+    #[test]
+    fn subagent_override_expands_and_sticks_across_active() {
+        let mut state = FoldState::default();
+        let key = FoldKey::Subagent("task-1".into());
+        // Default collapsed → toggle expands, and the choice persists whether
+        // the subagent is still running or has settled.
+        state.toggle(key.clone(), false);
+        assert!(state.is_expanded(&key, false));
+        assert!(state.is_expanded(&key, true));
     }
 
     #[test]

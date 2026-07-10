@@ -69,7 +69,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, IconName, StatusPulseClock, button_bare, disclosure};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, activity_bar_title, is_active,
+    DiffStat, activity_bar_title, is_active, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
@@ -681,7 +681,7 @@ fn render_item(
             thinking_block(ix, key, expanded, text, mermaid_images, dim, cx).into_any_element()
         }
         ChatItem::ToolCall(tc) => {
-            let key = FoldKey::Tool(tc.id.clone());
+            let key = tool_fold_key(tc);
             let expanded = fold.is_expanded(&key, is_active(item));
             tool_card(
                 key,
