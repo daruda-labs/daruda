@@ -926,9 +926,33 @@ pub fn agent_chat_idle() -> String {
     rust_i18n::t!("agent_chat.idle").into_owned()
 }
 
-/// Placeholder copy shown while the agent session is connecting.
+/// Placeholder copy shown while the agent session is connecting, before any
+/// handshake milestone has been reported yet.
 pub fn agent_chat_connecting() -> String {
     rust_i18n::t!("agent_chat.connecting").into_owned()
+}
+
+/// Status banner shown while `initialize` is in flight (awaiting the agent's
+/// capabilities reply).
+pub fn agent_chat_connecting_handshake() -> String {
+    rust_i18n::t!("agent_chat.connecting_handshake").into_owned()
+}
+
+/// Status banner shown while `session/new` is in flight (fresh session).
+pub fn agent_chat_connecting_creating_session() -> String {
+    rust_i18n::t!("agent_chat.connecting_creating_session").into_owned()
+}
+
+/// Status banner shown while `session/load` is in flight (resuming a
+/// persisted session).
+pub fn agent_chat_connecting_loading_session() -> String {
+    rust_i18n::t!("agent_chat.connecting_loading_session").into_owned()
+}
+
+/// Status banner shown while `session/set_mode` is in flight, applying the
+/// configured initial mode to a freshly created session.
+pub fn agent_chat_connecting_applying_mode() -> String {
+    rust_i18n::t!("agent_chat.connecting_applying_mode").into_owned()
 }
 
 /// Status banner shown while the app is downloading the Node.js runtime the
@@ -967,6 +991,19 @@ pub fn agent_chat_no_remote_cwd() -> String {
 /// Prefix for the connection-error status line.
 pub fn agent_chat_error_prefix() -> String {
     rust_i18n::t!("agent_chat.error_prefix").into_owned()
+}
+
+/// Error-line reason set when the connection's event stream closes while the
+/// pane is still `Connecting`/`Handshaking`/`PreparingRuntime` — no
+/// `Connected`/`Error` ever arrived, so nothing else would surface a failure.
+/// The renderer prepends the error prefix, so this is the bare reason.
+pub fn agent_chat_error_stream_ended() -> String {
+    rust_i18n::t!("agent_chat.error_stream_ended").into_owned()
+}
+
+/// Label for the "Retry" button shown in the Error status banner.
+pub fn agent_chat_retry() -> String {
+    rust_i18n::t!("agent_chat.retry").into_owned()
 }
 
 /// Empty-conversation hint shown before the first message.

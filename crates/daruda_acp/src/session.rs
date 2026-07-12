@@ -36,12 +36,14 @@
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::future::Future;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -55,6 +57,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::channel::oneshot;
+use futures::future::Either;
 
 use crate::connection::{AcpClientError, AdapterCommand};
 use crate::model::{ConfigOptionView, ModeStateView, SessionCapabilitiesView};
@@ -117,9 +120,30 @@ impl From<agent_client_protocol::schema::MaybeUndefined<String>> for InfoFieldCh
     }
 }
 
+/// A milestone reached while a connect is in flight, before the session is
+/// ready for prompts. Purely a progress marker for the host's status line —
+/// it carries no data of its own, unlike [`crate::node::NodeProgress`] (which
+/// tracks a download's byte progress).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectPhase {
+    /// `initialize` request sent, awaiting the agent's capabilities reply.
+    Handshaking,
+    /// `session/new` sent — creating a fresh session.
+    CreatingSession,
+    /// `session/load` sent — resuming a persisted session id.
+    LoadingSession,
+    /// `session/set_mode` sent to apply the configured initial mode on a
+    /// freshly created session.
+    ApplyingMode,
+}
+
 /// An event emitted by the live connection for the host to consume.
 #[derive(Debug)]
 pub enum AcpEvent {
+    /// A connect milestone was reached. Only ever emitted before the matching
+    /// [`AcpEvent::Connected`] or [`AcpEvent::Error`] — the host should ignore
+    /// a late/stale one that arrives after either (guard on current status).
+    ConnectProgress(ConnectPhase),
     /// `initialize` + `session/new` succeeded; the session is ready for prompts.
     /// `modes` carries the advertised session-mode state when the agent supports
     /// modes; `None` otherwise. `config_options` carries the advertised select
@@ -405,6 +429,57 @@ pub fn connect_agent_session(
     connect_session(adapter, cwd, initial_mode, resume)
 }
 
+/// Wall-clock budget for `initialize` and — on a *fresh* session —
+/// `session/new` and the optional `set_mode`. Without this, a hung adapter
+/// (e.g. an SSH-wrapped remote command stuck on a silent auth prompt, or a
+/// dead network) parks `block_task().await` forever: no event ever reaches
+/// the host, so the connecting status never resolves. `prompt_loop` is
+/// deliberately NOT covered — a live session with no traffic is normal, not a
+/// hang. `session/load` (a resume) is NOT covered by this budget — see
+/// [`CONNECT_RESUME_LOAD_TIMEOUT`]: these three requests carry no bulk
+/// payload and a healthy adapter answers in milliseconds, so a generous but
+/// still-bounded 60s is appropriate.
+const CONNECT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Wall-clock budget for `session/load` alone. Separate from
+/// [`CONNECT_HANDSHAKE_TIMEOUT`] because a resume's response only arrives
+/// after the adapter has replayed the *entire* prior conversation as
+/// `session/update` notifications first — a large history, or a slow link
+/// (e.g. the SSH-wrapped remote agent), can legitimately take much longer
+/// than a fresh `session/new`'s near-instant reply without being hung. Still
+/// bounded, so a genuinely stuck load (the same class of bug this whole
+/// timeout mechanism exists for) doesn't strand the pane forever.
+const CONNECT_RESUME_LOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Race `fut` against a `timeout` timer; on timeout, returns a synthetic
+/// protocol error naming `what` so the host's error banner names the stuck
+/// step rather than a generic failure. `fut` must resolve on its own within
+/// the timeout — cancellation here only stops *waiting* for it (the future is
+/// dropped), it does not abort a stuck subprocess.
+async fn with_connect_timeout<T>(
+    what: &str,
+    timeout: Duration,
+    fut: impl Future<Output = Result<T, agent_client_protocol::Error>>,
+) -> Result<T, agent_client_protocol::Error> {
+    // ALLOW: this crate is GPUI-free (see crates/daruda_acp/CLAUDE.md) and has
+    // no BackgroundExecutor to time on; smol::Timer is the only timer source
+    // available here. Tests pass a short explicit `timeout`, so this stays
+    // deterministic.
+    #[allow(clippy::disallowed_methods)]
+    let timer = smol::Timer::after(timeout);
+    match futures::future::select(Box::pin(fut), Box::pin(timer)).await {
+        Either::Left((result, _)) => result,
+        Either::Right(_) => Err(agent_client_protocol::Error::new(
+            -32603,
+            format!(
+                "{what} timed out after {}s — check the agent command and network reachability \
+                 (e.g. SSH host connectivity) and retry",
+                timeout.as_secs()
+            ),
+        )),
+    }
+}
+
 /// Drive the whole connection: handshake, session creation, then the prompt /
 /// cancel select loop, until the command channel closes or the protocol fails.
 async fn run_connection(
@@ -507,26 +582,40 @@ async fn run_connection(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| async move {
-            let init = connection
-                .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                .block_task()
-                .await?;
-            let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
+            // Each handshake step gets its own deadline rather than one budget
+            // for the whole sequence, because `session/load` is structurally
+            // different: its response only arrives after the adapter replays
+            // the *entire* prior conversation, which can legitimately take far
+            // longer than `initialize`/`session/new`/`set_mode`'s near-instant
+            // replies without being hung — see `CONNECT_RESUME_LOAD_TIMEOUT`.
+            // `prompt_loop` below is deliberately outside every timeout here —
+            // a live, quiet session is normal.
+            let _ = event_tx.unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::Handshaking));
+            let (capabilities, resume, fresh) =
+                with_connect_timeout("initialize", CONNECT_HANDSHAKE_TIMEOUT, async {
+                    let init = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let capabilities = session_capabilities_from_protocol(&init.agent_capabilities);
 
-            // Gate the requested resume on advertised `session/load` support:
-            // downgrade to a fresh session (with a Notice) when the agent can't
-            // replay history, so a resume against a non-load agent no longer
-            // fails the whole connect.
-            let (resume, resume_notice) = resolve_resume(resume, capabilities.load);
-            if let Some(notice) = resume_notice {
-                let _ = event_tx.unbounded_send(AcpEvent::Notice(notice));
-            }
-            // Whether this connect ends up creating a *fresh* session (either no
-            // resume was requested, or a requested resume was downgraded because
-            // the agent doesn't advertise `session/load`). The configured initial
-            // mode is applied only on a fresh session; a real load preserves the
-            // resumed session's own mode.
-            let fresh = resume.is_none();
+                    // Gate the requested resume on advertised `session/load` support:
+                    // downgrade to a fresh session (with a Notice) when the agent can't
+                    // replay history, so a resume against a non-load agent no longer
+                    // fails the whole connect.
+                    let (resume, resume_notice) = resolve_resume(resume, capabilities.load);
+                    if let Some(notice) = resume_notice {
+                        let _ = event_tx.unbounded_send(AcpEvent::Notice(notice));
+                    }
+                    // Whether this connect ends up creating a *fresh* session (either no
+                    // resume was requested, or a requested resume was downgraded because
+                    // the agent doesn't advertise `session/load`). The configured initial
+                    // mode is applied only on a fresh session; a real load preserves the
+                    // resumed session's own mode.
+                    let fresh = resume.is_none();
+                    Ok((capabilities, resume, fresh))
+                })
+                .await?;
 
             // New session, or resume an existing one via session/load. A load
             // replays the prior conversation as session/update notifications
@@ -540,30 +629,40 @@ async fn run_connection(
                 Vec<ConfigOptionView>,
             ) = match resume {
                 Some(id) => {
-                    let loaded = connection
-                        .send_request(LoadSessionRequest::new(id.clone(), cwd))
-                        .block_task()
-                        .await?;
-                    (
-                        id,
-                        loaded.modes.as_ref().map(Into::into),
-                        config_options_from_protocol(
-                            loaded.config_options.as_deref().unwrap_or(&[]),
-                        ),
-                    )
+                    let _ = event_tx
+                        .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::LoadingSession));
+                    with_connect_timeout("session/load", CONNECT_RESUME_LOAD_TIMEOUT, async {
+                        let loaded = connection
+                            .send_request(LoadSessionRequest::new(id.clone(), cwd))
+                            .block_task()
+                            .await?;
+                        Ok((
+                            id,
+                            loaded.modes.as_ref().map(Into::into),
+                            config_options_from_protocol(
+                                loaded.config_options.as_deref().unwrap_or(&[]),
+                            ),
+                        ))
+                    })
+                    .await?
                 }
                 None => {
-                    let new_session = connection
-                        .send_request(NewSessionRequest::new(cwd))
-                        .block_task()
-                        .await?;
-                    (
-                        new_session.session_id.clone(),
-                        new_session.modes.as_ref().map(Into::into),
-                        config_options_from_protocol(
-                            new_session.config_options.as_deref().unwrap_or(&[]),
-                        ),
-                    )
+                    let _ = event_tx
+                        .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::CreatingSession));
+                    with_connect_timeout("session/new", CONNECT_HANDSHAKE_TIMEOUT, async {
+                        let new_session = connection
+                            .send_request(NewSessionRequest::new(cwd))
+                            .block_task()
+                            .await?;
+                        Ok((
+                            new_session.session_id.clone(),
+                            new_session.modes.as_ref().map(Into::into),
+                            config_options_from_protocol(
+                                new_session.config_options.as_deref().unwrap_or(&[]),
+                            ),
+                        ))
+                    })
+                    .await?
                 }
             };
 
@@ -581,18 +680,27 @@ async fn run_connection(
             if fresh && let (Some(id), Some(ref mut mode_state)) = (initial_mode, modes.as_mut()) {
                 let available = mode_state.available.iter().any(|m| m.id == id);
                 if available && mode_state.current != id {
-                    match connection
-                        .send_request(SetSessionModeRequest::new(session_id.clone(), id.clone()))
-                        .block_task()
-                        .await
-                    {
+                    let _ = event_tx
+                        .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::ApplyingMode));
+                    let set_mode_result = with_connect_timeout(
+                        "session/set_mode",
+                        CONNECT_HANDSHAKE_TIMEOUT,
+                        connection
+                            .send_request(SetSessionModeRequest::new(
+                                session_id.clone(),
+                                id.clone(),
+                            ))
+                            .block_task(),
+                    )
+                    .await;
+                    match set_mode_result {
                         Ok(_) => {
                             mode_state.current = id;
                         }
                         Err(e) => {
                             let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
-                                "set_mode({id}) on connect failed — session is active in the \
-                                 adapter's default mode: {e:?}"
+                                "set_mode({id}) on connect failed — session is active \
+                                 in the adapter's default mode: {e:?}"
                             )));
                         }
                     }
@@ -1094,5 +1202,32 @@ mod tests {
         };
         // Must not panic.
         handle.respond_permission(99, PermissionDecision::Cancelled);
+    }
+
+    #[test]
+    fn with_connect_timeout_passes_through_a_future_that_resolves_first() {
+        let result = smol::block_on(with_connect_timeout(
+            "probe",
+            Duration::from_secs(5),
+            std::future::ready(Ok::<_, agent_client_protocol::Error>(42)),
+        ));
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn with_connect_timeout_errors_out_a_hung_future() {
+        // A future that never resolves models a stuck handshake (e.g. an
+        // SSH-wrapped adapter blocked on a silent auth prompt): without the
+        // race against the timer, `run_connection` would await this forever
+        // and the host would never see an `AcpEvent`, matching the reported
+        // "stuck on Connecting" symptom.
+        let result = smol::block_on(with_connect_timeout(
+            "probe",
+            Duration::from_millis(20),
+            std::future::pending::<Result<u32, agent_client_protocol::Error>>(),
+        ));
+        let err = result.expect_err("a never-resolving future must time out");
+        assert!(err.message.contains("probe"), "{}", err.message);
+        assert!(err.message.contains("timed out"), "{}", err.message);
     }
 }

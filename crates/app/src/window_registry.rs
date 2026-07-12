@@ -299,6 +299,24 @@ impl WindowRegistry {
             .map(|(h, _)| *h)
     }
 
+    /// The inverse of [`Self::handle_for_workspace`]: look up the `Workspace`
+    /// entity that owns window `handle`. Used by a cached, entity-backed pane
+    /// (e.g. `AgentChatView`, whose own `cx.entity_id()` is the pane, not the
+    /// Workspace) to dispatch a click into a `Workspace` op via its stored
+    /// `window_handle` — `weak.update(cx, |ws, cx| ws.some_op(..))` needs no
+    /// live `&mut Window`, so this alone is enough; reach for
+    /// `try_update_workspace_window` instead when the op needs one.
+    pub(crate) fn workspace_for_window(
+        handle: AnyWindowHandle,
+        cx: &App,
+    ) -> Option<WeakEntity<Workspace>> {
+        cx.try_global::<WindowRegistry>()?
+            .workspaces
+            .iter()
+            .find(|(h, _)| *h == handle)
+            .map(|(_, weak)| weak.clone())
+    }
+
     /// Return the window handle of the open Welcome window, if any.
     /// Used by `active_window_to_close` to detect whether the frontmost
     /// window is the Welcome screen.
