@@ -16,6 +16,15 @@
 //! Blocking on purpose (system `tar` + synchronous `ureq`): it runs on the
 //! host's background executor, mirroring the blocking git-CLI layer. Nothing
 //! here touches GPUI.
+//!
+//! Both runtimes also redirect `npm_config_cache` to an app-owned directory
+//! (`<install_root>/npx-cache`) instead of the default `~/.npm` — see
+//! [`npx_cache_dir`]'s doc comment for why the shared, unversioned default is
+//! unsafe to trust. One cost of that isolation: an existing install upgrading
+//! into this cache for the first time reinstalls each configured agent's npm
+//! package once (a fresh directory, not a migration of the old one — see
+//! [`npx_cache_dir`]) instead of reusing whatever was already warm in
+//! `~/.npm/_npx`.
 
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -124,31 +133,41 @@ fn parse_env_assignment(token: &str) -> Option<(&str, &str)> {
 impl NodeRuntime {
     /// Wrap an agent launch `command` for this runtime.
     ///
-    /// System, for an `npx` / `node` command, prepends an arch-pinning env
-    /// prefix — see [`prefix_with_host_arch_env`]. Any other System command
-    /// passes through unchanged; `node` / `npx` are already on the hydrated
-    /// `PATH`. Managed, for an `npx` / `node` command, rewrites it to a JSON
-    /// stdio config: the leading launcher token becomes the **absolute** path
-    /// inside the managed `bin/`, the remaining tokens are its args, and a
-    /// `PATH` prepending the managed `bin/` is injected so the launcher, and
-    /// the adapter it spawns, find the managed `node`. JSON (not a bash
-    /// string) is used because the managed path can contain spaces (macOS
-    /// `Application Support`), which bash-word splitting would break. A Managed
-    /// runtime with any other command passes it through unchanged.
+    /// `install_root` is the same app-managed directory passed to
+    /// [`ensure_node`] — used here only to derive [`npx_cache_dir`], not to
+    /// locate a Node.js install (a `System` runtime needs no such thing).
+    ///
+    /// System, for an `npx` / `node` command, prepends an arch-pinning and
+    /// cache-isolating env prefix — see [`prefix_with_host_arch_env`]. Any
+    /// other System command passes through unchanged; `node` / `npx` are
+    /// already on the hydrated `PATH`. Managed, for an `npx` / `node`
+    /// command, rewrites it to a JSON stdio config: the leading launcher
+    /// token becomes the **absolute** path inside the managed `bin/`, the
+    /// remaining tokens are its args, a `PATH` prepending the managed `bin/`
+    /// is injected so the launcher, and the adapter it spawns, find the
+    /// managed `node`, and (unless the command already sets its own
+    /// `npm_config_cache`) an isolated cache dir is injected too — see
+    /// [`npx_cache_dir`]. JSON (not a bash string) is used because the
+    /// managed path can contain spaces (macOS `Application Support`), which
+    /// bash-word splitting would break. A Managed runtime with any other
+    /// command passes it through unchanged.
     ///
     /// Only simple whitespace-tokenized `npx -y <pkg>` / `node <script> …` forms
     /// are rewritten; a caller needing more control supplies a JSON stdio config
     /// directly.
     #[must_use]
-    pub fn wrap_command(&self, command: &str) -> AdapterCommand {
+    pub fn wrap_command(&self, command: &str, install_root: &Path) -> AdapterCommand {
         match self {
             NodeRuntime::System if command_needs_node(command) => {
-                AdapterCommand(prefix_with_host_arch_env(command))
+                AdapterCommand(prefix_with_host_arch_env(command, install_root))
             }
             NodeRuntime::System => AdapterCommand(command.to_string()),
             NodeRuntime::Managed { node_dir } if command_needs_node(command) => {
                 let bin_dir = node_dir.join("bin");
                 let (env_assignments, tokens) = split_env_prefixed_tokens(command);
+                let has_cache_override = env_assignments
+                    .iter()
+                    .any(|(name, _)| *name == "npm_config_cache");
                 let launcher = tokens.first().copied().unwrap_or_default();
                 let abs_launcher = bin_dir.join(launcher);
                 let args = tokens
@@ -162,6 +181,17 @@ impl NodeRuntime {
                     .map(|(name, value)| EnvVariable::new(name, value))
                     .collect::<Vec<_>>();
                 env.push(EnvVariable::new("PATH", path));
+                // Skipped when the command's own env prefix already sets
+                // `npm_config_cache` — respect that explicit override rather
+                // than silently discard it (the env list is applied via
+                // sequential last-write-wins `Command::env` calls downstream,
+                // so pushing ours unconditionally here would win instead).
+                if !has_cache_override {
+                    env.push(EnvVariable::new(
+                        "npm_config_cache",
+                        npx_cache_dir(install_root).to_string_lossy().into_owned(),
+                    ));
+                }
                 let stdio = McpServerStdio::new("acp-agent", abs_launcher)
                     .args(args)
                     .env(env);
@@ -315,18 +345,39 @@ fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
     Ok((os, arch))
 }
 
-/// Prepend `npm_config_cpu=<arch> npm_config_os=<os>` — npm's env-var form
-/// of `--cpu`/`--os` — to `command`, so `npx` installs a platform-specific
+/// Prepend `npm_config_cpu=<arch> npm_config_os=<os> npm_config_cache=<dir>`
+/// — npm's env-var form of `--cpu`/`--os`/`--cache` — to `command`.
+///
+/// `npm_config_cpu`/`npm_config_os` make `npx` install a platform-specific
 /// native-binary optionalDependency for the real host arch even if the
 /// running Node.js itself reports a different `process.arch` (e.g. x64
-/// under Rosetta). Pure install-time defense-in-depth alongside
-/// [`detect_system_node`]'s own arch check: it does not fix a package whose
+/// under Rosetta); this is install-time defense-in-depth alongside
+/// [`detect_system_node`]'s own arch check, and does not fix a package whose
 /// *runtime* also self-detects arch off the live process rather than off
-/// what got installed. Best-effort — an unsupported `node_platform()` just
-/// leaves `command` unprefixed.
-fn prefix_with_host_arch_env(command: &str) -> String {
+/// what got installed. `npm_config_cache` redirects npx's cache to
+/// [`npx_cache_dir`] for the same isolation reason `Managed` needs it — see
+/// that function's doc comment.
+///
+/// Prepending (rather than appending) means a command whose own env prefix
+/// already sets one of these three names — legal per
+/// [`split_env_prefixed_tokens`], e.g. an `npm_config_cache=... npx ...`
+/// override — still wins: `AcpAgent::from_str` parses *all* leading
+/// `NAME=value` tokens left to right into one env list applied via
+/// sequential last-write-wins `Command::env` calls, so whichever assignment
+/// for a given name appears **later** in the string (the command's own,
+/// here) takes effect.
+///
+/// Best-effort — an unsupported `node_platform()` just leaves `command`
+/// unprefixed.
+fn prefix_with_host_arch_env(command: &str, install_root: &Path) -> String {
     match node_platform() {
-        Ok((os, arch)) => format!("npm_config_cpu={arch} npm_config_os={os} {command}"),
+        Ok((os, arch)) => {
+            let cache = npx_cache_dir(install_root);
+            format!(
+                "npm_config_cpu={arch} npm_config_os={os} npm_config_cache={} {command}",
+                cache.display()
+            )
+        }
         Err(_) => command.to_string(),
     }
 }
@@ -339,6 +390,31 @@ fn managed_folder_name(os: &str, arch: &str) -> String {
 /// The extracted managed node directory under `install_root`.
 fn managed_node_dir(install_root: &Path, os: &str, arch: &str) -> PathBuf {
     install_root.join(managed_folder_name(os, arch))
+}
+
+/// App-owned `npm_config_cache` target, used by both runtimes — a sibling of
+/// the versioned managed `node_dir` under `install_root` (so it is shared
+/// across a `MANAGED_NODE_VERSION` bump, not tied to one extracted Node.js
+/// tree), but populated by whichever Node.js — system or managed — is
+/// currently selected.
+///
+/// Needs to be app-owned rather than the default, shared `~/.npm`: a
+/// wrong-arch Node.js run elsewhere on the machine (a stray terminal
+/// command, another tool, or a session predating this isolation) can leave a
+/// wrong-arch native-binary `optionalDependency` cached under `~/.npm/_npx`
+/// for a given package spec; daruda reusing that slot — even with a
+/// correctly-arch-selected runtime of its own — reproduces the same "native
+/// binary not found" failure. Isolating the cache means only daruda's own,
+/// already-arch-verified runtime ever writes into it.
+///
+/// Trade-off: this directory starts empty, so the very first launch after
+/// adopting this isolation (or after a fresh install) reinstalls each
+/// configured agent's npm package once via `npx`, instead of reusing
+/// whatever was already warm in the old shared `~/.npm/_npx`. Deliberately
+/// not seeded from that old cache — the whole point of isolating it is to
+/// stop trusting cache entries daruda didn't itself just write.
+fn npx_cache_dir(install_root: &Path) -> PathBuf {
+    install_root.join("npx-cache")
 }
 
 /// The `node` binary inside an extracted managed node directory.
@@ -565,18 +641,58 @@ mod tests {
         assert!(!command_needs_node(""));
     }
 
+    /// Fixed test `install_root`, distinct from `node_dir` (which itself
+    /// lives under a real one in production) so assertions can tell the two
+    /// paths apart.
+    fn test_install_root() -> PathBuf {
+        PathBuf::from("/data/daruda/node")
+    }
+
     #[test]
-    fn system_runtime_prefixes_arch_env_for_an_npx_command() {
+    fn system_runtime_prefixes_arch_and_cache_env_for_an_npx_command() {
         let cmd = "npx -y @agentclientprotocol/claude-agent-acp@latest";
         let (os, arch) = node_platform().expect("supported test platform");
-        let expected = format!("npm_config_cpu={arch} npm_config_os={os} {cmd}");
-        assert_eq!(NodeRuntime::System.wrap_command(cmd).0, expected);
+        let install_root = test_install_root();
+        let expected = format!(
+            "npm_config_cpu={arch} npm_config_os={os} npm_config_cache={} {cmd}",
+            install_root.join("npx-cache").display()
+        );
+        assert_eq!(
+            NodeRuntime::System.wrap_command(cmd, &install_root).0,
+            expected
+        );
+    }
+
+    #[test]
+    fn system_runtime_lets_an_explicit_npm_config_cache_prefix_win() {
+        // The regression this guards: a caller-supplied `npm_config_cache=...`
+        // prefix (legal per `split_env_prefixed_tokens`, same as the
+        // `AUGMENT_DISABLE_AUTO_UPDATE=1 npx ...` form) must not be silently
+        // discarded by daruda's own isolation default.
+        let cmd = "npm_config_cache=/custom/cache npx -y pkg";
+        let install_root = test_install_root();
+        let command = NodeRuntime::System.wrap_command(cmd, &install_root);
+        // Both assignments are present (ours first, the override last); the
+        // override wins downstream because `AcpAgent::from_str` applies the
+        // env list via sequential last-write-wins `Command::env` calls.
+        let last_cache_assignment = command
+            .0
+            .split_whitespace()
+            .filter_map(|tok| tok.strip_prefix("npm_config_cache="))
+            .next_back()
+            .expect("npm_config_cache present");
+        assert_eq!(last_cache_assignment, "/custom/cache");
     }
 
     #[test]
     fn system_runtime_passes_a_non_node_command_through_unchanged() {
         let cmd = "/usr/local/bin/codex-acp --flag";
-        assert_eq!(NodeRuntime::System.wrap_command(cmd).0, cmd);
+        assert_eq!(
+            NodeRuntime::System
+                .wrap_command(cmd, &test_install_root())
+                .0,
+            cmd
+        );
     }
 
     #[test]
@@ -586,7 +702,7 @@ mod tests {
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .wrap_command(&cmd);
+        .wrap_command(&cmd, &test_install_root());
 
         // The command must be JSON (leading `{`) so no shell splitting happens.
         assert!(command.0.trim_start().starts_with('{'), "{}", command.0);
@@ -615,12 +731,65 @@ mod tests {
     }
 
     #[test]
+    fn managed_runtime_sets_an_isolated_npm_config_cache() {
+        // The regression this guards: a stray wrong-arch Node.js elsewhere on
+        // the machine can populate the *default* `~/.npm/_npx` cache slot for
+        // a package spec with the wrong-arch native binary; daruda's own
+        // correctly-arch-selected managed run must never reuse that slot.
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let cmd = format!("npx -y {ADAPTER_NPM_PACKAGE}");
+        let install_root = test_install_root();
+        let command = NodeRuntime::Managed { node_dir }.wrap_command(&cmd, &install_root);
+        let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                let cache = stdio
+                    .env
+                    .iter()
+                    .find(|e| e.name == "npm_config_cache")
+                    .expect("npm_config_cache env present");
+                assert_eq!(
+                    cache.value,
+                    install_root.join("npx-cache").to_string_lossy()
+                );
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn managed_runtime_lets_an_explicit_npm_config_cache_prefix_win() {
+        let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
+        let command = NodeRuntime::Managed { node_dir }.wrap_command(
+            "npm_config_cache=/custom/cache npx -y pkg",
+            &test_install_root(),
+        );
+        let agent = AcpAgent::from_str(&command.0).expect("managed command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                let cache_entries = stdio
+                    .env
+                    .iter()
+                    .filter(|e| e.name == "npm_config_cache")
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    cache_entries.len(),
+                    1,
+                    "must not emit a second, app-owned npm_config_cache alongside the caller's"
+                );
+                assert_eq!(cache_entries[0].value, "/custom/cache");
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn managed_runtime_rewrites_the_node_launcher_token() {
         let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .wrap_command("node /path/adapter.js --flag");
+        .wrap_command("node /path/adapter.js --flag", &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("managed node command parses");
         match agent.into_server() {
             McpServer::Stdio(stdio) => {
@@ -637,7 +806,10 @@ mod tests {
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .wrap_command("AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@0.32.0 --acp");
+        .wrap_command(
+            "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@0.32.0 --acp",
+            &test_install_root(),
+        );
         let agent = AcpAgent::from_str(&command.0).expect("managed env command parses");
         match agent.into_server() {
             McpServer::Stdio(stdio) => {
@@ -666,7 +838,12 @@ mod tests {
     fn managed_runtime_passes_non_node_command_through() {
         let node_dir = PathBuf::from("/data/daruda/node/node-v24.11.0-darwin-arm64");
         let cmd = "/usr/local/bin/codex-acp";
-        assert_eq!(NodeRuntime::Managed { node_dir }.wrap_command(cmd).0, cmd);
+        assert_eq!(
+            NodeRuntime::Managed { node_dir }
+                .wrap_command(cmd, &test_install_root())
+                .0,
+            cmd
+        );
     }
 
     #[test]
@@ -680,7 +857,7 @@ mod tests {
         let command = NodeRuntime::Managed {
             node_dir: node_dir.clone(),
         }
-        .wrap_command(&cmd);
+        .wrap_command(&cmd, &test_install_root());
         let agent = AcpAgent::from_str(&command.0).expect("command with spaces parses");
         match agent.into_server() {
             McpServer::Stdio(stdio) => {

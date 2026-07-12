@@ -422,7 +422,8 @@ pub fn connect_agent_session(
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let adapter = if crate::node::command_needs_node(&command) {
-        crate::node::ensure_node(&node_install_dir, progress)?.wrap_command(&command)
+        crate::node::ensure_node(&node_install_dir, progress)?
+            .wrap_command(&command, &node_install_dir)
     } else {
         AdapterCommand(command)
     };
