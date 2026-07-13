@@ -18,7 +18,7 @@ use super::Workspace;
 use super::command::lane_switcher::LaneCandidate;
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
-use crate::workspace::main_area::pane::{self, TabEntry};
+use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
 /// Immutable plan produced by `CreateWorktreeModal::validate` — holds
@@ -494,9 +494,9 @@ impl Workspace {
 
         // The bottom-dock draft is swapped per input pane by
         // `set_focused_pane`, not per lane: a lane switch changes the
-        // focused pane, so the swap runs on the focus path below
-        // (`set_focused_pane` for an existing focused pane, or inside
-        // `seed_initial_tab` for a freshly-seeded one).
+        // focused pane, so the swap runs on the focus path below when the
+        // incoming lane has a focused pane. An empty lane has none, so the
+        // draft stays put.
 
         // Update the project's last-active-lane hint so clicking
         // the project header in the left dock snaps to the same
@@ -531,18 +531,16 @@ impl Workspace {
             return;
         }
 
-        // 3. Lazy seed: a lane loaded from `git worktree list` on
-        //    startup has metadata but no runtime tabs. First-time
-        //    activation spawns one pane rooted at the lane path so
-        //    the user lands in the right shell immediately.
-        self.seed_initial_tab(target, window, cx);
+        // 3. No lazy seed. An empty lane (never opened, or emptied by the
+        //    user) stays empty and renders the "No open tabs" empty-state;
+        //    the user opens content from there. Only the first project at
+        //    app launch seeds a shell (see `new_with_project_impl`).
 
         // 4. Refocus the active pane and request a resize — the
         //    lane may have been last seen at a different viewport.
         //    Route through `set_focused_pane` so the bottom-dock draft
-        //    swaps to the newly-focused pane (a freshly-seeded lane
-        //    already swapped inside `seed_initial_tab`; this covers the
-        //    common case of a lane that already had tabs).
+        //    swaps to the newly-focused pane. An empty lane has no pane to
+        //    focus (guarded below), so the draft simply stays put.
         if self
             .active_runtime()
             .panes
@@ -594,10 +592,11 @@ impl Workspace {
     /// runs for a same-lane click, so without this re-probe the lane
     /// stays stuck non-`Present` until the user switches away and back.
     ///
-    /// On recovery to `Present` with no tabs (the empty-state never
-    /// seeded one) we run the same lazy-seed as a fresh activation so the
-    /// user lands in a shell. Still non-`Present` → re-point the right
-    /// dock (it may have nothing reflected yet) and stay put.
+    /// On recovery to `Present` the lane is re-probed and the right dock
+    /// re-pointed, but no tab is seeded: an empty recovered lane lands on
+    /// the "No open tabs" empty-state (the unified rule). Still non-`Present`
+    /// → re-point the right dock (it may have nothing reflected yet) and
+    /// stay put.
     fn reactivate_active_lane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let active = self.active;
         let was_present = self
@@ -607,8 +606,9 @@ impl Workspace {
         // Healthy lane that already has tabs: nothing a same-lane click
         // should act on — keep the fast path cheap (never re-probe or
         // disturb live terminals). A `Present` lane with *no* tabs (user
-        // closed them all, or it was never seeded) deliberately falls
-        // through so the re-probe + seed below give the user a shell.
+        // closed them all, or it was never opened) deliberately falls
+        // through so the re-probe below can recover availability; it still
+        // renders the empty-state afterward.
         if was_present && !self.active_runtime().tabs.is_empty() {
             return;
         }
@@ -618,15 +618,15 @@ impl Workspace {
             .map(|l| l.availability == LaneAvailability::Present)
             .unwrap_or(false);
         if now_present {
-            // Recovered (or was already present but never seeded a tab) —
-            // seed one so the user lands in a shell, then run the
-            // path-dependent reconcile the empty-state had skipped.
-            self.seed_initial_tab(active, window, cx);
+            // Recovered to Present. No tab is seeded — an empty lane renders
+            // the empty-state; the user opens content from there. Focus only
+            // if the lane already had a pane (guarded), then run the
+            // path-dependent right-dock reconcile the empty-state had skipped.
             if self.has_focused_pane() {
                 self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
             }
             self.main_area.pending_resize = true;
-            // The seeded tab is persisted runtime state.
+            // The recovered availability is persisted runtime state.
             self.mutate_durable(cx, |_, _| {});
             // Deliberately omits `activate_lane`'s `load_pending_file_panes`
             // + `replay_files_dirty`: a lane reaching here was either Missing
@@ -644,38 +644,6 @@ impl Workspace {
             self.reconcile_right_dock_for_inaccessible_lane(window, cx);
         }
         cx.notify();
-    }
-
-    /// Spawn one pane rooted at `target`'s path when the live runtime has
-    /// no tabs. A lane loaded from `git worktree list` on startup carries
-    /// metadata but no serialized tabs; first activation seeds a shell so
-    /// the viewport is never empty. On PTY failure the error surfaces in
-    /// the status bar and the viewport stays empty — still better than a
-    /// silent black pane. No-op when tabs already exist.
-    fn seed_initial_tab(&mut self, target: LaneRef, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.active_runtime().tabs.is_empty() {
-            return;
-        }
-        let cwd = self.lane_for(target).map(|w| w.path.clone());
-        match self.create_pane_with_cwd(cwd, window, cx) {
-            Ok(pane) => {
-                let pane_id = pane.id;
-                self.active_runtime_mut().panes.push(pane);
-                let tab_id = self.alloc_id();
-                self.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
-                self.active_runtime_mut().active_tab_index = 0;
-                self.set_focused_pane(pane_id, window, cx);
-                self.bump_activity(pane_id);
-            }
-            Err(e) => {
-                self.report_pane_error("activate lane", e, cx);
-            }
-        }
     }
 
     /// Re-point the right dock (Skills / Tools panels + commit button) at

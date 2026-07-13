@@ -56,6 +56,7 @@ use super::agent_chat_helpers::{
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
+use crate::surface::strings as s;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -958,7 +959,13 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::Error(message) => {
-                self.status = AgentSessionStatus::Error(message);
+                let error_message = match &self.cwd {
+                    Some(PaneCwd::Remote(_)) => {
+                        format!("{}\n\n{}", message, s::agent_chat_remote_connect_error_hint())
+                    }
+                    _ => message,
+                };
+                self.status = AgentSessionStatus::Error(error_message);
                 // A session-level error terminates every outstanding turn,
                 // including any cancel we were still awaiting an ack for — close
                 // the cancel window so a post-reconnect turn isn't misread.

@@ -126,11 +126,11 @@ fn agent_menu_is_flat(agent_count: usize) -> bool {
     agent_count <= crate::ui::theme::AGENT_MENU_FLAT_MAX
 }
 
-/// Whether a `+`-menu agent entry should be disabled: the agent's command
+/// Whether a `+`-menu agent entry should be disabled: the agent's launch
 /// needs a remote working directory substituted in (see
-/// [`daruda_config::agent::command_needs_remote_cwd`]) but the active lane
-/// has no `remote_cwd` set — there is nothing to substitute the `{{cwd}}`
-/// token with, so the entry is pre-disabled rather than left to fail after
+/// [`daruda_config::AgentLaunch::needs_remote_cwd`]) but the active lane
+/// has no `remote_cwd` set — there is nothing to substitute the remote path
+/// with, so the entry is pre-disabled rather than left to fail after
 /// the user picks it (`resolve_new_pane_cwd`'s error path remains a fallback
 /// for call sites that bypass this menu, e.g. programmatic pane creation).
 fn agent_menu_entry_disabled(needs_remote_cwd: bool, lane_has_remote_cwd: bool) -> bool {
@@ -882,13 +882,7 @@ impl Render for Workspace {
                 let agents: Vec<(String, String, bool)> = self
                     .agents
                     .iter()
-                    .map(|a| {
-                        (
-                            a.id.clone(),
-                            a.name.clone(),
-                            daruda_config::agent::command_needs_remote_cwd(&a.command),
-                        )
-                    })
+                    .map(|a| (a.id.clone(), a.name.clone(), a.launch.needs_remote_cwd()))
                     .collect();
                 let lane_has_remote_cwd = self
                     .active_lane()

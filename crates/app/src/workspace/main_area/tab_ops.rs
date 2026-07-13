@@ -241,6 +241,53 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Total open tabs across every lane runtime in the window (all
+    /// projects, all lanes). The window-close decision reads this — not the
+    /// active lane's count alone — so closing one lane's last tab never
+    /// tears down the window while another lane still holds content.
+    pub(in crate::workspace) fn total_open_tabs(&self) -> usize {
+        self.main_area
+            .runtimes
+            .values()
+            .map(|rt| rt.tabs.len())
+            .sum()
+    }
+
+    /// Drop every pane in the active lane's runtime and reset it to an
+    /// empty [`LaneRuntime`](crate::workspace::LaneRuntime), leaving the
+    /// lane at zero tabs (the "no tabs" empty state). Releases PTY
+    /// tracking, activity counters, zoom, and bottom-dock drafts for the
+    /// removed panes first — the same per-tab cleanup `close_tab_at`
+    /// performs — so nothing leaks when the runtime is reset. The lane
+    /// itself stays in the sidebar; the user reopens content via the
+    /// empty-state buttons, the tab-bar `+`, or a lane switch.
+    pub(in crate::workspace) fn empty_active_lane_runtime(&mut self, cx: &mut Context<Self>) {
+        let pane_ids: Vec<PaneId> = self.active_runtime().panes.iter().map(|p| p.id).collect();
+        if pane_ids
+            .iter()
+            .any(|&id| self.main_area.zoomed_pane_id == Some(id))
+        {
+            self.main_area.zoomed_pane_id = None;
+        }
+        self.main_area.pane_drop_hover = None;
+        self.release_pane_tracking(&pane_ids, cx);
+        for id in &pane_ids {
+            self.main_area.activity_counter.remove(id);
+            self.forget_pane_input_draft(*id);
+        }
+        *self.active_runtime_mut() = crate::workspace::LaneRuntime::default();
+        // Emptying a lane is a durable state change that must survive a
+        // restart (the empty-state persists instead of springing back a
+        // tab). Schedule the persist here — the empty-closure convention —
+        // rather than relying on the caller wrapping this in
+        // `mutate_durable`: the interactive close paths (pane-header ×,
+        // dirty-close prompt continuations) reach `close_tab_at` outside any
+        // durable wrapper, so a self-scheduled save is the single reliable
+        // site. `mark_dirty_and_save` coalesces via `cx.defer`, so a nested
+        // call from a wrapped caller is a harmless no-op-extra.
+        self.mutate_durable(cx, |_, _| {});
+    }
+
     pub(in crate::workspace) fn close_tab_at(
         &mut self,
         index: usize,
@@ -250,15 +297,20 @@ impl Workspace {
         if index >= self.active_runtime().tabs.len() {
             return;
         }
-        // Last tab in the active lane → close this window. Other
-        // windows (and the app itself under `QuitMode::Default`) stay
-        // alive; the user reopens projects via File > New Window /
-        // Open… / Open Recent. If the project had other lanes
-        // parked in `runtimes`, their PTYs drop with the workspace
-        // entity when the window is removed — that's fine for now, a
-        // future phase could offer a confirm.
+        // The active lane's last tab. Close the window only when it is
+        // also the window's last tab across *every* lane and project;
+        // otherwise empty this lane in place (0 tabs → empty-state) and
+        // keep the window, so closing one lane's content never tears down
+        // the others parked in `runtimes`. When the window does close,
+        // other windows (and the app itself under `QuitMode::Default`)
+        // stay alive; the user reopens projects via File > New Window /
+        // Open… / Open Recent.
         if self.active_runtime().tabs.len() <= 1 {
-            window.remove_window();
+            if self.total_open_tabs() <= 1 {
+                window.remove_window();
+                return;
+            }
+            self.empty_active_lane_runtime(cx);
             return;
         }
 

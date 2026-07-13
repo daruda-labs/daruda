@@ -40,7 +40,7 @@
 //! exits) and the pump-task drop ends the loop. No explicit teardown is needed.
 
 use daruda_acp::{NodeProgress, connect_agent_session};
-use daruda_config::agent::{CWD_TOKEN, command_needs_remote_cwd, substitute_tokens};
+use daruda_config::AgentLaunch;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
 use futures::StreamExt as _;
@@ -134,27 +134,27 @@ enum PaneCwdOutcome {
 
 /// Pure core of [`Workspace::resolve_new_pane_cwd`] — decide whether a fresh
 /// Agent chat pane should attach a `Local` or `Remote` cwd, given the
-/// candidate agent's launch `command` and the active lane's local/remote
-/// paths. Factored out of the workspace so it is unit-testable without gpui.
+/// candidate agent's `launch` and the active lane's local/remote paths.
+/// Factored out of the workspace so it is unit-testable without gpui.
 ///
-/// - `command` needs a remote cwd (`{{cwd}}` token present, see
-///   [`command_needs_remote_cwd`]) and `remote_cwd` is set → `Ok(Some(Remote))`.
-/// - `command` needs a remote cwd but `remote_cwd` is `None` (or blank —
+/// - `launch` needs a remote cwd (see [`AgentLaunch::needs_remote_cwd`]) and
+///   `remote_cwd` is set → `Ok(Some(Remote))`.
+/// - `launch` needs a remote cwd but `remote_cwd` is `None` (or blank —
 ///   empty or whitespace-only, e.g. a lane whose remote path field was left
 ///   as spaces) → `Err(())`: the agent has nowhere to attach, and the caller
 ///   must not attempt a connect.
-/// - `command` does not need a remote cwd → `Ok(local_cwd.map(Local))`,
+/// - `launch` does not need a remote cwd → `Ok(local_cwd.map(Local))`,
 ///   `None` when there is no active lane at all (mirrors the pre-existing
 ///   no-lane-cwd case).
 fn resolve_new_pane_cwd_core(
-    command: &str,
+    launch: &AgentLaunch,
     local_cwd: Option<PathBuf>,
     remote_cwd: Option<String>,
 ) -> Result<Option<PaneCwd>, ()> {
-    if command_needs_remote_cwd(command) {
-        // A blank remote_cwd has nothing to substitute for `{{cwd}}` — treat
-        // it the same as `None` rather than letting it flow into
-        // `substitute_tokens` and produce a broken `cd  && ...` command.
+    if launch.needs_remote_cwd() {
+        // A blank remote_cwd has nothing to substitute for the remote path
+        // — treat it the same as `None` rather than letting it flow into
+        // `AgentLaunch::wrap` and produce a broken `cd  && ...` command.
         remote_cwd
             .filter(|cwd| !cwd.trim().is_empty())
             .map(PaneCwd::Remote)
@@ -398,9 +398,10 @@ impl Workspace {
 
     /// Resolve whether a freshly-created Agent chat pane for `agent_id`
     /// should attach a `Local` or `Remote` cwd. Looks up `agent_id`'s launch
-    /// command in the catalog and defers to [`resolve_new_pane_cwd_core`];
-    /// an id no longer in the catalog behaves as a command with no `{{cwd}}`
-    /// token (falls back to `local_cwd`), matching `agent_command_for`'s
+    /// in the catalog and defers to [`resolve_new_pane_cwd_core`]; an id no
+    /// longer in the catalog falls back to an empty `AgentLaunch::Raw`
+    /// (no `{{cwd}}` token, so it behaves as a launch needing no remote
+    /// cwd — falls back to `local_cwd`), matching `agent_launch_for`'s
     /// existing "id not found" handling elsewhere in this file.
     pub(in crate::workspace) fn resolve_new_pane_cwd(
         &self,
@@ -408,8 +409,10 @@ impl Workspace {
         local_cwd: Option<PathBuf>,
         remote_cwd: Option<String>,
     ) -> Result<Option<PaneCwd>, ()> {
-        let command = self.agent_command_for(agent_id).unwrap_or_default();
-        resolve_new_pane_cwd_core(&command, local_cwd, remote_cwd)
+        let launch = self
+            .agent_launch_for(agent_id)
+            .unwrap_or_else(|| AgentLaunch::Raw(String::new()));
+        resolve_new_pane_cwd_core(&launch, local_cwd, remote_cwd)
     }
 
     /// Construct a fresh Agent chat pane for `agent_id`, resolving Local vs.
@@ -451,13 +454,13 @@ impl Workspace {
         }
     }
 
-    /// The launch command for `agent_id`, looked up in the catalog. `None` when
+    /// The launch spec for `agent_id`, looked up in the catalog. `None` when
     /// the id is not in the catalog (e.g. a persisted id whose agent was removed).
-    pub(in crate::workspace) fn agent_command_for(&self, agent_id: &str) -> Option<String> {
+    pub(in crate::workspace) fn agent_launch_for(&self, agent_id: &str) -> Option<AgentLaunch> {
         self.agents
             .iter()
             .find(|a| a.id == agent_id)
-            .map(|a| a.command.clone())
+            .map(|a| a.launch.clone())
     }
 
     /// Resolve the agent a restored pane should launch under, and whether its
@@ -624,18 +627,22 @@ impl Workspace {
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
-    /// Resolve the launch command for `pane_id`'s agent, reconciling the view
+    /// Resolve the launch spec for `pane_id`'s agent, reconciling the view
     /// when its `agent_id` is stale. Happy path (allocation-free beyond the
-    /// command clone): the view's `agent_id` is still in the catalog, so return
-    /// its command unchanged. Miss: the persisted `agent_id` now points at an
+    /// launch clone): the view's `agent_id` is still in the catalog, so return
+    /// its launch unchanged. Miss: the persisted `agent_id` now points at an
     /// agent a live config reload removed/renamed, so it lies about which agent
     /// is running — rewrite the view to the session-sticky default, persist, and
     /// launch that agent instead. Returns `None` only when the pane is gone.
-    fn resolve_pane_launch(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> Option<String> {
+    fn resolve_pane_launch(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Option<AgentLaunch> {
         let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id.clone();
         // Happy path: the view's agent is still in the catalog.
-        if let Some(command) = self.agent_command_for(&agent_id) {
-            return Some(command);
+        if let Some(launch) = self.agent_launch_for(&agent_id) {
+            return Some(launch);
         }
         // Stale id — reconcile so the chip / persisted state stop lying, then
         // launch the effective agent. `resolve_open_agent_id` yields a catalog
@@ -651,8 +658,8 @@ impl Workspace {
             self.mark_dirty_and_save(cx);
         }
         Some(
-            self.agent_command_for(&effective_id)
-                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().command),
+            self.agent_launch_for(&effective_id)
+                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch),
         )
     }
 
@@ -687,30 +694,49 @@ impl Workspace {
         let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
         let node_root = daruda_store::persistence::node_install_dir();
 
-        // Resolve the pane's agent_id → launch command, reconciling the view
+        // Resolve the pane's agent_id → launch spec, reconciling the view
         // when its agent_id no longer names a catalog entry (a live config
         // reload removed/renamed that agent). Returns `None` only when the pane
-        // is already gone — fall back to the catalog default command so the
-        // (soon-to-be-dropped) task still has a valid command to parse.
-        let command = self.resolve_pane_launch(pane_id, cx).unwrap_or_else(|| {
-            self.agent_command_for(&catalog_default_id(&self.agents))
-                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().command)
+        // is already gone — fall back to the catalog default launch so the
+        // (soon-to-be-dropped) task still has a valid launch to wrap.
+        let launch = self.resolve_pane_launch(pane_id, cx).unwrap_or_else(|| {
+            self.agent_launch_for(&catalog_default_id(&self.agents))
+                .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch)
         });
 
-        // A `Remote` cwd's command references the `{{cwd}}` token
+        // A `Remote` cwd's launch needs the lane's remote path assembled in
         // (`resolve_new_pane_cwd` only ever assigns `Remote` when
-        // `command_needs_remote_cwd` is true) — substitute the lane's remote
-        // path into the command and spawn there instead of the in-process
-        // local path. A `Local` cwd needs no rewrite; this is the only place
-        // a connect resolves the actual command/cwd pair to spawn, so a
-        // restored `Remote` pane (which skips `resolve_new_pane_cwd`, see
-        // `persistence.rs`) still gets substituted here on its lazy connect.
-        let (command, connect_cwd) = match &cwd {
-            PaneCwd::Remote(remote_path) => (
-                substitute_tokens(&command, &[(CWD_TOKEN, remote_path)]),
-                PathBuf::from(remote_path),
-            ),
-            PaneCwd::Local(path) => (command, path.clone()),
+        // `AgentLaunch::needs_remote_cwd` is true) — `Local` needs no
+        // remote path at all. This is the only place a connect resolves the
+        // actual command/cwd pair to spawn, so a restored `Remote` pane
+        // (which skips `resolve_new_pane_cwd`, see `persistence.rs`) still
+        // gets wrapped here on its lazy connect.
+        let (remote_path, connect_cwd): (Option<&str>, PathBuf) = match &cwd {
+            PaneCwd::Remote(remote_path) => {
+                (Some(remote_path.as_str()), PathBuf::from(remote_path))
+            }
+            PaneCwd::Local(path) => (None, path.clone()),
+        };
+        // `wrap` fails only when the pane's fixed `cwd` and the (possibly
+        // just-reconciled) `launch`'s remote-cwd requirement now disagree —
+        // e.g. a stale agent_id got swapped by `resolve_pane_launch` to a
+        // catalog entry with different remote-cwd needs than this pane's
+        // already-resolved `cwd`. A genuine edge case, not a "can't happen":
+        // never spawn a connection with a broken command, park the pane in
+        // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
+        // bail out of this connect attempt entirely.
+        let command = match launch.wrap(remote_path) {
+            Ok(command) => command,
+            Err(()) => {
+                if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                    view.update(cx, |v, cx| v.set_error(s::agent_chat_no_remote_cwd(), cx));
+                    // Connecting → Error clears the badge; dirty the cached
+                    // docks so it doesn't linger stale (same pattern as every
+                    // other Error transition in this function).
+                    self.notify_status_docks(cx);
+                }
+                return;
+            }
         };
 
         // Runtime provisioning (see `connect_agent_session`) can download
@@ -1302,53 +1328,82 @@ mod tests {
         resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
         should_notify_agent_event,
     };
-    use daruda_config::AgentDefinition;
+    use daruda_config::{AgentDefinition, AgentLaunch};
     use daruda_store::project::PaneCwd;
     use std::path::PathBuf;
 
-    const REMOTE_COMMAND: &str = "ssh vm-work 'cd {{cwd}} && npx acp-adapter'";
-    const LOCAL_COMMAND: &str = "npx acp-adapter";
+    fn ssh_launch() -> AgentLaunch {
+        AgentLaunch::Ssh {
+            adapter_command: "npx acp-adapter".into(),
+            host: "vm-work".into(),
+        }
+    }
 
-    #[test]
-    fn resolve_new_pane_cwd_token_with_remote_cwd_is_remote() {
-        let result = resolve_new_pane_cwd_core(
-            REMOTE_COMMAND,
-            Some(PathBuf::from("/local/lane")),
-            Some("/remote/lane".to_string()),
-        );
-        assert_eq!(
-            result,
-            Ok(Some(PaneCwd::Remote("/remote/lane".to_string())))
-        );
+    fn docker_launch() -> AgentLaunch {
+        AgentLaunch::Docker {
+            adapter_command: "npx acp-adapter".into(),
+            container: "devbox".into(),
+        }
+    }
+
+    fn local_launch() -> AgentLaunch {
+        AgentLaunch::Raw("npx acp-adapter".into())
     }
 
     #[test]
-    fn resolve_new_pane_cwd_token_without_remote_cwd_is_err() {
-        let result =
-            resolve_new_pane_cwd_core(REMOTE_COMMAND, Some(PathBuf::from("/local/lane")), None);
-        assert_eq!(result, Err(()));
-    }
-
-    #[test]
-    fn resolve_new_pane_cwd_token_with_blank_remote_cwd_is_err() {
-        // An empty or whitespace-only `remote_cwd` (e.g. a lane whose remote
-        // path field was set to just spaces) has nothing to substitute for
-        // `{{cwd}}` — it must behave exactly like `None`, not flow through as
-        // a bogus `Remote("")`/`Remote("   ")`.
-        for blank in ["", "   ", "\t"] {
+    fn resolve_new_pane_cwd_remote_launch_with_remote_cwd_is_remote() {
+        // Ssh and Docker must behave identically here: both always need a
+        // remote cwd (`AgentLaunch::needs_remote_cwd` is unconditionally true
+        // for both), regardless of adapter_command contents.
+        for launch in [ssh_launch(), docker_launch()] {
             let result = resolve_new_pane_cwd_core(
-                REMOTE_COMMAND,
+                &launch,
                 Some(PathBuf::from("/local/lane")),
-                Some(blank.to_string()),
+                Some("/remote/lane".to_string()),
             );
-            assert_eq!(result, Err(()), "blank remote_cwd {blank:?} should be Err");
+            assert_eq!(
+                result,
+                Ok(Some(PaneCwd::Remote("/remote/lane".to_string()))),
+                "launch {launch:?} should resolve to Remote"
+            );
         }
     }
 
     #[test]
-    fn resolve_new_pane_cwd_no_token_uses_local() {
+    fn resolve_new_pane_cwd_remote_launch_without_remote_cwd_is_err() {
+        for launch in [ssh_launch(), docker_launch()] {
+            let result =
+                resolve_new_pane_cwd_core(&launch, Some(PathBuf::from("/local/lane")), None);
+            assert_eq!(result, Err(()), "launch {launch:?} should be Err");
+        }
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_remote_launch_with_blank_remote_cwd_is_err() {
+        // An empty or whitespace-only `remote_cwd` (e.g. a lane whose remote
+        // path field was set to just spaces) has nothing to substitute in —
+        // it must behave exactly like `None`, not flow through as a bogus
+        // `Remote("")`/`Remote("   ")`.
+        for launch in [ssh_launch(), docker_launch()] {
+            for blank in ["", "   ", "\t"] {
+                let result = resolve_new_pane_cwd_core(
+                    &launch,
+                    Some(PathBuf::from("/local/lane")),
+                    Some(blank.to_string()),
+                );
+                assert_eq!(
+                    result,
+                    Err(()),
+                    "launch {launch:?}, blank remote_cwd {blank:?} should be Err"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_new_pane_cwd_local_launch_uses_local() {
         let result = resolve_new_pane_cwd_core(
-            LOCAL_COMMAND,
+            &local_launch(),
             Some(PathBuf::from("/local/lane")),
             Some("/remote/lane".to_string()),
         );
@@ -1359,8 +1414,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_new_pane_cwd_no_token_no_local_is_none() {
-        let result = resolve_new_pane_cwd_core(LOCAL_COMMAND, None, None);
+    fn resolve_new_pane_cwd_local_launch_no_local_is_none() {
+        let result = resolve_new_pane_cwd_core(&local_launch(), None, None);
         assert_eq!(result, Ok(None));
     }
 
@@ -1431,7 +1486,7 @@ mod tests {
             AgentDefinition {
                 id: "other".to_string(),
                 name: "Other".to_string(),
-                command: "run-other".to_string(),
+                launch: AgentLaunch::Raw("run-other".to_string()),
             },
             AgentDefinition::claude_default(),
         ];
@@ -1452,7 +1507,7 @@ mod tests {
             AgentDefinition {
                 id: "other".to_string(),
                 name: "Other".to_string(),
-                command: "run-other".to_string(),
+                launch: AgentLaunch::Raw("run-other".to_string()),
             },
             AgentDefinition::claude_default(),
         ]

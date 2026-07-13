@@ -572,20 +572,13 @@ impl Workspace {
         self.main_area.runtimes.entry(self.active).or_default();
 
         if self.active_runtime().tabs.is_empty() {
-            // Seed a fresh tab only for a legitimately-empty *Present*
-            // active lane. When the active lane is inaccessible the
-            // restore loop above deliberately skipped its pane rebuild
-            // (Task 1), so seeding a tab here would spawn a stray $HOME
-            // terminal that contradicts the inaccessible empty-state the
-            // main area renders. Leave `tabs` empty so `render` shows the
-            // empty-state instead.
-            let active_present = self
-                .active_lane()
-                .map(|l| l.availability == LaneAvailability::Present)
-                .unwrap_or(true);
-            if active_present {
-                self.add_tab(window, cx);
-            }
+            // An empty active lane is a first-class state, not something to
+            // paper over: restore never auto-seeds a shell. Whether the
+            // lane is Present (the user closed its tabs, or it was never
+            // opened) or inaccessible, the main area renders the
+            // empty-state and the user opens content from there. This is
+            // the persistence half of the unified rule — an emptied lane
+            // round-trips across restart instead of springing a fresh tab.
             return;
         }
 

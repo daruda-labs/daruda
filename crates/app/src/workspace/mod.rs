@@ -1115,9 +1115,10 @@ impl Workspace {
         // `render`) never panics — including the Welcome state, where
         // `active` is `LaneRef::default()` and no project is open. Seed
         // it for whatever `active` is, unconditionally: production then
-        // populates it via `add_tab`, a bootstrapped project via
-        // `activate_lane`, and Welcome leaves it empty (render shows the
-        // welcome screen).
+        // populates the first project's lane via `add_tab` below (the only
+        // auto-seed left), and Welcome leaves it empty (render shows the
+        // welcome screen). Lanes activated later are never auto-seeded —
+        // they render the empty-state until the user opens content.
         ws.main_area.runtimes.entry(ws.active).or_default();
         // Test-only short-circuit: every line below this point spawns a
         // background thread (PTY, FS watchers) or performs sync disk I/O

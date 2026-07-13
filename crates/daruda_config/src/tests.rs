@@ -99,7 +99,7 @@ fn agents_round_trip_through_toml() {
             AgentDefinition {
                 id: "codex".to_string(),
                 name: "Codex".to_string(),
-                command: "codex acp".to_string(),
+                launch: AgentLaunch::Raw("codex acp".to_string()),
             },
             AgentDefinition::claude_default(),
         ],

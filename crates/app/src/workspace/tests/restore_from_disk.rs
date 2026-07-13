@@ -132,10 +132,14 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
             ws.projects[0].lanes.iter().any(|l| l.id == ws.active.lane),
             "active lane must be a real member of the project"
         );
-        // The viewport must not be blank.
+        // Unified rule: a re-bootstrapped lane is brand-new and is NOT
+        // auto-seeded on restore — it lands on the "No open tabs"
+        // empty-state. The recovery guarantee is that the lane exists (the
+        // left dock is not blank), which the assertions above verify; the
+        // main area shows the empty-state rather than an auto-spawned tab.
         assert!(
-            !ws.active_runtime().tabs.is_empty(),
-            "restored workspace must have at least one tab"
+            ws.active_runtime().tabs.is_empty(),
+            "a re-bootstrapped lane lands on the empty-state, not an auto-seeded tab"
         );
     });
 

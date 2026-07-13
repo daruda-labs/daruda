@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 pub use agent::{
     ACP_REGISTRY_AGENT_PRESETS, ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig,
-    AgentDefinition, AgentPreset, DefaultPermissionMode,
+    AgentDefinition, AgentLaunch, AgentPreset, DefaultPermissionMode,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -384,7 +384,29 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             let mut table = toml_edit::Table::new();
             table["id"] = toml_edit::value(agent.id.clone());
             table["name"] = toml_edit::value(agent.name.clone());
-            table["command"] = toml_edit::value(agent.command.clone());
+            match &agent.launch {
+                AgentLaunch::Raw(command) => {
+                    table["command"] = toml_edit::value(command.clone());
+                }
+                AgentLaunch::Ssh {
+                    adapter_command,
+                    host,
+                } => {
+                    let mut ssh = toml_edit::Table::new();
+                    ssh["adapter_command"] = toml_edit::value(adapter_command.clone());
+                    ssh["host"] = toml_edit::value(host.clone());
+                    table["ssh"] = toml_edit::Item::Table(ssh);
+                }
+                AgentLaunch::Docker {
+                    adapter_command,
+                    container,
+                } => {
+                    let mut docker = toml_edit::Table::new();
+                    docker["adapter_command"] = toml_edit::value(adapter_command.clone());
+                    docker["container"] = toml_edit::value(container.clone());
+                    table["docker"] = toml_edit::Item::Table(docker);
+                }
+            }
             agents.push(table);
         }
         doc.insert("agents", toml_edit::Item::ArrayOfTables(agents));
