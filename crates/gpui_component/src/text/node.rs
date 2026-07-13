@@ -927,6 +927,57 @@ impl Node {
     }
 }
 
+/// How a single child of a `ListItem` should be laid out.
+///
+/// Split out as a pure function because the render path only produces opaque
+/// `AnyElement`s (untestable), while the *decision* of which children render —
+/// and how — is exactly where the "code block inside a list item vanishes" bug
+/// lived: the old inline `match` handled only `Paragraph` / `List` and dropped
+/// every other block on a `_ => {}` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListItemChildLayout {
+    /// Leading paragraph — carries the bullet / number prefix.
+    LeadParagraph,
+    /// A follow-on paragraph directly after another paragraph — merged into the
+    /// previous line's container so continuation text stacks.
+    MergedParagraph,
+    /// A follow-on paragraph after a non-paragraph block — its own continuation
+    /// line with no prefix, so it neither merges into that block's container
+    /// (e.g. a code block) nor sprouts a spurious bullet.
+    ContinuationParagraph,
+    /// A nested list — indented.
+    NestedList,
+    /// Any other block child (code block, blockquote, table, heading, rule).
+    /// Rendered indented; MUST NOT be dropped.
+    Block,
+}
+
+/// Classify each child of a `ListItem` for layout. See [`ListItemChildLayout`].
+fn classify_list_item_children(children: &[Node]) -> Vec<ListItemChildLayout> {
+    use ListItemChildLayout::*;
+    children
+        .iter()
+        .enumerate()
+        .map(|(ix, child)| match child {
+            Node::Paragraph(_) => {
+                if ix == 0 {
+                    LeadParagraph
+                } else {
+                    match &children[ix - 1] {
+                        Node::Paragraph(_) => MergedParagraph,
+                        // A paragraph after a nested list keeps the historical
+                        // prefixed leading-line treatment.
+                        Node::List { .. } => LeadParagraph,
+                        _ => ContinuationParagraph,
+                    }
+                }
+            }
+            Node::List { .. } => NestedList,
+            _ => Block,
+        })
+        .collect()
+}
+
 impl Node {
     fn render_list_item(
         item: &Node,
@@ -947,34 +998,31 @@ impl Node {
                 .children({
                     let mut items: Vec<Div> = Vec::with_capacity(children.len());
 
-                    for (child_ix, child) in children.iter().enumerate() {
-                        match child {
-                            Node::Paragraph(_) => {
-                                let last_not_list = child_ix > 0
-                                    && !matches!(children[child_ix - 1], Node::List { .. });
+                    let layouts = classify_list_item_children(children);
+                    for (child, layout) in children.iter().zip(layouts) {
+                        let block = child.render_block(
+                            NodeRenderOptions {
+                                depth: options.depth + 1,
+                                todo: checked.is_some(),
+                                is_last: true,
+                                ..options
+                            },
+                            node_cx,
+                            window,
+                            cx,
+                        );
 
-                                let text = child.render_block(
-                                    NodeRenderOptions {
-                                        depth: options.depth + 1,
-                                        todo: checked.is_some(),
-                                        is_last: true,
-                                        ..options
-                                    },
-                                    node_cx,
-                                    window,
-                                    cx,
-                                );
-
-                                // merge content into last item.
-                                if last_not_list {
-                                    if let Some(item_item) = items.last_mut() {
-                                        item_item.extend(vec![
-                                            div().overflow_hidden().child(text).into_any_element(),
-                                        ]);
-                                        continue;
-                                    }
+                        match layout {
+                            // Merge continuation prose into the previous line's
+                            // container so tight-list paragraphs stack.
+                            ListItemChildLayout::MergedParagraph => {
+                                if let Some(item_item) = items.last_mut() {
+                                    item_item.extend(vec![
+                                        div().overflow_hidden().child(block).into_any_element(),
+                                    ]);
                                 }
-
+                            }
+                            ListItemChildLayout::LeadParagraph => {
                                 items.push(
                                     h_flex()
                                         .flex_1()
@@ -1012,24 +1060,28 @@ impl Node {
                                             )
                                         })
                                         .child(
-                                            div().flex_1().min_w_0().overflow_hidden().child(text),
+                                            div().flex_1().min_w_0().overflow_hidden().child(block),
                                         ),
                                 );
                             }
-                            Node::List { .. } => {
-                                items.push(div().ml(rems(1.)).child(child.render_block(
-                                    NodeRenderOptions {
-                                        depth: options.depth + 1,
-                                        todo: checked.is_some(),
-                                        is_last: true,
-                                        ..options
-                                    },
-                                    node_cx,
-                                    window,
-                                    cx,
-                                )));
+                            // Nested lists, follow-on prose after a block, and
+                            // any other block child (code block, blockquote,
+                            // table, heading, rule) all render as an indented
+                            // continuation line — the last of these is the fix
+                            // for blocks that were previously dropped, so a
+                            // fenced code block inside a list item now renders.
+                            //
+                            // `min_w_0` overrides the flex default `min-width:
+                            // auto` so the wrapper shrinks to the list's width
+                            // instead of laying its child out at intrinsic
+                            // max-content width and overflowing / clipping at
+                            // wider panes (the same width-dependent class the
+                            // lead-paragraph and table-cell patches fix).
+                            ListItemChildLayout::NestedList
+                            | ListItemChildLayout::ContinuationParagraph
+                            | ListItemChildLayout::Block => {
+                                items.push(div().ml(rems(1.)).min_w_0().child(block));
                             }
-                            _ => {}
                         }
                     }
                     items
@@ -1359,5 +1411,76 @@ impl Node {
                 div().into_any_element()
             }
         }
+    }
+}
+
+// NOTE: this crate's lib-test target does not build in-repo — the vendor trim
+// left two independent, pre-existing blockers (`tree.rs` uses `#[gpui::test]`
+// without `gpui/test-support` in dev-deps; `dock/state.rs` `include_str!`s a
+// trimmed `tests/fixtures/layout.json`). These tests are correct and run once
+// the harness is repaired; until then the render fix is verified visually, the
+// established practice for the sibling `TextView` render patches.
+#[cfg(test)]
+mod tests {
+    use super::{
+        ListItemChildLayout::{self, *},
+        Node, Paragraph, classify_list_item_children,
+    };
+
+    fn p() -> Node {
+        Node::Paragraph(Paragraph::default())
+    }
+
+    fn ul() -> Node {
+        Node::List {
+            children: vec![],
+            ordered: false,
+        }
+    }
+
+    // `Divider` stands in for any non-paragraph / non-list block (code block,
+    // blockquote, table, heading, rule) — they all share the `_ => Block` arm.
+    fn block() -> Node {
+        Node::Divider
+    }
+
+    #[test]
+    fn list_item_keeps_block_children_between_paragraphs() {
+        // The exact shape of the regression: paragraph, fenced code block,
+        // paragraph. The middle block must render (not be dropped on `_ => {}`),
+        // and the trailing paragraph must start its own line rather than merge
+        // into the block's container.
+        let children = vec![p(), block(), p()];
+        assert_eq!(
+            classify_list_item_children(&children),
+            vec![LeadParagraph, Block, ContinuationParagraph],
+        );
+    }
+
+    #[test]
+    fn list_item_block_child_alone_is_not_dropped() {
+        let children = vec![block()];
+        assert_eq!(classify_list_item_children(&children), vec![Block]);
+    }
+
+    #[test]
+    fn list_item_merges_consecutive_paragraphs_and_indents_nested_list() {
+        // Locks the pre-existing behaviour the fix must preserve: consecutive
+        // paragraphs merge; a nested list indents; a paragraph after a nested
+        // list keeps its prefixed leading-line treatment.
+        let children = vec![p(), p(), ul(), p()];
+        assert_eq!(
+            classify_list_item_children(&children),
+            vec![LeadParagraph, MergedParagraph, NestedList, LeadParagraph],
+        );
+    }
+
+    #[test]
+    fn empty_list_item_classifies_to_nothing() {
+        let children: Vec<Node> = vec![];
+        assert_eq!(
+            classify_list_item_children(&children),
+            Vec::<ListItemChildLayout>::new(),
+        );
     }
 }
