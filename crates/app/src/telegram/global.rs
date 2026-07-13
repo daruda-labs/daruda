@@ -26,7 +26,9 @@ use gpui::{App, Global};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::bridge::{BridgeCore, BridgePing, InboundAction, OutboundMsg, RouteResult};
+use super::bridge::{
+    BridgeCore, BridgePing, InboundAction, OutboundMsg, RouteResult, TelegramTail,
+};
 use super::client;
 use super::keychain;
 use crate::settings_store::SettingsStore;
@@ -260,6 +262,35 @@ fn dispatch_to_workspace(
     });
 }
 
+/// The plain-text fallback body for `header`/`tail`: verbatim, no escaping
+/// or markdown parsing — exactly what used to be sent unconditionally
+/// before HTML formatting was added, and what [`spawn_send_task`] falls
+/// back to when the HTML attempt fails. Split out (mirrors
+/// `client.rs::parse_send_message_response`'s "split so tests can exercise
+/// it directly" reasoning) so the header/tail composition is unit-testable
+/// without a network mock.
+fn plain_body(header: &str, tail: &TelegramTail) -> String {
+    let tail_text = match tail {
+        TelegramTail::Plain(t) | TelegramTail::Markdown(t) => t.as_str(),
+    };
+    format!("{header}\n{tail_text}")
+}
+
+/// The Telegram-HTML body for `header`/`tail`. `header` and a
+/// `TelegramTail::Plain` tail are HTML-escaped only, never markdown-parsed;
+/// a `TelegramTail::Markdown` tail is run through the full converter — see
+/// [`TelegramTail`]'s doc comment (`bridge.rs`) for why running the
+/// markdown parser over plain administrative text (a pane title, a tool
+/// name, a raw command) is wrong, not just unnecessary.
+fn html_body(header: &str, tail: &TelegramTail) -> String {
+    let html_header = super::markdown::escape_text(header);
+    let html_tail = match tail {
+        TelegramTail::Plain(t) => super::markdown::escape_text(t),
+        TelegramTail::Markdown(t) => super::markdown::to_telegram_html(t),
+    };
+    format!("{html_header}\n{html_tail}")
+}
+
 /// The outbound send loop. Drains `outbound_rx` (moved in at spawn
 /// time — never stored on the struct) and posts each ping via
 /// `client::send_message`, off the foreground thread.
@@ -290,12 +321,44 @@ fn spawn_send_task(
 
             let OutboundMsg {
                 chat_id,
-                text,
+                header,
+                tail,
                 keyboard,
             } = msg;
+            // Computed up front (not inside the spawn below), since both
+            // `header` and `tail` get moved into the closure next.
+            let plain_text = plain_body(&header, &tail);
+            // Try the HTML-formatted body first; on ANY failure (a
+            // conversion edge case, or Telegram rejecting the tags) fall
+            // back to sending `plain_text` verbatim with no `parse_mode`
+            // rather than losing the notification outright — a failed send
+            // here is only logged below, never surfaced to the user, so
+            // this retry is the only thing standing between a formatting
+            // bug and a silently-dropped ping. Formatting itself runs
+            // inside the background-executor spawn below, alongside the
+            // blocking HTTP call, rather than on this foreground async
+            // loop — a full CommonMark parse of a response up to
+            // `TELEGRAM_PREVIEW_THRESHOLD` chars is real work that
+            // shouldn't run on the GPUI thread (mirrors
+            // `daruda_acp::node`'s "blocking work stays off the
+            // foreground executor" convention).
             let sent = cx
                 .background_executor()
-                .spawn(async move { client::send_message(&token, chat_id, &text, keyboard) })
+                .spawn(async move {
+                    let html = html_body(&header, &tail);
+                    match client::send_message(
+                        &token,
+                        chat_id,
+                        &html,
+                        Some("HTML"),
+                        keyboard.clone(),
+                    ) {
+                        Ok(id) => Ok(id),
+                        Err(_) => {
+                            client::send_message(&token, chat_id, &plain_text, None, keyboard)
+                        }
+                    }
+                })
                 .await;
 
             match sent {
@@ -327,6 +390,50 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[test]
+    fn plain_body_uses_the_tail_text_verbatim_for_either_variant() {
+        assert_eq!(
+            plain_body("title", &TelegramTail::Plain("file: a_b.txt".to_string())),
+            "title\nfile: a_b.txt"
+        );
+        assert_eq!(
+            plain_body("title", &TelegramTail::Markdown("**bold**".to_string())),
+            "title\n**bold**"
+        );
+    }
+
+    #[test]
+    fn html_body_escapes_a_plain_tail_but_never_markdown_parses_it() {
+        // The regression this guards: a raw_input summary or pane title
+        // containing incidental markdown-special characters (a file path
+        // with underscores, a shell glob) must render as literal text, not
+        // get reformatted as CommonMark emphasis.
+        let out = html_body(
+            "Deploy: rm -rf *.log",
+            &TelegramTail::Plain("file: my_file_name.txt".to_string()),
+        );
+        assert_eq!(out, "Deploy: rm -rf *.log\nfile: my_file_name.txt");
+        assert!(
+            !out.contains("<i>"),
+            "plain tail must not gain emphasis tags"
+        );
+    }
+
+    #[test]
+    fn html_body_markdown_parses_only_the_markdown_tail() {
+        let out = html_body(
+            "project\nagent",
+            &TelegramTail::Markdown("**bold** and `code`".to_string()),
+        );
+        assert_eq!(out, "project\nagent\n<b>bold</b> and <code>code</code>");
+    }
+
+    #[test]
+    fn html_body_escapes_html_special_chars_in_the_header() {
+        let out = html_body("A & B <panel>", &TelegramTail::Plain("ok".to_string()));
+        assert_eq!(out, "A &amp; B &lt;panel&gt;\nok");
+    }
 
     /// `install(cx)` must not double-spawn a poll loop against the same
     /// `getUpdates` offset — a second call is a no-op that leaves the

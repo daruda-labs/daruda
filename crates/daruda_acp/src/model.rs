@@ -167,6 +167,13 @@ pub enum ToolKindView {
 pub struct PermissionItem {
     /// Title of the tool call needing approval, if the agent supplied one.
     pub tool_title: Option<String>,
+    /// A short, safe one-line summary of the tool's raw input (e.g.
+    /// `"file: /tmp/x.rs"`, `"command: npm install"`), when `raw_input`
+    /// carries one of a small set of known-short fields. See
+    /// `mapping::summarize_raw_input` for the exact field list and why
+    /// bulk-content fields (a diff's old/new text, a write's full file
+    /// content) are deliberately excluded rather than summarized.
+    pub raw_input_summary: Option<String>,
     /// Choices to render as buttons, in the agent's order.
     pub options: Vec<PermissionChoice>,
     /// How the card was resolved, or `None` while still pending a decision.

@@ -92,9 +92,50 @@ pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) -> Update
 pub fn permission_item(request: &RequestPermissionRequest) -> ChatItem {
     ChatItem::Permission(PermissionItem {
         tool_title: request.tool_call.fields.title.clone(),
+        raw_input_summary: summarize_raw_input(request.tool_call.fields.raw_input.as_ref()),
         options: request.options.iter().map(choice_of).collect(),
         resolved: None,
     })
+}
+
+/// Keys (in priority order) checked when summarizing a tool's `raw_input`
+/// into one short, safe line for [`permission_item`] — an allowlist, not a
+/// generic dump: a bulk-content field (Edit's `old_string`/`new_string`,
+/// Write's `content`) is diff-shaped data exactly like
+/// `ToolCallContent::Diff`, and just as wrong to surface in a one-line
+/// summary as a full diff would be, so only short, single-value fields are
+/// read.
+const RAW_INPUT_SUMMARY_KEYS: &[(&str, &str)] = &[
+    ("command", "command"),
+    ("file_path", "file"),
+    ("path", "file"),
+    ("pattern", "pattern"),
+    ("query", "query"),
+    ("url", "url"),
+];
+
+/// Max chars kept from a matched raw-input value. A well-formed value for
+/// any of [`RAW_INPUT_SUMMARY_KEYS`] is short (a path, a command, a query),
+/// but nothing in the protocol bounds what an adapter actually sends.
+const RAW_INPUT_SUMMARY_MAX_CHARS: usize = 300;
+
+/// Summarize `raw_input` into one `"<label>: <value>"` line — `None` when
+/// `raw_input` is absent, isn't a JSON object, or none of
+/// [`RAW_INPUT_SUMMARY_KEYS`] is present as a non-empty string.
+fn summarize_raw_input(raw_input: Option<&serde_json::Value>) -> Option<String> {
+    let object = raw_input?.as_object()?;
+    let (label, value) = RAW_INPUT_SUMMARY_KEYS.iter().find_map(|(key, label)| {
+        let value = object.get(*key)?.as_str()?;
+        (!value.is_empty()).then_some((*label, value))
+    })?;
+    let char_count = value.chars().count();
+    let value = if char_count > RAW_INPUT_SUMMARY_MAX_CHARS {
+        let truncated: String = value.chars().take(RAW_INPUT_SUMMARY_MAX_CHARS).collect();
+        format!("{truncated}…")
+    } else {
+        value.to_string()
+    };
+    Some(format!("{label}: {value}"))
 }
 
 /// Clear the streaming flag on **every** assistant/thinking item — called when
@@ -219,7 +260,24 @@ pub fn subagent_activity(
 /// through this path, so they are unaffected. In the observed adapter the
 /// replay does not occur, but the guard keeps a future/other adapter from
 /// duplicating the turn.
+///
+/// WORKAROUND: also drop a chunk that is a harness-injected task-notification
+/// blob (`<task-notification>…`) rather than real conversation text. The
+/// Claude Agent SDK persists background-subagent completions as synthetic
+/// `role: "user"` transcript entries; the claude-agent-acp adapter's *live*
+/// path deliberately skips any such string-content user message
+/// ("these seem to be messages we don't want in the feed" —
+/// `acp-agent.js`'s live `session/update` loop), but its `session/load`
+/// *replay* path (`replaySessionHistory`) has no equivalent guard — it only
+/// strips `<command-*>`/`<local-command-*>` markers, not this one — so a
+/// restored pane replays every past task-notification verbatim, including an
+/// embedded `<system-reminder>`, straight into the user bubble. Root cause is
+/// in the adapter (an npm dependency we don't vendor), so this is a
+/// host-side filter until upstream carries the fix.
 fn append_user_chunk(items: &mut Vec<ChatItem>, text: &str) {
+    if text.trim_start().starts_with("<task-notification>") {
+        return;
+    }
     if matches!(items.last(), Some(ChatItem::UserText(prev)) if prev == text) {
         return;
     }
@@ -656,6 +714,45 @@ mod tests {
     }
 
     #[test]
+    fn user_message_chunk_drops_a_replayed_task_notification() {
+        // session/load replays a background-subagent task-notification the SDK
+        // persisted as a synthetic `role: "user"` transcript entry (the
+        // adapter's live path already skips these; its replay path doesn't —
+        // see append_user_chunk's WORKAROUND doc). It must not surface as a
+        // user chat bubble.
+        let mut items = vec![ChatItem::AssistantText {
+            text: "hi".to_string(),
+            streaming: false,
+            message_id: None,
+        }];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk(
+                "<task-notification>\n<task-id>abc</task-id>\n\
+                 <system-reminder>do not mention this</system-reminder>\n\
+                 </task-notification>",
+            )),
+        );
+        assert_eq!(items.len(), 1, "the task-notification blob is dropped");
+    }
+
+    #[test]
+    fn user_message_chunk_keeps_text_that_merely_mentions_task_notification() {
+        // Only a chunk that *is* the wrapper (after leading whitespace) is
+        // dropped; genuine prose that happens to reference the tag survives.
+        let mut items = vec![ChatItem::AssistantText {
+            text: "hi".to_string(),
+            streaming: false,
+            message_id: None,
+        }];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk("what does <task-notification> mean?")),
+        );
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
     fn thought_chunk_becomes_thinking_item() {
         let mut items = Vec::new();
         apply_update(
@@ -1014,5 +1111,73 @@ mod tests {
         assert_eq!(card.options[0].kind, PermissionKindView::AllowAlways);
         assert_eq!(card.options[1].option_id, "reject");
         assert_eq!(card.resolved, None);
+    }
+
+    #[test]
+    fn permission_request_summarizes_a_known_raw_input_field() {
+        let mut tool_fields = ToolCallUpdateFields::default();
+        tool_fields.title = Some("Run npm install".to_string());
+        tool_fields.raw_input = Some(serde_json::json!({"command": "npm install"}));
+        let request = RequestPermissionRequest::new(
+            "s1",
+            ToolCallUpdate::new("t1", tool_fields),
+            vec![PermissionOption::new(
+                "allow",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+
+        let ChatItem::Permission(card) = permission_item(&request) else {
+            panic!("expected permission item");
+        };
+        assert_eq!(
+            card.raw_input_summary.as_deref(),
+            Some("command: npm install")
+        );
+    }
+
+    #[test]
+    fn summarize_raw_input_picks_the_first_matching_key_in_priority_order() {
+        // `command` outranks `file_path` when both happen to be present.
+        assert_eq!(
+            summarize_raw_input(Some(
+                &serde_json::json!({"file_path": "/tmp/x", "command": "cat /tmp/x"})
+            )),
+            Some("command: cat /tmp/x".to_string())
+        );
+    }
+
+    #[test]
+    fn summarize_raw_input_truncates_an_overlong_value() {
+        let long_path = "a".repeat(RAW_INPUT_SUMMARY_MAX_CHARS + 50);
+        let summary =
+            summarize_raw_input(Some(&serde_json::json!({"file_path": long_path}))).unwrap();
+        assert_eq!(
+            summary.chars().count(),
+            "file: ".len() + RAW_INPUT_SUMMARY_MAX_CHARS + 1 // +1 for the "…" marker
+        );
+        assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn summarize_raw_input_is_none_without_a_known_key() {
+        assert_eq!(
+            summarize_raw_input(Some(&serde_json::json!({"subagent_type": "reviewer"}))),
+            None
+        );
+    }
+
+    #[test]
+    fn summarize_raw_input_is_none_for_an_empty_matched_value() {
+        assert_eq!(
+            summarize_raw_input(Some(&serde_json::json!({"command": ""}))),
+            None
+        );
+    }
+
+    #[test]
+    fn summarize_raw_input_is_none_without_raw_input() {
+        assert_eq!(summarize_raw_input(None), None);
     }
 }

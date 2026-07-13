@@ -127,15 +127,36 @@ pub struct PermissionPromptRef {
     pub reject: (String, String),
 }
 
-/// A ping to relay to the phone. `body` is pre-formatted, already-
-/// localized text (a later task's job to build via
-/// `surface::strings`) — `BridgeCore` treats it as opaque. `permission`
-/// is `Some` only for a permission-wait ping (adds Allow/Reject
-/// buttons); `None` for a plain completion ping (text only).
+/// The event-specific trailing content of a Telegram ping — kept separate
+/// from `header` (always plain: a pane title, or a project + agent name)
+/// because only some pings carry genuine agent-authored markdown that's
+/// safe to run through `telegram::markdown::to_telegram_html`. The rest (a
+/// "waiting"/"completed" label, a tool title, a `raw_input` summary) is
+/// plain administrative text that must never be markdown-parsed: parsing it
+/// would misread incidental punctuation in a file path or shell command
+/// (`file_name.txt`, `rm -rf *.log`) as CommonMark emphasis and silently
+/// reformat it into something the source never intended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TelegramTail {
+    /// Plain text — HTML-escaped for transport, never markdown-parsed.
+    Plain(String),
+    /// Genuine markdown (the agent's own response text) — markdown-parsed
+    /// into Telegram's HTML subset.
+    Markdown(String),
+}
+
+/// A ping to relay to the phone. `header` and `tail` are pre-formatted,
+/// already-localized text (a later task's job to build via
+/// `surface::strings`) — `BridgeCore` treats their *content* as opaque, it
+/// only cares which `TelegramTail` variant `tail` is so the send loop knows
+/// how to render it. `permission` is `Some` only for a permission-wait ping
+/// (adds Allow/Reject buttons); `None` for a plain completion ping (text
+/// only).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePing {
     pub pane: PaneRef,
-    pub body: String,
+    pub header: String,
+    pub tail: TelegramTail,
     pub permission: Option<PermissionPromptRef>,
 }
 
@@ -154,7 +175,8 @@ struct PendingPairCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboundMsg {
     pub chat_id: i64,
-    pub text: String,
+    pub header: String,
+    pub tail: TelegramTail,
     pub keyboard: Option<InlineKeyboard>,
 }
 
@@ -423,7 +445,8 @@ impl BridgeCore {
 
         OutboundMsg {
             chat_id: self.authorized_chat_id.unwrap_or_default(),
-            text: ping.body,
+            header: ping.header,
+            tail: ping.tail,
             keyboard,
         }
     }
@@ -715,12 +738,13 @@ mod tests {
         let mut bridge = BridgeCore::new(true, Some(1));
         let msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
-            body: "Turn finished".to_string(),
+            header: "Turn finished".to_string(),
+            tail: TelegramTail::Plain(String::new()),
             permission: None,
         });
 
         assert_eq!(msg.chat_id, 1);
-        assert_eq!(msg.text, "Turn finished");
+        assert_eq!(msg.header, "Turn finished");
         assert!(msg.keyboard.is_none());
         assert!(bridge.pending_permissions.is_empty());
     }
@@ -730,7 +754,8 @@ mod tests {
         let mut bridge = BridgeCore::new(true, Some(1));
         let msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
-            body: "Approve this?".to_string(),
+            header: "Approve this?".to_string(),
+            tail: TelegramTail::Plain(String::new()),
             permission: Some(PermissionPromptRef {
                 perm_id: 7,
                 allow: ("Allow".to_string(), "opt_allow".to_string()),
@@ -776,7 +801,8 @@ mod tests {
 
         let first_msg = bridge.build_ping(BridgePing {
             pane: pane(1, 1),
-            body: "first".to_string(),
+            header: "first".to_string(),
+            tail: TelegramTail::Plain(String::new()),
             permission: Some(prompt()),
         });
         let first_keyboard = first_msg.keyboard.expect("keyboard present");
@@ -788,7 +814,8 @@ mod tests {
         for _ in 0..PENDING_PERMISSIONS_CAP {
             bridge.build_ping(BridgePing {
                 pane: pane(1, 1),
-                body: "more".to_string(),
+                header: "more".to_string(),
+                tail: TelegramTail::Plain(String::new()),
                 permission: Some(prompt()),
             });
         }

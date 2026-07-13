@@ -414,6 +414,7 @@ mod tests {
     fn perm(resolved: bool) -> ChatItem {
         ChatItem::Permission(PermissionItem {
             tool_title: Some("Write /tmp/x".to_owned()),
+            raw_input_summary: None,
             options: Vec::new(),
             resolved: resolved.then_some(PermissionResolution::Cancelled),
         })

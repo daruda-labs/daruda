@@ -124,18 +124,27 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
     parse_updates(&body)
 }
 
-/// Send a text message, optionally with an inline keyboard attached.
-/// Returns the new message's `message_id`.
+/// Send a text message, optionally with a `parse_mode` (e.g. `"HTML"` — see
+/// `crate::telegram::markdown`) and/or an inline keyboard attached. Returns
+/// the new message's `message_id`. A malformed `text` for the given
+/// `parse_mode` (e.g. an unclosed tag) makes Telegram reject the whole call
+/// with an `Http` error — the caller (`global.rs`'s send loop) is
+/// responsible for retrying with `parse_mode: None` if that happens, this
+/// function does not.
 pub fn send_message(
     token: &str,
     chat_id: i64,
     text: &str,
+    parse_mode: Option<&str>,
     keyboard: Option<InlineKeyboard>,
 ) -> Result<i64, ClientError> {
     let mut payload = serde_json::json!({
         "chat_id": chat_id,
         "text": text,
     });
+    if let Some(parse_mode) = parse_mode {
+        payload["parse_mode"] = serde_json::json!(parse_mode);
+    }
     if let Some(keyboard) = keyboard {
         let row: Vec<serde_json::Value> = keyboard
             .buttons

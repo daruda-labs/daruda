@@ -13,6 +13,7 @@
 use gpui::Context;
 
 use crate::surface::strings as s;
+use crate::telegram::bridge::TelegramTail;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -40,6 +41,26 @@ fn preview_for(text: &str, marker: &str) -> String {
         .iter()
         .collect();
     format!("{head}\n{marker}\n{tail}")
+}
+
+/// Compose the permission-wait ping's tail: the localized "waiting for
+/// input" line, then an optional tool-title line, then an optional
+/// raw-input-summary line — both are the same
+/// `daruda_acp::PermissionItem::{tool_title,raw_input_summary}` fields the
+/// in-app permission card is built from, so the phone message says *what*
+/// is being asked (e.g. "Write /tmp/x.rs" / "command: npm install") instead
+/// of just that something is. An empty string is treated the same as
+/// absent (defensive — `raw_input_summary` already filters this at the
+/// source, see `daruda_acp::mapping::summarize_raw_input`).
+fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str>) -> String {
+    let mut tail = s::agent_notification_waiting();
+    for line in [tool_title, raw_input_summary] {
+        if let Some(line) = line.filter(|l| !l.is_empty()) {
+            tail.push('\n');
+            tail.push_str(line);
+        }
+    }
+    tail
 }
 
 /// Pick the Allow/Reject button pair from a permission card's choices (the
@@ -72,20 +93,6 @@ fn pick_allow_reject(
 }
 
 impl Workspace {
-    /// Compose a two-line Telegram ping body: the pane's display title (see
-    /// `agent_chat_ops::Workspace::pane_title`) followed by `tail` (the
-    /// event-specific label — "waiting for input", "completed", …). The
-    /// single place that shape is assembled, shared by the permission-wait
-    /// relay below and the turn-completion relay in `agent_chat_ops.rs`.
-    pub(in crate::workspace) fn telegram_ping_body(
-        &self,
-        pane_id: PaneId,
-        cx: &Context<Self>,
-        tail: &str,
-    ) -> String {
-        format!("{}\n{}", self.pane_title(pane_id, cx), tail)
-    }
-
     /// The owning project's display name for `pane_id`, if it belongs to
     /// one (`main_area.runtimes` is keyed by `LaneRef { project, lane }`,
     /// so the project id comes from whichever runtime's pane list contains
@@ -100,21 +107,28 @@ impl Workspace {
         self.project_for(project_id).map(|p| p.name.clone())
     }
 
-    /// Compose the turn-completion ping body: project name, agent name,
-    /// then the agent's actual last response (see [`preview_for`] for the
-    /// head/tail truncation past 2000 chars) — so the phone shows what the
-    /// agent actually said, not just a bare "completed" line. Falls back
-    /// to the generic "finished responding" text when the turn produced no
-    /// assistant text at all (e.g. a tool-only turn) or the pane's view is
-    /// already gone.
-    pub(in crate::workspace) fn telegram_completion_body(
+    /// Compose the turn-completion ping's header + tail: project name and
+    /// agent name as the (always plain) header, and the agent's actual last
+    /// response (see [`preview_for`] for the head/tail truncation past 2000
+    /// chars) as a [`TelegramTail::Markdown`] tail — so the phone shows
+    /// what the agent actually said, with its own markdown rendered,
+    /// rather than a bare "completed" line or literal `**`/backticks.
+    /// Falls back to a [`TelegramTail::Plain`] "finished responding" tail
+    /// when the turn produced no assistant text at all (e.g. a tool-only
+    /// turn) or the pane's view is already gone — that fallback text is
+    /// plain i18n copy, not agent-authored markdown, so it must not be
+    /// markdown-parsed either (see [`TelegramTail`]'s doc comment).
+    pub(in crate::workspace) fn telegram_completion_parts(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
-    ) -> String {
+    ) -> (String, TelegramTail) {
         let project_line = self.project_name_for_pane(pane_id);
         let Some(view) = self.agent_chat_view(pane_id) else {
-            return self.telegram_ping_body(pane_id, cx, &s::agent_notification_completed());
+            return (
+                self.pane_title(pane_id, cx),
+                TelegramTail::Plain(s::agent_notification_completed()),
+            );
         };
         let view = view.read(cx);
         let header = match project_line {
@@ -126,11 +140,17 @@ impl Workspace {
             _ => None,
         });
         match last_response {
-            Some(text) => format!(
-                "{header}\n{}",
-                preview_for(text, &s::agent_notification_telegram_truncated_marker())
+            Some(text) => (
+                header,
+                TelegramTail::Markdown(preview_for(
+                    text,
+                    &s::agent_notification_telegram_truncated_marker(),
+                )),
             ),
-            None => format!("{header}\n{}", s::agent_notification_completed()),
+            None => (
+                header,
+                TelegramTail::Plain(s::agent_notification_completed()),
+            ),
         }
     }
 
@@ -139,21 +159,30 @@ impl Workspace {
     /// the relay entirely (not a broken partial ping) if the agent
     /// didn't supply both an allow and a reject option (shouldn't happen
     /// for a real permission request, but nothing to build a keyboard
-    /// from if it somehow does).
+    /// from if it somehow does). `tool_title` / `raw_input_summary` are the
+    /// same `daruda_acp::PermissionItem` fields the in-app card is built
+    /// from — see [`permission_wait_tail`] — so the phone ping names the
+    /// actual action awaiting approval instead of just "waiting for your
+    /// input". Always a [`TelegramTail::Plain`] tail: none of `tool_title`,
+    /// `raw_input_summary`, or the "waiting" label is agent-authored
+    /// markdown — see [`TelegramTail`]'s doc comment for why that matters.
     pub(in crate::workspace) fn relay_permission_wait_to_telegram(
         &self,
         pane_id: PaneId,
         perm_id: u64,
         options: &[daruda_acp::PermissionChoice],
+        tool_title: Option<&str>,
+        raw_input_summary: Option<&str>,
         cx: &Context<Self>,
     ) {
         let Some((allow, reject)) = pick_allow_reject(options) else {
             return;
         };
-        let body = self.telegram_ping_body(pane_id, cx, &s::agent_notification_waiting());
+        let tail = permission_wait_tail(tool_title, raw_input_summary);
         self.relay_to_telegram(
             pane_id,
-            body,
+            self.pane_title(pane_id, cx),
+            TelegramTail::Plain(tail),
             Some(crate::telegram::bridge::PermissionPromptRef {
                 perm_id,
                 allow,
@@ -177,7 +206,8 @@ impl Workspace {
     pub(in crate::workspace) fn relay_to_telegram(
         &self,
         pane_id: PaneId,
-        body: String,
+        header: String,
+        tail: TelegramTail,
         permission: Option<crate::telegram::bridge::PermissionPromptRef>,
         cx: &Context<Self>,
     ) {
@@ -192,7 +222,8 @@ impl Workspace {
                 workspace: self.uuid(),
                 pane: pane_id,
             },
-            body,
+            header,
+            tail,
             permission,
         });
     }
@@ -265,9 +296,55 @@ impl Workspace {
 mod tests {
     use gpui::AppContext as _;
 
-    use super::{pick_allow_reject, preview_for};
+    use super::{permission_wait_tail, pick_allow_reject, preview_for};
+    use crate::surface::strings as s;
     use daruda_acp::{PermissionChoice, PermissionKindView};
     use daruda_store::project::PaneCwd;
+
+    #[test]
+    fn permission_wait_tail_appends_the_tool_title_when_present() {
+        assert_eq!(
+            permission_wait_tail(Some("Write /tmp/x.rs"), None),
+            format!("{}\n{}", s::agent_notification_waiting(), "Write /tmp/x.rs")
+        );
+    }
+
+    #[test]
+    fn permission_wait_tail_appends_the_raw_input_summary_after_the_title() {
+        assert_eq!(
+            permission_wait_tail(Some("Run npm install"), Some("command: npm install")),
+            format!(
+                "{}\n{}\n{}",
+                s::agent_notification_waiting(),
+                "Run npm install",
+                "command: npm install"
+            )
+        );
+    }
+
+    #[test]
+    fn permission_wait_tail_appends_only_the_raw_input_summary_without_a_title() {
+        assert_eq!(
+            permission_wait_tail(None, Some("file: /tmp/x.rs")),
+            format!("{}\n{}", s::agent_notification_waiting(), "file: /tmp/x.rs")
+        );
+    }
+
+    #[test]
+    fn permission_wait_tail_falls_back_to_plain_waiting_text_without_a_title_or_summary() {
+        assert_eq!(
+            permission_wait_tail(None, None),
+            s::agent_notification_waiting()
+        );
+    }
+
+    #[test]
+    fn permission_wait_tail_treats_empty_strings_as_absent() {
+        assert_eq!(
+            permission_wait_tail(Some(""), Some("")),
+            s::agent_notification_waiting()
+        );
+    }
 
     fn choice(option_id: &str, name: &str, kind: PermissionKindView) -> PermissionChoice {
         PermissionChoice {

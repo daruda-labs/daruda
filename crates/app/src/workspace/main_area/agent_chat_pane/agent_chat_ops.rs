@@ -242,7 +242,14 @@ impl Workspace {
         let daruda_acp::ChatItem::Permission(card) = daruda_acp::permission_item(request) else {
             return;
         };
-        self.relay_permission_wait_to_telegram(pane_id, *id, &card.options, cx);
+        self.relay_permission_wait_to_telegram(
+            pane_id,
+            *id,
+            &card.options,
+            card.tool_title.as_deref(),
+            card.raw_input_summary.as_deref(),
+            cx,
+        );
     }
 
     /// Fire the "completed" desktop notification for a settled turn. Called only
@@ -271,8 +278,8 @@ impl Workspace {
     ) {
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
-            let body = self.telegram_completion_body(pane_id, cx);
-            self.relay_to_telegram(pane_id, body, None, cx);
+            let (header, tail) = self.telegram_completion_parts(pane_id, cx);
+            self.relay_to_telegram(pane_id, header, tail, None, cx);
         }
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {

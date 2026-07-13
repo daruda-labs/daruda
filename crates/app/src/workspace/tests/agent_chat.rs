@@ -410,6 +410,7 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
                 view.update(cx, |v, cx| {
                     v.items.push(ChatItem::Permission(PermissionItem {
                         tool_title: Some("Write /tmp/x".to_string()),
+                        raw_input_summary: None,
                         options: vec![PermissionChoice {
                             option_id: "allow_once".to_string(),
                             name: "Allow".to_string(),
@@ -496,6 +497,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
                         tool("b"),
                         ChatItem::Permission(PermissionItem {
                             tool_title: Some("Write /tmp/x".to_string()),
+                            raw_input_summary: None,
                             options: vec![PermissionChoice {
                                 option_id: "allow_once".to_string(),
                                 name: "Allow".to_string(),
@@ -713,6 +715,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
                 view.update(cx, |v, _| {
                     v.items.push(ChatItem::Permission(PermissionItem {
                         tool_title: Some("Write /tmp/x".to_string()),
+                        raw_input_summary: None,
                         options: vec![PermissionChoice {
                             option_id: "allow_once".to_string(),
                             name: "Allow".to_string(),

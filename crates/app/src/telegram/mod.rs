@@ -11,3 +11,4 @@ pub mod bridge;
 pub mod client;
 pub mod global;
 pub mod keychain;
+mod markdown;
