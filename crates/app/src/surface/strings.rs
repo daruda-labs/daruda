@@ -1268,6 +1268,16 @@ pub fn projects_empty_denied_title() -> String {
 pub fn projects_empty_denied_body() -> String {
     rust_i18n::t!("projects.empty_denied_body").into_owned()
 }
+/// Main-area empty-state heading shown when the active lane is
+/// accessible but has no open tabs (the user closed them all).
+pub fn projects_empty_no_tabs_title() -> String {
+    rust_i18n::t!("projects.empty_no_tabs_title").into_owned()
+}
+/// Main-area empty-state body shown when the active lane is accessible
+/// but has no open tabs.
+pub fn projects_empty_no_tabs_body() -> String {
+    rust_i18n::t!("projects.empty_no_tabs_body").into_owned()
+}
 pub fn merge_modal_branch_label() -> String {
     rust_i18n::t!("modal.merge_branch_label").into_owned()
 }

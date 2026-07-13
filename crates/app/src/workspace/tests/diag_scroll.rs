@@ -82,6 +82,9 @@ fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
                     window,
                     cx,
                 );
+                // Activation no longer auto-seeds; open a terminal so the
+                // swapped-in lane has one (the entity under test here).
+                ws.add_tab(window, cx);
             });
         })
         .unwrap();
@@ -173,6 +176,15 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
 
     assert_eq!(active, 1, "click on lane 1 row must activate lane 1");
 
+    // Activation no longer auto-seeds; open a terminal in lane 1 so there
+    // is a swapped-in terminal entity to wheel over.
+    any_wh
+        .update(cx, |_, window, cx| {
+            ws.update(cx, |ws, cx| ws.add_tab(window, cx));
+        })
+        .unwrap();
+    cx.run_until_parked();
+
     // Wheel over the swapped-in terminal.
     let term1 = ws.read_with(cx, |ws, _| active_terminal_view(ws));
     feed_scrollback(&term1, cx);
@@ -234,6 +246,9 @@ fn diag_wheel_after_lane_swap(cx: &mut TestAppContext) {
                     window,
                     cx,
                 );
+                // Activation no longer auto-seeds; open a terminal so the
+                // swapped-in lane has one (the entity under test here).
+                ws.add_tab(window, cx);
             });
         })
         .unwrap();

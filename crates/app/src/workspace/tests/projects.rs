@@ -146,6 +146,13 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         )
     });
     let ws = wh.root(cx).unwrap();
+    // Give project 0 a tab of its own (the test constructor skips the
+    // bootstrap tab, and activation no longer auto-seeds). This is the
+    // content that must survive closing the other project.
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| ws.add_tab(window, cx));
+    })
+    .unwrap();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.add_project(
@@ -168,11 +175,12 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         assert_eq!(ws.projects[0].id, 0);
         assert_eq!(ws.active.project, 0);
         // Regression: main area must not be empty after delete. The
-        // surviving project's lane should be re-activated with at
-        // least one tab/pane so the user doesn't see a blank viewport.
+        // surviving project's lane is re-activated and keeps its own
+        // content (the tab opened above), so the user doesn't see a
+        // blank viewport.
         assert!(
             !ws.active_runtime().tabs.is_empty(),
-            "main area tabs must not be empty after closing a project"
+            "surviving project's own tab must remain after closing a project"
         );
         assert!(
             !ws.active_runtime().panes.is_empty(),

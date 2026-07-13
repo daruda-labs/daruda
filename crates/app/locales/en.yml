@@ -339,6 +339,8 @@ projects:
   empty_missing_body: "This worktree's directory could not be found on disk. It may have been moved or deleted."
   empty_denied_title: "Permission denied"
   empty_denied_body: "This worktree's directory exists but daruda can't read it. Grant Full Disk Access in System Settings, then reopen."
+  empty_no_tabs_title: "No open tabs"
+  empty_no_tabs_body: "This worktree has no open tabs. Open a terminal or start an agent chat to get going."
 
 # Group context menu
 group:

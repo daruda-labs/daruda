@@ -88,15 +88,79 @@ pub(in crate::workspace) fn render_center_content(
                 cx,
             )
         }
+    } else if ws.active_lane().is_some() {
+        // A `Present` active lane with no tabs — the user closed them all
+        // (and another lane kept the window open), or a restore left the
+        // lane unseeded. Show a recovery empty-state with New Terminal /
+        // New Agent Chat rather than a blank hole.
+        present_empty_state(cx)
     } else {
-        // No tab for the active lane, and the lane is `Present` (the
-        // inaccessible case is handled by the availability gate above).
-        // The legitimate "Present lane with no tabs" case is healed by
-        // the restore fallback / `add_tab`; a truly empty workspace (no
-        // projects, no active lane) also lands here. Either way, fall
-        // through to a blank element.
+        // Truly empty workspace (no projects, no active lane) lands here.
+        // Nothing to root a pane at, so fall through to a blank element.
         div().flex_1().w_full().into_any_element()
     }
+}
+
+/// Centered main-area placeholder shown when the active lane is
+/// accessible but holds no tabs. Offers the two ways back into content —
+/// New Terminal and New Agent Chat — each a one-line dispatch into the
+/// same ops the tab-bar `+` menu uses (one-way data flow).
+fn present_empty_state(cx: &mut Context<Workspace>) -> AnyElement {
+    use crate::surface::strings as s;
+    use crate::ui::{Icon, IconName, Sizable as _, button, button_primary};
+
+    let t = theme::current(cx);
+    div()
+        .flex_1()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(theme::MAIN_EMPTY_STATE_GAP))
+        .bg(t.file_viewer_bg)
+        .child(
+            Icon::new(IconName::SquareTerminal)
+                .with_size(px(theme::MAIN_EMPTY_STATE_ICON_SIZE))
+                .text_color(t.text_muted),
+        )
+        .child(
+            div()
+                .text_size(px(theme::MAIN_EMPTY_STATE_TITLE_FONT_SIZE))
+                .text_color(t.text_primary)
+                .child(SharedString::from(s::projects_empty_no_tabs_title())),
+        )
+        .child(
+            div()
+                .max_w(px(theme::MAIN_EMPTY_STATE_BODY_MAX_W))
+                .text_size(px(theme::MAIN_EMPTY_STATE_BODY_FONT_SIZE))
+                .text_color(t.text_muted)
+                .text_center()
+                .child(SharedString::from(s::projects_empty_no_tabs_body())),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(theme::MAIN_EMPTY_STATE_GAP))
+                .child(
+                    button_primary("no-tabs-new-terminal", s::ctx_new_terminal()).on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.mutate_durable_in(window, cx, |ws, w, cx| ws.add_tab(w, cx));
+                        }),
+                    ),
+                )
+                .child(
+                    button("no-tabs-new-chat", s::ctx_new_agent_chat()).on_click(cx.listener(
+                        |this, _, window, cx| {
+                            this.mutate_durable_in(window, cx, |ws, w, cx| {
+                                ws.open_agent_chat_pane(w, cx)
+                            });
+                        },
+                    )),
+                ),
+        )
+        .into_any_element()
 }
 
 /// Centered main-area placeholder shown when the active lane's root
