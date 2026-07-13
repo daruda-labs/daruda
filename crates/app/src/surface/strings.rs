@@ -988,6 +988,13 @@ pub fn agent_chat_no_remote_cwd() -> String {
     rust_i18n::t!("agent_chat.no_remote_cwd").into_owned()
 }
 
+/// Hint appended to a connection error when the pane's working directory is
+/// a remote (SSH/Docker) path. Guides the user to check the remote path
+/// configuration and network connectivity.
+pub fn agent_chat_remote_connect_error_hint() -> String {
+    rust_i18n::t!("agent_chat.remote_connect_error_hint").into_owned()
+}
+
 /// Prefix for the connection-error status line.
 pub fn agent_chat_error_prefix() -> String {
     rust_i18n::t!("agent_chat.error_prefix").into_owned()

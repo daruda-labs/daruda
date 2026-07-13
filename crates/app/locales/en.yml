@@ -228,6 +228,7 @@ agent_chat:
   retry: "Retry"
   no_lane_cwd: "No working directory for this lane."
   no_remote_cwd: "This lane has no remote path set. Right-click this lane in the sidebar to set one."
+  remote_connect_error_hint: "This looks like a remote (SSH/Docker) connection failure — check the Worktree's remote path (right-click it in the sidebar → "Set Remote Path…") and that the host/container is reachable."
   empty: "Ask the agent anything to get started."
   expand_all: "Expand all"
   collapse_all: "Collapse all"
