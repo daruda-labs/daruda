@@ -50,41 +50,217 @@ impl DefaultPermissionMode {
     }
 }
 
-/// A selectable ACP agent: an id, a display name, and the command that launches
-/// its ACP adapter. The command is a bash-style string or a JSON stdio config —
-/// daruda_acp parses it and provisions Node.js only for npx/node-family commands.
+/// A selectable ACP agent: an id, a display name, and how its ACP adapter is
+/// launched.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(from = "AgentDefinitionRepr", into = "AgentDefinitionRepr")]
 pub struct AgentDefinition {
     pub id: String,
     pub name: String,
-    /// Bash-style launch command or JSON stdio config. May contain the
-    /// [`CWD_TOKEN`] placeholder (e.g. to `cd` into a remote path over `ssh`
-    /// before launching the adapter); substituted via [`substitute_tokens`]
-    /// at connect time, and its presence marks the agent as remote — see
-    /// [`command_needs_remote_cwd`].
-    pub command: String,
+    pub launch: AgentLaunch,
 }
 
-/// Placeholder token in [`AgentDefinition::command`] substituted with the
+/// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
+/// JSON stdio config) exactly as given — daruda_acp parses it and provisions
+/// Node.js only for npx/node-family commands; this is what every registry
+/// preset, `claude_default()`, and every pre-migration config use. `Ssh` /
+/// `Docker` reach an adapter that runs on another host / inside a running
+/// container, and need a remote working directory assembled into the launch
+/// command at connect time via [`AgentLaunch::wrap`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentLaunch {
+    /// Runs `command` exactly as given — no wrapping. May contain the
+    /// [`CWD_TOKEN`] placeholder (e.g. to `cd` into a remote path over `ssh`
+    /// before launching the adapter); substituted at connect time by
+    /// [`AgentLaunch::wrap`], and its presence marks the agent as remote —
+    /// see [`AgentLaunch::needs_remote_cwd`]. This is the legacy
+    /// hand-written escape hatch; new remote setups should use `Ssh` /
+    /// `Docker` instead.
+    Raw(String),
+    /// `adapter_command` runs on `host` over SSH; [`AgentLaunch::wrap`]
+    /// assembles `ssh <host> sh -c 'cd "<remote path>" && <adapter_command>'`.
+    Ssh {
+        adapter_command: String,
+        host: String,
+    },
+    /// `adapter_command` runs inside the already-running container
+    /// `container`; [`AgentLaunch::wrap`] assembles
+    /// `docker exec -i <container> sh -c 'cd "<remote path>" && <adapter_command>'`.
+    Docker {
+        adapter_command: String,
+        container: String,
+    },
+}
+
+/// Placeholder token in an [`AgentLaunch::Raw`] command substituted with the
 /// working directory to launch the adapter in.
 pub const CWD_TOKEN: &str = "{{cwd}}";
 
-/// Replace each `(name, value)` token pair in `command`, in order. Tokens not
-/// present in `command` are ignored; a `command` with no tokens is returned
-/// unchanged.
-pub fn substitute_tokens(command: &str, tokens: &[(&str, &str)]) -> String {
-    let mut result = command.to_string();
-    for (name, value) in tokens {
-        result = result.replace(name, value);
+/// `remote_path`, once validated non-blank by [`AgentLaunch::wrap`], borrowed
+/// back out — or `Err(())` when it is `None` or blank (whitespace-only).
+fn require_remote_path(remote_path: Option<&str>) -> Result<&str, ()> {
+    match remote_path {
+        Some(path) if !path.trim().is_empty() => Ok(path),
+        _ => Err(()),
     }
-    result
 }
 
-/// Whether `command` references [`CWD_TOKEN`] and therefore needs a working
-/// directory substituted in before it can be launched (i.e. the agent runs
-/// remotely rather than in-process next to daruda).
-pub fn command_needs_remote_cwd(command: &str) -> bool {
-    command.contains(CWD_TOKEN)
+impl AgentLaunch {
+    /// Whether this launch needs a remote working directory substituted in
+    /// before [`Self::wrap`] can succeed. Always `true` for `Ssh` / `Docker`;
+    /// for `Raw`, `true` iff the command contains the literal [`CWD_TOKEN`]
+    /// — the only place token-sniffing still happens, preserved as the
+    /// legacy `Raw` escape hatch.
+    pub fn needs_remote_cwd(&self) -> bool {
+        match self {
+            AgentLaunch::Raw(command) => command.contains(CWD_TOKEN),
+            AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => true,
+        }
+    }
+
+    /// Build the final shell command to launch this adapter, substituting
+    /// `remote_path` in where needed.
+    ///
+    /// - `Raw`: if the command has no [`CWD_TOKEN`], returned unchanged and
+    ///   `remote_path` is ignored. If it does, `remote_path` must be `Some`
+    ///   and non-blank (whitespace-only counts as blank), else `Err(())`;
+    ///   otherwise the token is replaced with `remote_path` verbatim.
+    /// - `Ssh` / `Docker`: `remote_path` must be `Some` and non-blank, else
+    ///   `Err(())`; otherwise the adapter command is wrapped to `cd` into
+    ///   `remote_path` before running.
+    ///
+    /// `Err(())` rather than a richer error type: the only failure is "no
+    /// usable remote path was supplied", a precondition the caller already
+    /// knows the human-readable reason for (e.g. "lane has no remote cwd
+    /// yet") — there is nothing more to report back.
+    #[allow(clippy::result_unit_err)]
+    pub fn wrap(&self, remote_path: Option<&str>) -> Result<String, ()> {
+        match self {
+            AgentLaunch::Raw(command) => {
+                if command.contains(CWD_TOKEN) {
+                    let path = require_remote_path(remote_path)?;
+                    Ok(command.replace(CWD_TOKEN, path))
+                } else {
+                    Ok(command.clone())
+                }
+            }
+            AgentLaunch::Ssh {
+                adapter_command,
+                host,
+            } => {
+                let path = require_remote_path(remote_path)?;
+                Ok(format!(
+                    "ssh {host} sh -c 'cd \"{path}\" && {adapter_command}'"
+                ))
+            }
+            AgentLaunch::Docker {
+                adapter_command,
+                container,
+            } => {
+                let path = require_remote_path(remote_path)?;
+                Ok(format!(
+                    "docker exec -i {container} sh -c 'cd \"{path}\" && {adapter_command}'"
+                ))
+            }
+        }
+    }
+}
+
+/// Private wire representation for [`AgentDefinition`]. `id`/`name` stay flat
+/// TOML keys; the launch variant is either the flat legacy `command` key
+/// (`AgentLaunch::Raw`, byte-identical to every config written before this
+/// migration) or exactly one of the `[agents.ssh]` / `[agents.docker]`
+/// sub-tables. Mirrors the `PaneCwd`/`PaneCwdRepr` idiom in
+/// `daruda_store::project` for the same "clean enum in Rust, different wire
+/// shape on disk" problem — here as a plain (not untagged) struct since the
+/// three launch fields live at different keys rather than sharing one slot.
+#[derive(Serialize, Deserialize)]
+struct AgentDefinitionRepr {
+    id: String,
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ssh: Option<SshLaunchRepr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    docker: Option<DockerLaunchRepr>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SshLaunchRepr {
+    adapter_command: String,
+    host: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DockerLaunchRepr {
+    adapter_command: String,
+    container: String,
+}
+
+impl From<AgentDefinition> for AgentDefinitionRepr {
+    fn from(v: AgentDefinition) -> Self {
+        let (command, ssh, docker) = match v.launch {
+            AgentLaunch::Raw(command) => (Some(command), None, None),
+            AgentLaunch::Ssh {
+                adapter_command,
+                host,
+            } => (
+                None,
+                Some(SshLaunchRepr {
+                    adapter_command,
+                    host,
+                }),
+                None,
+            ),
+            AgentLaunch::Docker {
+                adapter_command,
+                container,
+            } => (
+                None,
+                None,
+                Some(DockerLaunchRepr {
+                    adapter_command,
+                    container,
+                }),
+            ),
+        };
+        Self {
+            id: v.id,
+            name: v.name,
+            command,
+            ssh,
+            docker,
+        }
+    }
+}
+
+impl From<AgentDefinitionRepr> for AgentDefinition {
+    /// Reads whichever of `ssh` / `docker` / `command` is set. Priority order
+    /// `ssh` > `docker` > `command` is a deliberate but arbitrary tie-break
+    /// for a hand-edited config that sets more than one at once — this isn't
+    /// expected in practice since daruda itself only ever writes one.
+    /// Defaults to `Raw("")` if none are set at all.
+    fn from(v: AgentDefinitionRepr) -> Self {
+        let launch = if let Some(ssh) = v.ssh {
+            AgentLaunch::Ssh {
+                adapter_command: ssh.adapter_command,
+                host: ssh.host,
+            }
+        } else if let Some(docker) = v.docker {
+            AgentLaunch::Docker {
+                adapter_command: docker.adapter_command,
+                container: docker.container,
+            }
+        } else {
+            AgentLaunch::Raw(v.command.unwrap_or_default())
+        };
+        Self {
+            id: v.id,
+            name: v.name,
+            launch,
+        }
+    }
 }
 
 /// A built-in ACP registry preset that can be inserted into the user catalog.
@@ -100,7 +276,7 @@ impl AgentPreset {
         AgentDefinition {
             id: self.id.to_string(),
             name: self.name.to_string(),
-            command: self.command.to_string(),
+            launch: AgentLaunch::Raw(self.command.to_string()),
         }
     }
 }
@@ -241,7 +417,9 @@ impl AgentDefinition {
         Self {
             id: "claude".to_string(),
             name: "Claude Code".to_string(),
-            command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            launch: AgentLaunch::Raw(
+                "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            ),
         }
     }
 
@@ -429,8 +607,8 @@ mod tests {
         assert_eq!(d.id, "claude");
         assert_eq!(d.name, "Claude Code");
         assert_eq!(
-            d.command,
-            "npx -y @agentclientprotocol/claude-agent-acp@latest"
+            d.launch,
+            AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".to_string())
         );
     }
 
@@ -439,7 +617,10 @@ mod tests {
         let d = AgentDefinition::codex_default();
         assert_eq!(d.id, "codex-acp");
         assert_eq!(d.name, "Codex");
-        assert_eq!(d.command, "npx -y @agentclientprotocol/codex-acp@1.1.0");
+        assert_eq!(
+            d.launch,
+            AgentLaunch::Raw("npx -y @agentclientprotocol/codex-acp@1.1.0".to_string())
+        );
     }
 
     #[test]
@@ -451,7 +632,10 @@ mod tests {
         assert!(presets.iter().any(|p| p.id == "claude-acp"));
         assert!(presets.iter().any(|p| p.id == "codex-acp"));
         assert!(presets.iter().any(|p| {
-            p.id == "factory-droid" && p.command.starts_with("DROID_DISABLE_AUTO_UPDATE=true ")
+            let AgentLaunch::Raw(command) = &p.launch else {
+                return false;
+            };
+            p.id == "factory-droid" && command.starts_with("DROID_DISABLE_AUTO_UPDATE=true ")
         }));
     }
 
@@ -465,7 +649,7 @@ mod tests {
         let d = AgentDefinition {
             id: "codex".to_string(),
             name: "Codex".to_string(),
-            command: "codex acp".to_string(),
+            launch: AgentLaunch::Raw("codex acp".to_string()),
         };
         let toml_str = toml::to_string(&d).expect("serialize");
         let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
@@ -473,50 +657,207 @@ mod tests {
     }
 
     #[test]
-    fn substitute_tokens_replaces_single_token() {
-        let result = substitute_tokens(
-            "ssh vm-work \"cd {{cwd}} && run\"",
-            &[(CWD_TOKEN, "/tmp/x")],
-        );
-        assert_eq!(result, "ssh vm-work \"cd /tmp/x && run\"");
-    }
-
-    #[test]
-    fn substitute_tokens_replaces_multiple_tokens() {
-        let result = substitute_tokens(
-            "cd {{cwd}} && export HOST={{host}}",
-            &[(CWD_TOKEN, "/tmp/x"), ("{{host}}", "vm-work")],
-        );
-        assert_eq!(result, "cd /tmp/x && export HOST=vm-work");
-    }
-
-    #[test]
-    fn substitute_tokens_returns_original_when_no_tokens_present() {
-        let command = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+    fn migration_command_toml_deserializes_to_raw_unchanged() {
+        // Every pre-migration config line, including a hand-written {{cwd}}
+        // token, must land in `Raw` byte-for-byte.
+        let toml_str = "id = \"legacy\"\nname = \"Legacy\"\ncommand = \"ssh vm-work \\\"cd {{cwd}} && run\\\"\"\n";
+        let d: AgentDefinition = toml::from_str(toml_str).expect("deserialize");
+        assert_eq!(d.id, "legacy");
+        assert_eq!(d.name, "Legacy");
         assert_eq!(
-            substitute_tokens(command, &[(CWD_TOKEN, "/tmp/x")]),
-            command
+            d.launch,
+            AgentLaunch::Raw("ssh vm-work \"cd {{cwd}} && run\"".to_string())
+        );
+
+        // And it serializes back to the exact same flat `command` shape.
+        let toml_str = toml::to_string(&d).expect("serialize");
+        assert!(toml_str.contains("command = "));
+        assert!(!toml_str.contains("[ssh]"));
+        assert!(!toml_str.contains("[docker]"));
+    }
+
+    #[test]
+    fn ssh_launch_toml_round_trips() {
+        let d = AgentDefinition {
+            id: "remote-agent".to_string(),
+            name: "Remote Agent".to_string(),
+            launch: AgentLaunch::Ssh {
+                adapter_command: "npx -y some-acp".to_string(),
+                host: "vm-work".to_string(),
+            },
+        };
+        let toml_str = toml::to_string(&d).expect("serialize");
+        assert!(toml_str.contains("[ssh]"));
+        assert!(toml_str.contains("host = \"vm-work\""));
+        // No flat `command` key — only `adapter_command` inside `[ssh]`.
+        assert!(!toml_str.contains("\ncommand = "));
+        let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back, d);
+    }
+
+    #[test]
+    fn docker_launch_toml_round_trips() {
+        let d = AgentDefinition {
+            id: "docker-agent".to_string(),
+            name: "Docker Agent".to_string(),
+            launch: AgentLaunch::Docker {
+                adapter_command: "npx -y some-acp".to_string(),
+                container: "ubuntu-dev".to_string(),
+            },
+        };
+        let toml_str = toml::to_string(&d).expect("serialize");
+        assert!(toml_str.contains("[docker]"));
+        assert!(toml_str.contains("container = \"ubuntu-dev\""));
+        // No flat `command` key — only `adapter_command` inside `[docker]`.
+        assert!(!toml_str.contains("\ncommand = "));
+        let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back, d);
+    }
+
+    #[test]
+    fn repr_priority_prefers_ssh_over_docker_over_command_when_hand_edited() {
+        // Defensive priority order for a hand-edited config that sets more
+        // than one launch shape at once: ssh > docker > command.
+        let both: AgentDefinition = toml::from_str(
+            "id = \"x\"\nname = \"X\"\ncommand = \"legacy\"\n\
+             [docker]\nadapter_command = \"d\"\ncontainer = \"c\"\n\
+             [ssh]\nadapter_command = \"s\"\nhost = \"h\"\n",
+        )
+        .expect("deserialize");
+        assert_eq!(
+            both.launch,
+            AgentLaunch::Ssh {
+                adapter_command: "s".to_string(),
+                host: "h".to_string(),
+            }
+        );
+
+        let docker_and_command: AgentDefinition = toml::from_str(
+            "id = \"x\"\nname = \"X\"\ncommand = \"legacy\"\n\
+             [docker]\nadapter_command = \"d\"\ncontainer = \"c\"\n",
+        )
+        .expect("deserialize");
+        assert_eq!(
+            docker_and_command.launch,
+            AgentLaunch::Docker {
+                adapter_command: "d".to_string(),
+                container: "c".to_string(),
+            }
         );
     }
 
     #[test]
-    fn substitute_tokens_with_empty_token_list_returns_original() {
-        let command = "cd {{cwd}} && run";
-        assert_eq!(substitute_tokens(command, &[]), command);
+    fn needs_remote_cwd_raw_detects_token() {
+        assert!(
+            AgentLaunch::Raw(
+                "ssh vm-work \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
+                    .to_string()
+            )
+            .needs_remote_cwd()
+        );
     }
 
     #[test]
-    fn command_needs_remote_cwd_detects_token() {
-        assert!(command_needs_remote_cwd(
-            "ssh vm-work \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
-        ));
+    fn needs_remote_cwd_raw_false_without_token() {
+        assert!(
+            !AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".to_string())
+                .needs_remote_cwd()
+        );
     }
 
     #[test]
-    fn command_needs_remote_cwd_false_without_token() {
-        assert!(!command_needs_remote_cwd(
-            "npx -y @agentclientprotocol/claude-agent-acp@latest"
-        ));
+    fn needs_remote_cwd_ssh_and_docker_are_always_true() {
+        assert!(
+            AgentLaunch::Ssh {
+                adapter_command: "run".to_string(),
+                host: "h".to_string(),
+            }
+            .needs_remote_cwd()
+        );
+        assert!(
+            AgentLaunch::Docker {
+                adapter_command: "run".to_string(),
+                container: "c".to_string(),
+            }
+            .needs_remote_cwd()
+        );
+    }
+
+    #[test]
+    fn wrap_raw_without_token_ignores_remote_path() {
+        let launch = AgentLaunch::Raw("npx -y some-acp".to_string());
+        assert_eq!(launch.wrap(None), Ok("npx -y some-acp".to_string()));
+        assert_eq!(
+            launch.wrap(Some("/tmp/anything")),
+            Ok("npx -y some-acp".to_string())
+        );
+    }
+
+    #[test]
+    fn wrap_raw_with_token_substitutes_remote_path() {
+        let launch = AgentLaunch::Raw("ssh vm-work \"cd {{cwd}} && run\"".to_string());
+        assert_eq!(
+            launch.wrap(Some("/home/user/project")),
+            Ok("ssh vm-work \"cd /home/user/project && run\"".to_string())
+        );
+    }
+
+    #[test]
+    fn wrap_raw_with_token_errs_on_missing_or_blank_remote_path() {
+        let launch = AgentLaunch::Raw("cd {{cwd}} && run".to_string());
+        assert_eq!(launch.wrap(None), Err(()));
+        assert_eq!(launch.wrap(Some("")), Err(()));
+        assert_eq!(launch.wrap(Some("   ")), Err(()));
+    }
+
+    #[test]
+    fn wrap_ssh_builds_exact_command() {
+        let launch = AgentLaunch::Ssh {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            host: "vm-work".to_string(),
+        };
+        assert_eq!(
+            launch.wrap(Some("/home/user/project")),
+            Ok(
+                "ssh vm-work sh -c 'cd \"/home/user/project\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn wrap_ssh_errs_on_missing_or_blank_remote_path() {
+        let launch = AgentLaunch::Ssh {
+            adapter_command: "run".to_string(),
+            host: "vm-work".to_string(),
+        };
+        assert_eq!(launch.wrap(None), Err(()));
+        assert_eq!(launch.wrap(Some("  ")), Err(()));
+    }
+
+    #[test]
+    fn wrap_docker_builds_exact_command_with_dash_i_never_dash_it() {
+        let launch = AgentLaunch::Docker {
+            adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
+            container: "ubuntu-dev".to_string(),
+        };
+        let wrapped = launch.wrap(Some("/home/user/project")).unwrap();
+        assert_eq!(
+            wrapped,
+            "docker exec -i ubuntu-dev sh -c 'cd \"/home/user/project\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+        );
+        assert!(wrapped.contains(" -i "));
+        assert!(!wrapped.contains(" -it "));
+    }
+
+    #[test]
+    fn wrap_docker_errs_on_missing_or_blank_remote_path() {
+        let launch = AgentLaunch::Docker {
+            adapter_command: "run".to_string(),
+            container: "ubuntu-dev".to_string(),
+        };
+        assert_eq!(launch.wrap(None), Err(()));
+        assert_eq!(launch.wrap(Some("")), Err(()));
     }
 
     #[test]
