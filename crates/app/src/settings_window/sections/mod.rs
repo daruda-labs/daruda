@@ -415,7 +415,7 @@ impl SettingsWindow {
                                     daruda_config::AgentDefinition {
                                         id: String::new(),
                                         name: String::new(),
-                                        command: String::new(),
+                                        launch: daruda_config::AgentLaunch::Raw(String::new()),
                                     },
                                     window,
                                     cx,
@@ -447,7 +447,14 @@ impl SettingsWindow {
     ) -> AnyElement {
         let t = theme::current(cx);
         let remove_id = format!("settings-agent-remove-{index}");
-        div()
+        let transport_kind = row
+            .transport_select
+            .read(cx)
+            .selected_value()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "raw".to_string());
+
+        let mut body = div()
             .flex()
             .flex_col()
             .gap(px(theme::MODAL_PANEL_GAP))
@@ -483,26 +490,46 @@ impl SettingsWindow {
                 s::settings_agent_field_name(),
                 crate::ui::input(&row.name_input, cx, ()),
             ))
-            .child({
-                let command_text = row.command_input.read(cx).value().to_string();
-                let is_remote = daruda_config::agent::command_needs_remote_cwd(&command_text);
-                let mut command_field = div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(theme::MODAL_FOOTER_GAP))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(crate::ui::input(&row.command_input, cx, ())),
-                    );
-                if is_remote {
-                    command_field = command_field
-                        .child(crate::ui::Badge::new(s::settings_agent_remote_badge()));
-                }
-                field_row(s::settings_agent_field_command(), command_field)
-            })
-            .into_any_element()
+            .child(field_row(
+                s::settings_agent_field_command(),
+                crate::ui::input(&row.command_input, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_agent_field_transport(),
+                crate::ui::select::select(&row.transport_select, cx, ()),
+            ));
+
+        // Only one of host/container is meaningful per transport kind — show
+        // just that field, plus a hint pointing at the Lane's remote-path
+        // setting (the value `AgentLaunch::wrap` substitutes in at connect
+        // time; see `daruda_config::AgentLaunch::needs_remote_cwd`).
+        if transport_kind == "ssh" {
+            body = body
+                .child(field_row(
+                    s::settings_agent_field_host(),
+                    crate::ui::input(&row.host_input, cx, ()),
+                ))
+                .child(
+                    div()
+                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(s::settings_agent_remote_path_hint()),
+                );
+        } else if transport_kind == "docker" {
+            body = body
+                .child(field_row(
+                    s::settings_agent_field_container(),
+                    crate::ui::input(&row.container_input, cx, ()),
+                ))
+                .child(
+                    div()
+                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(s::settings_agent_remote_path_hint()),
+                );
+        }
+
+        body.into_any_element()
     }
 
     pub(super) fn render_claude_status(&self, cx: &mut gpui::Context<Self>) -> AnyElement {

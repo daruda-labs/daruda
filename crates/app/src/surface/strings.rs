@@ -2218,12 +2218,43 @@ pub fn settings_agent_field_command() -> String {
     rust_i18n::t!("settings.agent_field_command").into_owned()
 }
 
-/// Badge shown next to the command field of an agent catalog row whose
-/// current command text contains the `{{cwd}}` token (see
-/// `daruda_config::agent::command_needs_remote_cwd`), marking the entry as
-/// remote-only without requiring the user to read the raw command string.
-pub fn settings_agent_remote_badge() -> String {
-    rust_i18n::t!("settings.agent_remote_badge").into_owned()
+/// Label for the transport-kind select (`daruda_config::AgentLaunch`'s three
+/// variants) in an agent catalog row.
+pub fn settings_agent_field_transport() -> String {
+    rust_i18n::t!("settings.agent_field_transport").into_owned()
+}
+
+/// Transport-select option label for `AgentLaunch::Raw`.
+pub fn settings_agent_transport_raw() -> String {
+    rust_i18n::t!("settings.agent_transport_raw").into_owned()
+}
+
+/// Transport-select option label for `AgentLaunch::Ssh`.
+pub fn settings_agent_transport_ssh() -> String {
+    rust_i18n::t!("settings.agent_transport_ssh").into_owned()
+}
+
+/// Transport-select option label for `AgentLaunch::Docker`.
+pub fn settings_agent_transport_docker() -> String {
+    rust_i18n::t!("settings.agent_transport_docker").into_owned()
+}
+
+/// Label for the SSH host field, shown only when a row's transport is `ssh`.
+pub fn settings_agent_field_host() -> String {
+    rust_i18n::t!("settings.agent_field_host").into_owned()
+}
+
+/// Label for the Docker container field, shown only when a row's transport
+/// is `docker`.
+pub fn settings_agent_field_container() -> String {
+    rust_i18n::t!("settings.agent_field_container").into_owned()
+}
+
+/// Hint line shown under the host/container field for an `ssh`/`docker`
+/// row, pointing at the Lane's remote-path setting that
+/// `AgentLaunch::wrap` substitutes in at connect time.
+pub fn settings_agent_remote_path_hint() -> String {
+    rust_i18n::t!("settings.agent_remote_path_hint").into_owned()
 }
 
 pub fn settings_agent_preset() -> String {
@@ -2251,6 +2282,12 @@ pub fn settings_err_agent_catalog_id(id: &str) -> String {
 }
 pub fn settings_err_agent_catalog_duplicate(id: &str) -> String {
     rust_i18n::t!("settings.err_agent_catalog_duplicate", id = id).into_owned()
+}
+pub fn settings_err_agent_catalog_host(index: usize) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_host", index = index).into_owned()
+}
+pub fn settings_err_agent_catalog_container(index: usize) -> String {
+    rust_i18n::t!("settings.err_agent_catalog_container", index = index).into_owned()
 }
 
 // Plugin section — install / uninstall UI labels

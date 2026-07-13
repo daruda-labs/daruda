@@ -202,7 +202,18 @@ pub(super) enum PluginSkillBodyState {
 pub(super) struct AgentCatalogRow {
     pub(super) id_input: Entity<InputState>,
     pub(super) name_input: Entity<InputState>,
+    /// The command that runs the ACP adapter — `Raw`'s full string, or the
+    /// `adapter_command` sub-field when `transport_select` is `ssh`/`docker`.
     pub(super) command_input: Entity<InputState>,
+    /// Transport kind for this row: `"raw"` / `"ssh"` / `"docker"` — mirrors
+    /// [`daruda_config::AgentLaunch`]'s three variants.
+    pub(super) transport_select: Entity<SelectState>,
+    /// SSH host — only meaningful (and only rendered) when `transport_select`
+    /// is `"ssh"`.
+    pub(super) host_input: Entity<InputState>,
+    /// Docker container name — only meaningful (and only rendered) when
+    /// `transport_select` is `"docker"`.
+    pub(super) container_input: Entity<InputState>,
 }
 
 impl SettingsWindow {
@@ -238,7 +249,25 @@ impl SettingsWindow {
     ) -> AgentCatalogRow {
         let id = definition.id.clone();
         let name = definition.name.clone();
-        let command = definition.command.clone();
+        let (command, transport_kind, host, container) = match &definition.launch {
+            daruda_config::AgentLaunch::Raw(command) => {
+                (command.clone(), "raw", String::new(), String::new())
+            }
+            daruda_config::AgentLaunch::Ssh {
+                adapter_command,
+                host,
+            } => (adapter_command.clone(), "ssh", host.clone(), String::new()),
+            daruda_config::AgentLaunch::Docker {
+                adapter_command,
+                container,
+            } => (
+                adapter_command.clone(),
+                "docker",
+                String::new(),
+                container.clone(),
+            ),
+        };
+        let transport_kind = SharedString::from(transport_kind);
         AgentCatalogRow {
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
@@ -255,6 +284,24 @@ impl SettingsWindow {
                     .placeholder("command --acp")
                     .default_value(command)
             }),
+            transport_select: cx.new(|cx| {
+                let opts = vec![
+                    SelectOption::new("raw", s::settings_agent_transport_raw()),
+                    SelectOption::new("ssh", s::settings_agent_transport_ssh()),
+                    SelectOption::new("docker", s::settings_agent_transport_docker()),
+                ];
+                select::state_with_options(opts, Some(&transport_kind), window, cx)
+            }),
+            host_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("user@host")
+                    .default_value(host)
+            }),
+            container_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder("container-name")
+                    .default_value(container)
+            }),
         }
     }
 
@@ -270,6 +317,25 @@ impl SettingsWindow {
             .push(Self::subscribe_input_state(&row.name_input, window, cx));
         self._input_subscriptions
             .push(Self::subscribe_input_state(&row.command_input, window, cx));
+        self._input_subscriptions
+            .push(Self::subscribe_input_state(&row.host_input, window, cx));
+        self._input_subscriptions.push(Self::subscribe_input_state(
+            &row.container_input,
+            window,
+            cx,
+        ));
+        // Re-render on transport pick so the row immediately shows/hides the
+        // matching host/container field (rows are added/removed at runtime,
+        // unlike the fixed global dropdowns wired in `new_with_section`).
+        self._input_subscriptions.push(cx.subscribe_in(
+            &row.transport_select,
+            window,
+            |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                if matches!(ev, select::SelectEvent::Confirm(_)) {
+                    cx.notify();
+                }
+            },
+        ));
     }
 
     pub(super) fn add_agent_row(
@@ -571,6 +637,21 @@ impl SettingsWindow {
             _input_subscriptions.push(Self::subscribe_input_state(&row.id_input, window, cx));
             _input_subscriptions.push(Self::subscribe_input_state(&row.name_input, window, cx));
             _input_subscriptions.push(Self::subscribe_input_state(&row.command_input, window, cx));
+            _input_subscriptions.push(Self::subscribe_input_state(&row.host_input, window, cx));
+            _input_subscriptions.push(Self::subscribe_input_state(
+                &row.container_input,
+                window,
+                cx,
+            ));
+            _input_subscriptions.push(cx.subscribe_in(
+                &row.transport_select,
+                window,
+                |_this, _state, ev: &select::ConfirmEvent, _window, cx| {
+                    if matches!(ev, select::SelectEvent::Confirm(_)) {
+                        cx.notify();
+                    }
+                },
+            ));
         }
 
         // Map each section to the focus target it should land on when
@@ -840,7 +921,36 @@ impl SettingsWindow {
                     &id,
                 )));
             }
-            agents.push(daruda_config::AgentDefinition { id, name, command });
+
+            let kind = row
+                .transport_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "raw".to_string());
+            let host = row.host_input.read(cx).value().trim().to_string();
+            let container = row.container_input.read(cx).value().trim().to_string();
+            if !agent_row_is_valid(&kind, &host, &container) {
+                let msg = if kind == "ssh" {
+                    s::settings_err_agent_catalog_host(index + 1)
+                } else {
+                    s::settings_err_agent_catalog_container(index + 1)
+                };
+                return Err(SharedString::from(msg));
+            }
+
+            let launch = match kind.as_str() {
+                "ssh" => daruda_config::AgentLaunch::Ssh {
+                    adapter_command: command,
+                    host,
+                },
+                "docker" => daruda_config::AgentLaunch::Docker {
+                    adapter_command: command,
+                    container,
+                },
+                _ => daruda_config::AgentLaunch::Raw(command),
+            };
+            agents.push(daruda_config::AgentDefinition { id, name, launch });
         }
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));
@@ -1113,6 +1223,51 @@ fn is_valid_agent_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Whether an agent catalog row's transport-specific fields are filled in.
+/// `"ssh"` requires a non-blank `host`; `"docker"` requires a non-blank
+/// `container`; any other `kind` (`"raw"`, or an unrecognized/absent select
+/// value) has no extra requirement. Pure and GPUI-free so it is directly
+/// unit-testable — the save loop in [`SettingsWindow::validate`] is the only
+/// caller.
+fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
+    match kind {
+        "ssh" => !host.trim().is_empty(),
+        "docker" => !container.trim().is_empty(),
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod agent_row_validation_tests {
+    use super::agent_row_is_valid;
+
+    #[test]
+    fn ssh_requires_non_blank_host() {
+        assert!(!agent_row_is_valid("ssh", "", ""));
+        assert!(!agent_row_is_valid("ssh", "   ", ""));
+        assert!(agent_row_is_valid("ssh", "vm-work", ""));
+    }
+
+    #[test]
+    fn docker_requires_non_blank_container() {
+        assert!(!agent_row_is_valid("docker", "", ""));
+        assert!(!agent_row_is_valid("docker", "", "   "));
+        assert!(agent_row_is_valid("docker", "", "ubuntu-dev"));
+    }
+
+    #[test]
+    fn raw_is_always_valid_regardless_of_host_or_container() {
+        assert!(agent_row_is_valid("raw", "", ""));
+        assert!(agent_row_is_valid("raw", "irrelevant", "irrelevant"));
+    }
+
+    #[test]
+    fn unrecognized_kind_is_treated_as_valid() {
+        assert!(agent_row_is_valid("", "", ""));
+        assert!(agent_row_is_valid("bogus", "", ""));
+    }
 }
 
 /// Return all font family names available on this system, sorted alphabetically.
