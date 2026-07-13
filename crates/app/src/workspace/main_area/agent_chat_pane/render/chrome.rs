@@ -2,8 +2,10 @@
 //! bar (title + expand/collapse), and the inline "agent is working" indicator
 //! with its animated pulse dots and elapsed clock.
 
-use daruda_acp::{ChatItem, UsageView};
-use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px, svg};
+use daruda_acp::{ChatItem, ConnectPhase, UsageView};
+use gpui::{
+    AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px, svg,
+};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
@@ -245,46 +247,110 @@ fn runtime_prep_text(phase: RuntimePrepPhase) -> SharedString {
     .into()
 }
 
-/// The thin top banner — shown while connecting or on error; hidden once
-/// the session is live (the conversation itself signals readiness).
+/// Localized banner copy for a handshake milestone — refines the flat
+/// "Connecting…" text once the connection task reports which ACP request is
+/// in flight.
+fn connect_phase_text(phase: ConnectPhase) -> SharedString {
+    match phase {
+        ConnectPhase::Handshaking => s::agent_chat_connecting_handshake(),
+        ConnectPhase::CreatingSession => s::agent_chat_connecting_creating_session(),
+        ConnectPhase::LoadingSession => s::agent_chat_connecting_loading_session(),
+        ConnectPhase::ApplyingMode => s::agent_chat_connecting_applying_mode(),
+    }
+    .into()
+}
+
+/// The thin top banner — shown while connecting or on error; hidden once the
+/// session is live (the conversation itself signals readiness). The `Error`
+/// arm carries an inline "Retry" button (`window_handle` + `pane_id` locate
+/// the owning `Workspace` op) — otherwise a failed connect has no way back
+/// short of closing the pane; see `Workspace::retry_agent_chat_connect`.
+/// `has_cwd` gates the button: a cwd-less pane's `Error` (no lane working
+/// directory, or a remote agent with no configured remote path) can never
+/// reconnect — `retry_agent_chat_connect` itself no-ops on it — so the
+/// button would otherwise sit there doing nothing on every click.
 pub(super) fn status_banner(
     status: &AgentSessionStatus,
+    pane_id: PaneId,
+    window_handle: AnyWindowHandle,
+    has_cwd: bool,
     t: &theme::DarudaTheme,
-    cx: &App,
+    cx: &mut Context<AgentChatView>,
 ) -> Option<impl IntoElement + use<>> {
-    let (text, bg, fg): (SharedString, Hsla, Hsla) = match status {
+    let (text, bg, fg, retryable): (SharedString, Hsla, Hsla, bool) = match status {
         AgentSessionStatus::Idle => (
             s::agent_chat_idle().into(),
             t.banner_info_bg,
             t.banner_info_text,
+            false,
         ),
         AgentSessionStatus::PreparingRuntime(phase) => (
             runtime_prep_text(*phase),
             t.banner_info_bg,
             t.banner_info_text,
+            false,
         ),
         AgentSessionStatus::Connecting => (
             s::agent_chat_connecting().into(),
             t.banner_info_bg,
             t.banner_info_text,
+            false,
+        ),
+        AgentSessionStatus::Handshaking(phase) => (
+            connect_phase_text(*phase),
+            t.banner_info_bg,
+            t.banner_info_text,
+            false,
         ),
         AgentSessionStatus::Connected => return None,
         AgentSessionStatus::Error(message) => (
             format!("{} {}", s::agent_chat_error_prefix(), message).into(),
             t.banner_error_bg,
             t.banner_error_text,
+            has_cwd,
         ),
     };
+    let retry_button = retryable.then(|| {
+        crate::ui::button(
+            ("agent-chat-retry", pane_id as usize),
+            s::agent_chat_retry(),
+        )
+        .ghost()
+        .xsmall()
+        .on_click(cx.listener(move |_this, _ev, _window, cx| {
+            // `cx.listener` has this AgentChatView leased for the duration of
+            // this callback; `retry_agent_chat_connect` reads/updates this
+            // same entity (via `Workspace::agent_chat_view`), which would
+            // double-lease-panic if called inline (CLAUDE.md Pitfall #5).
+            // `cx.defer` runs after the lease is released.
+            cx.defer(move |cx| {
+                if let Some(workspace) =
+                    crate::window_registry::WindowRegistry::workspace_for_window(window_handle, cx)
+                {
+                    // SILENT-OK: the workspace window may already be closed by the time this deferred callback runs — nothing left to retry
+                    let _ = workspace.update(cx, |ws, cx| {
+                        ws.retry_agent_chat_connect(pane_id, cx);
+                    });
+                }
+            });
+        }))
+    });
     Some(
         div()
             .flex_none()
             .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(theme::AGENT_CHAT_MSG_GAP))
             .px(px(theme::AGENT_CHAT_PAD_X))
             .py(px(theme::AGENT_CHAT_PAD_Y))
             .bg(bg)
             .text_color(fg)
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(text),
+            .child(div().flex_1().min_w_0().child(text))
+            .when_some(retry_button, |el, btn| el.child(btn)),
     )
 }
 

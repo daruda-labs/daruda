@@ -91,7 +91,14 @@ pub(in crate::workspace) fn render(
     let dim = content.dim_amount;
     let t = theme::current(cx).dimmed(dim);
 
-    let status_banner = status_banner(&content.status, &t, cx);
+    let status_banner = status_banner(
+        &content.status,
+        pane_id,
+        content.window_handle,
+        content.cwd.is_some(),
+        &t,
+        cx,
+    );
 
     // Activity bar: session title on the left, fold buttons on the right.
     // Always visible — it holds the fold buttons even while the conversation is

@@ -41,6 +41,9 @@ fn main() {
 
         while let Some(event) = events.next().await {
             match event {
+                AcpEvent::ConnectProgress(phase) => {
+                    eprintln!("[connect-progress] {phase:?}");
+                }
                 AcpEvent::Connected {
                     session_id,
                     modes,

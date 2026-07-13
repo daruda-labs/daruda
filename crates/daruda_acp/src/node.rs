@@ -124,13 +124,15 @@ fn parse_env_assignment(token: &str) -> Option<(&str, &str)> {
 impl NodeRuntime {
     /// Wrap an agent launch `command` for this runtime.
     ///
-    /// System passes the command through unchanged — `node` / `npx` are on the
-    /// hydrated `PATH`. Managed, for an `npx` / `node` command, rewrites it to a
-    /// JSON stdio config: the leading launcher token becomes the **absolute**
-    /// path inside the managed `bin/`, the remaining tokens are its args, and a
-    /// `PATH` prepending the managed `bin/` is injected so the launcher, and the
-    /// adapter it spawns, find the managed `node`. JSON (not a bash string) is
-    /// used because the managed path can contain spaces (macOS
+    /// System, for an `npx` / `node` command, prepends an arch-pinning env
+    /// prefix — see [`prefix_with_host_arch_env`]. Any other System command
+    /// passes through unchanged; `node` / `npx` are already on the hydrated
+    /// `PATH`. Managed, for an `npx` / `node` command, rewrites it to a JSON
+    /// stdio config: the leading launcher token becomes the **absolute** path
+    /// inside the managed `bin/`, the remaining tokens are its args, and a
+    /// `PATH` prepending the managed `bin/` is injected so the launcher, and
+    /// the adapter it spawns, find the managed `node`. JSON (not a bash
+    /// string) is used because the managed path can contain spaces (macOS
     /// `Application Support`), which bash-word splitting would break. A Managed
     /// runtime with any other command passes it through unchanged.
     ///
@@ -140,6 +142,9 @@ impl NodeRuntime {
     #[must_use]
     pub fn wrap_command(&self, command: &str) -> AdapterCommand {
         match self {
+            NodeRuntime::System if command_needs_node(command) => {
+                AdapterCommand(prefix_with_host_arch_env(command))
+            }
             NodeRuntime::System => AdapterCommand(command.to_string()),
             NodeRuntime::Managed { node_dir } if command_needs_node(command) => {
                 let bin_dir = node_dir.join("bin");
@@ -242,7 +247,15 @@ pub fn ensure_node(
     install_managed(install_root, os, arch, progress)
 }
 
-/// `true` if a system `node` is on `PATH` and at least [`MIN_NODE_VERSION`].
+/// `true` if a system `node` is on `PATH`, at least [`MIN_NODE_VERSION`], and
+/// built for the host's actual CPU architecture.
+///
+/// The arch check matters: an x86_64 Node.js under Rosetta on Apple Silicon
+/// still reports `process.arch: "x64"`, so `npx` installs any wrong-arch
+/// *native binary* optionalDependency (e.g. the ACP adapter's bundled Claude
+/// Code engine) — which then hangs silently under translation. Rejecting a
+/// mismatched system Node.js here routes to the managed download instead,
+/// which [`node_platform`] always builds for the real host arch.
 fn detect_system_node() -> bool {
     let Ok(node) = which::which("node") else {
         return false;
@@ -257,10 +270,28 @@ fn detect_system_node() -> bool {
     if !output.status.success() {
         return false;
     }
-    match parse_node_version(&String::from_utf8_lossy(&output.stdout)) {
+    let version_ok = match parse_node_version(&String::from_utf8_lossy(&output.stdout)) {
         Some(version) => version >= MIN_NODE_VERSION,
         None => false,
-    }
+    };
+    version_ok && system_node_arch_matches_host(&node)
+}
+
+/// `true` if `node`'s own `process.arch` matches the host's actual CPU
+/// architecture (per [`node_platform`]'s `(os, arch)` mapping). `false` on
+/// any probe failure — an architecture we can't confirm is treated as a
+/// mismatch, favoring the always-correct managed download over a guess.
+fn system_node_arch_matches_host(node: &Path) -> bool {
+    let Ok((_, expected_arch)) = node_platform() else {
+        return false;
+    };
+    let Ok(output) = std::process::Command::new(node)
+        .args(["-e", "process.stdout.write(process.arch)"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == expected_arch
 }
 
 /// Parse `node --version` output (`v24.11.0\n`) into a [`Version`].
@@ -282,6 +313,22 @@ fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
         other => return Err(NodeError::UnsupportedPlatform(format!("arch: {other}"))),
     };
     Ok((os, arch))
+}
+
+/// Prepend `npm_config_cpu=<arch> npm_config_os=<os>` — npm's env-var form
+/// of `--cpu`/`--os` — to `command`, so `npx` installs a platform-specific
+/// native-binary optionalDependency for the real host arch even if the
+/// running Node.js itself reports a different `process.arch` (e.g. x64
+/// under Rosetta). Pure install-time defense-in-depth alongside
+/// [`detect_system_node`]'s own arch check: it does not fix a package whose
+/// *runtime* also self-detects arch off the live process rather than off
+/// what got installed. Best-effort — an unsupported `node_platform()` just
+/// leaves `command` unprefixed.
+fn prefix_with_host_arch_env(command: &str) -> String {
+    match node_platform() {
+        Ok((os, arch)) => format!("npm_config_cpu={arch} npm_config_os={os} {command}"),
+        Err(_) => command.to_string(),
+    }
 }
 
 /// `node-<ver>-<os>-<arch>` — the distribution folder / archive stem.
@@ -519,8 +566,16 @@ mod tests {
     }
 
     #[test]
-    fn system_runtime_passes_the_command_through_unchanged() {
+    fn system_runtime_prefixes_arch_env_for_an_npx_command() {
         let cmd = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+        let (os, arch) = node_platform().expect("supported test platform");
+        let expected = format!("npm_config_cpu={arch} npm_config_os={os} {cmd}");
+        assert_eq!(NodeRuntime::System.wrap_command(cmd).0, expected);
+    }
+
+    #[test]
+    fn system_runtime_passes_a_non_node_command_through_unchanged() {
+        let cmd = "/usr/local/bin/codex-acp --flag";
         assert_eq!(NodeRuntime::System.wrap_command(cmd).0, cmd);
     }
 
@@ -756,6 +811,41 @@ cccc3333  node-v24.11.0-linux-x64.tar.xz
         .expect("system node is used");
         assert_eq!(runtime, NodeRuntime::System);
         assert_eq!(seen, vec![NodeProgress::UsingSystemNode]);
+    }
+
+    /// Executable shell script standing in for `node -e "process.stdout
+    /// .write(process.arch)"`, so arch-matching can be tested without
+    /// depending on a real Node.js or the test host's own arch.
+    fn write_fake_node_reporting(path: &Path, output: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, format!("#!/bin/sh\nprintf '%s' '{output}'\n")).unwrap();
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    #[test]
+    fn system_node_arch_matches_host_true_when_reported_arch_matches() {
+        let (_, expected) = node_platform().expect("supported test platform");
+        let dir = tempfile::tempdir().unwrap();
+        let fake_node = dir.path().join("node");
+        write_fake_node_reporting(&fake_node, expected);
+        assert!(system_node_arch_matches_host(&fake_node));
+    }
+
+    #[test]
+    fn system_node_arch_matches_host_false_on_arch_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_node = dir.path().join("node");
+        write_fake_node_reporting(&fake_node, "definitely-not-a-real-arch");
+        assert!(!system_node_arch_matches_host(&fake_node));
+    }
+
+    #[test]
+    fn system_node_arch_matches_host_false_on_missing_binary() {
+        assert!(!system_node_arch_matches_host(Path::new(
+            "/nonexistent-daruda-node-probe-binary"
+        )));
     }
 
     /// End-to-end check of the managed path against the *real* nodejs.org: it

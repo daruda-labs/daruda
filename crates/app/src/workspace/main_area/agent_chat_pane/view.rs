@@ -38,10 +38,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
-    AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ModeStateView, PermissionDecision,
-    PermissionKindView, PlanEntryView, SessionCapabilitiesView, SlashCommand, UsageView,
-    apply_update, cancel_pending_tools, finalize_streaming, permission_item, subagent_activity,
-    touched_tool_id,
+    AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ConnectPhase, ModeStateView,
+    PermissionDecision, PermissionKindView, PlanEntryView, SessionCapabilitiesView, SlashCommand,
+    UsageView, apply_update, cancel_pending_tools, finalize_streaming, permission_item,
+    subagent_activity, touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
@@ -107,8 +107,18 @@ pub(in crate::workspace) enum AgentSessionStatus {
     /// localized text) so the banner copy is derived at render.
     PreparingRuntime(RuntimePrepPhase),
     /// The ACP adapter has been asked to start but the session is not yet ready
-    /// for prompts (handshake + `session/new` in flight).
+    /// for prompts (handshake + `session/new` in flight), and no milestone
+    /// has been reported yet — a fresh connect starts here, before the
+    /// adapter process has even spoken ACP. Upgrades in-place to
+    /// `Handshaking` the moment the first `AcpEvent::ConnectProgress` lands.
     Connecting,
+    /// Refines `Connecting` once the connection task reports which step of
+    /// the handshake (`initialize` / `session/new` / `session/load` /
+    /// `set_mode`) is currently in flight, bounded by
+    /// `daruda_acp::session::CONNECT_HANDSHAKE_TIMEOUT` so this can never
+    /// hang forever — a timeout surfaces as `Error` like any other connect
+    /// failure.
+    Handshaking(ConnectPhase),
     /// `initialize` + `session/new` succeeded — the session accepts prompts and
     /// the event pump is folding updates into `items`.
     Connected,
@@ -417,10 +427,11 @@ impl AgentChatView {
         use daruda_claude::SessionStatus;
         match &self.status {
             AgentSessionStatus::Idle | AgentSessionStatus::Error(_) => None,
-            // Runtime prep is a connecting sub-phase — same pulsing badge.
-            AgentSessionStatus::PreparingRuntime(_) | AgentSessionStatus::Connecting => {
-                Some(SessionStatus::Connecting)
-            }
+            // Runtime prep and the handshake are both connecting sub-phases —
+            // same pulsing badge.
+            AgentSessionStatus::PreparingRuntime(_)
+            | AgentSessionStatus::Connecting
+            | AgentSessionStatus::Handshaking(_) => Some(SessionStatus::Connecting),
             AgentSessionStatus::Connected => Some(match self.activity_state() {
                 ActivityState::AwaitingPermission => SessionStatus::NeedsAttention,
                 ActivityState::Working => SessionStatus::Working,
@@ -659,6 +670,20 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Enter the `Handshaking` status at `phase` and repaint. Self-notifying
+    /// so the event pump can't advance the banner without dirtying the pane.
+    /// Called from `apply_event` only while still `Connecting`/`Handshaking`
+    /// (see that call site) — a `ConnectProgress` arriving after `Connected`
+    /// or `Error` is stale and must not resurrect the connecting banner.
+    pub(in crate::workspace) fn set_handshaking(
+        &mut self,
+        phase: ConnectPhase,
+        cx: &mut Context<Self>,
+    ) {
+        self.status = AgentSessionStatus::Handshaking(phase);
+        cx.notify();
+    }
+
     /// Blend `c` toward gray by the current dim amount, alpha preserved. The
     /// render wraps every color it applies with this so an unfocused pane grays
     /// like an inactive terminal while keeping the window translucency (an
@@ -731,6 +756,17 @@ impl AgentChatView {
         let mut turn_settled = false;
 
         match event {
+            AcpEvent::ConnectProgress(phase) => {
+                // Guard against a stale progress event arriving after the
+                // connect already resolved (Connected/Error) — same shape as
+                // the NodeProgress drain's guard in `connect_agent_chat`.
+                if matches!(
+                    self.status,
+                    AgentSessionStatus::Connecting | AgentSessionStatus::Handshaking(_)
+                ) {
+                    self.set_handshaking(phase, cx);
+                }
+            }
             AcpEvent::Connected {
                 session_id,
                 modes,
@@ -1018,6 +1054,31 @@ impl AgentChatView {
             self.list_state.remeasure();
             cx.notify();
         }
+    }
+
+    /// End-of-stream safety-net predicate: true while `status` is a
+    /// non-terminal connecting state (`PreparingRuntime`/`Connecting`/
+    /// `Handshaking`). The event pump checks this once its loop exits
+    /// (channel closed — handle dropped, or the connection task ended without
+    /// emitting a terminal event). Normally the stream never closes before
+    /// `Connected` or `Error` fires; both already resolve the status. But a
+    /// connection task that panics, or a `run_connection` future dropped by an
+    /// upstream bug before its `Err` path runs, closes the channel silently —
+    /// with no event left to ever move `status`, the pane would otherwise be
+    /// stuck on "Connecting…"/"Handshaking…" forever with no error and no
+    /// retry affordance (`Workspace::retry_agent_chat_connect` requires
+    /// `Error` to fire). The pump feeds a real `AcpEvent::Error` through
+    /// `apply_event` when this is true, rather than setting `status` here
+    /// directly, so the failure gets the exact same handling as any other
+    /// terminal error (turn settle, handle drop, pending-prompt clear —
+    /// see the `AcpEvent::Error` arm).
+    pub(in crate::workspace) fn is_still_connecting(&self) -> bool {
+        matches!(
+            self.status,
+            AgentSessionStatus::PreparingRuntime(_)
+                | AgentSessionStatus::Connecting
+                | AgentSessionStatus::Handshaking(_)
+        )
     }
 
     /// Recompute the projected render rows from `items` + `fold` and sync the
@@ -1384,16 +1445,15 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Full local reset for the `/clear` slash command: wipe the conversation
-    /// model and every runtime cache, dropping the live handle and event pump
-    /// so the ACP command channel closes and the pump loop ends — the same
-    /// teardown a pane close performs. The caller (`Workspace::reset_agent_chat_session`)
-    /// then calls `connect_agent_chat` to supersede this with a fresh
-    /// `session/new`, so the view never sits handle-less for a render.
-    pub(in crate::workspace) fn reset_for_new_session(&mut self, cx: &mut Context<Self>) {
-        // Same teardown as a pane close: dropping the handle closes the ACP
-        // command channel (connection task exits) and dropping the pump ends
-        // its loop. connect_agent_chat then supersedes with a fresh session.
+    /// Shared teardown for a full `/clear` reset and a post-`Error` retry:
+    /// drop the live handle and event pump (closing the ACP command channel
+    /// and ending the pump loop — the same teardown a pane close performs)
+    /// and wipe the conversation model + every runtime cache. Does NOT touch
+    /// `session_id`, `restoring`, or `status` — the two callers differ there:
+    /// a `/clear` reset drops the session id for a brand-new conversation; a
+    /// retry keeps it so the reconnect resumes the same one via
+    /// `session/load` instead of losing history.
+    fn teardown_transient_session_state(&mut self) {
         self.handle = None;
         self._event_pump = None;
         self.items.clear();
@@ -1420,12 +1480,37 @@ impl AgentChatView {
         self.plan_collapsed = false;
         self.session_title = None;
         self.session_updated_at = None;
+    }
+
+    /// Full local reset for the `/clear` slash command: wipe the conversation
+    /// model and every runtime cache via [`Self::teardown_transient_session_state`],
+    /// then also drop the persisted session id. The caller
+    /// (`Workspace::reset_agent_chat_session`) then calls `connect_agent_chat`
+    /// to supersede this with a fresh `session/new`, so the view never sits
+    /// handle-less for a render.
+    pub(in crate::workspace) fn reset_for_new_session(&mut self, cx: &mut Context<Self>) {
+        self.teardown_transient_session_state();
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
         self.restoring = false;
         self.status = AgentSessionStatus::Connecting;
         self.rebuild_rows(); // diff-splices list_state down to 0 rows
+        cx.notify();
+    }
+
+    /// Reconnect after a terminal `Error` without losing the conversation:
+    /// same teardown as `reset_for_new_session` (clears local `items` so a
+    /// resume's replay doesn't duplicate what was already rendered before the
+    /// failure) but keeps `session_id`, so `connect_agent_chat` resumes via
+    /// `session/load` and the adapter replays the exact same history back.
+    /// Called by `Workspace::retry_agent_chat_connect`, which then
+    /// re-invokes `connect_agent_chat` with `self.session_id` as the resume.
+    pub(in crate::workspace) fn retry_for_reconnect(&mut self, cx: &mut Context<Self>) {
+        self.teardown_transient_session_state();
+        self.restoring = self.session_id.is_some();
+        self.status = AgentSessionStatus::Connecting;
+        self.rebuild_rows();
         cx.notify();
     }
 

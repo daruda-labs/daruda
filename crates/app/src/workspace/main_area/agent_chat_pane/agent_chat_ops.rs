@@ -582,6 +582,41 @@ impl Workspace {
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
+    /// Manual retry entry point for the Error banner's "Retry" button: start
+    /// the ACP session for `pane_id` iff it is parked in
+    /// [`AgentSessionStatus::Error`]. Mirrors [`Self::maybe_connect_agent_chat`]
+    /// but gated on `Error` instead of `Idle`, and preserves the conversation:
+    /// `AgentChatView::retry_for_reconnect` clears local `items` (so a
+    /// resume's replay doesn't duplicate them) but keeps `session_id`, so this
+    /// resumes the same session via `session/load` when one exists rather than
+    /// starting over.
+    pub(in crate::workspace) fn retry_agent_chat_connect(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let (cwd, resume) = {
+            let Some(view) = self.agent_chat_view(pane_id) else {
+                return;
+            };
+            let v = view.read(cx);
+            if !matches!(v.status, AgentSessionStatus::Error(_)) {
+                return;
+            }
+            let Some(cwd) = v.cwd.clone() else {
+                return;
+            };
+            (cwd, v.session_id.clone())
+        };
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.retry_for_reconnect(cx));
+            // Error → Connecting is a dock-badge status change; the cached
+            // docks need an explicit dirty (see `notify_status_docks`).
+            self.notify_status_docks(cx);
+        }
+        self.connect_agent_chat(pane_id, cwd, resume, cx);
+    }
+
     /// Resolve the launch command for `pane_id`'s agent, reconciling the view
     /// when its `agent_id` is stale. Happy path (allocation-free beyond the
     /// command clone): the view's `agent_id` is still in the catalog, so return
@@ -914,14 +949,56 @@ impl Workspace {
                             break;
                         }
                     }
-                    // The stream ended. If a resume was still replaying (no
-                    // Connected/Error arrived — a misbehaving adapter), release
-                    // the gate so the accumulated items render instead of the
-                    // pane freezing mid-restore.
+                    // The stream ended — either the command channel closed (an
+                    // intentional pane close dropped the handle) or the
+                    // connection task ended without emitting a terminal event.
+                    // Two independent safety nets fire here, both no-ops in the
+                    // common already-terminal (Connected then closed) case:
+                    //  - `abort_restore` releases a still-set replay gate so a
+                    //    resume's partial replay renders instead of the pane
+                    //    freezing mid-restore.
+                    //  - a synthetic `AcpEvent::Error` resolves a status that
+                    //    never reached `Connected`/`Error` — without this, a
+                    //    connection task that exits silently before emitting
+                    //    anything (its future dropped by an upstream bug
+                    //    rather than returning `Err`) strands the pane on
+                    //    "Connecting…" forever with no event left to move it
+                    //    and no retry affordance (that requires `Error`). Fed
+                    //    through `apply_event` (not a bespoke setter) so this
+                    //    gets the exact same handling as any other terminal
+                    //    error — turn settle, handle drop, pending-prompt
+                    //    clear — instead of a partial hand-rolled duplicate
+                    //    that would leave the turn/activity state stranded.
                     // SILENT-OK: view/window already gone at end-of-stream — nothing to release
                     let _ = this.update(cx, |ws, cx| {
                         if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
+                            let was_connecting = view.read(cx).is_still_connecting();
                             view.update(cx, |v, cx| v.abort_restore(cx));
+                            if was_connecting {
+                                let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
+                                view.update(cx, |v, cx| {
+                                    v.apply_event(
+                                        daruda_acp::AcpEvent::Error(
+                                            s::agent_chat_error_stream_ended(),
+                                        ),
+                                        &syntax_theme,
+                                        is_light,
+                                        cx,
+                                    )
+                                });
+                                // Connecting → Error clears the badge; dirty the
+                                // cached docks so it doesn't linger stale.
+                                ws.notify_status_docks(cx);
+                                if let Some(cwd) =
+                                    view.read(cx).cwd.clone().and_then(PaneCwd::into_local)
+                                {
+                                    ws.apply_agent_chat_task_ended(
+                                        &cwd,
+                                        daruda_store::tasks::SessionEndReason::Error,
+                                        cx,
+                                    );
+                                }
+                            }
                         }
                     });
                 }
