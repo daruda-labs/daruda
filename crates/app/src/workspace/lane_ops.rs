@@ -708,63 +708,78 @@ impl Workspace {
         cx.notify();
     }
 
-    fn mutate_active_lane<F>(&mut self, id: LaneId, f: F, cx: &mut Context<Self>)
+    /// Apply `f` to the lane named by the full [`LaneRef`], then persist +
+    /// notify iff a lane was actually found. Resolves the project by
+    /// `target.project` — never the *active* project — because lane ids
+    /// restart per project (every project has a lane id 0), so a bare
+    /// `LaneId` against the active project would silently mutate the wrong
+    /// project's like-id'd lane (a left-dock edit on a background project
+    /// bleeding into the foreground one).
+    fn mutate_lane<F>(&mut self, target: LaneRef, f: F, cx: &mut Context<Self>)
     where
         F: FnOnce(&mut crate::lane::Lane),
     {
-        let mutated = {
-            let Some(project) = self.active_project_mut() else {
-                return;
-            };
-            if let Some(wt) = project.lanes.iter_mut().find(|w| w.id == id) {
-                f(wt);
-                true
-            } else {
-                false
-            }
-        };
+        let mutated = self
+            .project_for_mut(target.project)
+            .and_then(|p| p.lanes.iter_mut().find(|w| w.id == target.lane))
+            .map(f)
+            .is_some();
         if mutated {
             self.mutate_durable(cx, |_, _| {});
             cx.notify();
+        } else {
+            // The target lane/project vanished between the affordance being
+            // built (context-menu open) and the edit landing — e.g. the lane
+            // was removed while the edit modal was open. Log rather than
+            // silently drop the user's typed value. No toast: it is a rare
+            // race and one per stale submit would be noisier than useful.
+            let report = daruda_store::observability::error_report::ErrorReport::new(
+                "Lane edit dropped: target no longer exists",
+            )
+            .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+            .with_context("project", target.project.to_string())
+            .with_context("lane", target.lane.to_string())
+            .at(file!(), line!())
+            .dedup("lane.mutate.stale_target")
+            .build();
+            daruda_store::observability::log_writer::LogWriter::log(report);
         }
     }
 
-    /// Update the free-form description for the active project's
-    /// lane `id`. `None` clears it, reverting the left dock
-    /// sublabel to the lane path.
+    /// Update the free-form description for the lane named by `target`.
+    /// `None` clears it, reverting the left dock sublabel to the lane path.
     pub(in crate::workspace) fn set_lane_description(
         &mut self,
-        id: LaneId,
+        target: LaneRef,
         description: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.mutate_active_lane(id, |wt| wt.set_description(description), cx);
+        self.mutate_lane(target, |wt| wt.set_description(description), cx);
     }
 
-    /// Update the remote path the active project's lane `id` connects
+    /// Update the remote path the lane named by `target` connects
     /// its session to. `None` reverts the lane to the local
     /// filesystem. Only affects panes created *after* this call —
     /// `resolve_new_pane_cwd` resolves the remote cwd once, at
     /// pane-creation time, and never re-runs for panes already open.
     pub(in crate::workspace) fn set_lane_remote_cwd(
         &mut self,
-        id: LaneId,
+        target: LaneRef,
         remote_cwd: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.mutate_active_lane(id, |wt| wt.set_remote_cwd(remote_cwd), cx);
+        self.mutate_lane(target, |wt| wt.set_remote_cwd(remote_cwd), cx);
     }
 
-    /// Update the user-visible display name for the active project's
-    /// lane `id`. `None` clears it and reverts to the branch /
-    /// path fallback.
+    /// Update the user-visible display name for the lane named by `target`.
+    /// `None` clears it and reverts to the branch / path fallback.
     pub(in crate::workspace) fn set_lane_name(
         &mut self,
-        id: LaneId,
+        target: LaneRef,
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.mutate_active_lane(id, |wt| wt.set_name(name), cx);
+        self.mutate_lane(target, |wt| wt.set_name(name), cx);
     }
 
     /// Open the Remove-lane confirmation modal for `target`. Single

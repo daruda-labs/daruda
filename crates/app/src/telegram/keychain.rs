@@ -40,6 +40,14 @@ fn service_name() -> String {
 /// build is not macOS.
 #[cfg(target_os = "macos")]
 pub fn read_token() -> Option<String> {
+    // Tests must never read the real Keychain: `cargo test` is a debug build
+    // whose profile-suffixed `service_name()` equals a developer's real
+    // `daruda-telegram-bot-debug` token, so an un-stubbed read would feed a
+    // live token into the poll loop (real `getUpdates` → teardown hang, and a
+    // 409 conflict with a running app). Stay hermetic — no `security` call.
+    if cfg!(test) {
+        return None;
+    }
     let out = Command::new("security")
         .args([
             "find-generic-password",
@@ -203,6 +211,21 @@ mod tests {
         let name = service_name();
         assert_ne!(name, SERVICE);
         assert!(name.starts_with(SERVICE));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_token_is_hermetic_under_test() {
+        // Tests must never read the real Keychain: `cargo test` runs a debug
+        // build, whose profile-suffixed service name matches a developer's
+        // real `daruda-telegram-bot-debug` token, so an un-stubbed read would
+        // feed a live token into the poll loop — real network + teardown hang.
+        // `is_none()` (not `assert_eq!`) so a regression never prints the
+        // secret into test output.
+        assert!(
+            read_token().is_none(),
+            "read_token must be hermetic under test"
+        );
     }
 
     #[test]

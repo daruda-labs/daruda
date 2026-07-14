@@ -107,6 +107,12 @@ fn base_url(token: &str, method: &str) -> String {
 /// Telegram hands back — this function does not track or advance an
 /// offset itself, that's the routing layer's job.
 pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Update>, ClientError> {
+    // Tests must never hit the network: a real long-poll blocks teardown for
+    // the poll timeout and 409-conflicts a running app polling the same
+    // token. Return no updates hermetically — the poll loop then just idles.
+    if cfg!(test) {
+        return Ok(Vec::new());
+    }
     let url = format!(
         "{}?offset={offset}&timeout={timeout_s}",
         base_url(token, "getUpdates")
@@ -356,6 +362,19 @@ fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_updates_is_stubbed_under_test_no_network() {
+        // The long-poll must never touch the network in tests: a real
+        // `getUpdates` would block teardown for the poll timeout (and
+        // 409-conflict a running app polling the same token). The stub
+        // returns no updates without any HTTP call.
+        let updates = get_updates("dummy-token", 0, 1).expect("stub returns Ok");
+        assert!(
+            updates.is_empty(),
+            "test-stubbed get_updates yields nothing"
+        );
+    }
 
     #[test]
     fn parses_message_with_reply_to() {

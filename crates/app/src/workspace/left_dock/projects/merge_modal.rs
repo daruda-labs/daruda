@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use crate::ui::theme;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::project::LaneId;
+use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::{
     App, ClickEvent, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseDownEvent,
     Render, SharedString, WeakEntity, Window, div, prelude::*, px,
@@ -58,6 +58,11 @@ enum MergeState {
 // ----------------------------------------------------------------
 
 pub(in crate::workspace) struct MergeModal {
+    /// The project both lanes belong to — captured from the lane row the
+    /// menu was opened for, NOT the workspace's active project. Lane ids
+    /// restart per project, so resolving source/target against the active
+    /// project would merge the wrong project's like-id'd lanes.
+    project: ProjectId,
     /// The lane being merged from.
     source_wt_id: LaneId,
     source_branch: String,
@@ -81,6 +86,7 @@ impl MergeModal {
     /// the list would be empty.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn new(
+        project: ProjectId,
         source_wt_id: LaneId,
         source_branch: String,
         source_path: PathBuf,
@@ -107,6 +113,7 @@ impl MergeModal {
         }
 
         Self {
+            project,
             source_wt_id,
             source_branch,
             source_path,
@@ -117,6 +124,23 @@ impl MergeModal {
             focus_handle: cx.focus_handle(),
             state: MergeState::Idle,
             remove_after_merge: false,
+        }
+    }
+
+    /// `LaneRef` for the currently-selected merge target, resolved against
+    /// this modal's own [`Self::project`] — never the active project.
+    fn target_ref(&self) -> LaneRef {
+        LaneRef {
+            project: self.project,
+            lane: self.target_options[self.selected_idx].wt_id,
+        }
+    }
+
+    /// `LaneRef` for the source lane, resolved against [`Self::project`].
+    fn source_ref(&self) -> LaneRef {
+        LaneRef {
+            project: self.project,
+            lane: self.source_wt_id,
         }
     }
 
@@ -155,13 +179,8 @@ impl MergeModal {
         // (GitError::Exit), so no data is corrupted — this pre-check is
         // only a best-effort UX improvement for a friendlier error message.
         let target_is_dirty = if let Some(ws) = self.workspace.upgrade() {
-            let target_id = self.target_options[self.selected_idx].wt_id;
-            let ws_ref = ws.read(cx);
-            let target_ref = daruda_store::project::LaneRef {
-                project: ws_ref.active_ref().project,
-                lane: target_id,
-            };
-            ws_ref
+            let target_ref = self.target_ref();
+            ws.read(cx)
                 .git_status_cache
                 .get(&target_ref)
                 .is_some_and(|s| !s.staged.is_empty() || !s.unstaged.is_empty())
@@ -180,27 +199,16 @@ impl MergeModal {
 
         let me = cx.entity().downgrade();
         let workspace = self.workspace.clone();
-        let source_wt_id = self.source_wt_id;
         let source_branch = self.source_branch.clone();
         let source_path = self.source_path.clone();
         let source_repo_root = self.source_repo_root.clone();
         let target = &self.target_options[self.selected_idx];
-        let target_wt_id = target.wt_id;
         let target_path = target.wt_path.clone();
         let remove_after_merge = self.remove_after_merge;
-        let active_project = self
-            .workspace
-            .upgrade()
-            .map(|w| w.read(cx).active_ref().project)
-            .unwrap_or_default();
-        let target_ref = daruda_store::project::LaneRef {
-            project: active_project,
-            lane: target_wt_id,
-        };
-        let source_ref = daruda_store::project::LaneRef {
-            project: active_project,
-            lane: source_wt_id,
-        };
+        // Both refs resolve against this modal's own project, not the
+        // active one — see `MergeModal::project`.
+        let target_ref = self.target_ref();
+        let source_ref = self.source_ref();
 
         // Clones for use after the first async_cx.update closure.
         let workspace_post = workspace.clone();
@@ -356,18 +364,10 @@ impl MergeModal {
             self.dismiss(window, cx);
             return;
         };
-        let target_wt_id = target.wt_id;
         let target_path = target.wt_path.clone();
+        let target_ref = self.target_ref();
         let workspace = self.workspace.clone();
         let me = cx.entity().downgrade();
-        let active_project = workspace
-            .upgrade()
-            .map(|w| w.read(cx).active_ref().project)
-            .unwrap_or_default();
-        let target_ref = daruda_store::project::LaneRef {
-            project: active_project,
-            lane: target_wt_id,
-        };
 
         window
             .spawn(cx, async move |async_cx| {
@@ -392,15 +392,10 @@ impl MergeModal {
 
     /// Switch focus to the target lane so the user can resolve
     /// conflicts in its terminal, then dismiss this modal.
-    fn go_to_target(&mut self, target_wt_id: LaneId, window: &mut Window, cx: &mut Context<Self>) {
+    fn go_to_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let target = self.target_ref();
         if let Some(ws) = self.workspace.upgrade() {
-            ws.update(cx, |ws, cx| {
-                let target = daruda_store::project::LaneRef {
-                    project: ws.active_ref().project,
-                    lane: target_wt_id,
-                };
-                ws.activate_lane(target, window, cx);
-            });
+            ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
         }
         self.dismiss(window, cx);
     }
@@ -464,7 +459,6 @@ impl Render for MergeModal {
 
         // Snapshot selected-target info for footer closures (must happen
         // before any borrow of self.state).
-        let sel_wt_id = self.target_options[self.selected_idx].wt_id;
         let sel_branch = self.target_options[self.selected_idx].branch.clone();
 
         let t = theme::current(cx);
@@ -619,7 +613,7 @@ impl Render for MergeModal {
                     )
                     .on_click(cx.listener(
                         move |this, _: &ClickEvent, window, cx| {
-                            this.go_to_target(sel_wt_id, window, cx);
+                            this.go_to_target(window, cx);
                         },
                     )),
                 );
@@ -689,6 +683,7 @@ mod tests {
         let base = base_ref.map(|s| s.to_string());
         cx.add_window(|window, cx| {
             MergeModal::new(
+                7, // project id, distinct from any lane id below
                 99,
                 "feat/xyz".to_string(),
                 std::path::PathBuf::from("/tmp/repo/wt-feat"),
@@ -702,6 +697,24 @@ mod tests {
         })
         .root(cx)
         .unwrap()
+    }
+
+    #[gpui::test]
+    fn refs_resolve_against_constructed_project_not_active(cx: &mut TestAppContext) {
+        // The modal is built for project 7 (see `build_modal`) with an
+        // invalid workspace handle, so any resolution that reached for the
+        // *active* project would collapse to the default id 0. Both refs
+        // must instead carry the project the modal was opened for — the
+        // guarantee that a merge initiated on a background project's lane
+        // does not operate on the active project's like-id'd lanes.
+        let modal = build_modal(cx, &["main", "develop"], None);
+        modal.read_with(cx, |m, _| {
+            assert_eq!(m.source_ref().project, 7, "source ref uses modal's project");
+            assert_eq!(m.source_ref().lane, 99, "source ref uses source_wt_id");
+            assert_eq!(m.target_ref().project, 7, "target ref uses modal's project");
+            // First target after alphabetical sort ("develop") — wt_id 11.
+            assert_eq!(m.target_ref().lane, m.target_options[0].wt_id);
+        });
     }
 
     #[gpui::test]
@@ -802,6 +815,7 @@ mod tests {
         let modal = cx
             .add_window(|window, cx| {
                 MergeModal::new(
+                    0,
                     1,
                     "main".to_string(),
                     std::path::PathBuf::from("/tmp/repo"), // same as repo root

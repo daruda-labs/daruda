@@ -288,6 +288,147 @@ fn open_delete_project_modal_by_id_does_not_change_active(cx: &mut TestAppContex
     });
 }
 
+/// Build a workspace with project A (`a_path`, id 0) and project B (`b_path`,
+/// id 1). `add_project` activates B, so A is the *non-active* project; both
+/// bootstrap lanes share id 0 (lane ids restart per project). The returned
+/// handle lets a test edit A's lane while B is active — the precondition for
+/// the cross-project lane-edit bug.
+fn workspace_with_background_project_a(
+    cx: &mut TestAppContext,
+    a_path: &str,
+    b_path: &str,
+) -> (
+    gpui::WindowHandle<gpui_component::Root>,
+    gpui::Entity<Workspace>,
+) {
+    let config = daruda_config::Config::default();
+    let project = daruda_store::project::Project::from_path(a_path);
+    std::fs::create_dir_all(a_path).unwrap();
+    std::fs::create_dir_all(b_path).unwrap();
+    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_project(std::path::PathBuf::from(b_path), window, cx)
+        })
+    })
+    .unwrap()
+    .expect("add_project returned a LaneRef");
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active.project, 1, "project B is active")
+    });
+    (wh, ws)
+}
+
+/// The value of `f` (a lane field accessor) for project `pid`'s lane 0.
+fn lane0_field<T>(ws: &Workspace, pid: u64, f: impl FnOnce(&crate::lane::Lane) -> T) -> T {
+    f(ws.projects
+        .iter()
+        .find(|p| p.id == pid)
+        .expect("project present")
+        .lane(0)
+        .expect("lane 0 present"))
+}
+
+// A lane edit from the left-dock context menu must apply to the lane in the
+// project the menu was opened for — not the like-id'd lane in whichever
+// project happens to be active. Lane ids restart per project (`next_lane_id:
+// 0`), so every project has a lane id 0; routing a bare `LaneId` through the
+// active project silently writes the wrong lane, bleeding the setting across
+// projects. These three cover the shared `mutate_lane` helper via each setter.
+
+#[gpui::test]
+fn set_lane_remote_cwd_targets_named_project_not_active(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_background_project_a(
+        cx,
+        "/tmp/daruda_remote_cwd_scope_a",
+        "/tmp/daruda_remote_cwd_scope_b",
+    );
+    let a_lane = daruda_store::project::LaneRef {
+        project: 0,
+        lane: 0,
+    };
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_lane_remote_cwd(a_lane, Some("/data/a".to_string()), cx);
+        })
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            lane0_field(ws, 0, |l| l.remote_cwd.clone()),
+            Some("/data/a".to_string()),
+            "target project A's lane must receive the edit"
+        );
+        assert_eq!(
+            lane0_field(ws, 1, |l| l.remote_cwd.clone()),
+            None,
+            "active project B's like-id lane must stay untouched"
+        );
+    });
+}
+
+#[gpui::test]
+fn set_lane_name_targets_named_project_not_active(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_background_project_a(
+        cx,
+        "/tmp/daruda_lane_name_scope_a",
+        "/tmp/daruda_lane_name_scope_b",
+    );
+    let a_lane = daruda_store::project::LaneRef {
+        project: 0,
+        lane: 0,
+    };
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_lane_name(a_lane, Some("renamed-A".to_string()), cx);
+        })
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            lane0_field(ws, 0, |l| l.name.clone()),
+            Some("renamed-A".to_string()),
+            "target project A's lane must receive the rename"
+        );
+        assert_eq!(
+            lane0_field(ws, 1, |l| l.name.clone()),
+            None,
+            "active project B's like-id lane must stay untouched"
+        );
+    });
+}
+
+#[gpui::test]
+fn set_lane_description_targets_named_project_not_active(cx: &mut TestAppContext) {
+    let (wh, ws) = workspace_with_background_project_a(
+        cx,
+        "/tmp/daruda_lane_desc_scope_a",
+        "/tmp/daruda_lane_desc_scope_b",
+    );
+    let a_lane = daruda_store::project::LaneRef {
+        project: 0,
+        lane: 0,
+    };
+    cx.update_window(wh.into(), |_, _window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.set_lane_description(a_lane, Some("desc-A".to_string()), cx);
+        })
+    })
+    .unwrap();
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            lane0_field(ws, 0, |l| l.description.clone()),
+            Some("desc-A".to_string()),
+            "target project A's lane must receive the description"
+        );
+        assert_eq!(
+            lane0_field(ws, 1, |l| l.description.clone()),
+            None,
+            "active project B's like-id lane must stay untouched"
+        );
+    });
+}
+
 #[gpui::test]
 fn window_open_policy_round_trips_through_state(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();

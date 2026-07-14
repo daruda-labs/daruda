@@ -739,6 +739,26 @@ impl Workspace {
             }
         };
 
+        // DIAG: an ACP adapter spawn that fails with `os error 2` means the
+        // launcher (`docker` / `npx` / `ssh`) was not on this process's PATH —
+        // a GUI launch whose `hydrate_path_from_login_shell` was skipped or
+        // bailed leaves only the minimal launchd PATH. Log the exact command +
+        // effective PATH once per connect so the failure has ground truth
+        // instead of a bare `-32603`. Info severity: no toast, NDJSON only.
+        {
+            let path = std::env::var("PATH").unwrap_or_else(|_| "<unset>".to_string());
+            let report = daruda_store::observability::error_report::ErrorReport::new(
+                "ACP connect: resolved launch command",
+            )
+            .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
+            .with_context("command", command.clone())
+            .with_context("PATH", path)
+            .at(file!(), line!())
+            .dedup("agent_chat.connect.command")
+            .build();
+            daruda_store::observability::log_writer::LogWriter::log(report);
+        }
+
         // Runtime provisioning (see `connect_agent_session`) can download
         // Node.js on the first run of a machine without a usable system install.
         // Milestones flow over this channel to a foreground drain that shows a

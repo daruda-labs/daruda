@@ -134,7 +134,14 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                         surface_strings::edit_description_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
-                            workspace.set_lane_description(wt_id, value, cx);
+                            workspace.set_lane_description(
+                                LaneRef {
+                                    project: project_id,
+                                    lane: wt_id,
+                                },
+                                value,
+                                cx,
+                            );
                         },
                         window,
                         cx,
@@ -159,7 +166,14 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                         surface_strings::edit_remote_cwd_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
-                            workspace.set_lane_remote_cwd(wt_id, value, cx);
+                            workspace.set_lane_remote_cwd(
+                                LaneRef {
+                                    project: project_id,
+                                    lane: wt_id,
+                                },
+                                value,
+                                cx,
+                            );
                         },
                         window,
                         cx,
@@ -190,7 +204,14 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                         surface_strings::rename_placeholder(),
                         current.as_deref(),
                         move |workspace, value, _window, cx| {
-                            workspace.set_lane_name(wt_id, value, cx);
+                            workspace.set_lane_name(
+                                LaneRef {
+                                    project: project_id,
+                                    lane: wt_id,
+                                },
+                                value,
+                                cx,
+                            );
                         },
                         window,
                         cx,
@@ -284,9 +305,13 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                     ws.update(app_cx, |ws, cx| {
                         ws.close_context_menu(cx);
 
-                        // Build target list: other git worktrees with a branch.
+                        // Build target list: other git worktrees with a
+                        // branch — from the *menu's own* project, not the
+                        // active one (lane ids collide across projects).
                         let target_options: Vec<super::merge_modal::TargetOption> = ws
-                            .active_lanes()
+                            .project_for(project_id)
+                            .map(|p| p.lanes.as_slice())
+                            .unwrap_or(&[])
                             .iter()
                             .filter(|w| w.id != wt_id)
                             .filter_map(|w| match &w.kind {
@@ -317,6 +342,7 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                             None,
                             move |window, cx| {
                                 super::merge_modal::MergeModal::new(
+                                    project_id,
                                     wt_id,
                                     branch.clone(),
                                     src_path,
