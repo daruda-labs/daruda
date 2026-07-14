@@ -67,6 +67,35 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// until it has been quiet for this long.
 const SUBAGENT_QUIESCENCE: std::time::Duration = std::time::Duration::from_secs(8);
 
+/// Idle gap after the last post-turn (background) update before its accumulated
+/// assistant text is relayed to Telegram as a follow-up. Long enough to coalesce
+/// the streamed chunks (~700ms observed), short enough to feel prompt.
+const POST_TURN_QUIESCENCE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Assistant-text items whose index is at or beyond `relayed` (the count already
+/// covered by a prior relay), joined by a blank line. `None` when nothing new or
+/// the delta is whitespace-only. Also returns the new covered count so the caller
+/// can advance its marker. Counts whole items, not chars: a post-turn follow-up
+/// is a fresh `AssistantText` item (the observed Claude background-completion
+/// shape), so item-count marking is exact and dedup-free.
+fn post_turn_delta(items: &[ChatItem], relayed: usize) -> Option<(String, usize)> {
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|it| match it {
+            ChatItem::AssistantText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    if texts.len() <= relayed {
+        return None;
+    }
+    let delta = texts[relayed..].join("\n\n");
+    if delta.trim().is_empty() {
+        return None;
+    }
+    Some((delta, texts.len()))
+}
+
 /// Debug gate for agent-chat list-measurement tracing (`trace_remeasure`).
 /// Reads `DARUDA_DEBUG_AGENT_LIST` once and caches it. Off by default so the
 /// trace is silent in normal builds; set the env var to capture the remeasure
@@ -285,6 +314,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// busy→idle edge so the completion signal fires at the true settle point.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
+    /// Count of `AssistantText` items already delivered to Telegram (by the turn
+    /// completion relay or a prior post-turn relay). Baseline for the post-turn
+    /// delta. Snapped at every `settle_turn`.
+    pub(in crate::workspace) post_turn_relayed_assistant_texts: usize,
+    /// Set to `now` whenever a post-turn (no in-flight turn, not restoring) update
+    /// touches text/tools; cleared when the follow-up is relayed. Drives the
+    /// quiescence settle that `reconcile_post_turn` detects on the pulse tick.
+    pub(in crate::workspace) post_turn_dirty_at: Option<std::time::Instant>,
     /// True between a Stop and its `cancelled` `TurnEnded` ack. Stop settles the
     /// turn locally (responsive + hung-safe) and fires `Stopped`, but the cancel
     /// is still outstanding on the wire. While set, `send_prompt_text` buffers a
@@ -456,7 +493,41 @@ impl AgentChatView {
     /// guaranteed false without scanning `items` — the gate the pulse uses to
     /// avoid an O(items) scan of idle/terminated conversations every tick.
     pub(in crate::workspace) fn maybe_active(&self) -> bool {
-        self.turn.is_in_flight() || !self.subagent_last_activity.is_empty()
+        self.turn.is_in_flight()
+            || !self.subagent_last_activity.is_empty()
+            || self.post_turn_dirty_at.is_some()
+    }
+
+    /// On the pulse tick: if a post-turn follow-up has quiesced (no in-flight turn
+    /// and `POST_TURN_QUIESCENCE` elapsed since the last post-turn update), return
+    /// the new assistant text to relay and advance the marker. `None` otherwise.
+    pub(in crate::workspace) fn reconcile_post_turn(
+        &mut self,
+        now: std::time::Instant,
+        quiescence: std::time::Duration,
+    ) -> Option<String> {
+        if self.turn.is_in_flight() {
+            return None;
+        }
+        let dirty_at = self.post_turn_dirty_at?;
+        if now.saturating_duration_since(dirty_at) < quiescence {
+            return None;
+        }
+        self.post_turn_dirty_at = None;
+        let (delta, new_count) =
+            post_turn_delta(&self.items, self.post_turn_relayed_assistant_texts)?;
+        self.post_turn_relayed_assistant_texts = new_count;
+        Some(delta)
+    }
+
+    /// Force-flush a not-yet-quiesced post-turn follow-up (called when a new prompt
+    /// is about to subsume it). `None` when nothing is pending.
+    pub(in crate::workspace) fn take_pending_post_turn(&mut self) -> Option<String> {
+        self.post_turn_dirty_at.take()?;
+        let (delta, new_count) =
+            post_turn_delta(&self.items, self.post_turn_relayed_assistant_texts)?;
+        self.post_turn_relayed_assistant_texts = new_count;
+        Some(delta)
     }
 
     pub(in crate::workspace) fn is_busy(&self) -> bool {
@@ -598,6 +669,8 @@ impl AgentChatView {
             activity_started_at: None,
             was_busy: false,
             pending_completion: None,
+            post_turn_relayed_assistant_texts: 0,
+            post_turn_dirty_at: None,
             cancel_in_flight: false,
             diff_editors: HashMap::new(),
             diff_stats: HashMap::new(),
@@ -848,6 +921,14 @@ impl AgentChatView {
                 let effect = apply_update_with(&mut self.items, &update, adapter.as_ref());
                 touched_tool = effect.touched_tool;
                 touched_text = effect.touched_text;
+                // Post-turn (background) activity: an update that touches text or a
+                // tool while no turn is in flight and we're not replaying a load.
+                // Stamp the quiescence clock; the pulse tick relays the settled
+                // follow-up (Claude reports background completion here, with no
+                // TurnEnded to trigger the normal completion relay).
+                if (touched_text || touched_tool) && !self.turn.is_in_flight() && !self.restoring {
+                    self.post_turn_dirty_at = Some(std::time::Instant::now());
+                }
                 // Bump the subagent (parent) whose child just produced this
                 // tool-call event, so its run span stays "active" across the
                 // gaps between the subagent's sequential child calls. Only child
@@ -1331,6 +1412,15 @@ impl AgentChatView {
     fn settle_turn(&mut self) {
         self.turn = Turn::Idle;
         self.settle_items();
+        // Everything the turn produced is delivered by the completion relay, so
+        // reset the post-turn baseline to the current assistant-text count; only
+        // messages that arrive *after* this settle count as a follow-up.
+        self.post_turn_relayed_assistant_texts = self
+            .items
+            .iter()
+            .filter(|it| matches!(it, ChatItem::AssistantText { .. }))
+            .count();
+        self.post_turn_dirty_at = None;
     }
 
     /// Settle every still-live *item* — finalize streaming text, mark running
@@ -1551,5 +1641,53 @@ impl Render for AgentChatView {
         #[cfg(test)]
         self.render_count.set(self.render_count.get() + 1);
         super::render::render(self, cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn assistant_text_item(text: &str) -> daruda_acp::ChatItem {
+        daruda_acp::ChatItem::AssistantText {
+            text: text.to_string(),
+            streaming: false,
+            message_id: None,
+        }
+    }
+
+    #[test]
+    fn post_turn_delta_none_when_nothing_new() {
+        let items = vec![assistant_text_item("promise")];
+        assert_eq!(super::post_turn_delta(&items, 1), None);
+    }
+
+    #[test]
+    fn post_turn_delta_returns_new_item_and_advances_count() {
+        let items = vec![
+            assistant_text_item("promise"),
+            assistant_text_item("완료되었습니다"),
+        ];
+        assert_eq!(
+            super::post_turn_delta(&items, 1),
+            Some(("완료되었습니다".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn post_turn_delta_joins_multiple_new_items() {
+        let items = vec![
+            assistant_text_item("a"),
+            assistant_text_item("b"),
+            assistant_text_item("c"),
+        ];
+        assert_eq!(
+            super::post_turn_delta(&items, 1),
+            Some(("b\n\nc".to_string(), 3))
+        );
+    }
+
+    #[test]
+    fn post_turn_delta_ignores_whitespace_only_delta() {
+        let items = vec![assistant_text_item("x"), assistant_text_item("   ")];
+        assert_eq!(super::post_turn_delta(&items, 1), None);
     }
 }
