@@ -658,9 +658,7 @@ fn render_item(
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     match item {
-        ChatItem::UserText(text) => {
-            user_bubble(ix, text, dim, cx).into_any_element()
-        }
+        ChatItem::UserText(text) => user_bubble(ix, text, dim, cx).into_any_element(),
         // Under a response bar the speaker is already labeled with the agent
         // name; render the prose inline with no redundant per-block header/fold.
         // A trivial / top-level reply keeps the labeled, foldable block.

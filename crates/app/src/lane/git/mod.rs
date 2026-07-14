@@ -117,6 +117,15 @@ where
     let mut child = Command::new("git")
         .current_dir(cwd)
         .args(args)
+        // Force English/untranslated output. A handful of call sites
+        // (e.g. `remove_lane`'s force-required detection) match specific
+        // substrings in git's stderr; under a translated system locale
+        // those checks silently miss, misclassifying a real failure as
+        // something else. `LANGUAGE` outranks `LC_ALL`/`LANG` in gettext's
+        // resolution order, so it must be cleared, not just overridden.
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env_remove("LANGUAGE")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -310,9 +319,14 @@ pub fn add_lane(
 /// repo cannot be removed — git rejects that with a clear message
 /// and we pass the error through.
 ///
-/// Exit 128 with "is not a working tree" means the directory is already
-/// gone (manual deletion or a prior interrupted removal). Treat that as
-/// success so the UI can clean up the stale dock entry.
+/// A prior manual deletion (another terminal, a different git client, a
+/// previously interrupted removal) leaves nothing at `path` for git to
+/// remove — it fails with its generic "fatal" exit code (128) whose
+/// message text depends on the git process' locale (see [`run_git`]'s
+/// `LC_ALL=C` — belt-and-suspenders, not a substitute for this check).
+/// The outcome the caller wants (no worktree at `path`) is already true
+/// in that case, so [`already_removed`] recognizes it directly against
+/// the filesystem rather than matching git's stderr wording.
 pub fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
     if force {
@@ -321,12 +335,21 @@ pub fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), Git
     args.push(path.to_string_lossy().into_owned());
     match run_git(repo_root, args) {
         Ok(_) => Ok(()),
-        Err(GitError::Exit {
-            code: Some(128),
-            ref stderr,
-        }) if stderr.contains("is not a working tree") => Ok(()),
+        Err(GitError::Exit { code, .. }) if already_removed(code, path) => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+/// Whether a `git worktree remove` failure should be treated as success
+/// because the worktree is already gone. Checked directly against the
+/// filesystem — locale- and git-version-independent — rather than by
+/// matching git's exit message, which can be translated. `code == 128` is
+/// git's generic fatal-error class; requiring it (alongside the path
+/// check) keeps this narrow to that class rather than swallowing an
+/// unrelated failure (a different exit code) that happens to coincide
+/// with a missing path.
+fn already_removed(code: Option<i32>, path: &Path) -> bool {
+    code == Some(128) && !path.exists()
 }
 
 /// `git branch -D <branch>` — force-delete a branch. Used by the

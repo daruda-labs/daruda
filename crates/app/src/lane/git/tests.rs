@@ -527,6 +527,60 @@ fn remove_worktree_deletes_entry() {
 }
 
 #[test]
+fn already_removed_true_for_exit_128_when_path_is_gone() {
+    let dir = unique_tmpdir("already_removed_gone");
+    teardown(&dir); // the directory itself must not exist for this case
+    assert!(already_removed(Some(128), &dir));
+}
+
+#[test]
+fn already_removed_false_when_path_still_exists() {
+    // A genuinely dirty/still-present worktree must still surface as a
+    // real error (e.g. "needs --force") — never silently swallowed just
+    // because the exit code matches.
+    let dir = unique_tmpdir("already_removed_present");
+    assert!(!already_removed(Some(128), &dir));
+    teardown(&dir);
+}
+
+#[test]
+fn already_removed_false_for_a_different_exit_code_even_if_path_is_gone() {
+    // Conservative: only the exit-128 "fatal" class is eligible at all —
+    // an unrelated non-128 failure must not be swallowed just because the
+    // path happens to be missing.
+    let dir = unique_tmpdir("already_removed_wrong_code");
+    teardown(&dir);
+    assert!(!already_removed(Some(1), &dir));
+}
+
+#[test]
+fn remove_lane_succeeds_when_the_worktree_was_already_removed_elsewhere() {
+    // Mirrors the reported bug: the worktree was already fully removed
+    // (directory + git registration) from a *different* environment —
+    // e.g. another terminal running `git worktree remove` directly, or a
+    // prior daruda removal that raced. A second removal attempt from
+    // daruda's UI must not get stuck: git reports "is not a working
+    // tree" (exit 128) because there is genuinely nothing left to
+    // remove, and that outcome — no worktree at this path — is already
+    // what the user wanted.
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("extfullremove");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+
+    let wt_path = dir.join("wt-extfull");
+    add_lane(&dir, &wt_path, Some("scratch/extfull"), None).unwrap();
+    remove_lane(&dir, &wt_path, false).unwrap(); // the "external" removal
+
+    // daruda's Lane entry is still sitting in the list at this point —
+    // the user now clicks Remove in the app for the same target.
+    remove_lane(&dir, &wt_path, false).unwrap();
+    teardown(&dir);
+}
+
+#[test]
 fn add_worktree_with_existing_branch_fails_cleanly() {
     if !require_git() {
         return;
