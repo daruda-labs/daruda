@@ -1239,6 +1239,23 @@ fn agent_row_is_valid(kind: &str, host: &str, container: &str) -> bool {
     }
 }
 
+/// Return all font family names available on this system, sorted alphabetically.
+/// The `current` family is always included as the first entry so the select
+/// can show the currently-configured font even if it is not yet installed.
+fn all_font_names(cx: &gpui::App, current: &str) -> Vec<String> {
+    let mut names = cx.text_system().all_font_names();
+    names.sort();
+    names.dedup();
+    if !current.is_empty() && !names.iter().any(|n| n == current) {
+        names.insert(0, current.to_owned());
+    }
+    names
+}
+
+// `render::*` is just the `impl Render for SettingsWindow` block —
+// no items are re-exported, but keeping the module declaration above
+// is what makes the impl visible to external callers.
+
 #[cfg(test)]
 mod agent_row_validation_tests {
     use super::agent_row_is_valid;
@@ -1269,20 +1286,3 @@ mod agent_row_validation_tests {
         assert!(agent_row_is_valid("bogus", "", ""));
     }
 }
-
-/// Return all font family names available on this system, sorted alphabetically.
-/// The `current` family is always included as the first entry so the select
-/// can show the currently-configured font even if it is not yet installed.
-fn all_font_names(cx: &gpui::App, current: &str) -> Vec<String> {
-    let mut names = cx.text_system().all_font_names();
-    names.sort();
-    names.dedup();
-    if !current.is_empty() && !names.iter().any(|n| n == current) {
-        names.insert(0, current.to_owned());
-    }
-    names
-}
-
-// `render::*` is just the `impl Render for SettingsWindow` block —
-// no items are re-exported, but keeping the module declaration above
-// is what makes the impl visible to external callers.

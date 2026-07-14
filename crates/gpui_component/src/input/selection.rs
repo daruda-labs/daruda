@@ -58,8 +58,8 @@ mod tests {
         assert_eq!(CharType::from('\u{00A0}'), CharType::Whitespace);
         assert_eq!(CharType::from('\n'), CharType::Newline);
         assert_eq!(CharType::from('\r'), CharType::Newline);
-        assert_eq!(CharType::from('汉'), CharType::Other);
-        assert_eq!(CharType::from('é'), CharType::Other);
+        assert_eq!(CharType::from('汉'), CharType::Word);
+        assert_eq!(CharType::from('é'), CharType::Word);
     }
 
     #[test]
@@ -82,8 +82,8 @@ mod tests {
             (1, 0, Some("abcde")),
             (1, 4, Some("abcde")),
             (1, 5, Some(" ")),
-            (1, 6, Some("中")),
-            (1, 9, Some("文")),
+            (1, 6, Some("中文")),
+            (1, 9, Some("中文")),
             (1, 13, Some("🎉")),
             (1, 20, Some("test")),
             (2, 5, Some("[")),

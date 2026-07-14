@@ -91,10 +91,11 @@ fn post_turn_delta(items: &[ChatItem], relayed: usize) -> Option<(String, usize)
         return None;
     }
     let delta = texts[relayed..].join("\n\n");
-    if delta.trim().is_empty() {
+    let delta = delta.trim();
+    if delta.is_empty() {
         return None;
     }
-    Some((delta, texts.len()))
+    Some((delta.to_string(), texts.len()))
 }
 
 /// Debug gate for agent-chat list-measurement tracing (`trace_remeasure`).
@@ -531,6 +532,20 @@ impl AgentChatView {
         Some(delta)
     }
 
+    /// Sync the post-turn baseline to the current `AssistantText` count and clear
+    /// the dirty clock. Called wherever `items` is bulk-set to a known baseline
+    /// (turn settle, restore/replay completion, transient teardown) so only
+    /// messages arriving *after* that point count as a background follow-up —
+    /// the single update site for this mirrored count.
+    fn snap_post_turn_baseline(&mut self) {
+        self.post_turn_relayed_assistant_texts = self
+            .items
+            .iter()
+            .filter(|it| matches!(it, ChatItem::AssistantText { .. }))
+            .count();
+        self.post_turn_dirty_at = None;
+    }
+
     pub(in crate::workspace) fn is_busy(&self) -> bool {
         self.turn.is_in_flight()
             || subagent_activity(
@@ -862,6 +877,12 @@ impl AgentChatView {
                 let resumed =
                     self.restoring && self.session_id.as_deref() == Some(session_id.as_str());
                 self.restoring = false;
+                // A resume's replayed `session/update`s already populated `items`
+                // by this point (see the comment above) — sync the baseline now
+                // so those replayed messages don't later look like a background
+                // follow-up. A fresh session's `items` is still empty, so this is
+                // a no-op there.
+                self.snap_post_turn_baseline();
                 // Record the live session id so it persists — and so a later
                 // launch resumes this session instead of starting fresh.
                 self.session_id = Some(session_id);
@@ -1064,6 +1085,10 @@ impl AgentChatView {
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
                 self.restoring = false;
+                // Whatever replayed before the failure is now the baseline —
+                // it was already delivered by the replay itself, not a
+                // background follow-up.
+                self.snap_post_turn_baseline();
                 // A mid-turn failure must settle the turn like a Stop would —
                 // otherwise a streaming block stays `streaming: true` and an
                 // `InProgress` tool stays live, so the rollup glyph blinks
@@ -1148,6 +1173,10 @@ impl AgentChatView {
     pub(in crate::workspace) fn abort_restore(&mut self, cx: &mut Context<Self>) {
         if self.restoring {
             self.restoring = false;
+            // Whatever arrived before the stream closed is now the baseline —
+            // it was already delivered by the (aborted) replay, not a
+            // background follow-up.
+            self.snap_post_turn_baseline();
             self.rebuild_rows();
             self.list_state.remeasure();
             cx.notify();
@@ -1416,12 +1445,7 @@ impl AgentChatView {
         // Everything the turn produced is delivered by the completion relay, so
         // reset the post-turn baseline to the current assistant-text count; only
         // messages that arrive *after* this settle count as a follow-up.
-        self.post_turn_relayed_assistant_texts = self
-            .items
-            .iter()
-            .filter(|it| matches!(it, ChatItem::AssistantText { .. }))
-            .count();
-        self.post_turn_dirty_at = None;
+        self.snap_post_turn_baseline();
     }
 
     /// Settle every still-live *item* — finalize streaming text, mark running
@@ -1601,6 +1625,10 @@ impl AgentChatView {
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
         self.restoring = false;
+        // `teardown_transient_session_state` already cleared `items`, so this
+        // resets the baseline to 0 — a stray post-turn update queued before
+        // teardown can't relay stale text into the fresh session.
+        self.snap_post_turn_baseline();
         self.status = AgentSessionStatus::Connecting;
         self.rebuild_rows(); // diff-splices list_state down to 0 rows
         cx.notify();
@@ -1653,6 +1681,120 @@ mod tests {
             streaming: false,
             message_id: None,
         }
+    }
+
+    /// Build a minimal, offline `AgentChatView` (no cwd → `Idle` status, no
+    /// adapter spawned) as its own window root, so the post-turn marker
+    /// methods (`&mut self` + `Instant`/`Duration`, no `Workspace`) can be
+    /// driven directly. Lighter than `workspace/tests/agent_chat.rs`'s
+    /// `make_activity_view` (which goes through a full `Workspace` +
+    /// `create_agent_chat_pane`): `AgentChatView::new` only needs a
+    /// `Context<Self>`, not a `Workspace` at all.
+    fn make_test_view(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<super::AgentChatView> {
+        crate::test_support::init_gpui_component(cx);
+        cx.add_window(|window, cx| {
+            super::AgentChatView::new(
+                0,
+                window.window_handle(),
+                None,
+                super::AgentSessionStatus::Idle,
+                None,
+                "claude".to_string(),
+                "Claude".to_string(),
+                None,
+                cx,
+            )
+        })
+    }
+
+    /// `reconcile_post_turn` withholds the delta until `quiescence` has
+    /// elapsed since the dirty stamp, then relays it and advances the marker
+    /// so a second call (still no new text) is a no-op.
+    #[gpui::test]
+    fn reconcile_post_turn_waits_for_quiescence_then_dedups(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        let quiescence = std::time::Duration::from_millis(100);
+        let dirty_at = std::time::Instant::now();
+
+        window
+            .update(cx, |view, _window, _cx| {
+                view.items.push(assistant_text_item("done"));
+                view.post_turn_dirty_at = Some(dirty_at);
+            })
+            .unwrap();
+
+        window
+            .update(cx, |view, _window, _cx| {
+                assert_eq!(
+                    view.reconcile_post_turn(dirty_at, quiescence),
+                    None,
+                    "not yet quiesced"
+                );
+            })
+            .unwrap();
+
+        let settled = dirty_at + quiescence + std::time::Duration::from_millis(1);
+        window
+            .update(cx, |view, _window, _cx| {
+                assert_eq!(
+                    view.reconcile_post_turn(settled, quiescence),
+                    Some("done".to_string()),
+                    "quiesced: relays the delta and advances the marker"
+                );
+                assert_eq!(
+                    view.reconcile_post_turn(settled, quiescence),
+                    None,
+                    "second call has nothing new to relay"
+                );
+            })
+            .unwrap();
+    }
+
+    /// `take_pending_post_turn` force-flushes a not-yet-quiesced follow-up
+    /// exactly once, then reports nothing pending.
+    #[gpui::test]
+    fn take_pending_post_turn_flushes_once(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, _cx| {
+                view.items.push(assistant_text_item("flushed"));
+                view.post_turn_dirty_at = Some(std::time::Instant::now());
+                assert_eq!(view.take_pending_post_turn(), Some("flushed".to_string()));
+                assert_eq!(view.take_pending_post_turn(), None);
+            })
+            .unwrap();
+    }
+
+    /// Regression for the resume/replay baseline bug (Finding 1): after
+    /// `snap_post_turn_baseline()` syncs the marker to a pre-populated
+    /// history (as every `restoring = false` site now does), a stray
+    /// post-turn update that arrives with no new assistant text must not
+    /// resurrect the replayed conversation as a "background follow-up".
+    /// Before the fix, the marker stayed at its constructor default (0)
+    /// across a resume, so this same sequence would have relayed the whole
+    /// two-item history.
+    #[gpui::test]
+    fn snap_post_turn_baseline_prevents_replay_from_being_relayed(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, _cx| {
+                view.items.push(assistant_text_item("history-1"));
+                view.items.push(assistant_text_item("history-2"));
+                view.snap_post_turn_baseline();
+                assert_eq!(view.post_turn_relayed_assistant_texts, 2);
+
+                view.post_turn_dirty_at =
+                    Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
+                assert_eq!(
+                    view.reconcile_post_turn(
+                        std::time::Instant::now(),
+                        super::POST_TURN_QUIESCENCE
+                    ),
+                    None,
+                    "resumed baseline must not re-relay replayed history"
+                );
+            })
+            .unwrap();
     }
 
     #[test]
