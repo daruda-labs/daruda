@@ -114,6 +114,27 @@ impl Workspace {
         self.project_for(project_id).map(|p| p.name.clone())
     }
 
+    /// The header line(s) for a pane's Telegram pings: project name + agent name
+    /// when the pane's view is live, else the pane title. Shared by the
+    /// completion, ack, and post-turn relays so they all read identically.
+    pub(in crate::workspace) fn telegram_header(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> String {
+        let project_line = self.project_name_for_pane(pane_id);
+        match self.agent_chat_view(pane_id) {
+            Some(view) => {
+                let agent = view.read(cx).agent_name.clone();
+                match project_line {
+                    Some(project) => format!("{project}\n{agent}"),
+                    None => agent,
+                }
+            }
+            None => self.pane_title(pane_id, cx),
+        }
+    }
+
     /// Compose the turn-completion ping's header + tail: project name and
     /// agent name as the (always plain) header, and the agent's actual last
     /// response (see [`preview_for`] for the head/tail truncation past 2000
@@ -130,7 +151,7 @@ impl Workspace {
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> (String, TelegramTail) {
-        let project_line = self.project_name_for_pane(pane_id);
+        let header = self.telegram_header(pane_id, cx);
         let Some(view) = self.agent_chat_view(pane_id) else {
             return (
                 self.pane_title(pane_id, cx),
@@ -138,10 +159,6 @@ impl Workspace {
             );
         };
         let view = view.read(cx);
-        let header = match project_line {
-            Some(project) => format!("{project}\n{}", view.agent_name),
-            None => view.agent_name.clone(),
-        };
         let last_response = view.items.iter().rev().find_map(|item| match item {
             daruda_acp::ChatItem::AssistantText { text, .. } => Some(text.as_str()),
             _ => None,
@@ -231,6 +248,20 @@ impl Workspace {
         });
     }
 
+    /// Send a lightweight "received, working" ack to Telegram the instant a
+    /// phone-relayed reply is injected. Plain tail (fixed i18n copy, not
+    /// agent-authored markdown). Gated by `relay_to_telegram`.
+    pub(in crate::workspace) fn relay_ack_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
+        let header = self.telegram_header(pane_id, cx);
+        self.relay_to_telegram(
+            pane_id,
+            header,
+            TelegramTail::Plain(s::agent_notification_telegram_reply_ack()),
+            None,
+            cx,
+        );
+    }
+
     /// The workspace's persisted identity — needed by cross-cutting
     /// App-level services (e.g. the Telegram bridge,
     /// `crate::telegram::global`) that route by `WorkspaceUuid` since
@@ -252,6 +283,9 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) {
+        // Immediately confirm receipt on the phone — closes the blind gap
+        // between the reply landing and the turn producing any output.
+        self.relay_ack_to_telegram(pane_id, cx);
         self.send_agent_prompt_text(pane_id, text, cx);
     }
 

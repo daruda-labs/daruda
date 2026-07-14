@@ -752,6 +752,7 @@ notification:
   agent_completed: "에이전트가 응답을 마쳤습니다"
   agent_waiting: "에이전트가 입력을 기다리고 있습니다"
   telegram_truncated_marker: "…(중략)…"
+  telegram_reply_ack: "에이전트 수신 확인 — 응답 생성 또는 작업중…"
 
 # Terminal annotations (SP-1)
 terminal:

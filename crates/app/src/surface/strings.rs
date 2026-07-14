@@ -2556,6 +2556,12 @@ pub fn agent_notification_telegram_truncated_marker() -> String {
     rust_i18n::t!("notification.telegram_truncated_marker").into_owned()
 }
 
+/// Body for the Telegram ack sent the moment a phone-relayed reply is injected —
+/// closes the "did it go through?" gap before the turn produces any output.
+pub fn agent_notification_telegram_reply_ack() -> String {
+    rust_i18n::t!("notification.telegram_reply_ack").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold
@@ -3164,6 +3170,11 @@ mod tests {
             missing_in_ko.is_empty() && missing_in_en.is_empty(),
             "i18n key drift between en.yml and ko.yml:\n  missing in ko.yml: {missing_in_ko:?}\n  missing in en.yml: {missing_in_en:?}"
         );
+    }
+
+    #[test]
+    fn telegram_reply_ack_is_non_empty() {
+        assert!(!super::agent_notification_telegram_reply_ack().is_empty());
     }
 
     #[test]
