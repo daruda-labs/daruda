@@ -63,6 +63,62 @@ fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str
     tail
 }
 
+/// Which relay a deferred entry represents. `Permission` carries the request id
+/// so a late-delivered ping can be dropped if that request was already resolved.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::workspace) enum DeferKind {
+    Completion,
+    PostTurn,
+    Permission { perm_id: u64 },
+}
+
+/// A composed Telegram ping held back because the user was present when it fired.
+#[derive(Clone)]
+pub(in crate::workspace) struct DeferredRelay {
+    pub kind: DeferKind,
+    pub header: String,
+    pub tail: TelegramTail,
+    pub permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+}
+
+/// Hold a presence-gated relay instead of sending now: the feature is on, the
+/// app is foreground, and the user gave system input within `active_idle_secs`.
+/// Pure so it is unit-testable without a live `NSApplication`.
+pub(in crate::workspace) fn should_defer_relay(
+    enabled: bool,
+    app_active: bool,
+    idle_secs: f64,
+    active_idle_secs: u64,
+) -> bool {
+    enabled && app_active && idle_secs < active_idle_secs as f64
+}
+
+/// Append a deferred relay to a pane's pending queue, keeping at most one
+/// pending `Completion` (a newer completion supersedes an older one's "last
+/// response"); post-turn deltas and permissions accumulate.
+fn push_deferred(queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
+    if entry.kind == DeferKind::Completion {
+        queue.retain(|e| e.kind != DeferKind::Completion);
+    }
+    queue.push(entry);
+}
+
+/// From a pane's deferred queue, the entries still worth delivering given the
+/// pane's current live pending-permission id: drop permission pings whose
+/// `perm_id` no longer matches (resolved or superseded in-app).
+pub(in crate::workspace) fn deliverable_entries(
+    queue: Vec<DeferredRelay>,
+    live_perm: Option<u64>,
+) -> Vec<DeferredRelay> {
+    queue
+        .into_iter()
+        .filter(|e| match e.kind {
+            DeferKind::Permission { perm_id } => live_perm == Some(perm_id),
+            _ => true,
+        })
+        .collect()
+}
+
 /// Build one Telegram button per permission choice, in the same order and
 /// with the same labels the in-app card renders them (the same
 /// `daruda_acp::PermissionChoice` view-model list
@@ -190,7 +246,7 @@ impl Workspace {
     /// `raw_input_summary`, or the "waiting" label is agent-authored
     /// markdown — see [`TelegramTail`]'s doc comment for why that matters.
     pub(in crate::workspace) fn relay_permission_wait_to_telegram(
-        &self,
+        &mut self,
         pane_id: PaneId,
         perm_id: u64,
         options: &[daruda_acp::PermissionChoice],
@@ -203,13 +259,60 @@ impl Workspace {
             return;
         }
         let tail = permission_wait_tail(tool_title, raw_input_summary);
-        self.relay_to_telegram(
+        self.relay_or_defer_to_telegram(
             pane_id,
+            DeferKind::Permission { perm_id },
             self.pane_title(pane_id, cx),
             TelegramTail::Plain(tail),
             Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons }),
             cx,
         );
+    }
+
+    /// Presence-gated entry point for the completion / permission / post-turn
+    /// relays. When the user is present (app foreground + recent input) the
+    /// composed ping is held per-pane; otherwise it is sent immediately. Ack
+    /// deliberately bypasses this and calls `relay_to_telegram` directly.
+    pub(in crate::workspace) fn relay_or_defer_to_telegram(
+        &mut self,
+        pane_id: PaneId,
+        kind: DeferKind,
+        header: String,
+        tail: TelegramTail,
+        permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+        cx: &Context<Self>,
+    ) {
+        // Preserve `relay_to_telegram`'s drop-when-not-ready semantics: never
+        // stash (or send) a ping while disabled, unpaired, or before the
+        // bridge global is installed.
+        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some()) {
+            return;
+        }
+        if cx
+            .try_global::<crate::telegram::global::TelegramBridge>()
+            .is_none()
+        {
+            return;
+        }
+        let defer = should_defer_relay(
+            self.telegram.defer_while_active,
+            crate::platform::attention::is_app_active(),
+            crate::platform::attention::system_idle_seconds(),
+            self.telegram.active_idle_secs,
+        );
+        if defer {
+            push_deferred(
+                self.deferred_telegram.entry(pane_id).or_default(),
+                DeferredRelay {
+                    kind,
+                    header,
+                    tail,
+                    permission,
+                },
+            );
+        } else {
+            self.relay_to_telegram(pane_id, header, tail, permission, cx);
+        }
     }
 
     /// Relay a ping to the Telegram bridge, if the bridge is configured to
@@ -267,7 +370,7 @@ impl Workspace {
     /// (agent-authored), truncated like the completion ping. Gated by
     /// `relay_to_telegram`.
     pub(in crate::workspace) fn relay_post_turn_to_telegram(
-        &self,
+        &mut self,
         pane_id: PaneId,
         delta: String,
         cx: &Context<Self>,
@@ -278,7 +381,14 @@ impl Workspace {
             s::agent_notification_telegram_background_update(),
             preview_for(&delta, &s::agent_notification_telegram_truncated_marker()),
         );
-        self.relay_to_telegram(pane_id, header, TelegramTail::Markdown(body), None, cx);
+        self.relay_or_defer_to_telegram(
+            pane_id,
+            DeferKind::PostTurn,
+            header,
+            TelegramTail::Markdown(body),
+            None,
+            cx,
+        );
     }
 
     /// The workspace's persisted identity — needed by cross-cutting
@@ -316,27 +426,22 @@ impl Workspace {
     /// session, and reflows the row list — the same path the in-app
     /// buttons use.
     ///
-    /// The bridge's `perm_id` (captured when the ping was built) is
-    /// intentionally not checked against the view's current
-    /// `pending_permission` here — `AgentChatView::respond_permission`
-    /// already only acts on whatever is currently pending and no-ops
-    /// if nothing is (`pending_permission.take()` returns `None`). A
-    /// phone button for an already-superseded permission request
-    /// landing on a newer pending request is a pre-existing accepted
-    /// limitation (see `AgentChatView::pending_permission`'s own doc:
-    /// "MVP serialises permissions... a new request replaces the
-    /// previous pending id") — this method doesn't introduce a new
-    /// failure mode, just inherits the existing
-    /// single-serialized-permission-per-pane behavior.
+    /// The bridge's `perm_id` (captured when the ping was built) must still
+    /// match the pane's live pending permission. A stale phone button should not
+    /// resolve a newer request that replaced the original pending id.
     pub(crate) fn respond_bot_permission(
         &mut self,
         pane_id: PaneId,
+        perm_id: u64,
         decision: crate::telegram::bridge::PermissionDecision,
         cx: &mut Context<Self>,
     ) {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
+        if view.read(cx).pending_permission != Some(perm_id) {
+            return;
+        }
         let (option_id, kind) = match decision {
             crate::telegram::bridge::PermissionDecision::Allow(id) => {
                 (id, daruda_acp::PermissionKindView::AllowOnce)
@@ -351,6 +456,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
+    use futures::{FutureExt as _, StreamExt as _};
     use gpui::AppContext as _;
 
     use super::{permission_buttons, permission_wait_tail, preview_for};
@@ -358,6 +464,50 @@ mod tests {
     use crate::telegram::bridge::PermissionDecision;
     use daruda_acp::{PermissionChoice, PermissionKindView};
     use daruda_store::project::PaneCwd;
+
+    #[test]
+    fn should_defer_only_when_enabled_active_and_recently_used() {
+        assert!(super::should_defer_relay(true, true, 5.0, 60));
+        assert!(!super::should_defer_relay(true, true, 90.0, 60));
+        assert!(!super::should_defer_relay(true, false, 5.0, 60));
+        assert!(!super::should_defer_relay(false, true, 5.0, 60));
+    }
+
+    #[test]
+    fn push_deferred_keeps_one_completion_but_accumulates_others() {
+        use super::{DeferKind, DeferredRelay, TelegramTail};
+        let mk = |k| DeferredRelay {
+            kind: k,
+            header: String::new(),
+            tail: TelegramTail::Plain(String::new()),
+            permission: None,
+        };
+        let mut q = Vec::new();
+        super::push_deferred(&mut q, mk(DeferKind::Completion));
+        super::push_deferred(&mut q, mk(DeferKind::PostTurn));
+        super::push_deferred(&mut q, mk(DeferKind::Completion));
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[0].kind, DeferKind::PostTurn);
+        assert_eq!(q[1].kind, DeferKind::Completion);
+    }
+
+    #[test]
+    fn deliverable_entries_drops_stale_permission() {
+        use super::{DeferKind, DeferredRelay, TelegramTail};
+        let mk = |k| DeferredRelay {
+            kind: k,
+            header: String::new(),
+            tail: TelegramTail::Plain(String::new()),
+            permission: None,
+        };
+        let q = vec![
+            mk(DeferKind::Completion),
+            mk(DeferKind::Permission { perm_id: 7 }),
+        ];
+        let out = super::deliverable_entries(q, Some(9));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, DeferKind::Completion);
+    }
 
     #[test]
     fn permission_wait_tail_appends_the_tool_title_when_present() {
@@ -602,6 +752,100 @@ mod tests {
                 "the non-matching workspace's pane must not be touched"
             );
         });
+    }
+
+    /// `deliver_deferred_telegram` must tolerate a queued entry whose pane has
+    /// since closed, filter stale permission pings through the live pane's
+    /// `pending_permission`, and still deliver the remaining live-pane entry.
+    #[gpui::test]
+    async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_and_sends_live_entry(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let live_pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        // A pane id well past anything the test ever allocated — stands in
+        // for "the pane closed after the ping was queued".
+        const CLOSED_PANE: super::PaneId = u64::MAX;
+
+        let mk = |kind, tail: &str| super::DeferredRelay {
+            kind,
+            header: "header".to_string(),
+            tail: super::TelegramTail::Plain(tail.to_string()),
+            permission: None,
+        };
+
+        workspace.update(cx, |ws, _| {
+            ws.deferred_telegram
+                .entry(CLOSED_PANE)
+                .or_default()
+                .push(mk(super::DeferKind::Completion, "closed"));
+            ws.deferred_telegram
+                .entry(live_pane)
+                .or_default()
+                .push(mk(super::DeferKind::Completion, "completion"));
+            // Live pane, but a permission id that will never match the
+            // pane's `pending_permission` (which is `None` — no permission
+            // was ever requested on this pane) — exercises the
+            // `deliverable_entries` filter path on a real view.
+            ws.deferred_telegram
+                .entry(live_pane)
+                .or_default()
+                .push(mk(super::DeferKind::Permission { perm_id: 42 }, "stale"));
+        });
+
+        workspace.update(cx, |ws, cx| {
+            ws.deliver_deferred_telegram(cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, _| {
+            assert!(
+                ws.deferred_telegram.is_empty(),
+                "the queue drains after delivery"
+            );
+        });
+
+        let sent = outbound
+            .next()
+            .await
+            .expect("the live completion entry should be sent");
+        assert_eq!(sent.pane.pane, live_pane);
+        assert_eq!(sent.header, "header");
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain("completion".to_string())
+        );
+        assert!(sent.permission.is_none());
+        assert!(
+            outbound.next().now_or_never().is_none(),
+            "closed panes and stale permissions must not emit extra pings"
+        );
     }
 
     /// Construct a Workspace wrapped in `gpui_component::Root` — matches the

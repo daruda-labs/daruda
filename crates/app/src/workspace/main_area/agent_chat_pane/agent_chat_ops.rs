@@ -50,6 +50,7 @@ use std::path::PathBuf;
 
 use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
+use super::telegram_ops::DeferKind;
 use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase, TurnOutcome};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -218,7 +219,7 @@ impl Workspace {
     /// [`Self::fire_activity_completion`], not from the raw event. A no-op for
     /// every other event and when gated out.
     fn maybe_notify_agent_event(
-        &self,
+        &mut self,
         pane_id: PaneId,
         event: &daruda_acp::AcpEvent,
         cx: &Context<Self>,
@@ -289,7 +290,7 @@ impl Workspace {
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);
             let (header, tail) = self.telegram_completion_parts(pane_id, cx);
-            self.relay_to_telegram(pane_id, header, tail, None, cx);
+            self.relay_or_defer_to_telegram(pane_id, DeferKind::Completion, header, tail, None, cx);
         }
         let reason = match outcome {
             TurnOutcome::Completed | TurnOutcome::Stopped => {

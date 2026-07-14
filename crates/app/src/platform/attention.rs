@@ -33,6 +33,27 @@ pub fn is_app_active() -> bool {
     NSApplication::sharedApplication(mtm).isActive()
 }
 
+/// Seconds since the last system-wide user input (keyboard/mouse), read from
+/// CoreGraphics' HID idle clock. Lets presence gating tell "actively using the
+/// machine" from "away from keyboard" without installing an input event tap.
+/// Safe to call from any thread (the underlying query reads shared HID state),
+/// but callers here invoke it from the GPUI foreground loop.
+pub fn system_idle_seconds() -> f64 {
+    // kCGEventSourceStateHIDSystemState = 1; kCGAnyInputEventType = ~0.
+    const HID_SYSTEM_STATE: u32 = 1;
+    const ANY_INPUT_EVENT: u32 = u32::MAX;
+    // SAFETY: `CGEventSourceSecondsSinceLastEventType` is a pointer-free C query
+    // over HID state. Both arguments are valid `CGEventSourceStateID` /
+    // `CGEventType` values and it returns a plain `CFTimeInterval` (f64 seconds);
+    // there is no ownership transfer to manage.
+    unsafe { CGEventSourceSecondsSinceLastEventType(HID_SYSTEM_STATE, ANY_INPUT_EVENT) }
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGEventSourceSecondsSinceLastEventType(state: u32, event_type: u32) -> f64;
+}
+
 /// Apply a new attention request, replacing any prior pending request.
 ///
 /// Must be called on the main thread (`NSApplication` is main-thread-only).

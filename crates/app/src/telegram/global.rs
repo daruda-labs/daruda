@@ -76,6 +76,22 @@ impl TelegramBridge {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn install_for_test(
+    enabled: bool,
+    authorized_chat_id: Option<i64>,
+    cx: &mut App,
+) -> futures::channel::mpsc::UnboundedReceiver<BridgePing> {
+    assert!(
+        !cx.has_global::<TelegramBridge>(),
+        "TelegramBridge test global must be installed once per test app"
+    );
+    let core = BridgeCore::new(enabled, authorized_chat_id);
+    let (outbound_tx, outbound_rx) = unbounded();
+    cx.set_global(TelegramBridge { core, outbound_tx });
+    outbound_rx
+}
+
 /// Register the Telegram bridge global and spawn its poll + send
 /// loops. Call once from `main.rs`, after `SettingsStore::init`.
 /// Idempotent (mirrors `agent::skills::global::init`'s `has_global`
@@ -231,9 +247,13 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
                 ws.inject_bot_reply(pane.pane, text.clone(), cx)
             });
         }
-        InboundAction::RespondPermission { pane, decision, .. } => {
+        InboundAction::RespondPermission {
+            pane,
+            perm_id,
+            decision,
+        } => {
             dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                ws.respond_bot_permission(pane.pane, decision.clone(), cx)
+                ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx)
             });
         }
     }

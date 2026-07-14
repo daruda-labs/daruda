@@ -2,7 +2,7 @@
 //! launch. Each pump owns a channel-receiver thread plus a GPUI-side
 //! fanout that dispatches into every open Workspace window.
 //!
-//! Three pumps live here:
+//! Long-lived pumps live here:
 //!
 //! - **`claude-status`** — `~/.daruda/status/<session>.json`
 //!   filesystem watch → `Workspace::apply_claude_status_event`.
@@ -14,6 +14,10 @@
 //!   `ClaudeStatusStore::aggregate_for_cwd`) surfaces without the
 //!   user having to click. 30 s is conservative — the stale
 //!   threshold defaults to 60 s, so worst-case lag is ~30 s.
+//! - **`status-pulse`** — app-global animation clock for status badges
+//!   and agent-chat busy rows.
+//! - **`deferred-telegram-flush`** — 15 s periodic tick that delivers
+//!   Telegram pings held while the user was present once presence drops.
 //! - **`panels-reload`** — filesystem watch on
 //!   `~/.config/daruda/projects/<…>/panels.json` →
 //!   `Workspace::apply_panels_reload`. Self-write suppression in
@@ -56,6 +60,7 @@ pub(crate) fn spawn_all(cx: &mut App) {
     spawn_claude_status(cx);
     spawn_needs_attention_demote(cx);
     spawn_status_pulse(cx);
+    spawn_deferred_telegram_flush(cx);
     spawn_panels_reload(cx);
 }
 
@@ -92,6 +97,22 @@ fn spawn_needs_attention_demote(cx: &mut App) {
         |cx: &mut App| {
             WindowRegistry::for_each_workspace(cx, |_ws, _window, cx| {
                 cx.notify();
+            });
+        },
+        cx,
+    );
+}
+
+/// Deliver presence-deferred Telegram pings shortly after the user leaves the
+/// window. Cheap when idle: `flush_deferred_telegram` returns immediately while
+/// each workspace's deferred map is empty. 15s cadence bounds the delay from
+/// "user stepped away" to "phone buzzes".
+fn spawn_deferred_telegram_flush(cx: &mut App) {
+    watcher_pumps::spawn_periodic_pump(
+        std::time::Duration::from_secs(15),
+        |cx: &mut App| {
+            WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+                ws.flush_deferred_telegram(cx);
             });
         },
         cx,

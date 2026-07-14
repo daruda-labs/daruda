@@ -370,6 +370,8 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
     patch_section(&mut doc, "telegram", |t| {
         t["enabled"] = toml_edit::value(config.telegram.enabled);
+        t["defer_while_active"] = toml_edit::value(config.telegram.defer_while_active);
+        t["active_idle_secs"] = toml_edit::value(config.telegram.active_idle_secs as i64);
         match config.telegram.authorized_chat_id {
             Some(id) => t["authorized_chat_id"] = toml_edit::value(id),
             None => {

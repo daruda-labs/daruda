@@ -47,7 +47,15 @@ impl Workspace {
         self.syntax_theme = config.file_viewer.syntax_theme.clone();
         self.file_viewer_preview_tab = config.file_viewer.preview_tab;
         self.notifications = config.notifications.clone();
+        let previous_telegram_chat_id = self.telegram.authorized_chat_id;
         self.telegram = config.telegram.clone();
+        // The bridge just went disabled/unpaired, or the target chat changed:
+        // clear held pings rather than deliver old-context messages later.
+        if !(self.telegram.enabled && self.telegram.authorized_chat_id.is_some())
+            || self.telegram.authorized_chat_id != previous_telegram_chat_id
+        {
+            self.deferred_telegram.clear();
+        }
         self.clipboard = config.clipboard.clone();
         self.agent = config.agent.clone();
         self.agents = config.agents.clone();

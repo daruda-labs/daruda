@@ -597,11 +597,15 @@ fn patch_config_file_round_trips_telegram_enabled_and_chat_id() {
     let mut cfg = Config::default();
     cfg.telegram.enabled = true;
     cfg.telegram.authorized_chat_id = Some(999888777);
+    cfg.telegram.defer_while_active = false;
+    cfg.telegram.active_idle_secs = 5;
     crate::patch_config_file_to(&cfg, &path).unwrap();
 
     let reloaded = Config::load_from(&path);
     assert!(reloaded.telegram.enabled);
     assert_eq!(reloaded.telegram.authorized_chat_id, Some(999888777));
+    assert!(!reloaded.telegram.defer_while_active);
+    assert_eq!(reloaded.telegram.active_idle_secs, 5);
 }
 
 #[test]

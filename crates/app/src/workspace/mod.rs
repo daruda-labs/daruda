@@ -62,6 +62,8 @@ use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
 use daruda_terminal::TerminalConfig;
 
+use main_area::agent_chat_pane::telegram_ops::{deliverable_entries, should_defer_relay};
+
 // ----------------------------------------------------------------
 // Actions
 // ----------------------------------------------------------------
@@ -439,6 +441,12 @@ pub struct Workspace {
     /// lets the pump paint one final settled frame for the just-settled views.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
+    /// Presence-gated Telegram pings held back while the user is at this
+    /// window, keyed by the firing pane; drained by `flush_deferred_telegram`.
+    pub(in crate::workspace) deferred_telegram: std::collections::HashMap<
+        main_area::pane_tree::PaneId,
+        Vec<main_area::agent_chat_pane::telegram_ops::DeferredRelay>,
+    >,
     /// True while a git commit or push operation is running. Prevents
     /// duplicate submissions when the user double-clicks Commit/Push.
     pub(in crate::workspace) git_op_in_flight: bool,
@@ -1026,6 +1034,7 @@ impl Workspace {
             agents: config.agents.clone(),
             last_agent_id: None,
             agent_pulse_prev: Vec::new(),
+            deferred_telegram: std::collections::HashMap::new(),
             git_op_in_flight: false,
             commit_mode: CommitMode::Normal,
             git_stage_in_flight: false,
@@ -1626,6 +1635,42 @@ impl Workspace {
             gpui::App::notify(cx, *id);
         }
         self.agent_pulse_prev = busy_ids;
+    }
+
+    /// Deliver deferred Telegram pings once the user is no longer present at
+    /// this window (app backgrounded, or foreground but idle past
+    /// `active_idle_secs`). Runs on the periodic flush pump.
+    pub(crate) fn flush_deferred_telegram(&mut self, cx: &mut Context<Self>) {
+        if self.deferred_telegram.is_empty() {
+            return;
+        }
+        let still_present = should_defer_relay(
+            self.telegram.defer_while_active,
+            crate::platform::attention::is_app_active(),
+            crate::platform::attention::system_idle_seconds(),
+            self.telegram.active_idle_secs,
+        );
+        if still_present {
+            return;
+        }
+        self.deliver_deferred_telegram(cx);
+    }
+
+    /// Presence already dropped: drain and deliver. Split out so tests can drive
+    /// delivery without controlling live OS presence signals. Skips panes that
+    /// have since closed and drops permission pings whose request is no longer
+    /// the pane's live pending permission.
+    pub(in crate::workspace) fn deliver_deferred_telegram(&mut self, cx: &mut Context<Self>) {
+        let pending = std::mem::take(&mut self.deferred_telegram);
+        for (pane_id, queue) in pending {
+            let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+                continue;
+            };
+            let live_perm = view.read(cx).pending_permission;
+            for entry in deliverable_entries(queue, live_perm) {
+                self.relay_to_telegram(pane_id, entry.header, entry.tail, entry.permission, cx);
+            }
+        }
     }
 
     pub(in crate::workspace) fn set_right_dock_view(
