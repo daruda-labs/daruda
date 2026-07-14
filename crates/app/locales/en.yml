@@ -753,6 +753,7 @@ notification:
   agent_waiting: "Agent is waiting for your input"
   telegram_truncated_marker: "…(truncated)…"
   telegram_reply_ack: "Agent received — generating response / working…"
+  telegram_background_update: "🔔 Background update"
 
 # Terminal annotations (SP-1)
 terminal:

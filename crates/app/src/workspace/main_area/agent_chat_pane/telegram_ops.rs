@@ -262,6 +262,25 @@ impl Workspace {
         );
     }
 
+    /// Relay a post-turn follow-up (agent text that arrived after the turn ended,
+    /// e.g. Claude's background-job completion report) to Telegram. Markdown tail
+    /// (agent-authored), truncated like the completion ping. Gated by
+    /// `relay_to_telegram`.
+    pub(in crate::workspace) fn relay_post_turn_to_telegram(
+        &self,
+        pane_id: PaneId,
+        delta: String,
+        cx: &Context<Self>,
+    ) {
+        let header = self.telegram_header(pane_id, cx);
+        let body = format!(
+            "{}\n{}",
+            s::agent_notification_telegram_background_update(),
+            preview_for(&delta, &s::agent_notification_telegram_truncated_marker()),
+        );
+        self.relay_to_telegram(pane_id, header, TelegramTail::Markdown(body), None, cx);
+    }
+
     /// The workspace's persisted identity — needed by cross-cutting
     /// App-level services (e.g. the Telegram bridge,
     /// `crate::telegram::global`) that route by `WorkspaceUuid` since
@@ -271,11 +290,12 @@ impl Workspace {
         self.uuid
     }
 
-    /// Inject a phone-relayed reply as if the user typed it in this
-    /// pane. Thin wrapper over the existing `send_agent_prompt_text`
-    /// funnel — no new delivery path, just a `pub(crate)` entry point
-    /// for `crate::telegram::global`'s poll loop to call into (which
-    /// lives outside `workspace/` and can't reach the
+    /// Inject a phone-relayed reply as a prompt in this pane, and first send an
+    /// immediate Telegram ack (`relay_ack_to_telegram`) confirming receipt. The
+    /// prompt itself still goes through the existing `send_agent_prompt_text`
+    /// funnel — no new *prompt* delivery path, only the added ack ping. A
+    /// `pub(crate)` entry point for `crate::telegram::global`'s poll loop to
+    /// call into (which lives outside `workspace/` and can't reach the
     /// `pub(in crate::workspace)` version).
     pub(crate) fn inject_bot_reply(
         &mut self,

@@ -1584,6 +1584,7 @@ impl Workspace {
         // ACP event announces.
         let mut busy_ids: Vec<gpui::EntityId> = Vec::new();
         let mut completions = Vec::new();
+        let mut post_turn_relays: Vec<(main_area::pane_tree::PaneId, String)> = Vec::new();
         for (pane_id, view) in &candidates {
             let edge = view.update(cx, |v, _| v.reconcile_activity(tick_now));
             // `reconcile_activity` just recomputed the busy level with `tick_now`
@@ -1596,9 +1597,20 @@ impl Workspace {
             if let Some(outcome) = edge {
                 completions.push((*pane_id, outcome));
             }
+            if let Some(delta) = view.update(cx, |v, _| {
+                v.reconcile_post_turn(
+                    tick_now,
+                    crate::workspace::main_area::agent_chat_pane::view::POST_TURN_QUIESCENCE,
+                )
+            }) {
+                post_turn_relays.push((*pane_id, delta));
+            }
         }
         for (pane_id, outcome) in completions {
             self.fire_activity_completion(pane_id, outcome, cx);
+        }
+        for (pane_id, delta) in post_turn_relays {
+            self.relay_post_turn_to_telegram(pane_id, delta, cx);
         }
 
         // Nothing animating and nothing just settled — fully at rest, no work.

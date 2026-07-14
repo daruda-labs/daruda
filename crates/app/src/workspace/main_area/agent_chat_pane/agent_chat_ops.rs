@@ -1191,6 +1191,11 @@ impl Workspace {
             }
             SlashDispatch::Forward => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+                    // Flush a not-yet-quiesced post-turn follow-up before this new
+                    // turn subsumes it (else its delta would be lost/merged).
+                    if let Some(delta) = view.update(cx, |v, _| v.take_pending_post_turn()) {
+                        self.relay_post_turn_to_telegram(pane_id, delta, cx);
+                    }
                     view.update(cx, |v, cx| v.send_prompt_text(text, cx));
                     // Open the activity span on the idle→busy edge (stamps the
                     // working-indicator elapsed anchor at send). A returned

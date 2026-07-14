@@ -2562,6 +2562,12 @@ pub fn agent_notification_telegram_reply_ack() -> String {
     rust_i18n::t!("notification.telegram_reply_ack").into_owned()
 }
 
+/// Prefix for a Telegram follow-up carrying a message the agent produced *after*
+/// its turn ended (a background job's completion report).
+pub fn agent_notification_telegram_background_update() -> String {
+    rust_i18n::t!("notification.telegram_background_update").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold

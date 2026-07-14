@@ -70,7 +70,8 @@ const SUBAGENT_QUIESCENCE: std::time::Duration = std::time::Duration::from_secs(
 /// Idle gap after the last post-turn (background) update before its accumulated
 /// assistant text is relayed to Telegram as a follow-up. Long enough to coalesce
 /// the streamed chunks (~700ms observed), short enough to feel prompt.
-const POST_TURN_QUIESCENCE: std::time::Duration = std::time::Duration::from_millis(1500);
+pub(in crate::workspace) const POST_TURN_QUIESCENCE: std::time::Duration =
+    std::time::Duration::from_millis(1500);
 
 /// Assistant-text items whose index is at or beyond `relayed` (the count already
 /// covered by a prior relay), joined by a blank line. `None` when nothing new or
