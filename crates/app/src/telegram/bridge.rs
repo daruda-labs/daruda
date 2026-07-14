@@ -29,16 +29,18 @@ use daruda_store::project::WorkspaceUuid;
 const SENT_PINGS_CAP: usize = 64;
 
 /// Upper bound on how many outstanding permission-callback tokens
-/// `pending_permissions` keeps. Each permission-wait ping registers
-/// TWO tokens (Allow + Reject) via `build_ping`; if the user resolves
-/// the permission through the in-app desktop UI instead of tapping the
-/// phone button, neither token is ever consumed by `route_callback`
-/// and they'd otherwise accumulate forever over a long-running
-/// session. 64 tokens is the same order of magnitude as
-/// `SENT_PINGS_CAP` — roughly 32 concurrent permission prompts, which
-/// is already generous. Oldest tokens are evicted first, same shape as
-/// `sent_pings`; an evicted token simply routes to `Ignore` on a later
-/// tap, same as any other unknown/consumed token.
+/// `pending_permissions` keeps. Each permission-wait ping registers one
+/// token per button `build_ping` renders — typically 2 (Allow + Reject)
+/// but as many as the agent's option set carries; if the user resolves
+/// the permission through the in-app desktop UI instead of tapping a
+/// phone button, none of that ping's tokens are ever consumed by
+/// `route_callback` and they'd otherwise accumulate forever over a
+/// long-running session. 64 tokens is the same order of magnitude as
+/// `SENT_PINGS_CAP` — generous for the common 2-button case, and still a
+/// meaningful backlog even for richer option sets. Oldest tokens are
+/// evicted first, same shape as `sent_pings`; an evicted token simply
+/// routes to `Ignore` on a later tap, same as any other unknown/consumed
+/// token.
 const PENDING_PERMISSIONS_CAP: usize = 64;
 
 /// How long a generated `/pair` code stays valid. After this, `/pair`
@@ -114,17 +116,20 @@ pub struct RouteResult {
     pub answer_callback_id: Option<String>,
 }
 
-/// One row of inline buttons for a permission-wait ping: pre-formatted
-/// `(label, ACP option_id)` pairs. Labels arrive pre-localized from the
-/// caller (a later task builds them via `surface::strings` — this file
-/// does not touch i18n) — `BridgeCore` only needs the label text and
-/// the ACP option_id to route a later button tap back to the right
-/// decision.
+/// One row of inline buttons for a permission-wait ping: every option the
+/// agent offered, as pre-formatted `(label, decision)` pairs in the same
+/// order the in-app permission card renders them — no collapsing to a
+/// single Allow/Reject pair, so a richer option set (e.g. codex-acp's
+/// "Allow Once" / "Allow for Session" / an execpolicy-amendment allow,
+/// alongside Reject) stays fully choosable from the phone. Labels arrive
+/// pre-localized from the caller (a later task builds them via
+/// `surface::strings` — this file does not touch i18n) — `BridgeCore`
+/// only needs the label text and the already-resolved decision to route a
+/// later button tap back to the right outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPromptRef {
     pub perm_id: u64,
-    pub allow: (String, String),
-    pub reject: (String, String),
+    pub buttons: Vec<(String, PermissionDecision)>,
 }
 
 /// The event-specific trailing content of a Telegram ping — kept separate
@@ -150,8 +155,8 @@ pub enum TelegramTail {
 /// `surface::strings`) — `BridgeCore` treats their *content* as opaque, it
 /// only cares which `TelegramTail` variant `tail` is so the send loop knows
 /// how to render it. `permission` is `Some` only for a permission-wait ping
-/// (adds Allow/Reject buttons); `None` for a plain completion ping (text
-/// only).
+/// (adds one button per option the agent offered); `None` for a plain
+/// completion ping (text only).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePing {
     pub pane: PaneRef,
@@ -415,32 +420,20 @@ impl BridgeCore {
         );
 
         let keyboard = ping.permission.map(|prompt| {
-            let token_allow = Uuid::new_v4().simple().to_string();
-            let token_reject = Uuid::new_v4().simple().to_string();
+            let buttons: Vec<(String, String)> = prompt
+                .buttons
+                .into_iter()
+                .map(|(label, decision)| {
+                    let token = Uuid::new_v4().simple().to_string();
+                    self.insert_pending_permission(
+                        token.clone(),
+                        (ping.pane, prompt.perm_id, decision),
+                    );
+                    (label, token)
+                })
+                .collect();
 
-            let (allow_label, allow_option_id) = prompt.allow;
-            let (reject_label, reject_option_id) = prompt.reject;
-
-            self.insert_pending_permission(
-                token_allow.clone(),
-                (
-                    ping.pane,
-                    prompt.perm_id,
-                    PermissionDecision::Allow(allow_option_id),
-                ),
-            );
-            self.insert_pending_permission(
-                token_reject.clone(),
-                (
-                    ping.pane,
-                    prompt.perm_id,
-                    PermissionDecision::Reject(reject_option_id),
-                ),
-            );
-
-            InlineKeyboard {
-                buttons: vec![(allow_label, token_allow), (reject_label, token_reject)],
-            }
+            InlineKeyboard { buttons }
         });
 
         OutboundMsg {
@@ -455,7 +448,8 @@ impl BridgeCore {
     /// `PENDING_PERMISSIONS_CAP` bound by evicting the oldest token
     /// (from both the map and its companion order queue) once
     /// exceeded — mirrors `record_sent`'s eviction shape. `build_ping`
-    /// calls this twice per permission-wait ping (Allow + Reject).
+    /// calls this once per button in the permission-wait ping's
+    /// `PermissionPromptRef::buttons`.
     fn insert_pending_permission(
         &mut self,
         token: String,
@@ -758,8 +752,16 @@ mod tests {
             tail: TelegramTail::Plain(String::new()),
             permission: Some(PermissionPromptRef {
                 perm_id: 7,
-                allow: ("Allow".to_string(), "opt_allow".to_string()),
-                reject: ("Reject".to_string(), "opt_reject".to_string()),
+                buttons: vec![
+                    (
+                        "Allow".to_string(),
+                        PermissionDecision::Allow("opt_allow".to_string()),
+                    ),
+                    (
+                        "Reject".to_string(),
+                        PermissionDecision::Reject("opt_reject".to_string()),
+                    ),
+                ],
             }),
         });
 
@@ -791,12 +793,84 @@ mod tests {
     }
 
     #[test]
+    fn build_ping_permission_registers_one_token_per_button_beyond_two() {
+        // The real motivating case: codex-acp can offer more than one
+        // Allow-shaped option (Allow Once / Allow for Session / an
+        // execpolicy-amendment allow) alongside Reject. Every option the
+        // agent offers must become its own button + token, not collapse
+        // to a single Allow/Reject pair.
+        let mut bridge = BridgeCore::new(true, Some(1));
+        let msg = bridge.build_ping(BridgePing {
+            pane: pane(1, 1),
+            header: "Approve this?".to_string(),
+            tail: TelegramTail::Plain(String::new()),
+            permission: Some(PermissionPromptRef {
+                perm_id: 9,
+                buttons: vec![
+                    (
+                        "Allow Once".to_string(),
+                        PermissionDecision::Allow("allow_once".to_string()),
+                    ),
+                    (
+                        "Allow for Session".to_string(),
+                        PermissionDecision::Allow("allow_always".to_string()),
+                    ),
+                    (
+                        "Allow Commands Starting With …".to_string(),
+                        PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
+                    ),
+                    (
+                        "Reject".to_string(),
+                        PermissionDecision::Reject("reject_once".to_string()),
+                    ),
+                ],
+            }),
+        });
+
+        let keyboard = msg.keyboard.expect("keyboard present");
+        assert_eq!(keyboard.buttons.len(), 4);
+        let labels: Vec<&str> = keyboard.buttons.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Allow Once",
+                "Allow for Session",
+                "Allow Commands Starting With …",
+                "Reject",
+            ]
+        );
+
+        let tokens: std::collections::HashSet<&String> =
+            keyboard.buttons.iter().map(|(_, t)| t).collect();
+        assert_eq!(tokens.len(), 4, "every button gets its own distinct token");
+        assert_eq!(bridge.pending_permissions.len(), 4);
+
+        let execpolicy_token = &keyboard.buttons[2].1;
+        assert_eq!(
+            bridge.pending_permissions.get(execpolicy_token),
+            Some(&(
+                pane(1, 1),
+                9,
+                PermissionDecision::Allow("accept_execpolicy_amendment".to_string())
+            ))
+        );
+    }
+
+    #[test]
     fn pending_permissions_bound_evicts_oldest_entries() {
         let mut bridge = BridgeCore::new(true, Some(1));
         let prompt = || PermissionPromptRef {
             perm_id: 1,
-            allow: ("Allow".to_string(), "opt_allow".to_string()),
-            reject: ("Reject".to_string(), "opt_reject".to_string()),
+            buttons: vec![
+                (
+                    "Allow".to_string(),
+                    PermissionDecision::Allow("opt_allow".to_string()),
+                ),
+                (
+                    "Reject".to_string(),
+                    PermissionDecision::Reject("opt_reject".to_string()),
+                ),
+            ],
         };
 
         let first_msg = bridge.build_ping(BridgePing {

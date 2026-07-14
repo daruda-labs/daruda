@@ -63,33 +63,40 @@ fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str
     tail
 }
 
-/// Pick the Allow/Reject button pair from a permission card's choices (the
-/// same `daruda_acp::PermissionChoice` view-model list
+/// Build one Telegram button per permission choice, in the same order and
+/// with the same labels the in-app card renders them (the same
+/// `daruda_acp::PermissionChoice` view-model list
 /// `AgentChatView::apply_event` renders as in-app buttons — see
-/// `daruda_acp::mapping::permission_item`). Each side prefers the `*Once`
-/// kind, falling back to `*Always` if that's all the agent offered (both
-/// kinds map to the same underlying `daruda_acp::PermissionDecision::Allow`/
-/// `Reject` outcome — see `AgentChatView::respond_permission`'s match arms —
-/// so which one the button uses has no behavioral difference). Returns
-/// `(label, option_id)` pairs using the agent's own choice label — the same
-/// text the desktop permission card renders, so the phone stays consistent
-/// with the in-app UI without inventing new i18n strings for
-/// "Allow"/"Reject". Returns `None` if the agent didn't supply both sides.
-fn pick_allow_reject(
+/// `daruda_acp::mapping::permission_item`). No collapsing to a single
+/// Allow/Reject pair: a richer option set (e.g. codex-acp's "Allow Once" /
+/// "Allow for Session" / an execpolicy-amendment allow, alongside Reject)
+/// stays fully choosable from the phone, matching the desktop card exactly.
+/// Each choice's `*Once`/`*Always` kind maps to the same
+/// `daruda_acp::PermissionDecision::Allow`/`Reject` outcome
+/// `AgentChatView::respond_permission` sends for it — the finer-grained kind
+/// only picks in-app button styling (accent vs. danger), never the wire
+/// outcome, which is carried entirely by `option_id`. Returns an empty
+/// `Vec` only if the agent supplied no options at all (the caller skips the
+/// relay in that case — nothing to build a keyboard from).
+fn permission_buttons(
     options: &[daruda_acp::PermissionChoice],
-) -> Option<((String, String), (String, String))> {
+) -> Vec<(String, crate::telegram::bridge::PermissionDecision)> {
+    use crate::telegram::bridge::PermissionDecision;
     use daruda_acp::PermissionKindView as Kind;
-    let pick = |primary: Kind, fallback: Kind| {
-        options
-            .iter()
-            .find(|o| o.kind == primary)
-            .or_else(|| options.iter().find(|o| o.kind == fallback))
-            .map(|o| (o.name.clone(), o.option_id.clone()))
-    };
-    Some((
-        pick(Kind::AllowOnce, Kind::AllowAlways)?,
-        pick(Kind::RejectOnce, Kind::RejectAlways)?,
-    ))
+    options
+        .iter()
+        .map(|o| {
+            let decision = match o.kind {
+                Kind::AllowOnce | Kind::AllowAlways => {
+                    PermissionDecision::Allow(o.option_id.clone())
+                }
+                Kind::RejectOnce | Kind::RejectAlways => {
+                    PermissionDecision::Reject(o.option_id.clone())
+                }
+            };
+            (o.name.clone(), decision)
+        })
+        .collect()
 }
 
 impl Workspace {
@@ -154,13 +161,12 @@ impl Workspace {
         }
     }
 
-    /// Relay a permission-wait ping with Allow/Reject buttons, extracting
-    /// the button pair from the agent's own permission choices — skips
-    /// the relay entirely (not a broken partial ping) if the agent
-    /// didn't supply both an allow and a reject option (shouldn't happen
-    /// for a real permission request, but nothing to build a keyboard
-    /// from if it somehow does). `tool_title` / `raw_input_summary` are the
-    /// same `daruda_acp::PermissionItem` fields the in-app card is built
+    /// Relay a permission-wait ping with one button per option the agent
+    /// offered — skips the relay entirely (not a broken partial ping) if
+    /// the agent supplied no options at all (shouldn't happen for a real
+    /// permission request, but nothing to build a keyboard from if it
+    /// somehow does). `tool_title` / `raw_input_summary` are the same
+    /// `daruda_acp::PermissionItem` fields the in-app card is built
     /// from — see [`permission_wait_tail`] — so the phone ping names the
     /// actual action awaiting approval instead of just "waiting for your
     /// input". Always a [`TelegramTail::Plain`] tail: none of `tool_title`,
@@ -175,19 +181,16 @@ impl Workspace {
         raw_input_summary: Option<&str>,
         cx: &Context<Self>,
     ) {
-        let Some((allow, reject)) = pick_allow_reject(options) else {
+        let buttons = permission_buttons(options);
+        if buttons.is_empty() {
             return;
-        };
+        }
         let tail = permission_wait_tail(tool_title, raw_input_summary);
         self.relay_to_telegram(
             pane_id,
             self.pane_title(pane_id, cx),
             TelegramTail::Plain(tail),
-            Some(crate::telegram::bridge::PermissionPromptRef {
-                perm_id,
-                allow,
-                reject,
-            }),
+            Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons }),
             cx,
         );
     }
@@ -296,8 +299,9 @@ impl Workspace {
 mod tests {
     use gpui::AppContext as _;
 
-    use super::{permission_wait_tail, pick_allow_reject, preview_for};
+    use super::{permission_buttons, permission_wait_tail, preview_for};
     use crate::surface::strings as s;
+    use crate::telegram::bridge::PermissionDecision;
     use daruda_acp::{PermissionChoice, PermissionKindView};
     use daruda_store::project::PaneCwd;
 
@@ -383,106 +387,70 @@ mod tests {
     }
 
     #[test]
-    fn pick_allow_reject_prefers_once_kind_when_both_present() {
+    fn permission_buttons_exposes_every_option_not_just_first_of_kind() {
+        // The real motivating case (codex-acp): more than one Allow-shaped
+        // option (Once, session-scoped, an execpolicy amendment) alongside
+        // Reject — all four must become their own button, in order, not
+        // collapse to a single Allow/Reject pair.
         let options = vec![
-            choice("allow_once", "Allow", PermissionKindView::AllowOnce),
+            choice("allow_once", "Allow Once", PermissionKindView::AllowOnce),
             choice(
                 "allow_always",
-                "Always Allow",
+                "Allow for Session",
+                PermissionKindView::AllowAlways,
+            ),
+            choice(
+                "accept_execpolicy_amendment",
+                "Allow Commands Starting With …",
                 PermissionKindView::AllowAlways,
             ),
             choice("reject_once", "Reject", PermissionKindView::RejectOnce),
-            choice(
-                "reject_always",
-                "Always Reject",
-                PermissionKindView::RejectAlways,
-            ),
         ];
-        let (allow, reject) = pick_allow_reject(&options).expect("both sides present");
-        assert_eq!(allow, ("Allow".to_string(), "allow_once".to_string()));
-        assert_eq!(reject, ("Reject".to_string(), "reject_once".to_string()));
-    }
 
-    #[test]
-    fn pick_allow_reject_falls_back_to_always_when_once_missing() {
-        let options = vec![
-            choice(
-                "allow_always",
-                "Always Allow",
-                PermissionKindView::AllowAlways,
-            ),
-            choice(
-                "reject_always",
-                "Always Reject",
-                PermissionKindView::RejectAlways,
-            ),
-        ];
-        let (allow, reject) = pick_allow_reject(&options).expect("both sides present via fallback");
+        let buttons = permission_buttons(&options);
+
         assert_eq!(
-            allow,
-            ("Always Allow".to_string(), "allow_always".to_string())
-        );
-        assert_eq!(
-            reject,
-            ("Always Reject".to_string(), "reject_always".to_string())
+            buttons,
+            vec![
+                (
+                    "Allow Once".to_string(),
+                    PermissionDecision::Allow("allow_once".to_string())
+                ),
+                (
+                    "Allow for Session".to_string(),
+                    PermissionDecision::Allow("allow_always".to_string())
+                ),
+                (
+                    "Allow Commands Starting With …".to_string(),
+                    PermissionDecision::Allow("accept_execpolicy_amendment".to_string())
+                ),
+                (
+                    "Reject".to_string(),
+                    PermissionDecision::Reject("reject_once".to_string())
+                ),
+            ]
         );
     }
 
     #[test]
-    fn pick_allow_reject_falls_back_independently_per_side() {
-        // Allow side only has `*Once`, reject side only has `*Always` —
-        // each side resolves independently.
-        let options = vec![
-            choice("allow_once", "Allow", PermissionKindView::AllowOnce),
-            choice(
-                "reject_always",
-                "Always Reject",
-                PermissionKindView::RejectAlways,
-            ),
-        ];
-        let (allow, reject) = pick_allow_reject(&options).expect("both sides present");
-        assert_eq!(allow, ("Allow".to_string(), "allow_once".to_string()));
-        assert_eq!(
-            reject,
-            ("Always Reject".to_string(), "reject_always".to_string())
-        );
-    }
-
-    #[test]
-    fn pick_allow_reject_missing_allow_side_is_none() {
+    fn permission_buttons_maps_reject_always_to_reject_decision() {
         let options = vec![choice(
-            "reject_once",
-            "Reject",
-            PermissionKindView::RejectOnce,
+            "reject_always",
+            "Always Reject",
+            PermissionKindView::RejectAlways,
         )];
-        assert!(pick_allow_reject(&options).is_none());
+        assert_eq!(
+            permission_buttons(&options),
+            vec![(
+                "Always Reject".to_string(),
+                PermissionDecision::Reject("reject_always".to_string())
+            )]
+        );
     }
 
     #[test]
-    fn pick_allow_reject_missing_reject_side_is_none() {
-        let options = vec![choice("allow_once", "Allow", PermissionKindView::AllowOnce)];
-        assert!(pick_allow_reject(&options).is_none());
-    }
-
-    #[test]
-    fn pick_allow_reject_empty_options_is_none() {
-        assert!(pick_allow_reject(&[]).is_none());
-    }
-
-    #[test]
-    fn pick_allow_reject_ignores_unrelated_extra_options() {
-        // An extra option of a kind that isn't Allow/Reject-shaped (there
-        // is none in this enum, so simulate "extra/duplicate" entries)
-        // doesn't affect which entry wins for each side — the first
-        // matching entry in iteration order is picked.
-        let options = vec![
-            choice("allow_once_a", "Allow A", PermissionKindView::AllowOnce),
-            choice("allow_once_b", "Allow B", PermissionKindView::AllowOnce),
-            choice("reject_once", "Reject", PermissionKindView::RejectOnce),
-        ];
-        let (allow, reject) = pick_allow_reject(&options).expect("both sides present");
-        assert_eq!(allow, ("Allow A".to_string(), "allow_once_a".to_string()));
-        assert_eq!(reject, ("Reject".to_string(), "reject_once".to_string()));
+    fn permission_buttons_empty_options_is_empty() {
+        assert!(permission_buttons(&[]).is_empty());
     }
 
     /// Cross-workspace routing coverage: `crate::telegram::global`'s
@@ -491,7 +459,7 @@ mod tests {
     /// pane.workspace`, then mutates only the matching one. That guard —
     /// the entire reason `Workspace::uuid` and `for_each_workspace` exist
     /// for this feature — had zero test coverage; the pure pieces
-    /// (`pick_allow_reject`, `BridgeCore`) are covered above and in
+    /// (`permission_buttons`, `BridgeCore`) are covered above and in
     /// `telegram::bridge`, but not the multi-window dispatch itself.
     ///
     /// This drives the same shape `InboundAction::InjectPrompt`'s dispatch

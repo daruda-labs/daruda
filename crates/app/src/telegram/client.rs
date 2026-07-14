@@ -72,7 +72,8 @@ pub enum UpdateKind {
 
 /// A single row of inline buttons attached to a `sendMessage` call.
 /// Kept to one row of `(label, callback_data)` pairs — the only shape
-/// the bridge ever sends (a 2-button Allow/Reject permission prompt).
+/// the bridge ever sends (a permission prompt with one button per
+/// option the agent offered, typically Allow/Reject but sometimes more).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineKeyboard {
     pub buttons: Vec<(String, String)>,
