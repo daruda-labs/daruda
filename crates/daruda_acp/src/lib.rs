@@ -9,6 +9,7 @@
 //! the protocol round-trip and the smol-executor bridge. The long-lived
 //! multi-turn connection and the chat render-model mapping build on it.
 
+pub mod adapter;
 pub mod connection;
 pub mod mapping;
 pub mod model;
@@ -19,8 +20,8 @@ pub mod session;
 pub use agent_client_protocol::schema::v1::SessionId;
 pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
 pub use mapping::{
-    SubagentActivity, UpdateEffect, apply_update, cancel_pending_tools, finalize_streaming,
-    permission_item, subagent_activity, touched_tool_id,
+    SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
+    finalize_streaming, permission_item, subagent_activity, touched_tool_id,
 };
 pub use model::{
     ChatItem, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView, CostView, DiffView,

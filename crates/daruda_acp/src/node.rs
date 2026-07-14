@@ -702,8 +702,7 @@ mod tests {
         // `shell_words::split` would break the unquoted cache value into two
         // tokens and mistake the second fragment for the command, spawning
         // it instead of `npx` and failing with ENOENT.
-        let install_root =
-            PathBuf::from("/Users/x/Library/Application Support/daruda/node");
+        let install_root = PathBuf::from("/Users/x/Library/Application Support/daruda/node");
         let cmd = format!("npx -y {ADAPTER_NPM_PACKAGE}");
         let wrapped = NodeRuntime::System.wrap_command(&cmd, &install_root);
 
@@ -717,10 +716,7 @@ mod tests {
                     .iter()
                     .find(|e| e.name == "npm_config_cache")
                     .expect("npm_config_cache env present");
-                assert_eq!(
-                    cache.value,
-                    npx_cache_dir(&install_root).to_string_lossy()
-                );
+                assert_eq!(cache.value, npx_cache_dir(&install_root).to_string_lossy());
             }
             other => panic!("expected stdio transport, got {other:?}"),
         }

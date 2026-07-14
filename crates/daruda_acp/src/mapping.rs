@@ -13,6 +13,7 @@ use agent_client_protocol::schema::v1::{
     SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 
+use crate::adapter::{AcpAdapter, DefaultAdapter};
 use crate::model::{
     ChatItem, DiffView, PermissionChoice, PermissionItem, PermissionKindView, ToolCallItem,
     ToolKindView, ToolOutputBlock, ToolStatusView,
@@ -36,6 +37,17 @@ pub struct UpdateEffect {
 /// Apply one `session/update` notification to the chat item list, reporting what
 /// it touched via [`UpdateEffect`] so the host can gate its reconciles.
 pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) -> UpdateEffect {
+    apply_update_with(items, update, &DefaultAdapter)
+}
+
+/// [`apply_update`] with an explicit per-agent strategy (see [`crate::adapter`]).
+/// The host selects the adapter once per session and passes it on every update;
+/// the plain [`apply_update`] is sugar that uses [`DefaultAdapter`].
+pub fn apply_update_with(
+    items: &mut Vec<ChatItem>,
+    update: &SessionUpdate,
+    adapter: &dyn AcpAdapter,
+) -> UpdateEffect {
     match update {
         SessionUpdate::AgentMessageChunk(chunk) => {
             append_streaming(
@@ -69,7 +81,7 @@ pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) -> Update
             }
         }
         SessionUpdate::ToolCall(tool_call) => {
-            upsert_tool_call(items, tool_call);
+            upsert_tool_call(items, tool_call, adapter);
             UpdateEffect {
                 touched_tool: true,
                 ..UpdateEffect::default()
@@ -89,12 +101,35 @@ pub fn apply_update(items: &mut Vec<ChatItem>, update: &SessionUpdate) -> Update
 }
 
 /// Build a pending permission card from a `session/request_permission` request.
-pub fn permission_item(request: &RequestPermissionRequest) -> ChatItem {
+/// `items` is the conversation's current item list — used to look up a
+/// `raw_input` already recorded for this tool call id (see
+/// [`existing_raw_input`]) in preference to the request's own copy, which
+/// some adapters (codex-acp) re-quote for the permission prompt and can
+/// mangle in the process.
+pub fn permission_item(request: &RequestPermissionRequest, items: &[ChatItem]) -> ChatItem {
+    let own_raw_input = request.tool_call.fields.raw_input.as_ref();
+    let raw_input = existing_raw_input(items, &request.tool_call.tool_call_id.0).or(own_raw_input);
     ChatItem::Permission(PermissionItem {
         tool_title: request.tool_call.fields.title.clone(),
-        raw_input_summary: summarize_raw_input(request.tool_call.fields.raw_input.as_ref()),
+        raw_input_summary: summarize_raw_input(raw_input),
         options: request.options.iter().map(choice_of).collect(),
         resolved: None,
+    })
+}
+
+/// The `raw_input` already recorded on a `ChatItem::ToolCall` matching
+/// `tool_call_id`, if the item list has one. A prior `tool_call` (insert)
+/// event for the same id — which arrives before the permission request in
+/// every observed adapter — carries the pristine value; the permission
+/// request's own copy is a separate, adapter-reconstructed echo that isn't
+/// guaranteed to match it byte-for-byte.
+fn existing_raw_input<'a>(
+    items: &'a [ChatItem],
+    tool_call_id: &str,
+) -> Option<&'a serde_json::Value> {
+    items.iter().rev().find_map(|item| match item {
+        ChatItem::ToolCall(tc) if tc.id == tool_call_id => tc.raw_input.as_ref(),
+        _ => None,
     })
 }
 
@@ -349,24 +384,10 @@ fn append_streaming(
     }
 }
 
-/// The parent tool-call id the Claude adapter stamps on a subagent's inner tool
-/// calls: `_meta.claudeCode.parentToolUseId`. The adapter flattens subagent
-/// activity into the single session, so this is the only link from a child call
-/// back to the `Task`/`Agent` call that spawned it. `None` for a top-level call
-/// (no such meta) or any other adapter that doesn't set it.
-fn parent_tool_id_from_meta(
-    meta: &Option<agent_client_protocol::schema::v1::Meta>,
-) -> Option<String> {
-    meta.as_ref()?
-        .get("claudeCode")?
-        .get("parentToolUseId")?
-        .as_str()
-        .map(str::to_owned)
-}
-
-fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
+fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall, adapter: &dyn AcpAdapter) {
     let id = tool_call.tool_call_id.0.to_string();
-    let (diffs, output) = split_content(&tool_call.content);
+    let (diffs, mut output) = split_content(&tool_call.content);
+    push_raw_output_fallback(&mut output, &tool_call.raw_output);
     let mut item = ToolCallItem {
         id: id.clone(),
         title: tool_call.title.clone(),
@@ -375,7 +396,7 @@ fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall) {
         diffs,
         output,
         raw_input: tool_call.raw_input.clone(),
-        parent_tool_id: parent_tool_id_from_meta(&tool_call.meta),
+        parent_tool_id: adapter.parent_tool_id(&tool_call.meta),
     };
     highlight_tool_output(&mut item);
     match find_tool_call(items, &id) {
@@ -424,6 +445,10 @@ fn apply_tool_call_update(items: &mut [ChatItem], update: &ToolCallUpdate) {
     if fields.raw_input.is_some() {
         item.raw_input = fields.raw_input.clone();
     }
+    // A completion update often carries the result only in `raw_output` with no
+    // `content` (codex-acp's command execution) — fold it in when the typed
+    // content left the body empty.
+    push_raw_output_fallback(&mut item.output, &fields.raw_output);
     // Run last: kind / raw_input (source of the language) and output text are
     // both current by now, and the rewrite is idempotent.
     highlight_tool_output(item);
@@ -473,6 +498,47 @@ fn output_block_of(block: &ContentBlock) -> Option<ToolOutputBlock> {
         }),
         _ => None,
     }
+}
+
+/// Append a fallback output block derived from a tool call's `raw_output`, but
+/// only when the typed `content` produced no renderable text. Adapters that
+/// report results through an embedded terminal (which we drop) or *only* in
+/// `raw_output` — codex-acp streams a shell command's output through a terminal
+/// and repeats it in `raw_output`, and its MCP calls carry results solely there
+/// — would otherwise render an empty card. Claude-style adapters embed the same
+/// text as a `content` block, so their `output` is already non-empty and this is
+/// a no-op (no duplication).
+fn push_raw_output_fallback(
+    output: &mut Vec<ToolOutputBlock>,
+    raw_output: &Option<serde_json::Value>,
+) {
+    if !output.is_empty() {
+        return;
+    }
+    if let Some(raw) = raw_output
+        && let Some(block) = raw_output_block(raw)
+    {
+        output.push(block);
+    }
+}
+
+/// Render a `raw_output` value as a single text block, or `None` when it carries
+/// no visible text. codex-acp's command execution stores the human-facing output
+/// as a `formatted_output` string, surfaced verbatim; a bare string is used as
+/// is; anything else (a structured object such as an MCP `{ result, error }`)
+/// renders as pretty JSON.
+fn raw_output_block(raw: &serde_json::Value) -> Option<ToolOutputBlock> {
+    let text = match raw
+        .get("formatted_output")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(s) => s.to_string(),
+        None => match raw {
+            serde_json::Value::String(s) => s.clone(),
+            _ => serde_json::to_string_pretty(raw).ok()?,
+        },
+    };
+    (!text.trim().is_empty()).then_some(ToolOutputBlock::Text(text))
 }
 
 /// The owned `message_id` of a streamed content chunk, if the agent supplied
@@ -536,28 +602,8 @@ fn kind_of(kind: &ToolKind) -> ToolKindView {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        Content, ContentChunk, Diff, ResourceLink, TextContent, ToolCallUpdateFields,
+        Content, ContentChunk, Diff, ResourceLink, Terminal, TextContent, ToolCallUpdateFields,
     };
-
-    #[test]
-    fn parent_tool_id_read_from_claude_meta() {
-        let obj = |v: serde_json::Value| Some(v.as_object().unwrap().clone());
-        // The Claude adapter stamps the parent id here on a subagent's inner call.
-        assert_eq!(
-            parent_tool_id_from_meta(&obj(
-                serde_json::json!({"claudeCode": {"parentToolUseId": "toolu_parent"}})
-            )),
-            Some("toolu_parent".to_owned())
-        );
-        // No meta, or meta without the parent key → top-level call.
-        assert_eq!(parent_tool_id_from_meta(&None), None);
-        assert_eq!(
-            parent_tool_id_from_meta(&obj(
-                serde_json::json!({"claudeCode": {"toolName": "Bash"}})
-            )),
-            None
-        );
-    }
 
     #[test]
     fn split_content_types_output_blocks() {
@@ -583,6 +629,141 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn apply_update_with_routes_parent_id_through_adapter() {
+        // The mapper must consult the injected strategy for the parent id, not a
+        // hardcoded meta read — proven by a stub that returns a fixed sentinel
+        // regardless of the (empty) meta.
+        struct StubAdapter;
+        impl AcpAdapter for StubAdapter {
+            fn parent_tool_id(
+                &self,
+                _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            ) -> Option<String> {
+                Some("stub-parent".to_owned())
+            }
+        }
+        let mut items = Vec::new();
+        apply_update_with(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "x")),
+            &StubAdapter,
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(tc.parent_tool_id, Some("stub-parent".to_owned()));
+    }
+
+    #[test]
+    fn codex_command_output_surfaces_from_raw_output() {
+        // codex-acp reports a shell command's output only in `raw_output`
+        // (`{ formatted_output, exit_code }`); its `content` is an embedded
+        // terminal block we drop. The output must still fill the card body.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "ls -la")
+                    .kind(ToolKind::Execute)
+                    .content(vec![ToolCallContent::Terminal(Terminal::new("term-1"))]),
+            ),
+        );
+        // The in-progress insert carries no renderable text yet.
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert!(tc.output.is_empty());
+
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "c1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .raw_output(serde_json::json!({
+                        "formatted_output": "total 0\ndrwxr-xr-x  2 me  staff",
+                        "exit_code": 0,
+                    })),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Text(
+                "total 0\ndrwxr-xr-x  2 me  staff".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn raw_output_does_not_duplicate_text_content() {
+        // Claude-style adapters embed the result as a `content` text block *and*
+        // repeat it in `raw_output`. The text block wins — no duplicate block.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "read")
+                    .content(vec![ToolCallContent::Content(Content::new(
+                        ContentBlock::Text(TextContent::new("real output")),
+                    ))])
+                    .raw_output(serde_json::json!({ "formatted_output": "dup" })),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Text("real output".to_string())]
+        );
+    }
+
+    #[test]
+    fn raw_output_object_pretty_printed_when_no_formatted_output() {
+        // An MCP tool call returns structured `raw_output` (`{ result, error }`)
+        // with no content — fall back to a pretty-printed JSON block.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("m1", "mcp.server.tool")
+                    .kind(ToolKind::Other)
+                    .raw_output(serde_json::json!({ "result": { "ok": true }, "error": null })),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        let [ToolOutputBlock::Text(text)] = tc.output.as_slice() else {
+            panic!("expected one text block, got {:?}", tc.output);
+        };
+        assert!(text.contains("\"result\""), "pretty JSON, got: {text}");
+        assert!(text.contains("\"ok\": true"), "pretty JSON, got: {text}");
+    }
+
+    #[test]
+    fn blank_raw_output_adds_no_block() {
+        // A whitespace-only `formatted_output` (a command that printed nothing)
+        // must not add an empty output block.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "noop")
+                    .kind(ToolKind::Execute)
+                    .raw_output(serde_json::json!({ "formatted_output": "  \n ", "exit_code": 0 })),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert!(tc.output.is_empty());
     }
 
     fn text_chunk(s: &str) -> ContentChunk {
@@ -1103,7 +1284,7 @@ mod tests {
             ],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request) else {
+        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
             panic!("expected permission item");
         };
         assert_eq!(card.tool_title.as_deref(), Some("Write /tmp/x"));
@@ -1111,6 +1292,71 @@ mod tests {
         assert_eq!(card.options[0].kind, PermissionKindView::AllowAlways);
         assert_eq!(card.options[1].option_id, "reject");
         assert_eq!(card.resolved, None);
+    }
+
+    #[test]
+    fn permission_request_prefers_raw_input_from_a_matching_existing_tool_call() {
+        // codex-acp sometimes re-quotes `rawInput.command` for the permission
+        // request and mangles embedded quotes, even though a clean copy
+        // already arrived via the tool_call insert for the same id. Prefer
+        // the item list's already-clean copy over the request's own.
+        let items = vec![ChatItem::ToolCall(ToolCallItem {
+            id: "t1".to_string(),
+            title: "perl -0pi -e ...".to_string(),
+            kind: ToolKindView::Execute,
+            status: ToolStatusView::InProgress,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: Some(serde_json::json!({"command": "perl -0pi -e 's/clean/'"})),
+            parent_tool_id: None,
+        })];
+
+        let mut tool_fields = ToolCallUpdateFields::default();
+        tool_fields.raw_input =
+            Some(serde_json::json!({"command": "perl -0pi -e 's/GARBLED\"'!--/'"}));
+        let request = RequestPermissionRequest::new(
+            "s1",
+            ToolCallUpdate::new("t1", tool_fields),
+            vec![PermissionOption::new(
+                "allow",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+
+        let ChatItem::Permission(card) = permission_item(&request, &items) else {
+            panic!("expected permission item");
+        };
+        assert_eq!(
+            card.raw_input_summary.as_deref(),
+            Some("command: perl -0pi -e 's/clean/'")
+        );
+    }
+
+    #[test]
+    fn permission_request_falls_back_to_its_own_raw_input_without_a_matching_tool_call() {
+        // No matching ToolCall in items (e.g. Claude-style: permission
+        // arrives before any tool_call event for that id) — use the
+        // request's own raw_input, same as before this change.
+        let mut tool_fields = ToolCallUpdateFields::default();
+        tool_fields.raw_input = Some(serde_json::json!({"command": "npm install"}));
+        let request = RequestPermissionRequest::new(
+            "s1",
+            ToolCallUpdate::new("t1", tool_fields),
+            vec![PermissionOption::new(
+                "allow",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+
+        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
+            panic!("expected permission item");
+        };
+        assert_eq!(
+            card.raw_input_summary.as_deref(),
+            Some("command: npm install")
+        );
     }
 
     #[test]
@@ -1128,7 +1374,7 @@ mod tests {
             )],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request) else {
+        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
             panic!("expected permission item");
         };
         assert_eq!(

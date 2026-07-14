@@ -37,6 +37,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -312,10 +313,16 @@ impl AcpSessionHandle {
 /// shipping build never touches the wire unless explicitly asked. The app sets
 /// the variable in debug builds (see `bootstrap::init_observability`); it can
 /// also be set by hand to capture from any build.
-fn attach_wire_log(agent: AcpAgent) -> AcpAgent {
+///
+/// `agent_id` (the catalog id, e.g. `"claude"` / `"codex"`, empty for a caller
+/// with no such identity like the crate's own examples) is spliced into the
+/// configured file name via [`wire_log_path_for`] so concurrent sessions from
+/// different agents land in separate files instead of interleaving in one.
+fn attach_wire_log(agent: AcpAgent, agent_id: &str) -> AcpAgent {
     let Some(path) = std::env::var_os("DARUDA_ACP_WIRE_LOG") else {
         return agent;
     };
+    let path = wire_log_path_for(Path::new(&path), agent_id);
     // Open once (append) and share the handle with the debug closure; a per-line
     // reopen would thrash under streaming turns.
     let file = match std::fs::OpenOptions::new()
@@ -343,6 +350,42 @@ fn attach_wire_log(agent: AcpAgent) -> AcpAgent {
     })
 }
 
+/// Splice `-<agent_id>` into `base`'s file name, before the extension (e.g.
+/// `acp-wire.log` + `"claude"` → `acp-wire-claude.log`), so each agent's wire
+/// tap lands in its own file instead of every session interleaving into one
+/// shared `DARUDA_ACP_WIRE_LOG` file. `agent_id` empty leaves `base`
+/// untouched — the crate's own examples have no catalog identity to key on.
+/// Non-alphanumeric bytes in `agent_id` (a user-editable catalog field) are
+/// mapped to `_` so it can never escape `base`'s directory or break the file
+/// name.
+fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
+    if agent_id.is_empty() {
+        return base.to_path_buf();
+    }
+    let safe_id: String = agent_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let stem = base
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("acp-wire");
+    let file_name = match base.extension().and_then(|s| s.to_str()) {
+        Some(ext) => format!("{stem}-{safe_id}.{ext}"),
+        None => format!("{stem}-{safe_id}"),
+    };
+    match base.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(file_name),
+        _ => PathBuf::from(file_name),
+    }
+}
+
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
 /// `initial_mode` is an optional ACP mode id (e.g. `"bypassPermissions"`) to
@@ -357,15 +400,20 @@ fn attach_wire_log(agent: AcpAgent) -> AcpAgent {
 /// channel closes) or the connection fails; either way the event stream then
 /// reaches end-of-stream. A failure to *parse* the adapter command is reported
 /// synchronously as an error here, before any task is spawned.
+///
+/// `agent_id` is the catalog id (e.g. `"claude"` / `"codex"`) used only to key
+/// the dev-build wire-tap file — see [`attach_wire_log`]. Pass `""` when the
+/// caller has no such identity (the crate's own examples).
 pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
     initial_mode: Option<String>,
     resume: Option<SessionId>,
+    agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let agent = AcpAgent::from_str(&command.0)
         .map_err(|e| AcpClientError::Command(format!("{e:?}")))
-        .map(attach_wire_log)?;
+        .map(|agent| attach_wire_log(agent, agent_id))?;
 
     let (command_tx, command_rx) = unbounded::<Command>();
     let (event_tx, event_rx) = unbounded::<AcpEvent>();
@@ -412,13 +460,15 @@ pub fn connect_session(
 /// provisioning failure is surfaced as [`AcpClientError::Runtime`], whose
 /// `Display` carries a user-facing remedy. `progress` reports runtime-prep
 /// milestones so the host can show a status line during the (first-run only)
-/// download.
+/// download. `agent_id` is the catalog id (e.g. `"claude"` / `"codex"`) —
+/// see [`connect_session`]'s doc comment for what it's used for.
 pub fn connect_agent_session(
     command: String,
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_mode: Option<String>,
     resume: Option<SessionId>,
+    agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
     let adapter = if crate::node::command_needs_node(&command) {
@@ -427,7 +477,7 @@ pub fn connect_agent_session(
     } else {
         AdapterCommand(command)
     };
-    connect_session(adapter, cwd, initial_mode, resume)
+    connect_session(adapter, cwd, initial_mode, resume, agent_id)
 }
 
 /// Wall-clock budget for `initialize` and — on a *fresh* session —
@@ -1005,6 +1055,48 @@ fn resolve_resume(
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::PermissionOptionId;
+
+    #[test]
+    fn wire_log_path_splices_agent_id_before_the_extension() {
+        assert_eq!(
+            wire_log_path_for(Path::new("/logs/acp-wire.log"), "claude"),
+            PathBuf::from("/logs/acp-wire-claude.log")
+        );
+    }
+
+    #[test]
+    fn wire_log_path_handles_no_extension() {
+        assert_eq!(
+            wire_log_path_for(Path::new("/logs/acp-wire"), "codex"),
+            PathBuf::from("/logs/acp-wire-codex")
+        );
+    }
+
+    #[test]
+    fn wire_log_path_leaves_base_untouched_when_agent_id_is_empty() {
+        assert_eq!(
+            wire_log_path_for(Path::new("/logs/acp-wire.log"), ""),
+            PathBuf::from("/logs/acp-wire.log")
+        );
+    }
+
+    #[test]
+    fn wire_log_path_sanitizes_unsafe_agent_id_characters() {
+        // A user-editable catalog id must never let a path separator (or other
+        // filesystem-unsafe byte) escape the configured log directory.
+        assert_eq!(
+            wire_log_path_for(Path::new("/logs/acp-wire.log"), "../evil"),
+            PathBuf::from("/logs/acp-wire-___evil.log")
+        );
+    }
+
+    #[test]
+    fn wire_log_path_handles_a_bare_file_name_with_no_directory() {
+        assert_eq!(
+            wire_log_path_for(Path::new("acp-wire.log"), "claude"),
+            PathBuf::from("acp-wire-claude.log")
+        );
+    }
 
     #[test]
     fn cancelled_is_not_a_normal_completion() {

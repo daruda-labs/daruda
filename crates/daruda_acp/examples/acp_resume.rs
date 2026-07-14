@@ -40,7 +40,8 @@ fn main() {
         .unwrap_or_else(|| "What is 2 + 2? Reply in one short sentence.".to_string());
 
     smol::block_on(async move {
-        let (handle, mut events) = match connect_session(Default::default(), cwd, None, resume) {
+        let (handle, mut events) = match connect_session(Default::default(), cwd, None, resume, "")
+        {
             Ok(pair) => pair,
             Err(err) => {
                 eprintln!("connect failed: {err}");

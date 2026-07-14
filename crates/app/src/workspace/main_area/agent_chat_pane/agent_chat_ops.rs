@@ -239,7 +239,17 @@ impl Workspace {
         // touches protocol types" (see `daruda_acp::mapping` module
         // docs). `permission_item` always returns `ChatItem::Permission`
         // for a `RequestPermissionRequest`; the `let else` is defensive.
-        let daruda_acp::ChatItem::Permission(card) = daruda_acp::permission_item(request) else {
+        // Passes the view's current items (this runs before the event is
+        // folded in, but any earlier tool_call for this id is already
+        // there) so `permission_item` can prefer an already-clean
+        // `raw_input` over the request's own, possibly adapter-mangled,
+        // copy.
+        let Some(view) = self.agent_chat_view(pane_id) else {
+            return;
+        };
+        let daruda_acp::ChatItem::Permission(card) =
+            daruda_acp::permission_item(request, &view.read(cx).items)
+        else {
             return;
         };
         self.relay_permission_wait_to_telegram(
@@ -703,6 +713,15 @@ impl Workspace {
             self.agent_launch_for(&catalog_default_id(&self.agents))
                 .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch)
         });
+        // Read back after `resolve_pane_launch` (rather than threading its
+        // internal read out) so a stale-id reconcile it performed is picked up
+        // too. Only keys the dev-build wire-tap file name (see
+        // `daruda_acp::connect_session`'s `agent_id` param) — never affects the
+        // launch itself.
+        let agent_id = self
+            .agent_chat_view(pane_id)
+            .map(|v| v.read(cx).agent_id.clone())
+            .unwrap_or_default();
 
         // A `Remote` cwd's launch needs the lane's remote path assembled in
         // (`resolve_new_pane_cwd` only ever assigns `Remote` when
@@ -818,6 +837,7 @@ impl Workspace {
                         connect_cwd,
                         initial_mode,
                         resume.map(daruda_acp::SessionId::new),
+                        &agent_id,
                         &mut progress,
                     )
                 })

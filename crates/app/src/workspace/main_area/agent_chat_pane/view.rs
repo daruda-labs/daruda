@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ConnectPhase, ModeStateView,
     PermissionDecision, PermissionKindView, PlanEntryView, SessionCapabilitiesView, SlashCommand,
-    UsageView, apply_update, cancel_pending_tools, finalize_streaming, permission_item,
+    UsageView, apply_update_with, cancel_pending_tools, finalize_streaming, permission_item,
     subagent_activity, touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -841,7 +841,11 @@ impl AgentChatView {
                 }
             }
             AcpEvent::Update(update) => {
-                let effect = apply_update(&mut self.items, &update);
+                // Fold protocol traffic through this pane's per-agent strategy
+                // (selected from its catalog id) so vendor-specific `_meta` is
+                // read the way that agent emits it. See `daruda_acp::adapter`.
+                let adapter = daruda_acp::adapter::adapter_for(&self.agent_id);
+                let effect = apply_update_with(&mut self.items, &update, adapter.as_ref());
                 touched_tool = effect.touched_tool;
                 touched_text = effect.touched_text;
                 // Bump the subagent (parent) whose child just produced this
@@ -861,7 +865,8 @@ impl AgentChatView {
                 }
             }
             AcpEvent::PermissionRequested { id, request } => {
-                self.items.push(permission_item(&request));
+                let item = permission_item(&request, &self.items);
+                self.items.push(item);
                 self.pending_permission = Some(id);
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_) if self.cancel_in_flight => {
@@ -961,7 +966,11 @@ impl AgentChatView {
             AcpEvent::Error(message) => {
                 let error_message = match &self.cwd {
                     Some(PaneCwd::Remote(_)) => {
-                        format!("{}\n\n{}", message, s::agent_chat_remote_connect_error_hint())
+                        format!(
+                            "{}\n\n{}",
+                            message,
+                            s::agent_chat_remote_connect_error_hint()
+                        )
                     }
                     _ => message,
                 };
