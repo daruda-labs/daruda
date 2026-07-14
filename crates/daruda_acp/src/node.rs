@@ -369,13 +369,23 @@ fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
 ///
 /// Best-effort — an unsupported `node_platform()` just leaves `command`
 /// unprefixed.
+///
+/// `npm_config_cache`'s value is shell-quoted (`shell_words::quote`): it is
+/// [`npx_cache_dir`], a child of `install_root`, which on macOS is always
+/// under `~/Library/Application Support` — a path containing a space. This
+/// whole prefixed string is later re-tokenized by `AcpAgent::from_str` via
+/// `shell_words::split`, which treats an unquoted space as a word boundary;
+/// an unquoted cache path there splits `npm_config_cache=...` into two
+/// tokens, and the env-parsing loop stops at the first token without `=`,
+/// treating that fragment as the command to spawn instead of `npx` — an
+/// `ENOENT` that looks like a missing Node.js rather than a quoting bug.
 fn prefix_with_host_arch_env(command: &str, install_root: &Path) -> String {
     match node_platform() {
         Ok((os, arch)) => {
             let cache = npx_cache_dir(install_root);
             format!(
                 "npm_config_cpu={arch} npm_config_os={os} npm_config_cache={} {command}",
-                cache.display()
+                shell_words::quote(&cache.to_string_lossy())
             )
         }
         Err(_) => command.to_string(),
@@ -682,6 +692,38 @@ mod tests {
             .next_back()
             .expect("npm_config_cache present");
         assert_eq!(last_cache_assignment, "/custom/cache");
+    }
+
+    #[test]
+    fn system_runtime_command_survives_a_path_with_spaces_and_round_trips() {
+        // Regression: `install_root` mirrors the real `node_install_dir()`,
+        // which on macOS always lands under `~/Library/Application Support`
+        // — a space in the path. Before quoting, `AcpAgent::from_str`'s
+        // `shell_words::split` would break the unquoted cache value into two
+        // tokens and mistake the second fragment for the command, spawning
+        // it instead of `npx` and failing with ENOENT.
+        let install_root =
+            PathBuf::from("/Users/x/Library/Application Support/daruda/node");
+        let cmd = format!("npx -y {ADAPTER_NPM_PACKAGE}");
+        let wrapped = NodeRuntime::System.wrap_command(&cmd, &install_root);
+
+        let agent = AcpAgent::from_str(&wrapped.0).expect("wrapped command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, PathBuf::from("npx"));
+                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
+                let cache = stdio
+                    .env
+                    .iter()
+                    .find(|e| e.name == "npm_config_cache")
+                    .expect("npm_config_cache env present");
+                assert_eq!(
+                    cache.value,
+                    npx_cache_dir(&install_root).to_string_lossy()
+                );
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
     }
 
     #[test]

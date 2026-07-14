@@ -17,6 +17,7 @@ semver = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
+shell-words = "1"
 smol = { workspace = true }
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls"] }
