@@ -324,7 +324,6 @@ impl FileTree {
         parent_id: EntryId,
         loaded: Vec<LoadedEntry>,
     ) -> (Vec<EntryId>, Vec<PathBuf>) {
-        // Existing names under this parent.
         let existing: HashMap<String, EntryId> = self
             .child_ids(parent_id)
             .iter()
@@ -333,7 +332,6 @@ impl FileTree {
         let new_names: std::collections::HashSet<&str> =
             loaded.iter().map(|l| l.name.as_str()).collect();
 
-        // Remove children whose name is no longer present.
         let mut removed_paths = Vec::new();
         let to_remove: Vec<PathBuf> = existing
             .iter()
@@ -345,7 +343,6 @@ impl FileTree {
             self.remove_subtree(&p);
         }
 
-        // Insert names that didn't exist before.
         let mut added_ids = Vec::new();
         for l in loaded {
             if !existing.contains_key(&l.name) {

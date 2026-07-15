@@ -6,7 +6,7 @@
 //! [`SettingsWindow::focus_section`] to switch the active page rather
 //! than spawning a duplicate window.
 //!
-//! ## Layout (Phase 1)
+//! ## Layout
 //!
 //! ```text
 //! ┌───────────────────────────────────────┐
@@ -107,11 +107,11 @@ pub struct SettingsWindow {
     files_use_gitignore: bool,
     // File Viewer
     syntax_theme_select: Entity<SelectState>,
-    // Clipboard (Phase 1 — single field expose)
+    // Clipboard
     clipboard_streaming_input: Entity<InputState>,
     // Panels (bottom-dock macro grid)
     panels_grid_columns_input: Entity<InputState>,
-    // Claude Status (Phase 1 — toggle expose only)
+    // Claude Status
     claude_status_enable: bool,
     // Notifications (Telegram)
     telegram_enabled: bool,
@@ -400,10 +400,7 @@ impl SettingsWindow {
             select::state_with_options(opts, Some(&terminal_preset), window, cx)
         });
 
-        // UI preset select — chrome palette (workspace, modal,
-        // status bar, …). Phase 2 ships one preset so the dropdown
-        // renders but the user can't change it yet; Phase 3 will
-        // populate this from `ThemeRegistry`.
+        // UI preset select — chrome palette (workspace, modal, status bar, …).
         let ui_preset = SharedString::from(config.theme.ui_preset.clone());
         let ui_preset_select = cx.new(|cx| {
             let opts = daruda_config::UI_THEME_PRESETS

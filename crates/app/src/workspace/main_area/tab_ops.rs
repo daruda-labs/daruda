@@ -532,12 +532,10 @@ impl Workspace {
 
     // ---- Context-menu tab operations ----
     //
-    // The bulk close paths (Close Other Tabs / Close Tabs to Right)
-    // now route through `request_close_tabs_bulk` so the R-25 batch
-    // prompt covers every dirty TaskEdit pane in the closing set.
-    // The previous `close_other_tabs` / `close_tabs_to_right` helpers
-    // were unconditional loops over `close_tab_at` and silently
-    // dropped unsaved edits — they have been removed entirely.
+    // Close Other Tabs / Close Tabs to Right route through
+    // `request_close_tabs_bulk`, whose dirty-prompt covers every dirty
+    // TaskEdit pane in the closing set. Never loop over `close_tab_at`
+    // directly for a multi-tab close — that silently drops unsaved edits.
 
     /// Toggle the zoom state for `pane_id`. When zoomed, only that pane is
     /// rendered (full-size); the rest of the split tree is hidden.
@@ -730,7 +728,7 @@ impl Workspace {
         self.request_close_pane(self.active_runtime().focused_pane_id, window, cx);
     }
 
-    // ---- Dirty-checked close entry points (R-25) ----
+    // ---- Dirty-checked close entry points ----
 
     /// Batch close prompt covering every tab in `indices`. Walks each
     /// tab's panes for `is_dirty` and presents one summary modal.
@@ -897,7 +895,7 @@ impl Workspace {
     }
 
     /// Public close entry point that walks pane content through the
-    /// R-25 dirty-prompt before delegating to `close_pane_by_id`.
+    /// dirty-prompt before delegating to `close_pane_by_id`.
     pub(in crate::workspace) fn request_close_pane(
         &mut self,
         pane_id: PaneId,

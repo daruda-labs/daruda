@@ -27,7 +27,7 @@
 //! dedup becomes a real cost, these watcher instances can be wrapped in a
 //! central registry that owns and dedups them (this type is the producer-side
 //! subset of that). At today's ~8 fixed watchers dedup buys nothing, so no
-//! registry. — 2026-06-15 design decision.
+//! registry.
 
 use std::path::PathBuf;
 use std::sync::mpsc;

@@ -539,7 +539,7 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 
 // ---------------------------------------------------------------------------
 // Failure indicator — `failures N/M` once a session crosses the
-// soft display threshold (R-11 Phase 2 counter, R-23 visualization)
+// soft display threshold (R-11 counter, R-23 visualization)
 // ---------------------------------------------------------------------------
 
 /// Renders a small `failures 3/5` chip when any session attached to

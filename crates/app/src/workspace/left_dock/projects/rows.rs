@@ -345,10 +345,9 @@ pub(in crate::workspace) struct ProjectHeaderArgs {
 /// dropping a group on a project nested inside another group must
 /// silently no-op.
 ///
-/// `is_git` enables the trailing `[+]` button (per-project "create
-/// lane" affordance — the previous `+ new lane` row at the
-/// bottom of the lane list was folded into this header so the
-/// project row carries every project-scoped action).
+/// `is_git` enables the trailing `[+]` button — the project row's
+/// per-project "create lane" affordance, so the row carries every
+/// project-scoped action.
 ///
 /// `is_collapsed` flips the chevron between `ChevronDown` (expanded)
 /// and `ChevronRight` (collapsed). The chevron carries its own click
@@ -593,12 +592,10 @@ pub(in crate::workspace) fn section_header(
     cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
     // Section-level `[+]` is a toggle: clicking it opens a flat
-    // context menu with "Add Project…" / "New Group…" so the user can
-    // pick between adding a project (folder picker routed through
+    // context menu with "Add Project…" (folder picker routed through
     // `prompt_and_open_folder_with_policy`, policy-aware) and
-    // creating a group (previously only reachable via Cmd+Shift+N or
-    // the Command Palette). Per-project lane creation lives on
-    // each project's `[+ new lane]` row.
+    // "New Group…". Per-project lane creation lives on each
+    // project's `[+ new lane]` row.
     let workspace = snap.workspace.clone();
     let add_button = button_bare("section-add-toggle")
         .ghost()

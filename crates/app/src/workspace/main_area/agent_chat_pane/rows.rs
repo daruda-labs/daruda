@@ -553,8 +553,8 @@ mod tests {
     fn working_indicator_present_while_streaming() {
         use ToolStatusView::Completed;
         // Even while the tail block streams, the indicator stays pinned to the
-        // run's tail so the "working … + elapsed" signal is consistent — it no
-        // longer flickers out during streaming / tool execution.
+        // run's tail so the "working … + elapsed" signal stays visible through
+        // streaming and tool execution.
         let items = [
             ChatItem::UserText("q".into()),
             tool("a", Completed),
@@ -906,9 +906,9 @@ mod tests {
     #[test]
     fn subagent_parent_reads_live_while_a_child_runs() {
         use ToolStatusView::{Completed, InProgress};
-        // The reported bug: adapter marks the parent Task `Completed` (its SDK
-        // call returned) while a flattened child keeps running — the unit is
-        // still working, so the subtree must read live.
+        // The adapter marks the parent Task `Completed` (its SDK call returned)
+        // while a flattened child keeps running — the unit is still working,
+        // so the subtree must read live.
         let items = [
             tool("task", Completed),
             child_of("child", "task", InProgress),

@@ -19,12 +19,10 @@ async fn test_workspace_renders_without_reentrant_panic(cx: &mut TestAppContext)
 
 // ---- Modal layer ----
 //
-// Phase 4.c+4.d removed `Workspace::open_modal`/`dismiss_modal`/
-// `active_modal` and `ModalLayer`. Modal lifecycle is now owned by
-// `gpui_component::Root` (via `crate::workspace::dialog_helpers`),
-// which routes through `Window::open_dialog` / `close_dialog`. Those
-// APIs require a real `Root`-wrapped window — covered by visual smoke
-// testing rather than `TestAppContext` here.
+// Modal lifecycle is owned by `gpui_component::Root` (via
+// `crate::workspace::dialog_helpers`), routed through `Window::open_dialog` /
+// `close_dialog`. Those APIs require a real `Root`-wrapped window, so this is
+// covered by visual smoke testing rather than `TestAppContext` here.
 
 // ---- Tab add / close / switch ----
 

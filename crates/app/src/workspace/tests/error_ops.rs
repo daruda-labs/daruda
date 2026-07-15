@@ -1,5 +1,4 @@
-//! Tests for `Workspace::report_error` (Step 2 entry point) +
-//! toast-queue integration (Step 3).
+//! Tests for `Workspace::report_error` and toast-queue integration.
 //!
 //! Properties under test:
 //! - the report lands at the head of `error_history`,

@@ -1,14 +1,11 @@
 //! Status pill — the single per-row dropdown that drives every
 //! state-transition and meta action for a Task (R-26 / I-9).
 //!
-//! Replaces the previous fan of `[Start] [Stop] [Open] [Reopen]
-//! [Retry] [Delete]` buttons that varied per state. The pill itself
-//! shows the task's current state label; clicking it opens a
+//! The pill shows the task's current state label; clicking it opens a
 //! `PopupMenu` whose contents are the *valid* actions for that state.
-//! Plan decision (I-9): there is no `[⋯]` overflow — every action,
-//! including the meta actions (Edit / Delete / View error), lives in
-//! the pill menu, with a `separator` distinguishing transitions from
-//! meta actions.
+//! There is no `[⋯]` overflow — every action, including the meta
+//! actions (Edit / Delete / View error), lives in the pill menu, with
+//! a `separator` distinguishing transitions from meta actions.
 //!
 //! State → menu matrix (plan R-26):
 //!

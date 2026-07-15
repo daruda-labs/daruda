@@ -64,10 +64,8 @@ pub(in crate::workspace) fn collect_foldable_keys(items: &[daruda_acp::ChatItem]
     let mut keys: Vec<FoldKey> = Vec::new();
     // Structural fold levels (response / tool-group) come from the same row
     // projection the renderer uses, so expand/collapse-all covers exactly the
-    // headers on screen. The fold state doesn't affect which headers exist, so
-    // project against the default.
-    // Fold coverage is independent of live progress, so project with no
-    // in-flight turn (the working indicator carries no fold key).
+    // headers on screen. Neither the fold state nor live progress changes
+    // which headers exist, so project with defaults for both.
     let rows = project(items, &FoldState::default(), false);
     // Assistant prose rendered under a response bar is inline (no per-block
     // header/fold — the response bar owns the speaker label), so its

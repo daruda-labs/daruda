@@ -9,9 +9,9 @@
 //!
 //! Use cases (current + planned):
 //! - Right-panel Usage tab: short session id `[abc12345]` next to
-//!   each session row (R-3).
+//!   each session row.
 //! - Right-panel Tasks tab: per-session status badge `[abc12345]`
-//!   tinted by Claude session status (R-12).
+//!   tinted by Claude session status.
 //! - Future: short commit-hash next to a lane row, build-id
 //!   next to a Tasks log entry, etc.
 //!

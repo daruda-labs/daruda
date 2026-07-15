@@ -442,9 +442,8 @@ mod tests {
     fn terminal_config_honors_scrollback_max_rows() {
         let mut c = daruda_config::Config::default();
         c.scrollback.max_rows = 5000;
-        // Guards the startup-drift bug: the creation site used to fall back
-        // to `TerminalConfig::default()`'s 10_000 and ignore the user value
-        // until the first config reload.
+        // Regression guard: the creation site must honor the user's
+        // scrollback value immediately, not only after a config reload.
         assert_eq!(terminal_config_from(&c).max_scrollback, 5000);
     }
 

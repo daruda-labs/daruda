@@ -1,5 +1,4 @@
-//! Filesystem watcher for the TaskEdit pane's prompt markdown file
-//! (R-20 / I-13):
+//! Filesystem watcher for the TaskEdit pane's prompt markdown file.
 //!
 //! 1. **`dir_watch`** owns the `notify::Watcher` (via the returned
 //!    [`crate::dir_watch::DirWatcher`] handle) and forwards events for our

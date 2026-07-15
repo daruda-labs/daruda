@@ -203,10 +203,9 @@ pub(super) fn conclusion_block(
 /// `crate::ui::markdown` (keyed by `ix`), dimmed via `theme::agent_chat_fg_subtle(cx)`. Collapsed,
 /// the header shows the first non-empty line of `text`, dimmed italic.
 //
-// NOTE: the previous italic treatment of the body is not preserved —
-// `crate::ui::markdown` (TextView) owns its own typography. The "Thinking"
-// label plus the dimmer `text_subtle` colour still distinguish reasoning from
-// the assistant body.
+// `crate::ui::markdown` (TextView) owns its own typography, so the body is
+// not italicized; the "Thinking" label plus the dimmer `text_subtle` colour
+// distinguish reasoning from the assistant body.
 pub(super) fn thinking_block(
     ix: usize,
     key: FoldKey,

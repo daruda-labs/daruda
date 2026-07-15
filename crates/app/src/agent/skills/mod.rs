@@ -1,10 +1,9 @@
 //! Skills data model — GPUI-free types describing the on-disk layout
 //! of Claude Code Skills (`<root>/.claude/skills/<name>/SKILL.md`).
 //!
-//! Spec: <https://code.claude.com/docs/en/skills>. v2 of daruda's
-//! Skills tab tracks the directory model (one folder per skill,
-//! optional auxiliary files) rather than the legacy single-file
-//! commands layout. Frontmatter is parsed losslessly: known keys
+//! Spec: <https://code.claude.com/docs/en/skills>. Daruda's Skills tab
+//! tracks the directory model (one folder per skill, optional
+//! auxiliary files). Frontmatter is parsed losslessly: known keys
 //! become typed fields, unknown keys are preserved in `extra` and
 //! round-tripped on save.
 //!

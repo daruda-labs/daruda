@@ -1,7 +1,7 @@
 //! Typed registry of open Workspace + singleton windows.
 //!
-//! Replaces the scattered `cx.windows() + downcast::<T>()` loops with a single
-//! authoritative source of truth stored as a GPUI global.
+//! Single authoritative source of truth (a GPUI global) for locating open
+//! windows, instead of scattered `cx.windows() + downcast::<T>()` loops.
 //!
 //! # Workspace windows vs. singleton windows
 //!
@@ -153,10 +153,9 @@ impl WindowRegistry {
 
         let mut stale: HashSet<AnyWindowHandle> = HashSet::new();
         for (handle, weak) in pairs {
-            // After Phase 3 the window root is `gpui_component::Root`,
-            // which wraps a `Workspace`. We enter the window context via
-            // `cx.update_window` (root-type-agnostic) and route the
-            // closure into the inner `Workspace` entity.
+            // The window root is `gpui_component::Root`, which wraps a
+            // `Workspace`. Enter via `cx.update_window` (root-type-agnostic)
+            // and route the closure into the inner `Workspace` entity.
             let result = cx.update_window(handle, |_root, window, cx_w| {
                 let Some(ws) = weak.upgrade() else {
                     return;

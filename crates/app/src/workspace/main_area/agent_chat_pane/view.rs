@@ -1809,14 +1809,10 @@ mod tests {
             .unwrap();
     }
 
-    /// Regression for the resume/replay baseline bug (Finding 1): after
-    /// `snap_post_turn_baseline()` syncs the marker to a pre-populated
-    /// history (as every `restoring = false` site now does), a stray
-    /// post-turn update that arrives with no new assistant text must not
-    /// resurrect the replayed conversation as a "background follow-up".
-    /// Before the fix, the marker stayed at its constructor default (0)
-    /// across a resume, so this same sequence would have relayed the whole
-    /// two-item history.
+    /// After `snap_post_turn_baseline()` syncs the marker to a pre-populated
+    /// history (as every `restoring = false` site does), a stray post-turn
+    /// update that arrives with no new assistant text must not resurrect the
+    /// replayed conversation as a "background follow-up".
     #[gpui::test]
     fn snap_post_turn_baseline_prevents_replay_from_being_relayed(cx: &mut gpui::TestAppContext) {
         let window = make_test_view(cx);

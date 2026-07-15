@@ -342,8 +342,8 @@ impl Workspace {
     /// programmatic callers / malformed external edits from creating
     /// unnamed tabs.
     ///
-    /// The new tab starts empty; users edit `panels.json` to add
-    /// macros (B-7+ adds an in-app editor).
+    /// The new tab starts empty; users add macros via the `[+]` tile
+    /// (`MacroEditModal`) or by editing `panels.json` directly.
     pub(in crate::workspace) fn add_panel_tab(&mut self, name: String, cx: &mut Context<Self>) {
         let Some(tab) = build_new_tab(&name, &self.panels.tabs) else {
             return;

@@ -407,9 +407,9 @@ impl Render for Workspace {
                     })
                     .or_else(|| pane.map(|p| p.title()))
                     .unwrap_or_else(|| "shell".into());
-                // Prefix the dirty dot (R-25) so the user can spot
-                // unsaved TaskEdit panes in the tab bar at a glance.
-                // Terminal / File panes always read `false` here.
+                // Prefix the dirty dot so the user can spot unsaved
+                // TaskEdit panes in the tab bar at a glance. Terminal /
+                // File panes always read `false` here.
                 let label: SharedString = if pane.map(|p| p.tab_dirty_dot(cx)).unwrap_or(false) {
                     SharedString::from(format!(
                         "{}{}",

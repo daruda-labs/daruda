@@ -1,4 +1,4 @@
-//! Create / Edit dialog for terminal annotations (SP-1).
+//! Create / Edit dialog for terminal annotations.
 //!
 //! Reached via the Shift+Right-click context menu ("Add annotation")
 //! or by double-clicking an existing annotation overlay (Edit mode).

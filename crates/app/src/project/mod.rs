@@ -137,25 +137,17 @@ impl Project {
     /// rather than restoring with zero lanes (which would leave the
     /// left dock with no row to activate).
     pub fn from_disk(id: ProjectId, ps: &ProjectState, ov: &ProjectOverride) -> Self {
-        // Non-empty `lanes` is an invariant every other construction
-        // path (`bootstrap` / `new_with_uuid`) upholds; restore is the
-        // only one reading an externally-supplied list, so it must
-        // enforce the same floor. Falling back to `bootstrap_from_project`
-        // re-discovers the main worktree (plus any linked ones) and the
-        // next save records the recovered list, breaking the otherwise
-        // self-perpetuating empty state.
+        // Non-empty `lanes` is an invariant every other construction path
+        // upholds; restore is the only one reading an externally-supplied
+        // list, so an empty one triggers `bootstrap_from_project` to
+        // re-discover worktrees from disk (the next save persists the
+        // recovered list). `last_active_lane_id` is reset to the first
+        // synthesized lane in that case, since the persisted hint refers to
+        // an id that no longer exists once ids restart at 0.
         //
-        // When re-bootstrapping, also reset `last_active_lane_id` to the
-        // first synthesized lane: the persisted hint refers to a lane id
-        // that no longer exists in the freshly-bootstrapped set (ids
-        // restart at 0), so keeping it would write the stale id back to
-        // disk on the next save. `snap_target()` would mask the mismatch
-        // at read time, but a later session that happens to allocate the
-        // same id would inherit a hint that means nothing.
-        // Note: the empty-lanes re-bootstrap branch re-discovers lanes
-        // from disk but does NOT re-detect `default_branch` — the
-        // persisted value is read verbatim here. Task 3's reconcile pass
-        // owns refreshing it against the live repo.
+        // The re-bootstrap branch re-discovers lanes but does not re-detect
+        // `default_branch` — that value is read verbatim; refreshing it
+        // against the live repo is a separate reconcile pass.
         let (lanes, last_active_lane_id) = if ps.lanes.is_empty() {
             let lanes = Lane::bootstrap_from_project(&ps.root);
             let head = lanes.first().map(|w| w.id).unwrap_or(0);

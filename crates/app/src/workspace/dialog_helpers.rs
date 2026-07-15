@@ -98,22 +98,14 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
     });
 
     // `Root::open_dialog` synchronously focuses the dialog's own
-    // freshly-minted `FocusHandle` (see vendored
-    // `gpui_component::root::open_dialog`). To land focus inside the
-    // input instead, schedule our focus claim on a later update cycle
-    // — by that time the dialog tree has been painted, the input's
-    // `track_focus` has registered the handle in the focus map, and
-    // our `window.focus(...)` wins. Doing this *after* `open_dialog`
-    // (not before) ensures we run *after* root's focus assignment.
+    // freshly-minted `FocusHandle`. Scheduling our claim on a later
+    // update cycle lets it land after that assignment, once the
+    // input's `track_focus` has registered its handle in the focus map.
     //
-    // `let _ = cx.update_window(...)` is intentional: if the window
-    // is closed (or the dialog programmatically dismissed by a
-    // synchronous validation callback fired in the same tick that
-    // opened it) before the defer runs, the update returns `Err` and
-    // the focus call becomes a harmless no-op. There is no current
-    // caller that fast-dismisses inside the same tick; if one is
-    // added, it should drop the dialog body itself rather than
-    // relying on the deferred focus silently noop'ing.
+    // If the window closes (or the dialog is dismissed synchronously
+    // in the same tick it opened in) before the defer runs,
+    // `cx.update_window` returns `Err` and the focus call becomes a
+    // harmless no-op.
     let handle = state_for_focus.read(cx).focus_handle(cx);
     let wh = window.window_handle();
     cx.defer(move |cx| {
@@ -164,9 +156,9 @@ pub(in crate::workspace) fn open_confirm_dialog<F>(
 
 /// Open an OK-only alert dialog. No cancel, no destructive action —
 /// just a title, a body, and a single dismiss button. Used by
-/// [`Workspace::open_task_error_dialog`] (R-26 View error) to surface
-/// the full `TaskState::Error.message` text, which the row truncates
-/// to `RIGHT_PANEL_TASK_ERROR_TRUNCATE` chars.
+/// [`Workspace::open_task_error_dialog`] to surface the full
+/// `TaskState::Error.message` text, which the row truncates to
+/// `RIGHT_PANEL_TASK_ERROR_TRUNCATE` chars.
 pub(in crate::workspace) fn open_alert_dialog(
     title: impl Into<SharedString>,
     body: impl Into<SharedString>,
@@ -197,8 +189,6 @@ pub(in crate::workspace) fn open_alert_dialog(
 ///
 /// `width` is forwarded to `Dialog::width(...)` when supplied — pass
 /// `None` to keep the Dialog default (~480px).
-///
-/// Replaces `Workspace::open_modal::<XxxModal, _>(...)` for Phase 4.c/d.
 pub(in crate::workspace) fn open_form_modal<E, B>(
     title: impl Into<SharedString>,
     width: Option<Pixels>,

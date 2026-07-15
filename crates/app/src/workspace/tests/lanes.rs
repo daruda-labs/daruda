@@ -490,11 +490,11 @@ fn pane_lane_index_spans_active_and_parked_lanes(cx: &mut TestAppContext) {
                 lane: 1,
             };
             ws.activate_lane(lane1, window, cx);
-            // Open a tab in lane 1 (activation no longer auto-seeds one).
+            // Activation doesn't auto-seed a tab; open one in lane 1.
             ws.add_tab(window, cx);
-            // After the switch, lane 0 is parked and lane 1 is active.
-            // Both must appear in the index — a parked lane's panes can no
-            // longer be dropped from the workspace-wide scan.
+            // After the switch, lane 0 is parked and lane 1 is active. Both
+            // must appear in the index — a parked lane's panes must not be
+            // dropped from the workspace-wide scan.
             let index = ws.pane_lane_index();
             assert!(
                 index.iter().any(|(_, lane)| *lane == lane0),
@@ -752,8 +752,8 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             ws.terminal_input
                 .update(cx, |s, cx_state| s.set_value("draft-a", window, cx_state));
 
-            // Switch to lane 1 and open its own pane (activation no longer
-            // auto-seeds one); that pane takes focus, so draft-a is saved for
+            // Switch to lane 1 and open its own pane (activation doesn't
+            // auto-seed one); that pane takes focus, so draft-a is saved for
             // pane 0 and the input is cleared (lane 1's pane has no draft).
             ws.activate_lane(lane1, window, cx);
             ws.add_tab(window, cx);
@@ -1096,7 +1096,7 @@ fn input_drafts_survive_lane_switch(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&root_b);
 }
 
-// TODO Task 11: rewrite for new schema (uses deleted `save_state`).
+// Disabled: needs a rewrite for the new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]
 fn test_save_state_serializes_inactive_lane_runtime(cx: &mut TestAppContext) {
@@ -1138,7 +1138,7 @@ fn test_save_state_serializes_inactive_lane_runtime(cx: &mut TestAppContext) {
     assert!(wt1.tabs.is_empty());
 }
 
-// TODO Task 11: rewrite for new schema (uses deleted `restore_state` /
+// Disabled: needs a rewrite for the new schema (uses deleted `restore_state` /
 // legacy `ProjectState`).
 #[cfg(any())]
 #[gpui::test]
@@ -1240,7 +1240,7 @@ fn test_restore_state_rebuilds_all_lanes(cx: &mut TestAppContext) {
     });
 }
 
-// TODO Task 11: rewrite for new schema (uses deleted `save_state`).
+// Disabled: needs a rewrite for the new schema (uses deleted `save_state`).
 #[cfg(any())]
 #[gpui::test]
 fn test_save_state_captures_bootstrapped_lane(cx: &mut TestAppContext) {
@@ -1367,7 +1367,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
     // When the active lane's root is missing on disk, restore must not
     // seed a stray $HOME terminal tab — the main area renders the
     // inaccessible empty-state instead, which requires zero tabs so the
-    // empty-tab branch in `render` is reached (Task 2 guard).
+    // empty-tab branch in `render` is reached.
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
         WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,

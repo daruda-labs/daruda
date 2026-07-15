@@ -146,9 +146,9 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         )
     });
     let ws = wh.root(cx).unwrap();
-    // Give project 0 a tab of its own (the test constructor skips the
-    // bootstrap tab, and activation no longer auto-seeds). This is the
-    // content that must survive closing the other project.
+    // Give project 0 a tab of its own (the constructor skips the bootstrap
+    // tab and activation doesn't auto-seed one); this is the content that
+    // must survive closing the other project.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.add_tab(window, cx));
     })

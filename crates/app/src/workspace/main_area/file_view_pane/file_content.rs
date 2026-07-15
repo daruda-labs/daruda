@@ -217,11 +217,11 @@ fn load_diff(
             }
             let mut hunks = parse_diff_hunks(&text);
 
-            // Phase 3: syntax highlighting (file extension → language detection).
+            // Syntax highlighting (file extension → language detection).
             let ext = path.extension_str();
             highlight_hunks(&mut hunks, ext, syntax_theme, !diagram_dark);
 
-            // Phase 4: word-level diff for adjacent Removed/Added pairs.
+            // Word-level diff for adjacent Removed/Added pairs.
             apply_word_diff(&mut hunks);
 
             let (added, removed) = count_diff_stats(&hunks);

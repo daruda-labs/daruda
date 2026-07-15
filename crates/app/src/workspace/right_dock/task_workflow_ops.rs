@@ -799,8 +799,8 @@ impl Workspace {
     ///   wording across emissions and we don't want the row text to
     ///   jitter under the user's cursor).
     /// - Unknown titles for this session_id are pushed as new auto
-    ///   rows. Items Claude *drops* on subsequent emissions stay put
-    ///   (rows dropped by Claude on subsequent emissions stay put — no stale marking).
+    ///   rows. Items Claude drops on subsequent emissions stay put —
+    ///   no stale marking.
     ///
     /// Payload parse failures are silently dropped — Claude can change
     /// the `TodoWrite` schema at any time and a broken hook must not

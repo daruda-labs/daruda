@@ -83,7 +83,7 @@ pub(in crate::workspace) struct TerminalContent {
     pub(in crate::workspace) _view_event_subscription: Subscription,
     /// Outgoing channel into the PTY's writer thread. Cloned from
     /// `stdin_tx` at pane-spawn time so `Workspace::send_to_pane`
-    /// (R-14, skill invocation, future macros) can write into the
+    /// (skill invocation, future macros) can write into the
     /// same channel as the user's
     /// keystrokes, e.g. to dispatch a `claude --dangerously-skip-permissions
     /// "$(cat …)"` command line at task start. `None` for stub panes.
@@ -122,11 +122,10 @@ pub(in crate::workspace) struct FileContent {
     pub(in crate::workspace) saved_text: String,
 }
 
-/// Markdown-form editor pane for a single Task — replaces the old
-/// Create / Edit modals (R-19 / I-1). Lives at the same `PaneLayout::Pane`
-/// level as Terminal and File so users can split a TaskEdit alongside
-/// a running shell. `task_id = None` means this is a draft (R-19 / I-7):
-/// nothing is persisted to `tasks.json` until the user presses
+/// Markdown-form editor pane for a single Task. Lives at the same
+/// `PaneLayout::Pane` level as Terminal and File so users can split a
+/// TaskEdit alongside a running shell. `task_id = None` means this is a
+/// draft: nothing is persisted to `tasks.json` until the user presses
 /// `[Save Draft]` or `[Start]`, and the layout serializer skips drafts
 /// so they don't survive a session restart.
 pub(in crate::workspace) struct TaskEditContent {
@@ -135,7 +134,7 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) branch_input: Entity<crate::ui::InputState>,
     /// `true` once the user has manually edited the branch field —
     /// further title changes stop auto-deriving the branch so we
-    /// don't trample the override (R-19 / I-12).
+    /// don't trample the override.
     pub(in crate::workspace) branch_override: bool,
     pub(in crate::workspace) branch_validation: BranchValidation,
     /// Dropdown that maps user lane picks back to
@@ -145,11 +144,11 @@ pub(in crate::workspace) struct TaskEditContent {
     /// the absolute path of a registered lane, matching the
     /// `Task::base_worktree_path: Option<PathBuf>` schema. Sits in
     /// the focus chain between the prompt editor and the notes
-    /// editor (R-19 / C-1 review note).
+    /// editor.
     pub(in crate::workspace) base_select: Entity<crate::ui::select::SelectState>,
     /// Prompt is stored in `gpui_component::input::InputState` with
     /// `code_editor("markdown")` so it gets line numbers + syntax
-    /// highlight (R-20 / I-2). The entity is shared with the renderer
+    /// highlight. The entity is shared with the renderer
     /// via `crate::ui::markdown_editor(&state)`.
     pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
@@ -161,7 +160,7 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) agent_surface: TaskAgentSurface,
     pub(in crate::workspace) focus_handle: FocusHandle,
     pub(in crate::workspace) cached_title: SharedString,
-    /// Baseline snapshot for dirty comparison (R-25 / I-8). Reset to
+    /// Baseline snapshot for dirty comparison. Reset to
     /// `current_snapshot()` after every successful save.
     pub(in crate::workspace) saved_snapshot: TaskEditSnapshot,
     pub(in crate::workspace) _subscriptions: Vec<Subscription>,
@@ -172,10 +171,10 @@ pub(in crate::workspace) struct TaskEditContent {
     pub(in crate::workspace) _prompt_watcher:
         Option<crate::workspace::main_area::prompt_watcher::PromptFileWatcherHandle>,
     /// GPUI-side pump that polls the watcher's debounced channel and
-    /// dispatches `handle_prompt_file_changed` (R-20). Dropped with
+    /// dispatches `handle_prompt_file_changed`. Dropped with
     /// the pane.
     pub(in crate::workspace) _prompt_pump: Option<Task<()>>,
-    /// Trailing `[+ Add subtask…]` row input (R-21). `Submit` (Enter)
+    /// Trailing `[+ Add subtask…]` row input. `Submit` (Enter)
     /// dispatches `Workspace::add_subtask` and clears the buffer for
     /// the next entry; the input stays focused so the user can chain
     /// additions.
@@ -225,7 +224,7 @@ impl BranchValidation {
 ///
 /// Newline normalisation (CRLF → LF) lives in `current_snapshot()` so
 /// disk files written by external editors don't show as dirty just
-/// because of line-ending differences (R-25 risk note).
+/// because of line-ending differences.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) struct TaskEditSnapshot {
     pub(in crate::workspace) title: String,
@@ -243,14 +242,14 @@ pub(in crate::workspace) struct TaskEditSnapshot {
 
 /// CRLF → LF normaliser used by both the renderer's snapshot builder
 /// and the save path so dirty comparisons never trip on line-ending
-/// differences (R-25 risk note).
+/// differences.
 pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
 impl TaskEditContent {
     /// Build a fresh snapshot of the form's current state for dirty
-    /// comparison (R-25). The two markdown editors and the title /
+    /// comparison. The two markdown editors and the title /
     /// branch inputs are read through their entity handles; newline
     /// endings are normalised so a CRLF disk reload doesn't read as
     /// a user edit.
@@ -475,8 +474,8 @@ impl Pane {
     }
 
     /// Immutable accessor for the TaskEdit pane state. Used by
-    /// `Workspace::find_task_edit_pane`, dirty-check helpers (R-25),
-    /// and the layout serializer to skip draft panes (R-19 / B-5).
+    /// `Workspace::find_task_edit_pane`, dirty-check helpers,
+    /// and the layout serializer to skip draft panes.
     pub(in crate::workspace) fn task_edit_content(&self) -> Option<&TaskEditContent> {
         match &self.content {
             PaneContent::TaskEditPane(te) => Some(te),
@@ -517,7 +516,7 @@ impl Pane {
 
     /// True when the pane holds unsaved user edits. Terminal / File
     /// panes are never dirty — `false` rules them out of the close
-    /// prompt entirely (R-25 / I-8). TaskEdit panes diff the form
+    /// prompt entirely. TaskEdit panes diff the form
     /// state against `saved_snapshot`.
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
         match &self.content {
@@ -552,7 +551,7 @@ impl Pane {
     }
 
     /// True when the tab strip should paint a small `●` next to the
-    /// pane's title to signal unsaved edits (R-25 / Zed tab indicator).
+    /// pane's title to signal unsaved edits (Zed tab indicator).
     pub(in crate::workspace) fn tab_dirty_dot(&self, cx: &App) -> bool {
         self.is_dirty(cx)
     }
@@ -786,8 +785,8 @@ pub(in crate::workspace) struct TabEntry {
 
 /// All the cwd sources `resolve_default_cwd` chooses between.
 /// Named-fields struct so callers can't transpose `active_lane`
-/// and `project_root` (both `Option<PathBuf>`); the compiler now
-/// catches a mistake that previously silently picked the wrong tier.
+/// and `project_root` (both `Option<PathBuf>`); the compiler
+/// catches what would otherwise silently pick the wrong tier.
 #[derive(Debug, Default)]
 pub(in crate::workspace) struct CwdCandidates {
     /// The pane the user currently has focus on. Only consulted when
@@ -825,12 +824,10 @@ fn home_dir() -> Option<PathBuf> {
 /// 3) `candidates.project_root` — last-resort fallback for
 ///    non-lane workspaces.
 ///
-/// The previous resolver fell through to `project_root` ahead of
-/// the active lane path, which silently spawned new shells at
-/// the main repo root from inside a `daruda-feat-x` lane —
-/// breaking isolation for fresh starts, restored sessions before
-/// OSC 7 landed, and any `Cmd+T` issued before the focused pane had
-/// a reported cwd.
+/// Swapping `active_lane` and `project_root` in this order would
+/// silently spawn new shells at the main repo root from inside a lane —
+/// breaking isolation for fresh starts, restored sessions before OSC 7
+/// lands, and any `Cmd+T` issued before the focused pane reports a cwd.
 pub(in crate::workspace) fn resolve_default_cwd(
     inherit_cwd: bool,
     candidates: CwdCandidates,
@@ -962,7 +959,7 @@ impl Workspace {
 
         // Register the pane's shell PID with the PTY tracker so the
         // sysinfo poller can find `claude` descendants of this pane
-        // and bind them back to its session_id (Phase E). Stub
+        // and bind them back to its session_id. Stub
         // panes (no pty_pid) skip registration.
         if let Some(pid) = pty_pid {
             self.claude.pty_tracker.register(pane_id, pid);
@@ -1050,8 +1047,8 @@ impl Workspace {
                 }
 
                 // Drain PTY thread errors (writer/reader death) on
-                // every tick so the user sees them within one frame
-                // (D5). We enrich each report with pane id + cwd so
+                // every tick so the user sees them within one frame.
+                // We enrich each report with pane id + cwd so
                 // the user can tell which session died — the PTY
                 // threads themselves are GPUI-free and don't have
                 // access to the workspace's cached cwd.

@@ -6,7 +6,7 @@
 //!   so rows align whether or not a session is bound).
 //! - `agent_badges_row` — the multi-session sub-row shown only when
 //!   a lane has ≥ 2 concurrent agent sessions. The badge
-//!   matching the focused tab gets an outline ring (Phase E) so the
+//!   matching the focused tab gets an outline ring so the
 //!   user can tell which sibling their terminal is talking to.
 
 use crate::ui::theme;
@@ -35,16 +35,14 @@ pub(super) fn agent_status_cell(state: Option<SessionStatus>, cx: &gpui::App) ->
     }
 }
 
-/// Phase D — sub-row badge strip. Shown when a lane has ≥ 2
-/// concurrent agent sessions; each badge is a small per-session
-/// indicator (`IndicatorSize::Badge`) so the user can tell which of
-/// several agents needs attention.
+/// Sub-row badge strip shown when a lane has ≥ 2 concurrent agent
+/// sessions; each badge is a small per-session indicator
+/// (`IndicatorSize::Badge`) so the user can tell which of several
+/// agents needs attention.
 ///
-/// Phase E — `active_session_id` highlights the badge corresponding
-/// to the focused tab's agent session with an outline ring, so the
-/// user can tell which sibling session their terminal is talking to.
-/// Each badge also gets a hover tooltip showing the session_id
-/// prefix.
+/// `active_session_id` highlights the badge for the focused tab's
+/// agent session with an outline ring, and each badge gets a hover
+/// tooltip showing the session_id prefix.
 pub(super) fn agent_badges_row(
     sessions: &[(String, SessionStatus)],
     active_session_id: Option<&str>,

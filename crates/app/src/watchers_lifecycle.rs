@@ -119,13 +119,10 @@ fn spawn_deferred_telegram_flush(cx: &mut App) {
     );
 }
 
-/// Drive the shared status-badge animation clock. Advances one
-/// `StatusPulseClock` tick every `STATUS_INDICATOR_TICK_MS` (~4 fps) and
-/// repaints every window that has an animating Claude session —
-/// backgrounded windows included, so a session in another window keeps
-/// pulsing. Windows with no animating session stay at zero redraws.
-/// Replaces per-badge `with_animation` (which repainted the whole
-/// window ~60×/s). See `ui::agent_status_badge` and root `CLAUDE.md`
+/// Drive the shared status-badge animation clock at a single fixed rate
+/// (~4 fps) rather than per-badge, so N animating badges cost one repaint
+/// instead of N. Backgrounded windows with an animating session still
+/// pulse; windows with none stay at zero redraws. See root `CLAUDE.md`
 /// Pitfall #10.
 fn spawn_status_pulse(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(

@@ -220,7 +220,7 @@ fn render_row(
         })
         // on_click fires only when mousedown + mouseup happen at the same
         // position (no drag past DRAG_THRESHOLD), so it coexists safely with
-        // on_drag — a drag away from the row no longer also opens the file.
+        // on_drag — a drag away from the row doesn't also open the file.
         .on_click(cx.listener(move |_dock, ev: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 let click_count = ev.click_count();

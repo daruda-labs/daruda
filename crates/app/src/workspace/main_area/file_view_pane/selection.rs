@@ -73,8 +73,8 @@ impl CharSelection {
     }
 }
 
-/// File-viewer text-selection drag state. Encodes the three valid states the
-/// three former `bool`/`Option` fields allowed only by convention.
+/// File-viewer text-selection drag state, as an enum rather than a
+/// `bool`/`Option` flag pair so only the three valid states are representable.
 #[derive(Default, Clone, Debug, PartialEq)]
 pub(in crate::workspace) enum SelectionDrag {
     #[default]

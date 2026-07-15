@@ -648,15 +648,13 @@ impl Workspace {
         daruda_store::project::LaneRef::default()
     }
 
-    /// Recursively rebuild a `PaneLayout` from its serialized form.
-    /// Panes are spawned eagerly; `id_map` records the new PaneId for
-    /// each serialized pane_id so cross-references (focus, last
-    /// focused per tab) can be rewritten.
     /// Recursively materialize a serialized layout into live panes.
-    /// `fallback_cwd` is the cwd to use when a leaf's serialized cwd
-    /// is missing — typically the owning lane's path so restore
-    /// keeps each pane inside its lane even for sessions that
-    /// were saved before OSC 7 first reported the live cwd.
+    /// `id_map` records the new PaneId for each serialized pane_id so
+    /// cross-references (focus, last focused per tab) can be rewritten.
+    /// `fallback_cwd` is the cwd to use when a leaf's serialized cwd is
+    /// missing — typically the owning lane's path so restore keeps
+    /// each pane inside its lane even for sessions saved before OSC 7
+    /// first reported the live cwd.
     fn rebuild_layout(
         &mut self,
         slayout: &daruda_store::project::SerializedLayout,

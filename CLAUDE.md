@@ -11,15 +11,21 @@ Run multiple AI coding agents in parallel — each in its own `Lane` (a git work
 ```
 daruda/
 ├── crates/
-│   ├── app/              # main app binary (workspace, agent, ui, lane, surface)
-│   ├── daruda_config/    # config system (live reload)
-│   ├── daruda_store/     # persistence + observability (NDJSON log)
-│   ├── daruda_claude/    # Claude integration
-│   ├── daruda_terminal/  # terminal emulation + GPUI rendering
-│   ├── ghostty_vt/       # safe Rust wrapper over libghostty-vt
-│   └── ghostty_vt_sys/   # Zig C FFI bindings
-├── tools/vt_dump/        # diagnostic CLI
-├── vendor/ghostty/       # Ghostty v1.2.3 submodule
+│   ├── app/                  # main app binary (workspace, agent, ui, lane, surface)
+│   ├── daruda_acp/           # Agent Client Protocol client core (GPUI-free)
+│   ├── daruda_config/        # config system (live reload)
+│   ├── daruda_store/         # persistence + observability (NDJSON log)
+│   ├── daruda_claude/        # Claude integration
+│   ├── daruda_terminal/      # terminal emulation + GPUI rendering
+│   ├── daruda_update/        # app update checking
+│   ├── ghostty_vt/           # safe Rust wrapper over libghostty-vt
+│   ├── ghostty_vt_sys/       # Zig C FFI bindings
+│   ├── gpui_component/       # vendored gpui-component fork (do not lint/edit — see below)
+│   └── visual_tests/         # offscreen render snapshot tests
+├── tools/
+│   ├── vt_dump/               # diagnostic CLI
+│   └── gen_licenses/          # generates third-party license manifest
+├── vendor/ghostty/           # Ghostty v1.2.3 submodule
 └── scripts/
 ```
 
@@ -55,7 +61,16 @@ scripts/lint-no-silent-update.sh
 scripts/lint-viewport-row-scroll.sh
 scripts/lint-agent-activity.sh
 scripts/lint-daruda-path-literals.sh
+scripts/lint-file-size.sh
+scripts/lint-mark-dirty-direct-call.sh
 ```
+
+Note: `.github/workflows/ci.yml` gates only a subset of the above (fmt, the
+7-crate clippy list, and the 6 lints through `lint-viewport-row-scroll.sh`);
+`lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`,
+`lint-file-size.sh`, and `lint-mark-dirty-direct-call.sh` are local/reviewer checks
+not yet wired into CI, and neither the CI clippy/test `-p` list nor the commands
+above include `daruda_acp`.
 
 ## Visual verification
 
@@ -272,8 +287,15 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_config     →  daruda_store
              →  daruda_store
              →  daruda_claude     →  daruda_store
-             →  gpui, portable-pty
+             →  daruda_acp                          # GPUI-free ACP client core
+             →  daruda_update
+             →  gpui, gpui_component, portable-pty
 ```
+
+`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0),
+forwarded as-is so re-vendoring stays a pure file copy — it is excluded from
+clippy/lint/comment-cleanup passes; app code reaches it only through
+`crate::ui::*` (see "`gpui_component` access" below).
 
 `daruda_config` and `daruda_claude` both depend on `daruda_store` for
 `persistence::default_data_dir()` — the single profile-scoped (release

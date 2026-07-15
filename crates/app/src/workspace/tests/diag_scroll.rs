@@ -42,12 +42,11 @@ fn wheel_up(cx: &mut VisualTestContext) {
     });
 }
 
-/// Deterministic repro of the lost-wakeup: after a lane swap, one
-/// cache-hit draw of the workspace (no out-of-element terminal access,
-/// like the left-dock badge pulse) drops the terminal entity from gpui's
-/// `tracked_entities`. From then on `cx.notify(terminal)` no longer
-/// invalidates the window: the wheel scrolls the session, but no draw
-/// ever consumes the scheduled viewport refresh — frozen screen.
+/// Regression: a cache-hit workspace draw after a lane swap (e.g. the
+/// left-dock badge pulse) can drop the terminal entity from gpui's
+/// `tracked_entities`, so `cx.notify(terminal)` stops invalidating the
+/// window — the wheel scrolls the session but no draw consumes the
+/// refresh, leaving a frozen screen.
 #[gpui::test]
 fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
     let root_a = std::path::PathBuf::from("/tmp/diag_lost_a");
@@ -82,8 +81,8 @@ fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
                     window,
                     cx,
                 );
-                // Activation no longer auto-seeds; open a terminal so the
-                // swapped-in lane has one (the entity under test here).
+                // Activation doesn't auto-seed a tab; open one so the
+                // swapped-in lane has an entity under test.
                 ws.add_tab(window, cx);
             });
         })
@@ -176,8 +175,8 @@ fn diag_wheel_after_drag_then_lane_swap(cx: &mut TestAppContext) {
 
     assert_eq!(active, 1, "click on lane 1 row must activate lane 1");
 
-    // Activation no longer auto-seeds; open a terminal in lane 1 so there
-    // is a swapped-in terminal entity to wheel over.
+    // Activation doesn't auto-seed a tab; open one in lane 1 so there is a
+    // swapped-in terminal entity to wheel over.
     any_wh
         .update(cx, |_, window, cx| {
             ws.update(cx, |ws, cx| ws.add_tab(window, cx));
@@ -246,8 +245,8 @@ fn diag_wheel_after_lane_swap(cx: &mut TestAppContext) {
                     window,
                     cx,
                 );
-                // Activation no longer auto-seeds; open a terminal so the
-                // swapped-in lane has one (the entity under test here).
+                // Activation doesn't auto-seed a tab; open one so the
+                // swapped-in lane has an entity under test.
                 ws.add_tab(window, cx);
             });
         })

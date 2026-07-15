@@ -8,7 +8,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 impl Workspace {
     /// Register the platform `on_window_should_close` callback that
-    /// holds the window open while the R-25 batch prompt runs. The
+    /// holds the window open while the batch close prompt runs. The
     /// `window_close_in_flight` flag guards against the callback
     /// firing again while the prompt is on screen.
     pub(in crate::workspace) fn install_window_close_hook(
@@ -119,8 +119,8 @@ impl Workspace {
     }
 
     /// Snapshot of every dirty TaskEdit pane. Used by the window-close
-    /// batch prompt (R-25) to summarise pending edits in one modal.
-    /// Returns `(pane_id, title, is_draft)` triples.
+    /// batch prompt to summarise pending edits in one modal. Returns
+    /// `(pane_id, title, is_draft)` triples.
     pub(in crate::workspace) fn collect_dirty_pane_descriptors(
         &self,
         cx: &App,

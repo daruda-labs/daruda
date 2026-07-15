@@ -122,10 +122,10 @@ pub struct RouteResult {
 /// single Allow/Reject pair, so a richer option set (e.g. codex-acp's
 /// "Allow Once" / "Allow for Session" / an execpolicy-amendment allow,
 /// alongside Reject) stays fully choosable from the phone. Labels arrive
-/// pre-localized from the caller (a later task builds them via
-/// `surface::strings` — this file does not touch i18n) — `BridgeCore`
-/// only needs the label text and the already-resolved decision to route a
-/// later button tap back to the right outcome.
+/// pre-localized from the caller (`surface::strings` — this file does not
+/// touch i18n); `BridgeCore` only needs the label text and the
+/// already-resolved decision to route a later button tap back to the
+/// right outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPromptRef {
     pub perm_id: u64,

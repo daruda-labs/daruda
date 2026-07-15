@@ -99,11 +99,9 @@ impl AgentChatView {
                 self.diff_editors.insert(key, editor);
             }
         }
-        // We only reach here when there was pending diff work, so a tool card
-        // just grew (embedded editor, or the inline fallback's diff lines). The
-        // tool call may sit mid-list (a `ToolCallUpdate` to an earlier call), so
-        // a full remeasure is needed — `sync_list_after` only remeasures the
-        // tail. Runs once per diff-bearing event, not per frame.
+        // A tool card just grew, and the touched call may sit mid-list (a
+        // `ToolCallUpdate` to an earlier call), so `sync_list_after`'s tail-only
+        // remeasure isn't enough — do a full one. Once per diff-bearing event.
         self.list_state.remeasure();
     }
 
@@ -173,11 +171,10 @@ impl AgentChatView {
                     // gpui reuses the uploaded texture.
                     if let Some(image) = raster.and_then(|r| CachedImage::from_raster(&r)) {
                         view.mermaid_images.lock().unwrap().insert(key, image);
-                        // The fence's item grows from a code block to a diagram —
-                        // its cached height in the virtualized list is now stale,
-                        // so remeasure before repainting or the diagram clips /
-                        // leaves a gap. (Index unknown here; a full remeasure is a
-                        // one-shot when the raster lands, not a per-frame cost.)
+                        // The fence grew from a code block to a diagram, so its
+                        // cached height is stale — remeasure before repainting or
+                        // it clips. Index is unknown here, so this is a full
+                        // remeasure, but it's one-shot per landed raster.
                         view.list_state.remeasure();
                         cx.notify();
                     }

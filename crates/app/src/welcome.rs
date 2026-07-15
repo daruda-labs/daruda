@@ -3,8 +3,8 @@
 //! Displays the daruda logo, "Open Folder" button, recent projects
 //! list, and "New Empty Window" button.
 //!
-//! Recent entries are keyed by `WorkspaceUuid` under the new schema —
-//! clicking a row dispatches a `WelcomeEvent::OpenRecent(uuid)` which
+//! Recent entries are keyed by `WorkspaceUuid` — clicking a row
+//! dispatches a `WelcomeEvent::OpenRecent(uuid)` which
 //! [`crate::windows::open_recent_workspace`] resolves to a full
 //! `(WorkspaceState, Vec<ProjectState>)` payload.
 

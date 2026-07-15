@@ -107,9 +107,9 @@ pub(in crate::workspace) struct ClaudeContext {
     /// Running count of `PostToolUseFailure` hook events per Claude
     /// session. When a session crosses
     /// `daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD` the owning task
-    /// is escalated to `Error { message: "tool_use_failure xN" }`
-    /// (R-15 Phase 2). Cleared whenever a session is removed or
-    /// transitioned out of `Running`.
+    /// is escalated to `Error { message: "tool_use_failure xN" }`.
+    /// Cleared whenever a session is removed or transitioned out of
+    /// `Running`.
     pub(in crate::workspace) tool_use_failure_counts: HashMap<String, u32>,
 
     /// Last blocking-notification timestamp already surfaced as a
@@ -234,7 +234,7 @@ impl Workspace {
 
     /// Raise a transient desktop push for a blocking Claude
     /// `Notification` (permission prompt / idle prompt / elicitation
-    /// dialog). These no longer latch the lane indicator into a
+    /// dialog). These do not latch the lane indicator into a
     /// persistent `NeedsAttention` (see `daruda_claude::hooks::fsm`), so
     /// this one-shot push is their only surface.
     ///

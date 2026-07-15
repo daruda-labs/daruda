@@ -366,8 +366,8 @@ pub struct Workspace {
     pub(in crate::workspace) last_error: Option<gpui::SharedString>,
     /// Recent surfaced [`ErrorReport`]s, newest-first. Capped at 50
     /// entries — older reports drop out as new ones land. Long-tail
-    /// archive that survives toast dismissal so the (Step 6) "Show
-    /// recent errors" command palette entry can read it.
+    /// archive that survives toast dismissal so the "Show recent
+    /// errors" command palette entry can read it.
     pub(in crate::workspace) error_history:
         Vec<daruda_store::observability::error_report::ErrorReport>,
     /// Toast notification layer — owns the live queue, the 1 Hz expiry
@@ -508,7 +508,7 @@ pub struct Workspace {
     /// repository. Cleared after `finalize_create_lane` returns.
     pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
     /// Re-entry guard for the platform `on_window_should_close`
-    /// callback. Set to `true` while the R-25 batch prompt is
+    /// callback. Set to `true` while the batch close prompt is
     /// awaiting the user's answer; cleared once the answer lands or
     /// the workspace is dropped.
     pub(in crate::workspace) window_close_in_flight: bool,
@@ -695,7 +695,7 @@ impl Workspace {
         cx: &mut Context<Self>,
         for_test: bool,
     ) -> Self {
-        // Layer the project-local override (Phase 1: `[shell]` only)
+        // Layer the project-local override (currently `[shell]` only)
         // on top of the user-global config so the workspace boots with
         // the right shell program for its project.
         let effective = config_ops::effective_config_for(project.as_ref(), config);
@@ -707,8 +707,8 @@ impl Workspace {
         // `init_gpui_component`) still need them for
         // `refresh_skills_watcher` / `refresh_mcp_watcher`. The
         // `Theme` Global is also needed at first paint by the dock's
-        // TabBar (5950ff1) and by `theme::current(cx)` reads inside
-        // any wrapped-widget render path.
+        // TabBar and by `theme::current(cx)` reads inside any
+        // wrapped-widget render path.
         crate::ui::theme::init_if_missing(cx);
         crate::agent::skills::global::init(cx);
         crate::agent::mcp::global::init(cx);
@@ -1178,11 +1178,11 @@ impl Workspace {
         })
         .detach();
 
-        // R-25 / I-8: intercept `Cmd+Q` and red-cross close attempts so
-        // dirty TaskEdit panes don't silently disappear. The callback
-        // returns `false` to veto the close, spawns the async batch
-        // prompt, and then re-issues `window.remove_window()` once the
-        // user picks Save all / Discard all.
+        // Intercept `Cmd+Q` and red-cross close attempts so dirty
+        // TaskEdit panes don't silently disappear. The callback returns
+        // `false` to veto the close, spawns the async batch prompt, and
+        // then re-issues `window.remove_window()` once the user picks
+        // Save all / Discard all.
         Self::install_window_close_hook(ws_weak.clone(), window, cx);
         // Capture initial bounds so first save carries real geometry.
         ws.capture_window_bounds(window);
@@ -1478,10 +1478,10 @@ impl Workspace {
     /// its checkout. Used by the `AddHere` policy path so opening the
     /// same folder twice in the same window focuses the existing
     /// window instead of registering a duplicate runtime project.
-    /// (Policy B explicitly permits the same root across separate
-    /// windows — the cross-window guard no longer applies.) Compares
-    /// both as-given and canonicalized so the symlinked `/tmp` vs
-    /// `/private/tmp` flavours on macOS still match.
+    /// Scoped to this window only — Policy B explicitly permits the
+    /// same root across separate windows. Compares both as-given and
+    /// canonicalized so the symlinked `/tmp` vs `/private/tmp`
+    /// flavours on macOS still match.
     pub(crate) fn has_project_root(&self, root: &std::path::Path) -> bool {
         let canonical = std::fs::canonicalize(root).ok();
         self.projects.iter().any(|p| {
@@ -1541,28 +1541,21 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Drive the AgentChat status pulse and paint one final settled frame for a
-    /// pane that just left the Working state. Called every status-pulse tick.
+    /// Drive the AgentChat status pulse and paint one final settled frame
+    /// for a pane that just left the Working state. Called every
+    /// status-pulse tick.
     ///
-    /// Scans every lane's runtime, not just the active one — a subagent run
-    /// keeps ticking in a parked (non-active) lane, and that lane's pane still
-    /// needs its trailing settle frame so its badge/pulse actually stops when
-    /// the run quiesces.
+    /// Scans every lane, not just the active one — a subagent can keep
+    /// ticking in a parked lane, and its pane still needs a trailing
+    /// settle frame when the run quiesces.
     ///
-    /// A busy AgentChat view ([`AgentChatView::is_busy`] — a prompt turn in
-    /// flight OR a background subagent tool still running) is dirtied each tick
-    /// so its animated rollup dot / working row keeps ticking (root CLAUDE.md
-    /// Pitfall #10). Crucially, a view that was busy on the *previous* tick but
-    /// no longer is gets one more dirty here — otherwise its last "running"
-    /// frame (amber rollup dot / working row) freezes: during a silent
-    /// background-subagent stretch the pulse pump is the only repaint driver,
-    /// and the settling event's own self-notify can miss a cached view that
-    /// fell out of the window's tracked set (gpui `detect_accessed_entities`
-    /// lost-wakeup, see `lane_switch_scroll_dead_rootcause`). We re-render the
-    /// workspace (so its snapshot re-reads / re-tracks the views) and dirty each
-    /// view by id — the same pair the busy ticks do — for one trailing tick so
-    /// the settled (idle / done) frame actually paints. Returns nothing; updates
-    /// [`Self::agent_pulse_prev`] in place.
+    /// A busy [`AgentChatView`] is dirtied each tick to animate its pulse
+    /// (root CLAUDE.md Pitfall #10). A view that just went idle gets one
+    /// more dirty here: its own settling self-notify can miss a cached
+    /// view that fell out of the window's tracked set (gpui
+    /// `detect_accessed_entities` lost-wakeup, see
+    /// `lane_switch_scroll_dead_rootcause`), which would otherwise freeze
+    /// its last "running" frame.
     pub(crate) fn pulse_agent_chats(&mut self, cx: &mut Context<Self>) {
         let tick_now = std::time::Instant::now();
         // Collect the candidate panes (clone the entity + its pane id) first so

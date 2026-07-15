@@ -1,6 +1,6 @@
 //! Track which `claude` process lives inside each daruda pane.
 //!
-//! Phase E uses this to:
+//! Used to:
 //! - Highlight the badge for the focused tab's session in the
 //!   per-lane sub-row (visual disambiguation when multiple
 //!   sessions share a cwd).
@@ -274,15 +274,12 @@ fn run(
 /// the tracker with a [`Wake::Poke`]; the diffing happens in the
 /// resolution pass, so the event payload is not inspected.
 ///
-/// Intentionally NOT built on [`crate::dir_watch::spawn_dir_watcher`]: this
-/// watcher already pokes on *any* event — including the `EventKind::Other`
-/// rescan that FSEvents emits after a drop (sleep/wake) — so it gets the same
-/// rescan recovery `dir_watch` provides, and a full re-scan happens in the
-/// resolution pass regardless. It also multiplexes its wake into the shared
-/// `wake_tx` (alongside register / unregister pokes and `Wake::Shutdown`),
-/// which `spawn_dir_watcher`'s owned-channel model doesn't fit. Routing it
-/// through `dir_watch` would only add a forwarder thread for no behavior
-/// change. This is the pattern `dir_watch`'s rescan handling was modeled on.
+/// Intentionally NOT built on [`crate::dir_watch::spawn_dir_watcher`]: any
+/// event here already triggers a full re-resolution pass, so FSEvents'
+/// post-sleep `EventKind::Other` rescan is handled for free, and the wake
+/// needs to multiplex into the shared `wake_tx` alongside register /
+/// unregister / shutdown — a shape `spawn_dir_watcher`'s owned-channel model
+/// doesn't fit.
 fn spawn_sessions_watcher(
     dir: &Path,
     wake_tx: mpsc::Sender<Wake>,

@@ -268,9 +268,8 @@ fn reorder_in_place_moves_one_slot_right() {
         make_tab("b", "B", 1),
         make_tab("c", "C", 2),
     ];
-    // Drag A onto B: A and B swap. Regression test for the off-by-one
-    // that previously left the list unchanged on adjacent rightward
-    // drops.
+    // Drag A onto B: A and B swap. Guards against an off-by-one that
+    // would leave the list unchanged on adjacent rightward drops.
     assert!(reorder_in_place(&mut tabs, "a", "b"));
     let order_after: Vec<&str> = tabs.iter().map(|t| t.id.as_str()).collect();
     assert_eq!(order_after, vec!["b", "a", "c"]);

@@ -337,11 +337,9 @@ fn scope_section(
     }
 
     if matches!(scope, SkillScope::Plugin) {
-        // Plugin scope groups by owning plugin id, rendered as an
-        // Accordion so each plugin can be expanded / collapsed
-        // independently. Header clicks no longer trigger invocation —
-        // they only toggle the section open state. Individual skill
-        // rows inside an open section keep their own click-to-invoke.
+        // Plugin scope groups by owning plugin id in a collapsible
+        // Accordion. Header clicks only toggle the section open state;
+        // individual skill rows keep their own click-to-invoke.
         col = col.child(plugin_accordion(skills, &workspace, plugin_expanded, t, cx));
     } else {
         for s in skills {

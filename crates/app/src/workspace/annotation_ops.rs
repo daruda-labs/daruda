@@ -1,4 +1,4 @@
-//! Workspace-side annotation operations (SP-1).
+//! Workspace-side annotation operations.
 //!
 //! The TerminalSession exposes the low-level `add_annotation` /
 //! `update_annotation_text` / `remove_annotation` mutators (see

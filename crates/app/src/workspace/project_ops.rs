@@ -58,14 +58,13 @@ impl Workspace {
     /// runtime stays in the `runtimes` map under its own key.
     ///
     /// **Pre-condition (caller):** the same-workspace duplicate-root
-    /// check has already run. Policy B explicitly allows the same root
-    /// across multiple windows (each shares the on-disk `ProjectState`
-    /// via a reused UUID — see `find_existing_project_uuid_for_root`),
-    /// so the cross-window registry guard no longer applies. Same-window
-    /// dedup is still the caller's responsibility: invoking this with a
-    /// root already in `self.projects` will register a second runtime
-    /// project under a new id and the UI then renders the same folder
-    /// twice.
+    /// check has already run. Policy B allows the same root across
+    /// multiple windows (each shares the on-disk `ProjectState` via a
+    /// reused UUID — see `find_existing_project_uuid_for_root`), so
+    /// only same-window dedup is the caller's responsibility: invoking
+    /// this with a root already in `self.projects` will register a
+    /// second runtime project under a new id and the UI then renders
+    /// the same folder twice.
     pub(crate) fn add_project(
         &mut self,
         root: PathBuf,

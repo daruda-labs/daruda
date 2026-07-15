@@ -6,14 +6,9 @@
 //! [`Workspace::add_group`] / [`Workspace::rename_active_project`].
 //!
 //! `MoveActiveProjectToGroup` opens [`GroupSelectModal`] — a dropdown
-//! over every existing group plus an "Ungrouped" row. Free-text input
-//! was the original shape but allowed a typo to silently mint a fresh
-//! group (C-2 review); a follow-up searchable picker was tried but the
-//! query input added noise without aiding discovery, so the dropdown
-//! is the current resting shape. The dropdown constrains the pick to
-//! existing rows so accidental group proliferation is no longer
-//! reachable from this action. Use `NewGroup` (`Cmd+Shift+N`) to
-//! create groups deliberately.
+//! over every existing group plus an "Ungrouped" row. Constraining the
+//! pick to existing rows prevents a typo from silently minting a new
+//! group; use `NewGroup` (`Cmd+Shift+N`) to create groups deliberately.
 
 use gpui::{Context, Window};
 

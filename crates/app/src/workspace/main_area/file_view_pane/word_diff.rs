@@ -309,7 +309,7 @@ mod tests {
     fn apply_word_diff_pairs_multi_line_block_correctly() {
         use crate::workspace::main_area::file_view_pane::diff_parser::parse_diff_hunks;
         // 2 removed + 2 added: removed[0]↔added[0], removed[1]↔added[1].
-        // The old 1:1 scan would pair removed[1]↔added[0] (wrong).
+        // A naive scan could mis-pair removed[1]↔added[0] instead.
         let diff =
             "@@ -1,2 +1,2 @@\n-fn foo(x: i32)\n-fn bar(a: i32)\n+fn foo(y: i32)\n+fn bar(b: i32)\n";
         let mut hunks = parse_diff_hunks(diff);

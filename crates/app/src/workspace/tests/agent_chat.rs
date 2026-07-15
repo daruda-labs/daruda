@@ -114,8 +114,7 @@ async fn pane_cwd_returns_none_for_remote(cx: &mut TestAppContext) {
 }
 
 /// Companion to the Remote case above: a `PaneCwd::Local` pane's cwd must
-/// keep surfacing through `Pane::cwd()` exactly as before — this task is a
-/// pure refactor, so an existing local pane's behavior must not change.
+/// keep surfacing unchanged through `Pane::cwd()`.
 #[gpui::test]
 async fn pane_cwd_returns_path_for_local(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -139,8 +138,8 @@ async fn pane_cwd_returns_path_for_local(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-/// Task 2's core virtualization invariant: `sync_list_after` keeps the
-/// `ListState` item count exactly in step with `items`. A desync would make the
+/// Core virtualization invariant: `sync_list_after` keeps the `ListState`
+/// item count exactly in step with `items`. A desync would make the
 /// virtualized `list` render the wrong rows (or index out of range), so this
 /// pins the count after a sequence of appends driven through a public op.
 #[gpui::test]
@@ -291,7 +290,7 @@ async fn fold_all_collapses_then_expands_the_response(cx: &mut TestAppContext) {
     });
 }
 
-/// Task 1's core perf contract: a `cx.notify()` on the `AgentChatView` must
+/// Core perf contract: a `cx.notify()` on the `AgentChatView` must
 /// re-render the (cached) view — the mechanism that lets an async event (a
 /// streamed chunk, a landed mermaid image) repaint the conversation without the
 /// whole window re-rendering. Guards against a future change that breaks the
@@ -353,9 +352,8 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
                 );
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                // The prompt arrives from the shared bottom-dock input via the
-                // `send_agent_prompt_text` shim (the pane no longer owns an
-                // input); it routes into the view.
+                // Panes don't own their own input; the prompt is routed through
+                // the shared bottom-dock input's `send_agent_prompt_text` shim.
                 ws.send_agent_prompt_text(id, "hello agent".to_string(), cx);
                 id
             })
@@ -1187,9 +1185,8 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
 /// `activity_state()` (and the lane badge it drives via `to_session_status`) is
 /// derived from turn-in-flight OR a background subagent's child tool still
 /// running — with a pending permission taking precedence. Covers the four
-/// state combinations, including the regression the whole task fixes: the turn
-/// has ended but a background child tool is still running, so the pane must
-/// still read `Working`.
+/// state combinations, including: turn ended but a background child tool is
+/// still running, so the pane must still read `Working`.
 #[gpui::test]
 async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppContext) {
     use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
@@ -2587,7 +2584,7 @@ async fn reconcile_activity_two_turns_one_span_fires_latest_once(cx: &mut TestAp
     });
 }
 
-/// Regression for FIX-1: at connect the buffered first prompt is pumped
+/// Regression: at connect the buffered first prompt is pumped
 /// (turn Idle→InFlight) and the connect path now reconciles immediately,
 /// stamping `was_busy`. So when the very first ACP event on the stream is
 /// `TurnEnded` (turn → Idle, outcome stashed), the busy→idle edge is still
@@ -2604,7 +2601,7 @@ async fn connect_time_pump_then_turn_end_fires_completion(cx: &mut TestAppContex
     view.update(cx, |v, _| {
         // Connect pumps the buffered prompt → turn in flight.
         v.set_turn_in_flight();
-        // FIX-1: the connect path reconciles right after the pump, stamping the
+        // The connect path reconciles right after the pump, stamping the
         // busy level so a later settle edge is detectable.
         assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
         assert!(
@@ -2624,7 +2621,7 @@ async fn connect_time_pump_then_turn_end_fires_completion(cx: &mut TestAppContex
     });
 }
 
-/// Regression for FIX-5: `cancel_turn` must not clobber an already-captured
+/// Regression: `cancel_turn` must not clobber an already-captured
 /// completion. Stop is offered (gated on `is_busy()`) during the trailing-
 /// subagent window even after the foreground turn ended normally and stashed
 /// `Completed`; stopping then must leave that outcome intact rather than

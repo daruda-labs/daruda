@@ -755,17 +755,12 @@ mod tests {
         });
     }
 
-    // dismiss event test removed — DismissEvent flow no longer exists
-    // post Phase 4.c+4.d. Visual smoke test covers close_dialog routing.
-
     #[gpui::test]
     fn escape_blocked_while_merging(cx: &mut TestAppContext) {
-        // The Merging-state guard is asserted directly: while in
-        // Merging, the dismiss branch in `handle_key` is gated by
-        // `matches!(self.state, MergeState::Merging)`. We verify the
-        // state transition stays Merging since the close path is now
-        // `window.close_dialog` and not testable without a real Root
-        // window fixture.
+        // Asserts the Merging-state guard directly: `handle_key`'s
+        // dismiss branch checks `matches!(self.state, MergeState::Merging)`.
+        // The actual close (`window.close_dialog`) needs a real Root
+        // window fixture, so this only verifies the state stays Merging.
         let modal = build_modal(cx, &["main"], None);
         modal.update(cx, |m, cx| {
             m.state = MergeState::Merging;

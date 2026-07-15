@@ -296,7 +296,7 @@ pub fn sidebar_tab_files() -> String {
 }
 
 // ============================================================================
-// Right panel — Tasks tab labels (R-11 ~ R-18)
+// Right panel — Tasks tab labels
 // ============================================================================
 
 /// Filter dropdown labels.
@@ -331,7 +331,7 @@ pub const TASK_SEARCH_CLEAR_ICON: &str = "✕";
 
 /// Action labels rendered inside the status-pill dropdown. The pill
 /// itself shows the task's current state; the dropdown lists the
-/// transitions and meta actions valid for that state (R-26).
+/// transitions and meta actions valid for that state.
 pub fn task_action_start() -> String {
     rust_i18n::t!("task.action_start").into_owned()
 }
@@ -353,7 +353,7 @@ pub fn task_action_retry() -> String {
 pub fn task_action_edit() -> String {
     rust_i18n::t!("common.btn_edit").into_owned()
 }
-/// `View error` (R-26 Error state). Opens an OK-only alert dialog
+/// `View error` (Error state). Opens an OK-only alert dialog
 /// showing the full `TaskState::Error.message` so users can see the
 /// truncated row text in full.
 pub fn task_action_view_error() -> String {
@@ -418,7 +418,7 @@ pub fn task_picker_empty_delete() -> String {
 }
 
 /// `[📄 Open file]` button shown next to the Prompt section header in
-/// the TaskEdit pane (R-20 follow-up). Click opens
+/// the TaskEdit pane. Click opens
 /// `<wt>/.daruda/task-<branch>.md` in a fresh file viewer tab when
 /// the task has a lane (Backlog / draft tasks disable the button
 /// since no on-disk file exists yet).
@@ -489,9 +489,9 @@ pub fn task_edit_surface_agent_chat() -> String {
 /// triangle.
 pub const TASK_PILL_CHEVRON: &str = " ▾";
 
-/// TaskEdit pane close prompt — copy mirrors Zed `pane.rs:1981-1998`
-/// (R-25 / I-8). Draft branch uses a stronger "Discard new task?"
-/// heading since the work has never been persisted.
+/// TaskEdit pane close prompt — copy mirrors Zed `pane.rs:1981-1998`.
+/// Draft branch uses a stronger "Discard new task?" heading since the
+/// work has never been persisted.
 pub fn task_edit_save_prompt_prefix() -> String {
     rust_i18n::t!("task.edit_save_prompt_prefix").into_owned()
 }
@@ -514,11 +514,11 @@ pub fn task_edit_cancel() -> String {
     rust_i18n::t!("common.btn_cancel").into_owned()
 }
 
-/// Tab-title dirty indicator (R-25). Painted before the title with a
+/// Tab-title dirty indicator. Painted before the title with a
 /// trailing space so titles align across dirty / clean tabs.
 pub const TAB_TITLE_DIRTY_DOT: &str = "● ";
 
-/// Prompt-file watcher conflict prompt (R-20 / I-13). Fires when an
+/// Prompt-file watcher conflict prompt. Fires when an
 /// external editor rewrites `<wt>/.daruda/task-<branch>.md` and the
 /// pane already has unsaved edits.
 pub const PROMPT_WATCHER_HEADING_PREFIX: &str = "“";
@@ -538,7 +538,7 @@ pub fn prompt_watcher_diff() -> String {
     rust_i18n::t!("task.watcher_diff").into_owned()
 }
 
-/// Tab / window batch close prompt (R-25). Single 3-button modal
+/// Tab / window batch close prompt. Single 3-button modal
 /// summarising every dirty TaskEdit pane in the closing scope.
 pub fn tab_close_batch_heading() -> String {
     rust_i18n::t!("task.batch_close_heading").into_owned()
@@ -552,7 +552,7 @@ pub fn tab_close_batch_discard_all() -> String {
 
 /// Title for the toast surfaced when one or more panes in a Save-all
 /// batch fail to commit because their branch input is invalid. The
-/// detail message lists the affected task titles (M-2 review note).
+/// detail message lists the affected task titles.
 pub fn task_batch_save_failed_title() -> String {
     rust_i18n::t!("task.batch_save_failed_title").into_owned()
 }
@@ -571,9 +571,9 @@ pub fn task_done_flavour_other() -> String {
     rust_i18n::t!("task.done_flavour_other").into_owned()
 }
 
-/// Subtask UI strings (R-21). The section title is suffixed with the
+/// Subtask UI strings. The section title is suffixed with the
 /// `(done/total done)` counter at render time; the auto/manual labels
-/// surface the `source_session_id` namespace split (I-14).
+/// surface the `source_session_id` namespace split.
 pub fn task_subtask_section_title() -> String {
     rust_i18n::t!("task.subtask_section_title").into_owned()
 }
@@ -598,7 +598,7 @@ pub fn task_subtask_manual_label() -> String {
 // ============================================================================
 
 // ----------------------------------------------------------------
-// Plan-limit gauges (R-4)
+// Plan-limit gauges
 // ----------------------------------------------------------------
 
 /// Header title for the Usage tab (product brand — same in all locales).
@@ -745,7 +745,7 @@ pub fn format_reset_countdown(remaining: std::time::Duration) -> String {
 }
 
 // ----------------------------------------------------------------
-// Service status pill (R-5)
+// Service status pill
 // ----------------------------------------------------------------
 
 /// Label shown on the green pill when Anthropic Statuspage reports
@@ -1197,7 +1197,7 @@ pub fn keystroke_hint_idle() -> String {
 }
 
 // ----------------------------------------------------------------
-// Files view (W-7)
+// Files view
 // ----------------------------------------------------------------
 
 pub fn files_header_label() -> String {
@@ -1219,7 +1219,7 @@ pub fn files_load_error_prefix() -> String {
 pub const FILES_CHEVRON_PENDING: &str = "…";
 
 // ----------------------------------------------------------------
-// Lane context menu (W-8)
+// Lane context menu
 // ----------------------------------------------------------------
 
 pub fn ctx_reveal_in_finder() -> String {
@@ -1358,7 +1358,7 @@ pub fn merge_modal_remove_after() -> String {
 }
 
 // ----------------------------------------------------------------
-// Bottom dock panels — tab modals + context menu (B-3 / B-4)
+// Bottom dock panels — tab modals + context menu
 // ----------------------------------------------------------------
 
 pub fn create_panel_tab_modal_title() -> String {
@@ -1499,9 +1499,8 @@ pub fn projects_empty_state_cta() -> String {
 
 /// Section-header `[+]` toggle menu — entry labels. The `[+]` opens a
 /// flat context menu instead of dispatching straight to the folder
-/// picker so the user can pick between adding a Project (existing
-/// behaviour) or creating a Group (previously only reachable via the
-/// `Cmd+Shift+N` shortcut / Command Palette).
+/// picker so the user can pick between adding a Project or creating a
+/// Group (also reachable via `Cmd+Shift+N` / the Command Palette).
 pub fn section_add_menu_project() -> String {
     rust_i18n::t!("projects.add_menu_project").into_owned()
 }
@@ -1635,7 +1634,7 @@ pub fn agent_sessions_label_suffix() -> String {
 }
 
 // ----------------------------------------------------------------
-// Git Changes view (W-6)
+// Git Changes view
 // ----------------------------------------------------------------
 
 /// Placeholder text for the git commit message input.
@@ -2051,8 +2050,8 @@ pub fn settings_syntax_theme_darcula() -> String {
 }
 
 // ----------------------------------------------------------------
-// Dock nav labels — title-case for the new left-rail section list.
-// (The uppercase `SETTINGS_SECTION_*` consts above are still used as
+// Dock nav labels — title-case for the left-rail section list.
+// (The uppercase `SETTINGS_SECTION_*` consts above are used as
 //  body-area headers inside each rendered section.)
 // ----------------------------------------------------------------
 pub fn settings_nav_general() -> String {
@@ -2098,7 +2097,6 @@ pub fn settings_nav_agent() -> String {
     rust_i18n::t!("settings.nav_agent").into_owned()
 }
 
-// New body-section headers (Phase 1 additions)
 pub fn settings_section_general() -> String {
     rust_i18n::t!("settings.section_general").into_owned()
 }
@@ -2124,7 +2122,6 @@ pub fn settings_section_agent() -> String {
     rust_i18n::t!("settings.section_agent").into_owned()
 }
 
-// New labels / actions for Phase 1 sections
 pub fn settings_label_clipboard_streaming() -> String {
     rust_i18n::t!("settings.label_clipboard_streaming").into_owned()
 }
@@ -2621,8 +2618,7 @@ pub fn skills_new_button() -> String {
     rust_i18n::t!("skills.new_button").into_owned()
 }
 /// Header button on the right-panel Skills tab — opens Settings →
-/// Plugin so the user can install / uninstall plugins. Install /
-/// Uninstall is no longer surfaced inline on the panel rows.
+/// Plugin so the user can install / uninstall plugins.
 pub fn skills_manage_plugins_button() -> String {
     rust_i18n::t!("skills.manage_plugins_button").into_owned()
 }
@@ -2695,7 +2691,7 @@ pub fn skills_placeholder_body_loading() -> String {
 }
 
 // ----------------------------------------------------------------
-// Skills search bar (C-4) — substring filter atop the Skills tab.
+// Skills search bar — substring filter atop the Skills tab.
 // ----------------------------------------------------------------
 pub fn skills_search_placeholder() -> String {
     rust_i18n::t!("skills.search_placeholder").into_owned()
@@ -3056,7 +3052,7 @@ pub fn error_modal_button_close() -> String {
 }
 
 // ----------------------------------------------------------------
-// Terminal annotations (SP-1)
+// Terminal annotations
 // ----------------------------------------------------------------
 
 /// Context-menu entry that opens the annotation create dialog.

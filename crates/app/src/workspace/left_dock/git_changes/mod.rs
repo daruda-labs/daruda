@@ -680,8 +680,8 @@ fn unified_file_row(
         .when(is_selected, move |d| d.bg(row_selected_bg))
         .when(!is_selected, move |d| d.hover(move |d| d.bg(row_hover_bg)))
         // on_click fires only when mousedown + mouseup happen at the same
-        // position (no drag past DRAG_THRESHOLD), so dragging the row to drop
-        // its path elsewhere no longer also opens the diff view.
+        // position (no drag past DRAG_THRESHOLD), so dragging the row to
+        // drop its path elsewhere doesn't also open the diff view.
         .on_click(cx.listener(move |_dock, ev: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 let fh = panel_focus.clone();

@@ -351,9 +351,6 @@ mod tests {
         });
     }
 
-    // dismiss event test removed — DismissEvent flow no longer exists
-    // post Phase 4.c+4.d. close_dialog routing is exercised at runtime.
-
     #[gpui::test]
     fn delete_branch_defaults_off(cx: &mut TestAppContext) {
         // Branch deletion is destructive — must require explicit

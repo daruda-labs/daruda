@@ -94,14 +94,11 @@ fn run_inner(_event_type: &str) -> Result<(), Box<dyn std::error::Error>> {
         }
         FsmAction::Delete => {
             delete(&path)?;
-            // SessionEnd: the lock file is no longer needed. We can't
-            // delete it here because the current handler still holds
-            // the lock — it'd race with another `daruda --hook`
-            // happening to come in for this same session_id during
-            // shutdown. The lock file dropping logic lives in
-            // `cold_restore::run` (TTL sweep on the next daruda
-            // startup) which now also targets `*.lock` files older
-            // than the configured TTL.
+            // SessionEnd: can't delete the lock file here — this handler
+            // still holds it, and deleting now would race another
+            // `daruda --hook` for the same session_id during shutdown.
+            // `cold_restore::run`'s TTL sweep (next daruda startup) reaps
+            // stale `*.lock` files instead.
         }
     }
 

@@ -745,9 +745,7 @@ impl SettingsWindow {
     /// Spawn `claude plugin install/uninstall <plugin_id>` on the
     /// background executor, then broadcast a watcher refresh to every
     /// open Workspace so the right-bar Skills tab reflects the new
-    /// state. Mirrors the previous `Workspace::run_plugin_op` flow but
-    /// owned by the Settings window since the action is no longer
-    /// triggered from the panel.
+    /// state.
     pub(in crate::settings_window) fn run_plugin_op(
         &mut self,
         plugin_id: String,

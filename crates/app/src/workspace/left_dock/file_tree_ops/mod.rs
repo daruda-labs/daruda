@@ -667,31 +667,18 @@ impl Workspace {
                             "files.dir_read.root",
                         ))
                     } else {
-                        // The root is genuinely gone / unreadable. This is
-                        // a detection site: flip the lane's availability so
-                        // the file-tree scan / watcher / PTY spawn all
-                        // short-circuit, instead of escalating to a
-                        // repeating Error toast (the spam this feature
-                        // fixes).
+                        // Root is genuinely gone/unreadable: flip the lane's
+                        // availability so the file-tree scan / watcher / PTY
+                        // spawn all short-circuit instead of repeating an
+                        // Error toast.
                         self.set_lane_availability(wt_ref, classified);
-                        // Tear down the watcher + tree immediately.
-                        // `ensure_file_tree`'s teardown only runs on the
-                        // lazy-create path (no tree yet); for an *active*
-                        // lane whose tree already exists and vanishes
-                        // mid-session, render never re-calls
-                        // `ensure_file_tree`, so without this the watcher
-                        // keeps firing bulk reloads → repeated
-                        // `apply_dir_load_result` → repaint loop. Safe
-                        // ordering: the `tree.entry_mut` borrow above has
-                        // ended; the only tree access left
-                        // (`invalidate_visible_files_cache` + `cx.notify()`
-                        // below) tolerates a removed tree.
-                        // The setter wrote non-Present, so this guard is
-                        // true whenever the lane still exists; it also
-                        // covers the
-                        // lane-removed-between-schedule-and-apply case
-                        // (`None != Some(Present)` → teardown is a no-op on
-                        // already-absent keys).
+                        // Tear down watcher + tree now — for an already-active
+                        // lane whose tree exists, render never re-calls
+                        // `ensure_file_tree`, so skipping this would leave the
+                        // watcher looping reload → repaint. Safe here: the
+                        // `tree.entry_mut` borrow above has ended, and this
+                        // guard also covers the lane-removed-between-
+                        // schedule-and-apply race (`None != Some(Present)`).
                         if self.lane_for(wt_ref).map(|l| l.availability)
                             != Some(LaneAvailability::Present)
                         {

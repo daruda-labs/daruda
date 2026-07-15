@@ -11,11 +11,9 @@ mod files;
 mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;
-// TODO Task 11: rewrite for the UUID-keyed schema. Every test in this
-// module fed the deleted `legacy::WorkspaceState` / `legacy::ProjectState`
-// through `save_state` / `restore_state`; with the legacy module gone
-// the whole file no longer compiles. Gating the entire module is the
-// lightest-touch fix per Task 10's test policy.
+// Disabled: these tests drive `save_state` / `restore_state` against the
+// deleted `legacy::WorkspaceState` / `legacy::ProjectState` types, so the
+// file doesn't compile. Needs a rewrite for the UUID-keyed schema.
 mod lanes;
 #[cfg(any())]
 mod persistence;

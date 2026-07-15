@@ -415,7 +415,7 @@ mod tests {
             permission_mode: None,
             notification: None,
             // Timestamp is irrelevant to the priority/filter logic under
-            // test; the store no longer applies any age-based transform.
+            // test; the store applies no age-based transform.
             timestamp: chrono::Utc::now(),
             source: Source::Hook,
         }

@@ -43,10 +43,9 @@ pub struct SkillInvocationLabel {
     /// Frontmatter `argument-hint` if present. Used as the Input
     /// placeholder so the user sees what input the skill expects.
     pub argument_hint: Option<String>,
-    /// Carried for Phase B (Skill picker) which surfaces a per-scope
-    /// chip — not consumed in Phase A's solo-modal flow, but the
-    /// carrier stays scope-agnostic so the picker can construct
-    /// labels the same way.
+    /// Unused today (`#[allow(dead_code)]`) — reserved for a future
+    /// picker that surfaces a per-scope chip; keeping the carrier
+    /// scope-agnostic now avoids reshaping it later.
     #[allow(dead_code)]
     pub scope: SkillScope,
     /// Captured at open time so the submit handler sends to the same

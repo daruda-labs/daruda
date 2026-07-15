@@ -229,19 +229,15 @@ pub(crate) fn register_global_actions(cx: &mut App, config: std::sync::Arc<darud
         open_workspace_window(cfg_for_new.clone(), None, None, opts, cx);
         cx.stop_propagation();
     });
-    // `open_workspace_window` now reads `(saved, project, opts)`:
-    //   - saved = None, project = None → fully empty window.
-
     // Global CloseProject handler — surfaces the DeleteProjectModal
     // so the user picks between "Remove from Daruda only" (safe) and
     // "Remove lanes and delete on disk" (destructive). The
     // workspace mutation runs on the modal's submit callback.
     //
     // Fallback for "no active workspace" (e.g. only Welcome is open)
-    // is to close every Workspace window — matches the previous
-    // semantics so the user is never stuck with an unresponsive
-    // shortcut. `QuitMode::Default` (macOS Explicit) keeps the app
-    // running past the last closed window.
+    // is to close every Workspace window, so the user is never stuck
+    // with an unresponsive shortcut. `QuitMode::Default` (macOS
+    // Explicit) keeps the app running past the last closed window.
     cx.on_action(move |_: &CloseProject, cx: &mut App| {
         let Some((handle, weak)) = WindowRegistry::active_workspace(cx) else {
             close_all_workspace_windows(cx);

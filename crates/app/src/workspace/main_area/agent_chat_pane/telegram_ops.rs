@@ -4,11 +4,10 @@
 //! triggered them.
 //!
 //! Sibling of [`super::agent_chat_ops`], which owns the desktop-notification
-//! pipeline and still fires the two tee points — `maybe_notify_agent_event`
+//! pipeline and fires the two tee points — `maybe_notify_agent_event`
 //! (permission wait) and `fire_activity_completion` (turn completion) — that
-//! call into this file's `relay_*` methods exactly as before this domain was
-//! split out; both files are `impl Workspace` blocks in the same module tree,
-//! so no new plumbing was needed to keep that wired up.
+//! call into this file's `relay_*` methods; both files are `impl Workspace`
+//! blocks in the same module tree.
 
 use std::collections::HashSet;
 

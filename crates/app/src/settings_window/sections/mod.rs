@@ -106,10 +106,8 @@ impl SettingsWindow {
     }
 
     pub(super) fn render_general(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
-        // Phase 3-D ships two UI presets (`daruda_dark` / `daruda_light`)
-        // so the dropdown becomes interactive. It still renders as
-        // disabled if a future build ships only one preset, so the
-        // row's layout is stable across that edge case.
+        // Disabled (not hidden) if only one UI preset is available, so the
+        // row's layout stays stable across that edge case.
         let ui_preset_disabled = daruda_config::UI_THEME_PRESETS.len() <= 1;
         let ui_preset_widget = crate::ui::select::select(&self.ui_preset_select, cx, ())
             .when(ui_preset_disabled, |w| w.disabled(true));

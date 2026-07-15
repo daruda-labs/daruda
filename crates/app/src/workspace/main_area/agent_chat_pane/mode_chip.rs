@@ -33,7 +33,6 @@ pub(in crate::workspace) fn mode_chip(
     modes: &ModeStateView,
     workspace: WeakEntity<Workspace>,
 ) -> impl IntoElement + use<> {
-    // Look up the current mode's display name; fall back to the id itself.
     let display_name = modes
         .available
         .iter()
@@ -44,8 +43,7 @@ pub(in crate::workspace) fn mode_chip(
 
     let label = SharedString::from(format!("{}{}", display_name, strings::TASK_PILL_CHEVRON));
 
-    // Clone the available modes and current id for the dropdown closure.
-    // The closure is `'static`, so we capture owned data only.
+    // Owned data for the `'static` dropdown closure.
     let available: Vec<(String, String)> = modes
         .available
         .iter()
@@ -55,11 +53,9 @@ pub(in crate::workspace) fn mode_chip(
 
     let chip_id = SharedString::from(format!("agent-chat-mode-chip-{pane_id}"));
 
-    // Ghost variant: transparent background at rest, fills only on hover, so the
-    // chip row reads as inline text controls beside the input rather than raised
-    // buttons. Height and radius pin the button to the spec's fixed-heights table
-    // (Button: 28px, radius md: 6px). Kept identical to the model/effort
-    // `config_chip` so all three chips read as one control group.
+    // Ghost variant reads as inline text controls beside the input rather than
+    // raised buttons. Height/radius match the spec's fixed-heights table and
+    // `config_chip`, so all chips read as one control group.
     button(chip_id, label)
         .ghost()
         .xsmall()
