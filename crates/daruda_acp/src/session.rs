@@ -307,8 +307,11 @@ impl AcpSessionHandle {
 /// Dev-build ACP wire tap. When the `DARUDA_ACP_WIRE_LOG` environment variable
 /// names a file, every raw JSON-RPC line exchanged with the adapter — client →
 /// adapter (`stdin`), adapter → client (`stdout`), and the adapter's own
-/// `stderr` — is appended there with a millisecond timestamp and a direction
-/// marker, so tool-call / subagent traffic can be inspected off-line. Identity
+/// `stderr` — is written there with a millisecond timestamp and a direction
+/// marker, so tool-call / subagent traffic can be inspected off-line. The file
+/// is truncated on the first open of each process run and appended to by every
+/// later session in the same run, so a restart starts fresh instead of growing
+/// without bound. Identity
 /// (no tap) when the variable is unset or the file can't be opened, so the
 /// shipping build never touches the wire unless explicitly asked. The app sets
 /// the variable in debug builds (see `bootstrap::init_observability`); it can
@@ -323,11 +326,19 @@ fn attach_wire_log(agent: AcpAgent, agent_id: &str) -> AcpAgent {
         return agent;
     };
     let path = wire_log_path_for(Path::new(&path), agent_id);
+    // Start fresh each process run, then accumulate. `attach_wire_log` runs per
+    // ACP session (new chat pane, agent switch, resume) — not per app launch —
+    // so a plain `.truncate(true)` would wipe earlier sessions of the same run.
+    // Truncate only the first time this process opens a given path, so a restart
+    // starts clean while later sessions in the same run append.
+    let truncate = wire_log_first_open(&path);
     // Open once (append) and share the handle with the debug closure; a per-line
     // reopen would thrash under streaming turns.
     let file = match std::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .append(!truncate)
+        .truncate(truncate)
+        .write(truncate)
         .open(&path)
     {
         Ok(f) => Arc::new(Mutex::new(f)),
@@ -348,6 +359,26 @@ fn attach_wire_log(agent: AcpAgent, agent_id: &str) -> AcpAgent {
             let _ = writeln!(f, "{ts} {marker} {line}");
         }
     })
+}
+
+/// Whether `path` is being opened for the wire tap for the first time in this
+/// process. The first opener truncates the file (fresh start per app launch);
+/// every later session that reuses the same path appends. Tracked in a
+/// process-global set so restart-vs-same-run is decided by process lifetime, not
+/// by session count.
+fn wire_log_first_open(path: &Path) -> bool {
+    static SEEN: std::sync::OnceLock<Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    let mut seen = match SEEN
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+        .lock()
+    {
+        Ok(guard) => guard,
+        // A poisoned lock only means a prior holder panicked mid-insert; append
+        // (don't truncate) so we never wipe an existing run's log on recovery.
+        Err(_) => return false,
+    };
+    seen.insert(path.to_path_buf())
 }
 
 /// Splice `-<agent_id>` into `base`'s file name, before the extension (e.g.
@@ -1077,6 +1108,22 @@ mod tests {
         assert_eq!(
             wire_log_path_for(Path::new("/logs/acp-wire.log"), ""),
             PathBuf::from("/logs/acp-wire.log")
+        );
+    }
+
+    #[test]
+    fn wire_log_first_open_truncates_once_then_appends() {
+        // First open of a given path in this process truncates (fresh start on
+        // restart); every later open of the same path appends (same run keeps
+        // accumulating). A different path is independently first-opened.
+        let path_a = PathBuf::from("/logs/acp-wire-first-open-test-a.log");
+        let path_b = PathBuf::from("/logs/acp-wire-first-open-test-b.log");
+        assert!(wire_log_first_open(&path_a), "first open truncates");
+        assert!(!wire_log_first_open(&path_a), "second open appends");
+        assert!(!wire_log_first_open(&path_a), "third open still appends");
+        assert!(
+            wire_log_first_open(&path_b),
+            "a different path truncates once"
         );
     }
 
