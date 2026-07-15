@@ -1241,6 +1241,60 @@ impl Workspace {
         }
     }
 
+    /// Begin editing a queued prompt: pull its text into the bottom-dock
+    /// composer (cursor at end) and mark the view editing that slot. Shim for
+    /// the queued-prompt strip's ✎ button and for ↑ in an empty composer. On
+    /// the next send, [`AgentChatView::send_prompt_text`] replaces the slot in
+    /// place (order preserved). No-op when `pane_id` is gone, is not an Agent
+    /// chat pane, or `id` is no longer queued.
+    pub(in crate::workspace) fn begin_edit_queued_prompt(
+        &mut self,
+        pane_id: PaneId,
+        id: PromptId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        // Reading the view entity here is safe — it is a different entity from
+        // `self` (Workspace) and from `terminal_input`.
+        let Some(text) = view
+            .read(cx)
+            .pending_prompts
+            .iter()
+            .find(|q| q.id == id)
+            .map(|q| q.text.clone())
+        else {
+            return;
+        };
+        // Pull the text into the composer, cursor at end (mirrors
+        // `do_history_navigate`). Separate `entity.update` from the view update
+        // below — never nest two updates on entities in one call.
+        self.terminal_input.update(cx, |s, cx_state| {
+            s.set_value(&text, window, cx_state);
+            s.move_cursor_to_end(cx_state);
+        });
+        view.update(cx, |v, cx| v.begin_edit(id, cx));
+    }
+
+    /// Cancel an in-progress queued-prompt edit: clear the view's editing flag
+    /// and empty the composer. Shim for the strip's cancel (↩) button. No-op on
+    /// the view side when `pane_id` is gone or is not an Agent chat pane; the
+    /// composer is emptied regardless.
+    pub(in crate::workspace) fn cancel_edit_queued_prompt(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.cancel_edit(cx));
+        }
+        self.terminal_input
+            .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+    }
+
     /// Request cancellation of the active turn. Shim for the bottom-dock "Stop"
     /// button: routes into the view, which sends `session/cancel` and drains any
     /// pending permission request.

@@ -92,6 +92,37 @@ pub fn button_delete_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
         .label("\u{00d7}")
 }
 
+/// `✎` edit glyph for hover-revealed row actions — muted at rest, brightens to
+/// the primary text tone on direct hover. Sibling of [`button_delete_glyph`]
+/// (same compact `xsmall`, no fixed sizing) for the queued-prompt strip's
+/// per-item edit affordance.
+pub fn button_edit_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
+    let t = theme::current(cx);
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.text_muted)
+        .hover(t.text_primary);
+    Button::new(id)
+        .xsmall()
+        .tab_stop(false)
+        .custom(variant)
+        .label("\u{270e}")
+}
+
+/// `↩` cancel-edit glyph — muted at rest, brightens to the primary text tone on
+/// direct hover. Shown on the queued-prompt row currently being edited, in
+/// place of the edit / delete glyphs.
+pub fn button_edit_cancel_glyph(id: impl Into<ElementId>, cx: &App) -> Button {
+    let t = theme::current(cx);
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.text_muted)
+        .hover(t.text_primary);
+    Button::new(id)
+        .xsmall()
+        .tab_stop(false)
+        .custom(variant)
+        .label("\u{21a9}")
+}
+
 /// Section-header action glyph (`+`, `⟳`, `▾`, ...) — muted text on
 /// transparent bg with a soft hover-fill, no border. Use for inline
 /// header affordances and small dismiss buttons.

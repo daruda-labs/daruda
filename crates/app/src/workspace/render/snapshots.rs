@@ -239,12 +239,14 @@ impl Workspace {
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
             .map(|view| {
-                view.read(cx)
-                    .pending_prompts
+                let view = view.read(cx);
+                let editing = view.editing_prompt;
+                view.pending_prompts
                     .iter()
                     .map(|q| crate::workspace::layout::QueuedPromptView {
                         id: q.id,
                         text: q.text.clone(),
+                        editing: editing == Some(q.id),
                     })
                     .collect::<Vec<_>>()
             })

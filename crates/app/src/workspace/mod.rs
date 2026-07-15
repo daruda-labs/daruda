@@ -828,7 +828,7 @@ impl Workspace {
                     // Decide whether to consume before mutating any state.
                     // Reading ws (Workspace) is safe here: we're inside
                     // terminal_input's update, but Workspace is a different entity.
-                    if !ws.read(app).history_navigate_possible(dir) {
+                    if !ws.read(app).history_navigate_possible(dir, app) {
                         return false;
                     }
                     let ws_deferred = ws.downgrade();

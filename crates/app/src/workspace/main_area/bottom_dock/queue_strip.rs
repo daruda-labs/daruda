@@ -38,6 +38,10 @@ pub(in crate::workspace) fn render(
     let header_color = t.text_subtle;
     let item_color = t.text_body;
     let item_bg = t.overlay_hover;
+    // The row pulled into the composer for editing gets a distinct fill + a
+    // brighter text tone so the edit target reads clearly against its siblings.
+    let editing_bg = t.overlay_selected;
+    let editing_color = t.text_primary;
 
     // Header: "N queued" + clear-all button.
     let clear_all = {
@@ -75,18 +79,89 @@ pub(in crate::workspace) fn render(
         .max_h(px(theme::AGENT_QUEUE_STRIP_MAX_H))
         .overflow_y_scroll();
     for qp in prompts {
-        let workspace = snap.workspace.clone();
         let id = qp.id;
-        let remove = crate::ui::button_delete_glyph(
-            SharedString::from(format!("agent-queue-remove-{}", qp.id)),
-            cx,
-        )
-        .tooltip(s::bottom_input_queue_remove())
-        .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.remove_queued_prompt(pane_id, id, cx));
-            }
-        }));
+        // Text cell — brighter tone + an "editing…" suffix on the edit target.
+        let text_color = if qp.editing {
+            editing_color
+        } else {
+            item_color
+        };
+        let mut text_cell = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .flex_1()
+            .min_w_0()
+            .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(theme::AGENT_QUEUE_STRIP_FONT_SIZE))
+                    .text_color(text_color)
+                    .child(SharedString::from(qp.text.clone())),
+            );
+        if qp.editing {
+            text_cell = text_cell.child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(header_color)
+                    .child(SharedString::from(s::bottom_input_queue_editing())),
+            );
+        }
+
+        // Actions — while editing, a single cancel (↩); otherwise edit (✎) + × .
+        let actions = if qp.editing {
+            let workspace = snap.workspace.clone();
+            let cancel = crate::ui::button_edit_cancel_glyph(
+                SharedString::from(format!("agent-queue-edit-cancel-{}", qp.id)),
+                cx,
+            )
+            .tooltip(s::bottom_input_queue_edit_cancel())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| {
+                        ws.cancel_edit_queued_prompt(pane_id, window, cx)
+                    });
+                }
+            }));
+            div().flex().flex_row().items_center().child(cancel)
+        } else {
+            let edit_ws = snap.workspace.clone();
+            let edit = crate::ui::button_edit_glyph(
+                SharedString::from(format!("agent-queue-edit-{}", qp.id)),
+                cx,
+            )
+            .tooltip(s::bottom_input_queue_edit())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                if let Some(ws) = edit_ws.upgrade() {
+                    ws.update(cx, |ws, cx| {
+                        ws.begin_edit_queued_prompt(pane_id, id, window, cx)
+                    });
+                }
+            }));
+            let remove_ws = snap.workspace.clone();
+            let remove = crate::ui::button_delete_glyph(
+                SharedString::from(format!("agent-queue-remove-{}", qp.id)),
+                cx,
+            )
+            .tooltip(s::bottom_input_queue_remove())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = remove_ws.upgrade() {
+                    ws.update(cx, |ws, cx| ws.remove_queued_prompt(pane_id, id, cx));
+                }
+            }));
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+                .child(edit)
+                .child(remove)
+        };
+
         let row = div()
             .flex()
             .flex_row()
@@ -96,17 +171,9 @@ pub(in crate::workspace) fn render(
             .px(px(theme::AGENT_QUEUE_STRIP_ROW_PAD_X))
             .py(px(theme::AGENT_QUEUE_STRIP_ROW_PAD_Y))
             .rounded(px(theme::AGENT_QUEUE_STRIP_ROW_RADIUS))
-            .bg(item_bg)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(theme::AGENT_QUEUE_STRIP_FONT_SIZE))
-                    .text_color(item_color)
-                    .child(SharedString::from(qp.text.clone())),
-            )
-            .child(remove);
+            .bg(if qp.editing { editing_bg } else { item_bg })
+            .child(text_cell)
+            .child(actions);
         list = list.child(row);
     }
 

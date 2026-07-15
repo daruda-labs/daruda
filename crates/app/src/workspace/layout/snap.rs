@@ -214,6 +214,12 @@ impl LeftDockSnapshot {
 pub(in crate::workspace) struct QueuedPromptView {
     pub id: crate::workspace::main_area::agent_chat_pane::view::PromptId,
     pub text: String,
+    /// True when this prompt is the one currently pulled into the composer for
+    /// editing (mirrors `AgentChatView::editing_prompt == Some(id)`). The strip
+    /// renders this row in an "editing…" state with a cancel affordance instead
+    /// of the ✎ / × buttons. `PartialEq` on this field drives the bottom dock's
+    /// `.cached()` re-stage when the edit target changes.
+    pub editing: bool,
 }
 
 /// Point-in-time copy of `Workspace` fields consumed by the bottom

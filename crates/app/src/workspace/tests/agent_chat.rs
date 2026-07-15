@@ -2950,3 +2950,254 @@ async fn stop_buffers_reprompt_and_second_stop_clears_it(cx: &mut TestAppContext
         assert!(v.turn_is_idle(), "nothing left to run after both Stops");
     });
 }
+
+/// Editing a queued prompt replaces that slot's text in place — order preserved,
+/// the editing flag cleared, and nothing echoed into the transcript (an edit is
+/// not a new turn).
+#[gpui::test]
+async fn send_prompt_text_editing_replaces_slot_in_place(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, cx| {
+        v.send_prompt_text("first".into(), cx);
+        v.send_prompt_text("second".into(), cx);
+        v.send_prompt_text("third".into(), cx);
+        let middle = v.pending_prompts[1].id;
+        v.begin_edit(middle, cx);
+        assert_eq!(
+            v.editing_prompt,
+            Some(middle),
+            "begin_edit records the target"
+        );
+
+        v.send_prompt_text("edited".into(), cx);
+        assert_eq!(
+            queue_texts(v),
+            vec![
+                "first".to_string(),
+                "edited".to_string(),
+                "third".to_string()
+            ],
+            "editing replaces the slot in place, order preserved"
+        );
+        assert!(v.editing_prompt.is_none(), "send clears the editing flag");
+        assert!(v.items.is_empty(), "an in-place edit does not echo");
+    });
+}
+
+/// When the edit target is no longer queued (drained onto the wire while the
+/// user was editing), a send falls through to a brand-new queued prompt rather
+/// than dropping the typed text.
+#[gpui::test]
+async fn send_prompt_text_editing_target_gone_falls_through_to_new(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let view = make_activity_view(cx, window_handle, &workspace);
+
+    view.update(cx, |v, cx| {
+        v.send_prompt_text("only".into(), cx);
+        let id = v.pending_prompts[0].id;
+        v.begin_edit(id, cx);
+        // Model the target leaving the queue while the composer still targets it.
+        v.remove_queued(id, cx);
+        assert_eq!(
+            v.editing_prompt,
+            Some(id),
+            "removing a row does not by itself clear the editing flag"
+        );
+        assert!(v.pending_prompts.is_empty());
+
+        v.send_prompt_text("typed".into(), cx);
+        assert_eq!(
+            queue_texts(v),
+            vec!["typed".to_string()],
+            "a drained edit target falls through to a new queued prompt"
+        );
+        assert!(
+            v.editing_prompt.is_none(),
+            "the stale editing flag is cleared on send"
+        );
+        assert!(
+            v.items.is_empty(),
+            "no handle → the new prompt is queued, not echoed"
+        );
+    });
+}
+
+/// ↑ in an EMPTY composer, with a non-empty queue on the focused agent pane,
+/// pulls the most-recent queued prompt into the composer for editing.
+#[gpui::test]
+async fn up_arrow_in_empty_composer_edits_last_queued_prompt(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let (pane_id, last_id) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.send_agent_prompt_text(id, "q1".into(), cx);
+                ws.send_agent_prompt_text(id, "q2".into(), cx);
+                let last = agent_view(ws, id)
+                    .read(cx)
+                    .pending_prompts
+                    .last()
+                    .expect("queue non-empty")
+                    .id;
+                ws.terminal_input
+                    .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+                (id, last)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.do_history_navigate(crate::ui::HistoryDir::Up, window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.terminal_input.read(cx).value(),
+            "q2",
+            "the composer receives the last queued prompt's text"
+        );
+        assert_eq!(
+            agent_view(ws, pane_id).read(cx).editing_prompt,
+            Some(last_id),
+            "the editing flag targets the last queued prompt"
+        );
+    });
+}
+
+/// ↑ with a NON-empty composer does the ordinary history recall (no queue edit)
+/// — with no history entries here, the composer is left untouched and no edit
+/// begins.
+#[gpui::test]
+async fn up_arrow_with_nonempty_composer_does_not_edit_queue(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.send_agent_prompt_text(id, "q1".into(), cx);
+                ws.terminal_input
+                    .update(cx, |s, cx_state| s.set_value("typing", window, cx_state));
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.do_history_navigate(crate::ui::HistoryDir::Up, window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.terminal_input.read(cx).value(),
+            "typing",
+            "a non-empty composer is left for history recall, not a queue edit"
+        );
+        assert!(
+            agent_view(ws, pane_id).read(cx).editing_prompt.is_none(),
+            "no queue edit begins when the composer is non-empty"
+        );
+    });
+}
+
+/// Cancelling a queued-prompt edit clears the editing flag and empties the
+/// composer.
+#[gpui::test]
+async fn cancel_edit_queued_prompt_clears_flag_and_empties_composer(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let (pane_id, id) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.send_agent_prompt_text(id, "editable".into(), cx);
+                let prompt_id = agent_view(ws, id).read(cx).pending_prompts[0].id;
+                ws.begin_edit_queued_prompt(id, prompt_id, window, cx);
+                (id, prompt_id)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // begin pulled the text into the composer and set the editing flag.
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.terminal_input.read(cx).value(), "editable");
+        assert_eq!(agent_view(ws, pane_id).read(cx).editing_prompt, Some(id));
+    });
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.cancel_edit_queued_prompt(pane_id, window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.terminal_input.read(cx).value(),
+            "",
+            "cancel empties the composer"
+        );
+        assert!(
+            agent_view(ws, pane_id).read(cx).editing_prompt.is_none(),
+            "cancel clears the editing flag; the prompt stays queued"
+        );
+        assert_eq!(
+            queue_texts(agent_view(ws, pane_id).read(cx)),
+            vec!["editable".to_string()],
+            "cancel leaves the queued prompt intact"
+        );
+    });
+}

@@ -307,6 +307,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// Monotonic counter minting the next [`PromptId`] for a queued prompt.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) next_prompt_id: u64,
+    /// The queued prompt currently being edited in the composer, if any. Set by
+    /// [`Self::begin_edit`] (from the strip's ✎ button or ↑ in an empty
+    /// composer) and cleared on send ([`Self::send_prompt_text`] replaces the
+    /// slot in place), cancel ([`Self::cancel_edit`]), drain (the edit target
+    /// pumped onto the wire), or any queue reset. While `Some`, the strip marks
+    /// that row as the edit target and a send replaces its text rather than
+    /// enqueuing a new prompt. Runtime-only; never serialized.
+    pub(in crate::workspace) editing_prompt: Option<PromptId>,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
@@ -762,6 +770,7 @@ impl AgentChatView {
             handle: None,
             pending_prompts: Vec::new(),
             next_prompt_id: 0,
+            editing_prompt: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
             turn: Turn::Idle,
@@ -1191,6 +1200,7 @@ impl AgentChatView {
                 // them to be pumped (they were never echoed, so nothing dangles
                 // in the transcript).
                 self.pending_prompts.clear();
+                self.editing_prompt = None;
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
                 // closed — a lingering `Some(handle)` would let `send_prompt_text`
@@ -1411,6 +1421,20 @@ impl AgentChatView {
     /// Driven by the bottom-dock input via the Workspace shim
     /// (`send_agent_prompt_text`).
     pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
+        // Editing an existing queued prompt: replace that slot's text in place
+        // (order preserved) and return — this is not a new turn or a new queue
+        // entry. `.take()` clears the editing flag whether or not the target is
+        // still queued; if it drained onto the wire while the user was editing,
+        // the second `let` fails and we fall through to handle `text` as a
+        // brand-new prompt so nothing typed is lost.
+        if let Some(id) = self.editing_prompt.take()
+            && let Some(qp) = self.pending_prompts.iter_mut().find(|q| q.id == id)
+        {
+            qp.text = text;
+            self.rebuild_rows();
+            cx.notify();
+            return;
+        }
         if let Some(handle) = &self.handle
             && !self.turn.is_in_flight()
             && !self.cancel_in_flight
@@ -1488,8 +1512,28 @@ impl AgentChatView {
             return;
         }
         self.pending_prompts.clear();
+        self.editing_prompt = None;
         self.rebuild_rows();
         cx.notify();
+    }
+
+    /// Mark the queued prompt `id` as the one being edited in the composer.
+    /// Backs the bottom-dock strip's ✎ button and ↑-in-empty-composer via the
+    /// `Workspace::begin_edit_queued_prompt` shim (which pulls the text into the
+    /// input); this view only records which slot a subsequent send replaces.
+    pub(in crate::workspace) fn begin_edit(&mut self, id: PromptId, cx: &mut Context<Self>) {
+        self.editing_prompt = Some(id);
+        cx.notify();
+    }
+
+    /// Clear the editing flag (the composer edit was cancelled). No-op (no
+    /// notify) when nothing was being edited. Backs the strip's cancel (↩)
+    /// button via the `Workspace::cancel_edit_queued_prompt` shim, which also
+    /// empties the composer.
+    pub(in crate::workspace) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
+        if self.editing_prompt.take().is_some() {
+            cx.notify();
+        }
     }
 
     /// Move the next queued prompt into the active-turn model and return the
@@ -1499,6 +1543,12 @@ impl AgentChatView {
             return None;
         }
         let qp = self.pending_prompts.remove(0);
+        // If the drained entry was the one being edited, drop the stale editing
+        // flag so a later send doesn't try to replace an id that is no longer
+        // queued.
+        if self.editing_prompt == Some(qp.id) {
+            self.editing_prompt = None;
+        }
         self.turn = Turn::InFlight {
             started_at: std::time::Instant::now(),
         };
@@ -1570,6 +1620,7 @@ impl AgentChatView {
         // this Stop. A prompt the user types *after* Stop is pushed after this
         // clear and runs as a fresh turn.
         self.pending_prompts.clear();
+        self.editing_prompt = None;
         // `settle_turn` mutated items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing fold visibility and row
         // heights, so reproject and remeasure before notifying.
@@ -1738,6 +1789,7 @@ impl AgentChatView {
         self._event_pump = None;
         self.items.clear();
         self.pending_prompts.clear();
+        self.editing_prompt = None;
         self.pending_permissions.clear();
         self.turn = Turn::Idle;
         self.subagent_last_activity.clear();

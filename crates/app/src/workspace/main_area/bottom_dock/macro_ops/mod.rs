@@ -14,9 +14,11 @@ use daruda_store::panels::{
     ButtonWidget, MacroKey, PanelTab, PanelsState, TabId, TabLayout, WidgetId, new_tab_id,
     new_widget_id,
 };
-use gpui::{Context, KeyBinding, Keystroke, SharedString, Window};
+use gpui::{App, Context, KeyBinding, Keystroke, SharedString, Window};
 
+use crate::workspace::main_area::agent_chat_pane::view::PromptId;
 use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{RunMacroByShortcut, Workspace};
 
 /// Remove the tab with `tab_id` from `tabs`, returning the removed
@@ -554,7 +556,17 @@ impl Workspace {
     pub(in crate::workspace) fn history_navigate_possible(
         &self,
         dir: crate::ui::HistoryDir,
+        cx: &App,
     ) -> bool {
+        // ↑ is also consumed to edit the most-recent queued prompt when the
+        // focused pane is an agent chat with a non-empty queue — even if this
+        // lane has no input history yet. The empty-composer gate is applied in
+        // the deferred `do_history_navigate` (the composer can't be read here
+        // without re-entering `terminal_input` mid-update, pitfall #5).
+        if matches!(dir, crate::ui::HistoryDir::Up) && self.focused_agent_last_queued(cx).is_some()
+        {
+            return true;
+        }
         let lane_ref = self.active_ref();
         let Some(buf) = self.input_history.get(&lane_ref) else {
             return false;
@@ -563,6 +575,19 @@ impl Workspace {
             crate::ui::HistoryDir::Up => buf.has_entries(),
             crate::ui::HistoryDir::Down => buf.is_navigating(),
         }
+    }
+
+    /// Resolve the focused Agent chat pane and the id of its most-recently
+    /// queued prompt, when the focused pane is an agent chat with a non-empty
+    /// queue. Backs the ↑-in-empty-composer edit affordance
+    /// ([`Self::do_history_navigate`]) and its consume predicate
+    /// ([`Self::history_navigate_possible`]). `None` for a terminal focus, an
+    /// agent pane with an empty queue, or the Welcome state.
+    fn focused_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
+        let focused = self.active_runtime().focused_pane_id;
+        let view = self.agent_chat_view(focused)?;
+        let id = view.read(cx).pending_prompts.last()?.id;
+        Some((focused, id))
     }
 
     /// Execute a history navigation step for the active lane. Reads the
@@ -577,6 +602,18 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let current = self.terminal_input.read(cx).value().to_string();
+        // ↑ in an EMPTY composer, with a non-empty queue on the focused agent
+        // pane, pulls the most-recent queued prompt into the composer for
+        // editing instead of recalling input history. A non-empty composer,
+        // an empty queue, or a non-agent pane all fall through to the normal
+        // per-lane history recall below.
+        if matches!(dir, crate::ui::HistoryDir::Up)
+            && current.is_empty()
+            && let Some((pane_id, id)) = self.focused_agent_last_queued(cx)
+        {
+            self.begin_edit_queued_prompt(pane_id, id, window, cx);
+            return;
+        }
         let lane_ref = self.active_ref();
         let buf = self.input_history.entry(lane_ref).or_default();
         let new_text = match dir {

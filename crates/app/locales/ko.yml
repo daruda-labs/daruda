@@ -335,6 +335,9 @@ bottom_dock:
   queued_count: "%{n}개 대기 중"
   queue_clear_all: "모두 지우기"
   queue_remove: "대기열에서 제거"
+  queue_edit: "편집"
+  queue_edit_cancel: "편집 취소"
+  queue_editing: "편집 중…"
 
 # Projects view
 projects:

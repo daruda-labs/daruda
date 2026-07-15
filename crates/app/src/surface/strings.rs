@@ -1493,6 +1493,19 @@ pub fn bottom_input_queue_clear_all() -> String {
 pub fn bottom_input_queue_remove() -> String {
     rust_i18n::t!("bottom_dock.queue_remove").into_owned()
 }
+/// Queued-prompt strip — per-item edit (✎) button tooltip.
+pub fn bottom_input_queue_edit() -> String {
+    rust_i18n::t!("bottom_dock.queue_edit").into_owned()
+}
+/// Queued-prompt strip — cancel-edit (↩) button tooltip on the row being edited.
+pub fn bottom_input_queue_edit_cancel() -> String {
+    rust_i18n::t!("bottom_dock.queue_edit_cancel").into_owned()
+}
+/// Queued-prompt strip — inline label on the row currently pulled into the
+/// composer for editing.
+pub fn bottom_input_queue_editing() -> String {
+    rust_i18n::t!("bottom_dock.queue_editing").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Projects view — section header + empty state

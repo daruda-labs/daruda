@@ -335,6 +335,9 @@ bottom_dock:
   queued_count: "%{n} queued"
   queue_clear_all: "Clear all"
   queue_remove: "Remove from queue"
+  queue_edit: "Edit"
+  queue_edit_cancel: "Cancel edit"
+  queue_editing: "Editing…"
 
 # Projects view
 projects:
