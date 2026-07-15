@@ -205,6 +205,17 @@ impl LeftDockSnapshot {
 // Bottom dock
 // ----------------------------------------------------------------
 
+/// Read-only projection of one queued prompt for the bottom-dock
+/// queued-prompt strip. The [`crate::workspace::main_area::agent_chat_pane::view::PromptId`]
+/// is the single source of truth on the `AgentChatView`; this mirrors it plus
+/// the prompt text so the strip renders without re-entering the view entity,
+/// and routes a per-item removal back to that id via `remove_queued_prompt`.
+#[derive(Clone, PartialEq)]
+pub(in crate::workspace) struct QueuedPromptView {
+    pub id: crate::workspace::main_area::agent_chat_pane::view::PromptId,
+    pub text: String,
+}
+
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
 /// dock's `impl Render`.
 ///
@@ -252,6 +263,16 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     pub agent_config_options: Option<(
         crate::workspace::main_area::pane_tree::PaneId,
         Vec<daruda_acp::ConfigOptionView>,
+    )>,
+    /// Set when the focused pane is an Agent chat pane with a non-empty prompt
+    /// queue. Carries the pane id + the queued prompts (in FIFO order) so the
+    /// bottom dock renders the queued-prompt strip above the input and routes
+    /// each removal / clear-all back to that pane. `None` for a terminal-pane
+    /// focus, an agent pane with an empty queue, or the Welcome state — the
+    /// strip is then not rendered.
+    pub queued_prompts: Option<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        Vec<QueuedPromptView>,
     )>,
     /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,

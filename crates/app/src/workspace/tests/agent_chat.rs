@@ -33,6 +33,12 @@ fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatView> {
         .expect("agent chat pane present")
 }
 
+/// The queued-prompt texts in FIFO order — the queue holds `QueuedPrompt`
+/// (id + text), so tests compare on the text projection.
+fn queue_texts(v: &AgentChatView) -> Vec<String> {
+    v.pending_prompts.iter().map(|q| q.text.clone()).collect()
+}
+
 #[gpui::test]
 async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -161,11 +167,20 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
                 );
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                // Each prompt echoes one `UserText` item (no live handle, so no
-                // turn) and routes through `send_prompt_text` → `rebuild_rows`.
-                for n in 0..3 {
-                    ws.send_agent_prompt_text(id, format!("prompt {n}"), cx);
-                }
+                // Seed three bare user messages directly and reproject rows via a
+                // public op (`set_all_folds` calls `rebuild_rows`), then assert
+                // the virtualized list count stays in step with the rows. (An
+                // offline `send_agent_prompt_text` now queues without echoing —
+                // covered separately — so drive the transcript directly here.)
+                let view = agent_view(ws, id);
+                view.update(cx, |v, cx| {
+                    v.items = vec![
+                        daruda_acp::ChatItem::UserText("prompt 0".into()),
+                        daruda_acp::ChatItem::UserText("prompt 1".into()),
+                        daruda_acp::ChatItem::UserText("prompt 2".into()),
+                    ];
+                    v.set_all_folds(true, cx);
+                });
                 id
             })
         })
@@ -175,7 +190,7 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
-        assert_eq!(view.items.len(), 3, "three prompts were echoed");
+        assert_eq!(view.items.len(), 3, "three user messages were seeded");
         // The virtualized list indexes over projected rows, so its count must
         // track `rows`, not `items` (here they match: 3 bare user messages, no
         // agent responses → no synthetic headers).
@@ -330,8 +345,12 @@ async fn notify_rerenders_cached_agent_view(cx: &mut TestAppContext) {
     );
 }
 
+/// A prompt submitted while the pane cannot send now (here: no live handle) is
+/// enqueued WITHOUT echoing into the transcript — it lives only in the queue
+/// (surfaced by the bottom-dock strip) until it drains. This is the core
+/// behaviour change: queued prompts no longer clutter the conversation.
 #[gpui::test]
-async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
+async fn send_agent_prompt_text_queues_without_echo_while_offline(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
@@ -364,14 +383,14 @@ async fn send_agent_prompt_text_echoes_user_text(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
-        assert_eq!(
-            view.items.len(),
-            1,
-            "the submitted prompt is echoed as one UserText item"
+        assert!(
+            view.items.is_empty(),
+            "a queued prompt is NOT echoed into the transcript"
         );
         assert_eq!(
-            view.items[0],
-            daruda_acp::ChatItem::UserText("hello agent".to_string())
+            queue_texts(view),
+            vec!["hello agent".to_string()],
+            "the prompt lives in the queue instead"
         );
         // No live handle → the turn is not marked in flight.
         assert!(view.turn_is_idle());
@@ -1371,9 +1390,9 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
 }
 
 /// A prompt submitted before the session connects (`handle` is still `None`,
-/// the lazy-connect state) must be echoed locally *and* buffered — never
-/// silently dropped — with no turn marked in flight (nothing is on the wire
-/// yet). Buffering preserves submission order.
+/// the lazy-connect state) must be buffered — never silently dropped — without
+/// being echoed into the transcript, and with no turn marked in flight (nothing
+/// is on the wire yet). Buffering preserves submission order.
 #[gpui::test]
 async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -1408,11 +1427,11 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert!(view.handle.is_none(), "not connected");
-        // Both prompts echoed locally so the user sees them immediately.
-        assert_eq!(view.items.len(), 2, "both prompts echoed as UserText");
+        // Queued prompts are not echoed — they live only in the queue.
+        assert!(view.items.is_empty(), "queued prompts are not echoed");
         // Buffered in FIFO order rather than dropped.
         assert_eq!(
-            view.pending_prompts,
+            queue_texts(view),
             vec!["first".to_string(), "second".to_string()],
             "disconnected prompts are queued in submission order"
         );
@@ -1521,11 +1540,11 @@ async fn disconnected_prompts_buffer_fifo_without_a_turn(cx: &mut TestAppContext
     let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
     view.read_with(cx, |v, _| {
         assert_eq!(
-            v.pending_prompts,
+            queue_texts(v),
             vec!["a".to_string(), "b".to_string(), "c".to_string()],
             "disconnected prompts buffer in submission (FIFO) order, none dropped"
         );
-        assert_eq!(v.items.len(), 3, "all three echoed locally");
+        assert!(v.items.is_empty(), "queued prompts are not echoed");
         assert!(
             v.turn_is_idle(),
             "nothing is on the wire while disconnected"
@@ -1568,7 +1587,7 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     cx.update(|cx| view.update(cx, |v, cx| v.pump_pending_prompt(cx)));
     view.read_with(cx, |v, _| {
         assert_eq!(
-            v.pending_prompts,
+            queue_texts(v),
             vec!["queued".to_string()],
             "no handle → pump leaves the buffer intact"
         );
@@ -1589,6 +1608,189 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     });
 }
 
+/// The queue drains FIFO at send time: the front item leaves the queue, is
+/// echoed into the transcript as `UserText`, and starts the tracked turn. The
+/// live ACP handle is private to `daruda_acp`, so this exercises the shared
+/// model transition that `pump_pending_prompt` runs immediately before sending
+/// the returned text over the handle.
+#[gpui::test]
+async fn queued_prompt_drain_echoes_front_item_and_preserves_fifo(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.send_agent_prompt_text(id, "first".to_string(), cx);
+                ws.send_agent_prompt_text(id, "second".to_string(), cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
+    let would_send =
+        cx.update(|cx| view.update(cx, |v, cx| v.drain_next_queued_prompt_for_test(cx)));
+
+    assert_eq!(would_send, Some("first".to_string()));
+    view.read_with(cx, |v, _| {
+        assert_eq!(
+            queue_texts(v),
+            vec!["second".to_string()],
+            "only the drained front prompt leaves the queue"
+        );
+        assert_eq!(
+            v.items,
+            vec![daruda_acp::ChatItem::UserText("first".to_string())],
+            "the drained prompt is echoed at send time"
+        );
+        assert!(
+            !v.turn_is_idle(),
+            "draining a queued prompt starts a tracked turn"
+        );
+    });
+}
+
+#[gpui::test]
+async fn queued_prompt_ops_remove_one_and_clear_all(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let (pane_id, remove_id) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.send_agent_prompt_text(id, "first".to_string(), cx);
+                ws.send_agent_prompt_text(id, "second".to_string(), cx);
+                ws.send_agent_prompt_text(id, "third".to_string(), cx);
+                let remove_id = agent_view(ws, id).read(cx).pending_prompts[1].id;
+                (id, remove_id)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.remove_queued_prompt(pane_id, remove_id, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        assert_eq!(
+            queue_texts(view),
+            vec!["first".to_string(), "third".to_string()],
+            "remove_queued_prompt removes only the matching id"
+        );
+        assert!(
+            view.items.is_empty(),
+            "removing from the queue does not echo"
+        );
+    });
+
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        assert!(
+            view.pending_prompts.is_empty(),
+            "clear removes every prompt"
+        );
+        assert!(view.items.is_empty(), "clearing the queue does not echo");
+    });
+}
+
+#[gpui::test]
+async fn bottom_dock_snapshot_reflects_active_agent_queue(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let first = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let first_id = first.id;
+            ws.active_runtime_mut().panes.push(first);
+            ws.send_agent_prompt_text(first_id, "inactive".to_string(), cx);
+
+            let second = ws.create_agent_chat_pane(
+                Some(PaneCwd::Local(tmp.clone())),
+                None,
+                daruda_config::AgentDefinition::claude_default().id,
+                None,
+                window,
+                cx,
+            );
+            let second_id = second.id;
+            ws.active_runtime_mut().panes.push(second);
+            ws.active_runtime_mut().focused_pane_id = second_id;
+            ws.send_agent_prompt_text(second_id, "active first".to_string(), cx);
+            ws.send_agent_prompt_text(second_id, "active second".to_string(), cx);
+
+            let snap = ws.prepare_bottom_dock_snapshot(cx);
+            let (pane_id, queued) = snap
+                .queued_prompts
+                .as_ref()
+                .expect("active agent queue is projected into the bottom snapshot");
+            assert_eq!(*pane_id, second_id);
+            assert_eq!(
+                queued.iter().map(|q| q.text.clone()).collect::<Vec<_>>(),
+                vec!["active first".to_string(), "active second".to_string()],
+                "only the focused agent pane's queue is projected"
+            );
+
+            ws.active_runtime_mut().focused_pane_id = first_id;
+            let snap = ws.prepare_bottom_dock_snapshot(cx);
+            let (pane_id, queued) = snap
+                .queued_prompts
+                .as_ref()
+                .expect("newly active agent queue is projected");
+            assert_eq!(*pane_id, first_id);
+            assert_eq!(
+                queued.iter().map(|q| q.text.clone()).collect::<Vec<_>>(),
+                vec!["inactive".to_string()]
+            );
+        });
+    })
+    .unwrap();
+}
+
 /// `deliver_text_to_pane` dispatch table: the funnel routes by pane kind at one
 /// place. An AgentChat submit with a non-empty body echoes/queues a prompt; a
 /// whitespace-only submit is an accepted no-op (no blank ACP turn — the
@@ -1604,7 +1806,8 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
     let tmp = std::env::temp_dir();
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            // AgentChat pane: non-empty submit → accepted + echoed/queued.
+            // AgentChat pane: non-empty submit → accepted + queued (no live
+            // handle here, so the prompt is queued rather than echoed).
             let chat = ws.create_agent_chat_pane(
                 Some(PaneCwd::Local(tmp.clone())),
                 None,
@@ -1630,15 +1833,15 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
             {
                 let view = agent_view(ws, chat_id);
                 let view = view.read(cx);
-                assert_eq!(view.items.len(), 1, "non-empty submit echoes one prompt");
+                assert!(view.items.is_empty(), "a queued prompt is not echoed");
                 assert_eq!(
-                    view.items[0],
-                    daruda_acp::ChatItem::UserText("do the thing".to_string()),
-                    "the body is trimmed at the single dispatch point"
+                    queue_texts(view),
+                    vec!["do the thing".to_string()],
+                    "the body is trimmed at the single dispatch point, then queued"
                 );
             }
 
-            // Whitespace-only submit → accepted no-op: no new echo, no turn.
+            // Whitespace-only submit → accepted no-op: no new queue entry, no turn.
             assert!(
                 ws.deliver_text_to_pane(
                     chat_id,
@@ -1655,10 +1858,11 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                 let view = agent_view(ws, chat_id);
                 let view = view.read(cx);
                 assert_eq!(
-                    view.items.len(),
+                    queue_texts(view).len(),
                     1,
-                    "a blank submit adds no echo and fires no ACP turn"
+                    "a blank submit adds no queue entry and fires no ACP turn"
                 );
+                assert!(view.items.is_empty());
                 assert!(view.turn_is_idle());
             }
 
@@ -2718,7 +2922,7 @@ async fn stop_buffers_reprompt_and_second_stop_clears_it(cx: &mut TestAppContext
             "the re-prompt is buffered, not raced onto the wire, during cancel"
         );
         assert_eq!(
-            v.pending_prompts,
+            queue_texts(v),
             vec!["again".to_string()],
             "the re-prompt buffers client-side"
         );

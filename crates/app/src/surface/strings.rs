@@ -1481,6 +1481,18 @@ pub fn bottom_input_send_button() -> String {
 pub fn bottom_input_stop_button() -> String {
     rust_i18n::t!("common.btn_stop").into_owned()
 }
+/// Queued-prompt strip header — count of prompts waiting behind the running turn.
+pub fn bottom_input_queued_count(n: usize) -> String {
+    rust_i18n::t!("bottom_dock.queued_count", n = n).into_owned()
+}
+/// Queued-prompt strip — "clear all" button label.
+pub fn bottom_input_queue_clear_all() -> String {
+    rust_i18n::t!("bottom_dock.queue_clear_all").into_owned()
+}
+/// Queued-prompt strip — per-item remove (×) button tooltip.
+pub fn bottom_input_queue_remove() -> String {
+    rust_i18n::t!("bottom_dock.queue_remove").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Projects view — section header + empty state

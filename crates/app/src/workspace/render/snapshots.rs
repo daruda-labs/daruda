@@ -132,7 +132,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn prepare_bottom_dock_snapshot(
+    pub(in crate::workspace) fn prepare_bottom_dock_snapshot(
         &mut self,
         cx: &mut Context<Self>,
     ) -> BottomDockSnapshot {
@@ -229,6 +229,27 @@ impl Workspace {
             })
             .filter(|opts| !opts.is_empty())
             .map(|opts| (focused_id, opts));
+        // Queued prompts of the focused agent pane, projected for the
+        // queued-prompt strip. Same focused-agent-pane gate as the mode chip;
+        // `None` when not an agent pane or the queue is empty (strip hidden).
+        let queued_prompts = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused_id)
+            .and_then(|p| p.agent_chat_view())
+            .map(|view| {
+                view.read(cx)
+                    .pending_prompts
+                    .iter()
+                    .map(|q| crate::workspace::layout::QueuedPromptView {
+                        id: q.id,
+                        text: q.text.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|q| !q.is_empty())
+            .map(|q| (focused_id, q));
         BottomDockSnapshot {
             terminal_input_visible: self.terminal_input_visible,
             active_tab_id,
@@ -240,6 +261,7 @@ impl Workspace {
             agent_stop_pane,
             agent_mode,
             agent_config_options,
+            queued_prompts,
             shell,
             workspace: self.bottom_dock.read(cx).workspace.clone(),
         }

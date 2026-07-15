@@ -51,7 +51,7 @@ use std::path::PathBuf;
 use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::telegram_ops::DeferKind;
-use super::view::{AgentChatView, AgentSessionStatus, RuntimePrepPhase, TurnOutcome};
+use super::view::{AgentChatView, AgentSessionStatus, PromptId, RuntimePrepPhase, TurnOutcome};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
@@ -1209,6 +1209,35 @@ impl Workspace {
                     }
                 }
             }
+        }
+    }
+
+    /// Remove a single queued prompt from an Agent chat pane. Shim for the
+    /// bottom-dock queued-prompt strip's per-item × button: routes into the
+    /// view, which drops the entry and notifies (one-way data flow). No-op when
+    /// `pane_id` is gone or is not an Agent chat pane.
+    pub(in crate::workspace) fn remove_queued_prompt(
+        &mut self,
+        pane_id: PaneId,
+        id: PromptId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.remove_queued(id, cx));
+        }
+    }
+
+    /// Clear every queued prompt from an Agent chat pane. Shim for the
+    /// bottom-dock queued-prompt strip's "clear all" button: routes into the
+    /// view, which empties the queue and notifies (one-way data flow). No-op
+    /// when `pane_id` is gone or is not an Agent chat pane.
+    pub(in crate::workspace) fn clear_queued_prompts(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.clear_queue(cx));
         }
     }
 

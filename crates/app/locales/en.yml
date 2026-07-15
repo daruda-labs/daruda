@@ -332,6 +332,9 @@ bottom_dock:
   row_preset_2: "2 rows"
   row_preset_3: "3 rows"
   row_preset_tooltip: "Bottom dock height"
+  queued_count: "%{n} queued"
+  queue_clear_all: "Clear all"
+  queue_remove: "Remove from queue"
 
 # Projects view
 projects:

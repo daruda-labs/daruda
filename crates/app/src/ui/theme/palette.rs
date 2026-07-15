@@ -970,6 +970,20 @@ pub const DOCK_BOTTOM_INPUT_TEXT_PAD_H: f32 = INPUT_TEXTAREA_PAD_Y * 2.0;
 /// INPUT_PANEL_BUTTON_GAP` (button height + bottom gap from input chrome
 /// edge).
 pub const DOCK_BOTTOM_INPUT_ACTION_ROW_H: f32 = BUTTON_HEIGHT + INPUT_PANEL_BUTTON_GAP;
+/// Queued-prompt strip: max height (px) before the item list scrolls
+/// internally, so a long queue can't crowd out the terminal input below it.
+pub const AGENT_QUEUE_STRIP_MAX_H: f32 = 120.0;
+/// Queued-prompt strip: gap between the header row and item rows, and between
+/// adjacent item rows (px).
+pub const AGENT_QUEUE_STRIP_GAP: f32 = GAP_SM;
+/// Queued-prompt strip: item row / header font size (px).
+pub const AGENT_QUEUE_STRIP_FONT_SIZE: f32 = FONT_SIZE_MD;
+/// Queued-prompt strip: item row corner radius (px).
+pub const AGENT_QUEUE_STRIP_ROW_RADIUS: f32 = RADIUS_SM;
+/// Queued-prompt strip: item row inner padding X (px).
+pub const AGENT_QUEUE_STRIP_ROW_PAD_X: f32 = PAD_SM;
+/// Queued-prompt strip: item row inner padding Y (px).
+pub const AGENT_QUEUE_STRIP_ROW_PAD_Y: f32 = PAD_XS;
 /// Width of the invisible hit target for resize handles — used by
 /// both dock handles and pane dividers. Kept independent of the
 /// visible boundary width so the hit zone can be widened without

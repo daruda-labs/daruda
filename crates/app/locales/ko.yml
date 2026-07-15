@@ -332,6 +332,9 @@ bottom_dock:
   row_preset_2: "2줄"
   row_preset_3: "3줄"
   row_preset_tooltip: "하단 독 높이"
+  queued_count: "%{n}개 대기 중"
+  queue_clear_all: "모두 지우기"
+  queue_remove: "대기열에서 제거"
 
 # Projects view
 projects:

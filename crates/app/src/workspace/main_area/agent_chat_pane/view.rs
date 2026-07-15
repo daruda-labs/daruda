@@ -194,6 +194,31 @@ pub(in crate::workspace) enum ActivityState {
     AwaitingPermission,
 }
 
+/// Stable identity of a queued prompt, minted per pane by
+/// [`AgentChatView::enqueue_prompt`]. Lets the queued-prompt strip target a
+/// specific entry for removal without depending on its position (which shifts
+/// as earlier entries drain or are removed). Runtime-only; never persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(in crate::workspace) struct PromptId(u64);
+
+impl std::fmt::Display for PromptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A prompt the user submitted while a turn was in flight (or before the
+/// session connected), held in the queue until it can be dispatched. Unlike
+/// the send-now path, a queued prompt is NOT echoed into the transcript — it
+/// lives only here (and in the queued-prompt strip) until
+/// [`AgentChatView::pump_pending_prompt`] drains it, at which point it is
+/// echoed as a [`ChatItem::UserText`] at send time.
+#[derive(Debug, Clone)]
+pub(in crate::workspace) struct QueuedPrompt {
+    pub id: PromptId,
+    pub text: String,
+}
+
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
 ///
 /// Owns the live session: the [`daruda_acp::AcpSessionHandle`] the workspace
@@ -272,7 +297,16 @@ pub(in crate::workspace) struct AgentChatView {
     /// `TurnEnded` pumps the next, keeping only one turn tracked at a time.
     /// Cleared on a connect failure / terminal `Error` (there is no reconnect
     /// path, so buffered prompts can never be delivered); never serialized.
-    pub(in crate::workspace) pending_prompts: Vec<String>,
+    ///
+    /// A queued prompt is NOT echoed into `items` — it lives only here (surfaced
+    /// by the bottom-dock queued-prompt strip, keyed by [`PromptId`]) until it
+    /// drains, at which point `pump_pending_prompt` echoes it as a `UserText` at
+    /// send time. The user can remove an individual entry ([`Self::remove_queued`])
+    /// or clear the whole queue ([`Self::clear_queue`]) from the strip.
+    pub(in crate::workspace) pending_prompts: Vec<QueuedPrompt>,
+    /// Monotonic counter minting the next [`PromptId`] for a queued prompt.
+    /// Runtime-only; never serialized.
+    pub(in crate::workspace) next_prompt_id: u64,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
@@ -481,6 +515,17 @@ impl AgentChatView {
     #[cfg(test)]
     pub(in crate::workspace) fn turn_is_idle(&self) -> bool {
         !self.turn.is_in_flight()
+    }
+
+    /// Test-only hook: run the model half of the queued-prompt drain without a
+    /// live ACP handle. This mirrors what `pump_pending_prompt` does immediately
+    /// before sending the returned text over the handle.
+    #[cfg(test)]
+    pub(in crate::workspace) fn drain_next_queued_prompt_for_test(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        self.drain_next_queued_prompt(cx)
     }
 
     /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
@@ -716,6 +761,7 @@ impl AgentChatView {
             items: Vec::new(),
             handle: None,
             pending_prompts: Vec::new(),
+            next_prompt_id: 0,
             _event_pump: None,
             pending_permissions: HashSet::new(),
             turn: Turn::Idle,
@@ -1141,8 +1187,9 @@ impl AgentChatView {
                 // edge (via `reconcile_activity`), same as a normal completion.
                 self.pending_completion = Some(TurnOutcome::Errored);
                 // The session is dead with no reconnect path, so any buffered
-                // prompts can never be delivered — drop them (they were already
-                // echoed locally) rather than leaving them to be pumped.
+                // prompts can never be delivered — drop them rather than leaving
+                // them to be pumped (they were never echoed, so nothing dangles
+                // in the transcript).
                 self.pending_prompts.clear();
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
@@ -1355,33 +1402,46 @@ impl AgentChatView {
         );
     }
 
-    /// Send `text` as a prompt: echo it locally, forward it over the session,
-    /// and mark a turn in flight. Driven by the bottom-dock input via the
-    /// Workspace shim (`send_agent_prompt_text`).
+    /// Send `text` as a prompt. When the session is connected and idle, echo it
+    /// into the transcript and forward it over the session, marking a turn in
+    /// flight. Otherwise (not connected yet, a turn already in flight, or a
+    /// Stop's cancel still outstanding) enqueue it WITHOUT echoing — a queued
+    /// prompt lives only in the queue (surfaced by the bottom-dock strip) until
+    /// [`Self::pump_pending_prompt`] drains it and echoes it at send time.
+    /// Driven by the bottom-dock input via the Workspace shim
+    /// (`send_agent_prompt_text`).
     pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
-        // Echo locally so the prompt shows immediately even before the agent
-        // streams it back as a user-message chunk.
-        self.items.push(ChatItem::UserText(text.clone()));
         if let Some(handle) = &self.handle
             && !self.turn.is_in_flight()
             && !self.cancel_in_flight
         {
-            // Connected and idle: send now and mark the turn in flight.
-            handle.send_prompt(text);
+            // Connected and idle: send now, mark the turn in flight, and echo.
+            handle.send_prompt(text.clone());
             self.turn = Turn::InFlight {
                 started_at: std::time::Instant::now(),
             };
+            self.echo_prompt(text, cx);
         } else {
             // Not connected yet (lazy connect happens on first focus), a turn is
             // already in flight, or a Stop's cancel is still outstanding
             // (`cancel_in_flight` — buffer client-side so a second Stop can clear
-            // it and it can't race the cancel's ack onto the wire). Buffer in
-            // submission order — the local echo above already shows it — and drain
-            // it one-per-turn via `pump_pending_prompt` (at connect, on each
-            // `TurnEnded`, and when the cancel window closes). Do *not* mark the
-            // turn in flight: nothing new is on the wire yet.
-            self.pending_prompts.push(text);
+            // it and it can't race the cancel's ack onto the wire). Enqueue in
+            // submission order without echoing; it drains one-per-turn via
+            // `pump_pending_prompt` (at connect, on each `TurnEnded`, and when the
+            // cancel window closes) and is echoed then. Do *not* mark the turn in
+            // flight: nothing new is on the wire yet.
+            self.enqueue_prompt(text);
         }
+        cx.notify();
+    }
+
+    /// Append `text` to the transcript as a `UserText` item and refresh the
+    /// render (mermaid raster + row projection + scroll-to-end). This is the
+    /// prompt-echo, shared by the send-now path in [`Self::send_prompt_text`]
+    /// and the drain in [`Self::pump_pending_prompt`] — the echo now happens at
+    /// *send* time, not when a prompt is queued.
+    fn echo_prompt(&mut self, text: String, cx: &mut Context<Self>) {
+        self.items.push(ChatItem::UserText(text));
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
         // be a no-op here; diff editors are reconciled solely on the event-pump
         // path. The echoed `UserText` renders its markdown directly; a prompt
@@ -1396,7 +1456,55 @@ impl AgentChatView {
         // that lands at the bottom (gpui `list` re-arms following there), so the
         // streaming response keeps sticking — no manual stick flag needed.
         self.list_state.scroll_to_end();
+    }
+
+    /// Push `text` onto the pending-prompt queue with a freshly minted
+    /// [`PromptId`], returning that id. Does NOT echo into the transcript and
+    /// does NOT notify — the caller notifies once after mutating.
+    fn enqueue_prompt(&mut self, text: String) -> PromptId {
+        let id = PromptId(self.next_prompt_id);
+        self.next_prompt_id += 1;
+        self.pending_prompts.push(QueuedPrompt { id, text });
+        id
+    }
+
+    /// Remove the queued prompt with `id` from the queue. No-op (no notify) when
+    /// `id` is not present. Backs the bottom-dock strip's per-item × button via
+    /// the `Workspace::remove_queued_prompt` shim (one-way data flow).
+    pub(in crate::workspace) fn remove_queued(&mut self, id: PromptId, cx: &mut Context<Self>) {
+        let before = self.pending_prompts.len();
+        self.pending_prompts.retain(|q| q.id != id);
+        if self.pending_prompts.len() != before {
+            self.rebuild_rows();
+            cx.notify();
+        }
+    }
+
+    /// Drop every queued prompt. No-op (no notify) when the queue is already
+    /// empty. Backs the bottom-dock strip's "clear all" button via the
+    /// `Workspace::clear_queued_prompts` shim (one-way data flow).
+    pub(in crate::workspace) fn clear_queue(&mut self, cx: &mut Context<Self>) {
+        if self.pending_prompts.is_empty() {
+            return;
+        }
+        self.pending_prompts.clear();
+        self.rebuild_rows();
         cx.notify();
+    }
+
+    /// Move the next queued prompt into the active-turn model and return the
+    /// text that should be sent over ACP. No-op while a turn or cancel is active.
+    fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        if self.turn.is_in_flight() || self.cancel_in_flight || self.pending_prompts.is_empty() {
+            return None;
+        }
+        let qp = self.pending_prompts.remove(0);
+        self.turn = Turn::InFlight {
+            started_at: std::time::Instant::now(),
+        };
+        let text = qp.text;
+        self.echo_prompt(text.clone(), cx);
+        Some(text)
     }
 
     /// Send the next single buffered prompt iff the session is connected and no
@@ -1408,24 +1516,21 @@ impl AgentChatView {
     /// pumps the first; each `TurnEnded` pumps the next) so the view never
     /// tracks more than one turn at a time — the Stop / Send affordance then
     /// reflects the single live turn instead of clearing while later queued
-    /// turns are still streaming. The echo was already appended when the prompt
-    /// was buffered in `send_prompt_text`, so this does not re-echo.
+    /// turns are still streaming. A queued prompt was NOT echoed when it was
+    /// buffered, so the drain echoes it here (at send time).
     pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
         // Hold the queue while a cancel is still outstanding (`cancel_in_flight`):
         // the buffered re-prompt drains only once that window closes, via the
         // `TurnEnded` ack path that clears the flag and calls this.
-        if self.turn.is_in_flight() || self.cancel_in_flight || self.pending_prompts.is_empty() {
+        if self.handle.is_none() {
             return;
+        };
+        let Some(text) = self.drain_next_queued_prompt(cx) else {
+            return;
+        };
+        if let Some(handle) = &self.handle {
+            handle.send_prompt(text);
         }
-        let Some(handle) = self.handle.as_ref() else {
-            return;
-        };
-        // FIFO: the front of the queue is the oldest buffered prompt.
-        let text = self.pending_prompts.remove(0);
-        handle.send_prompt(text);
-        self.turn = Turn::InFlight {
-            started_at: std::time::Instant::now(),
-        };
         cx.notify();
     }
 

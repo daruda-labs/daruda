@@ -11,6 +11,7 @@
 pub(in crate::workspace) mod macro_edit_modal;
 pub(in crate::workspace) mod macro_key;
 pub(in crate::workspace) mod macro_ops;
+pub(in crate::workspace) mod queue_strip;
 pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
 pub(in crate::workspace) mod terminal_input;
@@ -58,7 +59,21 @@ pub(in crate::workspace) fn render_body(
     cx: &mut Context<Dock>,
 ) -> AnyElement {
     if snap.terminal_input_visible {
-        return terminal_input::render_body(snap, cx);
+        let input = terminal_input::render_body(snap, cx);
+        // The queued-prompt strip (if any) sits ABOVE the input panel; both
+        // stack in a full-height column so the input keeps its `flex_1` growth
+        // and the fixed-height strip rides on top.
+        return match queue_strip::render(snap, cx) {
+            Some(strip) => div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(strip)
+                .child(input)
+                .into_any_element(),
+            None => input,
+        };
     }
 
     let active_tab_id = snap.active_tab_id.as_ref();

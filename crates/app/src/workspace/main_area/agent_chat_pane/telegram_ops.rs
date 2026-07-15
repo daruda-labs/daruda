@@ -701,7 +701,7 @@ mod tests {
     /// `window_registry.rs`'s `make_window` test helper), one AgentChat pane
     /// per workspace, `for_each_workspace` + a `uuid()` guard, and
     /// `inject_bot_reply` as the observable mutation. Only the pane in the
-    /// targeted workspace should receive the injected prompt.
+    /// targeted workspace should receive the injected queued prompt.
     #[gpui::test]
     async fn for_each_workspace_uuid_guard_dispatches_to_only_the_matching_pane(
         cx: &mut gpui::TestAppContext,
@@ -770,15 +770,19 @@ mod tests {
         workspace_a.read_with(cx, |ws, cx| {
             let view = ws.agent_chat_view(pane_a).cloned().expect("pane a present");
             assert_eq!(
-                view.read(cx).items.len(),
-                1,
-                "the targeted workspace's pane received the injected prompt"
+                view.read(cx)
+                    .pending_prompts
+                    .iter()
+                    .map(|q| q.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["hello from telegram"],
+                "the targeted workspace's pane received the injected queued prompt"
             );
         });
         workspace_b.read_with(cx, |ws, cx| {
             let view = ws.agent_chat_view(pane_b).cloned().expect("pane b present");
             assert!(
-                view.read(cx).items.is_empty(),
+                view.read(cx).pending_prompts.is_empty(),
                 "the non-matching workspace's pane must not be touched"
             );
         });
