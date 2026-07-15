@@ -20,6 +20,7 @@ pub mod button;
 pub mod button_group;
 pub mod chart;
 pub mod checkbox;
+pub mod code_copy_button;
 pub mod code_editor;
 pub mod context_menu;
 pub mod dialog;
@@ -55,6 +56,7 @@ pub use button::{
 pub use button_group::{ButtonGroup, button_group};
 pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
+pub use code_copy_button::code_copy_button;
 pub use code_editor::{
     LineDecoration, file_viewer_editor, make_markdown_prose_state, make_markdown_state,
     markdown_editor,
@@ -84,7 +86,9 @@ pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};
 pub use gpui_component::scroll::ScrollableElement;
-pub use gpui_component::text::{SelectMode, select_mode_for_click_count};
+pub use gpui_component::text::{
+    SelectMode, TextSelectionHandle, active_text_selection, select_mode_for_click_count,
+};
 pub use gpui_component::text_selection::{
     CharType, ceil_char_boundary, char_cell_hit_x, floor_char_boundary, logical_line_range,
     word_range,

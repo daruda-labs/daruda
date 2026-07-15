@@ -384,6 +384,9 @@ impl CodeBlock {
             .child(
                 div()
                     .id("codeblock")
+                    // Hover anchor for the actions overlay's group-hover reveal
+                    // (daruda's markdown code-block copy button).
+                    .group("gpui-code-block")
                     .p_3()
                     .rounded(cx.theme().radius)
                     // Background-derived tint instead of the fixed
@@ -416,10 +419,15 @@ impl CodeBlock {
                     ))
                     .when_some(node_cx.code_block_actions.clone(), |this, actions| {
                         this.child(
+                            // Hover-reveal the whole overlay (background chip +
+                            // action) against the `gpui-code-block` group, so an
+                            // idle code block shows no persistent chip.
                             div()
                                 .absolute()
                                 .top_2()
                                 .right_2()
+                                .invisible()
+                                .group_hover("gpui-code-block", |s| s.visible())
                                 .bg(cx.theme().muted)
                                 .rounded(cx.theme().radius)
                                 .child(actions(&self, window, cx)),

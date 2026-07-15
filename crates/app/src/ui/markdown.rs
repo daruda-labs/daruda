@@ -18,6 +18,8 @@
 //! — valid only while the item list is append-only (see the agent-chat fold
 //! INVARIANT).
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use gpui::{
@@ -100,6 +102,8 @@ impl RenderOnce for Markdown {
         // theme foreground) — otherwise the body renders in gpui's default
         // black, invisible on the dark canvas. Code blocks keep syntax colors.
         let color = self.color.unwrap_or_else(|| cx.theme().foreground);
+        // Keep the markdown id to key each code block's copy button (below).
+        let base_id = self.id.clone();
         let mut view = TextView::markdown(self.id, self.text, window, cx)
             .selectable(self.selectable)
             .text_color(color);
@@ -124,6 +128,21 @@ impl RenderOnce for Markdown {
                 cbr(lang, source.as_ref(), window, cx)
             });
         }
+        // A hover-revealed copy button on every rendered code block, on for all
+        // markdown. Mermaid fences take the separate `code_block_render`
+        // replace-path above, which fully replaces the block's rendering (and
+        // supplies its own copy button), so they never reach this actions
+        // overlay and are naturally excluded. Key each button by the markdown
+        // id plus a content hash so its ✓ feedback state stays stable across
+        // renders even with multiple blocks of the same language. (Two
+        // byte-identical code blocks in one message hash alike and share one
+        // ✓ state — benign: they copy the same text.)
+        view = view.code_block_actions(move |cb, window, cx| {
+            let mut hasher = DefaultHasher::new();
+            cb.code().as_ref().hash(&mut hasher);
+            let id = ElementId::Name(format!("{base_id}-codecopy-{}", hasher.finish()).into());
+            crate::ui::code_copy_button(id, cb.code(), window, cx)
+        });
         view
     }
 }

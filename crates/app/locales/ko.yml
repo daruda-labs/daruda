@@ -768,6 +768,11 @@ terminal:
   annotation_err_operation_failed_title: "주석 작업 실패"
   annotation_err_operation_failed_message: "주석을 저장할 수 없습니다."
 
+# Rendered-markdown code-block copy button
+code_block:
+  copy: "코드 복사"
+  copied: "복사됨"
+
 # Create lane modal validation errors
 create_lane:
   err_branch_required: "브랜치 이름을 입력해 주세요."

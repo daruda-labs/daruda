@@ -882,6 +882,16 @@ pub const FILE_VIEWER_CLOSE: &str = "×";
 pub fn file_viewer_no_newline() -> String {
     rust_i18n::t!("file_viewer.no_newline").into_owned()
 }
+/// Tooltip on the rendered-markdown code-block copy button (idle state).
+pub fn code_block_copy() -> String {
+    rust_i18n::t!("code_block.copy").into_owned()
+}
+
+/// Tooltip on the rendered-markdown code-block copy button after a copy.
+pub fn code_block_copied() -> String {
+    rust_i18n::t!("code_block.copied").into_owned()
+}
+
 pub fn file_viewer_copy_abs_path() -> String {
     rust_i18n::t!("file_viewer.copy_abs_path").into_owned()
 }

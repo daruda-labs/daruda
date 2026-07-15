@@ -54,6 +54,7 @@ ui/
 ├── button_group.rs # button_group(id) — segmented single-select strip over gpui_component::ButtonGroup (theme-aware selected styling; `.children(buttons.selected(..))` + `.on_click(|indices|..)`)
 ├── chart.rs        # BarChart re-export over gpui_component::chart (Plot-backed; caller wraps in a fixed-height container)
 ├── checkbox.rs     # checkbox(id, label)
+├── code_copy_button.rs # code_copy_button(id, code, window, cx) — hover-reveal copy button for rendered-markdown code blocks (✓ feedback + 2s targeted-notify revert); wired globally by markdown.rs, revealed by the node.rs `gpui-code-block` group patch
 ├── dialog.rs       # Dialog / DialogButtonProps / ButtonVariant / WindowExt re-exports
 ├── disclosure.rs   # disclosure(id, is_open) — stateless chevron toggle (ChevronDown open / ChevronRight closed; .color()/.size()/.on_toggle()); caller owns fold state
 ├── group_box.rs    # group_box() factory over gpui_component::GroupBox (.outline()/.fill()/title)
@@ -283,9 +284,10 @@ access, ask first whether the access belongs in `ui/` instead.
 
 ## Vendor patches in `crates/gpui_component/`
 
-Fifteen small patches over upstream `longbridge/gpui-component` v0.5.1
+Small patches over upstream `longbridge/gpui-component` v0.5.1
 keep daruda's theme propagation + modal tab containment + tab font /
-gap / height control working. Re-apply on rev bump:
+gap / height control + agent-chat markdown chrome working. Re-apply on
+rev bump (the table below is the full list):
 
 | Patch | File | What |
 |---|---|---|
@@ -324,7 +326,10 @@ gap / height control working. Re-apply on rev bump:
 | Plain-text TextView (`TextViewType::Text`) | `src/text/text_view.rs` (`TextViewType::Text` variant, `TextView::plain(id, text, window, cx)` constructor, `parse_content` arm) | Renders the raw string verbatim as a single paragraph (no Markdown/HTML interpretation) through the same selectable Inline path — a selectable primitive for non-markdown text (command output, logs, titles). Mirrors zed's `Markdown::new_text` (`parse_links_only`) role. Wrapped as `crate::ui::selectable_text`. |
 | Multi-byte word/line selection | `src/text/inline.rs` (`layout_selections` char-width via `offset + c.len_utf8()`, Word/Line expansion via `text_selection::floor_char_boundary`), `src/text_selection.rs` (`floor_char_boundary`/`ceil_char_boundary` helpers; `CharType::from_char` uses `is_alphanumeric`) | Word/line selection was ASCII-only: `offset + 1` / `raw_end - 1` split 3-byte Hangul/CJK glyphs (cell width collapsed, `word_range` bailed at a non-boundary), and `is_ascii_alphanumeric` classified Hangul/CJK as `Other` (non-connectable). Now the byte steps round to char boundaries and any-script letters are `Word`, so double-click selects Hangul/CJK words. `floor_char_boundary`/`ceil_char_boundary` are the canonical helpers to reach for instead of `offset ± 1`; re-exported from `crate::ui`. |
 | Selection survives streaming | `src/text/text_view.rs` (`update_bounds` clears only on **width** change; reparse no longer calls `clear_selection`) | A streaming markdown block reparses and grows in height on every chunk; both the unconditional reparse-clear and the any-size-change clear dropped the user's selection mid-stream. Since a block's text only appends (stable layout), keep the pixel selection across reparse and height growth; only a width change (real reflow) clears. |
+| Code-block copy-button hover reveal | `src/text/node.rs` (`CodeBlock::render`) | add `.group("gpui-code-block")` to the code-block container div and gate the actions overlay with `.invisible().group_hover("gpui-code-block", \|s\| s.visible())`, so the host's `crate::ui::code_copy_button` (wired for all markdown via `crate::ui::markdown`) is revealed only on hover and an idle block shows no persistent action chip. |
 | Streaming re-parse debounce 200ms → 33ms | `src/text/text_view.rs` (`UpdateFuture` delay arg in the `request_layout` init path) | Upstream's 200ms trailing debounce makes streamed agent-chat markdown land in ~200ms steps ("chunky"); 33ms (~30Hz) lets it flow near-continuously like zed's eager reparse (`markdown.rs` `parse` has no fixed delay, only `pending_parse`/`should_reparse` coalescing). Parsing is off the main thread, so a lower value only raises background-parse frequency; static content parses once and is unaffected. Sole `Duration::from_millis` in the file — tune there. |
+| Expose active text selection | `src/global_state.rs` (`GlobalState::selecting_state: Option<Entity<TextViewState>>`), `src/text/text_view.rs` (paint mouse handlers set/unset the field; `pub struct TextSelectionHandle` + `pub fn active_text_selection(cx) -> Option<TextSelectionHandle>`) | Per-block selection lives in the private `TextViewState`; the host had no way to read/extend a live drag-selection. The selectable block's paint mouse-down handler registers its `Entity<TextViewState>` into `GlobalState.selecting_state` right after `start_selection` (the handle only exists in the handler — the state's own methods take `&mut self`), and mouse-up (`end_selection`) / outside-clear (`clear_selection`) null it. `active_text_selection(cx)` returns an opaque `TextSelectionHandle` wrapping that entity with `block_bounds` / `is_selecting` / `extend_to(pos)` (reuses `update_selection` — no duplicated `pos - bounds.origin` math) / `clear` (clears selection **and** deregisters). Drives agent-chat auto-scroll: a poll driver reads the live selection and extends it into newly-revealed text while dragging past the viewport edge. |
+| `gpui` test-support dev-dep | `Cargo.toml` (`[dev-dependencies] gpui = { workspace = true, features = ["test-support"] }`) | the lib-test target needs `#[gpui::test]` / `TestAppContext`, which require gpui's `test-support` feature; without it `tree.rs` (and any App-context test) fails to compile and takes the whole `cargo test -p gpui_component` suite down. Dev-only — never in the shipping binary. Fixes the pre-existing `tree.rs` compile failure noted in the sibling render-patch rows and unblocks App-context unit tests (e.g. the active-text-selection test). |
 
 Plus `[lints]` in `crates/gpui_component/Cargo.toml` silencing all
 upstream clippy warnings (vendored code is not in our lint scope).

@@ -855,6 +855,12 @@ impl Element for TextView {
                     state.update(cx, |state, _| {
                         state.start_selection(event.position, click_count);
                     });
+                    // Register the actively-selecting block so a host driver can
+                    // read/extend the live selection while the drag runs. The
+                    // `Entity<TextViewState>` handle only exists here (the state's
+                    // own methods take `&mut self`), so registration lives in the
+                    // handler, not in `start_selection`.
+                    GlobalState::global_mut(cx).selecting_state = Some(state.clone());
                     cx.notify(entity_id);
                 }
             });
@@ -886,6 +892,7 @@ impl Element for TextView {
                         state.update(cx, |state, _| {
                             state.end_selection();
                         });
+                        GlobalState::global_mut(cx).selecting_state = None;
                         cx.notify(entity_id);
                     }
                 });
@@ -903,12 +910,55 @@ impl Element for TextView {
                         state.update(cx, |state, _| {
                             state.clear_selection();
                         });
+                        GlobalState::global_mut(cx).selecting_state = None;
                         cx.notify(entity_id);
                     }
                 });
             }
         }
     }
+}
+
+/// Opaque handle to the selectable text-view block that currently has an
+/// active drag-selection (mouse held down). Obtained via
+/// [`active_text_selection`]. Lets a host driver (e.g. agent-chat autoscroll)
+/// read the block's bounds and extend or clear the live selection while the
+/// drag runs, without reaching into the private `TextViewState`.
+pub struct TextSelectionHandle(Entity<TextViewState>);
+
+impl TextSelectionHandle {
+    /// The block's bounds in window coordinates (refreshed each paint).
+    pub fn block_bounds(&self, cx: &App) -> Bounds<Pixels> {
+        self.0.read(cx).bounds
+    }
+
+    /// Whether the block is still in an active drag-selection.
+    pub fn is_selecting(&self, cx: &App) -> bool {
+        self.0.read(cx).is_selecting
+    }
+
+    /// Extend the selection's end to `pos` (window coordinates). Reuses the
+    /// exact window→local conversion a real mouse-move drag performs.
+    pub fn extend_to(&self, pos: Point<Pixels>, cx: &mut App) {
+        self.0.update(cx, |state, _| state.update_selection(pos));
+    }
+
+    /// Clear the selection — the same effect as clicking outside the block.
+    /// Also deregisters this block from the global active-selection slot, so a
+    /// subsequent [`active_text_selection`] returns `None`.
+    pub fn clear(&self, cx: &mut App) {
+        self.0.update(cx, |state, _| state.clear_selection());
+        GlobalState::global_mut(cx).selecting_state = None;
+    }
+}
+
+/// Return a handle to the selectable text-view block that currently has an
+/// active drag-selection, if any. `None` when no block is mid-drag.
+pub fn active_text_selection(cx: &App) -> Option<TextSelectionHandle> {
+    GlobalState::global(cx)
+        .selecting_state
+        .clone()
+        .map(TextSelectionHandle)
 }
 
 fn parse_content(
@@ -1060,6 +1110,51 @@ mod tests {
         assert_eq!(select_mode_for_click_count(3), SelectMode::Line);
         assert_eq!(select_mode_for_click_count(4), SelectMode::All);
         assert_eq!(select_mode_for_click_count(99), SelectMode::All);
+    }
+
+    /// Exercises the external selection side-channel end to end: registering a
+    /// block into `GlobalState.selecting_state` (what the paint mouse-down
+    /// handler does) makes `active_text_selection` observable, the handle
+    /// reflects `is_selecting` / `block_bounds`, `extend_to` reuses
+    /// `update_selection`, and `clear` both clears the selection and
+    /// deregisters the block so the handle disappears.
+    #[gpui::test]
+    fn test_active_text_selection_register_and_clear(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| TextViewState::new(cx));
+
+        cx.update(|cx| {
+            cx.set_global(GlobalState::new());
+
+            // Nothing registered → no active selection.
+            assert!(active_text_selection(cx).is_none());
+
+            // Begin a selection and register the block, mirroring the
+            // mouse-down handler.
+            state.update(cx, |state, _| {
+                state.bounds = Bounds {
+                    origin: point(px(5.), px(7.)),
+                    size: size(px(100.), px(40.)),
+                };
+                state.start_selection(point(px(10.), px(12.)), 1);
+            });
+            GlobalState::global_mut(cx).selecting_state = Some(state.clone());
+
+            // Now observable, and reflects the live block state.
+            let handle = active_text_selection(cx).expect("selection registered");
+            assert!(handle.is_selecting(cx));
+            assert_eq!(handle.block_bounds(cx).origin, point(px(5.), px(7.)));
+
+            // extend_to reuses update_selection (window→local conversion).
+            handle.extend_to(point(px(40.), px(20.)), cx);
+            let end_local = point(px(40.), px(20.)) - point(px(5.), px(7.));
+            assert_eq!(state.read(cx).selection_positions.1, Some(end_local));
+
+            // clear() clears the selection and deregisters the block.
+            handle.clear(cx);
+            assert!(!state.read(cx).is_selecting);
+            assert!(!state.read(cx).has_selection());
+            assert!(active_text_selection(cx).is_none());
+        });
     }
 
     #[test]

@@ -46,8 +46,8 @@ use daruda_acp::{
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
 use gpui::{
-    AnyWindowHandle, App, Context, Entity, FocusHandle, Focusable, FollowMode, ListAlignment,
-    ListState, ScrollHandle, Subscription, Task, Window, prelude::*, px,
+    AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, Focusable, FollowMode,
+    ListAlignment, ListState, Pixels, ScrollHandle, Subscription, Task, Window, prelude::*, px,
 };
 
 use super::agent_chat_helpers::{
@@ -417,6 +417,25 @@ pub(in crate::workspace) struct AgentChatView {
     /// `list()`), backing the region's 4px daruda thumb overlay. Runtime-only;
     /// never serialized.
     pub(in crate::workspace) plan_scroll: ScrollHandle,
+    /// Window-space bounds of the scrolling list viewport, captured each paint
+    /// by the container's `canvas` (the sanctioned layout-geometry cache; see
+    /// CLAUDE §3). Read by the drag-selection autoscroll poll to decide when the
+    /// cursor has left the viewport. `None` until the first paint. Transient.
+    pub(in crate::workspace) list_bounds: Option<Bounds<Pixels>>,
+    /// Drag-selection autoscroll poll task (mirrors `TerminalView::autoscroll_task`).
+    /// Spawned on a left mouse-down in the list, self-terminates when the drag
+    /// ends. Replace-and-cancel on each new drag; `None` when idle. Transient.
+    pub(in crate::workspace) autoscroll_task: Option<Task<()>>,
+    /// App-owned "a drag-selection is in progress" signal (mirrors the
+    /// terminal's `MouseDragState::TextSelection`). Set on the always-painted
+    /// list container's mouse-down, cleared through the single `end_selection_drag`
+    /// end point. This is the *primary* autoscroll-loop termination authority:
+    /// it is independent of the selected block's paint lifetime, so the poll
+    /// still stops on mouse-release even when the block unmounts from the
+    /// virtualized list mid-drag (which would leave the vendored `TextView`'s
+    /// paint-registered mouse-up / outside-clear handlers unable to null the
+    /// selection slot). Transient / session-only.
+    pub(in crate::workspace) selection_drag_active: bool,
     /// Inactive-pane dim amount in `[0.0, 1.0]`: `0.0` = focused / full color,
     /// `> 0.0` = unfocused leaf of a split, blended toward gray by this factor
     /// (see [`Self::dim`]). The single write site is `Workspace::refresh_pane_dimming`
@@ -719,6 +738,9 @@ impl AgentChatView {
             session_updated_at: None,
             plan_collapsed: false,
             plan_scroll: ScrollHandle::new(),
+            list_bounds: None,
+            autoscroll_task: None,
+            selection_drag_active: false,
             dim_amount: 0.0,
             _theme_observer: theme_observer,
             #[cfg(test)]

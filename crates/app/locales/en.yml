@@ -768,6 +768,11 @@ terminal:
   annotation_err_operation_failed_title: "Annotation operation failed"
   annotation_err_operation_failed_message: "The annotation could not be saved."
 
+# Rendered-markdown code-block copy button
+code_block:
+  copy: "Copy code"
+  copied: "Copied"
+
 # Create lane modal validation errors
 create_lane:
   err_branch_required: "Branch name is required."

@@ -862,6 +862,16 @@ pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 /// Agent chat turn-boundary gap (px) — extra space above a new user message,
 /// paired with a hairline, so consecutive turns read as distinct exchanges.
 pub const AGENT_CHAT_TURN_GAP: f32 = PAD_XL;
+/// Poll interval (ms) for the agent-chat drag-selection autoscroll loop.
+/// Mirrors the terminal's selection-autoscroll cadence (~20 Hz): fast enough
+/// to feel continuous while the cursor is parked past the pane edge, slow
+/// enough to stay cheap. Read by `start_selection_autoscroll`.
+pub const AGENT_CHAT_AUTOSCROLL_POLL_MS: u64 = 50;
+/// Maximum per-tick scroll distance (px) for the agent-chat drag-selection
+/// autoscroll — caps the velocity so a cursor dragged far past the edge
+/// scrolls smoothly (~3 chat lines per tick) instead of jumping pages. Read
+/// by `autoscroll_step`.
+pub const AGENT_CHAT_AUTOSCROLL_MAX_STEP_PX: f32 = 48.0;
 /// Per-row height of the embedded diff editor inside a tool card (px). Equal to
 /// gpui's window `line_height` (`Rems(1.25)` × the 16 px `rem_size` = 20 px,
 /// font-size independent — same value the bottom-input auto-grow relies on).

@@ -31,8 +31,8 @@ mod tool;
 
 use daruda_acp::{ChatItem, ToolStatusView};
 use gpui::{
-    AnyElement, App, ElementId, Entity, IntoElement, ListSizingBehavior, SharedString, div, list,
-    prelude::*, px,
+    AnyElement, App, ElementId, Entity, IntoElement, ListSizingBehavior, MouseButton, SharedString,
+    canvas, div, list, prelude::*, px,
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
@@ -169,10 +169,44 @@ pub(in crate::workspace) fn render(
         // the overlay is absolute-fill, so its parent must be `relative` and
         // sized to the viewport (this `flex_1` body slot). The scroll-to-bottom
         // button also anchors here so it stays above the working footer.
+        // Capture the list viewport bounds each paint (sanctioned MVU
+        // layout-geometry cache) so the drag-selection autoscroll poll can tell
+        // when the cursor has left the pane. Painted behind the list; being
+        // non-interactive it never intercepts the list's own mouse handlers.
+        let bounds_capture = {
+            let view = cx.entity();
+            canvas(
+                move |bounds, _window, cx| {
+                    view.update(cx, |v, _| v.list_bounds = Some(bounds));
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full()
+        };
         div()
             .relative()
             .flex_1()
             .min_h(px(0.))
+            // Left mouse-down starts the autoscroll poll (one-line dispatch into
+            // the view op — no state-transition logic in the closure). Bubbles
+            // after the block's own selection start, and never stops
+            // propagation, so it doesn't disturb normal click/scroll handling.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _ev, window, cx| this.start_selection_autoscroll(window, cx)),
+            )
+            // Left mouse-up ends the drag through the single end point on the
+            // always-painted container — so the poll stops on release regardless
+            // of whether the selected child block is still painted.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _ev, _window, _cx| this.end_selection_drag()),
+            )
+            // Mouse-move catches an off-window release on re-entry (the button is
+            // no longer held); mirrors the terminal's implicit mouse-up.
+            .on_mouse_move(cx.listener(|this, ev, _window, cx| this.on_selection_drag_move(ev, cx)))
+            .child(bounds_capture)
             .child(list_el)
             .children(crate::ui::scrollbar::vertical_thumb_for_list(
                 ("agent-chat-scrollbar", pane_id as usize),
