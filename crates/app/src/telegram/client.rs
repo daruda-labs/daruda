@@ -67,6 +67,12 @@ pub enum UpdateKind {
         chat_id: i64,
         callback_id: String,
         data: String,
+        /// The tapped message's id, for `edit_message_text` (strip the
+        /// buttons + append the outcome so the phone shows the decision took).
+        message_id: i64,
+        /// The tapped message's current text, so the edit can preserve the
+        /// original prompt and append the outcome rather than replacing it.
+        message_text: String,
     },
 }
 
@@ -171,11 +177,20 @@ pub fn send_message(
     parse_send_message_response(&body)
 }
 
-/// Acknowledge a callback-query button tap. Telegram requires this
-/// call after handling a tap or the client shows a loading spinner on
-/// the button indefinitely.
-pub fn answer_callback(token: &str, callback_id: &str) -> Result<(), ClientError> {
-    let payload = serde_json::json!({ "callback_query_id": callback_id });
+/// Acknowledge a callback-query button tap. Telegram requires this call after
+/// handling a tap or the client shows a loading spinner on the button
+/// indefinitely. When `text` is `Some`, Telegram also shows it as a brief toast
+/// notification to the user — this is the immediate "your tap registered"
+/// feedback; without it the spinner just clears silently.
+pub fn answer_callback(
+    token: &str,
+    callback_id: &str,
+    text: Option<&str>,
+) -> Result<(), ClientError> {
+    let mut payload = serde_json::json!({ "callback_query_id": callback_id });
+    if let Some(text) = text {
+        payload["text"] = serde_json::json!(text);
+    }
 
     let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
     let response = agent
@@ -185,6 +200,35 @@ pub fn answer_callback(token: &str, callback_id: &str) -> Result<(), ClientError
 
     let body = read_body(response)?;
     parse_answer_callback_response(&body)
+}
+
+/// Replace a previously-sent message's text and drop its inline keyboard
+/// (omitting `reply_markup` removes the buttons). Used after a permission button
+/// is tapped: the prompt message is rewritten to show the resolved outcome so
+/// the phone reflects the decision and the now-consumed buttons disappear. Sent
+/// as plain text (no `parse_mode`) — `text` is composed from the message's own
+/// display text plus an outcome line, and re-parsing display text as HTML could
+/// misrender.
+pub fn edit_message_text(
+    token: &str,
+    chat_id: i64,
+    message_id: i64,
+    text: &str,
+) -> Result<(), ClientError> {
+    let payload = serde_json::json!({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    });
+
+    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
+    let response = agent
+        .post(&base_url(token, "editMessageText"))
+        .send_json(payload)
+        .map_err(|e| ClientError::Http(e.to_string()))?;
+
+    let body = read_body(response)?;
+    parse_edit_message_response(&body)
 }
 
 fn read_body(response: ureq::Response) -> Result<String, ClientError> {
@@ -273,6 +317,9 @@ struct RawCallbackQuery {
 #[derive(Debug, Deserialize)]
 struct RawCallbackMessage {
     chat: RawChat,
+    message_id: i64,
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// Decode a `getUpdates` response body into the recognized subset of
@@ -310,6 +357,8 @@ fn parse_updates(body: &str) -> Result<Vec<Update>, ClientError> {
                     chat_id: message.chat.id,
                     callback_id: cq.id,
                     data: cq.data.unwrap_or_default(),
+                    message_id: message.message_id,
+                    message_text: message.text.unwrap_or_default(),
                 })
             }?;
             Some(Update {
@@ -358,6 +407,14 @@ fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
         envelope.description,
         "answerCallbackQuery failed",
     )
+}
+
+/// Decode an `editMessageText` response body. Same `"ok"`-envelope shape and
+/// split-for-testability reasoning as [`parse_answer_callback_response`].
+fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
+    let envelope: RawEnvelope =
+        serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
+    require_ok(envelope.ok, envelope.description, "editMessageText failed")
 }
 
 #[cfg(test)]
@@ -443,7 +500,7 @@ mod tests {
                     "update_id": 123457,
                     "callback_query": {
                         "id": "abc123-callback-id",
-                        "message": { "chat": { "id": 999 }, "message_id": 43 },
+                        "message": { "chat": { "id": 999 }, "message_id": 43, "text": "perm prompt" },
                         "data": "token_a"
                     }
                 }
@@ -459,6 +516,8 @@ mod tests {
                 chat_id: 999,
                 callback_id: "abc123-callback-id".to_string(),
                 data: "token_a".to_string(),
+                message_id: 43,
+                message_text: "perm prompt".to_string(),
             }
         );
     }
@@ -633,6 +692,23 @@ mod tests {
         let err = parse_answer_callback_response(body).expect_err("should error");
         match err {
             ClientError::Http(msg) => assert!(msg.contains("answerCallbackQuery failed")),
+            other => panic!("expected Http error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_edit_message_response_ok_true_is_ok() {
+        assert!(parse_edit_message_response(r#"{ "ok": true, "result": {} }"#).is_ok());
+    }
+
+    #[test]
+    fn parse_edit_message_response_ok_false_is_http_error() {
+        let err = parse_edit_message_response(
+            r#"{ "ok": false, "description": "message to edit not found" }"#,
+        )
+        .expect_err("should error");
+        match err {
+            ClientError::Http(msg) => assert!(msg.contains("message to edit not found")),
             other => panic!("expected Http error, got {other:?}"),
         }
     }

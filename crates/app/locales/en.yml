@@ -760,6 +760,10 @@ notification:
   telegram_truncated_marker: "…(truncated)…"
   telegram_reply_ack: "Agent received — generating response / working…"
   telegram_background_update: "🔔 Background update"
+  telegram_permission_allowed: "✅ Allowed"
+  telegram_permission_rejected: "🚫 Rejected"
+  telegram_permission_stale: "Already handled in the app"
+  telegram_permission_gone: "This session is no longer available"
 
 # Terminal annotations (SP-1)
 terminal:

@@ -2600,6 +2600,27 @@ pub fn agent_notification_telegram_background_update() -> String {
     rust_i18n::t!("notification.telegram_background_update").into_owned()
 }
 
+/// Feedback shown on the phone (callback toast + rewritten message line) when a
+/// phone-tapped permission button resolves to Allow.
+pub fn telegram_permission_allowed() -> String {
+    rust_i18n::t!("notification.telegram_permission_allowed").into_owned()
+}
+
+/// Feedback for a phone-tapped Reject.
+pub fn telegram_permission_rejected() -> String {
+    rust_i18n::t!("notification.telegram_permission_rejected").into_owned()
+}
+
+/// Feedback when the tapped request was already answered in-app or cancelled.
+pub fn telegram_permission_stale() -> String {
+    rust_i18n::t!("notification.telegram_permission_stale").into_owned()
+}
+
+/// Feedback when the target pane/session is gone (closed since the prompt sent).
+pub fn telegram_permission_gone() -> String {
+    rust_i18n::t!("notification.telegram_permission_gone").into_owned()
+}
+
 /// Format a `Duration` as a compact, human-friendly span for the
 /// "command finished" notification body. Examples: `42s`, `1m 03s`,
 /// `2h 15m`. Sub-second resolution is dropped; the user threshold

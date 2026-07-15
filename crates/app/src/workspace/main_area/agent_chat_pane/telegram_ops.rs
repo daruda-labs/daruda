@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use gpui::Context;
 
 use crate::surface::strings as s;
+use crate::telegram::bridge::BotPermissionOutcome;
 use crate::telegram::bridge::TelegramTail;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -438,12 +439,12 @@ impl Workspace {
         perm_id: u64,
         decision: crate::telegram::bridge::PermissionDecision,
         cx: &mut Context<Self>,
-    ) {
+    ) -> BotPermissionOutcome {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
-            return;
+            return BotPermissionOutcome::Gone;
         };
         if !view.read(cx).is_permission_outstanding(perm_id) {
-            return;
+            return BotPermissionOutcome::Stale;
         }
         let (option_id, kind) = match decision {
             crate::telegram::bridge::PermissionDecision::Allow(id) => {
@@ -456,6 +457,7 @@ impl Workspace {
         view.update(cx, |v, cx| {
             v.respond_permission(perm_id, option_id, kind, cx)
         });
+        BotPermissionOutcome::Applied
     }
 }
 

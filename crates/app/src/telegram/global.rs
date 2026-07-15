@@ -27,11 +27,13 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
 use super::bridge::{
-    BridgeCore, BridgePing, InboundAction, OutboundMsg, RouteResult, TelegramTail,
+    BotPermissionOutcome, BridgeCore, BridgePing, CallbackEdit, InboundAction, OutboundMsg,
+    PermissionDecision, RouteResult, TelegramTail,
 };
 use super::client;
 use super::keychain;
 use crate::settings_store::SettingsStore;
+use crate::surface::strings as s;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -173,40 +175,53 @@ fn spawn_poll_task(cx: &mut App) {
             // release it before running any side effect (HTTP calls,
             // cross-workspace dispatch) — routing is the only step that
             // touches `BridgeCore`.
-            let dispatch: Vec<(InboundAction, Option<String>)> = cx.update(|cx| {
-                let bridge = cx.global_mut::<TelegramBridge>();
-                updates
-                    .into_iter()
-                    .map(|update| {
-                        let RouteResult {
-                            action,
-                            answer_callback_id,
-                        } = bridge.core.route(update);
-                        (action, answer_callback_id)
-                    })
-                    .collect()
-            });
+            let dispatch: Vec<(InboundAction, Option<String>, Option<CallbackEdit>)> =
+                cx.update(|cx| {
+                    let bridge = cx.global_mut::<TelegramBridge>();
+                    updates
+                        .into_iter()
+                        .map(|update| {
+                            let RouteResult {
+                                action,
+                                answer_callback_id,
+                                callback_edit,
+                            } = bridge.core.route(update);
+                            (action, answer_callback_id, callback_edit)
+                        })
+                        .collect()
+                });
 
-            for (action, answer_callback_id) in dispatch {
-                if let Some(callback_id) = answer_callback_id {
-                    let ack_token = token.clone();
-                    let result = cx
-                        .background_executor()
-                        .spawn(async move { client::answer_callback(&ack_token, &callback_id) })
-                        .await;
-                    if let Err(e) = result {
-                        LogWriter::log(
-                            ErrorReport::new("Telegram answerCallbackQuery failed")
-                                .severity(ErrorSeverity::Info)
-                                .from_error(&e)
-                                .at(file!(), line!())
-                                .dedup("telegram.answer_callback")
-                                .build(),
-                        );
+            for (action, answer_callback_id, callback_edit) in dispatch {
+                match (answer_callback_id, action) {
+                    // A permission button tap: apply the decision FIRST so the
+                    // feedback is accurate, then answer the callback (toast) and
+                    // rewrite the message (drop the buttons + append the outcome).
+                    (
+                        Some(callback_id),
+                        InboundAction::RespondPermission {
+                            pane,
+                            perm_id,
+                            decision,
+                        },
+                    ) => {
+                        let mut outcome = BotPermissionOutcome::Gone;
+                        dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
+                            outcome =
+                                ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx);
+                        });
+                        let label = permission_feedback(&decision, outcome);
+                        answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
                     }
+                    // A callback whose token is unknown / already consumed: still
+                    // tell the user it was already handled (never leave the tap
+                    // silent).
+                    (Some(callback_id), _) => {
+                        let label = s::telegram_permission_stale();
+                        answer_and_edit(cx, &token, callback_id, callback_edit, &label).await;
+                    }
+                    // A message-origin action (injected reply, pairing, ignore).
+                    (None, action) => dispatch_action(action, cx),
                 }
-
-                dispatch_action(action, cx);
             }
 
             // No extra sleep on success — the long-poll `timeout_s` itself
@@ -247,15 +262,88 @@ fn dispatch_action(action: InboundAction, cx: &mut gpui::AsyncApp) {
                 ws.inject_bot_reply(pane.pane, text.clone(), cx)
             });
         }
-        InboundAction::RespondPermission {
-            pane,
-            perm_id,
-            decision,
-        } => {
-            dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                ws.respond_bot_permission(pane.pane, perm_id, decision.clone(), cx)
-            });
+        InboundAction::RespondPermission { .. } => {
+            // Permission taps always arrive as callbacks and are handled inline
+            // in the poll loop (apply → answer → edit) so their feedback can be
+            // accurate; they never reach this message-origin dispatch path.
         }
+    }
+}
+
+/// Answer a tapped callback with a toast, then rewrite the tapped message to
+/// drop its now-consumed buttons and append the outcome. Both are best-effort
+/// (logged on failure, never surfaced) — the decision itself was already applied
+/// by the caller. `label` is the localized outcome; the message keeps its
+/// original prompt text with the outcome appended.
+async fn answer_and_edit(
+    cx: &mut gpui::AsyncApp,
+    token: &str,
+    callback_id: String,
+    callback_edit: Option<CallbackEdit>,
+    label: &str,
+) {
+    let ack_token = token.to_string();
+    let toast = label.to_string();
+    let answered = cx
+        .background_executor()
+        .spawn(async move { client::answer_callback(&ack_token, &callback_id, Some(&toast)) })
+        .await;
+    if let Err(e) = answered {
+        LogWriter::log(
+            ErrorReport::new("Telegram answerCallbackQuery failed")
+                .severity(ErrorSeverity::Info)
+                .from_error(&e)
+                .at(file!(), line!())
+                .dedup("telegram.answer_callback")
+                .build(),
+        );
+    }
+
+    let Some(edit) = callback_edit else {
+        return;
+    };
+    let body = compose_edit_body(&edit.original_text, label);
+    let edit_token = token.to_string();
+    let edited = cx
+        .background_executor()
+        .spawn(async move {
+            client::edit_message_text(&edit_token, edit.chat_id, edit.message_id, &body)
+        })
+        .await;
+    if let Err(e) = edited {
+        LogWriter::log(
+            ErrorReport::new("Telegram editMessageText failed")
+                .severity(ErrorSeverity::Info)
+                .from_error(&e)
+                .at(file!(), line!())
+                .dedup("telegram.edit_message")
+                .build(),
+        );
+    }
+}
+
+/// The localized outcome label for a phone-tapped permission decision, shown
+/// both as the callback toast and appended to the rewritten message. Applied →
+/// the tapped direction (Allow/Reject); otherwise the reason it didn't apply.
+fn permission_feedback(decision: &PermissionDecision, outcome: BotPermissionOutcome) -> String {
+    match outcome {
+        BotPermissionOutcome::Applied => match decision {
+            PermissionDecision::Allow(_) => s::telegram_permission_allowed(),
+            PermissionDecision::Reject(_) => s::telegram_permission_rejected(),
+        },
+        BotPermissionOutcome::Stale => s::telegram_permission_stale(),
+        BotPermissionOutcome::Gone => s::telegram_permission_gone(),
+    }
+}
+
+/// Compose the rewritten message body: the original prompt text with the outcome
+/// appended on its own line, so the phone keeps the context of what was asked.
+/// Falls back to just the label when the original text is unavailable.
+fn compose_edit_body(original_text: &str, label: &str) -> String {
+    if original_text.is_empty() {
+        label.to_string()
+    } else {
+        format!("{original_text}\n\n— {label}")
     }
 }
 
@@ -410,6 +498,35 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[test]
+    fn compose_edit_body_appends_outcome_and_falls_back_when_empty() {
+        assert_eq!(
+            compose_edit_body("Allow write to /tmp/x?", "OK"),
+            "Allow write to /tmp/x?\n\n— OK"
+        );
+        // No original text available → just the label, no stray separator.
+        assert_eq!(compose_edit_body("", "OK"), "OK");
+    }
+
+    #[test]
+    fn permission_feedback_distinguishes_direction_and_reason() {
+        let allow = PermissionDecision::Allow("opt".into());
+        let reject = PermissionDecision::Reject("opt".into());
+        let applied_allow = permission_feedback(&allow, BotPermissionOutcome::Applied);
+        let applied_reject = permission_feedback(&reject, BotPermissionOutcome::Applied);
+        let stale = permission_feedback(&allow, BotPermissionOutcome::Stale);
+        let gone = permission_feedback(&allow, BotPermissionOutcome::Gone);
+
+        // Every outcome yields a distinct, non-empty label so the toast/edit is
+        // never blank and Allow reads differently from Reject.
+        for label in [&applied_allow, &applied_reject, &stale, &gone] {
+            assert!(!label.is_empty());
+        }
+        assert_ne!(applied_allow, applied_reject);
+        assert_ne!(applied_allow, stale);
+        assert_ne!(stale, gone);
+    }
 
     #[test]
     fn plain_body_uses_the_tail_text_verbatim_for_either_variant() {

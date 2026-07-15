@@ -77,6 +77,22 @@ pub enum PermissionDecision {
     Reject(String),
 }
 
+/// Result of routing a phone-tapped permission decision into a pane, so the
+/// poll loop can give the user accurate feedback (callback toast + message
+/// rewrite) instead of a blind, textless acknowledgement. Set by the
+/// workspace-side handler (`Workspace::respond_bot_permission`); this pure layer
+/// only defines the shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BotPermissionOutcome {
+    /// The decision was routed to the agent.
+    Applied,
+    /// The pane exists but the request was no longer outstanding (already
+    /// answered in-app, or the turn was cancelled).
+    Stale,
+    /// The target pane/view is gone (closed since the prompt was sent).
+    Gone,
+}
+
 /// What the caller (the poll loop) should do with a routed update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InboundAction {
@@ -114,6 +130,22 @@ pub enum InboundAction {
 pub struct RouteResult {
     pub action: InboundAction,
     pub answer_callback_id: Option<String>,
+    /// For a `Callback` update, the coordinates + current text of the tapped
+    /// message so the caller can rewrite it (drop the buttons + append the
+    /// outcome). `None` for a `Message` update. Independent of `action` because
+    /// even an `Ignore` (stale/consumed token) callback should still edit the
+    /// message to reflect that it was already handled.
+    pub callback_edit: Option<CallbackEdit>,
+}
+
+/// Where and what to rewrite after a callback button is tapped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallbackEdit {
+    pub chat_id: i64,
+    pub message_id: i64,
+    /// The message's current display text, so the rewrite can preserve the
+    /// original prompt and append an outcome line rather than replacing it.
+    pub original_text: String,
 }
 
 /// One row of inline buttons for a permission-wait ping: every option the
@@ -297,13 +329,27 @@ impl BridgeCore {
         self.update_offset = self.update_offset.max(update.update_id + 1);
 
         if !self.enabled {
-            let answer_callback_id = match &update.kind {
-                UpdateKind::Callback { callback_id, .. } => Some(callback_id.clone()),
-                UpdateKind::Message { .. } => None,
+            let (answer_callback_id, callback_edit) = match &update.kind {
+                UpdateKind::Callback {
+                    callback_id,
+                    chat_id,
+                    message_id,
+                    message_text,
+                    ..
+                } => (
+                    Some(callback_id.clone()),
+                    Some(CallbackEdit {
+                        chat_id: *chat_id,
+                        message_id: *message_id,
+                        original_text: message_text.clone(),
+                    }),
+                ),
+                UpdateKind::Message { .. } => (None, None),
             };
             return RouteResult {
                 action: InboundAction::Ignore,
                 answer_callback_id,
+                callback_edit,
             };
         }
 
@@ -317,17 +363,25 @@ impl BridgeCore {
                 RouteResult {
                     action,
                     answer_callback_id: None,
+                    callback_edit: None,
                 }
             }
             UpdateKind::Callback {
                 chat_id,
                 callback_id,
                 data,
+                message_id,
+                message_text,
             } => {
                 let action = self.route_callback(chat_id, data);
                 RouteResult {
                     action,
                     answer_callback_id: Some(callback_id),
+                    callback_edit: Some(CallbackEdit {
+                        chat_id,
+                        message_id,
+                        original_text: message_text,
+                    }),
                 }
             }
         }
@@ -515,6 +569,8 @@ mod tests {
                 chat_id,
                 callback_id: callback_id.to_string(),
                 data: data.to_string(),
+                message_id: update_id,
+                message_text: "prompt".to_string(),
             },
         }
     }
