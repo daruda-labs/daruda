@@ -90,6 +90,16 @@ impl Workspace {
                     // is left untrimmed.
                     let trimmed = input.body.trim();
                     if trimmed.is_empty() {
+                        // A whitespace-only submit while a queued prompt is being
+                        // edited would strand the "Editing…" strip row (the flag
+                        // stays set against an empty body). Cancel the edit so the
+                        // row reverts and the composer clears.
+                        let editing = self
+                            .agent_chat_view(pane_id)
+                            .is_some_and(|v| v.read(cx).editing_prompt.is_some());
+                        if editing {
+                            self.cancel_edit_queued_prompt(pane_id, window, cx);
+                        }
                         return true;
                     }
                     self.send_agent_prompt_text(pane_id, trimmed.to_string(), cx);

@@ -49,9 +49,9 @@ pub(in crate::workspace) fn render(
         crate::ui::button("agent-queue-clear-all", s::bottom_input_queue_clear_all())
             .ghost()
             .xsmall()
-            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                 if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, cx));
+                    ws.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, window, cx));
                 }
             }))
     };

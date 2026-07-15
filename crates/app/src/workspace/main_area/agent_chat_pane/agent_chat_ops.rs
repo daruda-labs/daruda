@@ -1231,13 +1231,24 @@ impl Workspace {
     /// bottom-dock queued-prompt strip's "clear all" button: routes into the
     /// view, which empties the queue and notifies (one-way data flow). No-op
     /// when `pane_id` is gone or is not an Agent chat pane.
+    ///
+    /// If a queued prompt was being edited when the queue is cleared, the
+    /// composer still holds that (now-deleted) slot's text; empty it too so it
+    /// doesn't linger as a phantom draft — mirrors `cancel_edit_queued_prompt`.
     pub(in crate::workspace) fn clear_queued_prompts(
         &mut self,
         pane_id: PaneId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            view.update(cx, |v, cx| v.clear_queue(cx));
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let was_editing = view.read(cx).editing_prompt.is_some();
+        view.update(cx, |v, cx| v.clear_queue(cx));
+        if was_editing {
+            self.terminal_input
+                .update(cx, |s, cx_state| s.set_value("", window, cx_state));
         }
     }
 

@@ -1712,8 +1712,8 @@ async fn queued_prompt_ops_remove_one_and_clear_all(cx: &mut TestAppContext) {
         );
     });
 
-    cx.update_window(window_handle.into(), |_, _window, cx| {
-        workspace.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, cx));
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, window, cx));
     })
     .unwrap();
     cx.run_until_parked();
@@ -3259,6 +3259,133 @@ async fn cancel_edit_queued_prompt_clears_flag_and_empties_composer(cx: &mut Tes
             queue_texts(agent_view(ws, pane_id).read(cx)),
             vec!["editable".to_string()],
             "cancel leaves the queued prompt intact"
+        );
+    });
+}
+
+/// Clearing the whole queue while a prompt is being edited also empties the
+/// composer — otherwise the deleted slot's text lingers as a phantom draft.
+#[gpui::test]
+async fn clear_queue_while_editing_empties_composer(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.send_agent_prompt_text(id, "q1".into(), cx);
+                ws.send_agent_prompt_text(id, "q2".into(), cx);
+                let last = agent_view(ws, id)
+                    .read(cx)
+                    .pending_prompts
+                    .last()
+                    .unwrap()
+                    .id;
+                ws.begin_edit_queued_prompt(id, last, window, cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        assert!(view.read(cx).pending_prompts.is_empty(), "queue cleared");
+        assert!(
+            view.read(cx).editing_prompt.is_none(),
+            "editing flag cleared"
+        );
+        assert_eq!(
+            ws.terminal_input.read(cx).value(),
+            "",
+            "the orphaned edit text is cleared from the composer"
+        );
+    });
+}
+
+/// A whitespace-only submit while editing cancels the edit rather than stranding
+/// the "Editing…" strip row against an empty body.
+#[gpui::test]
+async fn whitespace_submit_while_editing_cancels_edit(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.send_agent_prompt_text(id, "editable".into(), cx);
+                let pid = agent_view(ws, id).read(cx).pending_prompts[0].id;
+                ws.begin_edit_queued_prompt(id, pid, window, cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // Submit a whitespace-only body while the edit is in progress.
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.deliver_text_to_pane(
+                pane_id,
+                PaneTextInput {
+                    body: "   ".into(),
+                    submit: true,
+                },
+                window,
+                cx,
+            )
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        assert!(
+            view.read(cx).editing_prompt.is_none(),
+            "whitespace submit cancels the edit"
+        );
+        assert_eq!(
+            queue_texts(view.read(cx)),
+            vec!["editable".to_string()],
+            "the queued prompt is left intact (edit cancelled, not sent)"
+        );
+        assert_eq!(
+            ws.terminal_input.read(cx).value(),
+            "",
+            "the composer is emptied"
         );
     });
 }
