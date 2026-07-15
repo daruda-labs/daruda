@@ -3086,6 +3086,67 @@ async fn up_arrow_in_empty_composer_edits_last_queued_prompt(cx: &mut TestAppCon
     });
 }
 
+/// The ↑ consume-predicate `history_navigate_possible`: a non-empty queue on the
+/// focused agent pane makes ↑ consumable even with no lane input history (so the
+/// key reaches `do_history_navigate` and begins the edit); an empty queue with no
+/// history does not consume ↑, and Down is never affected by the queue.
+#[gpui::test]
+async fn history_navigate_possible_consumes_up_for_queue_without_history(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    // Empty queue, no history → ↑ falls through to cursor movement.
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            !ws.history_navigate_possible(crate::ui::HistoryDir::Up, cx),
+            "no queue and no history → ↑ is not consumed"
+        );
+        assert!(!ws.history_navigate_possible(crate::ui::HistoryDir::Down, cx));
+    });
+
+    // Enqueue offline (no handle → buffered, not sent); no input history is
+    // recorded by this path.
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.send_agent_prompt_text(pane_id, "q1".into(), cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert!(
+            ws.history_navigate_possible(crate::ui::HistoryDir::Up, cx),
+            "a queued prompt makes ↑ consumable even without input history"
+        );
+        assert!(
+            !ws.history_navigate_possible(crate::ui::HistoryDir::Down, cx),
+            "Down is unaffected by the queue"
+        );
+    });
+}
+
 /// ↑ with a NON-empty composer does the ordinary history recall (no queue edit)
 /// — with no history entries here, the composer is left untouched and no edit
 /// begins.

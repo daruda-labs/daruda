@@ -1431,7 +1431,9 @@ impl AgentChatView {
             && let Some(qp) = self.pending_prompts.iter_mut().find(|q| q.id == id)
         {
             qp.text = text;
-            self.rebuild_rows();
+            // Queue-only change: `items` (and thus the projected rows) are
+            // untouched, so notifying re-stages the strip without a transcript
+            // reproject.
             cx.notify();
             return;
         }
@@ -1499,7 +1501,8 @@ impl AgentChatView {
         let before = self.pending_prompts.len();
         self.pending_prompts.retain(|q| q.id != id);
         if self.pending_prompts.len() != before {
-            self.rebuild_rows();
+            // Queue-only change: the transcript rows are unaffected, so notify
+            // re-stages the strip without a transcript reproject.
             cx.notify();
         }
     }
@@ -1513,7 +1516,8 @@ impl AgentChatView {
         }
         self.pending_prompts.clear();
         self.editing_prompt = None;
-        self.rebuild_rows();
+        // Queue-only change: the transcript rows are unaffected, so notify
+        // re-stages the strip without a transcript reproject.
         cx.notify();
     }
 
