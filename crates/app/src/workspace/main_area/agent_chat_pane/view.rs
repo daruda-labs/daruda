@@ -52,7 +52,7 @@ use gpui::{
 
 use super::agent_chat_helpers::{
     DiffStat, apply_info_field, cancel_pending_permission, collect_foldable_keys, fold_active,
-    trailing_unresolved_permission,
+    permission_card_mut,
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
@@ -276,11 +276,16 @@ pub(in crate::workspace) struct AgentChatView {
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
-    /// The id of the single in-flight permission request awaiting a host
-    /// decision, if any. MVP serialises permissions: a new request replaces the
-    /// previous pending id (the agent only asks one at a time within a turn).
-    /// Cleared once the user responds.
-    pub(in crate::workspace) pending_permission: Option<u64>,
+    /// Request ids of the permission cards still awaiting a host decision. A
+    /// fast index over `items` — mirrors `{card.id : card.resolved.is_none()}`
+    /// and is updated in lockstep with the cards at every site that touches
+    /// them: `PermissionRequested` inserts (pushes card + id), `respond_permission`
+    /// removes (resolves card + drops id), `cancel_pending_permission` drains
+    /// (marks all cards + empties the set), and `teardown_transient_session_state`
+    /// resets (clears `items` + the set together). Unlike a single `Option<u64>`
+    /// it holds *every* outstanding request, so parallel tool-call permissions
+    /// each resolve to their own park instead of the newest clobbering the rest.
+    pub(in crate::workspace) pending_permissions: HashSet<u64>,
     /// Whether a prompt turn is in flight (between submit and the matching
     /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
     /// re-submit while the agent is busy, and carries the turn's start instant
@@ -643,11 +648,25 @@ impl AgentChatView {
         (running > 0).then_some(running)
     }
 
+    /// Whether any permission card is still awaiting a host decision. O(1) —
+    /// reads the outstanding-id index, so the render hot path (activity badge,
+    /// working indicator) never rescans `items`.
+    pub(in crate::workspace) fn has_pending_permission(&self) -> bool {
+        !self.pending_permissions.is_empty()
+    }
+
+    /// Whether the permission request `id` is still outstanding (its card
+    /// unresolved). Used by the Telegram relay to drop a phone decision for a
+    /// request the user already answered in-app (or that was cancelled).
+    pub(in crate::workspace) fn is_permission_outstanding(&self, id: u64) -> bool {
+        self.pending_permissions.contains(&id)
+    }
+
     /// The pane's derived activity — the single source of the badge label. A
     /// pending permission takes precedence (it needs the user, not the agent);
     /// otherwise the agent is [`ActivityState::Working`] while [`Self::is_busy`].
     pub(in crate::workspace) fn activity_state(&self) -> ActivityState {
-        if self.pending_permission.is_some() {
+        if self.has_pending_permission() {
             return ActivityState::AwaitingPermission;
         }
         if self.is_busy() {
@@ -698,7 +717,7 @@ impl AgentChatView {
             handle: None,
             pending_prompts: Vec::new(),
             _event_pump: None,
-            pending_permission: None,
+            pending_permissions: HashSet::new(),
             turn: Turn::Idle,
             subagent_last_activity: HashMap::new(),
             activity_started_at: None,
@@ -990,9 +1009,9 @@ impl AgentChatView {
                 }
             }
             AcpEvent::PermissionRequested { id, request } => {
-                let item = permission_item(&request, &self.items);
+                let item = permission_item(id, &request, &self.items);
                 self.items.push(item);
-                self.pending_permission = Some(id);
+                self.pending_permissions.insert(id);
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_) if self.cancel_in_flight => {
                 // The terminal signal (a `cancelled` `TurnEnded`, or a
@@ -1481,21 +1500,24 @@ impl AgentChatView {
         cancel_pending_permission(self);
     }
 
-    /// Resolve the pending permission request with the chosen option. Marks the
-    /// matching card resolved, sends the decision over the session, and clears
-    /// the pending id. `kind` selects Allow vs. Reject semantics.
+    /// Resolve the permission request `request_id` with the chosen option.
+    /// Marks *that* card resolved (found by id, not by position — several may be
+    /// outstanding), sends the decision over the session, and drops the id from
+    /// the outstanding index. No-op if the request was already answered or
+    /// cancelled. `kind` selects Allow vs. Reject semantics.
     pub(in crate::workspace) fn respond_permission(
         &mut self,
+        request_id: u64,
         option_id: String,
         kind: PermissionKindView,
         cx: &mut Context<Self>,
     ) {
-        let Some(id) = self.pending_permission.take() else {
+        if !self.pending_permissions.remove(&request_id) {
             return;
-        };
-        // Mark the trailing unresolved permission card resolved so the buttons
-        // disable and the choice shows.
-        if let Some(card) = trailing_unresolved_permission(self) {
+        }
+        // Mark the card that carries this request id resolved so its buttons
+        // disable and the choice shows — the others stay live.
+        if let Some(card) = permission_card_mut(self, request_id) {
             card.resolved = Some(daruda_acp::PermissionResolution::Chosen(option_id.clone()));
         }
         let decision = match kind {
@@ -1507,7 +1529,7 @@ impl AgentChatView {
             }
         };
         if let Some(handle) = &self.handle {
-            handle.respond_permission(id, decision);
+            handle.respond_permission(request_id, decision);
         }
         // The card is now resolved, so it no longer force-stays-visible under a
         // collapsed response: reproject so it folds back into the process
@@ -1611,7 +1633,7 @@ impl AgentChatView {
         self._event_pump = None;
         self.items.clear();
         self.pending_prompts.clear();
-        self.pending_permission = None;
+        self.pending_permissions.clear();
         self.turn = Turn::Idle;
         self.subagent_last_activity.clear();
         self.activity_started_at = None;

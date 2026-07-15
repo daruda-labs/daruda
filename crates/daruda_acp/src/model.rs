@@ -165,6 +165,12 @@ pub enum ToolKindView {
 /// A tool-permission request rendered as an inline card.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PermissionItem {
+    /// The daruda-internal request id this card represents (the same id the
+    /// connection parked under and the host resolves via
+    /// `AcpSessionHandle::respond_permission`). Carried on the card so the host
+    /// correlates a specific card to its park when several permissions are
+    /// outstanding at once (parallel tool calls) — not just the trailing one.
+    pub id: u64,
     /// Title of the tool call needing approval, if the agent supplied one.
     pub tool_title: Option<String>,
     /// A short, safe one-line summary of the tool's raw input (e.g.

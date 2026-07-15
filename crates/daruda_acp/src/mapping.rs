@@ -106,10 +106,15 @@ pub fn apply_update_with(
 /// [`existing_raw_input`]) in preference to the request's own copy, which
 /// some adapters (codex-acp) re-quote for the permission prompt and can
 /// mangle in the process.
-pub fn permission_item(request: &RequestPermissionRequest, items: &[ChatItem]) -> ChatItem {
+pub fn permission_item(
+    id: u64,
+    request: &RequestPermissionRequest,
+    items: &[ChatItem],
+) -> ChatItem {
     let own_raw_input = request.tool_call.fields.raw_input.as_ref();
     let raw_input = existing_raw_input(items, &request.tool_call.tool_call_id.0).or(own_raw_input);
     ChatItem::Permission(PermissionItem {
+        id,
         tool_title: request.tool_call.fields.title.clone(),
         raw_input_summary: summarize_raw_input(raw_input),
         options: request.options.iter().map(choice_of).collect(),
@@ -1284,7 +1289,7 @@ mod tests {
             ],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
+        let ChatItem::Permission(card) = permission_item(7, &request, &[]) else {
             panic!("expected permission item");
         };
         assert_eq!(card.tool_title.as_deref(), Some("Write /tmp/x"));
@@ -1292,6 +1297,28 @@ mod tests {
         assert_eq!(card.options[0].kind, PermissionKindView::AllowAlways);
         assert_eq!(card.options[1].option_id, "reject");
         assert_eq!(card.resolved, None);
+    }
+
+    #[test]
+    fn permission_item_carries_the_request_id() {
+        // The card records the daruda-internal request id so the host can
+        // correlate a specific card to its park when several permissions are
+        // outstanding at once (parallel tool calls). Without this, the host
+        // can only track one at a time and mis-routes the rest.
+        let request = RequestPermissionRequest::new(
+            "s1",
+            ToolCallUpdate::new("t1", ToolCallUpdateFields::default()),
+            vec![PermissionOption::new(
+                "allow_once",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+
+        let ChatItem::Permission(card) = permission_item(42, &request, &[]) else {
+            panic!("expected permission item");
+        };
+        assert_eq!(card.id, 42);
     }
 
     #[test]
@@ -1324,7 +1351,7 @@ mod tests {
             )],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request, &items) else {
+        let ChatItem::Permission(card) = permission_item(1, &request, &items) else {
             panic!("expected permission item");
         };
         assert_eq!(
@@ -1350,7 +1377,7 @@ mod tests {
             )],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
+        let ChatItem::Permission(card) = permission_item(1, &request, &[]) else {
             panic!("expected permission item");
         };
         assert_eq!(
@@ -1374,7 +1401,7 @@ mod tests {
             )],
         );
 
-        let ChatItem::Permission(card) = permission_item(&request, &[]) else {
+        let ChatItem::Permission(card) = permission_item(1, &request, &[]) else {
             panic!("expected permission item");
         };
         assert_eq!(

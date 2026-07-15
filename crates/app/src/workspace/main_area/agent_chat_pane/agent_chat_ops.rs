@@ -249,7 +249,7 @@ impl Workspace {
             return;
         };
         let daruda_acp::ChatItem::Permission(card) =
-            daruda_acp::permission_item(request, &view.read(cx).items)
+            daruda_acp::permission_item(*id, request, &view.read(cx).items)
         else {
             return;
         };

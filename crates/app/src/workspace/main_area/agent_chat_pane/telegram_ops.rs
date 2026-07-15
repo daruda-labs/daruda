@@ -10,6 +10,8 @@
 //! split out; both files are `impl Workspace` blocks in the same module tree,
 //! so no new plumbing was needed to keep that wired up.
 
+use std::collections::HashSet;
+
 use gpui::Context;
 
 use crate::surface::strings as s;
@@ -104,16 +106,18 @@ fn push_deferred(queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
 }
 
 /// From a pane's deferred queue, the entries still worth delivering given the
-/// pane's current live pending-permission id: drop permission pings whose
-/// `perm_id` no longer matches (resolved or superseded in-app).
+/// pane's set of live pending-permission ids: drop permission pings whose
+/// `perm_id` is no longer outstanding (resolved or cancelled in-app). Several
+/// permissions can be outstanding at once, so the filter tests set membership
+/// rather than equality against a single id.
 pub(in crate::workspace) fn deliverable_entries(
     queue: Vec<DeferredRelay>,
-    live_perm: Option<u64>,
+    live_perms: &HashSet<u64>,
 ) -> Vec<DeferredRelay> {
     queue
         .into_iter()
         .filter(|e| match e.kind {
-            DeferKind::Permission { perm_id } => live_perm == Some(perm_id),
+            DeferKind::Permission { perm_id } => live_perms.contains(&perm_id),
             _ => true,
         })
         .collect()
@@ -420,15 +424,15 @@ impl Workspace {
     }
 
     /// Resolve a phone-tapped Allow/Reject button against this pane's
-    /// currently-pending permission. Delegates to the existing
+    /// currently-outstanding permission. Delegates to the existing
     /// `AgentChatView::respond_permission`, which already: resolves
-    /// the trailing permission card, sends the decision over the ACP
+    /// the card carrying this `perm_id`, sends the decision over the ACP
     /// session, and reflows the row list — the same path the in-app
     /// buttons use.
     ///
-    /// The bridge's `perm_id` (captured when the ping was built) must still
-    /// match the pane's live pending permission. A stale phone button should not
-    /// resolve a newer request that replaced the original pending id.
+    /// The bridge's `perm_id` (captured when the ping was built) must still be
+    /// outstanding. A stale phone button should not resolve a request the user
+    /// already answered in-app or that was cancelled.
     pub(crate) fn respond_bot_permission(
         &mut self,
         pane_id: PaneId,
@@ -439,7 +443,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
-        if view.read(cx).pending_permission != Some(perm_id) {
+        if !view.read(cx).is_permission_outstanding(perm_id) {
             return;
         }
         let (option_id, kind) = match decision {
@@ -450,7 +454,9 @@ impl Workspace {
                 (id, daruda_acp::PermissionKindView::RejectOnce)
             }
         };
-        view.update(cx, |v, cx| v.respond_permission(option_id, kind, cx));
+        view.update(cx, |v, cx| {
+            v.respond_permission(perm_id, option_id, kind, cx)
+        });
     }
 }
 
@@ -504,9 +510,34 @@ mod tests {
             mk(DeferKind::Completion),
             mk(DeferKind::Permission { perm_id: 7 }),
         ];
-        let out = super::deliverable_entries(q, Some(9));
+        // Only id 9 is outstanding, so the ping for the resolved id 7 is dropped.
+        let live: std::collections::HashSet<u64> = [9].into_iter().collect();
+        let out = super::deliverable_entries(q, &live);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, DeferKind::Completion);
+    }
+
+    #[test]
+    fn deliverable_entries_keeps_each_outstanding_permission() {
+        use super::{DeferKind, DeferredRelay, TelegramTail};
+        let mk = |k| DeferredRelay {
+            kind: k,
+            header: String::new(),
+            tail: TelegramTail::Plain(String::new()),
+            permission: None,
+        };
+        let q = vec![
+            mk(DeferKind::Permission { perm_id: 7 }),
+            mk(DeferKind::Permission { perm_id: 8 }),
+            mk(DeferKind::Permission { perm_id: 9 }),
+        ];
+        // 7 and 9 are still outstanding; 8 was answered → its ping is dropped,
+        // the other two both survive (a single live id could not express this).
+        let live: std::collections::HashSet<u64> = [7, 9].into_iter().collect();
+        let out = super::deliverable_entries(q, &live);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].kind, DeferKind::Permission { perm_id: 7 });
+        assert_eq!(out[1].kind, DeferKind::Permission { perm_id: 9 });
     }
 
     #[test]
@@ -756,7 +787,8 @@ mod tests {
 
     /// `deliver_deferred_telegram` must tolerate a queued entry whose pane has
     /// since closed, filter stale permission pings through the live pane's
-    /// `pending_permission`, and still deliver the remaining live-pane entry.
+    /// `pending_permissions` outstanding-ids set, and still deliver the
+    /// remaining live-pane entry.
     #[gpui::test]
     async fn deliver_deferred_telegram_skips_closed_pane_filters_stale_permission_and_sends_live_entry(
         cx: &mut gpui::TestAppContext,
@@ -809,10 +841,10 @@ mod tests {
                 .entry(live_pane)
                 .or_default()
                 .push(mk(super::DeferKind::Completion, "completion"));
-            // Live pane, but a permission id that will never match the
-            // pane's `pending_permission` (which is `None` — no permission
-            // was ever requested on this pane) — exercises the
-            // `deliverable_entries` filter path on a real view.
+            // Live pane, but a permission id that is not in the pane's
+            // `pending_permissions` set (empty — no permission was ever
+            // requested on this pane) — exercises the `deliverable_entries`
+            // filter path on a real view.
             ws.deferred_telegram
                 .entry(live_pane)
                 .or_default()
@@ -846,6 +878,130 @@ mod tests {
             outbound.next().now_or_never().is_none(),
             "closed panes and stale permissions must not emit extra pings"
         );
+    }
+
+    /// A phone tap routes by permission id, not by position: with two
+    /// permissions outstanding, tapping the button for id A resolves *A* and
+    /// leaves B live; a second tap for an already-answered id is a clean no-op.
+    /// Mirrors the in-app `concurrent_permissions_resolve_independently_by_id`
+    /// for the Telegram `respond_bot_permission` path.
+    #[gpui::test]
+    async fn respond_bot_permission_routes_by_id_under_concurrency(cx: &mut gpui::TestAppContext) {
+        use daruda_acp::{
+            ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+        };
+
+        let config = daruda_config::Config::default();
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let card = |id: u64| {
+            ChatItem::Permission(PermissionItem {
+                id,
+                tool_title: Some(format!("Write /tmp/{id}")),
+                raw_input_summary: None,
+                options: vec![
+                    PermissionChoice {
+                        option_id: "allow_once".to_string(),
+                        name: "Allow".to_string(),
+                        kind: PermissionKindView::AllowOnce,
+                    },
+                    PermissionChoice {
+                        option_id: "reject_once".to_string(),
+                        name: "Reject".to_string(),
+                        kind: PermissionKindView::RejectOnce,
+                    },
+                ],
+                resolved: None,
+            })
+        };
+
+        let pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    let view = ws.agent_chat_view(id).cloned().expect("view present");
+                    view.update(cx, |v, _| {
+                        v.items = vec![card(100), card(200)];
+                        v.pending_permissions.insert(100);
+                        v.pending_permissions.insert(200);
+                    });
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        // Phone-tap the button for id 100, then a stale re-tap for 100.
+        workspace.update(cx, |ws, cx| {
+            ws.respond_bot_permission(
+                pane,
+                100,
+                PermissionDecision::Allow("allow_once".into()),
+                cx,
+            );
+            // Already answered → is_permission_outstanding(100) is false → no-op.
+            ws.respond_bot_permission(
+                pane,
+                100,
+                PermissionDecision::Reject("reject_once".into()),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, cx| {
+            let view = ws.agent_chat_view(pane).cloned().unwrap();
+            let view = view.read(cx);
+            let ChatItem::Permission(first) = &view.items[0] else {
+                panic!("expected first permission card");
+            };
+            let ChatItem::Permission(second) = &view.items[1] else {
+                panic!("expected second permission card");
+            };
+            assert_eq!(
+                first.resolved,
+                Some(PermissionResolution::Chosen("allow_once".to_string())),
+                "the tapped id resolves to its own option; the stale re-tap is a no-op"
+            );
+            assert_eq!(second.resolved, None, "the other permission stays live");
+            assert!(view.is_permission_outstanding(200));
+            assert!(!view.is_permission_outstanding(100));
+        });
+
+        // Phone-tap id 200 → the pane drains fully.
+        workspace.update(cx, |ws, cx| {
+            ws.respond_bot_permission(
+                pane,
+                200,
+                PermissionDecision::Reject("reject_once".into()),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, cx| {
+            let view = ws.agent_chat_view(pane).cloned().unwrap();
+            let view = view.read(cx);
+            let ChatItem::Permission(second) = &view.items[1] else {
+                panic!("expected second permission card");
+            };
+            assert_eq!(
+                second.resolved,
+                Some(PermissionResolution::Chosen("reject_once".to_string())),
+            );
+            assert!(!view.has_pending_permission());
+        });
     }
 
     /// Construct a Workspace wrapped in `gpui_component::Root` — matches the

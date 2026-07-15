@@ -416,7 +416,7 @@ pub(super) fn pulse_dots(cx: &gpui::App) -> String {
 /// activity outranks the running-tool title because during a subagent run the
 /// live tool is a (noisy) child call — the count is the signal the user wants.
 fn working_status(content: &AgentChatView) -> SharedString {
-    if content.pending_permission.is_some() {
+    if content.has_pending_permission() {
         s::agent_chat_awaiting_permission().into()
     } else if let Some(running) = content.subagent_progress() {
         s::agent_chat_subagent_progress(running).into()

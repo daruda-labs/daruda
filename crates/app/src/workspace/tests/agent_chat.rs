@@ -409,6 +409,7 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
                 // resolve it through the view op the permission button drives.
                 view.update(cx, |v, cx| {
                     v.items.push(ChatItem::Permission(PermissionItem {
+                        id: 42,
                         tool_title: Some("Write /tmp/x".to_string()),
                         raw_input_summary: None,
                         options: vec![PermissionChoice {
@@ -418,8 +419,9 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
                         }],
                         resolved: None,
                     }));
-                    v.pending_permission = Some(42);
+                    v.pending_permissions.insert(42);
                     v.respond_permission(
+                        42,
                         "allow_once".to_string(),
                         PermissionKindView::AllowOnce,
                         cx,
@@ -443,8 +445,139 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
             "the chosen option is recorded on the card"
         );
         assert!(
-            view.pending_permission.is_none(),
+            !view.has_pending_permission(),
             "the pending id is cleared once resolved"
+        );
+    });
+}
+
+/// Two permissions outstanding at once (parallel tool calls) each resolve to
+/// their own card and park — answering the *first* must not clobber the second.
+/// This is the concurrency bug the queue fixes: the old `Option<u64>` +
+/// trailing-card logic would resolve the newest card and mis-route the id.
+#[gpui::test]
+async fn concurrent_permissions_resolve_independently_by_id(cx: &mut TestAppContext) {
+    use daruda_acp::{
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    };
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let card = |id: u64| {
+        ChatItem::Permission(PermissionItem {
+            id,
+            tool_title: Some(format!("Write /tmp/{id}")),
+            raw_input_summary: None,
+            options: vec![
+                PermissionChoice {
+                    option_id: "allow_once".to_string(),
+                    name: "Allow".to_string(),
+                    kind: PermissionKindView::AllowOnce,
+                },
+                PermissionChoice {
+                    option_id: "reject_once".to_string(),
+                    name: "Reject".to_string(),
+                    kind: PermissionKindView::RejectOnce,
+                },
+            ],
+            resolved: None,
+        })
+    };
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                agent_view(ws, id).update(cx, |v, cx| {
+                    // Two permissions arrive back-to-back (as the pump would on
+                    // two `PermissionRequested` events), both outstanding.
+                    v.items = vec![card(100), card(200)];
+                    v.pending_permissions.insert(100);
+                    v.pending_permissions.insert(200);
+                    // Answer the FIRST one.
+                    v.respond_permission(
+                        100,
+                        "allow_once".to_string(),
+                        PermissionKindView::AllowOnce,
+                        cx,
+                    );
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        let ChatItem::Permission(first) = &view.items[0] else {
+            panic!("expected first permission card");
+        };
+        let ChatItem::Permission(second) = &view.items[1] else {
+            panic!("expected second permission card");
+        };
+        assert_eq!(
+            first.resolved,
+            Some(PermissionResolution::Chosen("allow_once".to_string())),
+            "the first card (the one answered) is resolved"
+        );
+        assert_eq!(
+            second.resolved, None,
+            "the second card stays live — answering the first must not clobber it"
+        );
+        assert!(
+            view.is_permission_outstanding(200),
+            "the second request is still outstanding"
+        );
+        assert!(
+            !view.is_permission_outstanding(100),
+            "the first request is no longer outstanding"
+        );
+        assert!(view.has_pending_permission());
+    });
+
+    // Now answer the SECOND one — the pane drains fully.
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            agent_view(ws, pane_id).update(cx, |v, cx| {
+                v.respond_permission(
+                    200,
+                    "reject_once".to_string(),
+                    PermissionKindView::RejectOnce,
+                    cx,
+                );
+            });
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        let ChatItem::Permission(second) = &view.items[1] else {
+            panic!("expected second permission card");
+        };
+        assert_eq!(
+            second.resolved,
+            Some(PermissionResolution::Chosen("reject_once".to_string())),
+            "the second card resolves to its own chosen option"
+        );
+        assert!(
+            !view.has_pending_permission(),
+            "no permissions remain outstanding"
         );
     });
 }
@@ -496,6 +629,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
                         tool("a"),
                         tool("b"),
                         ChatItem::Permission(PermissionItem {
+                            id: 7,
                             tool_title: Some("Write /tmp/x".to_string()),
                             raw_input_summary: None,
                             options: vec![PermissionChoice {
@@ -506,7 +640,7 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
                             resolved: None,
                         }),
                     ];
-                    v.pending_permission = Some(7);
+                    v.pending_permissions.insert(7);
                     // Collapse the response — the pending card must still surface.
                     v.set_all_folds(false, cx);
                 });
@@ -536,7 +670,12 @@ async fn resolved_permission_folds_back_immediately(cx: &mut TestAppContext) {
     cx.update_window(window_handle.into(), |_, _window, cx| {
         workspace.update(cx, |ws, cx| {
             agent_view(ws, pane_id).update(cx, |v, cx| {
-                v.respond_permission("allow_once".to_string(), PermissionKindView::AllowOnce, cx);
+                v.respond_permission(
+                    7,
+                    "allow_once".to_string(),
+                    PermissionKindView::AllowOnce,
+                    cx,
+                );
             });
         });
     })
@@ -714,6 +853,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
                 // event pump would have on a `PermissionRequested` event.
                 view.update(cx, |v, _| {
                     v.items.push(ChatItem::Permission(PermissionItem {
+                        id: 7,
                         tool_title: Some("Write /tmp/x".to_string()),
                         raw_input_summary: None,
                         options: vec![PermissionChoice {
@@ -723,7 +863,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
                         }],
                         resolved: None,
                     }));
-                    v.pending_permission = Some(7);
+                    v.pending_permissions.insert(7);
                 });
                 // No live handle (offline) — cancel still drains the pending
                 // permission host-side via the bottom-dock shim: the card
@@ -747,8 +887,81 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
             "cancelling the turn marks the pending card cancelled"
         );
         assert!(
-            view.pending_permission.is_none(),
+            !view.has_pending_permission(),
             "the pending id is cleared on cancel"
+        );
+    });
+}
+
+/// Cancelling a turn with *several* permissions outstanding must drain every one
+/// — ACP requires each parked request be resolved with a `Cancelled` outcome,
+/// so no card is left with live buttons and no park hangs forever.
+#[gpui::test]
+async fn cancel_agent_turn_drains_all_outstanding_permissions(cx: &mut TestAppContext) {
+    use daruda_acp::{
+        ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
+    };
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let tmp = std::env::temp_dir();
+
+    let card = |id: u64| {
+        ChatItem::Permission(PermissionItem {
+            id,
+            tool_title: Some(format!("Write /tmp/{id}")),
+            raw_input_summary: None,
+            options: vec![PermissionChoice {
+                option_id: "allow_once".to_string(),
+                name: "Allow".to_string(),
+                kind: PermissionKindView::AllowOnce,
+            }],
+            resolved: None,
+        })
+    };
+
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                agent_view(ws, id).update(cx, |v, _| {
+                    v.items = vec![card(100), card(200), card(300)];
+                    v.pending_permissions.insert(100);
+                    v.pending_permissions.insert(200);
+                    v.pending_permissions.insert(300);
+                });
+                ws.cancel_agent_turn(id, cx);
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        for item in &view.items {
+            let ChatItem::Permission(card) = item else {
+                panic!("expected a permission card");
+            };
+            assert_eq!(
+                card.resolved,
+                Some(PermissionResolution::Cancelled),
+                "every outstanding card is cancelled on turn cancel"
+            );
+        }
+        assert!(
+            !view.has_pending_permission(),
+            "no permission remains outstanding after cancel"
         );
     });
 }
@@ -1060,7 +1273,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
     view.update(cx, |v, _| {
         v.set_turn_idle();
         v.items.clear();
-        v.pending_permission = Some(7);
+        v.pending_permissions.insert(7);
     });
     view.read_with(cx, |v, _| {
         assert_eq!(v.activity_state(), ActivityState::AwaitingPermission);
@@ -1073,7 +1286,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
     // 4) Idle: no turn, no permission, only a top-level or completed tool.
     view.update(cx, |v, _| {
         v.set_turn_idle();
-        v.pending_permission = None;
+        v.pending_permissions.clear();
         v.items = vec![
             child(ToolStatusView::Completed),
             ChatItem::ToolCall(ToolCallItem {

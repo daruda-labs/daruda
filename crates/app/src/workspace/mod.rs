@@ -1666,8 +1666,8 @@ impl Workspace {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {
                 continue;
             };
-            let live_perm = view.read(cx).pending_permission;
-            for entry in deliverable_entries(queue, live_perm) {
+            let live_perms = view.read(cx).pending_permissions.clone();
+            for entry in deliverable_entries(queue, &live_perms) {
                 self.relay_to_telegram(pane_id, entry.header, entry.tail, entry.permission, cx);
             }
         }

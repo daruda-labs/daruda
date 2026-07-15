@@ -413,6 +413,7 @@ mod tests {
     /// A permission card — `resolved=false` makes it pending (actionable).
     fn perm(resolved: bool) -> ChatItem {
         ChatItem::Permission(PermissionItem {
+            id: 0,
             tool_title: Some("Write /tmp/x".to_owned()),
             raw_input_summary: None,
             options: Vec::new(),

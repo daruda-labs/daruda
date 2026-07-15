@@ -461,33 +461,47 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
     }
 }
 
-/// The trailing not-yet-resolved permission card in `items`, if any. The agent
-/// keeps a single permission request outstanding at a time and it is always the
-/// most recent, so reverse-scan for the first unresolved card.
-pub(in crate::workspace) fn trailing_unresolved_permission(
+/// The unresolved permission card carrying request `id`, if `items` still holds
+/// one. Found by id, not by position: several permissions can be outstanding at
+/// once (parallel tool calls), so the trailing card is not necessarily the one
+/// being answered.
+pub(in crate::workspace) fn permission_card_mut(
     view: &mut AgentChatView,
+    id: u64,
 ) -> Option<&mut daruda_acp::PermissionItem> {
     view.items.iter_mut().rev().find_map(|item| match item {
-        daruda_acp::ChatItem::Permission(card) if card.resolved.is_none() => Some(card),
+        daruda_acp::ChatItem::Permission(card) if card.id == id && card.resolved.is_none() => {
+            Some(card)
+        }
         _ => None,
     })
 }
 
-/// Cancel-drain the view's pending permission request, if any: respond to the
-/// agent with a `Cancelled` outcome and mark the trailing unresolved card
+/// Cancel-drain *every* outstanding permission request: respond to the agent
+/// with a `Cancelled` outcome for each parked id and mark each unresolved card
 /// cancelled so its buttons disable. No-op when nothing is pending; idempotent.
 /// ACP requires the client to resolve a pending permission with a cancelled
 /// outcome on `session/cancel`; this also runs when a turn ends or errors before
 /// the user decided, so no card is left stuck with live buttons.
 pub(in crate::workspace) fn cancel_pending_permission(view: &mut AgentChatView) {
-    let Some(id) = view.pending_permission.take() else {
+    if view.pending_permissions.is_empty() {
         return;
-    };
-    if let Some(handle) = &view.handle {
-        handle.respond_permission(id, daruda_acp::PermissionDecision::Cancelled);
     }
-    if let Some(card) = trailing_unresolved_permission(view) {
-        card.resolved = Some(daruda_acp::PermissionResolution::Cancelled);
+    for id in std::mem::take(&mut view.pending_permissions) {
+        if let Some(handle) = &view.handle {
+            handle.respond_permission(id, daruda_acp::PermissionDecision::Cancelled);
+        }
+    }
+    // Mark *every* unresolved card cancelled — a UI safety net that intentionally
+    // does not key off the set. Under the invariant the two are equal, but the
+    // asymmetry (a backend `Cancelled` is sent only for set ids) is deliberate:
+    // don't couple the UI marking to set membership to "align" them.
+    for item in view.items.iter_mut() {
+        if let daruda_acp::ChatItem::Permission(card) = item
+            && card.resolved.is_none()
+        {
+            card.resolved = Some(daruda_acp::PermissionResolution::Cancelled);
+        }
     }
 }
 

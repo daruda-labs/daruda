@@ -473,7 +473,7 @@ pub(super) fn permission_card(
         None => {
             let mut row = div().flex().flex_row().flex_wrap().gap(px(theme::GAP_SM));
             for (choice_ix, choice) in card.options.iter().enumerate() {
-                row = row.child(permission_button(ix, choice_ix, choice, cx));
+                row = row.child(permission_button(ix, card.id, choice_ix, choice, cx));
             }
             root = root.child(row);
         }
@@ -486,6 +486,7 @@ pub(super) fn permission_card(
 /// treatment; reject kinds use the danger treatment.
 fn permission_button(
     ix: usize,
+    request_id: u64,
     choice_ix: usize,
     choice: &PermissionChoice,
     cx: &mut Context<AgentChatView>,
@@ -506,7 +507,7 @@ fn permission_button(
         }
     };
     button.on_click(cx.listener(move |this, _, _window, cx| {
-        this.respond_permission(option_id.clone(), kind, cx);
+        this.respond_permission(request_id, option_id.clone(), kind, cx);
     }))
 }
 
