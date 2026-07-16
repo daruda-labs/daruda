@@ -11,9 +11,7 @@
 //!     and selection/copy paths.
 //!
 //! Pure helpers inside `view::element` (e.g. `byte_index_for_column_in_line`)
-//! are `pub(crate)` today, so they are benched indirectly through the session
-//! layer. When the Phase 1 prepaint cache lands we will expose the pure
-//! computation as a free function and benchmark it here directly.
+//! are `pub(crate)`, so they are benched indirectly through the session layer.
 
 use std::hint::black_box;
 

@@ -9,12 +9,9 @@ use crate::workspace::layout::Dock;
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, px};
 
 /// Wrap a group header + its member projects in a Premium Card surface.
-/// The card itself is non-interactive — every click target stays in
-/// `header` / `body`, and the card carries no hover fill of its own so
-/// the inner row hover (which sits on top of the card) stays visible.
-///
-/// `is_active` flips the surface to the "selected group" treatment when
-/// the focused project lives inside this group.
+/// Non-interactive (click targets stay in `header` / `body`) and carries
+/// no hover fill so the inner row hover stays visible. `is_active` flips
+/// to the "selected group" treatment when the focused project is inside.
 pub(in crate::workspace::left_dock::projects) fn group_card(
     header: AnyElement,
     body: AnyElement,

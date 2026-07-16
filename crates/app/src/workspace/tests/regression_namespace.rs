@@ -10,10 +10,9 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
     let tmp = tempfile::tempdir().unwrap();
     let data_dir = tmp.path().to_path_buf();
 
-    // Project A roots (use disposable directories under /tmp). The
-    // lane bootstrap inspects the path with `fs::metadata`, but
-    // missing dirs degrade gracefully to a `Default` lane — fine
-    // for persistence shape verification.
+    // Disposable /tmp roots. Lane bootstrap inspects the path with
+    // `fs::metadata`; a missing dir degrades to a `Default` lane,
+    // which is fine for persistence-shape verification.
     let root_a = std::env::temp_dir().join("daruda_regression_ns_a");
     let root_b = std::env::temp_dir().join("daruda_regression_ns_b");
     let _ = std::fs::create_dir_all(&root_a);
@@ -22,8 +21,8 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let project_a = daruda_store::project::Project::from_path(&root_a);
 
-    // First project supplied via `new_with_project`; second added via
-    // `add_project` so the workspace owns two runtime projects.
+    // First project via `new_with_project`, second via `add_project`,
+    // so the workspace owns two runtime projects.
     let wh = cx.add_window(|window, cx| {
         Workspace::new_with_project_for_test(&config, Some(project_a), data_dir.clone(), window, cx)
     });
@@ -35,10 +34,8 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
     })
     .unwrap();
 
-    // `add_project` schedules persist via `mutate_durable` → `cx.defer`.
-    // Force the defer to drain by reading + running an explicit persist
-    // synchronously on the workspace entity so the assertions see the
-    // post-add-project disk shape.
+    // `add_project` schedules persist via `cx.defer`; run an explicit
+    // synchronous persist so assertions see the post-add-project shape.
     ws.read_with(cx, |w, cx| w.persist_state(cx));
 
     let workspaces_dir = daruda_store::project::workspaces_dir_in(&data_dir);
@@ -71,8 +68,7 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
         "expected 2 project files, found {project_count}"
     );
 
-    // recent-workspaces.json is written and contains a single entry
-    // for this workspace's UUID.
+    // recent-workspaces.json holds a single entry for this UUID.
     let recent = daruda_store::project::load_recent_in(&data_dir);
     assert_eq!(recent.len(), 1, "exactly one recent entry");
     let ws_uuid = ws.read_with(cx, |w, _| w.uuid);
@@ -84,20 +80,13 @@ fn persist_state_writes_exactly_one_workspace_file(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn two_workspaces_sharing_a_project_do_not_clobber_each_other(cx: &mut TestAppContext) {
-    // Smaller variant of the io.whatap scenario:
-    // - W1: project A + project B, persist
-    // - W2: project A alone, persist (different workspace_uuid)
-    // After both persist:
-    //   - 2 workspace files exist (W1.uuid.json, W2.uuid.json)
-    //   - 2 project files exist (one per distinct UUID: A_w1, A_w2, B_w1
-    //     — note: each workspace mints a separate UUID for its own
-    //     runtime Project because `add_project` goes through
-    //     `Project::bootstrap` which calls `ProjectUuid::new()`. The
-    //     key invariant tested here is that W1's workspace file is
-    //     still intact after W2's write.)
-    //   - Loading W1 from disk yields a workspace whose project_ids
-    //     still references its original two projects; W2's write did
-    //     not clobber W1's workspace file.
+    // Two workspaces sharing a project root:
+    // - W1: projects A + B, persist
+    // - W2: project A alone, persist (distinct workspace_uuid)
+    // Each workspace mints its own ProjectUuid (via `Project::bootstrap`
+    // → `ProjectUuid::new()`). Key invariant: W2's write must not
+    // clobber W1's workspace file — loading W1 back still lists its
+    // original two projects.
     let tmp = tempfile::tempdir().unwrap();
     let data_dir = tmp.path().to_path_buf();
 
@@ -134,7 +123,7 @@ fn two_workspaces_sharing_a_project_do_not_clobber_each_other(cx: &mut TestAppCo
     assert_eq!(w1_project_ids.len(), 2, "W1 holds two projects");
 
     // ---- W2: A alone ----
-    // Use a fresh `from_path` so W2 mints its own ProjectUuid for A.
+    // Fresh `from_path` so W2 mints its own ProjectUuid for A.
     let project_a2 = daruda_store::project::Project::from_path(&root_a);
     let w2_handle = cx.add_window(|window, cx| {
         Workspace::new_with_project_for_test(

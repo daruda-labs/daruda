@@ -20,20 +20,16 @@ impl Workspace {
     /// config file watcher and the Settings window when the TOML changes.
     ///
     /// **UI theme:** Workspace does *not* swap the live `DarudaTheme`
-    /// here. The config watcher (`main.rs::spawn_config_watcher`) owns
-    /// that — it calls `crate::ui::theme::apply_ui_theme` once per
-    /// reload, app-wide, so a single config change repaints every
-    /// open window. Keeping the swap out of this method means
-    /// Workspace tests that build a sub-tree directly (without the
-    /// full `gpui_component::init` chain) don't accidentally trigger
-    /// a paint that reaches into uninitialised theme Globals.
+    /// here — the config watcher (`main.rs::spawn_config_watcher`) owns
+    /// that via `apply_ui_theme` once per reload, app-wide. Keeping the
+    /// swap out avoids Workspace tests (built without the full
+    /// `gpui_component::init` chain) painting into uninitialised Globals.
     pub fn apply_config(&mut self, config: &daruda_config::Config, cx: &mut Context<Self>) {
         // A config reload may create/remove the active project's config
         // layer; drop the memo so the status-bar dot re-stats on next render.
         self.cached_project_config = None;
-        // Derive the terminal config once (single source of truth), then reuse
-        // its resolved colors to patch live panes — so existing panes and
-        // future panes always resolve to identical fg/bg/palette values.
+        // Single source of truth for the config → terminal-config mapping;
+        // its resolved colors patch live panes so all panes match.
         self.terminal_config = terminal_config_from(config);
         let fg = self.terminal_config.default_fg;
         let bg = self.terminal_config.default_bg;
@@ -84,21 +80,16 @@ impl Workspace {
             });
         }
         // Keep the `InputState`'s auto-grow cap in sync with the new
-        // `input_max_rows` value. The cap is also baked in at construction
-        // (`workspace/mod.rs`); without this update a live reload would leave
-        // the editor expanding past the new limit or stopping short of it.
-        // `set_auto_grow` requires no `&mut Window`, so it runs inline.
+        // `input_max_rows` value (also baked in at construction). No
+        // `&mut Window` needed, so it runs inline.
         let new_max_rows = usize::from(config.agent.input_max_rows);
         self.terminal_input
             .update(cx, |s, _cx| s.set_auto_grow(1, new_max_rows));
-        // Resync the dock height after the cap change — lowering `input_max_rows`
-        // mid-edit would otherwise leave the dock too tall until the next
-        // keystroke. `adapt_dock_to_input_lines` is idempotent via its guard.
-        // `apply_config` runs inside `observe_global` (no `&mut Window` in scope
-        // and the workspace entity is already borrowed), so we re-enter the window
-        // via `try_update_workspace_window` and then `window.defer` to push the
-        // entity-borrowing work to the next event cycle (after the current observe
-        // callback releases its `&mut Workspace` borrow).
+        // Resync dock height after the cap change (idempotent via guard).
+        // `apply_config` runs inside `observe_global` with no `&mut Window`
+        // and the workspace already borrowed, so re-enter via
+        // `try_update_workspace_window` + `window.defer` to push the
+        // entity-borrowing work past the current observe callback's borrow.
         let handle = self.window_handle;
         let ws_weak = cx.weak_entity();
         crate::windows::try_update_workspace_window(
@@ -115,13 +106,11 @@ impl Workspace {
         );
         self.claude.usage_poll = config.usage.poll.clone();
 
-        // Patch all existing pane views: font + colors + opacity. Iterate
-        // every lane's panes (not just the active lane) so a parked lane's
-        // terminals pick up the new font/colors too. `set_font` /
-        // `apply_font_settings` only invalidate the shape cache (they do
-        // not resize or read `last_viewport`), so patching a parked,
-        // never-painted view is safe — the new geometry is recomputed on
-        // its next paint, after the lane is activated.
+        // Patch all existing pane views (font + colors + opacity) across
+        // every lane, not just the active one, so parked terminals update
+        // too. `set_font` / `apply_font_settings` only invalidate the shape
+        // cache (no resize / `last_viewport` read), so a parked never-painted
+        // view is safe — geometry recomputes on its next paint.
         let font = daruda_terminal::terminal_font_with_family(&self.font_family);
         for pane in self
             .main_area
@@ -144,7 +133,6 @@ impl Workspace {
                 view.apply_inset(config.font.inset_x, config.font.inset_y);
             });
         }
-        // Trigger #7 — left-dock config affecting filter state changed.
         let new_mirrors = crate::workspace::ConfigMirrors::from_config(config);
         let filter_changed = self.mirrors.files_show_hidden != new_mirrors.files_show_hidden
             || self.mirrors.files_use_gitignore != new_mirrors.files_use_gitignore;
@@ -163,44 +151,36 @@ impl Workspace {
             // `panels_grid_columns` is a BottomDockSnapshot source — no left-dock notify needed.
         }
         if filter_changed || icon_changed {
-            // `files_show_hidden` / `files_use_gitignore` / `files_icon_color_mode`
-            // are `LeftDockSnapshot` sources; the render staging diff picks them
-            // up on the next workspace render, so a plain `cx.notify()` suffices.
+            // These are `LeftDockSnapshot` sources picked up by the render
+            // staging diff on the next render, so a plain `cx.notify()` suffices.
             cx.notify();
         }
-        // File-viewer editor font size (config `font.editor_size`),
-        // independent of the terminal font. Mirror it to the GPUI-side
-        // global *before* any file-pane reload below so a re-bake reads
-        // the fresh size; the render path reads the global directly.
+        // File-viewer editor font size, independent of the terminal font.
+        // Mirror to the GPUI-side global *before* any file-pane reload so a
+        // re-bake reads the fresh size; the render path reads it directly.
         let editor_font_changed =
             (crate::ui::theme::editor_font_size(cx) - config.font.editor_size).abs() > f32::EPSILON;
         crate::ui::theme::set_editor_font_size(cx, config.font.editor_size);
 
-        // Agent-chat font size (config `font.agent_chat_size`), independent of
-        // the terminal and editor fonts. Mirror it to the GPUI-side global the
-        // agent-chat render path reads directly; on a change, the cached
-        // `AgentChatView`s are dirtied below (a bare workspace `cx.notify()`
-        // would not reach a cached child — render-cost rule §10).
+        // Agent-chat font size, independent of terminal/editor fonts. Mirror
+        // to the GPUI-side global the agent-chat render path reads directly; on
+        // change, cached `AgentChatView`s are dirtied below (a bare workspace
+        // `cx.notify()` would not reach a cached child — render-cost rule §10).
         let agent_chat_font_changed =
             (crate::ui::theme::agent_chat_font_size(cx) - config.font.agent_chat_size).abs()
                 > f32::EPSILON;
         crate::ui::theme::set_agent_chat_font_size(cx, config.font.agent_chat_size);
 
-        // Background opacity (config `window.opacity`) drives both the terminal
-        // pane fill (pushed per-view above) and the agent-chat pane background.
-        // Mirror it to the GPUI-side global the agent-chat render path reads
-        // directly; on a change, dirty each cached `AgentChatView` so its
-        // `.cached()` subtree repaints with the new alpha (a bare workspace
-        // `cx.notify()` would not reach a cached child — render-cost rule §10).
+        // Background opacity drives both the terminal pane fill (pushed above)
+        // and the agent-chat pane background. Mirror to the GPUI-side global;
+        // on change, dirty each cached `AgentChatView` below so its `.cached()`
+        // subtree repaints with the new alpha (render-cost rule §10).
         let bg_alpha_changed =
             (crate::ui::theme::background_alpha(cx) - config.window.opacity).abs() > f32::EPSILON;
         crate::ui::theme::set_background_alpha(cx, config.window.opacity);
-        // Mirror the terminal background color (same `bg` the terminal fill
-        // uses, resolved above) so the agent-chat pane tracks the terminal
+        // Mirror the terminal fg/bg so the agent-chat pane tracks the terminal
         // color theme on a live reload too.
         let bg_color_changed = crate::ui::theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
-        // Mirror the terminal foreground too so the agent-chat pane's text color
-        // tracks the terminal color theme (counterpart to the background above).
         let fg_color_changed = crate::ui::theme::set_agent_chat_fg(cx, fg.r, fg.g, fg.b);
         if bg_alpha_changed || bg_color_changed || fg_color_changed || agent_chat_font_changed {
             let views: Vec<_> = self
@@ -215,17 +195,14 @@ impl Workspace {
             }
         }
 
-        // A UI-theme switch changes the editor background's lightness, so the
-        // syntax palette flips its light/dark variant. Reload open file views
-        // to recompute the baked diff/markdown spans (and re-theme mermaid
-        // diagrams) for the new surface; raw editors recolour from the
-        // re-seeded highlight theme on their own.
+        // A UI-theme switch flips the syntax palette's light/dark variant.
+        // Reload open file views to recompute baked diff/markdown spans (and
+        // re-theme mermaid); raw editors recolour from the re-seeded theme.
         if theme_changed {
             self.reload_file_panes(cx);
         }
-        // A syntax-palette switch re-seeds the editor highlight theme (the
-        // raw editor repaints from it) and recomputes the baked-in diff /
-        // markdown spans by reloading every open file-view pane.
+        // A syntax-palette switch re-seeds the editor highlight theme and
+        // recomputes baked diff/markdown spans by reloading open file panes.
         if syntax_theme_changed {
             crate::ui::theme::set_active_syntax_palette(
                 cx,
@@ -233,37 +210,31 @@ impl Workspace {
             );
             self.reload_file_panes(cx);
         }
-        // Reload for a standalone editor-font change (a theme / syntax
-        // switch above already reloaded, so gate it out to avoid a double).
+        // Reload for a standalone editor-font change, gated to avoid a
+        // double when a theme / syntax switch above already reloaded.
         if editor_font_changed && !theme_changed && !syntax_theme_changed {
             self.reload_file_panes(cx);
         }
-        // Mirrors `claude_status.stale_threshold_secs` for the
-        // notification-push freshness gate.
+        // Mirror for the notification-push freshness gate.
         self.claude.stale_threshold_secs = config.claude_status.stale_threshold_secs;
-        // Picks up `claude_status.enable` flips.
         let new_enabled = config.claude_status.enable;
         if new_enabled != self.claude.claude_status_enabled {
             self.claude.claude_status_enabled = new_enabled;
             self.refresh_jsonl_watcher(cx);
         }
-        // Refresh locale-dependent widget strings. `apply_locale_str` in
-        // `globals::register_settings_observer` runs before this method, so
-        // `rust_i18n::locale()` already reflects the new language by the time
-        // we get here.
+        // Refresh locale-dependent widget strings. `apply_locale_str` runs
+        // before this method, so `rust_i18n::locale()` already reflects the
+        // new language here.
         self.refresh_locale_strings(cx);
 
         cx.notify();
     }
 
-    /// Re-apply translated strings to all widgets whose labels are captured
-    /// at construction time (InputState placeholders, InputPanel button
-    /// labels). Called from `apply_config` so every language switch
-    /// refreshes them in one place.
-    ///
-    /// Uses `try_update_workspace_window` to obtain a live `&mut Window`
-    /// because `apply_config` is called from `observe_global` which has no
-    /// window in scope, yet `InputState::set_placeholder` requires one.
+    /// Re-apply translated strings to widgets whose labels are captured at
+    /// construction (InputState placeholders, InputPanel button labels), in
+    /// one place per language switch. Uses `try_update_workspace_window` for a
+    /// live `&mut Window` since `apply_config` runs from `observe_global` (no
+    /// window in scope) yet `set_placeholder` requires one.
     fn refresh_locale_strings(&mut self, cx: &mut Context<Self>) {
         let git_commit_input = self.git_commit_input.clone();
         let skill_search_input = self.skill_search_input.clone();
@@ -310,14 +281,10 @@ impl Workspace {
 
     /// Derive the bottom-input placeholder from the focused pane's kind and
     /// the agent mode / modifier-key policy, then push it to the widget.
-    ///
-    /// **No `&mut Window` needed at the call site.** This method captures
-    /// the placeholder string (which requires only `&Context<Self>`) and then
-    /// re-enters the window via `try_update_workspace_window` to call
-    /// `set_placeholder`. Callers that *already hold* a `&mut Window`
-    /// (i.e. `focus_pane`) should call
-    /// [`Workspace::apply_input_placeholder`] instead to avoid nested
-    /// window re-entry.
+    /// Re-enters the window via `try_update_workspace_window` for
+    /// `set_placeholder`. Callers already holding a `&mut Window` (e.g.
+    /// `focus_pane`) should call [`Workspace::apply_input_placeholder`]
+    /// instead to avoid nested window re-entry.
     pub(in crate::workspace) fn refresh_terminal_input_placeholder(
         &mut self,
         cx: &mut Context<Self>,
@@ -392,12 +359,11 @@ pub(in crate::workspace) fn effective_config_for(
 
 /// Build a [`TerminalConfig`] from the resolved app config. Single source
 /// of truth for the config → terminal-config mapping: both pane creation
-/// (`new_with_project_impl`) and reload (`apply_config`) call this, so a new
-/// config-derived field can only be wired in one place.
+/// and reload call this, so a config-derived field is wired in one place.
 ///
 /// No `..TerminalConfig::default()` — every field is named so the compiler
-/// rejects an incomplete mapping. The four fields that are not yet wired to
-/// `daruda_config` are spelled out explicitly to keep that gap visible.
+/// rejects an incomplete mapping; the not-yet-wired fields are spelled out
+/// explicitly to keep that gap visible.
 pub(in crate::workspace) fn terminal_config_from(
     config: &daruda_config::Config,
 ) -> daruda_terminal::TerminalConfig {

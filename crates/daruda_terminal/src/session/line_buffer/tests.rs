@@ -130,7 +130,7 @@ fn min_position_tracks_oldest_live_line_after_eviction() {
 
 #[test]
 fn clear_bumps_overflow_and_invalidates_old_positions() {
-    // Step 5 contract: `clear` absorbs the cleared count into
+    // `clear` absorbs the cleared count into
     // `overflow`, so `next_append_abs` does not regress and every
     // outstanding `LineBufferPosition` lands below `overflow`
     // (treated as evicted, never aliasing a future line). Mirrors
@@ -575,11 +575,9 @@ fn next_append_abs_tracks_overflow_plus_len() {
 
 #[test]
 fn next_append_abs_equals_overflow_after_clear() {
-    // Under the current `clear` contract (lines dropped, overflow held),
-    // a cleared buffer's `next_append_abs` equals its `overflow`. Step 5
-    // reshapes this so `clear` also bumps `overflow` by the cleared
-    // length — both contracts agree that the value never aliases a
-    // position issued before the clear.
+    // `clear` bumps `overflow` by the cleared length, so a cleared
+    // buffer's `next_append_abs` equals its `overflow` — the value never
+    // aliases a position issued before the clear.
     let mut b = LineBuffer::new(1024);
     for _ in 0..5 {
         b.append("x", &[], EolKind::Hard);

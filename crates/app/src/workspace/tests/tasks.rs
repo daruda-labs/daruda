@@ -13,7 +13,7 @@ use daruda_store::tasks::{SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, Tas
 use gpui::{BorrowAppContext, TestAppContext};
 
 /// Insert a `Running` task with one attached session and return the
-/// task id. All P2-C tests share this fixture.
+/// task id. Shared fixture for the escalation-counter tests.
 fn seed_running_task(
     workspace: &gpui::Entity<crate::workspace::Workspace>,
     cx: &mut TestAppContext,
@@ -332,7 +332,7 @@ fn apply_agent_chat_task_ended_errors_on_error_reason(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
-// R-21 subtask ops
+// Subtask ops
 // ---------------------------------------------------------------------------
 
 /// Insert a Backlog task and return its id. Subtask tests don't need a
@@ -465,10 +465,10 @@ fn rename_subtask_updates_title_and_ignores_empty(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
-// R-22 TodoWrite hook merge
+// TodoWrite hook merge
 // ---------------------------------------------------------------------------
 
-/// Seed a `Running` task already attached to `session_id`. R-22 needs
+/// Seed a `Running` task already attached to `session_id`. Tests need
 /// the task↔session linkage in place so `apply_todo_write` can locate
 /// the row to fold into. Returns the task id.
 fn seed_running_task_with_subtasks(
@@ -566,7 +566,7 @@ fn apply_todo_write_never_overwrites_manual_subtask(cx: &mut TestAppContext) {
 
         let g = cx.global::<crate::agent::tasks_global::GlobalTasks>();
         let t = g.get(&task_id).unwrap();
-        assert_eq!(t.subtasks.len(), 2, "manual + auto coexist (I-14)");
+        assert_eq!(t.subtasks.len(), 2, "manual + auto coexist");
         let manual = t.subtasks.iter().find(|s| s.id == manual_id).unwrap();
         assert!(
             !manual.completed,

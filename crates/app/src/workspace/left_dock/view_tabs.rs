@@ -1,9 +1,8 @@
-//! ViewSwitcher for the left dock (LeftDock).
+//! ViewSwitcher for the left dock.
 //!
 //! Three tabs (Lanes / Git / Files) map to
-//! `daruda_store::project::LeftDockView`. Clicking a tab calls
-//! `Workspace::set_left_dock_view` via the snapshot's `workspace`
-//! weak-entity handle.
+//! `daruda_store::project::LeftDockView`; clicking one calls
+//! `Workspace::set_left_dock_view` via the snapshot's weak handle.
 
 use daruda_store::project::LeftDockView;
 use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
@@ -24,8 +23,8 @@ fn entries() -> Vec<(LeftDockView, gpui::SharedString)> {
 }
 
 /// Map a tab strip index back to its `LeftDockView`. Falls back to the
-/// first entry on out-of-bounds — `TabBar::on_click` only emits indices
-/// within the children we passed, so this is a defensive ceiling.
+/// first entry on out-of-bounds (defensive; `TabBar::on_click` only emits
+/// in-range indices).
 fn view_by_index(ix: usize) -> LeftDockView {
     entries()
         .get(ix)

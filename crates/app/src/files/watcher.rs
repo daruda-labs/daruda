@@ -1,18 +1,12 @@
 //! File-system watcher for the left-dock Files view.
 //!
-//! Per-lane `notify::RecommendedWatcher` with recursive watch (macOS
-//! FSEvents). Raw events are debounced on a dedicated thread (30 ms
-//! window); the thread blocks on `recv()` so it parks at zero CPU when
-//! the filesystem is idle. Bursts above `BULK_THRESHOLD` collapse to a
-//! single `Bulk` event so a `git checkout` does not produce one reload
-//! per file.
-//!
-//! Paths inside `.git/` are filtered out at classification time —
-//! `git status` itself writes to `.git/index` (stat-cache update),
-//! and forwarding those events would let `refresh_git_status` trigger
-//! itself in a loop, pinning idle CPU near 3.5 %. Working-tree changes
-//! (including `git checkout` / `git pull` results) live outside
-//! `.git/`, so the filter does not blind us to user-visible state.
+//! Per-lane recursive `notify::RecommendedWatcher`. Raw events are debounced
+//! on a dedicated thread (30 ms window) that blocks on `recv()`, so it parks
+//! at zero CPU when idle. Bursts above `BULK_THRESHOLD` collapse to one `Bulk`
+//! event. Paths inside `.git/` are filtered out: forwarding `.git/index`
+//! stat-cache writes would let `refresh_git_status` retrigger itself in a
+//! loop. Working-tree changes live outside `.git/`, so nothing user-visible
+//! is missed.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;

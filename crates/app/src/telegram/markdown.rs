@@ -1,39 +1,15 @@
-//! Markdown → Telegram-HTML conversion for outgoing bridge messages.
+//! Markdown to Telegram-HTML conversion for outgoing bridge messages.
 //!
-//! GPUI-free and stateless — a pure `&str -> String` transform, unit-tested
-//! without any HTTP or GPUI dependency. `global.rs`'s send loop calls
-//! [`to_telegram_html`] and passes `parse_mode: "HTML"` to `client::send_message`;
-//! on a send failure it retries once with the untouched source text and no
-//! `parse_mode` (see that module for the fallback).
-//!
-//! **Why HTML, not Telegram's MarkdownV2**: both `parse_mode`s render the exact
-//! same underlying set of message entities (bold/italic/strikethrough/code/pre/
-//! link/blockquote) — Telegram has no richer formatting either way. The
-//! difference is escaping risk. MarkdownV2 requires escaping ~18 characters
-//! (`` _ * [ ] ( ) ~ ` > # + - = | { } . ! ``) in plain text, and a single
-//! missed one makes Telegram reject the *entire* message with an HTTP 400 —
-//! silently, since a failed send here is only `LogWriter::log`ged, never
-//! surfaced to the user (see `global.rs::spawn_send_task`). HTML only needs
-//! `< > &` escaped, everywhere, unconditionally — a much smaller,
-//! context-independent surface for a hand-rolled converter to get right.
-//!
-//! **Why not a 1:1 syntax translation**: several CommonMark/GFM constructs
-//! daruda's own in-app chat renders (`crate::ui::markdown`, backed by
-//! `gpui_component`'s GFM-mode parser) have no Telegram equivalent at all —
-//! headings, native list bullets/numbering, tables, task-list checkboxes,
-//! footnotes, and inline images (Telegram text messages cannot embed an
-//! image; that needs a separate `sendPhoto` call, out of scope here). Each
-//! is downgraded to a plain-text approximation rather than dropped outright
-//! — see the per-construct comments below.
+//! GPUI-free, stateless, and fallible only at the later HTTP send step. HTML is
+//! used instead of MarkdownV2 because Telegram supports the same entity set but
+//! HTML has a much smaller, context-independent escaping surface (`<`, `>`,
+//! `&`), reducing silent HTTP 400 failures. GFM constructs without Telegram
+//! equivalents are downgraded to plain-text approximations.
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
-/// Convert `source` (CommonMark + the GFM extensions daruda's in-app
-/// renderer supports) into Telegram's HTML `parse_mode` subset. Never
-/// fails — any construct it can't map 1:1 degrades to a plain-text
-/// approximation (see module docs) rather than being dropped or causing an
-/// error; the caller's fallback path is reserved for a `sendMessage` HTTP
-/// failure, not a conversion failure, because this function has none.
+/// Convert CommonMark/GFM source into Telegram's HTML `parse_mode` subset.
+/// Unmapped constructs degrade to plain text rather than failing.
 pub fn to_telegram_html(source: &str) -> String {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -58,13 +34,8 @@ pub fn to_telegram_html(source: &str) -> String {
     blocks.join("\n\n")
 }
 
-/// Escape the three characters HTML `parse_mode` requires escaped in text
-/// content, everywhere, with no context-dependent exceptions — the entire
-/// reason HTML was chosen over MarkdownV2 (see module docs). `pub(crate)`
-/// so `global.rs`'s send loop can use it directly for a
-/// `TelegramTail::Plain` segment (escaped, but never markdown-parsed) —
-/// see that type's doc comment in `bridge.rs` for why the two are kept
-/// separate.
+/// Escape HTML text for Telegram `parse_mode`; also used for plain tail
+/// segments that must be escaped but not markdown-parsed.
 pub(crate) fn escape_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

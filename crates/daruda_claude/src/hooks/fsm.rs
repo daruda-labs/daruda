@@ -228,7 +228,7 @@ mod tests {
         // Every subtype — blocking and informational alike — leaves the
         // persisted status untouched. Blocking ones (permission / idle /
         // elicitation) are surfaced as a transient desktop push on the
-        // app side; none of them latch `NeedsAttention` anymore.
+        // app side instead of latching `NeedsAttention`.
         for t in [
             NotificationType::PermissionPrompt,
             NotificationType::IdlePrompt,

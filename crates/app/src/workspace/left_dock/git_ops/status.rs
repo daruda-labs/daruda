@@ -23,13 +23,11 @@ impl Workspace {
     /// Kick off a background `git status` for `target` and update
     /// `git_status_cache` when done. No-op for non-git worktrees.
     ///
-    /// Concurrency guard: at most one in-flight task per lane. A
-    /// second call while one is running sets `git_status_pending_repeat`,
-    /// which the in-flight task drains by re-invoking itself once
-    /// before returning. This collapses watcher-event bursts (a `cargo
-    /// build` can emit 30+ debounced events per second) into at most
-    /// two `git status` invocations: the running one + one repeat that
-    /// captures everything that landed during the run.
+    /// Concurrency guard: at most one in-flight task per lane. A second call
+    /// while one runs sets `git_status_pending_repeat`, which the in-flight
+    /// task drains by re-invoking itself once before returning. This collapses
+    /// watcher-event bursts into at most two invocations (the running one + a
+    /// repeat capturing everything that landed during the run).
     pub(in crate::workspace) fn refresh_git_status(
         &mut self,
         target: LaneRef,
@@ -57,28 +55,23 @@ impl Workspace {
                 ws.git_status_in_flight.remove(&target);
                 match result {
                     Ok(data) => {
-                        // Propagate an external branch switch (a checkout
-                        // run outside daruda, or in daruda's own terminal)
-                        // into the lane's recorded branch. The left-dock
-                        // label reads `Lane.kind.branch` rather than
-                        // re-probing git on render, so this refresh is the
-                        // only path that keeps the label current.
+                        // Propagate an external branch switch into the lane's
+                        // recorded branch. The left-dock label reads
+                        // `Lane.kind.branch` instead of re-probing on render,
+                        // so this refresh is the only path keeping it current.
                         ws.reconcile_lane_branch(target, data.branch.as_deref(), cx);
                         ws.git_status_cache.insert(target, data);
-                        // Trigger #6 — git status refresh updates badges.
+                        // Refreshed status updates the file badges.
                         ws.invalidate_visible_files_cache(target);
-                        // Commit button reflects the active lane's
-                        // staged count — recompute when that lane's
-                        // cache changes.
+                        // Commit button reflects the active lane's staged count.
                         if target == ws.active {
                             ws.sync_commit_buttons(cx);
                         }
                     }
                     Err(e) => {
-                        // `git status` failure disables the entire Git Changes
-                        // panel — staged/unstaged lists, commit footer, file
-                        // badges all go stale. That meets the CLAUDE.md
-                        // "core function broke" bar for Error severity.
+                        // A status failure staleness-freezes the whole Git
+                        // Changes panel, meeting the CLAUDE.md "core function
+                        // broke" bar for Error severity.
                         let report = ErrorReport::new("git status failed")
                             .severity(ErrorSeverity::Error)
                             .from_error(&e)
@@ -90,8 +83,8 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-                // Drain the repeat slot — re-fire once to capture
-                // events that landed while the previous run was busy.
+                // Drain the repeat slot — re-fire once for events that
+                // landed while the previous run was busy.
                 if ws.git_status_pending_repeat.remove(&target) {
                     ws.refresh_git_status(target, cx);
                 }
@@ -100,17 +93,12 @@ impl Workspace {
         .detach();
     }
 
-    /// Propagate the live `git status` branch into the targeted lane's
-    /// recorded `kind.branch`. The left-dock label and tab titles read
-    /// `Lane.kind.branch` (captured once at project-add / git-init time)
-    /// rather than probing git on every render, so without this an
-    /// external `git checkout` would leave the label stale. Rewrites and
-    /// persists only when the branch actually drifted, so the
-    /// file-watcher refresh bursts don't schedule a save each time.
-    ///
-    /// Routes the in-place update through [`crate::lane::Lane::set_kind`]
-    /// so the derived `is_main` mirror can never drift, and preserves the
-    /// lane's `repo_root` / `worktree_root` unchanged.
+    /// Propagate the live `git status` branch into the lane's recorded
+    /// `kind.branch` so an external `git checkout` doesn't leave the label
+    /// stale. Rewrites and persists only when the branch actually drifted, so
+    /// watcher refresh bursts don't schedule a save each time. Routes through
+    /// [`crate::lane::Lane::set_kind`] so the derived `is_main` mirror can't
+    /// drift; `repo_root` / `worktree_root` are preserved.
     pub(in crate::workspace) fn reconcile_lane_branch(
         &mut self,
         target: LaneRef,
@@ -148,15 +136,11 @@ impl Workspace {
         self.refresh_git_status(target, cx);
     }
 
-    /// Recompute and push the disabled state of the commit footer's
-    /// split-button.
-    ///
-    /// The `commit` split-button is disabled when an op is in flight or
-    /// no files are staged. Committing with nothing staged would just
-    /// fail at the git CLI, so the UI surfaces the "no-op" state
-    /// up-front. The Amend item inside the dropdown shares the same
-    /// disabled state because `DropdownButton` ties the caret to the
-    /// primary button's enablement.
+    /// Recompute the disabled state of the commit footer's split-button:
+    /// disabled when an op is in flight or nothing is staged (surfacing the
+    /// no-op up-front instead of failing at the git CLI). The dropdown Amend
+    /// item shares this state, since `DropdownButton` ties the caret to the
+    /// primary button.
     pub(in crate::workspace) fn sync_commit_buttons(&mut self, cx: &mut Context<Self>) {
         let staged_count = self
             .git_status_cache

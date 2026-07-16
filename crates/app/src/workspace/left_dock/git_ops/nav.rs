@@ -8,11 +8,9 @@ use gpui::{Context, Window};
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// Build the keyboard-navigable file order for the Git Changes view
-    /// in the active lane. Defers to the left dock's
-    /// `ordered_visible_paths` helper so any future change to the render
-    /// order (sticky conflicts, custom sort) automatically applies to
-    /// `↑↓` nav.
+    /// Keyboard-navigable file order for the active lane's Git Changes view.
+    /// Defers to `ordered_visible_paths` so render-order changes apply to
+    /// `↑↓` nav too.
     fn git_changes_visible_paths(&self) -> Vec<PathBuf> {
         let Some(s) = self.git_status_cache.get(&self.active) else {
             return Vec::new();
@@ -118,9 +116,8 @@ impl Workspace {
             (None, None) => return,
         };
 
-        // The diff viewer wants the absolute path (it routes through
-        // `open_pane_file_view` which loads from the filesystem); resolve
-        // the repo-root-relative cursor via LanePaths.
+        // The diff viewer loads from the filesystem, so resolve the
+        // repo-root-relative cursor to an absolute path via LanePaths.
         let Some(wt) = self.active_lane() else {
             return;
         };
@@ -129,10 +126,8 @@ impl Workspace {
     }
 
     /// Toggle the collapse state of a directory group in the Git Changes
-    /// view. State is per-lane and in-memory only — Git Changes is
-    /// task-driven (open it, deal with the diff, close it), so persisting
-    /// collapse state across app restarts would mostly preserve stale
-    /// "I last collapsed this dir three weeks ago" noise.
+    /// view. Per-lane and in-memory only — not persisted across restarts,
+    /// since the view is task-driven and stale collapse state is just noise.
     pub(in crate::workspace) fn toggle_git_dir_collapse(
         &mut self,
         lane_id: LaneId,

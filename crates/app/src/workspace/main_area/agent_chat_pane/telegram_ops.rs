@@ -1,13 +1,10 @@
 //! Telegram relay — `Workspace` ops that push agent-chat pings out to the
 //! Telegram bridge (`crate::telegram::global::TelegramBridge`) and route
-//! phone-tapped replies / permission decisions back into the pane that
-//! triggered them.
+//! phone-tapped replies / permission decisions back into the triggering pane.
 //!
-//! Sibling of [`super::agent_chat_ops`], which owns the desktop-notification
-//! pipeline and fires the two tee points — `maybe_notify_agent_event`
-//! (permission wait) and `fire_activity_completion` (turn completion) — that
-//! call into this file's `relay_*` methods; both files are `impl Workspace`
-//! blocks in the same module tree.
+//! Sibling of [`super::agent_chat_ops`], whose `maybe_notify_agent_event`
+//! (permission wait) and `fire_activity_completion` (turn completion) tee points
+//! call into this file's `relay_*` methods; both are `impl Workspace` blocks.
 
 use std::collections::HashSet;
 
@@ -21,18 +18,17 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Below this char count, [`preview_for`] sends the text verbatim.
 const TELEGRAM_PREVIEW_THRESHOLD: usize = 2000;
-/// How many leading/trailing characters survive when a response is
-/// truncated — the head carries what was asked/done, the tail carries the
-/// final result; the middle is usually tool-output detail already visible
-/// in the app.
+/// Leading/trailing characters kept when a response is truncated — head carries
+/// the ask, tail carries the result; the elided middle is usually tool-output
+/// detail already visible in the app.
 const TELEGRAM_PREVIEW_HEAD_CHARS: usize = 1000;
 const TELEGRAM_PREVIEW_TAIL_CHARS: usize = 1000;
 
-/// Keep `text` verbatim under [`TELEGRAM_PREVIEW_THRESHOLD`] characters;
-/// past it, keep the first [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last
-/// [`TELEGRAM_PREVIEW_TAIL_CHARS`] characters around `marker` (the
-/// caller's localized "…(truncated)…" string). Counts `char`s, not bytes,
-/// so a multi-byte response (Korean, emoji, …) never splits mid-character.
+/// Keep `text` verbatim under [`TELEGRAM_PREVIEW_THRESHOLD`] characters; past
+/// it, keep the first [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last
+/// [`TELEGRAM_PREVIEW_TAIL_CHARS`] characters around `marker` (the caller's
+/// localized "…(truncated)…" string). Counts `char`s, not bytes, so a multi-byte
+/// response never splits mid-character.
 fn preview_for(text: &str, marker: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= TELEGRAM_PREVIEW_THRESHOLD {
@@ -45,15 +41,11 @@ fn preview_for(text: &str, marker: &str) -> String {
     format!("{head}\n{marker}\n{tail}")
 }
 
-/// Compose the permission-wait ping's tail: the localized "waiting for
-/// input" line, then an optional tool-title line, then an optional
-/// raw-input-summary line — both are the same
-/// `daruda_acp::PermissionItem::{tool_title,raw_input_summary}` fields the
-/// in-app permission card is built from, so the phone message says *what*
-/// is being asked (e.g. "Write /tmp/x.rs" / "command: npm install") instead
-/// of just that something is. An empty string is treated the same as
-/// absent (defensive — `raw_input_summary` already filters this at the
-/// source, see `daruda_acp::mapping::summarize_raw_input`).
+/// Compose the permission-wait ping's tail: the localized "waiting for input"
+/// line, then optional tool-title and raw-input-summary lines (the same
+/// `daruda_acp::PermissionItem` fields the in-app card is built from) so the
+/// phone message names *what* is being asked. An empty string is treated as
+/// absent (defensive; the source already filters it).
 fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str>) -> String {
     let mut tail = s::agent_notification_waiting();
     for line in [tool_title, raw_input_summary] {
@@ -123,21 +115,14 @@ pub(in crate::workspace) fn deliverable_entries(
         .collect()
 }
 
-/// Build one Telegram button per permission choice, in the same order and
-/// with the same labels the in-app card renders them (the same
-/// `daruda_acp::PermissionChoice` view-model list
-/// `AgentChatView::apply_event` renders as in-app buttons — see
-/// `daruda_acp::mapping::permission_item`). No collapsing to a single
-/// Allow/Reject pair: a richer option set (e.g. codex-acp's "Allow Once" /
-/// "Allow for Session" / an execpolicy-amendment allow, alongside Reject)
-/// stays fully choosable from the phone, matching the desktop card exactly.
-/// Each choice's `*Once`/`*Always` kind maps to the same
-/// `daruda_acp::PermissionDecision::Allow`/`Reject` outcome
-/// `AgentChatView::respond_permission` sends for it — the finer-grained kind
-/// only picks in-app button styling (accent vs. danger), never the wire
-/// outcome, which is carried entirely by `option_id`. Returns an empty
-/// `Vec` only if the agent supplied no options at all (the caller skips the
-/// relay in that case — nothing to build a keyboard from).
+/// Build one Telegram button per permission choice, in the same order and with
+/// the same labels the in-app card uses (the same `daruda_acp::PermissionChoice`
+/// list). A richer option set (e.g. codex-acp's "Allow Once" / "Allow for
+/// Session" / execpolicy amendment, alongside Reject) stays fully choosable from
+/// the phone — no collapsing to a single Allow/Reject pair. Each `*Once`/
+/// `*Always` kind maps to the same `Allow`/`Reject` wire outcome (the kind only
+/// picks in-app styling; the outcome is carried by `option_id`). Empty `Vec`
+/// only when the agent supplied no options (caller then skips the relay).
 fn permission_buttons(
     options: &[daruda_acp::PermissionChoice],
 ) -> Vec<(String, crate::telegram::bridge::PermissionDecision)> {
@@ -160,10 +145,9 @@ fn permission_buttons(
 }
 
 impl Workspace {
-    /// The owning project's display name for `pane_id`, if it belongs to
-    /// one (`main_area.runtimes` is keyed by `LaneRef { project, lane }`,
-    /// so the project id comes from whichever runtime's pane list contains
-    /// this pane). `None` for a pane whose lane/project has since gone away.
+    /// The owning project's display name for `pane_id` (found via whichever
+    /// `main_area.runtimes` entry's pane list contains it). `None` for a pane
+    /// whose lane/project has since gone away.
     fn project_name_for_pane(&self, pane_id: PaneId) -> Option<String> {
         let project_id = self
             .main_area
@@ -195,17 +179,13 @@ impl Workspace {
         }
     }
 
-    /// Compose the turn-completion ping's header + tail: project name and
-    /// agent name as the (always plain) header, and the agent's actual last
-    /// response (see [`preview_for`] for the head/tail truncation past 2000
-    /// chars) as a [`TelegramTail::Markdown`] tail — so the phone shows
-    /// what the agent actually said, with its own markdown rendered,
-    /// rather than a bare "completed" line or literal `**`/backticks.
-    /// Falls back to a [`TelegramTail::Plain`] "finished responding" tail
-    /// when the turn produced no assistant text at all (e.g. a tool-only
-    /// turn) or the pane's view is already gone — that fallback text is
-    /// plain i18n copy, not agent-authored markdown, so it must not be
-    /// markdown-parsed either (see [`TelegramTail`]'s doc comment).
+    /// Compose the turn-completion ping's header + tail: the plain header, and
+    /// the agent's last response ([`preview_for`] truncates past 2000 chars) as
+    /// a [`TelegramTail::Markdown`] tail so the phone shows what the agent
+    /// actually said with its markdown rendered. Falls back to a
+    /// [`TelegramTail::Plain`] "finished responding" tail when the turn produced
+    /// no assistant text (e.g. tool-only) or the view is gone — that fallback is
+    /// plain i18n copy, not agent markdown, so it must not be parsed as such.
     pub(in crate::workspace) fn telegram_completion_parts(
         &self,
         pane_id: PaneId,

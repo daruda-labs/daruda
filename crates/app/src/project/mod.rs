@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn from_disk_reads_persisted_branch_fields() {
         // `from_disk` reads the persisted `default_branch` / `base_branch`
-        // verbatim — no git call. Task 3's reconcile owns refreshing them.
+        // verbatim — no git call. A separate reconcile pass owns refreshing them.
         let dir = std::env::temp_dir().join("daruda_project_from_disk_branches");
         let stored = crate::lane::Lane::default_for_project(0, dir.clone()).to_serialized();
         let ps = ProjectState {

@@ -1,9 +1,8 @@
-//! Remove-lane confirmation dialog (Modal trait flavor).
+//! Remove-lane confirmation dialog.
 //!
-//! Self-contained modal entity. Owns its own focus, key dispatch,
-//! and submit (background `git worktree remove`). On success the
-//! workspace finalizes by switching off the removed lane (if
-//! active) and dropping its runtime + entry.
+//! Self-contained modal entity owning its focus, key dispatch, and submit
+//! (background `git worktree remove`). On success the workspace switches off
+//! the removed lane (if active) and drops its runtime + entry.
 
 use std::path::PathBuf;
 

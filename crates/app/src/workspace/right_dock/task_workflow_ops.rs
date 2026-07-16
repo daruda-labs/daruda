@@ -1,4 +1,4 @@
-//! Right-panel Tasks tab — R-14 lifecycle layer.
+//! Right-panel Tasks tab — lifecycle layer.
 //!
 //! Hosts the long-running task workflows: `start_task` (open the
 //! lane → write the prompt file → dispatch `claude` into the
@@ -7,7 +7,7 @@
 //! session bookkeeping (`apply_task_session_changed`,
 //! `apply_task_session_ended`, `apply_todo_write`, …).
 //!
-//! Sibling of `task_ops` (R-12 filter + R-13 CRUD). Both modules
+//! Sibling of `task_ops` (filter + CRUD). Both modules
 //! extend the same `Workspace` via separate `impl Workspace` blocks.
 
 use std::path::Path;
@@ -25,7 +25,7 @@ use serde::Deserialize;
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
 
-/// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape (R-22).
+/// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape.
 /// Claude Code includes more fields (`activeForm`, sometimes free-form
 /// metadata) but daruda only cares about title + completion state.
 /// `#[serde(default)]` on `status` keeps the parser robust against
@@ -47,7 +47,7 @@ struct TodoWritePayload {
 
 impl Workspace {
     // ------------------------------------------------------------------
-    // R-14: lifecycle (start / cancel / focus / reopen / retry)
+    // Lifecycle (start / cancel / focus / reopen / retry)
     // ------------------------------------------------------------------
 
     /// Per-repo lock acquisition. Two concurrent `start_task` calls
@@ -349,7 +349,7 @@ impl Workspace {
         });
         self.save_tasks_dirty(cx);
 
-        // R-20 dynamic install: for the Terminal surface, if a TaskEdit pane for
+        // Dynamic install: for the Terminal surface, if a TaskEdit pane for
         // this task is already open (the user clicked Start from the pane
         // footer), the prompt file just landed on disk for the first time —
         // install the FS watcher now instead of waiting for the user to
@@ -411,7 +411,7 @@ impl Workspace {
 
     /// Switch the active lane to the one this task is running in.
     /// Lazily transitions to `Error { "lane gone" }` when the
-    /// path no longer exists on disk (D-10), so a deleted-from-the-
+    /// path no longer exists on disk, so a deleted-from-the-
     /// outside checkout doesn't dangle in `Running` forever.
     pub(in crate::workspace) fn focus_task_lane(
         &mut self,
@@ -511,7 +511,7 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------------
-    // R-15: Claude hook → task state mapping
+    // Claude hook → task state mapping
     // ------------------------------------------------------------------
 
     /// Attach `session_id` to every `Running` task whose lane
@@ -780,18 +780,18 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------------
-    // R-22: TodoWrite hook auto-merge
+    // TodoWrite hook auto-merge
     // ------------------------------------------------------------------
 
     /// Merge a `TodoWrite` hook payload into the matching task's
-    /// subtasks (R-22).
+    /// subtasks.
     ///
     /// Routing: the workspace already tracks which Claude session id
-    /// belongs to which `Running` task via `session_ids` (R-15). We
+    /// belongs to which `Running` task via `session_ids`. We
     /// reuse that linkage to find the target task — no extra
     /// bookkeeping needed.
     ///
-    /// Policy (I-14 namespace isolation):
+    /// Policy (namespace isolation):
     /// - User-added subtasks (`source_session_id == None`) are
     ///   **never** touched, even if a hook todo carries the same title.
     /// - For matches against an existing auto-subtask we only flip

@@ -1,36 +1,8 @@
-//! Settings window — edit common daruda config options in a standalone window.
+//! Singleton settings window for common daruda config options.
 //!
-//! Opened via `Cmd+,` (`OpenSettings(SettingsSection::default())`) or any
-//! menu / palette entry that constructs an `OpenSettings(section)`. The
-//! window is a singleton: a second open call routes through
-//! [`SettingsWindow::focus_section`] to switch the active page rather
-//! than spawning a duplicate window.
-//!
-//! ## Layout
-//!
-//! ```text
-//! ┌───────────────────────────────────────┐
-//! │  [traffic-light bar / title]          │
-//! ├──────────┬────────────────────────────┤
-//! │          │                            │
-//! │ sidebar  │   body for active section  │
-//! │ (nav)    │   (form fields)            │
-//! │          │                            │
-//! ├──────────┴────────────────────────────┤
-//! │             [Cancel] [Save]           │
-//! └───────────────────────────────────────┘
-//! ```
-//!
-//! Each section is a method on `SettingsWindow` (see `sections.rs`).
-//! Adding a new builtin section is:
-//!   1. Add the variant to [`daruda_config::BuiltinSection`] +
-//!      `BuiltinSection::ALL` + `slug()`.
-//!   2. Add a `SETTINGS_NAV_*` const + `SETTINGS_SECTION_*` header
-//!      in `surface/strings.rs`.
-//!   3. Add a `render_<section>` method in `sections.rs` and route
-//!      from `render::render_section_body`.
-//!   4. (Optional) extend `validate()` / `submit()` if the section
-//!      mutates `Config`.
+//! Reopening routes through [`SettingsWindow::focus_section`] instead of
+//! spawning a duplicate. Builtin sections pair a `BuiltinSection` variant with
+//! nav/header strings and a `render_<section>` method.
 
 mod render;
 mod sections;
@@ -54,17 +26,11 @@ use crate::window_registry::WindowRegistry;
 
 pub struct SettingsWindow {
     panel_focus_handle: FocusHandle,
-    /// Snapshot of the config at window-open time. `validate()` overlays form
-    /// values on top of this snapshot so fields not exposed in the UI (e.g.
-    /// `[colors]`, `[keybindings]`) are preserved on save.
+    /// Open-time snapshot; saves overlay form fields so hidden config survives.
     base_config: daruda_config::Config,
-    /// Which page the body is currently rendering. Updated by sidebar
-    /// click + by `focus_section` (called when a second `OpenSettings`
-    /// dispatch arrives while the window is already open).
+    /// Section currently rendered by the body.
     active_section: BuiltinSection,
-    /// Per-section first-input focus targets — used by `focus_section`
-    /// so a sidebar click / menu jump immediately lands focus on the
-    /// natural starting field (e.g. font size for the Font page).
+    /// Per-section first-input focus targets for sidebar/menu jumps.
     section_focus: HashMap<BuiltinSection, FocusHandle>,
     // ---- form fields ----
     // General page.

@@ -1,20 +1,15 @@
-//! Merge-into modal — lets the user pick a target lane branch and
-//! runs `git merge <source>` from the target's checkout directory.
+//! Merge-into modal — pick a target lane branch and run `git merge <source>`
+//! from the target's checkout. Only branches checked out as app lanes are
+//! offered (merging one that isn't in any lane would need a checkout git
+//! forbids while another lane holds it).
 //!
-//! Only branches currently checked out as app lanes are offered as
-//! targets; merging into a branch that isn't in any lane would
-//! require a checkout, which git forbids while another lane has it.
+//! On conflicts the merge is left in-progress in the target lane and the
+//! modal switches to a "Conflicts" state offering [Abort Merge]
+//! (`git merge --abort` + dismiss) or [Go to "<branch>" →] (activate the
+//! target lane to resolve in the terminal).
 //!
-//! Conflict handling: when git reports conflicts the merge is left
-//! in-progress in the target lane.  The modal switches to a
-//! "Conflicts" state and offers two actions:
-//!   • [Abort Merge] — runs `git merge --abort` and dismisses.
-//!   • [Go to "<branch>" →] — activates the target lane tab so the
-//!     user can resolve conflicts in the terminal, then commit.
-//!
-//! Remove-after-merge: when the source lane is removable (not the
-//! main checkout), a checkbox lets the user remove the lane and
-//! delete its branch automatically after a successful merge.
+//! When the source lane is removable, a checkbox removes it and deletes its
+//! branch after a successful merge.
 
 use std::path::PathBuf;
 

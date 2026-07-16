@@ -1,39 +1,12 @@
-//! Claude Code session-status indicator — four visual modes per
-//! [`SessionStatus`].
+//! Claude Code session-status indicator.
 //!
-//! All shapes are procedurally drawn with GPUI primitives — no SVG
-//! files, no external assets. Colour, size, and timing values come
-//! from `crate::ui::theme::STATUS_INDICATOR_*` (G4 — no
-//! inline literals).
+//! Draws every state as the same 3x3 dot grid using GPUI primitives and
+//! `theme::STATUS_INDICATOR_*` constants (G4: no inline literals).
 //!
-//! All states render as a 3×3 dot grid at the same footprint.
-//! State is expressed through colour and a low-rate stepped pattern:
-//!
-//! - **Idle** — all 9 dots fully lit, no animation.
-//! - **Connecting** — plus (+) ↔ cross (×), 2-frame blink. Centre stays lit.
-//! - **NeedsAttention** — all 9 dots blink `1.0 ↔ 0.4` (2-frame).
-//! - **Working** — serpentine "comet" head sweeps the grid in 6 stepped frames;
-//!   head at full alpha, trail fades to `STATUS_INDICATOR_DOT_GRID_TAIL_ALPHA_MIN`.
-//! - **ExecutingTool** — a quadrant (corner + two edges) rotates clockwise in
-//!   4 frames; centre stays dim at `STATUS_INDICATOR_RING_CENTER_ALPHA`.
-//!
-//! ## Why a shared clock instead of `with_animation`
-//!
-//! GPUI has no partial redraw: `with_animation` requests a frame every
-//! display refresh (~60 fps), and each frame marks the view dirty →
-//! the whole window tree re-lays-out and re-paints. A small status
-//! badge therefore cost ~40% CPU while it pulsed.
-//!
-//! Instead, a single [`StatusPulseClock`] global advances one `tick`
-//! every `STATUS_INDICATOR_TICK_MS` (~4 fps), driven by a gated pump
-//! (`watchers_lifecycle::spawn_status_pulse`) that notifies every window
-//! with an animating session — backgrounded windows included, so a
-//! session in another window keeps pulsing. Each badge derives its
-//! frame from the tick — no per-frame `request_animation_frame`. Result:
-//! ~4 redraws/s instead of ~60 while a badge animates, and zero while
-//! idle. The visible resolution of the comet (6/4 discrete frames) is
-//! unchanged by the lower rate; the smooth fades become 2-frame blinks
-//! (Pitfall #10).
+//! Animation uses one gated [`StatusPulseClock`] instead of `with_animation`:
+//! GPUI has no partial redraw, so a per-badge 60 fps animation repaints the
+//! window tree. The shared ~4 fps clock keeps animating windows alive, leaves
+//! idle windows at zero redraws, and satisfies CLAUDE.md Pitfall #10.
 
 use crate::ui::theme;
 use daruda_claude::SessionStatus;
@@ -41,19 +14,14 @@ use gpui::{
     App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, px,
 };
 
-/// Monotonic animation clock shared by every status badge. Advanced by
-/// the gated status-pulse pump (~`STATUS_INDICATOR_TICK_MS` per tick);
-/// badges read it during render to pick their current frame. Set as a
-/// global at app startup (`main.rs`) so `try_global` never misses after
-/// init; badges fall back to tick 0 (static frame) if read before.
+/// Monotonic animation clock shared by every status badge.
 #[derive(Default)]
 pub struct StatusPulseClock {
     pub tick: u64,
 }
 impl Global for StatusPulseClock {}
 
-/// Ticks each 2-frame blink holds per state before toggling. At
-/// ~4 fps (`TICK_MS = 250`), 2 ticks = 500 ms → ~1 Hz blink.
+/// Ticks each 2-frame blink holds before toggling (~1 Hz at 4 fps).
 const BLINK_HOLD_TICKS: u64 = 2;
 
 /// `true` on the "lit" half of a 2-frame blink cycle.
@@ -61,9 +29,7 @@ fn blink_on(tick: u64) -> bool {
     (tick / BLINK_HOLD_TICKS).is_multiple_of(2)
 }
 
-/// Serpentine head position (0..9) for the Working comet's 6-frame
-/// cycle. `round(frame * 9 / 6)` spreads 6 heads across the 9-dot path:
-/// `[0, 2, 3, 5, 6, 8]`.
+/// Serpentine head position for the Working comet's 6-frame cycle.
 fn snake_head(tick: u64) -> usize {
     let f = tick % 6;
     ((3 * f).div_ceil(2) % 9) as usize

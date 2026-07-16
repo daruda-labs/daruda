@@ -2,10 +2,7 @@
 //! counterpart to `daruda_store::project::SerializedLane`.
 //!
 //! Persistable fields mirror the serialized form; runtime-only fields
-//! (e.g. `status`) are recomputed and never written to disk. Tabs and
-//! panes move into this struct in W-3; until then, `Workspace` keeps
-//! its single top-level tab list and this struct carries only
-//! metadata.
+//! (e.g. `status`) are recomputed and never written to disk.
 
 pub mod availability;
 pub mod git;
@@ -194,10 +191,10 @@ impl Lane {
         Some(lanes)
     }
 
-    /// Hydrate runtime state from the on-disk form. Tabs stored on
-    /// the serialized record are ignored here — the caller (workspace
-    /// restore) is responsible for rebuilding `Workspace.tabs` from
-    /// them. Status always defaults to `Idle`.
+    /// Hydrate runtime state from the on-disk form. Tabs on the
+    /// serialized record are ignored here — the workspace-restore
+    /// caller rebuilds `Workspace.tabs` from them. Status defaults to
+    /// `Idle`.
     ///
     /// Legacy state files (saved before the `worktree_root` field was
     /// introduced) deserialize with an empty `PathBuf` for that slot.
@@ -548,7 +545,7 @@ mod tests {
         // Availability is runtime-only and never serialized — it must
         // load as the default `Present` regardless of the source value.
         assert_eq!(back.availability, LaneAvailability::Present);
-        // Serialized form carries no tabs yet (W-3 wires them).
+        // Serialized form carries no tabs.
         assert!(s.tabs.is_empty());
         assert_eq!(s.active_tab_index, 0);
         // base_ref + description + remote_cwd survive the round-trip.

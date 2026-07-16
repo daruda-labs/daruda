@@ -1,16 +1,8 @@
 //! GPUI-free fold-state core for the agent chat pane.
 //!
-//! Models which conversation blocks are folded. The design stores only the
-//! user's explicit overrides; everything else is derived purely from the
-//! block kind plus whether the block is currently active (streaming /
-//! in-progress). Because the conversation `items` vec is append-only and each
-//! item carries its own status, we never store absolute expanded/collapsed
-//! state — "auto-expand while active, auto-collapse when done" falls out of
-//! the derivation for free.
-//!
-//! This module is intentionally GPUI-free (plain `std` only) so it stays
-//! unit-testable in isolation and can later become a field on the GPUI struct
-//! `AgentChatContent`.
+//! Stores only user overrides; untouched keys derive their open/closed state
+//! from block kind plus whether the block is active. That keeps "expand while
+//! active, collapse when settled" out of render code.
 
 // INVARIANT: `FoldKey::Assistant`/`Thinking` are keyed by item index; this is
 // valid only because `items` is append-only (only the tail mutates in place; no
@@ -20,9 +12,7 @@
 
 use std::collections::HashMap;
 
-/// Identity of a foldable block.
-///
-/// GPUI-free: uses `std::String`, never `gpui::SharedString`.
+/// Identity of a foldable block. GPUI-free: uses `std::String`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(in crate::workspace) enum FoldKey {
     /// Assistant response, keyed by item index.
@@ -35,10 +25,7 @@ pub(in crate::workspace) enum FoldKey {
     Diff(String),
     /// A tool call's raw-input (JSON args) disclosure, keyed by tool-call id.
     ToolRawInput(String),
-    /// A subagent-launch tool call (Claude's `Task` tool, which carries
-    /// `subagent_type`), keyed by tool-call id. Distinct from `Tool` so it can
-    /// default collapsed: the subagent's flattened inner activity nests inside
-    /// the card and would otherwise fill the transcript while it runs.
+    /// Subagent-launch tool call; distinct so it can default collapsed.
     Subagent(String),
     /// A consecutive tool-call group, keyed by the group's first tool-call id.
     ToolGroup(String),
@@ -47,8 +34,7 @@ pub(in crate::workspace) enum FoldKey {
     Response(usize),
 }
 
-/// How a block kind defaults — behavior expressed as data rather than
-/// scattered conditionals at the call sites.
+/// Default fold behavior for a block kind.
 enum FoldPolicy {
     /// Always expanded by default (e.g. assistant prose).
     DefaultExpanded,
@@ -61,26 +47,20 @@ enum FoldPolicy {
 impl FoldKey {
     fn policy(&self) -> FoldPolicy {
         match self {
-            // Assistant prose and file-edit diffs stay open by default so the
-            // change is visible without a click (mirrors zed's expanded edit
-            // card); the user can still collapse them.
+            // Assistant prose and file-edit diffs stay visible by default.
             FoldKey::Assistant(_) | FoldKey::Diff(_) => FoldPolicy::DefaultExpanded,
             FoldKey::Thinking(_)
             | FoldKey::Tool(_)
             | FoldKey::ToolGroup(_)
             | FoldKey::Response(_) => FoldPolicy::ExpandedWhileActive,
-            // Raw-input JSON is supplementary detail, and a subagent launch's
-            // nested activity is bulky — both stay collapsed until asked for. A
-            // subagent uses `DefaultCollapsed` (not `ExpandedWhileActive`) so
-            // the box is folded from the start AND stays folded while the
-            // subagent runs; the user expands it to watch.
+            // Raw JSON and nested subagent activity are bulky; keep them
+            // collapsed even while active unless the user expands them.
             FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => FoldPolicy::DefaultCollapsed,
         }
     }
 }
 
-/// The natural (override-free) expanded state for a policy given whether the
-/// block is currently active.
+/// Override-free expanded state for a policy.
 fn natural_default(policy: FoldPolicy, active: bool) -> bool {
     match policy {
         FoldPolicy::DefaultExpanded => true,
@@ -89,10 +69,7 @@ fn natural_default(policy: FoldPolicy, active: bool) -> bool {
     }
 }
 
-/// Fold state for one conversation: the single source of truth.
-///
-/// Stores only explicit user choices; the natural default is derived for any
-/// key the user never touched.
+/// Fold state for one conversation; stores only explicit user choices.
 #[derive(Default)]
 pub(in crate::workspace) struct FoldState {
     /// Present = explicit user choice; absent = derive the natural default.
@@ -110,9 +87,7 @@ impl FoldState {
             .unwrap_or_else(|| natural_default(key.policy(), active))
     }
 
-    /// Flip relative to the current EFFECTIVE state (override or natural
-    /// default). The resulting choice is recorded as an explicit override, so
-    /// it persists across later `active` changes (user intent sticks).
+    /// Flip the current effective state and persist it as a user override.
     pub(in crate::workspace) fn toggle(&mut self, key: FoldKey, active: bool) {
         let cur = self.is_expanded(&key, active);
         self.overrides.insert(key, !cur);

@@ -1,27 +1,9 @@
-//! `crate::ui::list` — wrapper over `gpui_component::list`.
+//! Daruda wrapper over `gpui_component::list`.
 //!
-//! Replaces daruda's `Picker` (search + filter + pick) with the
-//! `gpui_component` `List + ListDelegate` stack. Hosts pick one of
-//! two paths:
-//!
-//! - **Filtered** — host owns a small `Vec<I: FilteredItem>` and wants
-//!   substring search out of the box. Use [`FilteredDelegate`] +
-//!   [`searchable_list_state`]. The delegate handles `perform_search`
-//!   automatically and exposes [`FilteredDelegate::item_at`] so the
-//!   host can resolve `ListEvent::Confirm(IndexPath)` back to the
-//!   underlying item without re-implementing the filter.
-//! - **Custom** — for async / fuzzy / multi-field search, hand-roll a
-//!   `ListDelegate` directly (see `gpui_component::list::ListDelegate`).
-//!   The [`list`] factory still applies `xsmall` for sizing parity.
-//!
-//! Event mapping vs. the legacy `Picker`:
-//! - `PickerEvent::Selected(usize)` → `ListEvent::Confirm(IndexPath)`.
-//!   `IndexPath::row` is the **post-filter** index; resolve to the
-//!   real item via [`FilteredDelegate::item_at`].
-//! - `PickerEvent::Cancelled` → `ListEvent::Cancel`.
-//! - `ListEvent::Select(IndexPath)` is new — emitted on highlight
-//!   change (arrow key / hover). Hosts that only care about commit can
-//!   ignore this variant.
+//! [`FilteredDelegate`] covers small in-memory lists with substring search and
+//! post-filter index resolution through [`FilteredDelegate::item_at`]. Hosts
+//! needing async, fuzzy, or multi-field search can provide a custom
+//! `ListDelegate` while still using the [`list`] factory for sizing parity.
 
 use std::sync::Arc;
 
@@ -32,9 +14,7 @@ use gpui_component::list::{ListDelegate, ListItem};
 pub use gpui_component::IndexPath;
 pub use gpui_component::list::{List, ListEvent, ListState as GpuiListState};
 
-/// Item-shape contract for the built-in [`FilteredDelegate`]. A label
-/// + case-insensitive substring matcher are enough to drive most
-///   "search this small list" UIs.
+/// Item contract for the built-in [`FilteredDelegate`].
 pub trait FilteredItem: 'static + Clone {
     fn label(&self) -> SharedString;
 
@@ -48,13 +28,7 @@ pub trait FilteredItem: 'static + Clone {
     }
 }
 
-/// A `ListDelegate` that holds an immutable item set + a filtered
-/// index list. `perform_search` re-runs the filter on every query
-/// change; `render_item` produces a default `ListItem` showing
-/// `FilteredItem::label`. Selection state is tracked locally so
-/// `set_selected_index` callbacks from the list survive across
-/// re-filters (the host typically cares only about the latest
-/// `Confirm` anyway).
+/// `ListDelegate` backed by immutable items plus a filtered index list.
 pub struct FilteredDelegate<I: FilteredItem> {
     items: Arc<Vec<I>>,
     /// Indices into `items` whose `matches(query)` returned true, in

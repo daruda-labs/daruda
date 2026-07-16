@@ -1,6 +1,6 @@
 use super::*;
 
-// ---- Lanes (W-2) ----
+// ---- Lanes ----
 
 #[gpui::test]
 fn test_workspace_without_project_has_no_lanes(cx: &mut TestAppContext) {
@@ -163,11 +163,10 @@ fn test_set_kind_recomputes_is_main_and_blocks_removal(cx: &mut TestAppContext) 
     });
 }
 
-/// Regression: an external `git checkout` is surfaced only through a
-/// `git status` refresh, which must rewrite the lane's recorded
-/// `kind.branch` (the source the left-dock label reads). Drift updates
-/// the branch and preserves the repo roots; a matching branch is a
-/// no-op.
+/// Regression: an external `git checkout` reaches the lane only via a
+/// `git status` refresh, which must rewrite the recorded `kind.branch`
+/// (the source the left-dock label reads). Drift updates the branch and
+/// preserves the repo roots; a matching branch is a no-op.
 #[gpui::test]
 fn reconcile_lane_branch_updates_kind_on_drift(cx: &mut TestAppContext) {
     let project = daruda_store::project::Project::from_path("/tmp/test_reconcile_branch");
@@ -349,9 +348,9 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
         }
     });
 
-    // Swap to lane 1 → both lanes' runtimes now coexist in the single
-    // `runtimes` map (active just re-points to lane 1). Activation no
-    // longer auto-seeds, so open one tab explicitly to give lane 1 content.
+    // Swap to lane 1 → both lanes' runtimes coexist in the single
+    // `runtimes` map (active just re-points to lane 1). Activation does
+    // not auto-seed, so open one tab explicitly to give lane 1 content.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             assert_eq!(ws.active_runtime().tabs.len(), 1);
@@ -372,7 +371,7 @@ fn test_activate_lane_swaps_tabs(cx: &mut TestAppContext) {
             // Now exactly one tab/pane for lane 1.
             assert_eq!(ws.active_runtime().tabs.len(), 1);
             assert_eq!(ws.active_runtime().panes.len(), 1);
-            // Both lanes registered — no separate active/inactive store.
+            // Both lanes registered in the single store.
             assert_eq!(ws.main_area.runtimes.len(), 2);
             let proj = ws.active_ref().project;
             // Lane 0 is now the parked entry; its runtime is untouched.

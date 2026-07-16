@@ -10,7 +10,6 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
     // Snapshot the defaults so the test remains valid if defaults change.
     let baseline = ws.read_with(cx, |ws, _| ws.mirrors.clone());
 
-    // Build a config that differs in every mirror field.
     let mut new_config = Config::default();
     new_config.panels.grid_columns = baseline.panels_grid_columns.wrapping_add(1);
     new_config.shell.close_pane_on_exit = !baseline.close_pane_on_exit;
@@ -21,10 +20,8 @@ async fn apply_config_syncs_all_mirrors(cx: &mut TestAppContext) {
         IconColorMode::Monochrome => IconColorMode::Color,
     };
 
-    // Apply
     ws.update(cx, |ws, cx| ws.apply_config(&new_config, cx));
 
-    // Assert all five mirrors flipped / updated.
     ws.read_with(cx, |ws, _| {
         assert_eq!(
             ws.mirrors.panels_grid_columns,

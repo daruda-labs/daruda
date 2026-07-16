@@ -245,7 +245,7 @@ fn task_loads_with_default_for_new_optional_fields() {
 }
 
 // ---------------------------------------------------------------------------
-// SubTask (R-21)
+// SubTask
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -308,9 +308,10 @@ fn task_with_subtasks_round_trips_through_disk() {
 
 #[test]
 fn legacy_task_json_without_subtasks_loads_with_empty_vec() {
-    // A `tasks.json` saved before R-21 has no `subtasks` key — the
-    // loader must surface the task with an empty vec, not refuse the
-    // file. Otherwise users would lose their entire Backlog on upgrade.
+    // A `tasks.json` saved before this field existed has no `subtasks`
+    // key — the loader must surface the task with an empty vec, not
+    // refuse the file. Otherwise users would lose their entire Backlog
+    // on upgrade.
     let json = format!(
         r#"{{
             "schema_version": {SCHEMA_VERSION},

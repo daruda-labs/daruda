@@ -72,11 +72,10 @@ pub const SEARCH_LABEL_IDLE: Hsla = hsla(0.0, 0.0, 0.6, 1.0);
 /// `focused/total` counter tint (light gray).
 pub const SEARCH_LABEL_COUNTER: Hsla = hsla(0.0, 0.0, 0.75, 1.0);
 
-// Every const that used to live in this file but is read only from the
-// `app` crate (workspace chrome, modal chrome, banners, settings,
-// agent panels, file viewer, right-panel surfaces, toast / error
-// report, badges, claude-status pills, etc.) has moved to
-// `app/src/ui/theme/palette.rs`. The bridge module at
+// Consts read only from the `app` crate (workspace chrome, modal chrome,
+// banners, settings, agent panels, file viewer, right-panel surfaces,
+// toast / error report, badges, claude-status pills, etc.) live in
+// `app/src/ui/theme/palette.rs` instead. The bridge module at
 // `app/src/ui/theme/mod.rs` re-exports both palettes so app-side call
 // sites continue to write `theme::FOO` against `crate::ui::theme`.
 //
@@ -425,7 +424,7 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // ---- Tasks tab (right_panel/tasks.rs) ----
 
 // ============================================================================
-// Status pill (R-26)
+// Status pill
 // ============================================================================
 //
 // The pill is the trailing-edge dropdown trigger on each task row.
@@ -447,7 +446,7 @@ pub const TERMINAL_SCROLLBAR_THUMB_MIN_H: f32 = 20.0;
 // ============================================================================
 
 // ============================================================================
-// Right Panel — gauges + service-status pill (R-4 / R-5)
+// Right Panel — gauges + service-status pill
 // ============================================================================
 //
 // Colors mirror Apple's San Francisco "vivid" palette as used in the

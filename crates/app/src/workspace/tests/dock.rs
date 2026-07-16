@@ -111,7 +111,6 @@ fn test_set_dock_view_updates_dock_view(cx: &mut TestAppContext) {
 #[gpui::test]
 fn test_set_dock_view_no_op_when_same(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
-    // First call switches to Files.
     ws.update(cx, |ws, cx| {
         ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     });
@@ -121,7 +120,6 @@ fn test_set_dock_view_no_op_when_same(cx: &mut TestAppContext) {
             daruda_store::project::LeftDockView::Files
         );
     });
-    // Second call with the same view should be a no-op (left_dock_view unchanged).
     ws.update(cx, |ws, cx| {
         ws.set_left_dock_view(daruda_store::project::LeftDockView::Files, cx);
     });
@@ -166,8 +164,7 @@ fn test_dock_drag_resizes_left_dock(cx: &mut TestAppContext) {
         ws.left_dock.update(cx, |d, _| d.is_open = true);
         let start = ws.left_dock.read(cx).size;
         ws.begin_dock_drag(layout::DockPosition::Left, 100.0, cx);
-        // Simulate drag by mutating size directly — the mousemove path
-        // exercises resize_all_tabs which needs a live Window.
+        // Mutate size directly; the mousemove path needs a live Window.
         ws.left_dock.update(cx, |d, _| d.resize(start + 30.0));
         assert_eq!(ws.left_dock.read(cx).size, start + 30.0);
         ws.end_dock_drag(cx);
@@ -215,9 +212,8 @@ fn test_dock_drag_right_and_bottom_track_their_own_sizes(cx: &mut TestAppContext
 fn test_end_stale_resize_drags_clears_live_drag(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        // Simulates the missed release: a drag is live but the button-up
-        // landed outside the window, so the next in-window move (button no
-        // longer held) routes here instead of continuing to resize.
+        // Missed release: a drag is live but button-up landed outside the
+        // window, so the next in-window move routes here instead of resizing.
         ws.left_dock.update(cx, |d, _| d.is_open = true);
         ws.begin_dock_drag(layout::DockPosition::Left, 100.0, cx);
         assert!(ws.dock_drag.is_some());
@@ -231,12 +227,10 @@ fn test_end_stale_resize_drags_clears_live_drag(cx: &mut TestAppContext) {
 
 // ---- Dock notify reentrancy ----
 //
-// Left/right dock event listeners are registered via `cx.listener` on
-// `Context<Dock>`, so they run while the Dock entity is leased. Any
-// Workspace op they dispatch may end in `notify_left_dock` /
-// `notify_right_dock`; the notify must therefore be lease-free or it
-// double-leases the dock and aborts the app (panic across the objc
-// event boundary cannot unwind).
+// Dock event listeners run while the Dock entity is leased, so any Workspace op
+// they dispatch that reaches `notify_left_dock` / `notify_right_dock` must be
+// lease-free — otherwise it double-leases the dock and aborts the app (a panic
+// across the objc event boundary cannot unwind).
 
 #[gpui::test]
 fn test_notify_left_dock_safe_while_dock_is_leased(cx: &mut TestAppContext) {

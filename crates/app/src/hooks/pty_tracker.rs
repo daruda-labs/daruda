@@ -1,41 +1,13 @@
 //! Track which `claude` process lives inside each daruda pane.
 //!
-//! Used to:
-//! - Highlight the badge for the focused tab's session in the
-//!   per-lane sub-row (visual disambiguation when multiple
-//!   sessions share a cwd).
-//! - Drop a session from `ClaudeStatusStore` once its `claude` process
-//!   is no longer attributable to a pane.
+//! Event-driven, no idle poll: a background thread wakes on
+//! `~/.claude/sessions/` changes or pane register/unregister pokes, then walks
+//! each session PID's parent chain toward registered PTY shell PIDs. Quiet
+//! directories cost zero wakeups; lingering dead sessions are pruned on the
+//! next wake or by cold-restore TTL rather than by polling.
 //!
-//! Mechanism — **event-driven, no idle poll.** A background thread
-//! blocks until woken by one of:
-//!
-//! - an FSEvents change in `~/.claude/sessions/` (Claude Code writes
-//!   one `<pid>.json` per live interactive session here — a create
-//!   fires when a session starts, a remove/modify as it changes), or
-//! - a pane `register` / `unregister` poke.
-//!
-//! On a wake it re-resolves bindings: for each registered pane it walks
-//! each session file's `claude` PID *up* its parent chain (a handful of
-//! targeted `sysinfo` single-PID refreshes — `ProcessesToUpdate::Some`,
-//! never the whole process table) until it reaches that pane's PTY
-//! shell PID. When the directory is quiet and no pane changes, the
-//! thread is parked and costs nothing — idle wakeups are zero.
-//!
-//! A dead `claude` whose session file lingers (a crash with no
-//! `SessionEnd` hook) resolves to no binding on the next wake — its
-//! now-dead PID has no parent — so its `DeadSession` is emitted then.
-//! A crash while the directory stays otherwise quiet is swept by the
-//! cold-restore TTL rather than an idle poll: the design trades instant
-//! crash cleanup for zero idle CPU.
-//!
-//! The result is two diff events on an `mpsc::Receiver`:
-//!
-//! - [`PtyTrackerEvent::BindingChanged`] — a pane's binding flipped
-//!   (claude started, exited, or got swapped for a different one).
-//! - [`PtyTrackerEvent::DeadSession`] — a session_id we previously
-//!   reported is no longer attached to any live `claude` process,
-//!   so the consumer can prune it from its store.
+//! Emits binding diffs so the UI can highlight the focused pane's session and
+//! drop status entries no longer attributable to any live pane.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -46,16 +18,10 @@ use std::time::Duration;
 
 use daruda_claude::pty_link;
 
-/// PaneId in the workspace layout. Mirrors `workspace::layout::PaneId`
-/// but defined locally to keep `pty_tracker` independent of GPUI / the
-/// workspace module.
+/// Pane id mirrored locally to keep this tracker independent of GPUI/workspace.
 pub type PaneId = u64;
 
-/// Coalescing window for a wake burst. A startup `register` fan-out
-/// (every pane registering at once) and atomic-rename saves of a
-/// session file both emit several wakes back-to-back; we settle this
-/// long, drain the rest, then re-resolve once. It is a debounce, not a
-/// poll — when no wake arrives, the thread stays parked indefinitely.
+/// Coalescing window for register fan-out and atomic-rename wake bursts.
 const DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// Upper bound on how far up a `claude` PID's parent chain we walk
@@ -65,13 +31,7 @@ const DEBOUNCE: Duration = Duration::from_millis(100);
 /// a tuning knob.
 const MAX_PARENT_WALK: usize = 32;
 
-/// One pane's currently-resolved `claude` process.
-///
-/// Equality is the binding's identity, `(claude_pid, session_id)` —
-/// the diff suppresses `BindingChanged` (and the window repaint it
-/// triggers) by comparing each pass's freshly-resolved binding against
-/// the previous one, so any per-pass metadata in this struct would
-/// re-emit the event every wake for an unchanged binding.
+/// One pane's currently resolved `claude` process. Equality is the diff key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PtyBinding {
     pub claude_pid: u32,

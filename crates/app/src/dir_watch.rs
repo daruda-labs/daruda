@@ -1,33 +1,13 @@
-//! GPUI-free directory watcher resilient to FSEvents drops (sleep/wake).
+//! GPUI-free directory watcher resilient to FSEvents rescan drops.
 //!
-//! On `event.need_rescan()` (FSEvents KernelDropped/UserDropped, surfaced by
-//! notify as EventKind::Other + Flag::Rescan) the whole watched directory is
-//! re-enumerated and re-emitted, so events lost across sleep/wake are not
-//! permanently dropped (the same recovery zed performs).
+//! On `event.need_rescan()`, the watched anchors are re-enumerated so existing
+//! files are re-emitted after sleep/wake. Deletions during the gap are not
+//! reconciled here; full "current set" reporting would couple this generic
+//! helper to watcher-specific semantics.
 //!
-//! LIMITATION: rescan recovery re-emits a `Changed`-style item only for files
-//! that still EXIST. A file *removed* during the gap is not reconciled — its
-//! consumer-side state lingers until the next real event (for the status
-//! watcher this is a ghost session indicator that clears on the next write).
-//! Full reconciliation would need a "current set" signal, deferred to avoid
-//! coupling this generic to per-watcher semantics.
-//!
-//! ## Lifetime
-//!
-//! [`spawn_dir_watcher`] returns the event [`Receiver`] plus a [`DirWatcher`]
-//! handle that OWNS the live notify watcher. Watching continues only while the
-//! handle is alive — drop it to stop (the OS subscription ends and the
-//! callback's sender closes). This RAII shape lets callers that re-spawn on
-//! config / project / lane changes (mcp, skills, …) avoid leaking a watcher
-//! per re-spawn, and lets app-global watchers (status, panels, …) opt into
-//! "never stop" by parking the handle somewhere long-lived. No background
-//! thread is spawned here — notify runs its own internal thread.
-//!
-//! NOTE (long-term): if per-project/per-lane watching multiplies and path
-//! dedup becomes a real cost, these watcher instances can be wrapped in a
-//! central registry that owns and dedups them (this type is the producer-side
-//! subset of that). At today's ~8 fixed watchers dedup buys nothing, so no
-//! registry.
+//! [`spawn_dir_watcher`] returns a receiver plus a [`DirWatcher`] RAII handle.
+//! Watching continues only while that handle is alive; app-global watchers park
+//! it, while respawned watchers drop it to stop the old subscription.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -37,22 +17,13 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 
-/// Owns the live notify watcher. Dropping it stops watching: the OS
-/// subscription ends and the FS callback's `Sender` closes (so a caller's
-/// downstream `Receiver` / debounce thread sees a disconnect and can exit).
-///
-/// `Option` + `Box<dyn>`: `None` is the inert state when the backend failed to
-/// initialize; `Box<dyn Watcher + Send>` hides notify's platform-specific
-/// concrete type from the public signature (mirrors `ConfigWatcherHandle`).
+/// Owns the live notify watcher; dropping it closes downstream receivers.
+/// `Box<dyn Watcher>` hides notify's platform-specific concrete type.
 pub struct DirWatcher {
     _watcher: Option<Box<dyn notify::Watcher + Send>>,
 }
 
-/// Routes a single notify event to either the rescan path or the classify path.
-///
-/// When `event.need_rescan()` is true (FSEvents KernelDropped/UserDropped),
-/// the whole directory is re-enumerated via `rescan()` so events lost during
-/// sleep/wake are recovered. Otherwise `classify(event)` handles it normally.
+/// Route one notify event to either normal classification or rescan recovery.
 fn route<T>(
     event: &notify::Event,
     classify: &impl Fn(&notify::Event) -> Vec<T>,
@@ -65,21 +36,14 @@ fn route<T>(
     }
 }
 
-/// Watch `anchors` with `notify` and deliver classified items on the returned
-/// receiver. The returned [`DirWatcher`] keeps the watch alive — see the module
-/// "Lifetime" section.
+/// Watch `anchors` and deliver classified items while the returned
+/// [`DirWatcher`] is kept alive.
 ///
 /// - `classify`: maps a normal event to zero or more items.
-/// - `rescan`: called instead of classify on an FSEvents drop (sleep/wake,
-///   kernel buffer overflow). Should enumerate the directory and return a
-///   `Changed`-style item for every relevant file found.
+/// - `rescan`: called on FSEvents drops; returns current relevant files.
 ///
-/// Per-anchor `watch` failures are tolerated (an anchor may not exist yet —
-/// callers watch the nearest existing ancestor — and one bad anchor must not
-/// kill the others). Anchor existence, when required, is the caller's
-/// responsibility (e.g. the status watcher's `create_dir_all`). If the backend
-/// itself fails to initialize, an inert handle (`None`) is returned and the
-/// receiver stays empty.
+/// One bad anchor is logged and skipped; backend init failure returns an inert
+/// handle and an empty receiver.
 pub fn spawn_dir_watcher<T: Send + 'static>(
     anchors: &[PathBuf],
     mode: notify::RecursiveMode,
@@ -140,12 +104,8 @@ pub fn spawn_dir_watcher<T: Send + 'static>(
     )
 }
 
-/// Collapse a burst of unit signals into one per settling `window`. The first
-/// signal starts the window; everything arriving during it coalesces into a
-/// single output `()`. Spawns one thread that exits cleanly when `raw_rx`
-/// disconnects (the source `DirWatcher` was dropped) or the returned receiver
-/// is dropped. Shared by the file-reload watchers (config, panels) whose
-/// `classify` emits `()` per relevant change.
+/// Collapse a burst of unit signals into one output per settling `window`.
+/// The helper thread exits when either channel side disconnects.
 pub fn debounce(raw_rx: mpsc::Receiver<()>, window: Duration) -> mpsc::Receiver<()> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {

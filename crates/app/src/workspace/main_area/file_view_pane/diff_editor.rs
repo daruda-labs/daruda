@@ -1,17 +1,9 @@
-//! Convert built diff [`VisualRow`]s into the inputs the unified editor
-//! renders the diff with:
+//! Convert diff [`VisualRow`]s into unified-editor inputs.
 //!
-//! - a synthetic buffer string (one line per row, no `+`/`-` marker — the
-//!   add/remove distinction is carried by the row background, matching the
-//!   bespoke renderer),
-//! - per-row [`LineDecoration`]s (background fill + a dual old/new gutter
-//!   string packed into the editor's single gutter column), and
-//! - contiguous highlight spans (syntax foreground + word-diff background)
-//!   that bypass the editor's tree-sitter highlighter — an interleaved
-//!   `+`/`-` diff buffer is not valid source for any language.
-//!
-//! Pure / GPUI-free: theme colours arrive via [`DiffColors`] so the
-//! mapping is unit-testable without a `Window`.
+//! The synthetic buffer omits `+`/`-` markers; row backgrounds and gutter
+//! decorations carry add/remove meaning. Highlight overrides combine syntax
+//! foregrounds with word-diff backgrounds because interleaved diff text is not
+//! valid source for the editor's highlighter.
 
 use std::ops::Range;
 
@@ -57,9 +49,7 @@ impl DiffColors {
     }
 }
 
-/// Editor inputs derived from a diff's `VisualRow`s, ready to push into the
-/// shared `InputState` (`set_value` + `set_line_decorations` +
-/// `set_highlight_override`).
+/// Editor inputs derived from a diff's `VisualRow`s.
 pub(in crate::workspace) struct DiffEditorModel {
     pub text: String,
     pub decorations: Vec<LineDecoration>,
@@ -85,10 +75,7 @@ fn fg_only(color: Hsla) -> HighlightStyle {
     }
 }
 
-/// Build the contiguous `(byte-range-within-line, style)` spans for one
-/// row's `line_text`, combining the per-segment syntax foreground with the
-/// word-diff background. Ranges tile `[0, line_text.len())` with no gaps or
-/// overlaps so they can feed the editor's run builder directly.
+/// Build contiguous per-line highlight spans combining syntax and word diff.
 fn line_spans(
     row: &VisualRow,
     line_text: &str,

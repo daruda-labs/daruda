@@ -1,18 +1,8 @@
 //! Pane-area file viewer renderers.
 //!
-//! Entry point is `render_pane_file_viewer`; the sub-modules below
-//! split the renderer by surface (toolbar / search panel / scrollbar)
-//! and by content kind (raw / diff / markdown). All cross-module
-//! helpers are `pub(super)` so visibility stays scoped to this module.
-//!
-//! ## Virtual list
-//!
-//! Both `render_raw_body` and `render_diff_body` use a virtual-list
-//! strategy: only the rows that fall within the current viewport
-//! (plus `FILE_VIEWER_VIRTUAL_OVERSCAN` rows above and below) are
-//! emitted as GPUI elements. Top and bottom spacer divs carry the
-//! height of the off-screen rows so the scroll container reports the
-//! correct total height and the native scrollbar thumb stays accurate.
+//! `render_pane_file_viewer` composes toolbar, body, search panel, and
+//! scrollbar. Raw/diff bodies virtualize rows with spacer divs so scroll height
+//! and the native thumb stay accurate.
 
 mod body;
 mod content_element;
@@ -22,9 +12,7 @@ mod search_panel;
 mod toolbar;
 mod virtual_list;
 
-/// Cacheable GPU-ready diagram image. Re-exported so the agent-chat mermaid
-/// renderer caches the converted image across renders (sizing matches the
-/// Markdown preview, which builds its own per render via `raster_block_image`).
+/// Cacheable GPU-ready diagram image re-exported for agent-chat mermaid.
 pub(in crate::workspace) use self::markdown::CachedImage;
 
 use crate::ui::theme;
@@ -37,9 +25,8 @@ use self::toolbar::render_file_viewer_toolbar;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
 
-/// Top-level entry: toolbar (top) + scrollable body (middle) + hint bar (bottom).
-/// Uses absolute positioning so the body receives a definite, bounded height from
-/// Taffy — required for overflow_y_scroll to compute a non-zero scroll_max.
+/// Top-level file-viewer element.
+/// Absolute positioning gives the body a bounded height for scrolling.
 pub(in crate::workspace) fn render_pane_file_viewer(
     fv: &PaneFileView,
     editor_state: gpui::Entity<gpui_component::input::InputState>,
@@ -55,16 +42,12 @@ pub(in crate::workspace) fn render_pane_file_viewer(
         PaneFileContent::LoadedRaw | PaneFileContent::LoadedDiff { .. }
     );
 
-    // Preview mode renders variable-height blocks; derive content height from GPUI's
-    // measured max_offset rather than total_rows * fixed_line_h to keep the thumb accurate.
+    // Preview has variable-height blocks; derive height from measured offset.
     let is_preview_mode = matches!(&fv.content, PaneFileContent::LoadedMarkdown { .. })
         && fv.view_mode == FileViewMode::Preview;
     let viewer_bg = theme::current(cx).file_viewer_bg;
 
-    // One scrollbar style across all modes: a thin daruda thumb. For
-    // editor modes (raw / diff) the editor's built-in bar is suppressed
-    // (`show_scrollbar(false)`) and the thumb is driven by the editor's
-    // own scroll position; other modes use the pane's scroll handle.
+    // One thin daruda thumb; editor modes use the editor scroll handle.
     let scrollbar: Option<AnyElement> = if is_editor_mode {
         let editor_scroll = editor_state.read(cx).scroll_handle().clone();
         let viewport_h = editor_scroll.bounds().size.height;

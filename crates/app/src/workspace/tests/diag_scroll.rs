@@ -1,6 +1,6 @@
-//! Regression tests: wheel scroll after lane switch does not freeze the
-//! screen.  Verifies gpui's cached AnyView does not lose its own entity
-//! from tracked_entities after an out-of-element read.
+//! Regression: wheel scroll after a lane switch must not freeze the
+//! screen — gpui's cached `AnyView` must keep its own entity in
+//! `tracked_entities` after an out-of-element read.
 
 use super::*;
 use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, VisualTestContext, point, px};
@@ -43,10 +43,9 @@ fn wheel_up(cx: &mut VisualTestContext) {
 }
 
 /// Regression: a cache-hit workspace draw after a lane swap (e.g. the
-/// left-dock badge pulse) can drop the terminal entity from gpui's
-/// `tracked_entities`, so `cx.notify(terminal)` stops invalidating the
-/// window — the wheel scrolls the session but no draw consumes the
-/// refresh, leaving a frozen screen.
+/// left-dock badge pulse) must not drop the terminal entity from gpui's
+/// `tracked_entities` — otherwise `cx.notify(terminal)` stops
+/// invalidating the window and the wheel scroll leaves a frozen screen.
 #[gpui::test]
 fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
     let root_a = std::path::PathBuf::from("/tmp/diag_lost_a");
@@ -92,8 +91,8 @@ fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
     let term1 = ws.read_with(cx, |ws, _| active_terminal_view(ws));
     feed_scrollback(&term1, cx);
 
-    // Simulate the badge-pulse style frame: dirty only the Workspace so
-    // the terminal's cached element takes the cache-hit path.
+    // Badge-pulse style frame: dirty only the Workspace so the
+    // terminal's cached element takes the cache-hit path.
     ws.update(cx, |_, cx| cx.notify());
     cx.run_until_parked();
     ws.update(cx, |_, cx| cx.notify());
@@ -106,10 +105,9 @@ fn diag_notify_lost_after_cache_hit_draw(cx: &mut TestAppContext) {
     let after = term1.read_with(cx, |v, _| v.session().viewport_row_offset());
     assert_ne!(before, after, "session-level scroll must work");
 
-    // After the gpui fix, the notify always reaches the window so the
-    // scheduled viewport refresh is consumed by render().  The scroll
-    // above already proved the session moved; draining the event queue
-    // without a freeze confirms the fix holds.
+    // The notify must reach the window so render() consumes the
+    // scheduled viewport refresh. Draining the queue without a freeze
+    // confirms it (the scroll above already proved the session moved).
     cx.run_until_parked();
 }
 

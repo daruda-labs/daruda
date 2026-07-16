@@ -39,7 +39,7 @@ fn test_save_state_with_project(cx: &mut TestAppContext) {
             state.primary_project().unwrap().root,
             std::path::PathBuf::from("/tmp/test_project")
         );
-        // Tabs now live inside the active lane.
+        // Tabs live inside the active lane.
         assert_eq!(state.primary_project().unwrap().lanes.len(), 1);
         assert!(!state.primary_project().unwrap().lanes[0].tabs.is_empty());
         assert_eq!(state.font_size, config.font.size);
@@ -113,7 +113,7 @@ fn test_save_state_serializes_leaf_layout(cx: &mut TestAppContext) {
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, app_cx| {
         let state = ws.save_state(app_cx).unwrap();
-        // Tabs moved onto the active lane in W-2.
+        // Tabs live on the active lane.
         let primary = state.primary_project().unwrap();
         assert_eq!(primary.lanes.len(), 1);
         let wt_tabs = &primary.lanes[0].tabs;
@@ -378,7 +378,7 @@ fn test_save_restore_round_trip_preserves_layout(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
 
-    // Capture the serialized shape. Tabs now live on the active lane.
+    // Capture the serialized shape. Tabs live on the active lane.
     let original = ws.read_with(cx, |ws, app_cx| ws.save_state(app_cx).unwrap());
     assert_eq!(original.primary_project().unwrap().lanes.len(), 1);
     assert_eq!(original.primary_project().unwrap().lanes[0].tabs.len(), 2);

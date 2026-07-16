@@ -1,4 +1,4 @@
-//! Bottom dock UI — user-managed panel tabs (macros, future widgets).
+//! Bottom dock UI for user-managed panel tabs.
 //!
 //! Composition mirrors the left dock's dock:
 //!   * `tab_strip::render` returns the header (one tab per

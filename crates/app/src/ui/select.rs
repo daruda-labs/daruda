@@ -1,24 +1,9 @@
-//! ui::select — wrapper over `gpui_component::select`.
+//! Select wrapper over `gpui_component::select`.
 //!
-//! Daruda's old `Select` widget mapped `(value, label)` pairs to a
-//! single dropdown, emitting `SelectEvent::Changed(value)` on pick.
-//! `gpui_component::Select` decouples state (`SelectState<D>`) from
-//! render (`Select<D>`) and emits `SelectEvent::Confirm(Option<Value>)`,
-//! so callers wire two pieces:
-//!
-//! 1. Construct [`SelectState`] (a `Vec<SelectOption>`-delegated alias)
-//!    inside an `Entity` field via [`state_with_options`], passing an
-//!    optional initial value.
-//! 2. In `render`, build the visual element with [`select`] and chain
-//!    placeholders / disabled flags as usual.
-//!
-//! `xsmall()` is auto-applied so call sites stay compact (CLAUDE.md
-//! §10). The third argument of [`select`] selects Tab participation
-//! via the [`SelectTabSpec`] trait: pass `isize` to cycle at that
-//! index or `()` to skip the cycle. `gpui_component::Select` has no
-//! `.tab_index(n)` builder, so the spec mutates the underlying
-//! `FocusHandle`'s tab fields directly — the value sticks because the
-//! handle is stored on `SelectState` and reused across re-renders.
+//! Keeps daruda's `(value, label)` option shape while using upstream
+//! state/render split. `xsmall()` is applied by default (CLAUDE.md §10), and
+//! Tab participation mirrors other inputs: `isize` cycles, `()` skips. The skip
+//! path mutates the stored `FocusHandle` because upstream has no builder for it.
 
 use crate::ui::theme;
 use gpui::{App, Context, Entity, Focusable as _, SharedString, Styled as _, Window};

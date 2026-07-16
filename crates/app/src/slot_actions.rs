@@ -1,23 +1,8 @@
-//! Slot-table macros — single source of truth for the `Cmd+1..9`
-//! tab quick-switch and `Cmd+Ctrl+1..9` lane quick-switch
-//! action wiring. The 1..=9 enumeration would otherwise need to be
-//! kept in lockstep across four files (`actions!` declaration, key
-//! bindings, config-override `bind!` arms, render-time
-//! `cx.listener` registrations); a per-section macro keeps the list
-//! in one place so adding the next slot is one line, not nine.
+//! Slot-table macros for `Cmd+1..9` tab and `Cmd+Ctrl+1..9` lane switching.
 //!
-//! Section keywords (passed as the first token of each invocation):
-//!
-//! | keyword | yields |
-//! |---|---|
-//! | `@bindings` | array literal of [`gpui::KeyBinding`] for `cx.bind_keys([...])` |
-//! | `@try_bind_override $key, $name, $cx` | block returning `bool` — `true` if the name matches a slot and the binding was applied; `false` otherwise (so callers fall through to other handlers) |
-//! | `@register_listeners $cx, $div` | chained `.on_action(...)` clauses on `$div` |
-//! | `@names` | array literal of `&'static str` config name strings |
-//!
-//! The action types themselves still live inside the `actions!`
-//! invocation in `workspace/mod.rs` — that is a procedural macro and
-//! must see literal idents.
+//! One table feeds static bindings, config overrides, listener registration,
+//! and public config names. The action idents still live in
+//! `workspace/mod.rs` because the `actions!` procedural macro must see them.
 
 #[macro_export]
 macro_rules! tab_slot_table {

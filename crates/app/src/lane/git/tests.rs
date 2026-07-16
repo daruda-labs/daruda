@@ -734,9 +734,6 @@ fn git_restore_staged_unstages_file() {
     teardown(&dir);
 }
 
-/// New W-11 affordance: passing `base = Some(ref)` makes the new
-/// lane branch from that ref instead of the current HEAD.
-/// We verify the resulting checkout is at the named branch's tip.
 #[test]
 fn git_merge_fast_forward() {
     if !require_git() {

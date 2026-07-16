@@ -3,7 +3,7 @@ use crate::files::tree::EntryKind;
 use std::sync::Arc;
 
 // ================================================================
-// W-7 Files view — integration + cache invalidation regression tests
+// Files view — integration + cache invalidation regression tests
 // ================================================================
 
 /// Build a Workspace rooted at a fresh tempdir with a few files +
@@ -158,8 +158,8 @@ async fn save_restore_preserves_file_viewer_pane(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
 
-    // Capture the current state — the file pane is now part of the
-    // active lane's tab list.
+    // Capture the current state — the file pane is part of the active
+    // lane's tab list.
     let (saved_workspace, saved_projects) = ws
         .read_with(cx, |ws, app_cx| ws.snapshot_for_disk(app_cx))
         .expect("snapshot_for_disk");
@@ -483,7 +483,7 @@ async fn cache_invalidates_on_git_status_update(cx: &mut TestAppContext) {
     });
 }
 
-// ---------------- W-7g watcher / dirty flag ----------------
+// ---------------- watcher / dirty flag ----------------
 
 #[gpui::test]
 async fn watcher_event_creates_entry_in_expanded_dir(cx: &mut TestAppContext) {
@@ -709,7 +709,7 @@ async fn watcher_event_triggers_git_status_refresh(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-// ---------------- W-7h hidden toggle + Alt+ collapse ----------------
+// ---------------- hidden toggle + Alt+ collapse ----------------
 
 #[gpui::test]
 async fn toggle_files_show_hidden_filters_dotfiles(cx: &mut TestAppContext) {
@@ -776,12 +776,8 @@ async fn alt_click_collapse_drops_descendants_from_expanded(cx: &mut TestAppCont
     ws.update(cx, |ws, cx| ws.ensure_file_tree(id, cx));
     cx.run_until_parked();
 
-    // Expand `sub/` so it has loaded children, then expand `sub`'s
-    // child file row implicitly via toggle (files do not actually
-    // expand; we just need the parent + a child dir for the test).
-    // The temp project has `sub/nested.txt` (a file), so just
-    // expanding `sub` is enough — the recursive collapse will drop
-    // `sub` from expanded.
+    // Expand `sub` so it has loaded children; the recursive collapse
+    // must then drop `sub` from the expanded set.
     let sub_id = child_id_by_name(&ws, cx, "sub");
     ws.update(cx, |ws, cx| ws.toggle_files_expand(id, sub_id, cx));
     cx.run_until_parked();
@@ -798,7 +794,7 @@ async fn alt_click_collapse_drops_descendants_from_expanded(cx: &mut TestAppCont
     });
 }
 
-// ---------------- W-7i keyboard navigation ----------------
+// ---------------- keyboard navigation ----------------
 
 #[gpui::test]
 async fn move_files_selection_advances_through_visible(cx: &mut TestAppContext) {
@@ -964,7 +960,7 @@ async fn finalize_remove_lane_clears_per_lane_state(cx: &mut TestAppContext) {
     });
 }
 
-// ---------------- W-7j gitignore ----------------
+// ---------------- gitignore ----------------
 
 #[gpui::test]
 async fn gitignore_marks_target_dir_entries_ignored(cx: &mut TestAppContext) {
@@ -1128,7 +1124,7 @@ async fn cache_invalidates_on_watcher_event(cx: &mut TestAppContext) {
     );
 }
 
-// ---------------- W-9 activate_lane_by_index ----------------
+// ---------------- activate_lane_by_index ----------------
 
 #[gpui::test]
 fn activate_lane_by_index_switches_to_nth_by_tab_order(cx: &mut TestAppContext) {
@@ -1480,11 +1476,11 @@ async fn child_load_error_on_already_missing_lane_emits_no_warning(cx: &mut Test
 
 #[gpui::test]
 async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
-    // Regression: the LaneId/LaneRef merge (73de52a) dropped the
-    // load-completion `set_value` into the raw editor, so every
-    // non-markdown file opened as an empty editor. The editor must
-    // hold the file text (and the saved-text baseline must match,
-    // so a freshly opened file is not dirty).
+    // Regression: a LaneId/LaneRef merge dropped the load-completion
+    // `set_value` into the raw editor, so every non-markdown file
+    // opened empty. The editor must hold the file text, and the
+    // saved-text baseline must match so a freshly opened file is not
+    // dirty.
     let (wh, ws, _temp) = build_workspace_with_temp_project(cx);
     // The test constructor skips WindowRegistry registration; the
     // load-completion handler needs it to find the owning window.

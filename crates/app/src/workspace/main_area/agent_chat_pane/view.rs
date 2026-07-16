@@ -1,38 +1,16 @@
-//! `AgentChatView` — the self-owned ACP chat pane entity.
+//! Self-owned ACP chat pane entity.
 //!
-//! Mirrors `TerminalView`: a pane-content entity that owns its model
-//! (conversation `items`, connection `status`, fold state, …) **and** its
-//! UI/runtime state (diff editors, mermaid cache, scroll handle), renders
-//! itself (`impl Render`), and `cx.notify()`s **itself** on every state
-//! change. The pane walker embeds it via `AnyView::cached(..)`, so a scroll
-//! or fold toggle dirties only this subtree — sibling docks / terminals keep
-//! their cached paint instead of the whole window re-rendering (the
-//! pre-extraction cost; see the module-level design note).
-//!
-//! ## What lives here vs. `agent_chat_ops`
-//!
-//! - **Here**: every op a render listener dispatches into (`toggle_fold`,
-//!   `on_scroll`, `respond_permission`, `set_mode`, …) plus the per-event
-//!   `apply_event` fold + the diff-editor / mermaid reconcilers. All operate
-//!   on `self` and notify `self`.
-//! - **`agent_chat_ops` (Workspace)**: pane/tab construction, the live ACP
-//!   connection + event pump, and the bottom-dock prompt / cancel routing —
-//!   the parts that need `Workspace` state (`syntax_theme`,
-//!   `default_permission_mode`) or the error pipeline (`report_error`). The
-//!   pump mutates this view via `view.update(.., cx.notify())`, so model
-//!   changes still notify only this subtree.
-//!
-//! `apply_event` takes `syntax_theme` / `is_light` as parameters (passed by
-//! the Workspace pump, which owns the config mirror) so the view holds no
-//! mirrored copy — there is no second sync site to keep in step.
+//! Like `TerminalView`, this pane owns its conversation model plus UI/runtime
+//! state, renders itself, and notifies itself. Workspace ops create the pane,
+//! own the ACP pump/error pipeline, and pass config-derived inputs into
+//! `apply_event` so the view does not mirror workspace config.
 //!
 //! ## SAFETY(MVU): self-contained pane entity
 //!
-//! This entity owns and mutates its own model, like `TerminalView` — it is
-//! **not** a Workspace-owned model written through a one-way op. The MVU
-//! "Views dispatch; only Workspace mutates Model" rule is about Workspace
-//! state; a self-notifying pane entity (CLAUDE rule #10) is the sanctioned
-//! exception, the same one `TerminalView` and `ToastLayer` take.
+//! This entity owns and mutates its own model, like `TerminalView`; it is not a
+//! Workspace-owned model written through a one-way op. The MVU rule applies to
+//! Workspace state; self-notifying pane entities are the sanctioned CLAUDE.md
+//! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};

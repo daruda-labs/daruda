@@ -179,7 +179,7 @@ impl Workspace {
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
 
-        // Trigger #4 — selection moved (dock row gets selected BG).
+        // Selection moved — the dock row picks up its selected background.
         self.invalidate_visible_files_cache(daruda_store::project::LaneRef {
             project: self.active.project,
             lane: lane_id,
@@ -193,19 +193,12 @@ impl Workspace {
         self.load_pane_file_content(owner, path, staged, effective_mode, file_status, cx);
     }
 
-    /// Open `path` as a file viewer in a new pane *split to the right
-    /// of* `anchor` (R-20 `[Diff]` conflict resolution).
-    ///
-    /// Unlike [`Self::open_pane_file_view`] — which adds the file in a
-    /// fresh tab — this variant keeps the anchor pane (typically a
-    /// `TaskEdit`) visible side-by-side with the disk version, so the
-    /// user can compare without tab-switching. No dedup against
-    /// existing file tabs — the split is intentionally transient.
-    /// Markdown files honour the same Raw→Preview default.
-    ///
-    /// Falls back silently when `anchor` no longer exists; the caller
-    /// (`open_disk_file_for_diff`) already routed through a stale
-    /// `pane_id` would otherwise crash on the layout walk.
+    /// Open `path` as a file viewer in a new pane split to the right of
+    /// `anchor`, used for `[Diff]` conflict resolution. Unlike
+    /// [`Self::open_pane_file_view`], this keeps the anchor pane (typically a
+    /// `TaskEdit`) visible side-by-side for comparison, with no dedup — the
+    /// split is intentionally transient. Markdown honours the Raw→Preview
+    /// default. Falls back silently when `anchor` no longer exists.
     pub(in crate::workspace) fn open_file_split_right(
         &mut self,
         lane_id: LaneId,
@@ -214,8 +207,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Markdown defaults to Preview here too — keeps the visual
-        // language consistent with `open_pane_file_view`.
+        // Markdown defaults to Preview here too, matching `open_pane_file_view`.
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
@@ -239,9 +231,8 @@ impl Workspace {
         let new_pane_id = pane.id;
         self.active_runtime_mut().panes.push(pane);
 
-        // Insert the new pane to the right of `anchor` in whichever
-        // tab owns it. Mirrors `split_focused_pane` but targets a
-        // caller-supplied anchor instead of `focused_pane_id`.
+        // Insert the new pane to the right of `anchor` in whichever tab owns
+        // it — like `split_focused_pane`, but targeting the given anchor.
         let mut inserted_tab: Option<usize> = None;
         for (idx, tab) in self.active_runtime_mut().tabs.iter_mut().enumerate() {
             if crate::workspace::main_area::pane_tree::insert_split_at(
@@ -337,10 +328,9 @@ impl Workspace {
             return;
         };
         fc.view.hide_unchanged = !fc.view.hide_unchanged;
-        // The active row Vec swaps between `rows_all` and `rows_no_ctx`
-        // here, so any cached search `matches: Vec<usize>` / `focused`
-        // now index into the wrong slice. Mirror `set_file_view_mode`
-        // and drop the search alongside the other view-derived state.
+        // The active row Vec swaps between `rows_all` and `rows_no_ctx`, so
+        // cached search indices point into the wrong slice — drop the search
+        // alongside the other view-derived state, as `set_file_view_mode` does.
         fc.view.search = None;
         fc.view.selection_drag = SelectionDrag::None;
 

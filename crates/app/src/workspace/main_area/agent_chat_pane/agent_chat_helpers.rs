@@ -406,12 +406,8 @@ pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
 /// `ToolRawInput` ignore `active` in their [`FoldPolicy`](super::fold), so this
 /// returns `false` for them (the value is irrelevant).
 ///
-/// Single source of truth for "is this fold active", shared by
-/// [`rows::project`](super::rows) — which derives each header's default
-/// collapsed state — and [`AgentChatView::toggle_fold`](super::view::AgentChatView::toggle_fold),
-/// which flips the *visible* state on click. Keeping both on one function means
-/// the projection and the toggle can never disagree on what "active" means (the
-/// prior hand-rolled duplication had to be kept in sync by comment).
+/// Single source of truth for "is this fold active", shared by projection and
+/// toggle paths so they cannot disagree on default collapse state.
 pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> bool {
     use daruda_acp::ChatItem;
     match key {

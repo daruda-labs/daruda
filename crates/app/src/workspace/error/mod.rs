@@ -1,18 +1,9 @@
 //! Workspace-side error reporting entry point.
 //!
-//! Every surfaced error (PTY thread death, MCP reload failure,
-//! filesystem watcher init failure, …) flows through
-//! [`Workspace::report_error`]. This module owns the routing logic so
-//! the surfaces it touches stay in one place:
-//!
-//! 1. Append the report to the on-disk NDJSON log
-//!    (`~/.daruda/logs/<profile>/daruda-YYYY-MM-DD.log`) via
-//!    [`LogWriter::global`].
-//! 2. Push it onto the in-memory `error_history` ring (capped at 50)
-//!    so a future "Show recent errors" command palette entry can
-//!    reach reports the user dismissed before they auto-expired.
-//! 3. Delegate the live toast (queue, expiry sweep, render) to
-//!    [`ToastLayer`](super::toast_layer::ToastLayer).
+//! Every surfaced error flows through [`Workspace::report_error`], which
+//! routes it to three surfaces: the on-disk NDJSON log ([`LogWriter::global`]),
+//! the in-memory `error_history` ring (capped), and the live toast
+//! ([`ToastLayer`](super::toast_layer::ToastLayer)).
 
 pub(in crate::workspace) mod modal;
 pub(in crate::workspace) mod toast;
@@ -24,19 +15,13 @@ use gpui::Context;
 use self::toast::ToastId;
 use crate::workspace::Workspace;
 
-/// Cap on the in-memory ring of recent reports. Tuned to fit comfortably
-/// in a future "Show recent errors" command palette entry without
-/// forcing scrollback.
+/// Cap on the in-memory ring of recent reports.
 const HISTORY_CAP: usize = 50;
 
 impl Workspace {
     /// Surface an error to the user and the on-disk log. Safe to call
     /// from any `&mut Workspace` context; persistence and rendering
     /// updates fire from this single call.
-    ///
-    /// Replaces ad-hoc `eprintln!("daruda: …")` call sites — those
-    /// only show up if the user launched daruda from a terminal with
-    /// stderr attached, which is rarely the case for a `.app` bundle.
     pub fn report_error(&mut self, report: ErrorReport, cx: &mut Context<Self>) {
         // 1. Persistence — best-effort. LogWriter may not be installed
         // (e.g. early-init tests) or may have been disabled if its

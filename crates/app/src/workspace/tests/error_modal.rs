@@ -1,10 +1,9 @@
-//! Tests for the Layer 2 Details modal — `ErrorReportModal`.
+//! Tests for the Details modal — `ErrorReportModal`.
 //!
-//! Three properties under test:
-//! - the modal entity captures the report verbatim at construction,
-//! - `Copy report` writes the full plain-text rendering (including
-//!   the system-info trailer) to the clipboard,
-//! - the `Copied` confirmation reverts after the 1 s window.
+//! Guards three properties: the modal captures the report verbatim at
+//! construction; `Copy report` writes the full plain-text rendering
+//! (including the system-info trailer) to the clipboard; the `Copied`
+//! confirmation reverts after the 1 s window.
 
 use std::time::Duration;
 
@@ -51,7 +50,7 @@ async fn modal_captures_full_report_at_construction(cx: &mut TestAppContext) {
             body.contains("session"),
             "body should embed the context table",
         );
-        // System-info trailer (D6 surface) — version + os + arch only.
+        // System-info trailer — version + os + arch only.
         assert!(
             body.contains(std::env::consts::OS),
             "body trailer should carry OS",

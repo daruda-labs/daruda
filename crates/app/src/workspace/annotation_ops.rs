@@ -1,24 +1,9 @@
-//! Workspace-side annotation operations.
-//!
-//! The TerminalSession exposes the low-level `add_annotation` /
-//! `update_annotation_text` / `remove_annotation` mutators (see
-//! `daruda_terminal::session::annotation_ops`). This file is the
-//! Workspace-level wrapper that:
-//!
-//! 1. Resolves a [`PaneId`] back to its `TerminalView` (the entity
-//!    that owns the session — lanes do not own sessions, so the API
-//!    is keyed by pane rather than [`LaneRef`]).
-//! 2. Routes session-side failures through [`Workspace::report_error`]
-//!    so the user gets a toast + an NDJSON log entry instead of a
-//!    silent no-op.
-//! 3. Opens the [`AnnotationDialog`] modal for the create / edit flows
-//!    (the view-purity rule says the context-menu listener is a
-//!    one-liner; the body lives here).
-//!
-//! The pane lookup walks `self.active_runtime().panes`; a removed pane (race
-//! between the context-menu click and a `Cmd+W`) surfaces as an Info
-//! report — the underlying session is gone but the user does not need
-//! a loud error toast for a self-resolved race.
+//! Workspace-level wrapper over the TerminalSession annotation mutators
+//! (see `daruda_terminal::session::annotation_ops`): resolves a [`PaneId`]
+//! to its `TerminalView` (the session owner — API is keyed by pane, not
+//! [`LaneRef`]), routes failures through [`Workspace::report_error`], and
+//! opens the [`AnnotationDialog`] for create/edit. A removed pane surfaces
+//! as an Info report — a self-resolved race, not a loud error.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Pixels, Point};
@@ -110,12 +95,10 @@ impl Workspace {
         }
     }
 
-    /// Open the Shift+Right-click context menu for the annotation
-    /// affordance. The menu always carries the "Add annotation" entry
-    /// (enabled when `range` is a single-line selection, otherwise
-    /// disabled with an explanatory tooltip). When the click landed on
-    /// an existing annotation, a "Delete annotation" entry is appended
-    /// below.
+    /// Open the Shift+Right-click annotation context menu. Always carries
+    /// "Add annotation" (enabled only for a single-line selection, else
+    /// disabled with a tooltip); appends "Delete annotation" when the click
+    /// landed on an existing mark.
     pub(in crate::workspace) fn open_annotation_context_menu(
         &mut self,
         pane_id: PaneId,
@@ -191,10 +174,9 @@ impl Workspace {
         );
     }
 
-    /// Pull up the [`AnnotationDialog`] in **edit** mode for the
-    /// supplied existing mark. Uses the session's O(1) `annotation_by_id`
-    /// lookup so the dialog opens correctly even when the mark is
-    /// scrolled out of the visible viewport.
+    /// Pull up the [`AnnotationDialog`] in **edit** mode for the given mark.
+    /// Uses the session's O(1) `annotation_by_id` lookup so it works even
+    /// when the mark is scrolled out of the viewport.
     pub(in crate::workspace) fn open_annotation_dialog_for_edit(
         &mut self,
         pane_id: PaneId,
@@ -259,9 +241,8 @@ impl Workspace {
         err: daruda_terminal::session::AnnotationError,
         cx: &mut Context<Self>,
     ) {
-        // `site` and `err` stay in the dedup key (internal identifier)
-        // rather than the user-facing message — they are debugging
-        // details that should not leak into a localized toast.
+        // `site` and `err` go in the dedup key, not the user-facing
+        // message — debugging details must not leak into a localized toast.
         let report = ErrorReport::new(s::terminal_annotation_err_operation_failed_title())
             .severity(ErrorSeverity::Warning)
             .message(s::terminal_annotation_err_operation_failed_message())

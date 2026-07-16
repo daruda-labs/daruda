@@ -1,13 +1,12 @@
 //! Status pill — the single per-row dropdown that drives every
-//! state-transition and meta action for a Task (R-26 / I-9).
+//! state-transition and meta action for a Task.
 //!
 //! The pill shows the task's current state label; clicking it opens a
-//! `PopupMenu` whose contents are the *valid* actions for that state.
-//! There is no `[⋯]` overflow — every action, including the meta
-//! actions (Edit / Delete / View error), lives in the pill menu, with
-//! a `separator` distinguishing transitions from meta actions.
+//! `PopupMenu` of the actions valid for that state, with a `separator`
+//! distinguishing transitions from meta actions (Edit / Delete / View
+//! error).
 //!
-//! State → menu matrix (plan R-26):
+//! State → menu matrix:
 //!
 //! | State     | Items (top → bottom)                                          |
 //! |-----------|---------------------------------------------------------------|
@@ -29,14 +28,10 @@ use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button};
 
 /// Build the status-pill trigger + dropdown for a single task row.
 ///
-/// The pill's label is the human state label that the renderer
-/// already produces; appending `TASK_PILL_CHEVRON` keeps the visual
-/// gap consistent and signals "click me for more". The trigger
-/// inherits its height (`RIGHT_PANEL_STATUS_PILL_HEIGHT_PX`),
-/// padding (`RIGHT_PANEL_STATUS_PILL_PADDING_X_PX`), and inline gap
-/// (`RIGHT_PANEL_STATUS_PILL_GAP_PX`) from the `xsmall()` factory in
-/// [`crate::ui::button`]; the two visual knobs the pill applies
-/// explicitly are the corner radius and a state-tinted background.
+/// The label is the state label plus `TASK_PILL_CHEVRON`. Height,
+/// padding, and inline gap come from the `xsmall()` factory in
+/// [`crate::ui::button`]; the pill sets only corner radius and a
+/// state-tinted background.
 pub(in crate::workspace) fn status_pill(
     task: &Task,
     snap: &RightDockSnapshot,
@@ -61,8 +56,7 @@ pub(in crate::workspace) fn status_pill(
 }
 
 /// State colour tinted with [`theme::RIGHT_PANEL_STATUS_PILL_BG_ALPHA`].
-/// The same hue powers the row's indicator (`state_indicator`) and the
-/// pill bg, so the visual signal stays consistent across the row.
+/// The same hue powers the row's indicator, keeping the signal consistent.
 fn pill_background(state: &TaskState, cx: &gpui::App) -> Hsla {
     let t = theme::current(cx);
     let base = match state {

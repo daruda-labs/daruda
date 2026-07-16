@@ -20,10 +20,8 @@ pub(in crate::workspace) mod usage;
 pub(in crate::workspace) mod view_tabs;
 
 /// Shared scaffold for a right-dock tab body: a vertical flex column
-/// with the panel's standard padding and section gap. Every right-dock
-/// view (Usage / Skills / Tasks / Tools) builds its body on this so the
-/// outer padding and inter-section spacing have a single definition
-/// rather than four near-identical copies.
+/// with the panel's standard padding and section gap, so every view
+/// (Usage / Skills / Tasks / Tools) shares one definition.
 pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
     div()
         .flex()
@@ -36,11 +34,8 @@ pub(in crate::workspace) fn right_panel_body() -> gpui::Div {
 /// Render the body for the currently-active right-panel tab.
 ///
 /// Wraps every per-tab body in a vertical scroll container so a long
-/// list (e.g. the marketplace catalog inside Skills, or the per-session
-/// rows in Usage) doesn't push the dock footer off-screen. The outer
-/// dock wrapper sets `overflow_hidden`, which would otherwise clip
-/// without offering any way to scroll. A scrollbar thumb overlay sits
-/// on top of the scroll viewport so the user can see scroll position.
+/// list doesn't push the dock footer off-screen (the outer dock wrapper
+/// sets `overflow_hidden`), with a scrollbar thumb overlay for position.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     let body = match snap.right_dock_view {
         RightDockView::Usage => usage::render(snap, cx),
@@ -70,9 +65,8 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 }
 
 /// Scrollbar thumb overlay for the right-dock body. Returns `None`
-/// when content fits without scrolling. Shape and position are derived
-/// from the shared `ScrollHandle`'s viewport / max-offset / current
-/// offset — the same approach used by `settings_window::render`.
+/// when content fits; shape and position derive from the shared
+/// `ScrollHandle`'s viewport / max-offset / current offset.
 fn scrollbar_thumb(handle: &ScrollHandle, cx: &App) -> Option<AnyElement> {
     let viewport_h = handle.bounds().size.height;
     let max_offset = handle.max_offset().y;

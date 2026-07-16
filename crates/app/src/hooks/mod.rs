@@ -19,14 +19,10 @@ pub(crate) mod tests_common {
     //! Cross-test serialization for the FSEvent watchers.
     //!
     //! macOS aggregates filesystem events under shared `/var/folders`
-    //! parents — cargo's default parallel test runner pits multiple
-    //! `notify::Watcher` subscriptions against the same kernel queue
-    //! and one watcher's `recv` window can overlap a sibling test's
-    //! event burst, blowing past the assertion's deadline. The fix is
-    //! a process-global mutex that serializes the watcher tests; the
-    //! tests still run from one binary, just one at a time. Pure-data
-    //! tests (e.g. `nearest_existing_ancestor_*`) don't need it and
-    //! keep running in parallel.
+    //! parents, so parallel `notify::Watcher` tests overlap each other's
+    //! event bursts and miss their deadlines. A process-global mutex
+    //! serializes the watcher tests; pure-data tests keep running in
+    //! parallel.
     use std::sync::{Mutex, MutexGuard};
 
     static FSEVENT_LOCK: Mutex<()> = Mutex::new(());

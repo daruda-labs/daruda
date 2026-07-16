@@ -74,7 +74,7 @@ pub(in crate::workspace) struct ClaudeContext {
     /// `~/.claude/settings.json`. Cached: refreshed at startup and after
     /// each install/uninstall action; on disk changes by the user
     /// directly editing settings.json the cache will lag until daruda
-    /// restarts (acceptable — Phase C-1 adds a settings.json watch).
+    /// restarts.
     pub(in crate::workspace) claude_hooks_installed: bool,
 
     /// PTY → claude session tracker. Polls sysinfo every 3 s to find

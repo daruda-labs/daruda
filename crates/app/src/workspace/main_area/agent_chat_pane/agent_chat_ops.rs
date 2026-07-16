@@ -1,43 +1,17 @@
-//! Workspace ops for the Agent chat pane — pane/tab construction, the live
-//! ACP connection + event pump, the desktop-notification pipeline, the
-//! bottom-dock prompt / cancel routing, plus the GPUI-free helpers the
-//! view's reconcilers reuse.
+//! `impl Workspace` ops for the Agent chat pane: pane/tab construction, the
+//! live ACP connection + event pump, the desktop-notification pipeline, and
+//! bottom-dock prompt / cancel routing. What stays here needs `Workspace`
+//! state (default permission mode, per-event `syntax_theme`, `report_error`);
+//! per-event folding and render-listener ops live on [`AgentChatView`].
+//! Telegram relay lives in the sibling [`super::telegram_ops`]; this file only
+//! tees into it from `maybe_notify_agent_event` and `fire_activity_completion`.
 //!
-//! The per-event folding and every render-listener op (`toggle_fold`,
-//! `on_scroll`, `respond_permission`, `set_mode`, …) live on
-//! [`AgentChatView`](super::view::AgentChatView); they operate on the view and
-//! `cx.notify()` the view, so a scroll / fold dirties only that cached subtree.
-//! What stays here are the parts that need `Workspace` state — the connection
-//! reads `agent.default_permission_mode`; the pump reads `syntax_theme` per
-//! event and owns the error pipeline (`report_error`) — and the construction
-//! that mutates the pane/tab tree.
-//!
-//! The Telegram relay domain (outbound pings, inbound reply/permission
-//! injection) lives in the sibling [`super::telegram_ops`] module; this file
-//! keeps only the two tee points — `maybe_notify_agent_event` and
-//! `fire_activity_completion` — that call into it.
-//!
-//! ## Connection + pump shape
-//!
-//! ```text
-//!   create_agent_chat_pane
-//!         │  builds Pane (status = Idle, handle = None) — no session yet
-//!         ▼
-//!   focus_pane → maybe_connect_agent_chat
-//!         │  first focus only: status Idle → Connecting
-//!         ▼
-//!   connect_agent_chat (cx.spawn, weak Workspace)
-//!         │  connect_agent_session on bg executor → (handle, rx)
-//!         │  store handle on the view, fold events through view.apply_event
-//!         ▼
-//!   event pump: while rx.next().await:
-//!           view.update(|v, cx| v.apply_event(event, &syntax_theme, is_light, cx))
-//!         each event notifies the *view* (cached subtree), never the Workspace
-//! ```
-//!
-//! Both the handle and the pump task live on the view, so closing the pane
-//! drops them: the handle drop closes the command channel (the connection task
-//! exits) and the pump-task drop ends the loop. No explicit teardown is needed.
+//! Connect flow: `create_agent_chat_pane` builds an `Idle` pane (no session);
+//! `focus_pane` → `maybe_connect_agent_chat` flips it `Connecting` on first
+//! focus; `connect_agent_chat` spawns the bg connect + event pump, folding each
+//! event through `view.apply_event` (notifying the view, never the Workspace).
+//! The handle and pump both live on the view, so closing the pane drops both —
+//! no explicit teardown.
 
 use daruda_acp::{NodeProgress, connect_agent_session};
 use daruda_config::AgentLaunch;
@@ -118,35 +92,26 @@ pub(in crate::workspace) fn resolve_open_agent_id(
 }
 
 /// Cwd outcome fed into [`Workspace::build_agent_chat_pane`]'s status
-/// derivation. Kept as one enum — rather than a `cwd: Option<PaneCwd>` +
-/// separate error-reason field, which could disagree — so an "unattachable"
-/// pane (an agent whose command needs `{{cwd}}` but the lane has no
-/// `remote_cwd`) is a variant of its own with its own reason, instead of
-/// being represented as `Ready(None)` with an ambiguous or overridden reason.
+/// derivation. One enum (not a `cwd` + separate error-reason pair that could
+/// disagree) so an unattachable pane carries its own reason as its own variant.
 enum PaneCwdOutcome {
-    /// A cwd resolution that completed normally: `Some` parks the pane
-    /// `Idle` with that cwd; `None` parks it in the generic "no working
-    /// directory" error (restore's genuinely cwd-less case).
+    /// Normal resolution: `Some` parks the pane `Idle` with that cwd; `None`
+    /// parks it in the generic "no working directory" error (cwd-less restore).
     Ready(Option<PaneCwd>),
-    /// The cwd could not be resolved at all — parks the pane in `Error`
-    /// with the given (already-localized) reason, cwd `None`.
+    /// Cwd unresolvable — parks the pane in `Error` with the given
+    /// (already-localized) reason, cwd `None`.
     Blocked(String),
 }
 
-/// Pure core of [`Workspace::resolve_new_pane_cwd`] — decide whether a fresh
-/// Agent chat pane should attach a `Local` or `Remote` cwd, given the
-/// candidate agent's `launch` and the active lane's local/remote paths.
-/// Factored out of the workspace so it is unit-testable without gpui.
+/// Pure core of [`Workspace::resolve_new_pane_cwd`]: decide whether a fresh
+/// Agent chat pane attaches a `Local` or `Remote` cwd, given the candidate
+/// agent's `launch` and the active lane's local/remote paths.
 ///
-/// - `launch` needs a remote cwd (see [`AgentLaunch::needs_remote_cwd`]) and
-///   `remote_cwd` is set → `Ok(Some(Remote))`.
-/// - `launch` needs a remote cwd but `remote_cwd` is `None` (or blank —
-///   empty or whitespace-only, e.g. a lane whose remote path field was left
-///   as spaces) → `Err(())`: the agent has nowhere to attach, and the caller
-///   must not attempt a connect.
-/// - `launch` does not need a remote cwd → `Ok(local_cwd.map(Local))`,
-///   `None` when there is no active lane at all (mirrors the pre-existing
-///   no-lane-cwd case).
+/// - Needs a remote cwd (see [`AgentLaunch::needs_remote_cwd`]) and `remote_cwd`
+///   is set → `Ok(Some(Remote))`.
+/// - Needs a remote cwd but `remote_cwd` is `None`/blank → `Err(())`: nowhere
+///   to attach, the caller must not connect.
+/// - Doesn't need a remote cwd → `Ok(local_cwd.map(Local))` (`None` for no lane).
 fn resolve_new_pane_cwd_core(
     launch: &AgentLaunch,
     local_cwd: Option<PathBuf>,
@@ -167,9 +132,8 @@ fn resolve_new_pane_cwd_core(
 }
 
 /// Whether to raise the notification: the channel must be enabled, and it is
-/// suppressed only when the app is foreground AND the firing pane is the
-/// focused one (the user is already looking at it). Mirrors the hook-
-/// notification focus gate.
+/// suppressed only when the app is foreground AND the firing pane is focused
+/// (the user is already looking at it). Mirrors the hook-notification gate.
 fn should_notify_agent_event(
     enabled: bool,
     skip_focused_pane: bool,
@@ -181,13 +145,12 @@ fn should_notify_agent_event(
 
 impl Workspace {
     /// Show a desktop notification `body` for agent-chat pane `pane_id`, gated
-    /// by `enabled` and the shared focus rule. The single place the focus gate +
-    /// title lookup live.
+    /// by `enabled` and the shared focus rule. The single focus-gate + title
+    /// lookup site.
     ///
-    /// The firing pane is "focused" only when it is the active lane's focused
-    /// pane. A pane in a parked (non-active) lane never matches this global pane
-    /// id, so a background lane's completion / wait always fires — the desired
-    /// behavior, since the user cannot be looking at it.
+    /// A pane is "focused" only when it is the active lane's focused pane; a
+    /// parked-lane pane never matches this global id, so a background lane's
+    /// completion / wait always fires (the user cannot be looking at it).
     fn notify_agent_pane(&self, pane_id: PaneId, enabled: bool, body: String, cx: &Context<Self>) {
         let is_focused = self.active_runtime().focused_pane_id == pane_id;
         if !should_notify_agent_event(
@@ -201,11 +164,9 @@ impl Workspace {
         crate::platform::notifications::show(&self.pane_title(pane_id, cx), &body);
     }
 
-    /// The pane's display title for a notification: its live session title,
-    /// or the static tab-title fallback before the session reports one.
-    /// Also read by `telegram_ops::Workspace::telegram_ping_body`, which is
-    /// why this stays `pub(in crate::workspace)` rather than private —
-    /// both files are `impl Workspace` blocks under the same module tree.
+    /// The pane's display title for a notification: its live session title, or
+    /// the static tab-title fallback before the session reports one. Stays
+    /// `pub(in crate::workspace)` because `telegram_ops` also reads it.
     pub(in crate::workspace) fn pane_title(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
         self.agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).session_title.clone())
@@ -233,18 +194,12 @@ impl Workspace {
             s::agent_notification_waiting(),
             cx,
         );
-        // Reuse the same protocol→view-model conversion
-        // `AgentChatView::apply_event` uses to render the in-app
-        // permission card, so this relay never has to name the raw ACP
-        // protocol type — `daruda_acp`'s boundary is "host never
-        // touches protocol types" (see `daruda_acp::mapping` module
-        // docs). `permission_item` always returns `ChatItem::Permission`
-        // for a `RequestPermissionRequest`; the `let else` is defensive.
-        // Passes the view's current items (this runs before the event is
-        // folded in, but any earlier tool_call for this id is already
-        // there) so `permission_item` can prefer an already-clean
-        // `raw_input` over the request's own, possibly adapter-mangled,
-        // copy.
+        // Reuse `apply_event`'s protocol→view-model conversion so this relay
+        // never names a raw ACP type (daruda_acp's "host never touches protocol
+        // types" boundary). `permission_item` always returns `Permission` for a
+        // permission request; the `let else` is defensive. Passing the view's
+        // current items lets it prefer an already-clean `raw_input` (from an
+        // earlier tool_call for this id) over the request's own copy.
         let Some(view) = self.agent_chat_view(pane_id) else {
             return;
         };
@@ -298,10 +253,8 @@ impl Workspace {
             }
             TurnOutcome::Errored => daruda_store::tasks::SessionEndReason::Error,
         };
-        // Task tracking is a local-filesystem concept (`worktree_path` is
-        // matched against a real path) — a `PaneCwd::Remote` pane has
-        // nothing to match, so `into_local` skips it rather than passing a
-        // remote id where a `Path` is expected.
+        // Task tracking matches `worktree_path` against a real path, so a
+        // `PaneCwd::Remote` pane has nothing to match — `into_local` skips it.
         if let Some(cwd) = self
             .agent_chat_view(pane_id)
             .and_then(|v| v.read(cx).cwd.clone())
@@ -311,15 +264,12 @@ impl Workspace {
         }
     }
 
-    /// Construct an Agent chat `Pane` (no tab side-effects). Allocates the pane
-    /// id and builds the `Entity<AgentChatView>`, seeding the conversation as
-    /// empty and parking the session in `Idle` (or `Error` when there is no
-    /// lane cwd to attach to). The live ACP session is *not* started here —
-    /// [`Self::focus_pane`] connects it lazily on first focus (via
+    /// Construct an Agent chat `Pane` (no tab side-effects), parking the session
+    /// in `Idle` (or `Error` with no lane cwd). The live ACP session is *not*
+    /// started here — [`Self::focus_pane`] connects it lazily on first focus (via
     /// [`Self::maybe_connect_agent_chat`]), so cold restore doesn't spin up an
-    /// agent process per pane. The prompt input is the shared bottom-dock
-    /// input, not a per-pane field. The `window` is needed only to capture the
-    /// window handle the view stores for later diff-editor creation.
+    /// agent process per pane. `window` is captured only for the window handle
+    /// the view stores for later diff-editor creation.
     pub(in crate::workspace) fn create_agent_chat_pane(
         &mut self,
         cwd: Option<PaneCwd>,
@@ -340,14 +290,10 @@ impl Workspace {
     }
 
     /// Shared pane-construction core behind [`Self::create_agent_chat_pane`]
-    /// and [`Self::create_new_agent_chat_pane`]: builds the view + wraps it
-    /// in a `Pane` for an already-decided cwd `outcome`. Factored out (and
-    /// `outcome` kept as one enum rather than a `cwd` + separate error-reason
-    /// pair) so a resolved-but-unattachable cwd (an agent whose command
-    /// needs `{{cwd}}` but the lane has no `remote_cwd` configured) can still
-    /// go through the single pane-construction path while carrying its own
-    /// actionable error reason — distinct from the generic "no working
-    /// directory" reason a genuinely cwd-less pane uses.
+    /// and [`Self::create_new_agent_chat_pane`]: builds the view + wraps it in a
+    /// `Pane` for an already-decided cwd `outcome`. `outcome` is one enum so a
+    /// resolved-but-unattachable cwd goes through this single path carrying its
+    /// own reason, distinct from the generic "no working directory" reason.
     fn build_agent_chat_pane(
         &mut self,
         outcome: PaneCwdOutcome,
@@ -357,11 +303,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
-        // The connection roots at the lane cwd; without one there is no working
-        // directory to attach the agent to. Park such a pane in an error state
-        // rather than a dormant `Idle` that could never connect. The cwd case
-        // stays `Idle` until first focus. The status banner re-adds the error
-        // prefix, so carry the bare reason here — not the prefix.
+        // No lane cwd → no directory to attach to: park in `Error` rather than a
+        // dormant `Idle` that could never connect. The status banner re-adds the
+        // error prefix, so carry the bare reason here.
         let (cwd, status) = match outcome {
             PaneCwdOutcome::Ready(Some(cwd)) => (Some(cwd), AgentSessionStatus::Idle),
             PaneCwdOutcome::Ready(None) => {
@@ -371,9 +315,8 @@ impl Workspace {
         };
         let pane_id = self.alloc_id();
         let window_handle = window.window_handle();
-        // Seed the tab title from the persisted session title (when present) so
-        // a restored dormant pane shows its label before the session loads;
-        // fall back to the static default for a freshly opened pane.
+        // Seed the tab title from the persisted session title so a restored
+        // dormant pane shows its label before the session loads; else default.
         let cached_title = match &title {
             Some(t) if !t.is_empty() => t.clone().into(),
             _ => s::agent_chat_tab_title().into(),
@@ -407,13 +350,10 @@ impl Workspace {
         }
     }
 
-    /// Resolve whether a freshly-created Agent chat pane for `agent_id`
-    /// should attach a `Local` or `Remote` cwd. Looks up `agent_id`'s launch
-    /// in the catalog and defers to [`resolve_new_pane_cwd_core`]; an id no
-    /// longer in the catalog falls back to an empty `AgentLaunch::Raw`
-    /// (no `{{cwd}}` token, so it behaves as a launch needing no remote
-    /// cwd — falls back to `local_cwd`), matching `agent_launch_for`'s
-    /// existing "id not found" handling elsewhere in this file.
+    /// Resolve whether a fresh Agent chat pane for `agent_id` attaches a `Local`
+    /// or `Remote` cwd: looks up the launch and defers to
+    /// [`resolve_new_pane_cwd_core`]. An id no longer in the catalog falls back
+    /// to an empty `AgentLaunch::Raw` (needs no remote cwd → uses `local_cwd`).
     pub(in crate::workspace) fn resolve_new_pane_cwd(
         &self,
         agent_id: &str,
@@ -427,17 +367,11 @@ impl Workspace {
     }
 
     /// Construct a fresh Agent chat pane for `agent_id`, resolving Local vs.
-    /// Remote cwd via [`Self::resolve_new_pane_cwd`]. The single entry point
-    /// every fresh-creation call site uses (`open_agent_chat_pane_with_agent`,
-    /// `split_focused_pane_kind`, `finalize_create_lane`), so the
-    /// no-remote-cwd fallback lives in one place instead of duplicated at
-    /// each call site. `session_id`/`title` are always `None` here — a fresh
-    /// pane never resumes a prior conversation; only restore
-    /// (`persistence.rs`) passes those, and it calls
-    /// [`Self::create_agent_chat_pane`] directly with an already-resolved
-    /// `PaneCwd` from disk, skipping this resolution entirely (a persisted
-    /// `Remote` pane's remote path was valid when saved and needs no
-    /// re-derivation against a lane that may since have changed).
+    /// Remote cwd via [`Self::resolve_new_pane_cwd`]. The single fresh-creation
+    /// entry point, so the no-remote-cwd fallback lives in one place.
+    /// `session_id`/`title` are always `None` — a fresh pane never resumes;
+    /// only restore passes those, calling [`Self::create_agent_chat_pane`]
+    /// directly with an already-resolved `PaneCwd` from disk.
     pub(in crate::workspace) fn create_new_agent_chat_pane(
         &mut self,
         agent_id: String,
@@ -453,11 +387,8 @@ impl Workspace {
         self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
     }
 
-    /// The active lane's local path and remote cwd, or `(None, None)` when
-    /// there is no active lane. The single source both fresh-pane cwd call
-    /// sites (`open_agent_chat_pane_with_agent`, `split_focused_pane_kind`)
-    /// read from, so they can't drift on how a lane-less workspace is
-    /// represented.
+    /// The active lane's local path and remote cwd, or `(None, None)` when there
+    /// is no active lane. Single source both fresh-pane cwd call sites read from.
     pub(in crate::workspace) fn active_lane_cwds(&self) -> (Option<PathBuf>, Option<String>) {
         match self.active_lane() {
             Some(lane) => (Some(lane.path.clone()), lane.remote_cwd.clone()),
@@ -474,12 +405,11 @@ impl Workspace {
             .map(|a| a.launch.clone())
     }
 
-    /// Resolve the agent a restored pane should launch under, and whether its
-    /// persisted session id is still resumable. A pre-feature save (`agent_id`
-    /// None) was created by the built-in Claude agent. If that owning agent is
-    /// still in the catalog we relaunch it and keep the session id (resume works);
-    /// if it was removed we fall back to the default agent and drop the session id
-    /// (its session belongs to a now-absent agent — resuming it would be invalid).
+    /// Resolve the agent a restored pane launches under, and whether its
+    /// persisted session id is still resumable. A `None` `agent_id` means the
+    /// built-in Claude agent. If the owning agent is still in the catalog,
+    /// relaunch it and keep the session id (resume works); if removed, fall back
+    /// to the default agent and drop the session id (resuming it is invalid).
     pub(in crate::workspace) fn resolve_restored_agent(
         &self,
         persisted_agent_id: Option<String>,
@@ -496,9 +426,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Default to the last agent the user opened (session-local), falling
-        // back to the catalog default. A stale last id (agent removed from
-        // config) also falls back.
+        // Default to the last agent opened (session-local), falling back to the
+        // catalog default; a stale last id (agent removed) also falls back.
         let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
         self.open_agent_chat_pane_with_agent(agent_id, window, cx);
     }
@@ -535,13 +464,10 @@ impl Workspace {
         self.active_runtime_mut().tab_history.push(cur_tab);
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
-        // The live session is not started here — `focus_pane` below connects it
-        // lazily (`maybe_connect_agent_chat`), the same path a restored pane
-        // takes on first focus. The prompt input lives in the bottom dock, not
-        // the pane. Open the dock first so the input is visible before
-        // `focus_pane` activates the input panel, syncs the placeholder, and
-        // moves keyboard focus to it for AgentChat panes. The focused *pane*
-        // stays this one, so `send_terminal_input` routes to its ACP session.
+        // The live session connects lazily via `focus_pane` below. The prompt
+        // input lives in the bottom dock; open the dock first so it's visible
+        // before `focus_pane` activates the input panel and moves focus to it.
+        // The focused *pane* stays this one, so input routes to its ACP session.
         if !self.bottom_dock.read(cx).is_open {
             self.bottom_dock.update(cx, |d, cx| {
                 d.toggle();
@@ -575,16 +501,12 @@ impl Workspace {
             if !matches!(v.status, AgentSessionStatus::Idle) {
                 return;
             }
-            // Both `Local` and `Remote` panes are connectable: `connect_agent_chat`
-            // substitutes the `{{cwd}}` token and rewrites the spawn cwd for a
-            // `Remote` pane. A pane with no cwd at all was already parked in
-            // `Error` at construction (`create_agent_chat_pane` /
-            // `create_new_agent_chat_pane`) and never reaches `Idle`.
+            // Both `Local` and `Remote` panes are connectable; a cwd-less pane
+            // was parked in `Error` at construction and never reaches `Idle`.
             let Some(cwd) = v.cwd.clone() else {
                 return;
             };
-            // A persisted session id (restored pane) resumes the prior
-            // conversation via `session/load`; `None` starts a fresh session.
+            // A persisted session id resumes via `session/load`; `None` is fresh.
             (cwd, v.session_id.clone())
         };
         // Flip to `Connecting` before spawning so a second focus during the
@@ -596,21 +518,18 @@ impl Workspace {
                 v.restoring = resuming;
                 v.set_connecting(cx);
             });
-            // Idle → Connecting is a dock-badge status change; the cached
-            // docks need an explicit dirty (see `notify_status_docks`).
+            // Idle → Connecting is a dock-badge status change; dirty the cached
+            // docks explicitly (see `notify_status_docks`).
             self.notify_status_docks(cx);
         }
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
-    /// Manual retry entry point for the Error banner's "Retry" button: start
-    /// the ACP session for `pane_id` iff it is parked in
-    /// [`AgentSessionStatus::Error`]. Mirrors [`Self::maybe_connect_agent_chat`]
-    /// but gated on `Error` instead of `Idle`, and preserves the conversation:
-    /// `AgentChatView::retry_for_reconnect` clears local `items` (so a
-    /// resume's replay doesn't duplicate them) but keeps `session_id`, so this
-    /// resumes the same session via `session/load` when one exists rather than
-    /// starting over.
+    /// Manual retry for the Error banner's "Retry" button: connect `pane_id` iff
+    /// parked in [`AgentSessionStatus::Error`]. Like
+    /// [`Self::maybe_connect_agent_chat`] but gated on `Error`;
+    /// `retry_for_reconnect` clears local `items` yet keeps `session_id`, so an
+    /// existing session resumes via `session/load` rather than starting over.
     pub(in crate::workspace) fn retry_agent_chat_connect(
         &mut self,
         pane_id: PaneId,
@@ -631,20 +550,18 @@ impl Workspace {
         };
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |v, cx| v.retry_for_reconnect(cx));
-            // Error → Connecting is a dock-badge status change; the cached
-            // docks need an explicit dirty (see `notify_status_docks`).
+            // Error → Connecting is a dock-badge status change; dirty the cached
+            // docks explicitly (see `notify_status_docks`).
             self.notify_status_docks(cx);
         }
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
-    /// Resolve the launch spec for `pane_id`'s agent, reconciling the view
-    /// when its `agent_id` is stale. Happy path (allocation-free beyond the
-    /// launch clone): the view's `agent_id` is still in the catalog, so return
-    /// its launch unchanged. Miss: the persisted `agent_id` now points at an
-    /// agent a live config reload removed/renamed, so it lies about which agent
-    /// is running — rewrite the view to the session-sticky default, persist, and
-    /// launch that agent instead. Returns `None` only when the pane is gone.
+    /// Resolve the launch spec for `pane_id`'s agent, reconciling the view when
+    /// its `agent_id` is stale. Happy path: the view's `agent_id` is still in
+    /// the catalog, so return its launch. Miss: a live config reload
+    /// removed/renamed that agent, so rewrite the view to the session-sticky
+    /// default, persist, and launch that. `None` only when the pane is gone.
     fn resolve_pane_launch(
         &mut self,
         pane_id: PaneId,
@@ -656,8 +573,8 @@ impl Workspace {
             return Some(launch);
         }
         // Stale id — reconcile so the chip / persisted state stop lying, then
-        // launch the effective agent. `resolve_open_agent_id` yields a catalog
-        // entry (or the built-in Claude id when the catalog is somehow empty).
+        // launch the effective agent (a catalog entry, or the Claude id when the
+        // catalog is somehow empty).
         let effective_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             let id = effective_id.clone();
@@ -675,19 +592,16 @@ impl Workspace {
     }
 
     /// Open the live ACP session for an already-pushed Agent chat pane and store
-    /// the event-pump task on its view. Runs the (synchronous-to-parse, then
-    /// async) connect on the background executor, then re-enters the workspace
-    /// to store the handle and fold events through the view.
+    /// the event-pump task on its view. Runs the connect on the background
+    /// executor, then re-enters the workspace to store the handle and fold
+    /// events through the view. The pump lives in the view's `_event_pump`, so
+    /// closing the pane drops it (ending the loop) and drops the session handle.
     ///
-    /// The spawned task is stored in the view's `_event_pump`, so closing the
-    /// pane drops it (ending the loop) in addition to dropping the session
-    /// handle (which closes the connection).
-    /// `resume` carries the persisted ACP session id when the pane is restoring
-    /// a prior conversation: `Some` branches `session/load` (the adapter replays
-    /// history before the `Connected` reply), `None` starts a fresh
-    /// `session/new`. A failed *resume* retries once as a fresh session so the
-    /// pane stays usable; the stale id is left persisted (a successful new
-    /// session overwrites it via the `Connected` persist trigger).
+    /// `resume` carries the persisted session id: `Some` branches `session/load`
+    /// (the adapter replays history before the `Connected` reply), `None` starts
+    /// a fresh `session/new`. A failed *resume* retries once as fresh; the stale
+    /// id stays persisted (a successful new session overwrites it via the
+    /// `Connected` persist trigger).
     pub(in crate::workspace) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
@@ -695,42 +609,33 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // Always offer the app's default permission mode; `run_connection`
-        // applies it only when it creates a *fresh* session (no resume, or a
-        // resume the agent can't `session/load` and so downgrades to
-        // session/new) and skips it on a real load, which preserves the resumed
-        // session's own mode. Passing it unconditionally is what lets a
-        // downgraded resume still get the configured default (a `None` here would
-        // leave the fresh session in the adapter's default).
+        // Always offer the default permission mode; `run_connection` applies it
+        // only on a *fresh* session (new, or a resume downgraded to session/new)
+        // and skips it on a real load, preserving the resumed session's own mode.
+        // Passing it unconditionally lets a downgraded resume still get the
+        // configured default.
         let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
         let node_root = daruda_store::persistence::node_install_dir();
 
-        // Resolve the pane's agent_id → launch spec, reconciling the view
-        // when its agent_id no longer names a catalog entry (a live config
-        // reload removed/renamed that agent). Returns `None` only when the pane
-        // is already gone — fall back to the catalog default launch so the
-        // (soon-to-be-dropped) task still has a valid launch to wrap.
+        // Resolve the pane's agent_id → launch spec, reconciling a stale
+        // agent_id. `None` only when the pane is gone — fall back to the catalog
+        // default so the (soon-to-be-dropped) task still has a valid launch.
         let launch = self.resolve_pane_launch(pane_id, cx).unwrap_or_else(|| {
             self.agent_launch_for(&catalog_default_id(&self.agents))
                 .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().launch)
         });
-        // Read back after `resolve_pane_launch` (rather than threading its
-        // internal read out) so a stale-id reconcile it performed is picked up
-        // too. Only keys the dev-build wire-tap file name (see
-        // `daruda_acp::connect_session`'s `agent_id` param) — never affects the
-        // launch itself.
+        // Read back after `resolve_pane_launch` so any stale-id reconcile it did
+        // is picked up. Only keys the dev-build wire-tap file name — never
+        // affects the launch itself.
         let agent_id = self
             .agent_chat_view(pane_id)
             .map(|v| v.read(cx).agent_id.clone())
             .unwrap_or_default();
 
-        // A `Remote` cwd's launch needs the lane's remote path assembled in
-        // (`resolve_new_pane_cwd` only ever assigns `Remote` when
-        // `AgentLaunch::needs_remote_cwd` is true) — `Local` needs no
-        // remote path at all. This is the only place a connect resolves the
-        // actual command/cwd pair to spawn, so a restored `Remote` pane
-        // (which skips `resolve_new_pane_cwd`, see `persistence.rs`) still
-        // gets wrapped here on its lazy connect.
+        // A `Remote` cwd's launch needs the lane's remote path assembled in;
+        // `Local` needs none. This is the only place a connect resolves the
+        // command/cwd pair to spawn, so a restored `Remote` pane (which skips
+        // `resolve_new_pane_cwd`) still gets wrapped here on its lazy connect.
         let (remote_path, connect_cwd): (Option<&str>, PathBuf) = match &cwd {
             PaneCwd::Remote(remote_path) => {
                 (Some(remote_path.as_str()), PathBuf::from(remote_path))

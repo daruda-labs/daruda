@@ -94,9 +94,9 @@ pub struct PtyHandle {
     /// handles (test builds) where resize is a no-op.
     pub master: Option<Arc<dyn MasterPty + Send>>,
     /// PID of the shell process forked into this PTY's slave end.
-    /// `None` in stub handles. Used by the PTY-tracker subsystem
-    /// (Phase E) as the root from which to walk descendants in
-    /// search of `claude` child processes.
+    /// `None` in stub handles. Used by the PTY-tracker subsystem as the
+    /// root from which to walk descendants in search of `claude` child
+    /// processes.
     pub child_pid: Option<u32>,
 }
 
@@ -206,8 +206,8 @@ pub fn spawn_pty_real(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
         .spawn_command(cmd)
         .map_err(|e| PtyError::SpawnShell(e.to_string()))?;
     // Capture the PID before the waiter thread takes ownership of
-    // `child`. Used by Phase E's PtyTracker as the descendant-walk
-    // root so we can find `claude` children of this PTY.
+    // `child`. Used by PtyTracker as the descendant-walk root so we can
+    // find `claude` children of this PTY.
     let child_pid = child.process_id();
 
     // The exit channel fires once when the shell process terminates.

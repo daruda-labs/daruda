@@ -482,15 +482,9 @@ fn render_md_image(
     }
 }
 
-/// A rasterized diagram/image converted to a GPUI-ready image **once**.
-///
-/// The `Arc<RenderImage>` carries a stable image id, so reusing the *same*
-/// instance across renders lets gpui's texture cache hit. Building a fresh
-/// `RenderImage` every render instead forces a per-frame GPU re-upload
-/// (`Window::paint_image` → Metal `replaceRegion`), which dominates paint cost
-/// in an image-heavy view that re-renders each frame (e.g. the agent chat
-/// scrolling with mermaid diagrams). Callers cache this and clone it (cheap —
-/// an `Arc` bump) per render rather than re-converting the raster.
+/// Rasterized image converted once so GPUI can reuse the same texture id.
+/// Agent chat caches this for image-heavy markdown; rebuilding per render would
+/// force repeated GPU uploads.
 #[derive(Clone)]
 pub(in crate::workspace) struct CachedImage {
     image: std::sync::Arc<RenderImage>,
@@ -498,10 +492,7 @@ pub(in crate::workspace) struct CachedImage {
 }
 
 impl CachedImage {
-    /// Convert a raster once: swap RGBA→BGRA (gpui's `RenderImage` is BGRA with
-    /// straight alpha, matching gpui's own decoder, which only swaps channels
-    /// and does not premultiply). `None` only when the buffer dimensions don't
-    /// match the byte length (a corrupt raster).
+    /// Convert a raster once, swapping RGBA to GPUI's BGRA byte order.
     pub(in crate::workspace) fn from_raster(raster: &RasterImage) -> Option<Self> {
         let mut bgra = raster.rgba.clone();
         for pixel in bgra.chunks_exact_mut(4) {
@@ -513,11 +504,8 @@ impl CachedImage {
         Some(Self { image, logical_w })
     }
 
-    /// Block-layout element for the diagram, displayed at its logical (1×) size
-    /// so a 2× HiDPI bitmap stays crisp but shows at its natural size;
-    /// `max_w_full` shrinks anything wider than the container and
-    /// `MD_IMAGE_MAX_HEIGHT` caps the height. Cloning the inner image source is
-    /// an `Arc` bump, so gpui sees the same id and reuses the uploaded texture.
+    /// Block-layout element at logical size, capped to the container and max
+    /// image height while preserving the cached texture id.
     pub(in crate::workspace) fn block(&self) -> AnyElement {
         img(ImageSource::Render(self.image.clone()))
             .w(px(self.logical_w))
@@ -527,10 +515,8 @@ impl CachedImage {
     }
 }
 
-/// Block-layout element for a raster, converting it fresh. Shared by the
-/// Markdown preview (`render_md_image`); the agent chat instead caches a
-/// [`CachedImage`] so it does not re-convert (and re-upload) per render.
-/// `None` only on a corrupt raster (dimension/byte-length mismatch).
+/// Block-layout element for a raster, converting fresh for Markdown preview.
+/// Agent chat caches [`CachedImage`] instead.
 pub(in crate::workspace) fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
     Some(CachedImage::from_raster(raster)?.block())
 }

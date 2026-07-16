@@ -16,14 +16,10 @@ use crate::workspace::dialog_helpers::open_confirm_dialog;
 impl Workspace {
     /// Stage a single file from the working tree into the index.
     ///
-    /// Runs from the lane's git toplevel so:
-    /// (a) linked lanes stage into their own per-lane index
-    ///     rather than the shared `repo_root` (which `git_repo_root_for`
-    ///     returns and which is wrong for any non-primary lane); and
-    /// (b) an anchored main lane (where `wt.path` points at a
-    ///     subdirectory the user opened) still gets the porcelain-path
-    ///     base correct — `git status --porcelain` paths are
-    ///     toplevel-relative, so `git add` must run from there.
+    /// Runs from the lane's git toplevel so (a) linked lanes stage into their
+    /// own per-lane index rather than the shared `repo_root`, and (b) porcelain
+    /// paths (which are toplevel-relative) resolve correctly even for an
+    /// anchored main lane whose `wt.path` is a subdirectory.
     pub(in crate::workspace) fn stage_file(
         &mut self,
         lane_id: LaneId,

@@ -12,11 +12,8 @@
 //! - Done / Error  → terminal, lane preserved (user deletes via dock)
 //! - Cancelled     → user-initiated stop, lane preserved
 //!
-//! Phase 1 hardcodes `agent_type = Claude`; the field is reserved for
-//! future codex / gemini / copilot / cursor-agent expansion (G5
-//! forward-only compatibility).
-//!
-//! See `daruda/docs/Right-Panel-Tasks-Plan.md` for the full spec.
+//! `agent_type` is hardcoded to `Claude`; the field exists for
+//! forward-compatible codex / gemini / copilot / cursor-agent support (G5).
 
 pub mod branch;
 pub mod persistence;

@@ -1,26 +1,13 @@
-//! App-side UI palette — workspace chrome, docks, status bar, docks.
+//! App-side UI palette for workspace chrome, docks, status bar, and panels.
 //!
-//! Lives in the `app` crate (not `daruda_terminal::ux::theme`) because
-//! it describes colours / metrics for daruda-bespoke chrome widgets:
-//! tab bar, dock view tabs, lanes list, status bar, dock
-//! panels. The terminal-side palette (cell fg/bg, cursor, search
-//! overlay, scrollback search, terminal scrollbar) stays in
-//! `daruda_terminal::ux::theme` because the `view/` rendering code
-//! inside that crate reads it directly.
+//! Terminal colours stay in `daruda_terminal::ux::theme`; this palette is
+//! re-projected into `gpui_component::Theme` by the sibling bridge. Hue literals
+//! follow CLAUDE.md §9: degrees [0, 360], normalized by local [`hsla`].
 //!
-//! Sibling [`super`] (the bridge) re-projects selected entries here
-//! plus terminal-side constants into `gpui_component::Theme` slots so
-//! every wrapped widget (Dialog / Input / Select / …) inherits the
-//! daruda tone.
-//!
-//! Hue convention matches `daruda_terminal::ux::theme`: every literal
-//! reads in degrees [0, 360]; the local [`hsla`] helper normalizes to
-//! the fractional form `gpui::Hsla` actually stores. The duplicate
-//! helper here is intentional — both files speak in degrees so call
-//! sites can copy a colour between them without unit conversion. This
-//! does **not** violate the "no third hsla helper" rule (CLAUDE.md
-//! §11) because that rule targets *unit confusion* (degrees vs.
-//! fraction); both helpers use the same degree-based contract.
+//! The duplicate helper is intentional and does not violate the "no third hsla
+//! helper" rule (CLAUDE.md §11): both approved helpers share the same
+//! degree-based contract, so colours copy between app and terminal palettes
+//! without unit conversion.
 
 use gpui::Hsla;
 use gpui_component::highlighter::{SyntaxColors, ThemeStyle};
@@ -39,11 +26,10 @@ const fn hsla(h_degrees: f32, s: f32, l: f32, a: f32) -> Hsla {
     }
 }
 
-/// Re-project an existing token at a new alpha — `const`-friendly so a
-/// tint/overlay can derive from its opaque parent (e.g. a 12 % success
-/// row fill from [`SUCCESS`]) instead of duplicating the H/S/L literal.
-/// Keeps the single-source-of-truth chain intact: change the parent and
-/// every alpha variant follows.
+/// Re-project a token at a new alpha — `const`-friendly so a tint/overlay
+/// derives from its opaque parent (e.g. a 12% success fill from [`SUCCESS`])
+/// instead of duplicating the H/S/L literal, keeping the single-source chain
+/// intact.
 pub const fn with_alpha(c: Hsla, a: f32) -> Hsla {
     Hsla {
         h: c.h,
@@ -53,10 +39,9 @@ pub const fn with_alpha(c: Hsla, a: f32) -> Hsla {
     }
 }
 
-/// Re-project an existing token at a new lightness — the H/S/A stay put.
-/// Lets a hover/active state variant derive from its base token (e.g. a
-/// brighter [`SUCCESS`] for a button's hover) instead of hand-writing a
-/// parallel `hsla()` literal in the gpui_component bridge.
+/// Re-project a token at a new lightness (H/S/A stay put) — lets a
+/// hover/active variant derive from its base (e.g. a brighter [`SUCCESS`] for a
+/// button hover) instead of a parallel `hsla()` literal in the bridge.
 pub const fn with_lightness(c: Hsla, l: f32) -> Hsla {
     Hsla {
         h: c.h,
@@ -70,11 +55,10 @@ pub const fn with_lightness(c: Hsla, l: f32) -> Hsla {
 /// nothing (e.g. a nested accordion whose parent surface shows through).
 pub const TRANSPARENT: Hsla = hsla(0.0, 0.0, 0.0, 0.0);
 
-/// Neutral overlays (`s = 0`, hue irrelevant) for background-derived
-/// elevation. Laid over any surface at a low alpha via [`with_alpha`], white
-/// lifts a dark background and black recesses a light one, so a tint reads one
-/// step off the base regardless of the background *color* — the base needs
-/// only its lightness inspected. See `theme::agent_chat_tint`.
+/// Neutral overlays (`s = 0`) for background-derived elevation. Over any
+/// surface at low alpha via [`with_alpha`], white lifts a dark background and
+/// black recesses a light one, so a tint reads one step off the base from its
+/// lightness alone. See `theme::agent_chat_tint`.
 pub const OVERLAY_WHITE: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 pub const OVERLAY_BLACK: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
 /// Alpha for the agent-chat tool-card tint — a gentle lift so the card sits
@@ -85,10 +69,9 @@ pub const AGENT_CHAT_CARD_TINT_ALPHA: f32 = 0.05;
 /// the edge tracks the background instead of a fixed line color.
 pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
 /// User-message bubble fill: a translucent *accent* tint (not the neutral
-/// white/black used for code), so the user's turn is set off by hue while code
-/// stays chromatically quiet. Translucent, so it rides the pane background on
-/// any theme; accent-hued rather than neutral is the one sanctioned chromatic
-/// fill (cf. `accent-muted`, DESIGN §Accent — badge fill).
+/// white/black used for code) so the user's turn is set off by hue while code
+/// stays quiet. Accent-hued rather than neutral is the one sanctioned
+/// chromatic fill (cf. `accent-muted`, DESIGN §Accent — badge fill).
 pub const AGENT_CHAT_USER_TINT: Hsla = with_alpha(PRIMARY, 0.22);
 
 /// Mid-gray target the inactive-pane dim blends toward, matching
@@ -100,33 +83,29 @@ pub const DIM_GRAY_LEVEL: f32 = 0.3;
 // Design tokens — primitive colour literals (single source of truth)
 // ============================================================================
 
-// Lifted off pure black (l 0.006 → 0.031) so the window frame isn't harsher
-// than the content it surrounds. Hue/saturation match the SURFACE_* ladder
-// (cyan-blue 210, faint) rather than a pure-240 navy — at this lightness a
-// high-240 tint reads as visibly navy. Values are the exact HSL of the 8-bit
-// hex #070809 (B−R = 2, same cool strength as SURFACE_1), so the theme
-// survives its serialize→hex→parse round-trip cleanly.
+// Lifted off pure black so the window frame isn't harsher than its content.
+// Hue/saturation match the SURFACE_* ladder (faint cyan-blue 210, not a 240
+// navy which reads visibly navy at this lightness). Values are the exact HSL
+// of hex #070809 so the theme survives its serialize→hex→parse round-trip.
 pub const CANVAS: Hsla = hsla(210.0, 0.125, 0.0314, 1.0);
 pub const SURFACE_1: Hsla = hsla(210.0, 0.063, 0.063, 1.0);
 pub const SURFACE_2: Hsla = hsla(210.0, 0.048, 0.082, 1.0);
 pub const SURFACE_3: Hsla = hsla(210.0, 0.040, 0.098, 1.0);
-/// Code-viewing surface (file viewer + diff). Sits one rung above
-/// `CANVAS` so the editor reads as its own plane and bright glyphs stay
-/// off the deepest base, while the syntax palette stays above the
-/// contrast floor — see DESIGN §Readability.
+/// Code-viewing surface (file viewer + diff). One rung above `CANVAS` so the
+/// editor reads as its own plane and the syntax palette clears the contrast
+/// floor — see DESIGN §Readability.
 pub const EDITOR_SURFACE: Hsla = hsla(220.0, 0.10, 0.05, 1.0);
 
 // Light-theme surface ladder — cool-tinted near-whites (faint blue, never
-// neutral gray), mirroring the dark ladder's cool identity. Used by
-// `apply_daruda_palette` and theme-variant render helpers so light mode
-// doesn't fall through to the dark consts above. Matches `daruda_light.json`.
+// neutral gray), mirroring the dark ladder. Used by `apply_daruda_palette` and
+// theme-variant render helpers so light mode doesn't fall through to the dark
+// consts above. Matches `daruda_light.json`.
 pub const LIGHT_CANVAS: Hsla = hsla(222.0, 0.10, 0.954, 1.0);
 pub const LIGHT_SURFACE_1: Hsla = hsla(222.0, 0.09, 0.907, 1.0);
 pub const LIGHT_SURFACE_2: Hsla = hsla(222.0, 0.085, 0.879, 1.0);
 pub const LIGHT_SURFACE_3: Hsla = hsla(222.0, 0.08, 0.846, 1.0);
-/// Near-black ink for text on light surfaces (the inverse of `INK`, which is
-/// a near-white for dark surfaces). Used by render sites that still read a
-/// raw text const instead of a theme-variant field.
+/// Near-black ink for text on light surfaces (inverse of `INK`). Used by
+/// render sites that read a raw text const instead of a theme-variant field.
 pub const LIGHT_INK: Hsla = hsla(222.0, 0.14, 0.12, 1.0);
 pub const HAIRLINE: Hsla = hsla(223.0, 0.091, 0.151, 1.0);
 pub const ACCENT: Hsla = hsla(233.8, 0.563, 0.596, 1.0);
@@ -241,10 +220,9 @@ pub const BG_ACTIVE: Hsla = SURFACE_3;
 pub const BORDER: Hsla = HAIRLINE;
 
 // Text roles — the only four sanctioned UI text tones (DESIGN §Colors:
-// ink / body / mute / subtle). All carry the cool-blue tint that is the
-// design identity; feature constants must reference these rather than
-// inventing neutral-gray (`hsla(0,0,L)`) literals, which DESIGN §Don'ts
-// forbids ("never neutral gray").
+// ink / body / mute / subtle), all carrying the cool-blue design tint.
+// Feature constants must reference these, never neutral-gray (`hsla(0,0,L)`)
+// literals, which DESIGN §Don'ts forbids.
 pub const TEXT_PRIMARY: Hsla = INK; // titles, active labels, focused rows
 pub const TEXT_SECONDARY: Hsla = TEXT_BODY; // body copy, descriptions, previews
 pub const TEXT_TERTIARY: Hsla = TEXT_MUTE; // section headers, muted metadata
@@ -257,11 +235,9 @@ pub const TEXT_DISABLED: Hsla = TEXT_SUBTLE; // empty states, lowest emphasis
 // is referenced only here.
 pub const PRIMARY: Hsla = ACCENT;
 
-// Overlay roles — white lift at fixed alphas (DESIGN: elevation via the
-// surface ladder, expressed as translucent white for row hover/active
-// fills that must read over any underlying surface). One step per
-// intensity so every list/row reuses the same lift instead of picking a
-// bespoke alpha.
+// Overlay roles — white lift at fixed alphas for row hover/active fills that
+// must read over any underlying surface. One step per intensity so every
+// list/row reuses the same lift instead of a bespoke alpha.
 pub const OVERLAY_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.04); // pointer hover row
 pub const OVERLAY_SELECTED: Hsla = hsla(0.0, 0.0, 1.0, 0.06); // selected / expanded row
 pub const OVERLAY_ACTIVE: Hsla = hsla(0.0, 0.0, 1.0, 0.08); // active row, faint border/separator
@@ -275,16 +251,14 @@ pub const OVERLAY_PROMINENT: Hsla = hsla(0.0, 0.0, 1.0, 0.10); // pill fill, set
 // Workspace chrome — title bar, tab bar, status bar, docks
 // ============================================================================
 
-/// Small dot in the right section of the status bar that lights up
-/// when the workspace's project layer (`<config_dir>/daruda/projects/...`)
-/// has a `config.toml` on disk. Cyan-ish accent so it reads as
-/// informational, not as an alert.
+/// Status-bar dot that lights up when the workspace's project layer has a
+/// `config.toml` on disk. Cyan-ish accent so it reads as informational, not
+/// an alert.
 pub const STATUS_BAR_PROJECT_DOT: Hsla = hsla(180.0, 0.55, 0.55, 1.0);
 
-/// Inline "detached" chip background and text — shown next to the
-/// project/branch label when the active git worktree is on a detached
-/// HEAD. Amber-leaning so it signals *attention* without rising to
-/// the red-error tier; the state is uncommon but not destructive.
+/// Inline "detached" chip background and text — shown next to the branch
+/// label on a detached HEAD. Amber-leaning so it signals attention without
+/// rising to the red-error tier.
 pub const STATUS_BAR_DETACHED_BG: Hsla = with_lightness(WARNING, 0.22);
 pub const STATUS_BAR_DETACHED_TEXT: Hsla = with_lightness(WARNING, 0.72);
 
@@ -368,10 +342,9 @@ pub const LANE_CARD_MARGIN_X: f32 = PAD_STANDARD;
 /// Lanes list — vertical gap between adjacent lane rows inside
 /// a project block so consecutive rows don't read as a single block.
 pub const LANE_LIST_GAP_Y: f32 = 3.0;
-/// Lanes list — horizontal indent step (px). Each hierarchy level is
-/// one step deeper than its parent: project header sits at the group
-/// rank, lane rows sit one step (8 px) to the right of their project
-/// header. Applied to the lane list container, not per-row.
+/// Lanes list — horizontal indent step (px). Each hierarchy level sits one
+/// step deeper than its parent (lane rows one step right of their project
+/// header). Applied to the lane list container, not per-row.
 pub const LANE_INDENT_STEP: f32 = 8.0;
 /// Lanes card — border width (px).
 pub const LANE_CARD_BORDER_W: f32 = 1.0;
@@ -396,7 +369,7 @@ pub const LANE_BRANCH_CHIP_RADIUS: f32 = RADIUS_SM;
 pub const LANE_BRANCH_CHIP_BORDER_W: f32 = LANE_CARD_BORDER_W;
 
 // ============================================================================
-// Migrated from daruda_terminal::ux::theme (Phase 1 follow-up)
+// Workspace chrome (modal, dock, banners, settings, agent panels, etc.)
 // ============================================================================
 
 /// Modal backdrop dim alpha (0..1).
@@ -430,11 +403,9 @@ pub const MODAL_FOOTER_GAP: f32 = GAP_LG;
 pub const MODAL_FOOTER_MARGIN_TOP: f32 = PAD_SM;
 /// Single-line text-input field height (px).
 pub const MODAL_INPUT_HEIGHT: f32 = 32.0;
-/// Minimum pixel height of the Notes textarea inside `EditTaskModal`.
-/// The Notes field shares the same `flex_1` column as the Prompt, but
-/// is biased smaller because notes are typically short — `min_h`
-/// guarantees at least ~6 lines of room without letting the row
-/// dominate the column.
+/// Minimum height of the Notes textarea inside `EditTaskModal` (px). Shares
+/// the Prompt's `flex_1` column but is biased smaller (notes are short); this
+/// guarantees ~6 lines without letting the row dominate the column.
 pub const MODAL_NOTES_TEXTAREA_MIN_H: f32 = 120.0;
 /// Radio-button indicator column width in the merge modal (px).
 /// Wide enough to contain "●" / "○" at MODAL_BODY_FONT_SIZE.
@@ -2438,11 +2409,8 @@ mod tests {
             "operator",
             "punctuation",
             "emphasis",
-            // Dotted sub-captures with no exact field: both paths must
-            // fall back to the first segment (editor via
-            // `SyntaxColors::style`, diff via `bucket_for_capture`). These
-            // are the methods / qualified types / keyword sub-kinds that
-            // previously diverged between the raw and diff views.
+            // Dotted sub-captures with no exact field must fall back to the
+            // first segment in both editor and diff views.
             "function.method",
             "function.call",
             "function.macro",

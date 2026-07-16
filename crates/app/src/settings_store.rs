@@ -1,22 +1,10 @@
-//! `SettingsStore` — single GPUI `Global` carrying the user [`Config`]
-//! plus per-lane [`ProjectConfig`] overlays.
+//! GPUI `Global` carrying user config plus per-lane project overlays.
 //!
-//! Mirrors the zed `crates/settings/src/settings_store.rs` pattern:
-//! a Global owning both layers, with consumers subscribing via
-//! `cx.observe_global::<SettingsStore>` instead of having a watcher
-//! call into each [`Workspace`] one-by-one.
-//!
-//! Bootstrap rules (CLAUDE.md §"GPUI shared-state convention"):
-//!
-//! - [`init`] is idempotent (`cx.has_global` guard) so test fixtures
-//!   and the production entry point both call it without panicking
-//!   on the second `set_global`.
-//! - Mutate via `cx.update_global::<SettingsStore, _>(|store, _| ...)`
-//!   so observers fire automatically on the closure return.
-//! - Per-lane slices live in a `BTreeMap<PathBuf, ...>` and
-//!   every `Workspace::finalize_remove_lane` must call
-//!   [`SettingsStore::forget_lane`] so the map can't grow
-//!   unbounded across a long session.
+//! Mirrors zed's settings-store shape: consumers subscribe via
+//! `cx.observe_global::<SettingsStore>` and mutations go through
+//! `cx.update_global` so observers fire on return. `init` stays idempotent and
+//! removed lanes must call [`SettingsStore::forget_lane`] (CLAUDE.md
+//! GPUI shared-state cleanup rule).
 
 use crate::config_watcher;
 use daruda_config::{Config, ProjectConfig, project};
@@ -25,11 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Settings layers — user-global plus per-lane overlay.
-///
-/// `user` is the parsed `~/.config/daruda/config.toml`. `project`
-/// keys are absolute lane paths and the values are the parsed
-/// `.daruda/config.toml` overlay sitting inside each lane.
+/// Parsed user config plus per-lane overlays keyed by absolute lane path.
 pub struct SettingsStore {
     user: Arc<Config>,
     project: BTreeMap<PathBuf, Arc<ProjectConfig>>,
@@ -47,48 +31,34 @@ impl Default for SettingsStore {
 }
 
 impl SettingsStore {
-    /// Idempotent initialiser. Production entry point
-    /// (`globals::init_all`) and test fixtures both call this; the
-    /// `has_global` guard keeps a second call from clobbering an
-    /// already-populated store.
+    /// Idempotent initializer for production and test fixtures.
     pub fn init(cx: &mut App) {
         if !cx.has_global::<SettingsStore>() {
             cx.set_global(Self::default());
         }
     }
 
-    /// Read-only access to the live Global. Panics if [`init`] never
-    /// ran — call from the GPUI app context only.
+    /// Read-only access to the live Global; panics if [`init`] never ran.
     pub fn global(cx: &App) -> &Self {
         cx.global::<Self>()
     }
 
-    /// Live user-layer snapshot. Returns a reference into the Arc
-    /// the store holds; callers cloning the `Arc` get cheap shared
-    /// ownership without re-reading disk.
+    /// Live user-layer snapshot.
     pub fn user(&self) -> &Config {
         &self.user
     }
 
-    /// User config wrapped in `Arc`. Cheap clone for handlers that
-    /// need to outlive the borrow on `SettingsStore`.
+    /// Cheap shared user-config clone for handlers outliving this borrow.
     pub fn user_arc(&self) -> Arc<Config> {
         self.user.clone()
     }
 
-    /// Replace the cached user layer with a fresh `Config::load()`
-    /// from disk. Call via `cx.update_global::<SettingsStore, _>` so
-    /// `observe_global` callbacks fire on return.
+    /// Replace the cached user layer with a fresh `Config::load()` from disk.
     pub fn reload_user(&mut self) {
         self.user = Arc::new(Config::load());
     }
 
-    /// Resolve the effective `Config` for an optional lane path
-    /// by composing the user layer with the matching project
-    /// overlay (if any).  Falls back to the user layer when
-    /// `lane` is `None` or no overlay has been loaded for that
-    /// path. Returns a fresh owned `Config` rather than a borrow so
-    /// callers can hand it to `Workspace::apply_config`.
+    /// Resolve owned effective config for a lane by applying its overlay.
     pub fn effective_for(&self, lane: Option<&Path>) -> Config {
         let base = (*self.user).clone();
         match lane.and_then(|w| self.project.get(w)) {
@@ -97,27 +67,18 @@ impl SettingsStore {
         }
     }
 
-    /// Load (or refresh) the project overlay for `lane`. Reads
-    /// from disk using the daruda-config conventions
-    /// (`project_config_path`).  Idempotent — safe to call from
-    /// `Workspace::new_with_project` and again from any reload path.
+    /// Load or refresh the project overlay for `lane`.
     pub fn load_project_layer(&mut self, lane: &Path) {
         let cfg = ProjectConfig::load_for(lane);
         self.project.insert(lane.to_path_buf(), Arc::new(cfg));
     }
 
-    /// Drop the project overlay for `lane`. Required by
-    /// `Workspace::finalize_remove_lane` so the map can't grow
-    /// unbounded across a long session (CLAUDE.md "Cleanup rule").
+    /// Drop an overlay when a lane is removed (CLAUDE.md cleanup rule).
     pub fn forget_lane(&mut self, lane: &Path) {
         self.project.remove(lane);
     }
 
-    /// Surgical user-config edit + persist + cache update. Pass the
-    /// closure through `cx.update_global::<SettingsStore, _>` so the
-    /// `observe_global` fanout runs on return. Returns the same
-    /// `Err` shape as [`daruda_config::patch_config_file`] for the caller to
-    /// surface as an `ErrorReport` if writing fails.
+    /// Edit, persist, and cache-update the user layer in one step.
     pub fn patch_user<F>(&mut self, f: F) -> Result<(), String>
     where
         F: FnOnce(&mut Config),
@@ -129,29 +90,16 @@ impl SettingsStore {
         Ok(())
     }
 
-    /// Replace the user layer with an explicit value — testing
-    /// helper.  Production should go through [`reload_user`] or
-    /// [`patch_user`]. Mirrors zed's `update_user_settings` helper.
+    /// Replace the user layer for tests; production uses reload/patch paths.
     #[doc(hidden)]
     pub fn set_user_for_testing(&mut self, cfg: Config) {
         self.user = Arc::new(cfg);
     }
 }
 
-/// Spawn the filesystem watcher for `config.toml` and a background
-/// pump that, for every debounced reload signal, refreshes the
-/// `SettingsStore` Global. Workspace `cx.observe_global` callbacks
-/// fan out the change to every open window.
-///
-/// Must be called exactly once during app bootstrap, *after*
-/// [`SettingsStore::init`].
-///
-/// The watcher handle is moved into the spawned task; dropping the
-/// task drops the handle, which releases the live `notify::Watcher`
-/// and ends the debounce thread (RAII end-to-end). The sync
-/// receiver is polled via `try_recv` on a 250 ms timer — the
-/// channel pre-debounces inside `spawn_config_watcher`, and any
-/// leftover burst is drained before a single `reload_user` apply.
+/// Spawn the `config.toml` watcher and refresh the global on debounced reloads.
+/// Must run once after [`SettingsStore::init`]; the moved handle keeps the OS
+/// watcher and debounce thread alive for the task lifetime.
 pub fn spawn_file_watch(cx: &mut App) {
     let handle = config_watcher::spawn_config_watcher();
     let tick = std::time::Duration::from_millis(250);

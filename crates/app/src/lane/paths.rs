@@ -1,36 +1,17 @@
 //! Lane-aware path conversion helpers.
 //!
-//! A single `PathBuf` can carry three different meanings depending on its
-//! origin:
-//!
-//! | Origin | Base | Example |
-//! |---|---|---|
-//! | `git status --porcelain` | `repo_root` | `daruda/crates/foo.rs` |
-//! | `FileTree` (Files dock) | `wt.path` | `crates/foo.rs` |
-//! | Drag / external open | absolute | `/term/daruda/crates/foo.rs` |
-//!
-//! When `wt.path == repo_root` (the common case where the user opens the repo
-//! root directly) all three happen to collapse, so bugs only surface when the
-//! user opens a sub-directory of the repo (`wt.path != repo_root`).
-//!
-//! `LanePaths` captures both anchors and exposes named conversion methods
-//! so every call site documents *which* space it is converting from or to.
-//! Direct `.join()` on raw `PathBuf` values is banned once the newtype layer
-//! is in place (see CLAUDE.md Pitfall #10).
+//! Git status paths are repo-root-relative, file-tree paths are lane-root
+//! relative, and drag/external paths are absolute. `LanePaths` captures both
+//! anchors so call sites choose the intended conversion explicitly instead of
+//! doing raw `.join()` arithmetic.
 
 use std::path::{Path, PathBuf};
 
-/// Path-conversion helper for a single lane.
-///
-/// Holds references to the two anchors needed to translate among the three
-/// path spaces.  Callers construct one at the start of an operation and use
-/// the named methods — no arithmetic on raw `PathBuf` values is needed.
+/// Path-conversion helper for one lane.
 pub struct LanePaths<'a> {
     /// Absolute path of the lane directory (`wt.path`).
     pub wt_path: &'a Path,
-    /// Absolute path of the git repo root.  `None` for non-git worktrees
-    /// (the `LaneKind::Default` case); those callers only use
-    /// `from_files_tree` / `to_wt_relative`.
+    /// Git repo root, or `None` for non-git lanes.
     pub repo_root: Option<&'a Path>,
 }
 

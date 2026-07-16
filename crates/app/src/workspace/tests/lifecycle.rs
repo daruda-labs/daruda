@@ -19,10 +19,8 @@ async fn test_workspace_renders_without_reentrant_panic(cx: &mut TestAppContext)
 
 // ---- Modal layer ----
 //
-// Modal lifecycle is owned by `gpui_component::Root` (via
-// `crate::workspace::dialog_helpers`), routed through `Window::open_dialog` /
-// `close_dialog`. Those APIs require a real `Root`-wrapped window, so this is
-// covered by visual smoke testing rather than `TestAppContext` here.
+// Modal lifecycle is owned by `gpui_component::Root`, which requires a real
+// `Root`-wrapped window — covered by visual smoke testing, not `TestAppContext`.
 
 // ---- Tab add / close / switch ----
 
@@ -399,10 +397,9 @@ fn test_close_pane_on_exit_defaults_true(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_sibling_close_pattern_no_reentrant_panic(cx: &mut TestAppContext) {
-    // Mirrors the stdout-poll sibling task's pattern: read the config
-    // flag, then in a separate update close the pane. If GPUI ever
-    // tightens reentrancy rules this test will fail fast at the
-    // borrow boundary rather than deep inside a PTY task.
+    // Mirrors the stdout-poll sibling task's pattern: read the config flag,
+    // then close the pane in a separate update. Guards against a reentrant
+    // borrow conflict at that boundary.
     let (window_handle, ws) = build_workspace(cx);
     cx.update_window(window_handle.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.add_tab(window, cx));
@@ -446,11 +443,9 @@ fn test_apply_config_updates_close_pane_on_exit(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_apply_config_propagates_shell_program(cx: &mut TestAppContext) {
-    // The user-`[shell]` `program` (and any project-layer override of
-    // it via `Config::resolve`) reaches new panes through
-    // `Workspace::shell_program`. This test exercises the apply path
-    // end-to-end so a future refactor of `apply_config` doesn't
-    // silently drop the field.
+    // The `[shell]` `program` reaches new panes through
+    // `Workspace::shell_program`; guards against `apply_config` dropping
+    // the field.
     let (window_handle, ws) = build_workspace(cx);
     let mut cfg = daruda_config::Config::default();
     cfg.shell.program = Some("/bin/test-shell".into());
@@ -463,8 +458,7 @@ fn test_apply_config_propagates_shell_program(cx: &mut TestAppContext) {
         assert_eq!(ws.shell_program.as_deref(), Some("/bin/test-shell"));
     });
 
-    // Clearing the field at the user layer (with no project override)
-    // resets the workspace back to the "use $SHELL/zsh default" path.
+    // Clearing the field resets the workspace to the "$SHELL/zsh default" path.
     cfg.shell.program = None;
     cx.update_window(window_handle.into(), |_, _window, cx| {
         ws.update(cx, |ws, cx| ws.apply_config(&cfg, cx));
@@ -477,12 +471,10 @@ fn test_apply_config_propagates_shell_program(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppContext) {
-    // `reload_config` must apply the project layer on top of the
-    // user config it receives. This test materialises a real project
-    // config file at the path `daruda_config::project_config_path`
-    // would compute for a temp repo, so the resolve goes through the
-    // actual `ProjectConfig::load_for` lookup rather than a hand-
-    // assembled merge.
+    // `reload_config` must apply the project layer on top of the user config.
+    // Materialises a real project config file at the `project_config_path`
+    // location so the resolve goes through the actual `ProjectConfig::load_for`
+    // lookup rather than a hand-assembled merge.
     let temp = tempfile::tempdir().unwrap();
     let project_path = temp.path().to_path_buf();
     let cfg_path = daruda_config::project_config_path(&project_path)
@@ -495,8 +487,8 @@ fn test_reload_config_resolves_project_layer_shell_override(cx: &mut TestAppCont
         "[shell]\nprogram = \"/bin/project-shell\"\nclose_pane_on_exit = false\n",
     )
     .unwrap();
-    // Clean up the on-disk file at end of test so we don't pollute
-    // the user's real `~/.config/daruda/projects/` tree.
+    // Clean up the on-disk file so the test doesn't pollute the real
+    // `~/.config/daruda/projects/` tree.
     struct Cleanup(std::path::PathBuf);
     impl Drop for Cleanup {
         fn drop(&mut self) {
@@ -563,9 +555,8 @@ fn test_last_error_surfaces_in_status_bar_data(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        // The render path copies `last_error` into StatusBarData.error
-        // (see render.rs). Assert the source field is what we expect —
-        // rendering itself is verified by the no-panic render tests.
+        // The render path copies `last_error` into StatusBarData.error;
+        // assert the source field, rendering is covered by no-panic tests.
         let err = ws.last_error.as_ref().expect("error set");
         assert!(err.contains("spawn"));
         assert!(err.contains("enomem"));

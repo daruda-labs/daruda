@@ -1,5 +1,4 @@
-//! Workspace operations on `PanelsState` — load/save bottom-dock
-//! panels (macros, future widget types).
+//! Workspace operations on persistent bottom-dock panels.
 //!
 //! Persistence is handled by the `daruda_store::panels` module; this module is
 //! the Workspace-side bridge: it owns the data_dir lookup, provides

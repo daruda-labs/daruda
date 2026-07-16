@@ -314,7 +314,7 @@ fn editor_column(
         .into_any_element()
 }
 
-/// SubtaskListView (R-21). Shows the section title with the current
+/// SubtaskListView. Shows the section title with the current
 /// `(done/total done)` progress counter, then one row per subtask
 /// (checkbox + title + `auto`/`manual` label + `[×]`), then the
 /// inline `[+ Add subtask…]` input. Draft panes (no `task_id`) get a
@@ -546,7 +546,7 @@ fn notes_header(cx: &gpui::App) -> impl IntoElement {
 }
 
 /// Header row above the Prompt markdown editor: "Prompt" label on the
-/// left, `[📄 Open file]` button on the right (R-20 follow-up). The
+/// left, `[📄 Open file]` button on the right. The
 /// button is disabled for drafts and Backlog tasks since neither has
 /// the on-disk `<wt>/.daruda/task-<branch>.md` file yet — running
 /// `[Start]` materialises both the lane and the file in one step.

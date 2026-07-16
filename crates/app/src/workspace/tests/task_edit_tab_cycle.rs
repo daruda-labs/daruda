@@ -1,43 +1,25 @@
 //! TaskEdit pane — Tab cycle wiring regression test.
 //!
-//! Each input / select slot in the TaskEdit body picks a Tab cycle
-//! position through the third argument of the `crate::ui::*` factory:
-//! pass an `isize` to slot the widget into the cycle, or `()` to keep
-//! it mouse-only. The `()` form mutates the underlying `FocusHandle`
-//! registry to `tab_stop = false`; the `isize` form passed to `select`
-//! mutates it the other way (`tab_index = N`). Both mutations land the
-//! moment the factory runs at render time, so this test:
+//! Each TaskEdit slot picks a Tab position via the `crate::ui::*` factory's
+//! `tab` arg: `isize` sets `tab_index`, `()` sets `tab_stop = false`. Driving
+//! the body's `render` directly runs those factories, so the test reads the
+//! resulting `tab_index` / `tab_stop` off the focus handles — catching a
+//! `select(..., ())` slip on `base_select`.
 //!
-//! 1. Opens a fresh draft TaskEdit pane.
-//! 2. Calls the body's `render` fn directly — that drives every
-//!    `crate::ui::select(...)` / `crate::ui::input(...)` factory in
-//!    the body, which is what mutates the focus handle registry.
-//! 3. Reads the resulting `tab_index` / `tab_stop` off the state
-//!    entities' focus handles.
-//!
-//! A `select(..., ())` slip on `base_select` would flip `tab_stop` to
-//! `false` and leave `tab_index` at the default `0`; both assertions
-//! below would catch it.
-//!
-//! Coverage limit: `crate::ui::input(state, cx, isize)` and
-//! `markdown_editor(state).tab_index(isize)` set the Tab position on
-//! the rendered `Input` element (not the `FocusHandle` registry), so
-//! their slot order is only observable post-paint via the dispatch
-//! tree — out of reach of a unit test. The tab-stop-vs-skip choice IS
-//! registry-visible; that's what this test pins.
+//! Coverage limit: the `isize` slot order on `input` / `markdown_editor` sets
+//! the position on the rendered element (not the registry), observable only
+//! post-paint; the registry-visible tab-stop-vs-skip choice is what this pins.
 
 use gpui::{AppContext as _, Focusable as _, TestAppContext};
 
 use super::build_workspace;
 
-// IGNORED after the gpui 1.5.4 bump: gpui's test-mode entity leak detector now
-// flags the gpui_component `InputState`/`SelectState` handles this test creates,
-// because it drives the body `render()` directly (outside the paint->cleanup
-// cycle) so the widgets' focus/observer subscriptions are never torn down. This
-// is a test-harness artifact, not a functional regression — the real app tears
-// these down on pane/window close, and the tab-cycle wiring it asserts is
-// unaffected. Follow-up: assert without a manual render(), or break the vendored
-// widget retention.
+// IGNORED: gpui's test-mode entity leak detector flags the gpui_component
+// `InputState`/`SelectState` handles this test creates, because driving the
+// body `render()` directly (outside the paint->cleanup cycle) leaves the
+// widgets' focus/observer subscriptions un-torn-down. A test-harness artifact,
+// not a functional regression — the real app tears these down on pane/window
+// close. Follow-up: assert without a manual render().
 #[gpui::test]
 #[ignore = "gpui 1.5.4 leak detector flags gpui_component widget retention under manual render(); see comment"]
 async fn task_edit_pane_tab_cycle_wires_base_select(cx: &mut TestAppContext) {

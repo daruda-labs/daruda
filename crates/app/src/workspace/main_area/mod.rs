@@ -374,20 +374,12 @@ pub(in crate::workspace) fn render_layout(
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_hidden()
-                    // Embed the view as a cached element, exactly like the
-                    // Terminal arm: when only a sibling dirties the Workspace,
-                    // the chat view isn't in `dirty_views`, so GPUI reuses its
-                    // prior paint instead of re-laying-out the conversation.
-                    // The view's own `cx.notify()` (scroll, fold, streaming)
-                    // marks it dirty and forces a re-render. The view tracks its
-                    // own focus handle, so no `track_focus` on this wrapper.
-                    //
-                    // Inactive-split dim is applied *inside* the view (per-color
-                    // blend toward gray, alpha preserved — `AgentChatView::dim`),
-                    // driven by `refresh_pane_dimming`, mirroring the terminal.
-                    // An overlay scrim is NOT used: it would composite gray over
-                    // the pane and fill in the window translucency the terminal
-                    // dim keeps.
+                    // Cached element (like the Terminal arm): a sibling-only
+                    // dirty reuses the prior paint; the view's own `cx.notify()`
+                    // forces a re-render. It tracks its own focus handle, so no
+                    // `track_focus` here. Inactive-split dim is applied inside
+                    // the view (`AgentChatView::dim`, alpha-preserving) rather
+                    // than an overlay scrim, so window translucency survives.
                     .child(
                         AnyView::from(ac.view.clone())
                             .cached(StyleRefinement::default().size_full().flex()),
@@ -395,10 +387,9 @@ pub(in crate::workspace) fn render_layout(
                 self::pane::PaneContent::Terminal(t) => {
                     let view_for_path_drag = t.view.clone();
                     let view_for_external = t.view.clone();
-                    // Inactive-pane dim is applied to the terminal's own
-                    // colors via `TerminalView::set_dim_amount`
-                    // (driven by `refresh_pane_dimming`), not a black
-                    // overlay — that preserves a transparent background.
+                    // Inactive-pane dim goes through `TerminalView::set_dim_amount`
+                    // on the terminal's own colors, not a black overlay, so a
+                    // transparent background survives.
                     div()
                         .flex_1()
                         .flex()
@@ -439,13 +430,10 @@ pub(in crate::workspace) fn render_layout(
                                 });
                             },
                         ))
-                        // Cache the terminal view as an element: when only a
-                        // sibling (e.g. a left-dock status-badge animation)
-                        // dirties the Workspace, the terminal isn't in
-                        // `dirty_views`, so GPUI reuses its prior prepaint+paint
-                        // instead of re-shaping the whole grid. Real terminal
-                        // updates call `cx.notify()` on the view, which marks it
-                        // dirty and forces a re-render. Style mirrors the view's
+                        // Cache the terminal view as an element: a sibling-only
+                        // dirty reuses the prior prepaint+paint instead of
+                        // re-shaping the grid; a real update's `cx.notify()` on
+                        // the view forces a re-render. Style mirrors the view's
                         // own root (`size_full().flex()`).
                         .child(
                             AnyView::from(t.view.clone())
@@ -454,10 +442,9 @@ pub(in crate::workspace) fn render_layout(
                 }
             };
             root = root.child(content);
-            // Drop-target overlay: a half-fill hint drawn as a SIBLING of
-            // the `.cached()` terminal view (so it doesn't break caching),
-            // positioned by the hovered half. Renders from the
-            // `pane_drop_hover` snapshot only — no state transition here.
+            // Drop-target half-fill hint, drawn as a sibling of the `.cached()`
+            // view so caching is preserved. Renders from the `pane_drop_hover`
+            // snapshot only — no state transition here.
             if let Some((target_id, half)) = drop_target
                 && target_id == id
             {

@@ -1,30 +1,7 @@
-//! Reusable section-header row.
+//! Reusable left-dock section-header row.
 //!
-//! Pulled out of three near-identical chains in
-//! `workspace/left_dock/{lanes/list, git_changes/mod, files/mod}.rs`.
-//! Each rendered the same shape — `flex_row + items_center +
-//! justify_between + theme::LANE_SECTION_HEADER_FONT_SIZE +
-//! TEXT_MUTE + label + optional actions` — only differing in
-//! padding (some sites embed the header inside an outer column whose
-//! padding is handled separately) and whether the label needs
-//! truncation.
-//!
-//! Padding is opt-in via [`SectionHeader::padding`] / [`pad_x`] /
-//! [`pad_y`] so callers that already wrap the header in a parent column
-//! don't double-pad. Label truncation is also opt-in because the file
-//! tree / git-changes headers can host long branch names.
-//!
-//! ```ignore
-//! use crate::ui::SectionHeader;
-//!
-//! SectionHeader::new("Lanes")
-//!     .padding(theme::LANE_ROW_PAD_X, theme::LANE_SECTION_PAD_Y)
-//!     .actions(add_button)
-//!
-//! SectionHeader::new(format!("Git Changes — {branch}"))
-//!     .truncate_label(true)
-//!     .actions(remote_button_row)
-//! ```
+//! Padding and label truncation are opt-in because some callers already own
+//! outer padding, and file/git headers can contain long branch names.
 
 use crate::ui::theme;
 use gpui::{AnyElement, App, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px};
@@ -40,9 +17,7 @@ pub struct SectionHeader {
 }
 
 impl SectionHeader {
-    /// Start a header with the given label. Padding and actions are
-    /// off by default — opt in with [`padding`](Self::padding) /
-    /// [`actions`](Self::actions).
+    /// Start a header with padding/actions off by default.
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
             label: label.into(),
@@ -53,8 +28,7 @@ impl SectionHeader {
         }
     }
 
-    /// Right-aligned action slot — typically a button or a row of
-    /// buttons. Pass any `IntoElement`.
+    /// Right-aligned action slot.
     pub fn actions(mut self, el: impl IntoElement) -> Self {
         self.actions = Some(el.into_any_element());
         self

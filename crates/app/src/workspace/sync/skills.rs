@@ -1,15 +1,10 @@
 //! Skills watcher → GPUI bridge.
 //!
-//! Mirrors `jsonl_pump`: every 100 ms tick the pump task drains every
-//! [`SkillsEvent`] queued by the watcher and dispatches a per-scope
-//! reload through [`Workspace::apply_skills_event`]. Dropping the
-//! returned `Task<()>` (held as `_skills_event_pump` on `Workspace`)
-//! cancels the loop, the receiver disconnects, and the watcher
-//! threads exit.
-//!
-//! Mutations land in the app-wide `SkillsState` Global; other
-//! Workspaces re-render via their `observe_global::<SkillsState>`
-//! subscription registered in `Workspace::new_with_project`.
+//! Every 100 ms tick the pump drains queued [`SkillsEvent`]s and dispatches a
+//! per-scope reload through [`Workspace::apply_skills_event`]. Dropping the
+//! returned `Task<()>` (`_skills_event_pump`) cancels the loop and the watcher
+//! threads exit. Mutations land in the app-wide `SkillsState` Global; other
+//! Workspaces re-render via their `observe_global::<SkillsState>` subscription.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};

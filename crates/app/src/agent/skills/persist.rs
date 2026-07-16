@@ -1,11 +1,9 @@
 //! Atomic write / rename / delete for skill directories.
 //!
-//! All mutations happen against the directory tree on disk; the
-//! Workspace's in-memory `SkillsState` is rebuilt by the watcher (or
-//! explicitly via `Workspace::reload_skills`) after the call returns
-//! `Ok`. Atomicity matters because the Skills tab + Claude Code
-//! itself read these files on every render — a torn write would
-//! leave the tool seeing half-frontmatter mid-edit.
+//! Mutations hit the on-disk tree; the in-memory `SkillsState` is
+//! rebuilt by the watcher afterwards. Atomicity matters because the
+//! Skills tab and Claude Code read these files live — a torn write
+//! would expose half-frontmatter mid-edit.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,9 +13,8 @@ use tempfile::NamedTempFile;
 use super::frontmatter::{SkillFrontmatter, render_skill_md};
 use super::{SkillScope, scan};
 
-/// Draft state submitted by the CRUD modal. Contains the inputs the
-/// modal collected; `persist::write_skill` resolves the target path
-/// and serialises the SKILL.md content.
+/// Draft inputs collected by the CRUD modal; `write_skill` resolves
+/// the target path and serialises the SKILL.md content.
 #[derive(Clone, Debug)]
 pub struct SkillDraft {
     pub name: String,
@@ -26,9 +23,8 @@ pub struct SkillDraft {
     pub body: String,
 }
 
-/// Errors callers expect — split from `io::Error` so the modal can
-/// route the duplicate-name case to the validation banner instead of
-/// a generic "filesystem error".
+/// Split from `io::Error` so the modal can route the duplicate-name
+/// case to the validation banner instead of a generic FS error.
 #[derive(Debug)]
 pub enum PersistError {
     Io(io::Error),
@@ -40,8 +36,7 @@ pub enum PersistError {
     /// Skill scope is `Project` but the workspace has no project root.
     NoProjectRoot,
     /// Caller tried to mutate a read-only scope (currently
-    /// [`SkillScope::Plugin`] — marketplace files are owned by the
-    /// plugin loader, not by daruda).
+    /// [`SkillScope::Plugin`], owned by the plugin loader).
     ReadOnlyScope(SkillScope),
 }
 
@@ -89,15 +84,12 @@ pub fn resolve_skill_dir(
     Ok(root.join(name))
 }
 
-/// Create or overwrite the SKILL.md for a draft. The directory is
-/// created lazily; the body is composed via
-/// [`render_skill_md`](crate::agent::skills::frontmatter::render_skill_md)
-/// and written through a NamedTempFile + `persist` so a crash mid-write
-/// leaves the previous content intact.
+/// Create or overwrite the SKILL.md for a draft, written through a
+/// NamedTempFile + `persist` so a crash mid-write leaves the previous
+/// content intact.
 ///
 /// `overwrite=false` returns [`PersistError::AlreadyExists`] when a
-/// `SKILL.md` is present — the modal uses this to gate the Save button
-/// for the Create flow. Edit flows pass `overwrite=true`.
+/// `SKILL.md` is present (Create flow); Edit flows pass `true`.
 pub fn write_skill(
     draft: &SkillDraft,
     project_root: Option<&Path>,
@@ -116,9 +108,8 @@ pub fn write_skill(
 
     let serialized = render_skill_md(&draft.frontmatter, &draft.body);
 
-    // Atomic replace: write into a temp file in the same directory,
-    // fsync, then rename. macOS rename(2) is atomic at the inode
-    // level, so partial reads are impossible.
+    // Atomic replace: temp file in the same dir, fsync, then rename.
+    // macOS rename(2) is atomic, so partial reads are impossible.
     let mut tmp = NamedTempFile::new_in(&dir)?;
     use std::io::Write as _;
     tmp.as_file_mut().write_all(serialized.as_bytes())?;
@@ -146,9 +137,8 @@ pub fn rename_skill(old_dir: &Path, new_name: &str) -> Result<PathBuf, PersistEr
     Ok(new_dir)
 }
 
-/// Delete the entire skill directory, including all auxiliary files.
-/// The CRUD modal pairs this with a confirm dialog — there is no
-/// trash / undo path.
+/// Delete the entire skill directory. The CRUD modal pairs this with
+/// a confirm dialog — there is no trash / undo path.
 pub fn delete_skill(dir: &Path) -> Result<(), PersistError> {
     std::fs::remove_dir_all(dir)?;
     Ok(())

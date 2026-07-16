@@ -1,9 +1,9 @@
 //! Right-panel Tasks tab — `Workspace`-side operations.
 //!
 //! Splits cleanly into three layers:
-//! - **Filter / expansion** (R-12) — pure UI state changes.
-//! - **CRUD** (R-13) — `create_task` / `update_task` / `delete_task`.
-//! - **Lifecycle** (R-14) — `start_task` / `cancel_task` / `reopen_task` /
+//! - **Filter / expansion** — pure UI state changes.
+//! - **CRUD** — `create_task` / `update_task` / `delete_task`.
+//! - **Lifecycle** — `start_task` / `cancel_task` / `reopen_task` /
 //!   `retry_task` / `focus_task_lane`.
 //!
 //! Persistence routes through `save_tasks_dirty`, which always wraps the
@@ -22,7 +22,7 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     // ------------------------------------------------------------------
-    // R-12: filter / expansion / persistence
+    // Filter / expansion / persistence
     // ------------------------------------------------------------------
 
     /// Cycle the Tasks tab filter through `All → Backlog → Running →
@@ -67,7 +67,7 @@ impl Workspace {
     }
 
     /// Ensure the Tasks tab's live tick is alive exactly when at least
-    /// one task is in the `Running` state (R-23). The tick re-renders
+    /// one task is in the `Running` state. The tick re-renders
     /// the workspace at [`theme::RIGHT_PANEL_TASK_LIVE_TICK_MS`]
     /// cadence so the pulse dot animates and the inline duration text
     /// advances. When no `Running` task remains, the tick stops by
@@ -150,7 +150,7 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------------
-    // R-13: CRUD
+    // CRUD
     // ------------------------------------------------------------------
 
     /// Update editable fields on an existing task. The lifecycle state
@@ -158,15 +158,12 @@ impl Workspace {
     /// editable surface — that is driven by the workflow.
     ///
     /// `base_worktree_path = None` maps to "use the project's active
-    /// lane at start_task time" (C-1 review note). Re-editing a
+    /// lane at start_task time". Re-editing a
     /// `Running` / `Done` task's base has no immediate effect — the
     /// field is consulted only when a Backlog task transitions to
     /// `Running` via `start_task`.
-    // Argument list grew once `base_worktree_path` joined the editable
-    // surface (C-1). Bundling these into a `TaskUpdate` struct is a
-    // worthwhile follow-up but out of scope for the review fix — every
-    // call site already passes named locals so the verbosity is
-    // bounded.
+    // Every call site passes named locals, so the long argument list
+    // stays readable despite the count.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn update_task(
         &mut self,
@@ -195,7 +192,7 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------------
-    // R-21: subtask CRUD
+    // Subtask CRUD
     // ------------------------------------------------------------------
     //
     // Mutations are applied through `cx.update_global::<GlobalTasks, _>`
@@ -342,7 +339,7 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------------
-    // R-13 picker (start/cancel/reopen/retry/delete)
+    // Lifecycle picker (start/cancel/reopen/retry/delete)
     // ------------------------------------------------------------------
 
     /// Open the [`TaskPickerModal`] for the given action. The five
@@ -376,7 +373,7 @@ impl Workspace {
     /// are not currently in the `Error` state — the menu entry is
     /// only exposed on Error rows, but defensive guarding keeps the
     /// dispatcher honest if a race lets the state flip between menu
-    /// open and click. (R-26 View error.)
+    /// open and click.
     pub(in crate::workspace) fn open_task_error_dialog(
         &mut self,
         task_id: &str,

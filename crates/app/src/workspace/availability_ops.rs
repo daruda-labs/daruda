@@ -37,13 +37,11 @@ impl Workspace {
         }
     }
 
-    /// Re-classify one lane's root *and* its owning project's root
-    /// against the live filesystem. The lane↔project coupling is
-    /// intentional: activating a lane (every `activate_lane` calls this)
-    /// must also refresh the owning project's availability so the
-    /// project header reflects the live filesystem, not a stale flag.
-    /// Paths are collected before any mutation so we never hold an
-    /// immutable lane/project borrow while taking the `&mut self` setters.
+    /// Re-classify one lane's root *and* its owning project's root against
+    /// the live filesystem. The coupling is intentional: every
+    /// `activate_lane` calls this, and the project header must reflect the
+    /// live filesystem too. Paths are collected before mutating so no
+    /// immutable borrow is held while calling the `&mut self` setters.
     pub(in crate::workspace) fn recompute_availability_for(&mut self, r: LaneRef) {
         let lane_path = self.lane_for(r).map(|l| l.path.clone());
         let project_root = self.project_for(r.project).map(|p| p.root.clone());
@@ -95,14 +93,11 @@ mod tests {
     use std::path::Path;
     use tempfile::TempDir;
 
-    /// Build a Workspace rooted at `root` with a single project / lane.
-    /// Returns the live `Workspace` entity plus the persistence-dir
-    /// guard; the caller binds the guard so it (and its on-disk dir)
-    /// lives for the test, then drops cleanly. The `add_window` handle
-    /// is intentionally dropped here — the GPUI test executor keeps the
-    /// entity alive independently of the handle, so the returned
-    /// `Entity<Workspace>` stays usable after the handle goes out of
-    /// scope.
+    /// Build a Workspace rooted at `root` with a single project/lane.
+    /// Returns the entity plus the persistence-dir guard (bound by the
+    /// caller so its on-disk dir lives for the test). The `add_window`
+    /// handle is dropped here — the GPUI test executor keeps the entity
+    /// alive independently, so the returned `Entity<Workspace>` stays usable.
     fn workspace_at(cx: &mut TestAppContext, root: &Path) -> (gpui::Entity<Workspace>, TempDir) {
         crate::test_support::init_gpui_component(cx);
         let config = daruda_config::Config::default();

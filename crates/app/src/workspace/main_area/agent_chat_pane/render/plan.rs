@@ -11,9 +11,7 @@ use crate::ui::{ButtonVariants as _, Disclosure, IconName, button_bare, disclosu
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// `(completed, total)` over the plan entries.  Returns `(0, 0)` for an empty
-/// plan — callers must guard on `plan.is_empty()` before using the ratio for
-/// colour logic (0 == 0 would otherwise read as "all done").
+/// `(completed, total)`; callers guard empty plans before colour logic.
 fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
     let done = plan
         .iter()
@@ -22,11 +20,8 @@ fn plan_progress(plan: &[PlanEntryView]) -> (usize, usize) {
     (done, plan.len())
 }
 
-/// The status glyph + its colour for one plan entry: ● done (green),
-/// ● in progress (running amber), ● pending (muted). All three states share
-/// the filled ● glyph and are distinguished by colour alone. Mirrors
-/// [`super::rollup_glyph`]'s `(glyph, color)` shape; the completed green reuses
-/// the diff-stat add colour (there is no dedicated `success` theme token).
+/// Filled status dot plus colour; completed reuses diff-add green because
+/// there is no dedicated success token.
 fn plan_status_glyph(
     status: PlanStatus,
     t: &theme::DarudaTheme,
@@ -44,9 +39,7 @@ fn plan_status_glyph(
     }
 }
 
-/// The content text colour for one plan entry: completed dims (muted, no
-/// strikethrough), in-progress emphasizes (full foreground), pending stays
-/// foreground. All derive from the terminal-mirrored agent-chat foreground.
+/// Content colour for one plan entry.
 fn plan_entry_color(status: PlanStatus, dim: f32, cx: &App) -> Hsla {
     match status {
         PlanStatus::Completed => theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
@@ -55,15 +48,7 @@ fn plan_entry_color(status: PlanStatus, dim: f32, cx: &App) -> Hsla {
     }
 }
 
-/// Dedicated bottom region rendering the agent's live execution plan as a
-/// collapsible checklist. `None` (no element, no space) when the plan is empty.
-/// A top hairline separates it from the conversation above (the region sits
-/// below the body). The header — a disclosure row mirroring the section bars —
-/// shows a chevron, the "Plan" label, and the `{done}/{total}` count; collapsed
-/// it also trails the current in-progress entry's content. Clicking the header
-/// toggles [`AgentChatView::toggle_plan_collapsed`]. Expanded, the checklist
-/// lists each entry (status glyph + content) and scrolls internally past
-/// `AGENT_CHAT_PLAN_MAX_H`.
+/// Collapsible bottom checklist for the agent's live execution plan.
 pub(super) fn plan_region(
     pane_id: PaneId,
     plan: &[PlanEntryView],
@@ -84,10 +69,7 @@ pub(super) fn plan_region(
         theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim)
     };
 
-    // Header: same chevron + clickable-row scaffold as the section bars, but the
-    // click routes to the plan toggle (not a `FoldKey`), so it's built inline
-    // rather than via `disclosure_row`. The chevron carries no `on_toggle` — it's
-    // a pure indicator; the whole row is the click target.
+    // Built inline because this toggles plan state, not a `FoldKey`.
     let chevron: Disclosure = disclosure(
         SharedString::from(format!("agent-chat-plan-chevron-{pane_id}")),
         !collapsed,
@@ -122,10 +104,7 @@ pub(super) fn plan_region(
                 .child(SharedString::from(format!("{done}/{total}"))),
         );
 
-    // Collapsed: trail the current in-progress entry's content (muted,
-    // ellipsized) after a `·` separator, so a folded plan still hints at the
-    // live step. A pulsing ● glyph precedes the separator so a folded plan
-    // still shows the live pulse. Nothing trails when no entry is in progress.
+    // Folded plans still hint at the current live step when one exists.
     if collapsed && let Some(active) = plan.iter().find(|e| e.status == PlanStatus::InProgress) {
         header = header
             .child(
@@ -149,12 +128,8 @@ pub(super) fn plan_region(
             );
     }
 
-    // Every entry done: the plan no longer changes, so offer an explicit × to
-    // dismiss the finished checklist instead of leaving it lingering as a
-    // collapsed header with no clear close point. `done == total` implies no
-    // in-progress entry, so the collapsed trailing block above never coexists
-    // with this — one `flex_1` spacer pushes the × to the trailing edge. The
-    // click stops propagation so it dismisses without also toggling the header.
+    // Once complete, offer an explicit dismiss control; stop propagation so it
+    // does not also toggle the header.
     if done == total {
         header = header.child(div().flex_1().min_w_0()).child(
             button_bare(SharedString::from(format!(
@@ -176,12 +151,8 @@ pub(super) fn plan_region(
         .flex()
         .flex_col()
         .border_t_1()
-        // Background-derived tint + hairline (not the fixed UI `dock_bg` /
-        // `border`): the plan region sits on the terminal-mirrored pane, so a
-        // fixed dark surface would clash with a light/custom terminal theme —
-        // and its terminal-foreground text would render dark-on-dark there. The
-        // translucent lift steps it one above the pane on any theme, matching
-        // the tool cards.
+        // Use terminal-derived tint, not fixed chrome colours, so custom/light
+        // terminal themes keep the plan region legible.
         .border_color(theme::dim_toward_gray(
             theme::agent_chat_border_tint(cx),
             dim,
@@ -190,12 +161,8 @@ pub(super) fn plan_region(
         .child(header);
 
     if !collapsed {
-        // The plan list is a plain `Div` (not `list()`) — no virtualisation, which
-        // is fine for a typically small dataset (< 50 entries). It still gets the
-        // project's 4px daruda thumb via the `Div`/`ScrollHandle` variant
-        // (`vertical_thumb`), tracked through `plan_scroll`, matching the file
-        // viewer and conversation. If 100+ entries become common, migrate to
-        // `list()` to bound full-tree repaint cost.
+        // Plain `Div`, not `list()`: plans are typically small and this keeps
+        // the shared `ScrollHandle` thumb path.
         let mut list = div()
             .id(("agent-chat-plan-list", pane_id as usize))
             .flex()
@@ -217,9 +184,7 @@ pub(super) fn plan_region(
                     .flex_row()
                     .items_baseline()
                     .gap(px(theme::AGENT_CHAT_MSG_GAP))
-                    // In-progress row: accent-28% tint + slight rounding so the
-                    // highlight reads as a bar (mirrors the selection token used
-                    // by the completion menu and text selection).
+                    // In-progress row uses the shared selection tint.
                     .when(in_progress, |row| {
                         row.bg(theme::dim_toward_gray(theme::SELECTION_BG, dim))
                             .rounded_sm()
@@ -229,8 +194,7 @@ pub(super) fn plan_region(
                             .flex_none()
                             .text_color(glyph_color)
                             .text_size(px(theme::agent_chat_font_size(cx)))
-                            // In-progress glyph pulses in lockstep with the section
-                            // header rollup dot; settled glyphs stay solid.
+                            // In-progress glyph pulses; settled glyphs stay solid.
                             .when(in_progress, |g| g.opacity(pulse_opacity(cx)))
                             .child(SharedString::from(glyph)),
                     )
@@ -244,13 +208,8 @@ pub(super) fn plan_region(
                     ),
             );
         }
-        // The thumb sources its geometry from `plan_scroll`: the viewport height
-        // from the scroll container's bounds, the total content height as
-        // `viewport_h + max_offset().y` (the `ScrollHandle` convention noted in
-        // `crate::ui::scrollbar::vertical_thumb`), and the offset from
-        // `offset().y`. `top_offset` is `px(0.)` — the list starts at the
-        // relative wrapper's origin. The wrapper is `.relative()` so the absolute
-        // thumb (`.right(...)`) positions against it.
+        // Thumb geometry follows the `ScrollHandle` convention used by the
+        // shared scrollbar helper.
         let viewport_h = plan_scroll.bounds().size.height;
         let content_h = viewport_h + plan_scroll.max_offset().y;
         let thumb = crate::ui::scrollbar::vertical_thumb(

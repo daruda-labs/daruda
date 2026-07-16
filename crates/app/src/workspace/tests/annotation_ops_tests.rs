@@ -1,13 +1,9 @@
-//! Tests for `Workspace` annotation ops (SP-1).
+//! Tests for `Workspace` annotation ops.
 //!
-//! The happy-path test verifies that an annotation added via
-//! `Workspace::add_annotation` round-trips through the pane's
-//! TerminalSession and surfaces in `annotations_in_range`.
-//!
-//! The error-path test removes the target pane before invoking the op
-//! so the workspace routes the failure through `report_error` — we
-//! assert the resulting toast / history entry rather than expecting a
-//! return value.
+//! Happy path: `add_annotation` round-trips through the pane's
+//! TerminalSession into `annotations_in_range`. Error path: a missing
+//! target pane routes the failure through `report_error` (asserted via
+//! the history entry, not a return value).
 
 use super::*;
 use daruda_store::observability::error_report::ErrorSeverity;
@@ -73,9 +69,8 @@ async fn add_annotation_round_trips_into_session(cx: &mut TestAppContext) {
 async fn add_annotation_with_missing_pane_reports_error(cx: &mut TestAppContext) {
     let (_window, workspace) = build_workspace(cx);
 
-    // PaneId is a monotonic u64 (`Workspace::alloc_id`); pick an id
-    // far above the next allocation so the lookup is guaranteed to
-    // miss without having to mutate workspace state.
+    // PaneId is a monotonic u64; an id far above the next allocation is
+    // guaranteed to miss the lookup without mutating workspace state.
     let phantom_pane: crate::workspace::main_area::pane_tree::PaneId = 99_999_u64;
 
     workspace.update(cx, |ws, cx| {

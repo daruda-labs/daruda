@@ -1,12 +1,7 @@
 //! AgentChat pane — open action and the pure parts of the prompt / permission
-//! / mode ops (no live ACP session required).
-//!
-//! `open_agent_chat_pane` produces a `PaneContent::AgentChat` leaf wrapping a
-//! self-owned `Entity<AgentChatView>`; the prompt-echo, permission-resolve,
-//! cancel, and mode ops are tested against a view built with
-//! `create_agent_chat_pane` (which does not itself open a connection), so no
-//! `npx` adapter is ever spawned — the view's `handle` stays `None` and the
-//! host-side state transitions still run.
+//! / mode ops (no live ACP session required). Tests build the view via
+//! `create_agent_chat_pane`, which opens no connection, so `handle` stays
+//! `None` while host-side state transitions still run.
 
 use daruda_acp::{ModeStateView, SessionModeView};
 use daruda_store::project::PaneCwd;
@@ -68,9 +63,8 @@ async fn open_agent_chat_pane_creates_agent_chat_leaf(cx: &mut TestAppContext) {
         match &pane.content {
             PaneContent::AgentChat(ac) => {
                 let view = ac.view.read(cx);
-                // The default test workspace has no resolvable lane cwd, so the
-                // pane parks in `Error` rather than attempting a (subprocess)
-                // connection — keeps the suite offline.
+                // No resolvable lane cwd → the pane parks in `Error` rather
+                // than attempting a connection, keeping the suite offline.
                 assert!(
                     matches!(view.status, AgentSessionStatus::Error(_)),
                     "no lane cwd → error status, not a live connect, got {:?}",
@@ -169,9 +163,8 @@ async fn list_state_count_tracks_items(cx: &mut TestAppContext) {
                 ws.active_runtime_mut().panes.push(pane);
                 // Seed three bare user messages directly and reproject rows via a
                 // public op (`set_all_folds` calls `rebuild_rows`), then assert
-                // the virtualized list count stays in step with the rows. (An
-                // offline `send_agent_prompt_text` now queues without echoing —
-                // covered separately — so drive the transcript directly here.)
+                // the virtualized list count stays in step with the rows.
+                // (Offline `send_agent_prompt_text` only queues, so seed directly.)
                 let view = agent_view(ws, id);
                 view.update(cx, |v, cx| {
                     v.items = vec![
@@ -347,8 +340,8 @@ async fn notify_rerenders_cached_agent_view(cx: &mut TestAppContext) {
 
 /// A prompt submitted while the pane cannot send now (here: no live handle) is
 /// enqueued WITHOUT echoing into the transcript — it lives only in the queue
-/// (surfaced by the bottom-dock strip) until it drains. This is the core
-/// behaviour change: queued prompts no longer clutter the conversation.
+/// (surfaced by the bottom-dock strip) until it drains, so queued prompts don't
+/// clutter the conversation.
 #[gpui::test]
 async fn send_agent_prompt_text_queues_without_echo_while_offline(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -358,9 +351,8 @@ async fn send_agent_prompt_text_queues_without_echo_while_offline(cx: &mut TestA
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                // `create_agent_chat_pane` builds the pane but does not open a
-                // connection — that is the caller's job — so this never spawns
-                // an adapter. Push it directly into the tree.
+                // `create_agent_chat_pane` opens no connection, so this never
+                // spawns an adapter. Push it directly into the tree.
                 let pane = ws.create_agent_chat_pane(
                     Some(PaneCwd::Local(tmp.clone())),
                     None,
@@ -371,8 +363,8 @@ async fn send_agent_prompt_text_queues_without_echo_while_offline(cx: &mut TestA
                 );
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                // Panes don't own their own input; the prompt is routed through
-                // the shared bottom-dock input's `send_agent_prompt_text` shim.
+                // Panes don't own input; prompts route through the shared
+                // bottom-dock input's `send_agent_prompt_text` shim.
                 ws.send_agent_prompt_text(id, "hello agent".to_string(), cx);
                 id
             })
@@ -421,9 +413,9 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
-                // Inject a pending permission card + its pending id, as the
-                // event pump would have on a `PermissionRequested` event, then
-                // resolve it through the view op the permission button drives.
+                // Inject a pending permission card + its pending id (as the pump
+                // would on a `PermissionRequested` event), then resolve it
+                // through the view op the permission button drives.
                 view.update(cx, |v, cx| {
                     v.items.push(ChatItem::Permission(PermissionItem {
                         id: 42,
@@ -469,9 +461,8 @@ async fn respond_permission_resolves_the_pending_card(cx: &mut TestAppContext) {
 }
 
 /// Two permissions outstanding at once (parallel tool calls) each resolve to
-/// their own card and park — answering the *first* must not clobber the second.
-/// This is the concurrency bug the queue fixes: the old `Option<u64>` +
-/// trailing-card logic would resolve the newest card and mis-route the id.
+/// their own card by id — answering the *first* must not clobber the second.
+/// Guards against mis-routing the resolution to the newest card.
 #[gpui::test]
 async fn concurrent_permissions_resolve_independently_by_id(cx: &mut TestAppContext) {
     use daruda_acp::{
@@ -517,8 +508,7 @@ async fn concurrent_permissions_resolve_independently_by_id(cx: &mut TestAppCont
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 agent_view(ws, id).update(cx, |v, cx| {
-                    // Two permissions arrive back-to-back (as the pump would on
-                    // two `PermissionRequested` events), both outstanding.
+                    // Two permissions arrive back-to-back, both outstanding.
                     v.items = vec![card(100), card(200)];
                     v.pending_permissions.insert(100);
                     v.pending_permissions.insert(200);
@@ -715,8 +705,8 @@ async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppC
     cx.run_until_parked();
 
     // No resolvable lane cwd → the pane parks in `Error`. The message must be
-    // the bare reason: the status banner re-adds the error prefix, so storing
-    // the prefix here would render it doubled.
+    // the bare reason: the banner re-adds the error prefix, so storing the
+    // prefix here would render it doubled.
     let status = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
@@ -750,8 +740,8 @@ async fn agent_chat_pane_without_cwd_carries_reason_not_prefix(cx: &mut TestAppC
 }
 
 /// A pane with a working directory parks in `Idle`, not `Connecting`: the live
-/// ACP session is started lazily on first focus, not at construction. This is
-/// what keeps cold restore from spinning up an agent process per restored pane.
+/// ACP session starts lazily on first focus, not at construction — so cold
+/// restore doesn't spin up an agent process per restored pane.
 #[gpui::test]
 async fn agent_chat_pane_with_cwd_is_idle_until_focus(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -867,7 +857,7 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 // Inject a pending permission card + its pending id, as the
-                // event pump would have on a `PermissionRequested` event.
+                // pump would on a `PermissionRequested` event.
                 view.update(cx, |v, _| {
                     v.items.push(ChatItem::Permission(PermissionItem {
                         id: 7,
@@ -882,9 +872,8 @@ async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContex
                     }));
                     v.pending_permissions.insert(7);
                 });
-                // No live handle (offline) — cancel still drains the pending
-                // permission host-side via the bottom-dock shim: the card
-                // resolves to `Cancelled` and the pending id clears.
+                // Offline (no handle): cancel still drains the pending
+                // permission host-side — card resolves `Cancelled`, id clears.
                 ws.cancel_agent_turn(id, cx);
                 id
             })
@@ -1006,8 +995,8 @@ async fn cancel_turn_ends_the_turn_locally_without_an_agent_reply(cx: &mut TestA
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 // A turn mid-flight: streaming text + a still-running tool call,
-                // exactly the state a hung agent would leave (it never sends a
-                // stop reason, so `TurnEnded` would never clear this).
+                // exactly the state a hung agent leaves (no stop reason ever
+                // arrives, so `TurnEnded` would never clear this).
                 view.update(cx, |v, _| {
                     v.set_turn_in_flight();
                     v.items = vec![
@@ -1086,8 +1075,8 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
                 "no-op when the pane is idle"
             );
 
-            // Simulate a turn in flight, as `send_prompt` would. A turn in
-            // flight makes `is_busy()` true.
+            // Simulate a turn in flight (as `send_prompt` would); this makes
+            // `is_busy()` true.
             agent_view(ws, id).update(cx, |v, _| v.set_turn_in_flight());
             assert!(
                 ws.cancel_agent_turn_if_active(id, cx),
@@ -1106,13 +1095,11 @@ async fn cancel_if_in_flight_only_cancels_a_running_turn(cx: &mut TestAppContext
     .unwrap();
 }
 
-/// Regression for "the agent status indicator disappears after a lane
-/// switch": a parked lane's AgentChat session status must still reach the
-/// **rendered** left-dock snapshot. Drives a *real* `activate_lane` switch
-/// between two lanes and asserts on the output of the real
-/// `prepare_left_dock_snapshot` — the same `agent_status_per_lane` map the
-/// per-lane row keys its badge from. This is the production render path, not
-/// a re-implementation.
+/// Regression: the agent status indicator disappears after a lane switch. A
+/// parked lane's AgentChat status must still reach the rendered left-dock
+/// snapshot. Drives a real `activate_lane` switch and asserts on the real
+/// `prepare_left_dock_snapshot`'s `agent_status_per_lane` map (the badge
+/// source), exercising the production render path.
 #[gpui::test]
 async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
@@ -1151,11 +1138,9 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
         workspace.update(cx, |ws, cx| {
             // An agent chat pane in lane 0 (active) with a turn in flight →
             // `to_session_status()` is `Working`. Wire it into a tab layout
-            // exactly as `open_agent_chat_pane` does (pane + TabEntry) so it
-            // appears in `pane_lane_index`; do it directly rather than via the
-            // open action to skip `focus_pane`'s lazy `maybe_connect` (which
-            // would spawn a real adapter). `create_agent_chat_pane` itself
-            // opens no connection.
+            // (pane + TabEntry) so it appears in `pane_lane_index`; do it
+            // directly rather than via the open action to skip `focus_pane`'s
+            // lazy `maybe_connect`, which would spawn a real adapter.
             let pane = ws.create_agent_chat_pane(
                 Some(PaneCwd::Local(root_a.clone())),
                 None,
@@ -1241,8 +1226,7 @@ async fn activity_state_folds_background_tool_and_permission(cx: &mut TestAppCon
                 );
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                // Connected so `to_session_status` maps activity (not a
-                // connecting / dormant status).
+                // Connected so `to_session_status` maps activity.
                 agent_view(ws, id).update(cx, |v, _| {
                     v.status = AgentSessionStatus::Connected;
                 });
@@ -1353,10 +1337,9 @@ async fn agent_chat_view_finds_a_pane_parked_in_an_inactive_lane(cx: &mut TestAp
                 "found while live in the active lane"
             );
 
-            // Simulate a lane switch: the pane moves into a *different*
-            // lane's runtime in the single `runtimes` map while `self.active`
-            // points elsewhere. (The key is a distinct parked lane — the
-            // lookup scans every runtime, not just the active one.)
+            // Simulate a lane switch: move the pane into a different lane's
+            // runtime while `self.active` points elsewhere, so the lookup must
+            // scan every runtime, not just the active one.
             let parked = ws
                 .active_runtime_mut()
                 .panes
@@ -1402,9 +1385,9 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                // A pane with a cwd parks in `Idle` with `handle: None` — the
+                // A pane with a cwd parks in `Idle` with `handle: None`; the
                 // session connects lazily on first focus, which this test never
-                // triggers, so no `npx` adapter is spawned.
+                // triggers, so no adapter is spawned.
                 let pane = ws.create_agent_chat_pane(
                     Some(PaneCwd::Local(tmp.clone())),
                     None,
@@ -1444,12 +1427,11 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
     });
 }
 
-/// Stop must halt everything queued, not just the live turn. With prompts
-/// buffered behind the running turn, `cancel_turn` clears the whole queue so the
-/// cancelled turn's later `TurnEnded` → `pump_pending_prompt` finds an empty
-/// buffer and cannot silently auto-fire the next prompt (the bottom-dock input
-/// does not gate Send on `turn.is_in_flight()`, so this queue-behind-a-turn state is
-/// reachable in normal use).
+/// Stop must halt everything queued, not just the live turn. `cancel_turn`
+/// clears the whole queue so the cancelled turn's later `TurnEnded` →
+/// `pump_pending_prompt` finds an empty buffer and cannot silently auto-fire
+/// the next prompt. (Send is not gated on `turn.is_in_flight()`, so a
+/// queue-behind-a-turn state is reachable in normal use.)
 #[gpui::test]
 async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);

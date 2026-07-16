@@ -1,18 +1,9 @@
-//! Syntax highlighting for the diff / file viewer.
+//! Syntax highlighting for the diff/file viewer.
 //!
-//! Uses tree-sitter (via `tree-sitter-highlight`) over the grammars and
-//! highlight queries bundled in `gpui_component`'s language registry
-//! (reached through `crate::ui::highlighter`). The whole text of a hunk /
-//! file is parsed in one pass so multi-line tokens (block comments,
-//! string literals, …) are coloured correctly across line boundaries;
-//! the resulting capture ranges are then split back into per-line spans.
-//!
-//! Colours come from the syntax palette selected by `theme_name`
-//! ([`dt_theme::SyntaxPalette::from_config_name`]), keyed by tree-sitter
-//! capture name — one colour (and optional bold/italic channel) per capture.
-//! Unknown / legacy names fall back to the recommended Daruda palette.
-//!
-//! All public functions are GPUI-free and safe to call on `background_executor`.
+//! Parses each hunk/file text with tree-sitter in one pass so multi-line tokens
+//! survive the later split into per-line spans. Capture names map through the
+//! configured syntax palette, with unknown names falling back to Daruda tokens.
+//! Public functions are GPUI-free and background-executor safe.
 
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -20,12 +11,8 @@ use super::{DiffHunk, DiffLine, HighlightedSpan, VisualRow};
 use crate::ui::highlighter::LanguageRegistry;
 use crate::ui::theme as dt_theme;
 
-/// Capture names recognised by the highlighter. Mirrors
-/// `gpui_component::highlighter`'s `HIGHLIGHT_NAMES` (which is `pub(super)`
-/// and so cannot be imported); the order is irrelevant, but every name a
-/// bundled `highlights.scm` query references must appear here for
-/// tree-sitter-highlight to report it. [`dt_theme::syntax_color`] maps
-/// each name to a colour.
+/// Capture names recognised by bundled queries. Duplicated because
+/// `gpui_component::highlighter::HIGHLIGHT_NAMES` is not public.
 const HIGHLIGHT_NAMES: [&str; 40] = [
     "attribute",
     "boolean",

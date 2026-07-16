@@ -1,73 +1,40 @@
-//! `~/.claude/plugins/installed_plugins.json` parser.
+//! Parser for Claude Code's installed plugin manifest.
 //!
-//! The manifest is the single source of truth for which marketplace
-//! plugins Claude Code currently has loaded. Daruda mirrors that view
-//! into the Skills tab's Plugin section — never reads from
-//! `~/.claude/plugins/marketplaces/` directly, which is just the
-//! source-repo cache.
-//!
-//! Schema sample (real on-disk format):
-//! ```json
-//! {
-//!   "version": 2,
-//!   "plugins": {
-//!     "swift-lsp@claude-plugins-official": [
-//!       {
-//!         "scope": "user",
-//!         "installPath": "/home/user/.claude/plugins/cache/.../1.0.0",
-//!         "version": "1.0.0",
-//!         "installedAt": "2026-02-06T09:30:57.914Z",
-//!         ...
-//!       }
-//!     ]
-//!   }
-//! }
-//! ```
-//!
-//! `id` is the dictionary key (`<plugin>@<marketplace>`). One id can
-//! map to multiple installs (different `scope`s); we surface them all
-//! independently so the user sees every active version.
+//! `~/.claude/plugins/installed_plugins.json` is mirrored into the Skills tab's
+//! Plugin section. Plugin ids are manifest keys (`<plugin>@<marketplace>`), and
+//! one id can map to multiple scoped installs.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// One install record for a single plugin id. Only the fields daruda
-/// consumes are typed; everything else (`installedAt`, `gitCommitSha`,
-/// …) is dropped.
+/// One install record for a plugin id; unrelated manifest fields are ignored.
 #[derive(Clone, Debug, Deserialize)]
 pub struct PluginInstall {
-    /// `<plugin>@<marketplace>` — the manifest's dictionary key.
-    /// Filled in by the caller after `serde_json` finishes (since the
-    /// id lives on the parent map, not on each entry).
+    /// `<plugin>@<marketplace>` — the manifest's dictionary key,
+    /// filled in by the caller since it lives on the parent map.
     #[serde(skip)]
     pub id: String,
-    /// `"user"` for global installs, `"project"` for repo-local. Both
-    /// surface the same way in daruda — the field is kept verbatim so
-    /// future revisions can split them.
+    /// `"user"` (global) or `"project"` (repo-local), kept as manifest data.
     #[serde(default)]
     pub scope: String,
-    /// Resolved on-disk path to the plugin (e.g.
-    /// `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`).
-    /// `<install_path>/skills/<name>/SKILL.md` is what we scan.
+    /// Resolved on-disk plugin path; `<install_path>/skills/<name>/SKILL.md`
+    /// is what we scan.
     #[serde(rename = "installPath")]
     pub install_path: PathBuf,
-    /// Plugin version string (`"1.0.0"`, a commit SHA, etc.). Tracked
-    /// for display; daruda doesn't compare versions.
+    /// Version string, for display only; daruda doesn't compare versions.
     #[serde(default)]
     pub version: String,
 }
 
-/// Top-level wrapper. `version` is documented as `2` today but daruda
-/// doesn't gate on it — just parses whatever fields it recognises.
+/// Top-level wrapper; version is ignored so known fields keep parsing.
 #[derive(Debug, Deserialize)]
 struct InstalledPluginsFile {
     #[serde(default)]
     plugins: std::collections::BTreeMap<String, Vec<PluginInstall>>,
 }
 
-/// Default manifest path. Falls back to `./.claude/...` when
-/// `dirs::home_dir()` is unavailable so tests stay deterministic.
+/// Default manifest path with deterministic fallback when home is unavailable.
 pub fn installed_plugins_manifest() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -76,8 +43,7 @@ pub fn installed_plugins_manifest() -> PathBuf {
         .join("installed_plugins.json")
 }
 
-/// Default plugin cache root — surfaced for the watcher so it can
-/// subscribe even before any plugin is installed.
+/// Default plugin cache root for watchers before any plugin is installed.
 pub fn plugins_cache_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -86,11 +52,7 @@ pub fn plugins_cache_root() -> PathBuf {
         .join("cache")
 }
 
-/// Parent of both `cache/` (installed plugins) and `marketplaces/`
-/// (registered-but-not-installed plugins). The watcher subscribes to
-/// this single root so it sees both kinds of changes — including new
-/// marketplace clones that materialise outside the installed plugin
-/// tree.
+/// Parent of both installed plugin cache and registered marketplaces.
 pub fn plugins_root() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))

@@ -353,22 +353,21 @@ pub(in crate::workspace) struct RightDockSnapshot {
         std::collections::HashMap<std::path::PathBuf, daruda_claude::SessionStatus>,
     /// Per-session Claude status, keyed by `session_id`. Mirrors the
     /// `ClaudeStatusStore` slice that the Tasks tab needs to render
-    /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge
-    /// (R-23). Empty when `claude_status.enable` is off or no
-    /// session has reported a status yet.
+    /// the `⟳ / ● / ⚠` glyph trailing each row's session-id badge.
+    /// Empty when `claude_status.enable` is off or no session has
+    /// reported a status yet.
     pub claude_status_per_session: std::collections::HashMap<String, daruda_claude::SessionStatus>,
     /// Per-session tool-use failure counts mirrored from
     /// `Workspace::claude.tool_use_failure_counts`. Only sessions
     /// with a positive count are present. The Tasks-tab renderer
     /// surfaces a `failures N/M` hint once a count reaches
-    /// [`daruda_terminal::ux::strings::RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD`]
-    /// (R-23 / R-11 Phase 2 carry-over).
+    /// [`daruda_terminal::ux::strings::RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD`].
     pub tool_use_failure_counts: std::collections::HashMap<String, u32>,
     /// Reference instant captured once per frame so every row in the
     /// Tasks tab computes its live duration against the same `now`.
     /// `Utc::now()` per row would drift between calls within a single
     /// frame and break the `2m 14s → 2m 15s` invariant for sibling
-    /// rows that update on the same tick (R-23).
+    /// rows that update on the same tick.
     pub now: chrono::DateTime<chrono::Utc>,
     /// Scroll handle shared between the right-panel body's
     /// `overflow_y_scroll` and the scrollbar thumb overlay. Cloned from

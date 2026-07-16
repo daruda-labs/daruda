@@ -38,19 +38,14 @@ impl Workspace {
             },
             move |ws, result, cx| {
                 ws.git_op_in_flight = false;
-                // `git_op_in_flight` drives the Git view's disabled/loading
-                // state; the `Ok(None)` / `Err` arms below have no other
-                // workspace notify, so render the workspace here and let the
-                // left-dock staging diff invalidate the `.cached()` dock.
+                // Clears the Git view's disabled/loading state; the Ok(None)
+                // and Err arms have no other notify, so render here.
                 cx.notify();
                 match result {
                     Ok(Some(probe)) => {
-                        // Pick the matching lane entry's branch from
-                        // `git worktree list` so the header label flips
-                        // from "detached" to the actual branch name (git
-                        // init defaults to `main`, but a user-configured
-                        // `init.defaultBranch` may differ — read what git
-                        // actually decided rather than guessing).
+                        // Read the branch git actually chose (init defaults to
+                        // `main`, but `init.defaultBranch` may differ) so the
+                        // header label flips from "detached" to the real name.
                         if let Some(wt) = ws
                             .active_project_mut()
                             .and_then(|p| p.lanes.iter_mut().find(|w| w.id == lane_id))
@@ -61,10 +56,8 @@ impl Workspace {
                                 .find(|p| p.path == wt.path)
                                 .or_else(|| probe.lanes.first());
                             let probed_branch = probed_entry.and_then(|p| p.branch.clone());
-                            // Freshly init'd repo: the toplevel from the
-                            // probe entry IS this lane's root. Fall
-                            // back to `wt.path` if for some reason the
-                            // entry list is empty.
+                            // Freshly init'd repo: the probe entry's toplevel
+                            // is this lane's root; fall back to `wt.path`.
                             let worktree_root = probed_entry
                                 .map(|p| p.path.clone())
                                 .unwrap_or_else(|| wt.path.clone());
@@ -77,11 +70,9 @@ impl Workspace {
                         ws.refresh_git_status(target, cx);
                     }
                     Ok(None) => {
-                        // `git init` succeeded — the repo is on disk and
-                        // usable; only the follow-up probe that flips
-                        // `LaneKind::Default → Git` failed. The user
-                        // can re-open the project and the next probe
-                        // will pick it up. Warning, not Error.
+                        // Repo is on disk and usable — only the follow-up
+                        // probe that flips `Default → Git` failed, and a
+                        // re-open will pick it up. Warning, not Error.
                         let report = ErrorReport::new("git init succeeded but probe failed")
                             .severity(ErrorSeverity::Warning)
                             .at(file!(), line!())

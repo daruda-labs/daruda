@@ -1,15 +1,9 @@
-//! Create / Edit dialog for terminal annotations.
-//!
-//! Reached via the Shift+Right-click context menu ("Add annotation")
-//! or by double-clicking an existing annotation overlay (Edit mode).
-//! Mounted through [`crate::workspace::dialog_helpers::open_form_modal`]
-//! so the outer Dialog chrome (panel, backdrop, Escape-to-close) is
-//! handled by `gpui_component::Dialog`; this entity owns only the body
-//! (input + footer buttons).
-//!
-//! The Save / Cancel listeners are one-liners: their bodies forward to
-//! the workspace mutation methods (`add_annotation`,
-//! `update_annotation_text`) so the view-purity rule holds.
+//! Create / Edit dialog for terminal annotations, reached via the
+//! Shift+Right-click context menu or a double-click on an existing overlay.
+//! Mounted through [`crate::workspace::dialog_helpers::open_form_modal`], so
+//! `gpui_component::Dialog` owns the chrome and this entity owns only the
+//! body. Save/Cancel listeners forward to the workspace mutation methods,
+//! keeping the view-purity rule.
 
 use std::rc::Rc;
 
@@ -103,21 +97,18 @@ impl AnnotationDialog {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Pull the input text once. `InputState::value()` returns a
-        // SharedString already; clone the owned `String` for the
-        // workspace call (the dialog instance is about to be dropped).
+        // Clone an owned String for the workspace call — the dialog is
+        // about to be dropped.
         let text = self.text_input.read(cx).value().to_string();
         let target = self.target;
-        // Close the dialog before re-entering the workspace — the
-        // dialog modal stack is owned by Dialog/gpui_component::Root;
-        // mutating workspace state afterwards is the safer order.
+        // Close the dialog before re-entering the workspace: the modal
+        // stack is owned by Dialog/gpui_component::Root, so mutating
+        // afterwards is the safer order.
         window.close_dialog(cx);
 
-        // The closure body below is the *only* logic deviation from
-        // the view-purity rule's one-liner template. Branching on the
-        // dialog target is a single dispatch decision that has nowhere
-        // else to live — there is no per-target `ws.foo(target)` that
-        // could absorb the match.
+        // The target match is a single dispatch decision with nowhere else
+        // to live — the only view-purity deviation from the one-liner
+        // template.
         let Some(ws) = self.workspace.upgrade() else {
             return;
         };

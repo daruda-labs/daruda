@@ -1,21 +1,9 @@
-//! Install / uninstall daruda's entries in `~/.claude/settings.json`.
+//! Install/uninstall daruda hook entries in `~/.claude/settings.json`.
 //!
-//! Self-identification: every daruda hook command points at
-//! `~/.daruda/hooks/notify.sh`, so we recognise our own entries by
-//! the path substring [`MARKER_PATH_FRAGMENT`] in the command string.
-//! This lets us cleanly remove just our entries without touching
-//! whatever else the user (or another tool) has registered.
-//!
-//! Atomicity: read-modify-write happens under an exclusive advisory
-//! flock on a sibling lock file (`<settings>.daruda.lock`), so
-//! concurrent install/uninstall from multiple daruda windows or a
-//! settings.json watcher can't lose each other's edits. The actual
-//! write itself is also atomic via tempfile + rename.
-//!
-//! Schema safety: a parse failure or unexpected shape (e.g.
-//! `hooks.PreToolUse` written as a string by hand) returns an
-//! [`InstallerError`] rather than overwriting the user's data.
-//! See the `install_refuses_*` tests for the exact contract.
+//! Entries are recognized by the stable `~/.daruda/hooks/notify.sh` suffix, so
+//! uninstall removes only daruda hooks. Settings edits are locked and atomic;
+//! unexpected JSON shape returns [`InstallerError`] instead of overwriting user
+//! data.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -38,11 +26,7 @@ pub const SUBSCRIBED_EVENTS: &[&str] = &[
     "StopFailure",
 ];
 
-/// Substring used to identify daruda's hook entries inside
-/// `settings.json`. Every command we register points at
-/// `~/.daruda/hooks/notify.sh`, expanded; we match on this stable
-/// suffix so dotfile-syncs across machines (with different home
-/// paths) still recognise existing entries.
+/// Stable suffix used to identify daruda hook entries across machines.
 const MARKER_PATH_FRAGMENT: &str = "/.daruda/hooks/notify.sh";
 
 /// Wrapper script source — extracted on first install.
@@ -53,10 +37,7 @@ pub enum InstallerError {
     Io(std::io::Error),
     Json(serde_json::Error),
     NoHome,
-    /// `~/.claude/settings.json` parsed as JSON but the structural
-    /// shape (e.g. `hooks.<EventName>` not an array) is incompatible
-    /// with our merge logic. We refuse to overwrite rather than
-    /// silently nuke the user's data.
+    /// Parsed JSON whose `hooks.<EventName>` shape cannot be merged safely.
     BadSchema {
         event: String,
         actual_kind: String,
@@ -120,8 +101,7 @@ impl InstallerPaths {
     }
 }
 
-/// Install daruda's hook entries. Idempotent — calling repeatedly
-/// rewrites the same shape and does not duplicate entries.
+/// Install daruda's hook entries idempotently.
 pub fn install(paths: &InstallerPaths) -> Result<(), InstallerError> {
     write_notify_script(&paths.notify_script)?;
     update_settings_json(&paths.claude_settings, |settings| {
@@ -139,8 +119,7 @@ pub fn uninstall(paths: &InstallerPaths) -> Result<(), InstallerError> {
     Ok(())
 }
 
-/// Quick check — are we registered in `settings.json` for at least
-/// one of the subscribed events?
+/// Whether any subscribed hook event already contains a daruda command.
 pub fn is_installed(paths: &InstallerPaths) -> bool {
     let Ok(text) = fs::read_to_string(&paths.claude_settings) else {
         return false;
@@ -166,8 +145,7 @@ fn write_notify_script(dst: &Path) -> Result<(), InstallerError> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Always rewrite so an upgraded daruda picks up wrapper-script
-    // changes without the user having to delete the old file.
+    // Always rewrite so upgrades refresh the wrapper script.
     fs::write(dst, NOTIFY_SCRIPT)?;
     set_executable(dst)?;
     Ok(())
@@ -187,9 +165,7 @@ fn set_executable(_path: &Path) -> Result<(), InstallerError> {
     Ok(())
 }
 
-/// Per-event command string. Claude Code does not forward extra args
-/// to the hook command; each event has its own literal `<EventName>`
-/// suffix so the wrapper knows what fired.
+/// Per-event command string; Claude Code does not forward event args itself.
 fn command_for_event(notify_script: &Path, event: &str) -> String {
     format!("\"{}\" {event}", notify_script.display())
 }
@@ -205,9 +181,7 @@ where
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Acquire an exclusive advisory lock on a sibling lock file so
-    // concurrent installers / uninstallers (and a hypothetical future
-    // settings.json self-write watcher) don't lose each other's edits.
+    // Lock a sibling file so concurrent install/uninstall cannot lose edits.
     let lock_path = path.with_extension("daruda.lock");
     let lock = OpenOptions::new()
         .create(true)

@@ -146,9 +146,8 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         )
     });
     let ws = wh.root(cx).unwrap();
-    // Give project 0 a tab of its own (the constructor skips the bootstrap
-    // tab and activation doesn't auto-seed one); this is the content that
-    // must survive closing the other project.
+    // Give project 0 a tab of its own — the content that must survive
+    // closing the other project.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.add_tab(window, cx));
     })
@@ -174,10 +173,8 @@ fn close_active_project_keeps_window_when_other_remain(cx: &mut TestAppContext) 
         assert_eq!(ws.projects.len(), 1);
         assert_eq!(ws.projects[0].id, 0);
         assert_eq!(ws.active.project, 0);
-        // Regression: main area must not be empty after delete. The
-        // surviving project's lane is re-activated and keeps its own
-        // content (the tab opened above), so the user doesn't see a
-        // blank viewport.
+        // Regression: main area must not be empty after delete — the
+        // surviving project's lane is re-activated and keeps its own tab.
         assert!(
             !ws.active_runtime().tabs.is_empty(),
             "surviving project's own tab must remain after closing a project"
@@ -247,7 +244,7 @@ fn close_active_project_signals_window_close_when_no_survivor_has_a_lane(cx: &mu
 #[gpui::test]
 fn open_delete_project_modal_by_id_does_not_change_active(cx: &mut TestAppContext) {
     // Root-wrapped window so `open_form_modal`'s `window.open_dialog`
-    // can walk the gpui_component::Root layer.
+    // can walk the `gpui_component::Root` layer.
     let config = daruda_config::Config::default();
     let project = daruda_store::project::Project::from_path("/tmp/daruda_delete_byid_a");
     std::fs::create_dir_all("/tmp/daruda_delete_byid_a").unwrap();
@@ -288,11 +285,10 @@ fn open_delete_project_modal_by_id_does_not_change_active(cx: &mut TestAppContex
     });
 }
 
-/// Build a workspace with project A (`a_path`, id 0) and project B (`b_path`,
-/// id 1). `add_project` activates B, so A is the *non-active* project; both
-/// bootstrap lanes share id 0 (lane ids restart per project). The returned
-/// handle lets a test edit A's lane while B is active — the precondition for
-/// the cross-project lane-edit bug.
+/// Build a workspace with project A (id 0) and project B (id 1); `add_project`
+/// activates B, so A is the *non-active* project. Both bootstrap lanes share
+/// id 0 (lane ids restart per project) — the precondition for the
+/// cross-project lane-edit bug.
 fn workspace_with_background_project_a(
     cx: &mut TestAppContext,
     a_path: &str,
@@ -329,12 +325,11 @@ fn lane0_field<T>(ws: &Workspace, pid: u64, f: impl FnOnce(&crate::lane::Lane) -
         .expect("lane 0 present"))
 }
 
-// A lane edit from the left-dock context menu must apply to the lane in the
-// project the menu was opened for — not the like-id'd lane in whichever
-// project happens to be active. Lane ids restart per project (`next_lane_id:
-// 0`), so every project has a lane id 0; routing a bare `LaneId` through the
-// active project silently writes the wrong lane, bleeding the setting across
-// projects. These three cover the shared `mutate_lane` helper via each setter.
+// A lane edit from the left-dock context menu must target the lane in the
+// project the menu was opened for, not the like-id'd lane in whichever project
+// is active. Every project has a lane id 0, so a bare `LaneId` routed through
+// the active project writes the wrong lane. These three cover the shared
+// `mutate_lane` helper via each setter.
 
 #[gpui::test]
 fn set_lane_remote_cwd_targets_named_project_not_active(cx: &mut TestAppContext) {
@@ -459,9 +454,8 @@ fn window_open_policy_round_trips_through_state(cx: &mut TestAppContext) {
         workspace_state.window_open_policy,
         daruda_store::project::WindowOpenPolicy::NewWindow
     );
-    // New schema: `next_project_id` is a runtime-only counter (per-
-    // session) rather than persisted. Verify the runtime counter and
-    // that the workspace state references exactly one project.
+    // `next_project_id` is a runtime-only (per-session) counter, not
+    // persisted; the workspace state references exactly one project.
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.next_project_id, 1);
     });

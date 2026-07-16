@@ -1,10 +1,6 @@
 //! Round-trip verification: `snapshot_for_disk` → `restore_from_disk`
 //! preserves the workspace's UUID-keyed identity (workspace UUID,
-//! project UUIDs, project roots, active focus). Tab/pane structure is
-//! exercised by the legacy `restore_state` tests; this file focuses on
-//! the new-shape projection so a future caller swap can rely on the
-//! parallel method staying behaviorally equivalent for the bits the
-//! new schema actually carries.
+//! project UUIDs, project roots, active focus).
 
 use super::*;
 
@@ -58,11 +54,10 @@ fn snapshot_then_restore_preserves_identity(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppContext) {
-    // Regression: a persisted project whose lane list is empty
-    // (`worktrees: []` — a corrupt / interrupted save proven to exist
-    // in production) must re-discover its lanes on restore. Restoring
-    // it verbatim leaves a 0-lane project, which blanks the left dock
-    // and — on project close — the main area.
+    // Regression: a persisted project with an empty lane list
+    // (`worktrees: []`, from a corrupt/interrupted save) must
+    // re-discover its lanes on restore. A verbatim 0-lane project
+    // blanks the left dock and — on project close — the main area.
     use daruda_store::project::{
         DockStates, LeftDockView, ProjectOverride, ProjectState, ProjectUuid, RightDockView,
         WORKSPACE_SCHEMA_VERSION, WindowOpenPolicy, WindowState, WorkspaceState, WorkspaceUuid,
@@ -132,11 +127,9 @@ fn restore_rebootstraps_project_with_empty_persisted_lanes(cx: &mut TestAppConte
             ws.projects[0].lanes.iter().any(|l| l.id == ws.active.lane),
             "active lane must be a real member of the project"
         );
-        // Unified rule: a re-bootstrapped lane is brand-new and is NOT
-        // auto-seeded on restore — it lands on the "No open tabs"
-        // empty-state. The recovery guarantee is that the lane exists (the
-        // left dock is not blank), which the assertions above verify; the
-        // main area shows the empty-state rather than an auto-spawned tab.
+        // A re-bootstrapped lane is not auto-seeded: it lands on the
+        // empty-state, not an auto-spawned tab. The recovery guarantee
+        // is only that the lane exists (left dock not blank).
         assert!(
             ws.active_runtime().tabs.is_empty(),
             "a re-bootstrapped lane lands on the empty-state, not an auto-seeded tab"

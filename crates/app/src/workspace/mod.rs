@@ -1,17 +1,8 @@
-//! Terminology — keep these distinct in code and prose:
-//!
-//! - `Tab bar`: horizontal strip at the top of the window. One per workspace.
-//!   Identifiers: `tab_bar`, `TAB_BAR_HEIGHT`.
-//! - `Tab cell`: one entry inside the tab bar. Identifiers: `tab_cell`,
-//!   `tab_titles`, `tab-close`.
-//! - `Pane`: a leaf in the split tree (PTY + TerminalView). Identifiers:
-//!   `pane`, `Pane`, `pane_id`, `PaneId`.
-//! - `Pane header`: per-pane title bar shown above a pane in split mode only.
-//!   Identifiers: `pane_header`, `PANE_HEADER_HEIGHT`, `pane-hdr`, `pane-close`.
-//!
-//! Never use bare `header` or `title_bar` — always one of `tab_*` or `pane_*`.
-//! `terminal_title()` (daruda_terminal) returns the OSC-2 string used by both
-//! tab cells and pane headers; do not rename it back to `tab_title`.
+//! Terminology (keep distinct): `Tab bar` = top strip, one per workspace;
+//! `Tab cell` = one entry in it; `Pane` = a leaf in the split tree
+//! (PTY + TerminalView); `Pane header` = per-pane title bar, split mode only.
+//! Never use bare `header` / `title_bar` — always `tab_*` or `pane_*`.
+//! `terminal_title()` (daruda_terminal) feeds both tab cells and pane headers.
 
 mod actions;
 mod annotation_dialog;
@@ -68,31 +59,21 @@ use main_area::agent_chat_pane::telegram_ops::{deliverable_entries, should_defer
 // Actions
 // ----------------------------------------------------------------
 
-/// Parameterized action — fires when a user-defined macro shortcut
-/// is pressed. Carries the shortcut string so the handler can resolve
-/// it back to the macro at dispatch time (the binding is set up by
-/// `main_area::bottom_dock::macro_ops::register_macro_shortcuts`,
-/// which can register the same shortcut without recompiling).
-///
-/// `no_json` skips the keymap-deserialize derive — this action is
-/// only constructed at runtime by the registrar, never loaded from a
-/// keymap.json file.
+/// Parameterized action fired when a user-defined macro shortcut is
+/// pressed. Carries the shortcut string so the handler resolves it back
+/// to the macro at dispatch time (bound by
+/// `main_area::bottom_dock::macro_ops::register_macro_shortcuts`).
+/// `no_json` skips the keymap-deserialize derive — constructed only at
+/// runtime by the registrar, never loaded from keymap.json.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
 pub struct RunMacroByShortcut(pub gpui::SharedString);
 
-/// Open the Settings window on the requested page.
-///
-/// Carries [`daruda_config::BuiltinSection`] so each menu / palette
-/// entry can land directly on the right page (Font, Keymap, etc.)
-/// instead of dropping the user on the General page and forcing a
-/// click. `Cmd+,` and the legacy `"open_settings"` config name both
-/// resolve to `OpenSettings(BuiltinSection::default())` (= General).
-///
-/// `no_json` is used because daruda's keybinding override path lives
-/// in `surface::action_map`, not GPUI's keymap.json — see the
-/// `open_settings.<slug>` matching in `bind!` for the per-section
-/// override syntax.
+/// Open the Settings window on the requested page. Carries
+/// [`daruda_config::BuiltinSection`] so each menu / palette entry lands
+/// directly on the right page instead of General. `no_json`: daruda's
+/// keybinding override path lives in `surface::action_map` (see the
+/// `open_settings.<slug>` matching in `bind!`), not GPUI's keymap.json.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
@@ -192,36 +173,29 @@ actions!(
         CloseOtherTabs,
         CloseTabsToRight,
         ToggleZoomPane,
-        /// Open a fresh TaskEdit pane in draft mode (no task_id).
-        /// Wired from the Command Palette `new_task` entry and
-        /// configurable as a keybinding via
-        /// `[keybindings] new_task = "cmd-shift-n"` in user config
-        /// (m-1 review note).
+        /// Open a fresh TaskEdit pane in draft mode (no task_id). Wired
+        /// from the Command Palette `new_task`; keybinding via
+        /// `[keybindings] new_task`.
         NewTask,
-        /// Open the task picker filtered to all tasks; the picked
-        /// task gets a TaskEdit pane via `open_task_edit_pane`.
-        /// Configurable as a keybinding via `[keybindings] edit_task`.
+        /// Open the task picker for all tasks; the pick gets a TaskEdit
+        /// pane. Keybinding via `[keybindings] edit_task`.
         EditTask,
         /// Prompt for a group name and create an empty group in the
-        /// shared (group + ungrouped-project) tab-order pool. Wired
-        /// from the Command Palette `new_group` entry.
+        /// shared tab-order pool. Wired from `new_group`.
         NewGroup,
-        /// Rename the active workspace project via a single-field
-        /// modal. Wired from the Command Palette `rename_project`
-        /// entry.
+        /// Rename the active workspace project via a single-field modal.
+        /// Wired from `rename_project`.
         RenameActiveProject,
-        /// Move the active project into a group selected by name
-        /// (blank input = ungrouped, unknown name creates a fresh
-        /// group). Wired from the Command Palette
-        /// `move_project_to_group` entry.
+        /// Move the active project into a group by name (blank =
+        /// ungrouped, unknown name creates one). Wired from
+        /// `move_project_to_group`.
         MoveActiveProjectToGroup,
-        /// Save the currently focused file-view pane to disk.
-        /// Wired to `cmd-s` in the `FileViewer` focus scope.
+        /// Save the focused file-view pane to disk. Wired to `cmd-s` in
+        /// the `FileViewer` focus scope.
         SaveFilePane,
-        /// Open a fresh Agent chat (ACP) pane in a new tab, anchored at
-        /// the active lane. Wired from the Command Palette
-        /// `new_agent_chat` entry and configurable as a keybinding via
-        /// `[keybindings] new_agent_chat = "…"` in user config.
+        /// Open a fresh Agent chat (ACP) pane in a new tab at the active
+        /// lane. Wired from `new_agent_chat`; keybinding via
+        /// `[keybindings] new_agent_chat`.
         OpenAgentChat,
     ]
 );
@@ -244,13 +218,10 @@ pub(in crate::workspace) enum CommitMode {
 }
 
 pub struct Workspace {
-    /// Stable cross-session identifier — matches the UUID stored on
-    /// disk at `workspaces/<uuid>.json`. Minted at construction (or
-    /// adopted from a restored [`daruda_store::project::WorkspaceState`]
-    /// in a later task) and never changes for the lifetime of the
-    /// `Workspace` entity. Read by the v3 persistence path; the legacy
-    /// save path still keys by `path_hash`, so the field is currently
-    /// unread by anything other than tests.
+    /// Stable cross-session identifier — matches the UUID stored on disk
+    /// at `workspaces/<uuid>.json`. Minted at construction, never changes
+    /// for the entity's lifetime. Read by the v3 persistence path;
+    /// otherwise unread outside tests.
     #[allow(dead_code)]
     pub(in crate::workspace) uuid: daruda_store::project::WorkspaceUuid,
     /// TabBar + PaneTree runtime state. Holds every lane's runtime
@@ -264,13 +235,12 @@ pub struct Workspace {
     /// or the top edge of the bottom dock.
     pub(in crate::workspace) dock_drag: Option<layout::ops::DockDrag>,
     /// When true, new tabs/panes spawn with the focused pane's cwd
-    /// (iTerm2 "Reuse previous session's directory"). Future config knob.
+    /// (iTerm2 "Reuse previous session's directory").
     pub(in crate::workspace) inherit_cwd: bool,
-    /// Terminal config applied to every new pane. Holds the font
-    /// size + iTerm2-style vertical/horizontal spacing multipliers so
-    /// all panes share one source of truth; `resize_all_tabs` reads
-    /// the same settings to measure cells consistently with the
-    /// TerminalView render path.
+    /// Terminal config applied to every new pane (font size + iTerm2-style
+    /// spacing multipliers). Single source of truth; `resize_all_tabs`
+    /// reads the same settings to measure cells consistently with
+    /// TerminalView.
     pub(in crate::workspace) terminal_config: TerminalConfig,
     /// Primary font family from config. Applied to each new pane's
     /// TerminalView so user-specified fonts take effect.
@@ -289,21 +259,17 @@ pub struct Workspace {
     /// 18 sub-fields don't clutter `Workspace`'s top level. See
     /// [`claude_session_ops::ClaudeContext`].
     pub(in crate::workspace) claude: claude_session_ops::ClaudeContext,
-    /// Runtime projects in this workspace. Zero entries = empty
-    /// (Welcome screen). One entry = single-project window (current
-    /// behaviour); commit c onward allows multiple. Each project owns
-    /// its own lanes, so the per-project lane list is reached
-    /// via `projects[i].lanes`. `tabs`/`panes` still live on the
-    /// active lane's `MainAreaContext` slot until W-3 migrates
-    /// them into the runtime struct.
+    /// Runtime projects in this workspace. Zero entries = empty (Welcome
+    /// screen). Each project owns its own lanes, reached via
+    /// `projects[i].lanes`. `tabs`/`panes` live on the active lane's
+    /// `MainAreaContext` slot.
     pub(in crate::workspace) projects: Vec<crate::project::Project>,
     /// Active (project, lane) pair. When `projects` is non-empty,
     /// always points at a live entry — kept normalized by
     /// `activate_lane` and `finalize_remove_*` paths.
     pub(in crate::workspace) active: daruda_store::project::LaneRef,
-    /// User-defined groups in the left dock. Each project's
-    /// `group_id` links into this list. Empty during the early
-    /// multi-project rollout — Group CRUD lands in a later commit.
+    /// User-defined groups in the left dock. Each project's `group_id`
+    /// links into this list.
     pub(in crate::workspace) groups: Vec<daruda_store::project::SerializedGroup>,
     /// Monotonic counter for the next `ProjectId` minted by
     /// [`Workspace::add_project`]. Deleted ids are never reused.
@@ -381,12 +347,10 @@ pub struct Workspace {
     /// parameter.
     pub(in crate::workspace) cached_window_bounds: Option<daruda_store::project::WindowState>,
     /// Memoized status-bar "project config layer exists" flag, keyed by the
-    /// active project root. `project_config_path` + `Path::exists` are
-    /// filesystem stats; `render()` runs on every animation frame (status
-    /// badges request frames without `cx.notify`), so statting per render
-    /// burned syscalls in a tight loop. Recompute only when the active root
-    /// changes; `reload_config` clears it so a freshly created project layer
-    /// surfaces immediately.
+    /// active project root. `render()` runs every frame, so statting per
+    /// render burned syscalls; recompute only when the root changes.
+    /// `reload_config` clears it so a freshly created layer surfaces
+    /// immediately.
     pub(in crate::workspace) cached_project_config: Option<(std::path::PathBuf, bool)>,
     /// User-set window title (Window > Edit Window Title…). When
     /// `Some`, replaces the auto-derived `"<pane title> — <cwd>"`
@@ -431,15 +395,11 @@ pub struct Workspace {
     /// not persisted). A fresh pane defaults to this so switching agents "sticks"
     /// for the window; falls back to the catalog default when unset or stale.
     pub(in crate::workspace) last_agent_id: Option<String>,
-    /// AgentChat view ids that were in the Working state on the previous
-    /// status-pulse tick. The pulse pump repaints busy views each tick; the
-    /// moment a view settles (leaves Working) the pump would stop and its last
-    /// "running" frame — an amber rollup dot / working row — freezes, because a
-    /// cached view can miss the settling event's own notify (the gpui
+    /// AgentChat view ids that were Working on the previous status-pulse
+    /// tick. Lets the pump paint one final settled frame for a just-settled
+    /// view whose own settling notify can miss a cached view (gpui
     /// `detect_accessed_entities` lost-wakeup, see
-    /// `lane_switch_scroll_dead_rootcause`). Remembering the previous busy set
-    /// lets the pump paint one final settled frame for the just-settled views.
-    /// Runtime-only; never serialized.
+    /// `lane_switch_scroll_dead_rootcause`). Runtime-only; never serialized.
     pub(in crate::workspace) agent_pulse_prev: Vec<gpui::EntityId>,
     /// Presence-gated Telegram pings held back while the user is at this
     /// window, keyed by the firing pane; drained by `flush_deferred_telegram`.
@@ -841,15 +801,11 @@ impl Workspace {
                     true
                 })
                 // Accepting a slash-command completion routes through the
-                // workspace for the adaptive send. The accept hook fires inside
-                // this `InputState`'s update (the menu has already inserted the
-                // text). `cx.defer_in` would *re-lease this same InputState* to
-                // run its closure, so `complete_slash_command` ->
-                // `send_terminal_input` (which reads/clears `terminal_input`,
-                // this very entity) would still re-enter and panic. Defer at the
-                // window/app level instead: that closure gets `&mut Window,
-                // &mut App` with no entity re-lease, so the deferred work can
-                // safely touch `terminal_input` (CLAUDE.md pitfall #5).
+                // workspace. The accept hook fires inside this `InputState`'s
+                // update; `cx.defer_in` would re-lease this same InputState, so
+                // `complete_slash_command` -> `send_terminal_input` (which
+                // reads/clears `terminal_input`) would re-enter and panic. Defer
+                // at window/app level — no entity re-lease (CLAUDE.md pitfall #5).
                 .on_completion_accept(move |item, window, cx| {
                     let name = item.label.clone();
                     let ws = ws_for_accept.clone();
@@ -1045,7 +1001,7 @@ impl Workspace {
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
-            // R-23 live tick (pulse + duration) needs to be running.
+            // live tick (pulse + duration) needs to be running.
             _tasks_global_subscription: cx
                 .observe_global::<crate::agent::tasks_global::GlobalTasks>(|ws, cx| {
                     ws.ensure_task_live_tick(cx);
@@ -1157,7 +1113,7 @@ impl Workspace {
         // `data_dir`. Production paths all share the default
         // `~/.config/daruda/`; tests inject a fresh per-test dir.
         crate::agent::tasks_global::load_from_dir(cx, &ws.data_dir);
-        // Kick off the R-23 pulse / duration tick if `load_from_dir`
+        // Kick off the pulse / duration tick if `load_from_dir`
         // restored any `Running` task — the `GlobalTasks` observe
         // subscription wouldn't fire here because the set_global call
         // pre-dates the subscription registration above.
@@ -1228,12 +1184,9 @@ impl Workspace {
             weak.update(cx, |ws, cx| ws.persist_state(cx)).ok();
         });
         // Persistence-worthy mutations always change something the UI
-        // renders too — left-dock tree, status bar, window title, etc.
-        // Without an explicit `cx.notify()` the dock keeps the stale
-        // snapshot until an unrelated event fires (the May-2026
-        // add-project / add-group regressions both had this shape).
-        // Keep notify here so every call site (group/project CRUD,
-        // lane DnD, policy updates) gets a render for free.
+        // renders too — left-dock tree, status bar, window title. Without
+        // this notify the dock keeps the stale snapshot until an unrelated
+        // event fires. Keep it so every call site gets a render for free.
         cx.notify();
     }
 
@@ -1520,13 +1473,10 @@ impl Workspace {
         gpui::App::notify(cx, dock_id);
     }
 
-    /// Invalidate the left dock's `.cached()` element directly, bypassing
-    /// the render staging diff. Source mutations no longer need this: a
-    /// workspace `cx.notify()` re-stages the `LeftDockSnapshot` and
-    /// `content_differs` invalidates the cached dock on a real change. The
-    /// sole remaining caller is the status pulse, which must advance badge
-    /// animation frames that are *not* part of the snapshot (so the staging
-    /// diff reports no change and would not refresh the dock).
+    /// Invalidate the left dock's `.cached()` element directly. The sole
+    /// caller is the status pulse, which advances badge animation frames
+    /// that are *not* part of `LeftDockSnapshot` (so the staging diff reports
+    /// no change and would not refresh the dock).
     /// Lease-free (`App::notify`) — dock event listeners run inside a
     /// `Context<Dock>` lease, so leasing the dock here would double-lease.
     pub(crate) fn notify_left_dock(&self, cx: &mut Context<Self>) {

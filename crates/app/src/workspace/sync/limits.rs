@@ -1,42 +1,20 @@
 //! Background-poll tasks for the Anthropic plan-rate API, the public
 //! service-status page, and the local JSONL activity aggregation.
-//! Three independent loops, one per endpoint, so:
 //!
-//! - the cadence can differ (`[usage.poll].limits_secs` vs.
-//!   `status_secs`; `Activity` shares `limits_secs`),
-//! - a hung fetch on one endpoint never blocks the others,
-//! - each can be disabled (`= 0`) without affecting the others.
+//! Three independent loops, one per endpoint, so cadences can differ
+//! (`[usage.poll].limits_secs` vs. `status_secs`; `Activity` shares
+//! `limits_secs`), a hung fetch on one never blocks the others, and each can
+//! be disabled (`= 0`) independently. Each loop snapshots its live-reload-aware
+//! cadence, idle-rechecks when disabled, otherwise dispatches the blocking
+//! `ureq` fetch onto the background executor and forwards the result to a
+//! workspace setter, then sleeps the cadence. Failed fetches are silently
+//! dropped (previous snapshot stays); the Usage tab renders placeholders while
+//! the cache is still `Default::default()`.
 //!
-//! Each loop:
-//! 1. snapshots the current poll cadence from `Workspace::usage_poll`
-//!    (live-reload aware — picks up `config.toml` edits next tick),
-//! 2. if the cadence is `0` / disabled, sleeps `IDLE_RECHECK` and
-//!    re-checks (so flipping the toggle on takes effect within ~1
-//!    minute, not "next launch"),
-//! 3. otherwise dispatches the synchronous `ureq` fetch onto the
-//!    background executor (so the Metal thread never blocks) and
-//!    forwards the result to a workspace setter via
-//!    `entity.update`,
-//! 4. sleeps the cadence interval and loops.
-//!
-//! Failed fetches don't crash the loop — `Err(_)` is silently
-//! dropped, leaving the previous snapshot in place. The Usage tab
-//! falls back to placeholder rendering when the cached data is at
-//! `Default::default()` (no successful fetch yet).
-//!
-//! ## Known limitation: per-Workspace duplication
-//!
-//! Both endpoints return account-wide data (plan limits and public
-//! service status are not workspace-scoped), but the pump is owned
-//! by `Workspace`, so opening N project windows fires `2 * N`
-//! requests every tick. With the default 5-minute cadence and a
-//! handful of workspaces this is harmless, but a future refactor
-//! should hoist the pump to a process-wide singleton (likely in
-//! `App`-level state) and have workspaces subscribe to a shared
-//! cache. Tracked as a follow-up because the singleton refactor
-//! also needs to handle "no workspaces open yet" — Welcome window
-//! exists without a Workspace, so the pump owner has to outlive
-//! Workspace lifetime.
+//! Known limitation: the pump is per-`Workspace`, so N project windows fire
+//! `2 * N` account-wide requests per tick. Harmless at the default 5-minute
+//! cadence; a process-wide singleton would need to outlive Workspace (the
+//! Welcome window has none) to fix it.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -47,12 +25,9 @@ use gpui::{Context, Task, WeakEntity};
 
 use crate::workspace::Workspace;
 
-/// Re-check cadence used while the endpoint is disabled (`secs ==
-/// 0`). Reuses [`PollConfig::MIN_POLL_SECS`] (60 s) — same
-/// reasoning: short enough that flipping the toggle on takes
-/// effect quickly, long enough that we don't spin on `read_with`
-/// while idle. Sharing the constant keeps the two "minimum
-/// cadence" knobs in one place.
+/// Re-check cadence while the endpoint is disabled (`secs == 0`). Reuses
+/// [`PollConfig::MIN_POLL_SECS`] (60 s): flipping the toggle on takes effect
+/// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 
 /// Spawn the endpoint pumps. Returns the `Task<()>` handles so the

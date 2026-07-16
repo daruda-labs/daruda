@@ -1,52 +1,21 @@
-//! Theme bridge — map daruda's palette into `gpui_component`'s `Theme`.
+//! Theme bridge from daruda palettes to `gpui_component::Theme`.
 //!
-//! `gpui_component` widgets read every color through `cx.theme().<slot>`,
-//! so overwriting the global `ThemeColor` after `gpui_component::init`
-//! retones every Dialog / Input / Checkbox / Notification at one site
-//! without touching widget code or the vendored crate.
-//!
-//! Called once from `main.rs` at app startup.
-//!
-//! Sibling [`palette`] holds the app-side UI palette constants
-//! (workspace chrome, docks, status bar) that are
-//! independent of the terminal-side color model in
-//! `daruda_terminal::ux::theme`.
-//!
-//! This module re-exports both palettes so app-side call sites can
-//! write `use crate::ui::theme;` and reach every constant through one
-//! path — `theme::SURFACE_1`, `theme::MODAL_PANEL_BG`,
-//! `theme::TERMINAL_FG`, etc. The split is purely a code-organization
-//! concern; consumers should not need to know whether a given
-//! constant lives in [`palette`] or in `daruda_terminal::ux::theme`.
+//! Installed once after `gpui_component::init`, retinting upstream widgets at
+//! the global theme slot layer. This module re-exports app and terminal palette
+//! constants so call sites can use one `crate::ui::theme` path.
 
 pub mod daruda_theme;
 pub mod palette;
 
 pub use daruda_theme::DarudaTheme;
 
-/// Read the currently-installed `DarudaTheme` palette. Wraps
-/// `cx.global::<DarudaTheme>()` so call sites read like
-/// `theme::current(cx).tab_bar_bg` — visually parallel to the
-/// existing `theme::SURFACE_1` const path.
-///
-/// Phase 3-C migrates the workspace-chrome call sites (tab strip,
-/// pane header, dock, status bar, lanes list) to this helper;
-/// the long tail of modal / agent / right-panel sites keeps reading
-/// the underlying `palette::FOO` const until a follow-up pass moves
-/// them too. Both paths return the same colour today — Phase 3-D
-/// wires JSON loading so the helper starts returning user-authored
-/// overrides while the const path keeps the compiled-in default.
+/// Read the currently installed `DarudaTheme` palette.
 pub fn current(cx: &gpui::App) -> &DarudaTheme {
     cx.global::<DarudaTheme>()
 }
 
-/// Blend `color`'s RGB toward `palette::DIM_GRAY_LEVEL` by `amount` in sRGB
-/// space, **preserving alpha**, so a translucent colour stays equally
-/// translucent — only the hue/lightness dulls. This is the retained-mode
-/// counterpart to the terminal's `dim_toward_gray`: applied per colour it
-/// dims an inactive pane while keeping the window see-through, which an
-/// overlay scrim cannot do (a scrim composites over the translucency and
-/// fills it in). `amount <= 0.0` returns the colour unchanged.
+/// Dim RGB toward gray while preserving alpha; unlike a scrim, this keeps
+/// translucent panes translucent.
 pub fn dim_toward_gray(color: gpui::Hsla, amount: f32) -> gpui::Hsla {
     if amount <= 0.0 {
         return color;

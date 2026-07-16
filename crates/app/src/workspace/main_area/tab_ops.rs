@@ -34,22 +34,14 @@ impl Workspace {
     }
 
     /// Focus-change chokepoint for `main_area.focused_pane_id`, and the
-    /// single site that swaps the shared bottom-dock input draft. The left
-    /// dock derives `focused_file_selection` and `agent_active_session_id`
-    /// from the focused pane and is `.cached()`, so every focus change must
-    /// render the workspace; the render staging diff then invalidates the
-    /// dock. `restore_from_disk` writes the field directly during initial
-    /// construction (`cx.new`) — no prior cache exists at that point, so
-    /// no explicit notify is needed.
+    /// single site that swaps the shared bottom-dock input draft. The
+    /// `.cached()` left dock derives state from the focused pane, so every
+    /// focus change must render the workspace to invalidate the dock.
     ///
     /// Takes `&mut Window` because the draft swap calls
-    /// `InputState::set_value`, which needs a live window. A windowless
-    /// re-entry via `window_handle` is not an option here: every caller
-    /// already holds the window (it is `.take()`n from its slot for the
-    /// in-flight update), so `cx.update_window(self.window_handle, …)`
-    /// would fail with "window not found" and the restore would silently
-    /// no-op (same reason `apply_input_placeholder` exists next to the
-    /// windowless `refresh_terminal_input_placeholder`).
+    /// `InputState::set_value`, which needs a live window; every caller
+    /// already holds the window, so a windowless `cx.update_window` re-entry
+    /// would fail with "window not found".
     pub(in crate::workspace) fn set_focused_pane(
         &mut self,
         id: PaneId,
@@ -57,18 +49,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         // Swap the bottom-dock draft only when focus moves to a *different*
-        // pane that consumes the shared input (Terminal / AgentChat). The
-        // visible text is saved to its owner — the pane it was typed for,
-        // tracked by `input_owner`, not the outgoing `focused_pane_id` — then
-        // the incoming pane's draft is restored (empty when it has none).
-        // Non-input panes (File / TaskEdit) leave the text and owner in place:
-        // they do not read the bottom input.
-        //
-        // Re-focusing the pane that already owns the visible text is a no-op:
-        // `InputState::set_value` clears the selection and scroll offset even
-        // for identical text, so swapping to the same draft would jump the
-        // cursor to the start mid-edit (reachable by closing a background tab
-        // while typing).
+        // input-consuming pane (Terminal / AgentChat). The visible text is
+        // saved to its owner (`input_owner`, the pane it was typed for), then
+        // the incoming pane's draft is restored. Non-input panes leave the
+        // text and owner in place. The `input_owner != Some(id)` guard matters
+        // because `InputState::set_value` resets selection/scroll even for
+        // identical text, which would jump the cursor mid-edit.
         if self.pane_consumes_bottom_input(id) && self.input_owner != Some(id) {
             let current = self.terminal_input.read(cx).value().to_string();
             if let Some(owner) = self.input_owner {
@@ -87,24 +73,18 @@ impl Workspace {
         }
         self.active_runtime_mut().focused_pane_id = id;
         cx.notify();
-        // Re-evaluate inactive-pane dim: the focused pane drops to full
-        // color and its former-focused sibling dims (or, after a split /
-        // close, the whole tab's dim state is recomputed).
+        // Re-evaluate inactive-pane dim (focused pane goes full color, former
+        // sibling dims).
         self.refresh_pane_dimming(cx);
-        // The bottom input's placeholder + panel activation stay on the
-        // `focus_pane` path (which this is paired with on interactive entry),
-        // not here: this method only tracks the focused pane + swaps the draft,
-        // keeping the focus-vs-placeholder concerns separated.
+        // Placeholder + panel activation stay on the `focus_pane` path; this
+        // method only tracks the focused pane + swaps the draft.
     }
 
-    /// Drop a removed pane's bottom-dock input draft and, when it was the
-    /// pane whose text is currently shown (`input_owner`), clear that
-    /// pointer so the next input-pane focus does not save the stale visible
-    /// text back to a pane that no longer exists. The single place every
-    /// pane-removal path (close pane / close tab / remove lane / close
-    /// project) forgets a draft, so `input_drafts` never keeps entries for
-    /// panes that are gone. Empty-string drafts are never stored, so a
-    /// missing entry is a no-op `remove`.
+    /// Drop a removed pane's bottom-dock input draft and clear `input_owner`
+    /// when it pointed here, so the next focus does not save stale visible
+    /// text back to a gone pane. Single site every pane-removal path (close
+    /// pane / tab / lane / project) calls, keeping `input_drafts` free of
+    /// dead entries.
     pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
         self.input_drafts.remove(&pane_id);
         if self.input_owner == Some(pane_id) {
@@ -130,16 +110,12 @@ impl Workspace {
             })
     }
 
-    /// Push per-pane dim onto the active tab's terminal *and* agent-chat views:
-    /// inactive panes blend toward gray (iTerm2-style), the focused pane stays
-    /// full color. Terminals dim their own cell colors (`set_dim_amount`); agent
-    /// chat panes carry the same amount and blend each rendered color through
-    /// `AgentChatView::dim` — both alpha-preserving, so the window translucency
-    /// survives. Only dims when the active tab is actually split
-    /// (`leaf_count() > 1`) and no pane is zoomed; a lone pane (or a zoomed
-    /// leaf) is never dimmed. Single update site for either `set_dim_amount` —
-    /// the MVU one-way-data-flow rule. Notifies only the views whose amount
-    /// changed (Pitfall #10: the `.cached()` view must be dirtied to repaint).
+    /// Push per-pane dim onto the active tab's terminal and agent-chat views:
+    /// inactive panes blend toward gray, the focused pane stays full color
+    /// (both alpha-preserving, so window translucency survives). Only dims a
+    /// genuinely split tab (`leaf_count() > 1`) with no zoomed pane. Single
+    /// update site for `set_dim_amount` (MVU one-way flow); notifies only the
+    /// changed views (Pitfall #10: a `.cached()` view must be dirtied).
     pub(in crate::workspace) fn refresh_pane_dimming(&mut self, cx: &mut Context<Self>) {
         let Some(tab) = self
             .active_runtime()
@@ -203,12 +179,9 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn add_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // An inaccessible active lane renders the empty-state; spawning a
-        // tab here would root a PTY at the dead lane path (falling back to
-        // `$HOME`) and escape that empty-state. No-op — the empty-state's
-        // Remove is the only action offered for such a lane. (A workspace
-        // with no project at all is not affected — that path still allows
-        // tabs.)
+        // An inaccessible active lane renders the empty-state; spawning a tab
+        // would root a PTY at the dead lane path and escape it. No-op. (A
+        // workspace with no project at all still allows tabs.)
         if self.active_lane_is_inaccessible() {
             return;
         }
@@ -253,14 +226,11 @@ impl Workspace {
             .sum()
     }
 
-    /// Drop every pane in the active lane's runtime and reset it to an
-    /// empty [`LaneRuntime`](crate::workspace::LaneRuntime), leaving the
-    /// lane at zero tabs (the "no tabs" empty state). Releases PTY
-    /// tracking, activity counters, zoom, and bottom-dock drafts for the
-    /// removed panes first — the same per-tab cleanup `close_tab_at`
-    /// performs — so nothing leaks when the runtime is reset. The lane
-    /// itself stays in the sidebar; the user reopens content via the
-    /// empty-state buttons, the tab-bar `+`, or a lane switch.
+    /// Drop every pane in the active lane's runtime and reset it to an empty
+    /// [`LaneRuntime`](crate::workspace::LaneRuntime) (the "no tabs" empty
+    /// state). Releases PTY tracking, activity counters, zoom, and drafts for
+    /// the removed panes first (same cleanup as `close_tab_at`). The lane
+    /// stays in the sidebar.
     pub(in crate::workspace) fn empty_active_lane_runtime(&mut self, cx: &mut Context<Self>) {
         let pane_ids: Vec<PaneId> = self.active_runtime().panes.iter().map(|p| p.id).collect();
         if pane_ids
@@ -276,15 +246,10 @@ impl Workspace {
             self.forget_pane_input_draft(*id);
         }
         *self.active_runtime_mut() = crate::workspace::LaneRuntime::default();
-        // Emptying a lane is a durable state change that must survive a
-        // restart (the empty-state persists instead of springing back a
-        // tab). Schedule the persist here — the empty-closure convention —
-        // rather than relying on the caller wrapping this in
-        // `mutate_durable`: the interactive close paths (pane-header ×,
-        // dirty-close prompt continuations) reach `close_tab_at` outside any
-        // durable wrapper, so a self-scheduled save is the single reliable
-        // site. `mark_dirty_and_save` coalesces via `cx.defer`, so a nested
-        // call from a wrapped caller is a harmless no-op-extra.
+        // Emptying a lane is a durable change that must survive restart, so
+        // self-schedule the persist here: interactive close paths reach
+        // `close_tab_at` outside any `mutate_durable` wrapper. The `cx.defer`
+        // coalescing makes a nested call from a wrapped caller harmless.
         self.mutate_durable(cx, |_, _| {});
     }
 
@@ -297,14 +262,10 @@ impl Workspace {
         if index >= self.active_runtime().tabs.len() {
             return;
         }
-        // The active lane's last tab. Close the window only when it is
-        // also the window's last tab across *every* lane and project;
-        // otherwise empty this lane in place (0 tabs → empty-state) and
-        // keep the window, so closing one lane's content never tears down
-        // the others parked in `runtimes`. When the window does close,
-        // other windows (and the app itself under `QuitMode::Default`)
-        // stay alive; the user reopens projects via File > New Window /
-        // Open… / Open Recent.
+        // The active lane's last tab. Close the window only when it is also
+        // the window's last tab across every lane and project; otherwise empty
+        // this lane in place (→ empty-state) and keep the window, so closing
+        // one lane's content never tears down others parked in `runtimes`.
         if self.active_runtime().tabs.len() <= 1 {
             if self.total_open_tabs() <= 1 {
                 window.remove_window();
@@ -599,11 +560,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Reject when the active lane is inaccessible OR there is no real
-        // focused pane (e.g. the empty-state of an inaccessible lane).
-        // Without a focused pane the `insert_split_at` loop below would
-        // match no tab, leaving the new pane orphaned in `panes` with no
-        // `TabEntry` referencing it.
+        // Reject an inaccessible lane or no real focused pane: without one the
+        // `insert_split_at` loop below matches no tab, orphaning the new pane
+        // in `panes` with no `TabEntry`.
         if self.active_lane_is_inaccessible() || !self.has_focused_pane() {
             return;
         }
@@ -622,11 +581,9 @@ impl Workspace {
                 // then parks the pane in `AgentSessionStatus::Error` rather
                 // than connecting.
                 let (local_cwd, remote_cwd) = self.active_lane_cwds();
-                // The split was chosen *because* the focused pane is an
-                // agent-chat pane, so inherit its agent — splitting a `codex`
-                // chat must open another `codex`, not reset to the catalog
-                // default. Fall back to the session-sticky default only if the
-                // source agent id can't be read.
+                // Inherit the focused pane's agent (splitting a `codex` chat
+                // opens another `codex`); fall back to the session-sticky
+                // default only if its agent id can't be read.
                 let focused = self.active_runtime().focused_pane_id;
                 let agent_id = self
                     .agent_chat_view(focused)
@@ -648,12 +605,9 @@ impl Workspace {
             }
         }
 
-        // Agent chat's prompt input lives in the bottom dock; reveal it (and
-        // mark the pane active) before `focus_pane` activates the input panel
-        // and moves keyboard focus there. Mirrors `open_agent_chat_pane`'s
-        // bottom-dock reveal + lazy connect (`focus_pane` →
-        // `maybe_connect_agent_chat`); the agent, though, is inherited from the
-        // source pane above rather than the session default `open_*` uses.
+        // Agent chat's prompt input lives in the bottom dock; reveal it and
+        // mark the pane active before `focus_pane` moves keyboard focus there.
+        // Mirrors `open_agent_chat_pane`'s reveal + lazy connect.
         if matches!(kind, NewPaneKind::AgentChat) {
             if !self.bottom_dock.read(cx).is_open {
                 self.bottom_dock.update(cx, |d, cx| {

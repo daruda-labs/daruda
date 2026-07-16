@@ -1,16 +1,10 @@
-//! Per-lane file tree data structure.
+//! Per-lane file tree data structure (GPUI-free).
 //!
-//! Each `Entry` is a node in a flat HashMap keyed by `EntryId`, with a
-//! parallel `path → id` index and a `parent_id → child_ids` index. The
-//! lazy state machine `UnloadedDir → PendingDir → Dir` mirrors Zed's
-//! `EntryKind`: an unloaded directory shows up as a row but its
-//! children are read on demand. `expanded` is a sorted `Vec<EntryId>`
-//! so toggling is O(log n) and stale ids are easy to drop after
-//! `remove_subtree`.
-//!
-//! The module is GPUI-free; callers feed `LoadedEntry` records (one
-//! per direct child) produced by the blocking `crate::files::load`
-//! helper into `apply_dir_load` to materialise the next layer.
+//! `Entry` nodes live in a flat HashMap keyed by `EntryId`, with parallel
+//! `path → id` and `parent_id → child_ids` indexes. The lazy state machine
+//! `UnloadedDir → PendingDir → Dir` reads a directory's children on demand;
+//! `expanded` is a sorted `Vec<EntryId>` for O(log n) toggle. Callers feed
+//! `LoadedEntry` records from `crate::files::load` into `apply_dir_load`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,7 +49,7 @@ pub struct Entry {
     pub is_symlink: bool,
     /// `name.starts_with('.')`. Drives the "dotfile last" sort group.
     pub is_hidden: bool,
-    /// Filled by gitignore evaluation (W-7j). Default false.
+    /// Filled by gitignore evaluation. Default false.
     pub is_ignored: bool,
 }
 

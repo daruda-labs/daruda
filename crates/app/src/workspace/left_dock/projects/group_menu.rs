@@ -1,14 +1,9 @@
-//! Context menu items for a Group header (left-dock lanes view,
-//! §5.1). Mirrors the lane row's `build_context_menu_items` shape
-//! — pure builder, takes a `WeakEntity<Workspace>` plus the captured
-//! group id + flags, returns a flat `Vec<ContextMenuItem>` ready for
-//! `Workspace::open_context_menu`.
+//! Context menu items for a Group header — a flat `Vec<ContextMenuItem>`
+//! ready for `Workspace::open_context_menu`.
 //!
-//! Items: Rename · color presets (6 + Clear) · Collapse/Expand toggle ·
-//! Delete. Sub-menus are intentionally absent (the upstream `ui`
-//! widget is flat-only — see `crates/app/src/ui/context_menu.rs`), so
-//! colour choices sit at the menu's top level interleaved with the
-//! other actions via Separators.
+//! Items: Rename · color presets (6 + Clear) · Collapse/Expand · Delete.
+//! Sub-menus are absent because the `ui` context-menu widget is flat-only,
+//! so colour choices sit at the top level separated by `Separator`s.
 
 use daruda_store::project::GroupId;
 use gpui::{SharedString, WeakEntity};

@@ -1,12 +1,8 @@
-//! Lane lifecycle operations on `Workspace`: create / remove
-//! validation + execution, modal openers, slot-id allocation, and the
-//! lane activation path (re-points `active` into the single runtimes map).
-//!
-//! All git CLI calls go through `cx.background_executor` so the
-//! UI thread never blocks; the post-git state mutations come back via
-//! `cx.update` to touch GPUI entities and `Window`. Modal state lives
-//! on `Workspace` (not in this file) because it has to outlive any
-//! single render cycle.
+//! Lane lifecycle operations on `Workspace`: create / remove validation
+//! + execution, modal openers, slot-id allocation, and the lane
+//! activation path (re-points `active` into the single runtimes map).
+//! Git CLI runs on `cx.background_executor`; post-git state mutations
+//! return via `cx.update`.
 
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use daruda_store::tasks::TaskAgentSurface;
@@ -21,21 +17,18 @@ use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_a
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
-/// Immutable plan produced by `CreateWorktreeModal::validate` — holds
-/// the sanitized branch, derived new-path, and repo_root so the modal
-/// can ship clones to a background executor without borrowing
-/// `Workspace`.
+/// Immutable plan from `CreateWorktreeModal::validate` — sanitized
+/// branch, derived new-path, and repo_root, so the modal can ship clones
+/// to a background executor without borrowing `Workspace`.
 #[derive(Debug, Clone)]
 pub(in crate::workspace) struct CreateWorktreePlan {
     pub branch: String,
     pub new_path: std::path::PathBuf,
     pub repo_root: std::path::PathBuf,
-    /// Ref the new branch should be based on (e.g. `main`,
-    /// `origin/main`). `None` = whatever git's `lane add` defaults
-    /// to (current HEAD when paired with `-b`).
+    /// Ref the new branch is based on. `None` = git's default (current
+    /// HEAD when paired with `-b`).
     pub base_ref: Option<String>,
-    /// Free-form description captured at creation time.
-    /// Surfaced as the lane row sublabel in the left dock.
+    /// Free-form description; surfaced as the lane row sublabel.
     pub description: Option<String>,
 }
 
@@ -47,10 +40,9 @@ pub(in crate::workspace) struct RemoveWorktreePlan {
 }
 
 impl Workspace {
-    /// Switch to the nth lane of the active project by left-dock
-    /// position (0-indexed). Lanes are sorted by `tab_order` so the
-    /// position matches what the user sees in the left dock. No-ops
-    /// when `index` is out of range or no project is loaded.
+    /// Switch to the nth lane (0-indexed) of the active project, sorted
+    /// by `tab_order` to match the left-dock order. No-ops when `index`
+    /// is out of range or no project is loaded.
     pub(in crate::workspace) fn activate_lane_by_index(
         &mut self,
         index: usize,
@@ -81,8 +73,8 @@ impl Workspace {
     // ---- Lane switcher (Cmd+P) ----
 
     /// Toggle the fuzzy Lane switcher. On open, snapshot one candidate
-    /// per lane across every project so the overlay render reads a
-    /// frozen list (MVU: render never reaches into live project state).
+    /// per lane across every project so the overlay render reads a frozen
+    /// list (MVU: render never reaches into live project state).
     pub(in crate::workspace) fn on_toggle_lane_switcher(
         &mut self,
         _: &ToggleLaneSwitcher,
@@ -117,8 +109,7 @@ impl Workspace {
             .collect()
     }
 
-    /// Activate the focused lane and close the switcher. Mirrors
-    /// `execute_palette_action`'s shape.
+    /// Activate the focused lane and close the switcher.
     pub(in crate::workspace) fn execute_lane_switcher_selection(
         &mut self,
         window: &mut Window,
@@ -143,8 +134,7 @@ impl Workspace {
     }
 
     /// Validate that `target` is removable and resolve its (repo_root,
-    /// path) for the shell-out. Pure — does not mutate state, so it's
-    /// safe to call from tests or action handlers without side effects.
+    /// path) for the shell-out. Pure — no state mutation.
     pub(in crate::workspace) fn validate_remove_lane(
         &self,
         target: LaneRef,
@@ -166,31 +156,25 @@ impl Workspace {
     }
 
     /// Post-git cleanup on the UI thread: switch away if active, then
-    /// drop the entry and its runtime. Invariant: the active lane
-    /// is always survivable because `validate_remove_lane` refuses
-    /// main/default kinds, so there's always at least one other entry
-    /// in the project.
+    /// drop the entry and its runtime. Invariant: the active lane is
+    /// always survivable because `validate_remove_lane` refuses
+    /// main/default kinds, so at least one other entry remains.
     pub(in crate::workspace) fn finalize_remove_lane(
         &mut self,
         target: LaneRef,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Capture the lane path before removal so the per-lane
-        // entries in the `SkillsState` / `McpState` Globals can be
-        // pruned — otherwise the BTreeMap grows unbounded across the
-        // session as lanes come and go.
+        // Capture the path before removal so the per-lane `SkillsState` /
+        // `McpState` Global entries can be pruned (else they grow
+        // unbounded across the session).
         let removed_path = self.lane_for(target).map(|w| w.path.clone());
 
-        // Pick the fallback `LaneRef` to activate when the removal
-        // strips the currently active lane. Prefer a sibling
-        // lane in the same project (Project membership stays put),
-        // then fall back to *another* project's snap target so the
-        // status bar / window title / pane runtime never wedge on a
-        // dangling ref. Returning `None` here only happens in the
-        // degenerate case where the workspace is about to be empty —
-        // the section-header `[+]` is hidden for non-git workspaces so
-        // in practice main lanes keep at least one per project.
+        // Fallback `LaneRef` to activate when removal strips the active
+        // lane: prefer a sibling in the same project, else another
+        // project's snap target so nothing wedges on a dangling ref.
+        // `None` only in the degenerate about-to-be-empty case (the `[+]`
+        // is hidden for non-git workspaces, so main lanes keep ≥1 each).
         let fallback_target: Option<LaneRef> = if self.active == target {
             let same_project = self
                 .projects
@@ -218,14 +202,12 @@ impl Workspace {
         if let Some(fallback) = fallback_target {
             self.activate_lane(fallback, window, cx);
         }
-        // Release the removed lane's panes from PTY tracking before
-        // their runtime drops — otherwise the tracker keeps walking
-        // the dead shell PIDs for the window's lifetime. Gated on
-        // `target != self.active`: if no fallback was found above
-        // (`fallback_target` was `None` — the degenerate about-to-be-
-        // empty case) `target` is still the active lane, and dropping
-        // its runtime would violate the "active runtime always present"
-        // invariant. The window is closing in that case, so leave it.
+        // Release the removed lane's panes from PTY tracking before their
+        // runtime drops — else the tracker keeps walking dead shell PIDs.
+        // Gated on `target != self.active`: if no fallback was found
+        // (degenerate about-to-be-empty case), dropping the active
+        // runtime would break the "active runtime always present"
+        // invariant. The window is closing then, so leave it.
         let removed_pane_ids: Vec<_> = self
             .main_area
             .runtimes
@@ -236,11 +218,10 @@ impl Workspace {
             self.release_pane_tracking(&removed_pane_ids, cx);
             self.main_area.runtimes.remove(&target);
         }
-        // W-7 per-lane state must be cleared too — otherwise the
-        // notify watcher keeps running, the cache holds stale paths,
-        // and the gitignore matcher leaks. Dropping the entries also
-        // drops the embedded `RecommendedWatcher`, which stops the
-        // kernel-side watch.
+        // Clear per-lane state too — else the notify watcher keeps
+        // running, the cache holds stale paths, and the gitignore matcher
+        // leaks. Dropping the entries also drops the embedded
+        // `RecommendedWatcher`, stopping the kernel-side watch.
         self.file_tree.file_trees.remove(&target);
         self.file_tree.file_watchers.remove(&target);
         self.file_tree.files_reload_queues.remove(&target);
@@ -251,10 +232,9 @@ impl Workspace {
         self.git_status_cache.remove(&target);
         self.git_collapsed_dirs.remove(&target);
         self.git_changes_cursor.remove(&target);
-        // Bottom-dock drafts are keyed per pane, so drop the entry for
-        // every pane that lived in the removed lane; clear `input_owner`
-        // if it pointed at one of them (the visible text then belongs to
-        // no live pane).
+        // Bottom-dock drafts are keyed per pane: drop the entry for every
+        // pane in the removed lane; clear `input_owner` if it pointed at
+        // one of them.
         for pane_id in &removed_pane_ids {
             self.forget_pane_input_draft(*pane_id);
         }
@@ -271,38 +251,29 @@ impl Workspace {
                 s.forget_lane(&path);
             });
             // Drop the per-lane slice from `SettingsStore` so its
-            // BTreeMap doesn't grow unbounded across the session
-            // (CLAUDE.md §"GPUI shared-state convention — Cleanup
-            // rule").
+            // BTreeMap doesn't grow unbounded (CLAUDE.md §"GPUI
+            // shared-state convention — Cleanup rule").
             cx.update_global::<crate::settings_store::SettingsStore, _>(|s, _| {
                 s.forget_lane(&path);
             });
         }
-        // The watcher's pair list is fixed at spawn time, so removing
-        // a lane leaves a dead `~/.claude/projects/<encoded>/`
-        // entry under FSEvents subscription — re-spawn so the lookup
-        // table matches the live lane set.
+        // Watcher pair list is fixed at spawn, so removing a lane leaves
+        // a dead JSONL subscription — re-spawn to match the live lane set.
         self.refresh_jsonl_watcher(cx);
-        // Project skill scope is anchored to the active lane's
-        // root; restart the watcher so it tracks the new active path.
+        // Skill scope follows the active lane's root; restart the watcher.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
-        // Empty closure: see group_ops.rs:83 for rationale. The preceding
-        // refresh_* calls finish the mutation chain; the wrapper only needs
-        // to schedule persist here.
+        // Empty closure: see group_ops.rs:83. Only schedules persist.
         self.mutate_durable(cx, |_, _| {});
-        // Force a render even when no fallback fired — the lane
-        // list shrank by one and the dock would otherwise hold a row
-        // for the now-removed lane until an unrelated render.
-        // Same defensive notify shape `add_project` uses.
+        // Force a render even when no fallback fired — the lane list
+        // shrank and the dock would otherwise keep the removed row.
         cx.notify();
     }
 
-    /// Resolve the active git repo_root from the active project's
-    /// lane list. Returns `None` when the workspace isn't backed by
-    /// a git repo. Used by callers (e.g. the `[+]` button) that need to
-    /// construct a `CreateWorktreeModal` without traversing the
-    /// lane list.
+    /// Resolve the active git repo_root from the active project's lane
+    /// list. `None` when the workspace isn't git-backed. Lets callers
+    /// (e.g. the `[+]` button) build a `CreateWorktreeModal` without
+    /// traversing the lane list.
     pub(in crate::workspace) fn git_repo_root(&self) -> Option<std::path::PathBuf> {
         self.active_lanes().iter().find_map(|w| match &w.kind {
             daruda_store::project::LaneKind::Git { repo_root, .. } => Some(repo_root.clone()),
@@ -310,12 +281,10 @@ impl Workspace {
         })
     }
 
-    /// Post-git UI-thread work: spawn a pane at the new checkout,
-    /// wrap it in a Tab / LaneRuntime, register the Lane
-    /// entry, and activate the newcomer. Errors here leave the freshly
-    /// created git worktree orphaned on disk (the user can clean up
-    /// via `git worktree prune`) and bubble the message back so the
-    /// modal shows it.
+    /// Post-git UI-thread work: spawn a pane at the new checkout, wrap it
+    /// in a Tab / LaneRuntime, register the Lane, and activate it. Errors
+    /// leave the created worktree orphaned on disk (recover via `git
+    /// worktree prune`) and bubble the message back to the modal.
     pub(in crate::workspace) fn finalize_create_lane(
         &mut self,
         plan: CreateWorktreePlan,
@@ -334,22 +303,20 @@ impl Workspace {
             base_ref,
             description,
         } = plan;
-        // The lane's initial pane mirrors the requested surface: a terminal
-        // (default, incl. every manual lane creation) or an in-app Agent chat
-        // session rooted at the new checkout. `create_agent_chat_pane` parks
-        // Idle and connects lazily on first focus — the `activate_lane` below
-        // focuses it, which starts the ACP session.
+        // The initial pane mirrors the requested surface: a terminal
+        // (default) or an in-app Agent chat rooted at the new checkout.
+        // The agent-chat pane parks Idle and connects lazily on first
+        // focus — the `activate_lane` below focuses it, starting the ACP
+        // session.
         let pane = match surface {
             TaskAgentSurface::Terminal => self
                 .create_pane_with_cwd(Some(new_path.clone()), window, cx)
                 .map_err(|e| e.to_string())?,
             TaskAgentSurface::AgentChat => {
-                // No source agent-chat pane here (a new lane), so open under the
-                // session-sticky default — matching `open_agent_chat_pane`.
-                // `CreateWorktreePlan` carries no `remote_cwd` (a brand-new lane
-                // only gets one via the sidebar's right-click, after creation),
-                // so an agent whose command needs `{{cwd}}` parks in the
-                // actionable "no remote path set" error here rather than
+                // No source pane (new lane), so open under the
+                // session-sticky default. A brand-new lane has no
+                // `remote_cwd`, so an agent whose command needs `{{cwd}}`
+                // parks in the "no remote path set" error rather than
                 // connecting.
                 let agent_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
                 self.create_new_agent_chat_pane(agent_id, Some(new_path.clone()), None, window, cx)
@@ -373,10 +340,9 @@ impl Workspace {
             .project_for(project_id)
             .map(|p| p.lanes.len())
             .unwrap_or(0) as u32;
-        // A freshly-added linked lane's toplevel is exactly
-        // `new_path` — `git worktree add` writes the per-lane
-        // `.git` pointer file there. No anchoring happens at this
-        // point either, so `path` and `worktree_root` start equal.
+        // A freshly-added linked lane's toplevel is exactly `new_path`
+        // (where `git worktree add` writes the `.git` pointer). No
+        // anchoring yet, so `path` and `worktree_root` start equal.
         let worktree_root = new_path.clone();
         let mut wt = crate::lane::Lane::git(
             new_id,
@@ -401,22 +367,20 @@ impl Workspace {
         };
         self.main_area.runtimes.insert(new_ref, runtime);
         self.activate_lane(new_ref, window, cx);
-        // New cwd → new `~/.claude/projects/<encoded>/` to watch.
+        // New cwd → new JSONL dir to watch.
         self.refresh_jsonl_watcher(cx);
         // New lane root → new project-skills directory to watch.
         self.refresh_skills_watcher(cx);
         self.refresh_mcp_watcher(window, cx);
-        // Returning the spawned pane's id lets task-driven callers
-        // (start_task) write into that PTY directly instead of
-        // relying on `focused_pane_id`, which races with whatever
-        // focus state activate_lane leaves behind on edge cases.
+        // Return the spawned pane's id so task-driven callers (start_task)
+        // write into that PTY directly rather than relying on
+        // `focused_pane_id`, which races with activate_lane's focus state.
         Ok(pane_id)
     }
 
-    /// Monotonic lane id allocator scoped to `project_id`.
-    /// Walks both the lane list and every registered runtime key
-    /// so a phantom key from a crash mid-remove never collides with a
-    /// fresh id.
+    /// Monotonic lane id allocator scoped to `project_id`. Walks both the
+    /// lane list and every runtime key so a phantom key from a crash
+    /// mid-remove never collides with a fresh id.
     fn allocate_lane_id(&self, project_id: ProjectId) -> LaneId {
         let max_list = self
             .project_for(project_id)
@@ -439,14 +403,11 @@ impl Workspace {
             .unwrap_or(0)
     }
 
-    /// Switch the visible lane. Every lane's runtime lives in the single
+    /// Switch the visible lane. Every runtime lives in the single
     /// `runtimes` map; the active lane is the entry under `self.active`,
-    /// so activating a different one just re-points that key — no fields
-    /// are moved and every parked lane's PTY entities keep running. If the
-    /// target has never been populated (e.g. `bootstrap_from_project`
-    /// loaded its metadata from `git worktree list` but no tabs were
-    /// serialized), a fresh pane is spawned at the lane's path so the user
-    /// never lands on an empty viewport.
+    /// so activating another just re-points that key — nothing is moved
+    /// and parked lanes' PTY entities keep running. An unpopulated target
+    /// seeds an empty runtime entry (no lazy pane spawn).
     pub(in crate::workspace) fn activate_lane(
         &mut self,
         target: LaneRef,
@@ -460,63 +421,49 @@ impl Workspace {
         if self.lane_for(target).is_none() {
             return;
         }
-        // Leaving the active lane abandons any pending amend — the prefilled
-        // message belongs to the lane we're leaving. No-op when not amending.
+        // Leaving the active lane abandons any pending amend (the prefill
+        // belongs to the lane we're leaving). No-op when not amending.
         self.exit_amend_mode(window, cx);
         // Re-classify the incoming lane's root against the live
-        // filesystem before any path-dependent work runs below. A lane
-        // whose directory vanished while inactive must flip to
-        // non-`Present` here so the lazy-seed (PTY spawn) and the
-        // path-dependent tail are skipped.
+        // filesystem first: a lane whose directory vanished while inactive
+        // flips to non-`Present` here, skipping the path-dependent tail.
         self.recompute_availability_for(target);
-        // Trigger #5 — active lane change. Both the previous and the
-        // incoming visible lists become stale (selection moves with the
-        // active id).
+        // Active-lane change invalidates both the previous and incoming
+        // visible file lists (selection moves with the active id).
         let previous = self.active;
         self.invalidate_visible_files_cache(previous);
         self.invalidate_visible_files_cache(target);
-        // Clear keyboard cursor — it lived in the previous lane's
-        // visible list.
+        // Clear keyboard cursor — it lived in the previous visible list.
         self.file_tree.files_selection = None;
 
-        // 1. Re-point the active key. Both lanes' runtimes already live in
-        //    the single `runtimes` map, so there is nothing to freeze or
-        //    swap — the previous lane's runtime stays under its key and the
-        //    target's stays under its. A lane loaded from `git worktree
-        //    list` but never activated has no entry yet; `entry().or_default`
-        //    seeds an empty one so `active_runtime()` resolves immediately.
+        // Re-point the active key. Both runtimes already live in the
+        // single `runtimes` map — nothing to swap. A lane never activated
+        // has no entry yet; `entry().or_default` seeds an empty one so
+        // `active_runtime()` resolves immediately.
         self.main_area.runtimes.entry(target).or_default();
-        // Drop any in-flight drag hover so a stale half-fill overlay does not
-        // linger on the newly-activated lane. The notify paths below cover it.
+        // Drop any in-flight drag hover so a stale half-fill overlay does
+        // not linger on the newly-activated lane.
         self.main_area.pane_drop_hover = None;
 
         self.active = target;
 
-        // The bottom-dock draft is swapped per input pane by
-        // `set_focused_pane`, not per lane: a lane switch changes the
-        // focused pane, so the swap runs on the focus path below when the
-        // incoming lane has a focused pane. An empty lane has none, so the
-        // draft stays put.
+        // The bottom-dock draft swaps per input pane (via
+        // `set_focused_pane`), not per lane — handled on the focus path
+        // below when the incoming lane has a focused pane.
 
-        // Update the project's last-active-lane hint so clicking
-        // the project header in the left dock snaps to the same
-        // lane the user just left.
+        // Update the last-active-lane hint so clicking the project header
+        // snaps back to the lane the user just left.
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == target.project) {
             project.last_active_lane_id = target.lane;
         }
-        // File viewer panes live in their own lane's runtime entry, so
-        // each lane retains its own open files across activations.
 
-        // An unavailable lane (root deleted / unreadable) becomes the
-        // active lane — `active` now points at its (possibly empty)
-        // runtime entry — but the path-spawning work is skipped:
-        // lazy-seed would root a PTY at the dead path, and
-        // `refresh_git_status` would shell out `git status` against it
-        // and spam an error toast. The right-dock reconcile + persist
-        // below are filesystem-tolerant (skills/mcp scan a missing dir as
-        // empty; the commit button reads in-memory cache) so they still
-        // run — otherwise the panels would keep showing the *previous*
-        // lane's data after the switch.
+        // An unavailable lane (root deleted / unreadable) still becomes
+        // active, but path-spawning work is skipped: it would root a PTY
+        // at the dead path and `refresh_git_status` would spam a toast.
+        // The right-dock reconcile + persist below are filesystem-tolerant
+        // (skills/mcp scan a missing dir as empty; commit button reads
+        // in-memory cache), so they run — else the panels keep showing the
+        // previous lane's data.
         if self
             .lane_for(target)
             .map(|l| l.availability != LaneAvailability::Present)

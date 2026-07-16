@@ -1,25 +1,8 @@
-//! Macro edit modal — create or edit a `ButtonWidget` via form.
+//! Macro edit modal for creating or editing a `ButtonWidget`.
 //!
-//! Six fields:
-//!   * `label`              (Input, required)
-//!   * `send`               (Input, required)
-//!   * `auto_enter`         (Checkbox, default checked)
-//!   * `display_as_icon`    (Checkbox, default unchecked)
-//!   * `icon`               (Input, required when display_as_icon)
-//!   * `shortcut`           (Input, optional — e.g. "cmd-shift-1")
-//!
-//! Modes:
-//!   * Create — empty fields, defaults applied.
-//!   * Edit   — fields seeded from the existing widget. `widget_id`
-//!     is captured so submit can locate the original.
-//!
-//! Tab order: label → send → auto_enter → display_as_icon → icon →
-//! shortcut → Record button. Cycled by GPUI's tab system through the
-//! `.tab_group()` on the modal root and each input's `tab_index`.
-//!
-//! Submit dispatches synchronously into Workspace
-//! (`add_widget` / `update_widget`) — no async work, so this modal is
-//! shorter than `CreateWorktreeModal`.
+//! Create starts from defaults; edit seeds fields from the source widget and
+//! keeps `widget_id` for submit. GPUI Tab order follows field order plus the
+//! Record button. Submit is synchronous Workspace mutation only.
 
 use crate::ui::theme;
 use daruda_store::panels::{ButtonDisplay, ButtonWidget, TabId, WidgetId, new_widget_id};

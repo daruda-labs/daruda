@@ -167,13 +167,11 @@ impl AgentLaunch {
 }
 
 /// Private wire representation for [`AgentDefinition`]. `id`/`name` stay flat
-/// TOML keys; the launch variant is either the flat legacy `command` key
-/// (`AgentLaunch::Raw`, byte-identical to every config written before this
-/// migration) or exactly one of the `[agents.ssh]` / `[agents.docker]`
-/// sub-tables. Mirrors the `PaneCwd`/`PaneCwdRepr` idiom in
-/// `daruda_store::project` for the same "clean enum in Rust, different wire
-/// shape on disk" problem — here as a plain (not untagged) struct since the
-/// three launch fields live at different keys rather than sharing one slot.
+/// TOML keys; the launch variant is either the flat `command` key
+/// (`AgentLaunch::Raw`, kept for backward-compatible configs) or exactly one
+/// of the `[agents.ssh]` / `[agents.docker]` sub-tables — a plain (not
+/// untagged) struct since the three launch fields live at different keys
+/// rather than sharing one slot.
 #[derive(Serialize, Deserialize)]
 struct AgentDefinitionRepr {
     id: String,

@@ -1,31 +1,12 @@
-//! Usage tab body — a widget-style dashboard modelled on the Übersicht
-//! `claude-usage` widget. Top to bottom:
+//! Usage tab body — a widget-style dashboard (header, status pill, plan
+//! gauges, today's stats, 7-day chart, totals) modelled on the Übersicht
+//! `claude-usage` widget.
 //!
-//! ```text
-//! ┌─ Usage ──────────────────────────────────────────────────────┐
-//! │  [C] Claude Code                           [TEAM 5x]          │ ← header
-//! │  ● Operational                                                │ ← status pill
-//! │  PLAN USAGE                              ↻ 3m ago             │ ← section + refresh
-//! │  ┌ 5h ───────────────────────── 12% ┐                        │ ← gauge card
-//! │  │ ████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │                        │
-//! │  │ Resets in 4h 43m                  │                        │
-//! │  └───────────────────────────────────┘                       │
-//! │  TODAY                                                         │
-//! │  [5.0K Messages][21 Sessions][1.3K Tool Calls]               │ ← stat cards
-//! │  LAST 7 DAYS                                                   │
-//! │  ▃ █ ▂ ▄ ▅ ▃ ▆   (weekday labels, today highlighted)         │ ← bar chart
-//! │  248.2K Total Messages  843 Total Sessions  78 Active Days   │ ← totals
-//! └──────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! Plan limits come from `RightDockSnapshot::plan_limits` (refreshed by
-//! the limits pump); activity from `RightDockSnapshot::activity` (the
-//! local JSONL aggregation pump). The ↻ badge dispatches
-//! `Workspace::refresh_usage_now`.
-//!
-//! All static text comes from `surface::strings::usage_*`; all pixel
-//! and color values from `crate::ui::theme`. Direct `hsla(...)` /
-//! `px(N)` literals are caught by `scripts/lint-inline-literals.sh`.
+//! Plan limits come from `RightDockSnapshot::plan_limits` (limits pump);
+//! activity from `RightDockSnapshot::activity` (local JSONL aggregation
+//! pump). The ↻ badge dispatches `Workspace::refresh_usage_now`. Static
+//! text comes from `surface::strings::usage_*`, pixels/colors from
+//! `crate::ui::theme`.
 
 use std::time::{Duration, SystemTime};
 
@@ -200,7 +181,7 @@ fn gauge_card(
     let t = theme::current(cx);
     let label: SharedString = label.into();
 
-    // Border-only card (no fill), `theme.radius` corners — see B5.
+    // Border-only card (no fill), `theme.radius` corners.
     let card = group_box().outline();
 
     let Some(win) = window else {
@@ -325,12 +306,9 @@ fn today_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
 /// One stat card: a big value over a muted label, centered.
 fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
-    // `flex_1` lives on a wrapper div, not the GroupBox: GroupBox forces
-    // `w_full` internally, so the wrapper owns the 1/3 grid width and the
-    // GroupBox fills it (putting flex_1 on the GroupBox makes all three
-    // claim full width and overflow the dock). GroupBox content is
-    // left-aligned, so a full-width `items_center` child re-centers the
-    // value over its label.
+    // `flex_1` on a wrapper div, not the GroupBox (GroupBox forces
+    // `w_full`, so the wrapper owns the 1/3 grid width). A full-width
+    // `items_center` child re-centers over the left-aligned GroupBox.
     div().flex_1().min_w_0().child(
         group_box().outline().child(
             div()
@@ -359,14 +337,11 @@ fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
 // 7-day activity chart
 // ----------------------------------------------------------------
 
-/// "LAST 7 DAYS" heading + a bar chart over the most recent ≤7 days
-/// that have activity, weekday-labeled, with today highlighted. The
-/// aggregator stores only days with activity (ascending by date), so the
-/// trailing entries are the most recent active days — zero days are
-/// dropped, not padded. Today is matched by date (not position), so a
-/// zero-activity today simply isn't highlighted rather than
-/// mis-highlighting the last active day. Heights normalize to the
-/// busiest day in the window.
+/// "LAST 7 DAYS" heading + a bar chart over the most recent ≤7 days with
+/// activity, weekday-labeled, today highlighted. The aggregator stores
+/// only active days (ascending by date), so zero days are dropped, not
+/// padded; today is matched by date (not position). Heights normalize to
+/// the busiest day in the window.
 fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> AnyElement {
     let today = chrono::Local::now().date_naive();
     let n = activity.daily.len();
@@ -452,10 +427,8 @@ fn chart_bar(
 // ----------------------------------------------------------------
 
 /// All-time totals: a "TOTAL" section header over a 3-up row of
-/// value-over-label cells (matching the "today" section). The
-/// per-cell labels drop their "Total"/"Active" prefix since the
-/// section header carries that context. Borderless GroupBox
-/// (`.normal()`) so the footer reads as a summary, not a card.
+/// value-over-label cells. Borderless GroupBox (`.normal()`) so the
+/// footer reads as a summary, not a card.
 fn totals_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
     div()
         .flex()
@@ -489,10 +462,9 @@ fn totals_row(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
         ))
 }
 
-/// One totals cell: a borderless GroupBox holding a value over its
-/// label, centered (GroupBox content is left-aligned, so a full-width
-/// `items_center` child re-centers it). `flex_1` on the wrapper, not
-/// the GroupBox, since GroupBox forces `w_full`.
+/// One totals cell: a borderless GroupBox holding a centered value over
+/// its label. `flex_1` on the wrapper, not the GroupBox (which forces
+/// `w_full`).
 fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     div().flex_1().min_w_0().child(

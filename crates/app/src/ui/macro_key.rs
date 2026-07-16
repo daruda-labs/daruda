@@ -1,30 +1,8 @@
 //! Bottom-dock macro key widget.
 //!
-//! Square or pill button tuned to the macro grid's tone — distinct
-//! enough from `gpui_component::Button` that wrapping it is incompatible:
-//! callers chain external `.hover(...)` / `.on_right_click(...)` /
-//! `.tooltip(closure)` which gpui_component Button cannot host (single
-//! hover slot consumed internally; no right-click / closure-tooltip API).
-//!
-//! Two display modes:
-//!
-//! | Mode  | Use case                          |
-//! |-------|-----------------------------------|
-//! | `Text` | pill-style key labelled with `label` (content-driven width) |
-//! | `Icon` | fixed-square key showing `icon` codepoint (falls back to first char of `label`) |
-//!
-//! ```ignore
-//! MacroKey::new(element_id, label)
-//!     .icon_mode()
-//!     .icon(codepoint)
-//!     .tooltip(build_fn)
-//!     .on_click(left_handler)
-//!     .on_right_click(right_handler)
-//! ```
-//!
-//! For modal footer / form-submit buttons (Primary / Secondary / Danger)
-//! use the `crate::ui::button*` factories — those wrap
-//! `gpui_component::Button` directly.
+//! This stays separate from `gpui_component::Button` because macro keys need
+//! external hover styling, right-click handlers, and closure-built tooltips.
+//! Use `crate::ui::button*` for modal/footer actions.
 
 use crate::ui::theme;
 use gpui::{
@@ -35,7 +13,7 @@ use gpui::{
 /// Content display mode for a [`MacroKey`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum KeyDisplay {
-    /// Pill button labelled with `label`. Width is content-driven.
+    /// Content-width pill labelled with `label`.
     Text,
     /// Fixed-square key showing `icon` codepoint (falls back to first char of `label`).
     Icon,

@@ -1,5 +1,5 @@
 //! TaskEdit pane lifecycle — builder, open / find, branch validation,
-//! save / discard / start dispatchers (R-19 + R-25 + I-12).
+//! save / discard / start dispatchers.
 //!
 //! The pane itself is rendered by `render::task_edit_pane`; this
 //! module owns the *operations* (open, save, validate, find existing)
@@ -75,7 +75,7 @@ pub(in crate::workspace) fn validate_branch(text: &str) -> BranchValidation {
 impl Workspace {
     /// Open (or focus) the TaskEdit pane for `task_id`. `None` opens a
     /// fresh draft pane. Same task → second open re-focuses the
-    /// existing pane (I-6) instead of creating a duplicate.
+    /// existing pane instead of creating a duplicate.
     pub(in crate::workspace) fn open_task_edit_pane(
         &mut self,
         task_id: Option<TaskId>,
@@ -205,10 +205,9 @@ impl Workspace {
             },
         );
 
-        // R-21 subtask inputs — one for the trailing `[+ Add subtask…]`
+        // Subtask inputs — one for the trailing `[+ Add subtask…]`
         // row, one shared across all inline-rename rows. Both go
-        // through `gpui_component::Input` (IME-verified equivalent of
-        // the old daruda TextInput per ADR S1).
+        // through `gpui_component::Input` (IME-verified).
         let new_subtask_input = cx.new(|cx_state| {
             InputState::new(window, cx_state)
                 .placeholder(crate::surface::strings::task_subtask_add_placeholder())
@@ -235,7 +234,7 @@ impl Workspace {
             },
         );
 
-        // Base-lane selector (R-19 / C-1). The leading
+        // Base-lane selector. The leading
         // empty-string sentinel maps to `Task::base_worktree_path ==
         // None`; the remaining options are registered lanes keyed
         // by absolute path. Building the option list once here keeps
@@ -286,7 +285,7 @@ impl Workspace {
                 .unwrap_or_default(),
         };
 
-        // R-20: install the FS watcher when the task has a lane
+        // Install the FS watcher when the task has a lane
         // and the prompt file is already on disk. Backlog tasks have
         // no lane yet; drafts have neither. Subsequent
         // `start_task` runs that materialise the lane are out of
@@ -334,7 +333,7 @@ impl Workspace {
 
     /// Auto-derive branch from title — fires from the title input's
     /// `Changed` event. No-op once the user has manually edited the
-    /// branch (I-12 / `branch_override = true`).
+    /// branch (`branch_override = true`).
     pub(in crate::workspace) fn refresh_task_edit_branch(
         &mut self,
         pane_id: PaneId,
@@ -435,7 +434,7 @@ impl Workspace {
 
     /// Dynamically install the prompt-file FS watcher on a TaskEdit
     /// pane that's still open when its task transitions Backlog →
-    /// Running (R-20). At pane-open time the lane didn't exist
+    /// Running. At pane-open time the lane didn't exist
     /// yet so `install_prompt_watcher` returned `None`; `start_task`
     /// just wrote the file, so the watcher can finally subscribe.
     /// No-op when the pane is closed, when there's already a watcher
@@ -474,8 +473,8 @@ impl Workspace {
     /// `[+ Add subtask…]` row submitted (Enter). Routes the text into
     /// `add_subtask`, then clears the input so the next entry can
     /// start fresh. No-op for draft panes — subtasks attach to
-    /// persisted tasks only (R-21 UI design: drafts show a "save
-    /// first" hint in place of the list).
+    /// persisted tasks only — drafts show a "save
+    /// first" hint in place of the list.
     pub(in crate::workspace) fn submit_new_subtask(
         &mut self,
         pane_id: PaneId,
@@ -607,7 +606,7 @@ impl Workspace {
 
     /// Persist the pane's form into `GlobalTasks` without closing the
     /// pane. Used by the close-tab and window-close batch flows
-    /// (R-25) where one wrapping prompt covers multiple panes and the
+    /// where one wrapping prompt covers multiple panes and the
     /// caller drives the close pass separately. Returns the resolved
     /// `task_id` on success, `None` when the form is invalid (the
     /// caller should keep the pane open in that case).
@@ -628,7 +627,7 @@ impl Workspace {
         // picked a stale option" — but `start_task` re-runs
         // `branch_for_worktree_path` and falls back to git's default
         // when the lookup misses, so the worst case is the same
-        // behaviour as `None` (R-19 risk note).
+        // behaviour as `None`.
         let base_path: Option<std::path::PathBuf> = if form.base_value.is_empty() {
             None
         } else {
@@ -671,7 +670,7 @@ impl Workspace {
         };
 
         // Re-baseline the dirty snapshot so the pane no longer reads
-        // as dirty after a successful save (R-25 / I-8).
+        // as dirty after a successful save.
         if let Some(te) = self.task_edit_content_mut_for(pane_id) {
             te.task_id = Some(task_id.clone());
             te.saved_snapshot = crate::workspace::main_area::pane::TaskEditSnapshot {
@@ -688,7 +687,7 @@ impl Workspace {
         Some(task_id)
     }
 
-    /// Close the TaskEdit pane without saving. R-25's full dirty-prompt
+    /// Close the TaskEdit pane without saving. The full dirty-prompt
     /// flow lives on `close_pane_by_id`; this is the explicit Discard
     /// path the form footer dispatches to.
     pub(in crate::workspace) fn discard_task_edit_pane(
@@ -697,10 +696,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Mark the pane as non-dirty so the close prompt (R-25)
+        // Mark the pane as non-dirty so the close prompt
         // doesn't second-guess the user's explicit Discard. Routes
         // through `current_snapshot` so any new field on
-        // `TaskEditSnapshot` (e.g. C-1 `base_value`) is captured by
+        // `TaskEditSnapshot` (e.g. `base_value`) is captured by
         // a single source of truth rather than duplicated here.
         if let Some(pane) = self.active_runtime().panes.iter().find(|p| p.id == pane_id)
             && let Some(te) = pane.task_edit_content()
@@ -763,7 +762,7 @@ struct TaskEditFormSnapshot {
 
 /// CRLF → LF for dirty-comparison snapshots. External editors (vim,
 /// VS Code on Windows) may rewrite the prompt file with CRLF; we
-/// don't want that to register as a user edit (R-25 risk note).
+/// don't want that to register as a user edit.
 pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
@@ -844,7 +843,7 @@ impl Workspace {
     /// rewrites `<wt>/.daruda/task-<branch>.md`. Reloads the editor
     /// silently when the pane is clean; surfaces a conflict prompt
     /// (Use disk version / Keep my version / Diff) when the pane is
-    /// dirty (R-20 / I-13).
+    /// dirty.
     pub(in crate::workspace) fn handle_prompt_file_changed(
         &mut self,
         pane_id: PaneId,
@@ -954,8 +953,6 @@ impl Workspace {
                 2 => {
                     // Split the TaskEdit pane's tab to the right with
                     // the disk version so the user sees both at once.
-                    // (R-20 follow-up — replaces the previous "new tab"
-                    // fallback.)
                     this.open_disk_file_for_diff(pane_id, path_for_diff.clone(), window, cx);
                 }
                 _ => {}
@@ -982,7 +979,7 @@ impl Workspace {
     }
 
     /// Open `<wt>/.daruda/task-<branch>.md` in a fresh file viewer
-    /// tab (R-20 `[📄 Open file]` button). No-op for tasks that
+    /// tab (`[📄 Open file]` button). No-op for tasks that
     /// haven't been started yet — Backlog tasks have no lane
     /// path, and Started tasks whose prompt file disappeared (e.g.
     /// manual delete) silently bail rather than open a viewer onto a
@@ -1036,7 +1033,7 @@ impl Workspace {
         self.open_files_entry(wt_ref, path, window, cx);
     }
 
-    /// Helper used by the R-20 conflict prompt's `[Diff]` branch.
+    /// Helper used by the conflict prompt's `[Diff]` branch.
     /// Opens `path` in a file viewer pane *split to the right of* the
     /// owning TaskEdit pane so the user sees the in-pane editor on
     /// the left and the disk version on the right simultaneously

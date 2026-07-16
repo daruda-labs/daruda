@@ -1,35 +1,8 @@
-//! Runtime watchers — long-lived background pumps spawned once at
-//! launch. Each pump owns a channel-receiver thread plus a GPUI-side
-//! fanout that dispatches into every open Workspace window.
+//! App-wide watcher pumps spawned once at launch.
 //!
-//! Long-lived pumps live here:
-//!
-//! - **`claude-status`** — `~/.daruda/status/<session>.json`
-//!   filesystem watch → `Workspace::apply_claude_status_event`.
-//!   Cold restore happens inside `Workspace::new_with_project`;
-//!   this pump only delivers subsequent live changes.
-//! - **`needs-attention-demote`** — 30 s periodic tick that calls
-//!   `cx.notify()` on every open Workspace so stale
-//!   `NeedsAttention` demotion (see
-//!   `ClaudeStatusStore::aggregate_for_cwd`) surfaces without the
-//!   user having to click. 30 s is conservative — the stale
-//!   threshold defaults to 60 s, so worst-case lag is ~30 s.
-//! - **`status-pulse`** — app-global animation clock for status badges
-//!   and agent-chat busy rows.
-//! - **`deferred-telegram-flush`** — 15 s periodic tick that delivers
-//!   Telegram pings held while the user was present once presence drops.
-//! - **`panels-reload`** — filesystem watch on
-//!   `~/.config/daruda/projects/<…>/panels.json` →
-//!   `Workspace::apply_panels_reload`. Self-write suppression in
-//!   `apply_panels_reload` (compares serialized JSON, skips notify
-//!   when disk matches the in-memory state) prevents daruda's own
-//!   atomic-rename saves from looping.
-//!
-//! Config-reload lives in `crate::settings_store::spawn_file_watch`,
-//! not here. Workspaces pick up edits via their
-//! `cx.observe_global::<SettingsStore>` subscription; the app-wide
-//! theme / keybinding / appearance side effects fan out from
-//! `globals::register_settings_observer`.
+//! Covers Claude status, attention demotion, status animation, deferred
+//! Telegram flushes, and panels reload. Config reload lives with
+//! `SettingsStore` because workspaces already subscribe to that global.
 
 use crate::ui::StatusPulseClock;
 use crate::ui::theme;
@@ -39,10 +12,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::App;
 
-/// App-global watchers (status, panels, …) never stop, so their RAII
-/// [`crate::dir_watch::DirWatcher`] handles are parked here for the process
-/// lifetime instead of being dropped (dropping would end the watch). Populated
-/// once at launch from `spawn_all`; never cleared.
+/// App-global watcher handles parked for process lifetime; dropping one would
+/// stop its OS subscription.
 static APP_WATCHERS: std::sync::OnceLock<std::sync::Mutex<Vec<crate::dir_watch::DirWatcher>>> =
     std::sync::OnceLock::new();
 
@@ -103,10 +74,8 @@ fn spawn_needs_attention_demote(cx: &mut App) {
     );
 }
 
-/// Deliver presence-deferred Telegram pings shortly after the user leaves the
-/// window. Cheap when idle: `flush_deferred_telegram` returns immediately while
-/// each workspace's deferred map is empty. 15s cadence bounds the delay from
-/// "user stepped away" to "phone buzzes".
+/// Deliver Telegram pings after presence drops; idle work is just an empty-map
+/// check, and the 15s cadence bounds notification delay.
 fn spawn_deferred_telegram_flush(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(15),
@@ -119,11 +88,9 @@ fn spawn_deferred_telegram_flush(cx: &mut App) {
     );
 }
 
-/// Drive the shared status-badge animation clock at a single fixed rate
-/// (~4 fps) rather than per-badge, so N animating badges cost one repaint
-/// instead of N. Backgrounded windows with an animating session still
-/// pulse; windows with none stay at zero redraws. See root `CLAUDE.md`
-/// Pitfall #10.
+/// Drive the shared status-badge clock at ~4 fps. One gated pulse dirties only
+/// windows with animation, avoiding per-badge animation redraws (CLAUDE.md
+/// Pitfall #10).
 fn spawn_status_pulse(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_millis(theme::STATUS_INDICATOR_TICK_MS),
@@ -138,18 +105,13 @@ fn spawn_status_pulse(cx: &mut App) {
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 if ws.has_animating_claude_status(cx) {
                     cx.notify();
-                    // Right and left docks are `.cached()`; animated
-                    // status badges live in both (Tasks tab in the right
-                    // dock, per-lane AgentStatusBadge in the left dock),
-                    // so the pulse must dirty both dock entities or they
-                    // freeze (Pitfall #10).
+                    // Cached dock entities must be dirtied explicitly or their
+                    // animated badges freeze (Pitfall #10).
                     ws.notify_right_dock(cx);
                     ws.notify_left_dock(cx);
                 }
-                // AgentChat panes are separately-cached main-area entities, so
-                // their in-flight rollup dot / working row needs its own dirty —
-                // plus one trailing frame when a pane settles, or its last
-                // "running" frame freezes (see `pulse_agent_chats`).
+                // AgentChat panes are separately cached; pulse them through
+                // settle so their final running frame cannot freeze.
                 ws.pulse_agent_chats(cx);
             });
         },

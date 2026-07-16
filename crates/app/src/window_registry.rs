@@ -1,45 +1,9 @@
-//! Typed registry of open Workspace + singleton windows.
+//! Typed registry for open Workspace and singleton windows.
 //!
-//! Single authoritative source of truth (a GPUI global) for locating open
-//! windows, instead of scattered `cx.windows() + downcast::<T>()` loops.
-//!
-//! # Workspace windows vs. singleton windows
-//!
-//! `WindowRegistry` tracks both Workspace windows (many) and the Settings
-//! singleton (at most one). The Settings entry is needed because the Settings
-//! window root is `gpui_component::Root` wrapping a `SettingsWindow` (so
-//! `gpui_component::Input::TextElement::paint` can call `Root::read` without
-//! panicking), which means a plain `cx.windows().downcast::<SettingsWindow>()`
-//! search cannot recover the inner entity.
-//!
-//! # Lifecycle
-//!
-//! - **Workspace registration**: `Workspace::new_with_project` calls
-//!   `register` after the struct is fully initialised. A `cx.on_release` hook
-//!   in the same constructor calls `deregister` when the entity drops.
-//! - **Settings registration**: `SettingsWindow::new_with_section` calls
-//!   `register_settings` after construction; its `cx.on_release` hook calls
-//!   `clear_settings` when the entity drops (window close).
-//!
-//! # Usage
-//!
-//! ```rust
-//! // Broadcast to every open workspace
-//! WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-//!     ws.reload_config(&config, cx);
-//! });
-//!
-//! // Close all workspace windows (atomically drains the registry)
-//! let handles = WindowRegistry::drain_handles(cx);
-//!
-//! // Replace the window that initiated an open action
-//! if let Some(h) = WindowRegistry::active_workspace_handle(cx) { ... }
-//!
-//! // Focus an already-open Settings window (or detect that it is closed)
-//! if let Some(sh) = WindowRegistry::settings(cx) {
-//!     sh.update(cx, |this, window, cx| this.focus_section(section, window, cx));
-//! }
-//! ```
+//! Keeps window lookup in one GPUI global instead of scattering
+//! `cx.windows() + downcast::<T>()` loops. Singleton handles store the inner
+//! entity as well as the window handle because wrapped roots cannot always be
+//! recovered by downcast.
 
 use std::collections::HashSet;
 
@@ -49,10 +13,8 @@ use crate::settings_window::SettingsWindow;
 use crate::welcome::WelcomeScreen;
 use crate::workspace::Workspace;
 
-/// Bundled `(window handle, inner entity)` pair for the Settings singleton.
-/// The window's root view is `gpui_component::Root`, so `cx.update_window`
-/// targets the window via the handle and then routes mutation into the
-/// inner `SettingsWindow` entity through the weak ref.
+/// Settings singleton handle; stores the inner entity because the window root
+/// is `gpui_component::Root`, not `SettingsWindow`.
 #[derive(Clone)]
 pub(crate) struct SettingsHandle {
     window: AnyWindowHandle,
@@ -60,9 +22,7 @@ pub(crate) struct SettingsHandle {
 }
 
 impl SettingsHandle {
-    /// Run `f` against the live `SettingsWindow` entity. Returns `None` if
-    /// either the window or the inner entity is gone (the caller's open path
-    /// should then fall through to creating a fresh window).
+    /// Run `f` against the live `SettingsWindow`; `None` means reopen it.
     pub(crate) fn update<R>(
         &self,
         cx: &mut App,
@@ -76,11 +36,8 @@ impl SettingsHandle {
     }
 }
 
-/// Bundled `(window handle, inner entity)` pair for the Welcome singleton.
-/// Mirrors [`SettingsHandle`]: the Welcome window root is `WelcomeScreen`
-/// directly (no `gpui_component::Root` wrapper), so the inner entity could
-/// also be recovered via `downcast`, but storing it here avoids that fragile
-/// path and makes the lifecycle symmetric with the other singletons.
+/// Welcome singleton handle; mirrors [`SettingsHandle`] so singleton lifecycle
+/// stays symmetric.
 #[derive(Clone)]
 pub(crate) struct WelcomeHandle {
     window: AnyWindowHandle,
@@ -88,23 +45,15 @@ pub(crate) struct WelcomeHandle {
 }
 
 impl WelcomeHandle {
-    /// Upgrade to a strong entity reference. Returns `None` only if the
-    /// window was closed between registration and this call — practically
-    /// impossible immediately after `open_window` succeeds.
+    /// Upgrade to the live entity, or `None` if the window has closed.
     pub(crate) fn upgrade(&self) -> Option<Entity<WelcomeScreen>> {
         self.inner.upgrade()
     }
 }
 
-/// GPUI global that tracks every open Workspace window by pairing its
-/// `AnyWindowHandle` with a `WeakEntity<Workspace>` so broadcast and close
-/// operations are typed and do not require `downcast` at the call site. Also
-/// tracks the Settings singleton (see [`SettingsHandle`]).
-///
-/// Implements `Default` so GPUI's `default_global` initialises it
-/// automatically on first access — no explicit `init` call is required and
-/// tests that create Workspace entities without running `main()` work without
-/// any setup.
+/// GPUI global mapping open windows to their typed workspace/singleton entity.
+/// `Default` lets tests and production paths create it lazily via
+/// `default_global`, without a separate init call.
 #[derive(Default)]
 pub(crate) struct WindowRegistry {
     workspaces: Vec<(AnyWindowHandle, WeakEntity<Workspace>)>,
@@ -115,9 +64,7 @@ pub(crate) struct WindowRegistry {
 impl Global for WindowRegistry {}
 
 impl WindowRegistry {
-    /// Add a new workspace to the registry. Called from inside
-    /// `Workspace::new_with_project` so the entry is always present by the
-    /// time the first render fires.
+    /// Add a workspace once construction has produced its window handle.
     pub(crate) fn register(
         handle: AnyWindowHandle,
         workspace: WeakEntity<Workspace>,
@@ -128,8 +75,7 @@ impl WindowRegistry {
             .push((handle, workspace));
     }
 
-    /// Remove a workspace from the registry. Called from the
-    /// `cx.on_release` hook wired in `Workspace::new_with_project`.
+    /// Remove a workspace from the `cx.on_release` hook.
     pub(crate) fn deregister(workspace: &WeakEntity<Workspace>, cx: &mut App) {
         if cx.try_global::<WindowRegistry>().is_some() {
             cx.global_mut::<WindowRegistry>()
@@ -138,8 +84,7 @@ impl WindowRegistry {
         }
     }
 
-    /// Apply `f` to every live workspace. Entries whose window can no longer
-    /// be updated (closed mid-iteration) are pruned lazily from the registry.
+    /// Apply `f` to every live workspace and lazily prune closed windows.
     pub(crate) fn for_each_workspace<F>(cx: &mut App, mut f: F)
     where
         F: FnMut(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>),
@@ -153,9 +98,8 @@ impl WindowRegistry {
 
         let mut stale: HashSet<AnyWindowHandle> = HashSet::new();
         for (handle, weak) in pairs {
-            // The window root is `gpui_component::Root`, which wraps a
-            // `Workspace`. Enter via `cx.update_window` (root-type-agnostic)
-            // and route the closure into the inner `Workspace` entity.
+            // Enter via the root-type-agnostic window handle, then route into
+            // the inner `Workspace` entity.
             let result = cx.update_window(handle, |_root, window, cx_w| {
                 let Some(ws) = weak.upgrade() else {
                     return;
@@ -173,8 +117,7 @@ impl WindowRegistry {
         }
     }
 
-    /// All window handles currently in the registry. Used when handles are
-    /// needed without modifying the registry.
+    /// All registered workspace window handles.
     #[allow(dead_code)]
     pub(crate) fn all_handles(cx: &App) -> Vec<AnyWindowHandle> {
         cx.try_global::<WindowRegistry>()
@@ -182,10 +125,7 @@ impl WindowRegistry {
             .unwrap_or_default()
     }
 
-    /// Atomically remove and return all handles. Used by
-    /// `close_all_workspace_windows` so a double-fire (race between two
-    /// callers) returns an empty list on the second call and skips the
-    /// close loop without doing any work.
+    /// Atomically drain handles; a second close-all caller sees an empty list.
     pub(crate) fn drain_handles(cx: &mut App) -> Vec<AnyWindowHandle> {
         if cx.try_global::<WindowRegistry>().is_none() {
             return Vec::new();
@@ -196,9 +136,7 @@ impl WindowRegistry {
         handles
     }
 
-    /// Return the active window handle if it belongs to a registered
-    /// Workspace. Used by `open_project_with_mode` to identify which window
-    /// initiated the open action so only that window is closed.
+    /// Return the active window when it is a registered Workspace.
     pub(crate) fn active_workspace_handle(cx: &App) -> Option<AnyWindowHandle> {
         let active = cx.active_window()?;
         cx.try_global::<WindowRegistry>()?
@@ -208,10 +146,7 @@ impl WindowRegistry {
             .map(|(h, _)| *h)
     }
 
-    /// Return `(handle, weak_entity)` for the active workspace. Used by
-    /// the global `OpenFolder` / `CloseProject` action handlers to enter
-    /// the workspace and mutate it (add a project, close one) without
-    /// looping the entire registry.
+    /// Return `(handle, weak_entity)` for the active workspace.
     pub(crate) fn active_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
         let active = cx.active_window()?;
         cx.try_global::<WindowRegistry>()?
@@ -221,10 +156,8 @@ impl WindowRegistry {
             .map(|(h, w)| (*h, w.clone()))
     }
 
-    /// First registered workspace `(handle, weak)`, ignoring OS focus. The
-    /// `--screenshot-scenario` driver targets the same window the capture
-    /// uses (the first open window); in an automated launch no window is the
-    /// active one, so [`active_workspace`] returns `None` there.
+    /// First registered workspace, used by screenshot runs where no OS-focused
+    /// active window exists.
     #[cfg(feature = "screenshot")]
     pub(crate) fn first_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
         cx.try_global::<WindowRegistry>()?
@@ -233,10 +166,7 @@ impl WindowRegistry {
             .cloned()
     }
 
-    /// Record the live Settings singleton. Called from
-    /// `SettingsWindow::new_with_section` so the entry is in place before the
-    /// first render. Replaces any previous entry (the caller path guarantees
-    /// at most one Settings window is open at a time).
+    /// Record the live Settings singleton.
     pub(crate) fn register_settings(
         window: AnyWindowHandle,
         inner: WeakEntity<SettingsWindow>,
@@ -245,24 +175,19 @@ impl WindowRegistry {
         cx.default_global::<WindowRegistry>().settings = Some(SettingsHandle { window, inner });
     }
 
-    /// Drop the Settings singleton entry. Called from the `cx.on_release`
-    /// hook wired in `SettingsWindow::new_with_section`.
+    /// Drop the Settings singleton entry from its `cx.on_release` hook.
     pub(crate) fn clear_settings(cx: &mut App) {
         if cx.try_global::<WindowRegistry>().is_some() {
             cx.global_mut::<WindowRegistry>().settings = None;
         }
     }
 
-    /// Return a clone of the Settings handle if a Settings window is open.
-    /// Used by `open_settings_window` to bring an existing window to the
-    /// front instead of opening a second one.
+    /// Return the open Settings handle, if any.
     pub(crate) fn settings(cx: &App) -> Option<SettingsHandle> {
         cx.try_global::<WindowRegistry>()?.settings.clone()
     }
 
-    /// Record the live Welcome singleton. Called from `WelcomeScreen::new`
-    /// so the entry is in place before the first render. Replaces any
-    /// previous entry (at most one Welcome window is open at a time).
+    /// Record the live Welcome singleton.
     pub(crate) fn register_welcome(
         window: AnyWindowHandle,
         inner: WeakEntity<WelcomeScreen>,
@@ -271,22 +196,19 @@ impl WindowRegistry {
         cx.default_global::<WindowRegistry>().welcome = Some(WelcomeHandle { window, inner });
     }
 
-    /// Drop the Welcome singleton entry. Called from the `cx.on_release`
-    /// hook wired in `WelcomeScreen::new`.
+    /// Drop the Welcome singleton entry from its `cx.on_release` hook.
     pub(crate) fn clear_welcome(cx: &mut App) {
         if cx.try_global::<WindowRegistry>().is_some() {
             cx.global_mut::<WindowRegistry>().welcome = None;
         }
     }
 
-    /// Return a clone of the Welcome handle if a Welcome window is open.
-    /// Used by `open_welcome_window` to retrieve the entity for subscription.
+    /// Return the open Welcome handle, if any.
     pub(crate) fn welcome(cx: &App) -> Option<WelcomeHandle> {
         cx.try_global::<WindowRegistry>()?.welcome.clone()
     }
 
-    /// Look up the `AnyWindowHandle` that owns the workspace entity with
-    /// `entity_id`. Used by async mutate closures that need `&mut Window`.
+    /// Look up the window that owns a workspace entity.
     pub(crate) fn handle_for_workspace(
         entity_id: gpui::EntityId,
         cx: &App,
@@ -298,13 +220,8 @@ impl WindowRegistry {
             .map(|(h, _)| *h)
     }
 
-    /// The inverse of [`Self::handle_for_workspace`]: look up the `Workspace`
-    /// entity that owns window `handle`. Used by a cached, entity-backed pane
-    /// (e.g. `AgentChatView`, whose own `cx.entity_id()` is the pane, not the
-    /// Workspace) to dispatch a click into a `Workspace` op via its stored
-    /// `window_handle` — `weak.update(cx, |ws, cx| ws.some_op(..))` needs no
-    /// live `&mut Window`, so this alone is enough; reach for
-    /// `try_update_workspace_window` instead when the op needs one.
+    /// Inverse of [`Self::handle_for_workspace`], used by cached pane entities
+    /// that need to dispatch into their owning `Workspace`.
     pub(crate) fn workspace_for_window(
         handle: AnyWindowHandle,
         cx: &App,
@@ -316,9 +233,7 @@ impl WindowRegistry {
             .map(|(_, weak)| weak.clone())
     }
 
-    /// Return the window handle of the open Welcome window, if any.
-    /// Used by `active_window_to_close` to detect whether the frontmost
-    /// window is the Welcome screen.
+    /// Return the open Welcome window handle, if any.
     pub(crate) fn welcome_window(cx: &App) -> Option<AnyWindowHandle> {
         cx.try_global::<WindowRegistry>()?
             .welcome
@@ -326,9 +241,7 @@ impl WindowRegistry {
             .map(|h| h.window)
     }
 
-    /// Return the window handle of the open Settings window, if any. Used by
-    /// the `--screenshot-scenario settings` driver to capture the Settings
-    /// window (a separate window) instead of the workspace.
+    /// Return the open Settings window handle, if any.
     #[cfg(feature = "screenshot")]
     pub(crate) fn settings_window(cx: &App) -> Option<AnyWindowHandle> {
         cx.try_global::<WindowRegistry>()?
@@ -375,10 +288,7 @@ mod tests {
         assert_eq!(visited, 0);
     }
 
-    /// Construct a Workspace wrapped in `gpui_component::Root` —
-    /// matches the production windowing path so APIs that walk the
-    /// window root (`WindowExt::has_active_dialog` etc.) don't panic
-    /// during construction.
+    /// Construct the same `Root`-wrapped Workspace shape used in production.
     fn make_window(
         cx: &mut TestAppContext,
         config: &daruda_config::Config,

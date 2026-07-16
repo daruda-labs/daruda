@@ -19,10 +19,9 @@
 //! reload) is what keeps the four code paths from drifting against
 //! one another.
 
-/// Deferred-refresh intent for the next render. Replaces the former
-/// `(pending_refresh, pending_refresh_keep_selection)` bool pair, whose
-/// `(false, true)` combination was illegal yet representable. The three
-/// variants enumerate exactly the valid states.
+/// Deferred-refresh intent for the next render. The three variants
+/// enumerate exactly the valid states, so an invalid combination
+/// cannot be represented.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PendingRefresh {
     /// No refresh pending.

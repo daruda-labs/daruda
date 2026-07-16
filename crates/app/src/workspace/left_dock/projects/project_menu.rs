@@ -1,18 +1,11 @@
-//! Context menu items for a Project header (left-dock lanes view,
-//! §5.1). Mirrors `group_menu::build_group_menu_items` — flat
-//! `Vec<ContextMenuItem>` ready for `Workspace::open_context_menu`.
+//! Context menu items for a Project header — a flat `Vec<ContextMenuItem>`
+//! ready for `Workspace::open_context_menu`.
 //!
-//! Items: Rename · Move to Group · Delete · Open in New Window.
-//!
-//! The active-project–scoped action handlers (`on_rename_active_project`,
-//! `on_move_active_project_to_group`, global `CloseProject`) are reused
-//! by first snapping the workspace focus to the right-clicked project
-//! (matches the §5.5 `project header click → last_active_lane_id`
-//! semantics — the menu just makes the snap explicit). "Open in New
-//! Window" routes straight to `Workspace::open_project_in_new_window`
-//! without snapping the focus — the user explicitly asked for a
-//! separate window, so the current workspace's active state stays
-//! untouched.
+//! Items: Rename · Move to Group · Delete · Open in New Window. The first
+//! three reuse active-project–scoped handlers by first snapping focus to
+//! the right-clicked project; "Open in New Window" routes straight to
+//! `open_project_in_new_window` without snapping, so the current
+//! workspace's active state stays untouched.
 
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::WeakEntity;
@@ -66,21 +59,12 @@ pub(in crate::workspace) fn build_project_menu_items(
     items.push(ContextMenuItem::separator());
 
     // -- Delete --
-    // Open the chooser modal directly instead of dispatching the
-    // global `CloseProject` action. From a context-menu
-    // `on_mouse_down` callback, `window.dispatch_action(...)` does
-    // not reliably reach the registered `cx.on_action(CloseProject)`
-    // handler — the action falls into the focus-bubble chain and
-    // gets swallowed before global handlers fire, so the user sees
-    // the menu close with no modal. The keyboard shortcut path
-    // (cmd-shift-W) still routes through the global action handler
-    // because the action is dispatched from a key event, where the
-    // focus chain is what routes it.
-    //
-    // The deferred-close dance lives in
-    // `open_delete_active_project_modal` (shared with the main-area
-    // inaccessible empty-state); the menu just snaps focus to the
-    // right-clicked project first so the op targets it (§5.5).
+    // Open the chooser modal directly rather than dispatching the global
+    // `CloseProject` action: from a context-menu `on_mouse_down` callback,
+    // `dispatch_action` falls into the focus-bubble chain and gets swallowed
+    // before global handlers fire (the keyboard shortcut still routes through
+    // the global handler since it dispatches from a key event). Snap focus to
+    // the right-clicked project first so the op targets it.
     let ws_delete = ws.clone();
     items.push(ContextMenuItem::new(
         s::project_menu_delete(),
@@ -116,13 +100,7 @@ pub(in crate::workspace) fn build_project_menu_items(
 
 #[cfg(test)]
 mod tests {
-    // `build_project_menu_items` is pure plumbing: it consumes a
-    // `WeakEntity<Workspace>` (only constructible inside a GPUI test
-    // context) and returns context-menu items whose handlers delegate to
-    // `Workspace::on_rename_active_project` /
-    // `on_move_active_project_to_group` / `close_active_project` /
-    // `open_project_in_new_window`. Those ops are covered by
-    // `workspace::tests::projects` against the same workspace fixtures
-    // the menu would dispatch into, so a duplicate inline harness would
-    // not add coverage.
+    // `build_project_menu_items` is pure plumbing whose handlers delegate to
+    // `Workspace` ops already covered by `workspace::tests::projects`, so a
+    // duplicate inline harness would add no coverage.
 }

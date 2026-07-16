@@ -32,9 +32,8 @@ use crate::workspace::dnd_ops::TopRow;
 /// divergence, or no status cached yet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) struct GitBadgeData {
-    /// Modified + staged + untracked, rolled up. The previous design
-    /// split these into `M` / `?` letters; the GH-Desktop pill collapses
-    /// them into a single count so the chip stays narrow.
+    /// Modified + staged + untracked, rolled up into a single count so the
+    /// GH-Desktop pill stays narrow.
     pub total: u32,
     /// Commits ahead of the configured upstream (zero when no upstream
     /// is set or HEAD is detached).
@@ -418,7 +417,7 @@ pub(in crate::workspace) fn project_header_row(
         .when(!show_active_bg, move |d| {
             d.hover(move |d| d.bg(row_hover_bg))
         })
-        // Accent left border is lane-only (C2); the header carries the active fill only.
+        // Accent left border is lane-only; the header carries the active fill only.
         .when(show_active_bg, move |d| d.bg(row_active_bg))
         // Header click snaps the workspace focus to this project's
         // last-active lane (§5.5). No-op when the click lands on
@@ -862,13 +861,9 @@ pub(in crate::workspace) fn worktree_row(
     let ws_for_click = workspace.clone();
     let ws_for_drop = workspace.clone();
     let ws_for_rclick = workspace.clone();
-    // Lane IDs reset to 0 per project (`Lane::bootstrap_from_project`
-    // numbers each project's lanes from 0), so `("lane-row", wt_id)`
-    // collides across projects — GPUI sees the same ElementId for the first
-    // lane of every project and routes the click to only one of them
-    // (the first project's row), which is why clicking a 2nd project's
-    // lane never reaches `activate_lane`. Encode both ids into the
-    // id string so each row is uniquely addressable.
+    // Lane IDs restart at 0 per project, so `("lane-row", wt_id)` collides
+    // across projects and GPUI routes every first-lane click to a single row.
+    // Encode both project + lane id so each row is uniquely addressable.
     let row_group = SharedString::from(format!("lane-row-{project_id}-{wt_id}"));
     let mut row = div()
         .id(SharedString::from(format!("lane-row-{project_id}-{wt_id}")))
@@ -878,11 +873,9 @@ pub(in crate::workspace) fn worktree_row(
         .flex()
         .flex_row()
         .items_center()
-        // Vertical padding matches the project/group header rows
-        // (`LANE_SECTION_PAD_Y`) so all three row kinds share the
-        // same breathing room regardless of body height — a `min_h`
-        // approach collapsed to zero padding once the agent
-        // multi-session sub-row grew the row past the floor.
+        // Vertical padding (not `min_h`) matches the project/group header
+        // rows so all three kinds share the same breathing room regardless
+        // of body height, even when the agent multi-session sub-row grows it.
         .px(px(theme::LANE_ROW_PAD_X))
         .py(px(theme::LANE_SECTION_PAD_Y))
         .gap(px(theme::LANE_ROW_GAP))

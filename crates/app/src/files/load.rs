@@ -1,15 +1,8 @@
-//! Blocking directory read for the file tree.
-//!
-//! Produces one `LoadedEntry` per direct child of `abs_path`. The
-//! function never follows symlinks: `entry.file_type()` is `lstat` on
-//! Unix, so a symlink to a directory reports `is_symlink = true` and
-//! `is_dir = false`, surfacing as a leaf row that the user can still
-//! click to open as raw text. Per-entry errors (a single unreadable
-//! child) are skipped silently; only failure to open the directory
-//! itself is propagated.
-//!
-//! Callers must run this on `cx.background_executor()`; it blocks for
-//! the entire `read_dir` walk.
+//! Blocking directory read for the file tree — one `LoadedEntry` per direct
+//! child. Never follows symlinks (`lstat`): a symlinked dir reports
+//! `is_symlink = true` / `is_dir = false` and surfaces as a clickable leaf.
+//! Per-entry errors are skipped; only failure to open the dir propagates.
+//! Run on `cx.background_executor()` — it blocks for the whole `read_dir`.
 
 use std::fs;
 use std::io;

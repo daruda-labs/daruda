@@ -2,38 +2,19 @@
 //! `<lane>/.claude/skills/` (project) and `~/.claude/skills/`
 //! (personal).
 //!
-//! Two threads, mirroring `panels_watcher`:
-//! 1. **FSEvent thread** — owns the `notify::Watcher`, blocks on the
-//!    shutdown channel, drops the watcher when the caller releases the
-//!    handle.
-//! 2. **Debounce thread** — collapses event bursts (atomic-rename
-//!    saves emit ≥3 events) into one [`SkillsEvent`] per scope per
-//!    [`DEBOUNCE`] window. Exits when its raw channel disconnects,
-//!    which happens automatically once the FSEvent thread drops the
-//!    watcher (and with it the closure-owned raw sender).
+//! An FSEvent thread owns the `notify::Watcher`; a debounce thread
+//! collapses event bursts (atomic-rename saves emit ≥3 events) into one
+//! [`SkillsEvent`] per scope per [`DEBOUNCE`] window. Dropping
+//! [`SkillsWatcherHandle`] drops the watcher, which disconnects the raw
+//! channel and lets the debounce thread exit.
 //!
-//! Lifecycle: dropping [`SkillsWatcherHandle`] closes the shutdown
-//! channel → FSEvent thread unblocks → `notify::Watcher` drops →
-//! `raw_tx` drops with the closure → debounce thread sees its receiver
-//! disconnect and exits.
-//!
-//! macOS quirk: `tempfile::tempdir()` returns paths under
-//! `/var/folders/...`, which the kernel canonicalises to
-//! `/private/var/folders/...`. FSEvents reports the canonicalised
-//! form, so the closure compares paths against `canonicalize(...)` of
-//! each watched root rather than the raw input. Without this the
-//! watcher fires events with no matching scope and tests panic with
-//! empty event vectors.
-//!
-//! Pre-existing-directory quirk: when the user has never created
-//! `~/.claude/skills/` (or `<lane>/.claude/skills/`), the target
-//! directory does not exist at spawn time, so `notify::watch` would
-//! fail. We fall back to watching the closest existing ancestor
-//! (typically `~/.claude` / `<lane>/.claude`) and rely on the
-//! callback's `starts_with` filter to throw away events outside the
-//! skills subtree. That way creating the first skill via an external
-//! editor still fires a `Reloaded` event without daruda needing to
-//! restart its watcher.
+//! Two macOS quirks:
+//! - FSEvents reports canonicalised paths (`/var → /private/var`), so
+//!   the closure compares against `canonicalize(...)` of each root.
+//! - When the target skills dir doesn't exist yet, subscribing to it
+//!   would fail, so we watch the closest existing ancestor and filter
+//!   events via `starts_with`. Creating the first skill externally then
+//!   still fires a `Reloaded` without restarting the watcher.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};

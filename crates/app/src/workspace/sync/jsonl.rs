@@ -1,16 +1,12 @@
 //! JSONL event pump — bridges [`crate::hooks::jsonl_watcher`] into
 //! the GPUI Workspace.
 //!
-//! The watcher runs whenever `claude_status_enabled` is true,
-//! regardless of hook installation status. On each `JsonlEvent`, we
-//! synthesize a [`StatusFile`] with `source = Source::Jsonl` and feed
-//! it through the same store as hook events. The store's race policy
-//! The hook-wins race policy ensures hook entries win over JSONL on
-//! ties, so when both channels are live the user sees the authoritative path.
-//!
-//! Mirrors the shape of [`super::pty_pump`] — drain every queued
-//! event per 100 ms tick so a burst from a multi-session lane
-//! doesn't lag visible state.
+//! The watcher runs whenever `claude_status_enabled` is true, regardless of
+//! hook installation status. Each `JsonlEvent` becomes a [`StatusFile`] with
+//! `source = Source::Jsonl` fed through the same store as hook events; the
+//! store's hook-wins race policy keeps hook entries authoritative on ties.
+//! Drains every queued event per 100 ms tick so a multi-session burst doesn't
+//! lag visible state.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -22,9 +18,8 @@ use gpui::{Context, Task};
 use crate::hooks::jsonl_watcher::{self, JsonlEvent, JsonlWatcherHandle};
 use crate::workspace::Workspace;
 
-/// 100 ms — same as `pty_pump`. Short enough that JSONL-only updates
-/// (Claude Code spawned outside daruda's PTY ancestry) feel responsive,
-/// long enough that no-events ticks aren't expensive.
+/// 100 ms: JSONL-only updates (Claude Code spawned outside daruda's PTY
+/// ancestry) feel responsive without expensive no-event ticks.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawn the long-lived task that pulls `JsonlEvent`s from `events`
@@ -113,23 +108,13 @@ fn jsonl_pseudo_event_label() -> String {
 }
 
 impl Workspace {
-    /// (Re)evaluate whether the JSONL watcher should be running for
-    /// this Workspace, and (re)spawn it with the current lane set.
-    ///
-    /// Engaged when **both** are true:
-    /// - `claude_status_enabled` (config opt-in)
-    /// - resolvable `dirs::home_dir()` (sanity check)
-    ///
-    /// The JSONL watcher runs regardless of hook installation status.
-    /// When hooks also deliver data, the store's race policy
-    /// (`should_replace`) ensures hook data takes precedence over JSONL.
-    ///
-    /// Otherwise the watcher is dropped (which closes its shutdown
-    /// channel and lets the FSEvents subscription unregister).
-    ///
-    /// Call from any site that changes one of those inputs:
-    /// initial construction, lane create / remove, and
-    /// `apply_config` when `claude_status.enable` flips.
+    /// (Re)evaluate whether the JSONL watcher should run for this Workspace,
+    /// and (re)spawn it with the current lane set. Engaged when both
+    /// `claude_status_enabled` and a resolvable `dirs::home_dir()` hold;
+    /// otherwise the watcher is dropped (unregistering its FSEvents
+    /// subscription). Call from any site that changes those inputs: initial
+    /// construction, lane create / remove, and `apply_config` when
+    /// `claude_status.enable` flips.
     pub fn refresh_jsonl_watcher(&mut self, cx: &mut Context<Self>) {
         // Drop any existing watcher handle + pump first so the old
         // watcher exits before the new one starts subscribing to the

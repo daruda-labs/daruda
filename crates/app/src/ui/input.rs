@@ -1,30 +1,10 @@
-//! Text input factory — wrapper over `gpui_component::input`. Works
-//! for both single-line (modal default) and multi-line states (e.g.
-//! the bottom-dock terminal input): the inner `Input` picks the mode
-//! from `InputState.mode`, and the wrapper's `items_stretch` lets a
-//! multi-line `h_auto` body grow to the parent cell's height while
-//! leaving single-line inputs unchanged (single-line inner carries an
-//! explicit `input_h(size)`).
+//! Text input factory over `gpui_component::input`.
 //!
-//! daruda inputs sit on `MODAL_INPUT_BG`, not `gpui_component`'s
-//! default `theme.background`. Plain `input` keeps the inner `Input`'s
-//! own chrome (bg + border + 1px accent focus border) and just
-//! overrides the bg via `.bg()`. [`input_with_action`] hosts the action
-//! in an outer div, so it keeps the inner `Input` borderless and draws
-//! the bg / border / focus-within accent on that div.
-//!
-//! Tab participation is the same `XxxTabSpec` polymorphism used by
-//! `checkbox` / `radio` / `select`: pass an `isize` to slot the input
-//! into the modal's cycle, or `()` to skip it (read-only / display-
-//! only inputs). `Input` has no `tab_stop` builder, so the `()` impl
-//! mutates the `InputState`'s `FocusHandle` directly — hence the `cx`
-//! argument.
-//!
-//! ```ignore
-//! let state = cx.new(|cx| crate::ui::InputState::new(window, cx).placeholder("Name"));
-//! parent.child(crate::ui::input(&state, cx, 0));   // cycles at index 0
-//! parent.child(crate::ui::input(&state, cx, ())); // mouse-only
-//! ```
+//! Supports single-line and multi-line states with daruda modal chrome. Tab
+//! participation mirrors checkbox/radio/select: pass an `isize` for a modal
+//! cycle slot, or `()` to remove read-only/display-only inputs from Tab order.
+//! `Input` lacks a `tab_stop` builder, so the `()` path mutates the state's
+//! `FocusHandle` directly.
 
 use crate::ui::theme as d;
 use gpui::{
@@ -37,9 +17,7 @@ pub use gpui_component::input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
 };
 
-/// Tab-participation specifier for [`input`]. Mirrors `CheckboxTabSpec`
-/// / `RadioTabSpec` / `SelectTabSpec` — `isize` slots the input at
-/// that cycle index, `()` removes it from the cycle.
+/// Tab-participation specifier for [`input`].
 pub trait InputTabSpec {
     fn apply(self, state: &Entity<InputState>, cx: &App, input: Input) -> Input;
 }
@@ -60,11 +38,7 @@ impl InputTabSpec for () {
     }
 }
 
-/// Construct a daruda-toned single-line input bound to `state`.
-///
-/// `tab` decides Tab cycle participation (`isize` cycles at that
-/// index, `()` skips). The inner `Input` paints its own chrome; `.bg()`
-/// overrides the surface to `MODAL_INPUT_BG`.
+/// Construct a daruda-toned input bound to `state`.
 ///
 /// `.w_full()` is baked in: the inner `gpui_component::Input` sizes
 /// to its parent via `size_full`, so a content-sized wrapper would

@@ -1,10 +1,9 @@
-//! Literal-text search over the current viewport (GPUI-free).
+//! Literal and regex text search over the current viewport (GPUI-free).
 //!
 //! We keep this module platform-free so it can run headless in unit
 //! tests. The renderer (`element.rs`) translates `MatchRange`s into
 //! background overlay quads at paint time. This mirrors Alacritty's
-//! approach in `alacritty_terminal/src/term/search.rs` but without the
-//! regex automaton — Phase 1 is literal-only.
+//! approach in `alacritty_terminal/src/term/search.rs`.
 
 use regex::{Regex, RegexBuilder};
 use unicode_width::UnicodeWidthChar as _;

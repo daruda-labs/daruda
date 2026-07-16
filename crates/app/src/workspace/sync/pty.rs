@@ -1,13 +1,10 @@
-//! PTY-tracker event pump — bridges the GPUI-free
-//! `hooks::pty_tracker` channel into the GPUI Workspace entity.
+//! PTY-tracker event pump — bridges the GPUI-free `hooks::pty_tracker`
+//! channel into the GPUI Workspace entity.
 //!
-//! The tracker emits diff events (`BindingChanged` / `DeadSession`)
-//! through an `mpsc::Receiver` whenever an FSEvents change in the
-//! sessions directory or a pane register/unregister re-resolves
-//! bindings. GPUI tasks can't `recv()` on a std channel without
-//! blocking the background executor, so we drain it with a 100 ms timer
-//! — `tab close` fans out one `BindingChanged` per pane plus several
-//! `DeadSession` events, and a single read-per-tick would lag on bursts.
+//! The tracker emits `BindingChanged` / `DeadSession` diff events over an
+//! `mpsc::Receiver`. GPUI tasks can't block on a std channel, so a 100 ms
+//! timer drains every queued event per tick — a burst (e.g. tab close) would
+//! lag a single read-per-tick.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
@@ -17,9 +14,8 @@ use gpui::{Context, Task};
 use crate::hooks::pty_tracker::PtyTrackerEvent;
 use crate::workspace::Workspace;
 
-/// 100 ms strikes a balance: short enough that visible state (sub-row
-/// badges, active outline) snaps without perceptible lag, long enough
-/// that the background executor isn't woken up gratuitously.
+/// 100 ms: visible state (sub-row badges, active outline) snaps without
+/// perceptible lag, without waking the background executor gratuitously.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawn the long-lived task that pulls events from `pty_rx` and

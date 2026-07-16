@@ -32,11 +32,9 @@ async fn mutate_durable_returns_inner_value(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn mutate_durable_runs_inner_closure(cx: &mut TestAppContext) {
-    // The closure side-effect: change `Workspace::left_dock_view`.
-    // After `mutate_durable`, the change is visible and the wrapper
-    // returned `()` (no panic). Persist scheduling is async (cx.defer),
-    // so we don't assert on persisted state here — the assertion target
-    // is that the wrapper actually drove the closure to completion.
+    // Assert the wrapper drives the closure to completion: the
+    // `left_dock_view` change is visible afterward. Persist scheduling
+    // is async (cx.defer), so persisted state is not asserted here.
     let wh = make_workspace_with_dirs(cx, "/tmp/daruda_durable_runs");
     let ws = wh.root(cx).unwrap();
     let before = ws.read_with(cx, |ws, _| ws.left_dock_view);

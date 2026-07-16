@@ -5,9 +5,9 @@
 //! GPUI-free: the GPUI view layer in `app` consumes the event stream this
 //! crate emits.
 //!
-//! Task-1 status: the [`connection`] module is the one-shot spike that proves
-//! the protocol round-trip and the smol-executor bridge. The long-lived
-//! multi-turn connection and the chat render-model mapping build on it.
+//! [`connection`] runs a one-shot protocol round-trip over the smol-executor
+//! bridge; [`session`] builds the long-lived multi-turn connection on top of
+//! it, and [`mapping`] turns protocol updates into the chat render model.
 
 pub mod adapter;
 pub mod connection;

@@ -1,19 +1,8 @@
 //! Word-level diff computation for the diff viewer.
 //!
-//! Scans parsed hunks for consecutive Removed/Added blocks and annotates them
-//! with intra-line change ranges using `similar`.
-//!
-//! Pairing strategy: consecutive Removed lines and the consecutive Added lines
-//! immediately following them are treated as a section pair. Lines are paired
-//! by position for the first `min(N, M)` lines of the section and word-diffed;
-//! surplus lines on the longer side, and lines over `WORD_DIFF_LINE_LIMIT`
-//! bytes, are left without intra-line highlights.
-//!
-//! Tokenisation: runs of alphanumeric/`_` characters form one token each;
-//! every other character (whitespace, operator, punctuation) is its own token.
-//! Adjacent changed tokens are coalesced into contiguous byte ranges.
-//!
-//! GPUI-free — safe to call on `background_executor`.
+//! Consecutive removed/added sections are paired by position for
+//! intra-line highlighting with `similar`; surplus or very long lines are left
+//! un-highlighted. GPUI-free and background-executor safe.
 
 use similar::{ChangeTag, TextDiff};
 
@@ -23,13 +12,7 @@ use super::{DiffHunk, DiffLine, WordChange};
 /// this are left without intra-line highlights (performance guard).
 const WORD_DIFF_LINE_LIMIT: usize = 300;
 
-/// Scan every hunk for consecutive Removed/Added blocks and annotate them
-/// with word-level change ranges in-place.
-///
-/// - Collect a run of consecutive `Removed` lines, then a run of consecutive
-///   `Added` lines immediately following.
-/// - Delegate pairing to [`word_diff_runs`] (positional, `min(N, M)` lines).
-/// - Lines longer than `WORD_DIFF_LINE_LIMIT` bytes are skipped individually.
+/// Annotate consecutive removed/added blocks with word-level change ranges.
 pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
     for hunk in hunks.iter_mut() {
         let mut i = 0;
@@ -59,8 +42,7 @@ pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
             }
             let added_end = i;
 
-            // Snapshot the run contents (owned, so the borrow on `hunk.lines`
-            // is released before we write the results back).
+            // Own the run text so the borrow ends before writing results back.
             let removed: Vec<String> = (removed_start..removed_end)
                 .map(|k| match &hunk.lines[k] {
                     DiffLine::Removed { content, .. } => content.clone(),
@@ -90,19 +72,8 @@ pub(in crate::workspace) fn apply_word_diff(hunks: &mut [DiffHunk]) {
     }
 }
 
-/// Pairing seam: given a run of `removed` line contents and the run of `added`
-/// line contents that immediately follows it, return the per-line intra-line
-/// change ranges for each side (one entry per input line; an empty inner vec
-/// means "no intra-line highlight for that line").
-///
-/// This is the single decision point for *how* removed/added lines are paired.
-/// The scan in [`apply_word_diff`] is intentionally agnostic to it.
-///
-/// Current rule: pair lines by position for the first `min(N, M)` lines and
-/// word-diff each pair. Surplus lines on the longer side (a pure addition or
-/// deletion with no counterpart) are left un-highlighted. This covers the
-/// common N:N modify-in-place case and degrades gracefully for N≠M blocks
-/// instead of dropping intra-line highlights entirely.
+/// Pair removed/added runs by position; surplus lines stay un-highlighted so
+/// uneven blocks degrade gracefully instead of losing all word diff.
 fn word_diff_runs(
     removed: &[String],
     added: &[String],

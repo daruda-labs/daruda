@@ -407,8 +407,8 @@ mod tests {
     fn unknown_hook_event_name_fails_to_parse() {
         let json =
             r#"{"hook_event_name":"WorktreeCreate","session_id":"x","cwd":"/t"}"#.to_string();
-        // A-5 handler treats this as a no-op (exit 0). Here we just
-        // confirm it doesn't silently match a known variant.
+        // The hook handler treats an unparseable event as a no-op (exit 0).
+        // Here we just confirm it doesn't silently match a known variant.
         let res: Result<HookEvent, _> = serde_json::from_str(&json);
         assert!(res.is_err());
     }

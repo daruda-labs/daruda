@@ -39,7 +39,7 @@ pub enum TaskPickAction {
     Retry,
     Delete,
     /// Picks a task to open in a TaskEdit pane — wired from the
-    /// Command Palette `edit_task` entry (C-2 review). Any task state
+    /// Command Palette `edit_task` entry. Any task state
     /// is eligible because Edit is a pure metadata mutation.
     Edit,
 }

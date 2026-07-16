@@ -253,12 +253,9 @@ impl InputPanel {
     // `gpui_component::Input` already registers its own
     // `on_action(Copy / Cut / Paste / SelectAll)` handlers — when the
     // focus is on the input these run automatically through the
-    // `"Input"` key context. Surrounding panes used to call
-    // `panel.copy/cut/...` to extend that handling to clicks landing
-    // on the outer wrapper (drop target, padding); the trade-off is
-    // that Cmd+C / Cmd+V now only act on the input while it has
-    // keyboard focus. Drop / drag-and-drop flows continue to work
-    // through `insert_at_cursor` below.
+    // `"Input"` key context. Cmd+C / Cmd+V only act on the input while
+    // it has keyboard focus. Drop / drag-and-drop flows go through
+    // `insert_at_cursor` below.
 
     pub fn insert_at_cursor(&self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let t = text.to_string();

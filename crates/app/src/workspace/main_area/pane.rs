@@ -46,17 +46,13 @@ impl std::fmt::Display for PaneSpawnError {
 
 impl std::error::Error for PaneSpawnError {}
 
-/// Per-pane content kind. `Terminal` is the PTY-backed shell view;
-/// `File` is the pane-area file viewer (raw / preview / diff). Future
-/// kinds (chat, diagnostics) plug in here without touching every
-/// workspace caller — `Pane` only ever exposes match-dispatched
-/// accessors (`title`, `cwd`, `focus_handle`, `render_into`, `resize`).
+/// Per-pane content kind. `Pane` only ever exposes match-dispatched
+/// accessors (`title`, `cwd`, `focus_handle`, `resize`), so new kinds plug
+/// in here without touching every caller.
 ///
-/// `large_enum_variant` is allowed because Box-ing the bigger variant
-/// would add an indirection on every render walk for negligible
-/// stack-size savings — the enum is owned per-pane (one allocation
-/// either way), and the path-hot reads (`title`, `focus_handle`) stay
-/// cheaper without the heap hop.
+/// `large_enum_variant` is allowed: the enum is owned per-pane (one
+/// allocation either way), so Box-ing the big variant only adds a heap hop
+/// to the path-hot reads for negligible stack savings.
 #[allow(clippy::large_enum_variant)]
 pub(in crate::workspace) enum PaneContent {
     Terminal(TerminalContent),
@@ -81,12 +77,9 @@ pub(in crate::workspace) struct TerminalContent {
     /// 1337 attention requests) and dispatches them to platform APIs
     /// gated by `[notifications]` config. Dropped with the pane.
     pub(in crate::workspace) _view_event_subscription: Subscription,
-    /// Outgoing channel into the PTY's writer thread. Cloned from
-    /// `stdin_tx` at pane-spawn time so `Workspace::send_to_pane`
-    /// (skill invocation, future macros) can write into the
-    /// same channel as the user's
-    /// keystrokes, e.g. to dispatch a `claude --dangerously-skip-permissions
-    /// "$(cat …)"` command line at task start. `None` for stub panes.
+    /// Outgoing channel into the PTY's writer thread, cloned from `stdin_tx`
+    /// so `Workspace::send_to_pane` (skills, macros) can write into the same
+    /// channel as the user's keystrokes. `None` for stub panes.
     pub(in crate::workspace) pty_input_tx: Option<mpsc::Sender<Vec<u8>>>,
     /// Wakes the stdout poll out of its idle backoff (see
     /// `stdout_poll_interval`) so output following a PTY write is
@@ -137,19 +130,14 @@ pub(in crate::workspace) struct TaskEditContent {
     /// don't trample the override.
     pub(in crate::workspace) branch_override: bool,
     pub(in crate::workspace) branch_validation: BranchValidation,
-    /// Dropdown that maps user lane picks back to
-    /// `Task::base_worktree_path`. The empty-string sentinel value
-    /// means "no explicit base — start_task will branch from the
-    /// project's active lane at run time"; every other value is
-    /// the absolute path of a registered lane, matching the
-    /// `Task::base_worktree_path: Option<PathBuf>` schema. Sits in
-    /// the focus chain between the prompt editor and the notes
-    /// editor.
+    /// Dropdown mapping lane picks to `Task::base_worktree_path`. The
+    /// empty-string sentinel means "no explicit base — branch from the
+    /// active lane at run time"; every other value is the absolute path of a
+    /// registered lane. Sits in the focus chain between prompt and notes.
     pub(in crate::workspace) base_select: Entity<crate::ui::select::SelectState>,
-    /// Prompt is stored in `gpui_component::input::InputState` with
-    /// `code_editor("markdown")` so it gets line numbers + syntax
-    /// highlight. The entity is shared with the renderer
-    /// via `crate::ui::markdown_editor(&state)`.
+    /// Prompt editor state (`code_editor("markdown")` for line numbers +
+    /// syntax highlight), shared with the renderer via
+    /// `crate::ui::markdown_editor(&state)`.
     pub(in crate::workspace) prompt_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) notes_state: Entity<gpui_component::input::InputState>,
     pub(in crate::workspace) auto_execute: bool,
@@ -179,11 +167,9 @@ pub(in crate::workspace) struct TaskEditContent {
     /// the next entry; the input stays focused so the user can chain
     /// additions.
     pub(in crate::workspace) new_subtask_input: Entity<crate::ui::InputState>,
-    /// `Some(subtask_id)` while the user has the matching row in
-    /// inline-rename mode (double-click → Enter / blur commits the
-    /// new title; Escape cancels). The rename input itself is reused
-    /// across rows so only one entity exists, which sidesteps
-    /// composition-state churn when switching rename targets mid-IME.
+    /// `Some(subtask_id)` while that row is in inline-rename mode (Enter /
+    /// blur commits, Escape cancels). One shared rename input is reused
+    /// across rows to avoid IME composition-state churn when switching rows.
     pub(in crate::workspace) editing_subtask: Option<String>,
     pub(in crate::workspace) editing_subtask_input: Entity<crate::ui::InputState>,
     /// Scroll handle for the form-body absolute scroll container.
@@ -378,13 +364,10 @@ impl Pane {
     /// affordances skip TaskEdit panes.
     ///
     /// **AgentChat is `None` for `PaneCwd::Remote`.** This is a local
-    /// filesystem accessor — every consumer (`resolve_default_cwd`'s
-    /// `Cmd+T` inheritance tier, `display_cwd`, the Files-view affordance,
-    /// the MCP cwd-change watcher) expects a real path on this machine. A
-    /// remote pane's cwd string leaking through here would otherwise reach
-    /// `spawn_pty`'s existence check, silently fall back to `$HOME`, and
-    /// skip the lane-local fallback tier `resolve_default_cwd` would
-    /// otherwise have used.
+    /// filesystem accessor — every consumer expects a real path on this
+    /// machine. A remote pane's cwd string leaking through would reach
+    /// `spawn_pty`'s existence check, silently fall back to `$HOME`, and skip
+    /// the lane-local fallback tier.
     pub(in crate::workspace) fn cwd(&self) -> Option<&Path> {
         match &self.content {
             PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
@@ -811,23 +794,15 @@ fn home_dir() -> Option<PathBuf> {
     home.is_accessible_dir().then_some(home)
 }
 
-/// Pure resolver for the cwd a new pane should spawn at. Keeps the
-/// "1 lane = 1 cwd" invariant: when no live focused-pane cwd is
-/// available, the active lane's path wins over the project root.
+/// Pure resolver for a new pane's spawn cwd, keeping the "1 lane = 1 cwd"
+/// invariant. Priority:
+/// 1) `focused_pane` (when `inherit_cwd`),
+/// 2) `active_lane` — pins `Cmd+T` inside the lane even before OSC 7 lands,
+/// 3) `project_root` — last resort for non-lane workspaces.
 ///
-/// Priority:
-/// 1) `candidates.focused_pane` (when `inherit_cwd` is true) — copy
-///    from the pane the user is currently looking at,
-/// 2) `candidates.active_lane` — keeps `Cmd+T` from a lane
-///    pinned inside that lane even before the new shell sends
-///    OSC 7,
-/// 3) `candidates.project_root` — last-resort fallback for
-///    non-lane workspaces.
-///
-/// Swapping `active_lane` and `project_root` in this order would
-/// silently spawn new shells at the main repo root from inside a lane —
-/// breaking isolation for fresh starts, restored sessions before OSC 7
-/// lands, and any `Cmd+T` issued before the focused pane reports a cwd.
+/// The `active_lane`-over-`project_root` order matters: swapping it would
+/// spawn shells at the repo root from inside a lane, breaking isolation for
+/// fresh starts, restored sessions, and `Cmd+T` before OSC 7 reports.
 pub(in crate::workspace) fn resolve_default_cwd(
     inherit_cwd: bool,
     candidates: CwdCandidates,
@@ -879,10 +854,8 @@ impl Workspace {
         // starts with the same font_size / spacing. Zoom actions
         // diverge each view's runtime font_size individually.
         let config = self.terminal_config;
-        // `shell_program` carries the effective shell from
-        // `apply_config` (user `[shell]` plus any project override).
-        // Falls back to `PtyConfig::default()`'s `$SHELL`/`/bin/zsh`
-        // resolution when neither layer pins a program.
+        // `shell_program` is the effective shell from `apply_config`; falls
+        // back to `PtyConfig::default()`'s `$SHELL`/`/bin/zsh` when unset.
         let mut pty_config = PtyConfig {
             cwd,
             ..PtyConfig::default()
@@ -942,12 +915,10 @@ impl Workspace {
         );
 
         // Bridge `TerminalViewEvent`s into Workspace-side platform calls
-        // (dock attention, notifications, …). The view emits; the
-        // Workspace gates by config and dispatches. `pane_id` is
-        // captured by the closure so the focus-gate can identify
-        // which pane raised the event without needing entity equality.
-        // Window-aware subscribe lets `ContextMenuRequested` open the
-        // host context menu / annotation dialog (both need `&mut Window`).
+        // (dock attention, notifications, …), gated by config. `pane_id` is
+        // captured so the focus-gate can identify the raising pane; the
+        // window-aware subscribe lets `ContextMenuRequested` open the host
+        // context menu / annotation dialog (both need `&mut Window`).
         let captured_pane_id = pane_id;
         let view_event_sub = cx.subscribe_in(
             &view,

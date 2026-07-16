@@ -1,27 +1,8 @@
-//! Pure view of an `&AgentChatView` — the scrolling conversation and inline
-//! permission cards. Built under the view's own `Context<AgentChatView>` (the
-//! view embeds this via `AnyView::cached(..)`). The prompt input lives in the
-//! shared bottom dock (`send_terminal_input` routes to the focused AgentChat
-//! pane's session), so this view carries no input field of its own.
+//! Pure view of an `&AgentChatView`.
 //!
-//! MVU view purity: every event closure is a one-line dispatch into an
-//! `AgentChatView` op (`this.respond_permission`, `this.toggle_fold`,
-//! `this.on_scroll`, …) — each notifies the view itself, so a scroll / fold
-//! dirties only this cached subtree. No state transition lives here.
-//!
-//! Rendering notes:
-//! - Assistant / user / thinking text: every message body renders as
-//!   rendered, drag-selectable / copyable markdown via `crate::ui::markdown`
-//!   (a `TextView` wrapper). Selection state is GPUI keyed-state, so each
-//!   body's id is keyed by the item's index — stable because `items` is
-//!   append-only. The collapsed summary stays plain text. Streaming bodies
-//!   render their partial markdown fine; the streaming signal lives on the
-//!   input dock, so no per-message caret is shown.
-//! - Tool-call diffs embed the read-only diff-editor entities that
-//!   `reconcile_diff_editors` builds from the diff ops (the `diff_editors`
-//!   cache); when an editor can't be built (window gone) or the diff is
-//!   identical, the card falls back to inline old/new colored monospace
-//!   lines using the file-viewer diff palette.
+//! MVU view purity: event closures one-line dispatch into view ops, so state
+//! changes stay outside render. Message selection keys use append-only item
+//! indexes; tool diffs embed cached read-only editors when available.
 
 mod blocks;
 mod chrome;
@@ -44,11 +25,8 @@ pub(super) type DiffEditors = std::collections::HashMap<String, Entity<crate::ui
 /// diff summary).
 pub(super) type DiffStats = std::collections::HashMap<String, DiffStat>;
 
-/// Rendered mermaid diagrams (GPU-ready [`CachedImage`]) keyed by source hash
-/// (filled async in the ops layer). Shared `Arc<Mutex<…>>` so the
-/// `code_block_render` closure — bound into `TextView`'s cached parse — reads
-/// the *live* cache, not a snapshot (the image lands after parse; see
-/// `AgentChatContent::mermaid_images`).
+/// Rendered mermaid diagrams keyed by source hash. Shared so the cached
+/// markdown code-block hook can see async image arrivals after parse.
 pub(super) type MermaidImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
@@ -76,18 +54,15 @@ use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 use crate::workspace::main_area::pane_tree::PaneId;
 
-/// Build the element tree for an Agent chat pane. Takes the view by shared
-/// reference (field reads) plus its own `Context` (listener binding); the two
-/// are distinct borrows, so reading `view` while `cx` is mutably held is fine.
+/// Build the element tree for an Agent chat pane.
 pub(in crate::workspace) fn render(
     view: &AgentChatView,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement {
     let pane_id = view.pane_id;
     let content = view;
-    // Clone the palette to an owned value so the render body can use `cx`
-    // mutably (binding listeners) while reading theme colours — `current`
-    // returns a borrow tied to `cx`.
+    // Own the palette so the render body can use `cx` mutably (listener
+    // binding) while reading theme colours — `current` borrows `cx`.
     let dim = content.dim_amount;
     let t = theme::current(cx).dimmed(dim);
 
@@ -100,11 +75,8 @@ pub(in crate::workspace) fn render(
         cx,
     );
 
-    // Activity bar: session title on the left, fold buttons on the right.
-    // Always visible — it holds the fold buttons even while the conversation is
-    // empty or still connecting. The title resolves to the agent's session
-    // title, else the first prompt, else the configured agent name. Fold buttons
-    // appear only once there are items.
+    // Activity bar: title left, fold buttons right. Title resolves to the
+    // session title, else the first prompt, else the configured agent name.
     let title = activity_bar_title(content.session_title.as_deref(), &content.items);
     let agent_title = if content.agent_name.trim().is_empty() {
         content.agent_id.as_str()
@@ -124,10 +96,9 @@ pub(in crate::workspace) fn render(
         cx,
     );
 
-    // The scroll-to-bottom button overlays the list when the user has scrolled
-    // up off the bottom (tail-follow released). It anchors to the body slot
-    // (below), not the pane root, so it floats just above the working footer
-    // instead of colliding with it. At-bottom is read from the list geometry.
+    // Scroll-to-bottom button, shown when scrolled up off the bottom
+    // (tail-follow released). Anchors to the body slot so it floats above the
+    // working footer. At-bottom is read from the list geometry.
     let scroll_btn: Option<AnyElement> = (!content.items.is_empty()
         && !crate::ui::scrollbar::list_at_bottom(
             &content.list_state,
@@ -146,12 +117,10 @@ pub(in crate::workspace) fn render(
             .child(SharedString::from(s::agent_chat_empty()))
             .into_any_element()
     } else {
-        // Virtualized conversation: `list` renders only the visible rows (+
-        // overdraw), so draw cost is bounded by the viewport, not the
-        // conversation length. The `'static` closure re-fetches the view
-        // (`this`) and indexes the projected `rows` (see `rows::project`), which
-        // interleaves synthetic fold headers with item rows; `render_row`
-        // dispatches by kind and applies per-row padding + nesting rail.
+        // Virtualized conversation: `list` renders only visible rows, so draw
+        // cost is bounded by the viewport, not the conversation length. The
+        // closure indexes the projected `rows` (see `rows::project`) and
+        // `render_row` dispatches by kind with per-row padding + nesting rail.
         let t_items = t.clone();
         // The last *visible* row gets bottom `PAD_Y` (vs `LIST_GAP` between
         // rows); collapsed rows are zero-height so they don't count.
@@ -165,14 +134,12 @@ pub(in crate::workspace) fn render(
         )
         .with_sizing_behavior(ListSizingBehavior::Auto)
         .size_full();
-        // Wrap the list so the live-tracking scrollbar overlay can sit over it:
-        // the overlay is absolute-fill, so its parent must be `relative` and
-        // sized to the viewport (this `flex_1` body slot). The scroll-to-bottom
-        // button also anchors here so it stays above the working footer.
-        // Capture the list viewport bounds each paint (sanctioned MVU
-        // layout-geometry cache) so the drag-selection autoscroll poll can tell
-        // when the cursor has left the pane. Painted behind the list; being
-        // non-interactive it never intercepts the list's own mouse handlers.
+        // Wrap the list so the absolute-fill scrollbar overlay and the
+        // scroll-to-bottom button can sit over it (parent must be `relative`,
+        // sized to the viewport). Capture the list viewport bounds each paint
+        // (sanctioned MVU layout-geometry cache) so the drag-selection
+        // autoscroll poll can tell when the cursor has left the pane. Painted
+        // behind the list and non-interactive, so it never intercepts mouse.
         let bounds_capture = {
             let view = cx.entity();
             canvas(
@@ -188,17 +155,16 @@ pub(in crate::workspace) fn render(
             .relative()
             .flex_1()
             .min_h(px(0.))
-            // Left mouse-down starts the autoscroll poll (one-line dispatch into
-            // the view op — no state-transition logic in the closure). Bubbles
-            // after the block's own selection start, and never stops
-            // propagation, so it doesn't disturb normal click/scroll handling.
+            // Left mouse-down starts the autoscroll poll. Bubbles after the
+            // block's own selection start and never stops propagation, so it
+            // doesn't disturb normal click/scroll handling.
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _ev, window, cx| this.start_selection_autoscroll(window, cx)),
             )
-            // Left mouse-up ends the drag through the single end point on the
-            // always-painted container — so the poll stops on release regardless
-            // of whether the selected child block is still painted.
+            // Left mouse-up ends the drag on the always-painted container, so
+            // the poll stops on release even if the selected child block is no
+            // longer painted.
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _ev, _window, _cx| this.end_selection_drag()),
@@ -228,14 +194,11 @@ pub(in crate::workspace) fn render(
         // `TerminalView`), so the pane walker embeds it as a plain cached
         // `AnyView` and `wrapper_focus_handle` returns `None` for this kind.
         .track_focus(&content.focus_handle)
-        // Background: the terminal color theme (config
-        // `effective_colors().background`) at the window opacity (config
-        // `window.opacity`), so this pane matches the terminal in both color
-        // and translucency. `agent_chat_bg` is opaque (a=1.0), so
-        // `.opacity(alpha)` yields exactly the window alpha; at the default
-        // 1.0 this is a plain fill. Applied only to the pane fill — message
-        // bubbles and the header keep their own opaque backgrounds for
-        // legibility.
+        // Background: the terminal color theme at the window opacity, so this
+        // pane matches the terminal in color and translucency. `agent_chat_bg`
+        // is opaque, so `.opacity(alpha)` yields exactly the window alpha.
+        // Applied only to the pane fill — bubbles and header keep their own
+        // opaque backgrounds for legibility.
         .bg(
             crate::ui::theme::dim_toward_gray(crate::ui::theme::agent_chat_bg(cx), dim)
                 .opacity(crate::ui::theme::background_alpha(cx)),
@@ -243,10 +206,9 @@ pub(in crate::workspace) fn render(
         .children(status_banner)
         .child(bar)
         .child(body)
-        // The plan region is a flex-none sibling BELOW the body: because `body`
-        // is `flex_1` and this is `flex_none`, the region claims its own space
-        // and the conversation shrinks to fit. Absent (`None`) when the agent
-        // has published no plan, so it costs no vertical space then.
+        // The plan region is a flex-none sibling below the `flex_1` body, so it
+        // claims its own space and the conversation shrinks to fit. `None` when
+        // the agent has published no plan, costing no vertical space.
         .children(plan_region(
             pane_id,
             &content.plan,
@@ -267,11 +229,10 @@ fn agent_display_name(view: &AgentChatView) -> &str {
     }
 }
 
-/// Render one projected row: an item, a synthetic fold header, or — when
-/// collapsed under an ancestor fold — a zero-height `Empty` (the row stays in
-/// the sequence so the count is fold-stable). Applies per-row padding (top on
-/// the first row, `PAD_Y` on the last visible row, `LIST_GAP` between) and a
-/// left indent per nesting level.
+/// Render one projected row: an item, a synthetic fold header, or a zero-height
+/// `Empty` when collapsed under an ancestor fold (the row stays in the sequence
+/// so the count is fold-stable). Applies per-row padding (top on the first row,
+/// `PAD_Y` on the last visible, `LIST_GAP` between) and a left indent per level.
 fn render_row(
     this: &AgentChatView,
     ix: usize,
@@ -341,7 +302,7 @@ fn render_row(
         theme::AGENT_CHAT_LIST_GAP
     };
     // A new turn (a `User` row past the first) gets extra top space so
-    // consecutive turns read as distinct exchanges, not one running column.
+    // consecutive turns read as distinct exchanges.
     let turn_break = ix != 0 && matches!(row.kind, RowKind::User(_));
     div()
         .w_full()
@@ -359,27 +320,23 @@ fn render_row(
 }
 
 /// Where the fold-toggle click lives on a [`disclosure_row`] / [`foldable_block`]
-/// header. `Row` makes the whole header a generous click target; `Chevron` binds
-/// the toggle to the chevron glyph alone and leaves the rest of the header inert.
+/// header: the whole row, or the chevron glyph alone.
 #[derive(Clone, Copy)]
 pub(super) enum ToggleTarget {
-    /// The whole header row toggles the fold (default: section bars, text
-    /// blocks). Generous hit area.
+    /// The whole header row toggles the fold — generous hit area (section bars,
+    /// text blocks).
     Row,
-    /// Only the chevron toggles; the rest of the header is inert — so a header
-    /// carrying its own selectable content (the tool-card title) doesn't fight
-    /// text selection. Used by the tool card and its nested raw-input / diff
-    /// disclosures.
+    /// Only the chevron toggles; the rest of the header stays inert so a header
+    /// carrying selectable content (the tool-card title) doesn't fight text
+    /// selection.
     Chevron,
 }
 
-/// The shared scaffold for every collapsible header in the pane: a full-width,
-/// borderless row that toggles `key` and leads with the disclosure chevron.
-/// Callers append their own label / summary / trailing glyph. `target` picks
-/// where the click lives (whole row vs chevron only). One source for the row's
-/// layout + click target, so the section bars (`response_bar` /
-/// `tool_group_bar`) and the inline blocks (`foldable_block`) can never drift
-/// apart — e.g. one growing box chrome the others lack.
+/// Shared scaffold for every collapsible header: a full-width borderless row
+/// that toggles `key` and leads with the disclosure chevron. Callers append
+/// their own label / summary / trailing glyph; `target` picks where the click
+/// lives. One source for layout + click target, so the section bars and inline
+/// blocks can't drift apart.
 fn disclosure_row(
     base: impl Into<ElementId>,
     key: FoldKey,
@@ -389,7 +346,7 @@ fn disclosure_row(
     cx: &mut Context<AgentChatView>,
 ) -> gpui::Stateful<gpui::Div> {
     // One base id yields both the row's click target and the chevron glyph's
-    // identity, so the two stay distinct yet stable across renders.
+    // identity — distinct yet stable across renders.
     let base: ElementId = base.into();
     let chevron: Disclosure = disclosure((base.clone(), "chevron"), expanded)
         .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
@@ -414,11 +371,9 @@ fn disclosure_row(
     }
 }
 
-/// The status-rollup glyph trailing a section header: ● running (in progress /
-/// streaming, blinking), ⚠ partial (some failed, some succeeded), ✗ all failed,
-/// else ✓ all done. Single source for the response bar and the tool-group bar
-/// so the two never disagree on treatment.
-/// The outcome a section header's rollup glyph summarizes over its run.
+/// The outcome a section header's rollup glyph summarizes over its run (see
+/// [`rollup_glyph`]). Single source for the response bar and tool-group bar so
+/// the two never disagree on treatment.
 enum Rollup {
     /// At least one child still in progress / streaming (not settled).
     Running,
@@ -468,15 +423,15 @@ fn rollup_glyph(
 ) -> impl IntoElement + use<> {
     let (glyph, color) = match rollup {
         // Amber "executing tool" accent so an in-progress run reads stronger
-        // than a settled glyph instead of fading into body grey.
+        // than a settled glyph.
         Rollup::Running => ("●", t.status_executing_tool_dark),
         Rollup::Ok => ("✓", t.file_diff_stat_add),
         // Partial = some failed, some succeeded → warning, not a hard failure.
         Rollup::Partial => ("⚠", t.banner_warning_text),
         Rollup::Failed => ("✗", t.banner_error_text),
     };
-    // Blink the running dot (1.0 ↔ MIN on the shared 2-tick pulse) so an
-    // in-progress run reads as live; the settled glyphs stay solid.
+    // Blink the running dot on the shared 2-tick pulse so it reads as live;
+    // settled glyphs stay solid.
     let opacity = if matches!(rollup, Rollup::Running) {
         pulse_opacity(cx)
     } else {
@@ -490,11 +445,10 @@ fn rollup_glyph(
         .child(SharedString::from(glyph))
 }
 
-/// Collapsible header for an agent response (the run of agent items under a
-/// user message). The whole row toggles `FoldKey::Response`; shows a chevron +
-/// agent label, and — when collapsed — the response's first line, a tool count,
-/// and a status-rollup glyph (see [`rollup_glyph`]). The
-/// user prompt stays visible above, so the summary doesn't repeat it.
+/// Collapsible header for an agent response (agent items under a user message).
+/// The whole row toggles `FoldKey::Response`; shows a chevron + agent label and,
+/// when collapsed, the response's first line, tool count, and status-rollup
+/// glyph (see [`rollup_glyph`]).
 fn response_bar(
     this: &AgentChatView,
     anchor: usize,
@@ -530,9 +484,9 @@ fn response_bar(
                         .find(|l| !l.trim().is_empty())
                         .map(str::to_owned);
                 }
-                // Produced assistant output counts as a success for the rollup,
-                // so a response that answered *and* hit a tool failure reads as
-                // partial (⚠), not a hard failure (✗).
+                // Produced assistant output counts as success, so a response
+                // that answered *and* hit a tool failure reads partial (⚠),
+                // not a hard failure (✗).
                 if !text.trim().is_empty() {
                     any_ok = true;
                 }
@@ -543,10 +497,8 @@ fn response_bar(
         }
     }
     let rollup = rollup_of(running, failed, any_ok);
-    // Borderless disclosure row (shared `disclosure_row`) — matches the
-    // assistant / thinking block headers, so a single-block reply and a
-    // multi-block / tool response share one header style. Only content cards
-    // (`tool_card`) carry box chrome; section headers stay light.
+    // Borderless `disclosure_row`, matching the block headers — section headers
+    // stay light; only content cards (`tool_card`) carry box chrome.
     let mut row = disclosure_row(
         SharedString::from(format!("agent-chat-response-{anchor}")),
         FoldKey::Response(anchor),
@@ -564,8 +516,8 @@ fn response_bar(
             .child(SharedString::from(agent_display_name(this).to_string())),
     );
 
-    // Collapsed: the response's first line (ellipsized) + tool count fill the
-    // row before the status glyph. Expanded: just push the glyph to the right.
+    // Collapsed: first line (ellipsized) + tool count fill the row before the
+    // status glyph. Expanded: push the glyph to the right.
     if collapsed {
         let line = first_line.unwrap_or_default();
         row = row.child(
@@ -613,17 +565,14 @@ fn tool_group_bar(
                 ToolStatusView::InProgress | ToolStatusView::Pending => running = true,
                 ToolStatusView::Failed => failed = true,
                 ToolStatusView::Completed => any_ok = true,
-                // Cancelled is settled but neither a success nor a failure, so
-                // it sets no flag — it stops the run pulsing without turning
-                // the rollup glyph red.
+                // Settled but neither success nor failure: sets no flag, so the
+                // run stops pulsing without turning the glyph red.
                 ToolStatusView::Cancelled => {}
             }
         }
     }
     let rollup = rollup_of(running, failed, any_ok);
-    // Borderless disclosure row (shared `disclosure_row`), same as the response
-    // bar — section headers stay light; only `tool_card` (content) carries box
-    // chrome.
+    // Borderless `disclosure_row`, same as the response bar.
     disclosure_row(
         SharedString::from(format!("agent-chat-toolgroup-{gid}")),
         FoldKey::ToolGroup(gid.to_string()),
@@ -650,10 +599,8 @@ fn tool_group_bar(
     .child(rollup_glyph(rollup, t, cx))
 }
 
-/// Floating "jump to bottom" affordance shown over the list when the user has
-/// scrolled up (tail-follow released). One-line dispatch into
-/// `this.scroll_to_bottom(cx)` (render purity); positioned bottom-right via
-/// the pane root's `relative`.
+/// Floating "jump to bottom" affordance shown when the user has scrolled up
+/// (tail-follow released). Positioned bottom-right via the parent's `relative`.
 fn scroll_to_bottom_button(
     pane_id: PaneId,
     cx: &mut Context<AgentChatView>,
@@ -670,11 +617,9 @@ fn scroll_to_bottom_button(
 }
 
 /// One conversation row. Message bodies render as selectable markdown via
-/// `crate::ui::markdown`, keyed by `ix` for stable selection identity.
-///
-/// `fold` / `diff_stats` are read-only here (render purity): the foldable kinds
-/// derive their expanded state purely via `fold.is_expanded(&key, active)` and
-/// read the collapsed diff summary from `diff_stats`. Toggling routes through
+/// `crate::ui::markdown`, keyed by `ix` for stable selection identity. `fold` /
+/// `diff_stats` are read-only here: foldable kinds derive expanded state via
+/// `fold.is_expanded(&key, active)`; toggling routes through
 /// `AgentChatView::toggle_fold`, never mutating the view in render.
 #[allow(clippy::too_many_arguments)]
 fn render_item(

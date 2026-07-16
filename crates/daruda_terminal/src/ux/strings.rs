@@ -158,7 +158,7 @@ pub const RIGHT_PANEL_TASK_SESSION_BADGE_LEN: usize = 8;
 
 /// Glyph prefixing the per-row subtask progress badge (`☑done/total`).
 /// Rendered at the same trailing position as the duration / session
-/// cells so every row keeps the same column layout (R-21).
+/// cells so every row keeps the same column layout.
 pub const RIGHT_PANEL_SUBTASK_PROGRESS_GLYPH: &str = "☑";
 
 /// Glyph trailing the session-id badge while the matching Claude

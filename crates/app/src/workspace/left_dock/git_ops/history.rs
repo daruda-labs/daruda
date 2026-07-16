@@ -154,11 +154,10 @@ impl Workspace {
         }
     }
 
-    /// Switch the Commit split button into amend mode. The box text present
-    /// when entering is saved on the `Amend` variant so Cancel can restore it.
-    /// A non-empty box keeps the user's text and enters immediately; an empty
-    /// box first loads the tip commit message (async) and enters once it
-    /// arrives. A repo with no commits stays in normal mode and toasts.
+    /// Switch the Commit split button into amend mode. The box text on entry
+    /// is saved on the `Amend` variant so Cancel can restore it. A non-empty
+    /// box enters immediately; an empty box first loads the tip commit message
+    /// (async). A repo with no commits stays in normal mode and toasts.
     fn enter_amend_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(repo_root) = self.git_repo_root_for(self.active) else {
             return;
@@ -178,8 +177,8 @@ impl Workspace {
         }
 
         // Empty box → load HEAD's message, then enter amend mode in the
-        // continuation. The saved draft is empty (Cancel restores an empty box).
-        // `wh` recovers a live `&mut Window` for `set_text`.
+        // continuation with an empty saved draft. `wh` recovers a live
+        // `&mut Window` for `set_text`.
         let wh = window.window_handle();
         let repo_for_report = repo_root.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -233,12 +232,10 @@ impl Workspace {
         .detach();
     }
 
-    /// Cancel amend mode: restore the box to the draft saved when amend mode
-    /// was entered (the user's own message, or empty if we'd prefilled), then
-    /// switch back to normal Commit labels — so a user who cancels can commit
-    /// their original message without it being wiped. Safe to call
-    /// unconditionally; a no-op when not in amend mode. Used by Cancel Amend
-    /// and by lane switches.
+    /// Cancel amend mode: restore the box to the draft saved on entry (the
+    /// user's own message, or empty if prefilled) and switch back to normal
+    /// Commit labels, so the original message isn't wiped. Safe to call
+    /// unconditionally; a no-op when not in amend mode.
     pub(in crate::workspace) fn exit_amend_mode(
         &mut self,
         window: &mut Window,

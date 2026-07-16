@@ -1,27 +1,11 @@
-//! MCP server data model — GPUI-free types describing the on-disk
-//! layout of the three MCP server scopes Claude Code reads (matching
-//! the official scope table at <https://code.claude.com/docs/en/mcp>):
+//! GPUI-free MCP server data model for Claude Code's three scopes.
 //!
-//! - **User** — `~/.claude.json` top-level `mcpServers` (available
-//!   across every project).
-//! - **Local** — `~/.claude.json` `projects[<lane>].mcpServers` (private
-//!   to the current project).
-//! - **Project** — `<lane>/.mcp.json` (team-shared, committable).
+//! User and Local live in `~/.claude.json`; Project lives in `<lane>/.mcp.json`.
+//! Precedence is Local > Project > User. Round-tripping must preserve unknown
+//! keys because `.claude.json` also holds unrelated Claude Code state.
 //!
-//! Precedence (highest first, per the docs): Local > Project > User.
-//!
-//! User and Local share one physical file (`~/.claude.json`); Project
-//! lives in its own `.mcp.json`. Both files round-trip losslessly: known
-//! keys land in typed fields, unknown keys are preserved via `extra`
-//! (per server) and via the raw `serde_json::Value` tree (every key
-//! outside the patched `mcpServers` map). This is mandatory —
-//! `~/.claude.json` holds the user's entire Claude Code state (history,
-//! per-project data, auth), and silently dropping any of it on a toggle
-//! would be catastrophic.
-//!
-//! No GPUI imports here — `app/src/CLAUDE.md` G2 / G7 forbid them.
-//! This module is consumed by the renderer (`workspace/right_dock/tools/`),
-//! the watcher (`hooks/mcp_watcher.rs`), and the CRUD modals.
+//! No GPUI imports here; `app/src/CLAUDE.md` G2/G7 reserve this module for
+//! parsing, persistence, watchers, and renderer data.
 
 pub mod global;
 pub mod parse;
@@ -42,15 +26,7 @@ pub use persist::{
     McpPersistError, McpServerDraft, delete_server, set_disabled, update_server, write_server,
 };
 
-/// On-disk scope for an MCP server, matching Claude Code's three
-/// installation scopes.
-///
-/// - `User` — `~/.claude.json` top-level `mcpServers` (cross-project).
-/// - `Project` — `<lane>/.mcp.json` (team-shared, committable).
-/// - `Local` — `~/.claude.json` `projects[<lane>].mcpServers` (private
-///   to the current project).
-///
-/// Precedence (highest first): Local > Project > User.
+/// On-disk scope for an MCP server; precedence is Local > Project > User.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum McpScope {
     User,

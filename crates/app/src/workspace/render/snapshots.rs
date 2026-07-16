@@ -293,7 +293,7 @@ impl Workspace {
             .collect();
         // Per-session status keyed by the `session_id` so the Tasks
         // tab's row renderer can paint a `⟳ / ● / ⚠` glyph next to
-        // each row's session-id badge (R-23) without dipping into
+        // each row's session-id badge without dipping into
         // the workspace.
         let claude_status_per_session: std::collections::HashMap<
             String,

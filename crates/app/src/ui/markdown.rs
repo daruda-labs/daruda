@@ -1,22 +1,9 @@
-//! Wrapper over `gpui_component::text::TextView` — rendered, drag-selectable,
-//! copyable Markdown (headings, bold, code blocks with syntax highlight, GFM).
+//! Render-once wrapper over `gpui_component::text::TextView` Markdown.
 //!
-//! Shape: a `RenderOnce` that stores only `(id, text)`, so the caller
-//! constructs it cx-only in a snapshot render path (no `&mut Window` needed at
-//! the call site). `TextView::markdown` — which *does* need `&mut Window` to
-//! register its keyed selection state — is built inside `render`, where the
-//! window is in scope. This is how a window-needing widget rides a cx-only
-//! render path without threading `&mut Window` through it.
-//!
-//! Selection state is owned by GPUI, keyed by `id`
-//! (`window.use_keyed_state("{id}/state")`), so there is no per-message entity
-//! to manage. That mirrors the diff editor entities and the scroll handle: a
-//! sanctioned "GPUI-owned view state" exception to the MVU single-source rule.
-//!
-//! `id` must be stable per logical block across renders, or the keyed state
-//! (and the live selection) resets. Callers key by the conversation item index
-//! — valid only while the item list is append-only (see the agent-chat fold
-//! INVARIANT).
+//! Builds the window-needing `TextView::markdown` inside render so callers can
+//! construct Markdown from cx-only snapshot paths. Selection is GPUI keyed
+//! state, a sanctioned MVU exception; callers must provide stable ids or live
+//! selection resets.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -29,12 +16,7 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 use gpui_component::text::TextView;
 
-/// Host hook to replace a code block's rendering with a custom element,
-/// keyed off the fence's `(lang, source)`. Returns `Some(el)` to override,
-/// `None` to keep the default code rendering. `Send + Sync + 'static` because
-/// `TextView` threads it through its async parse. Domain-free: the closure
-/// takes/returns only primitives + `AnyElement`, so this module stays free of
-/// any workspace / raster types.
+/// Optional code-block override hook kept domain-free for this UI wrapper.
 type CodeBlockRender =
     Arc<dyn Fn(&str, &str, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync>;
 
@@ -56,11 +38,7 @@ impl Markdown {
         self
     }
 
-    /// Fill the container width (so text wraps to it) vs. size to content.
-    /// Default `true` — needed for block markdown in a column, where without
-    /// it `TextView` lays out at its intrinsic max-content width, overflowing
-    /// the pane (no wrap, content clipped off-screen). Set `false` for a
-    /// shrink-to-fit context like a chat bubble.
+    /// Fill the container width so block markdown wraps; set false for bubbles.
     pub fn full_width(mut self, full_width: bool) -> Self {
         self.full_width = full_width;
         self

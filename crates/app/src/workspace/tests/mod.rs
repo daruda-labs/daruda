@@ -11,9 +11,8 @@ mod files;
 mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;
-// Disabled: these tests drive `save_state` / `restore_state` against the
-// deleted `legacy::WorkspaceState` / `legacy::ProjectState` types, so the
-// file doesn't compile. Needs a rewrite for the UUID-keyed schema.
+// Disabled: drives save_state/restore_state against removed legacy
+// WorkspaceState/ProjectState types; needs a rewrite for the UUID-keyed schema.
 mod lanes;
 #[cfg(any())]
 mod persistence;
@@ -55,12 +54,10 @@ fn build_workspace(
     build_workspace_with(cx, &config, None)
 }
 
-/// Variant of [`build_workspace`] that lets the caller control the
-/// `Config` and supply an optional `Project`. Mirrors production's
-/// `windows::open_workspace_window` — Workspace constructed inside
-/// `gpui_component::Root::new(...)` so any API that walks the window
-/// root (Dialog open, Theme reads, focus tracking) sees the same
-/// shape as the running app.
+/// Variant of [`build_workspace`] with caller-controlled `Config` and optional
+/// `Project`. Mirrors `windows::open_workspace_window` — Workspace constructed
+/// inside `gpui_component::Root::new(...)` so window-root APIs (Dialog, Theme,
+/// focus) see the same shape as the running app.
 fn build_workspace_with(
     cx: &mut TestAppContext,
     config: &daruda_config::Config,
@@ -80,10 +77,9 @@ fn build_workspace_with(
                 window,
                 cx,
             );
-            // `build_workspace` is used by tab/dock/persistence tests
-            // that assume a workspace boots with one tab; opt back into
-            // that single piece of heavy init while keeping the rest
-            // (watchers, persist, macro shortcuts) skipped.
+            // Tab/dock/persistence tests assume a workspace boots with one
+            // tab; opt back into that init while keeping the rest (watchers,
+            // persist, macro shortcuts) skipped.
             ws.add_tab(window, cx);
             ws
         });

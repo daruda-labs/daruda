@@ -1,43 +1,22 @@
-//! Background-task helpers for `Workspace`.
-//!
-//! The dominant async shape across `*_ops.rs` is:
-//!
-//! 1. snapshot a few read-only fields off `&self`,
-//! 2. run blocking work on `cx.background_executor()`,
-//! 3. drop back onto the foreground inside `this.update(cx, ...)`
-//!    and mutate.
-//!
-//! [`spawn_bg_work_and_mutate`] folds that pattern into one call so
-//! callers only declare the blocking work and the foreground-side
-//! mutation; `await`, `detach`, and the `this.update` `Result`
-//! handling are absorbed by the helper.
+//! Background-task helpers for `Workspace`. [`spawn_bg_work_and_mutate`]
+//! folds the common async shape — run blocking work on the background
+//! executor, then mutate on the foreground inside `this.update(cx, ...)` —
+//! into one call, absorbing the `await` and `this.update` `Result` handling.
 
 use gpui::{Context, Task};
 
 use super::Workspace;
 
-/// Run `bg` on the background executor, then call `on_result` on
-/// the foreground GPUI thread inside `this.update(cx, …)`. Returns
-/// the spawned [`Task<()>`]; callers either store it in a struct
-/// field (so dropping the workspace cancels in-flight work) or
-/// `.detach()` it (fire-and-forget — the existing convention for
-/// `git_ops`-style spawns).
+/// Run `bg` on the background executor, then call `on_result` on the
+/// foreground GPUI thread inside `this.update(cx, …)`. Returns the spawned
+/// [`Task<()>`]; callers store it (drop cancels in-flight work) or
+/// `.detach()` it (fire-and-forget, the `git_ops` convention).
 ///
-/// Type parameters:
-/// - `R` — value the blocking work returns. Lands as the second
-///   argument to `on_result`.
-/// - `F` — the blocking work itself. Runs on the background
-///   executor; must be `Send + 'static` so it can move across
-///   threads.
-/// - `G` — the foreground continuation. Takes `&mut Workspace`,
-///   the `R` produced by `F`, and the workspace `Context`. Not
-///   `Send` because GPUI's foreground tasks stay on the main
-///   thread.
-///
-/// The returned task no-ops if the workspace was dropped between the
-/// background work finishing and the foreground update — workspace
-/// teardown is the expected terminal state, not an error worth
-/// surfacing. Marked `SILENT-OK` for the lint script.
+/// `R` is the blocking work's return, passed to `on_result`. `F` is
+/// `Send + 'static` to cross threads; `G` is not `Send` (GPUI foreground
+/// tasks stay on the main thread). The returned task no-ops if the
+/// workspace was dropped mid-flight — teardown is the expected terminal
+/// state, so it is `SILENT-OK` for the lint script.
 pub(in crate::workspace) fn spawn_bg_work_and_mutate<R, F, G>(
     cx: &mut Context<Workspace>,
     bg: F,

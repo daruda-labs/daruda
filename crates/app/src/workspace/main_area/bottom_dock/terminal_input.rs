@@ -1,37 +1,8 @@
-//! Bottom dock body for the built-in "Terminal Input" panel.
+//! Bottom dock body for the built-in Terminal Input panel.
 //!
-//! Renders the `crate::ui::input_with_action` wrapper — a chrome cell
-//! (`MODAL_INPUT_BG` + border + radius) with the Submit button in its
-//! own column beside the text, so the text uses the cell's full height
-//! at every dock size. Enter or the button click forwards the current
-//! text to the focused terminal pane followed by `\r`, then clears the
-//! field. The send key depends on context: a focused agent chat pane
-//! sends on Enter (Shift+Enter for a newline) unless the
-//! `agent.use_modifier_to_send` config is on, in which case — and for
-//! terminal panes — Cmd+Enter sends. While an agent chat pane that
-//! advertises ≥2 session modes is focused, Shift+Tab cycles the mode
-//! (Claude Code's permission-mode cycle) instead of outdenting. The
-//! keyboard path lives in `workspace::mod.rs` via `subscribe_in` on the
-//! `InputState`; this file owns the visual layout + the button-click handler.
-//!
-//! Layout sketch (every dock height). The mode chip only appears when the
-//! focused pane is an Agent chat pane that advertises session modes; a
-//! terminal-pane focus shows the Submit button alone:
-//!
-//! ```text
-//! ┌──────────────────────────────┐
-//! │ text                         │
-//! │ ...        [Mode ▾][Submit]  │
-//! └──────────────────────────────┘
-//! ```
-//!
-//! Drop handling — dropped paths are quoted with [`shell_quote`] using
-//! the focused pane's shell flavour so a path like
-//! `/Users/me/My File.txt` reaches the shell as a single token. Two
-//! sources are handled:
-//!
-//! - [`PathDrag`] — internal left-dock (Files / Git Changes) row drag.
-//! - [`gpui::ExternalPaths`] — Finder / desktop / other-app file drops.
+//! Owns the visual layout and button-click handler; keyboard handling lives in
+//! `workspace::mod.rs` on the shared `InputState`. Dropped paths are quoted via
+//! [`shell_quote`] using the focused pane's shell flavour before insertion.
 
 use crate::ui::theme;
 use gpui::{AnyElement, ClickEvent, Context, ExternalPaths, IntoElement, div, prelude::*, px};
@@ -51,15 +22,8 @@ pub(in crate::workspace) fn render_body(
     let state_for_external = state.clone();
     let workspace = snap.workspace.clone();
     let shell = snap.shell;
-    // Cmd+C / Cmd+X / Cmd+V / Cmd+A on the input are handled by
-    // `gpui_component::Input`'s own action handlers (key context
-    // `"Input"`). The user must have keyboard focus on the input for
-    // the shortcuts to fire — the same constraint every other modal
-    // input has.
-    // While the focused pane is an Agent chat pane mid-turn, the button
-    // reads "Stop" and cancels that pane's turn; otherwise it reads "Send"
-    // and forwards the input (to the agent session or the terminal PTY,
-    // resolved inside `send_terminal_input`).
+    // Input edit shortcuts are handled by gpui_component's `"Input"` context.
+    // Mid-turn agent panes show Stop; otherwise the button sends input.
     // DESIGN.md: Submit button — height 28px, radius md (6px). The primary / danger
     // factory applies the accent / danger background; height and radius are pinned
     // here to match the spec's fixed heights table (Button: 28px) and radius scale

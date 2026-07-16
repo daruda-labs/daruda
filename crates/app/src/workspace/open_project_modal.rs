@@ -1,16 +1,9 @@
-//! Modal asking how to open a folder picked via File > Open… when
-//! the workspace's `WindowOpenPolicy` is `Ask`.
-//!
-//! Two mutually-exclusive choices (radio): add the folder to the
-//! current window vs. open it in a fresh window. A "Don't ask again"
-//! checkbox folds the picked choice into the workspace's
-//! [`WindowOpenPolicy`] so subsequent Open Project actions bypass
-//! this modal.
-//!
-//! The modal owns no business logic — it just collects the user's
-//! choice and hands it to [`OpenProjectChoice`]'s submit callback,
-//! which threads back into [`crate::windows`] to execute the picked
-//! action against the captured `path`.
+//! Modal asking how to open a folder picked via File > Open… when the
+//! workspace's `WindowOpenPolicy` is `Ask`. Two radio choices (add to this
+//! window / open in a new window) plus a "Don't ask again" checkbox that
+//! folds the pick into [`WindowOpenPolicy`]. Owns no business logic — it
+//! collects the choice and hands it to the submit callback, which threads
+//! back into [`crate::windows`] to act on the captured `path`.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -96,14 +89,10 @@ impl OpenProjectModal {
         let path = self.path.clone();
         let wh = window.window_handle();
         window.close_dialog(cx);
-        // Defer the on_submit fire — close_dialog only schedules the
-        // modal entity's teardown, so calling on_submit synchronously
-        // here re-enters update_window from inside a still-alive modal
-        // entity's borrow and GPUI returns "window not found". Capture
-        // the window handle and re-enter on the next effect cycle once
-        // the modal has been dropped (G9: capture
-        // `window.window_handle()` and re-enter via
-        // `cx.update_window(handle, ...)`).
+        // Defer the on_submit fire: close_dialog only schedules teardown,
+        // so firing synchronously re-enters update_window from inside the
+        // still-alive modal's borrow and GPUI returns "window not found".
+        // Re-enter via the captured handle on the next effect cycle (G9).
         cx.defer(move |app_cx| {
             crate::windows::try_update_workspace_window(
                 wh,

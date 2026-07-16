@@ -1,15 +1,10 @@
 //! Whether a lane (or project) root directory can be read on disk.
 //!
-//! A lane's root can vanish or become unreadable between sessions —
-//! the user deletes the worktree, an external `git worktree remove`
-//! runs, or a TCC-restricted directory denies `readdir`. When that
-//! happens the file-tree scan, watcher, and PTY spawn all waste work
-//! and the directory-read failure spams an error toast every tick.
-//!
-//! This runtime-only flag captures that state so the read-side
-//! short-circuits (skip the scan, tear down the watcher, suppress the
-//! toast) and a later UI task can render the lane as unavailable.
-//! Mirrors the `Lane.status` precedent: recomputed from the live
+//! A lane's root can vanish or become unreadable between sessions
+//! (deleted worktree, external `git worktree remove`, TCC-denied
+//! `readdir`). This runtime-only flag lets the read side short-circuit
+//! (skip the scan, tear down the watcher, suppress the toast) and the
+//! UI render the lane as unavailable. Recomputed from the live
 //! filesystem, never serialized.
 //!
 //! GPUI-free: pure `std::fs` plus the [`FileTreeError`] mapping.
@@ -48,17 +43,14 @@ pub fn classify_dir(path: &Path) -> LaneAvailability {
 /// fabricating a filesystem that yields each error kind.
 fn classify_dir_from_error(e: &std::io::Error) -> LaneAvailability {
     match e.kind() {
-        // The only kinds that mean the directory is genuinely gone or
-        // unusable — these justify tearing the lane down and showing
-        // the inaccessible empty-state.
+        // Only genuine "gone / unusable" kinds justify tearing the lane
+        // down and showing the inaccessible empty-state.
         std::io::ErrorKind::NotFound => LaneAvailability::Missing,
         std::io::ErrorKind::PermissionDenied => LaneAvailability::AccessDenied,
         std::io::ErrorKind::NotADirectory => LaneAvailability::Missing,
-        // Every other failure — Interrupted, TimedOut, WouldBlock, a
-        // stale handle, EMFILE, or a generic I/O error — is transient
-        // or unknown. The directory most likely still exists, so stay
-        // `Present`: a hiccup must not trigger teardown + empty-state.
-        // The caller surfaces such failures as a normal error toast.
+        // Every other kind is transient/unknown — the directory likely
+        // still exists, so stay `Present` and let the caller surface it
+        // as a normal error toast rather than triggering teardown.
         _ => LaneAvailability::Present,
     }
 }

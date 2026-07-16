@@ -261,9 +261,8 @@ fn reorder_project_before_downward_across_multiple_lands_after_target(cx: &mut T
         }
     });
     // Before: [pa=0, pb=1, pc=2]. Drag pa onto pc (down past pb).
-    // Expected: pa lands AFTER pc → [pb=0, pc=1, pa=2]. The pre-fix
-    // behavior produced [pb=0, pa=1, pc=2] (one slot short of the
-    // drop target), which is exactly the "1 → 3 goes to slot 2" report.
+    // Expected: pa lands AFTER pc → [pb=0, pc=1, pa=2]. Regression guard
+    // for the "1 → 3 lands one slot short at 2" downward-drop bug.
     let (pa, pb, pc) = ws.read_with(cx, |ws, _| {
         (ws.projects[0].id, ws.projects[1].id, ws.projects[2].id)
     });

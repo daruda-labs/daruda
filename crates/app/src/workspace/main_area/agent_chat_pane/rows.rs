@@ -1,19 +1,12 @@
 //! Render-row projection over the flat `items` model.
 //!
-//! The conversation model (`AgentChatView.items`) stays a flat, append-only
-//! `Vec<ChatItem>` (the ACP / zed standard). Folding structure — turns, agent
-//! responses, consecutive tool-call groups — is *derived at render time* by
-//! [`project`], never baked into the model. The result is a stable sequence of
-//! [`RenderRow`]s the virtualized `list` indexes over: synthetic header rows
-//! (`ResponseHeader`, `ToolGroupHeader`) interleaved with the item rows, each
-//! carrying a `hidden` flag (collapsed under an ancestor → rendered as a
-//! zero-height `Empty`) and a nesting `indent` depth.
-//!
-//! Folding never *removes* rows — it flips `hidden` — so the row count is
-//! stable across a fold toggle (only heights change → `remeasure`), and only an
-//! `items` append (or a run becoming a group) changes the count. `same_slot`
-//! lets `rebuild_rows` find the longest unchanged prefix and splice only the
-//! tail, preserving scroll.
+//! Folding structure (turns, agent responses, tool-call groups) is derived at
+//! render time by [`project`], never stored: it yields a stable sequence of
+//! [`RenderRow`]s (synthetic headers interleaved with item rows, each with a
+//! `hidden` flag and `indent` depth) that the virtualized `list` indexes over.
+//! Folding flips `hidden` rather than removing rows, so the count is fold-stable
+//! and `same_slot` lets `rebuild_rows` splice only the changed tail, preserving
+//! scroll.
 
 use daruda_acp::{ChatItem, ToolCallItem};
 
@@ -26,44 +19,39 @@ use super::fold::{FoldKey, FoldState};
 const TOOL_GROUP_MIN: usize = 2;
 
 /// What a projected row represents. The payload is the row's stable *slot key*
-/// (item index / tool-group id) plus cached display data; `same_slot` compares
-/// only the key.
+/// (item index / tool-group id); `same_slot` compares only the key.
 pub(in crate::workspace) enum RowKind {
     /// A user message — the always-visible turn anchor (never folded).
     User(usize),
     /// Synthetic header for an agent response (the run of agent items after a
     /// user message), keyed by the anchoring `UserText` index. Emitted only for
     /// a non-trivial response (≥ 1 tool or ≥ 2 blocks); `collapsed` hides the
-    /// whole response and drives the header chevron / summary.
+    /// whole response.
     ResponseHeader { anchor: usize, collapsed: bool },
     /// An individual agent block (assistant / thinking / tool / permission /
     /// error), keyed by its `items` index.
     AgentItem(usize),
     /// Synthetic header for a consecutive run of ≥ [`TOOL_GROUP_MIN`] tool
     /// calls. `gid` is the first tool call's id (stable under append-only);
-    /// `first_ix` + `count` locate the run for the summary; `collapsed` drives
-    /// the header chevron + whether the summary line is shown.
+    /// `first_ix` + `count` locate the run; `collapsed` drives the chevron and
+    /// summary line.
     ToolGroupHeader {
         gid: String,
         first_ix: usize,
         count: usize,
         collapsed: bool,
     },
-    /// The turn's conclusion — the run's final assistant-text block, when it
-    /// sits under a response bar. Keyed by its `items` index. Unlike the inline
-    /// process prose (a plain `AgentItem` at indent > 0, hidden when the
-    /// response folds), the conclusion stays visible when the response is
-    /// collapsed *and* carries its own fold toggle (`FoldKey::Assistant`), so it
-    /// can be collapsed to a one-line summary independently of the process.
+    /// The turn's conclusion — the run's final assistant-text block when it sits
+    /// under a response bar. Stays visible when the response is collapsed and
+    /// carries its own fold toggle (`FoldKey::Assistant`), so it can collapse to
+    /// a one-line summary independently of the process prose.
     ConclusionItem(usize),
-    /// Synthetic "agent is working" indicator pinned at the tail of the last
-    /// turn's run for the whole time a turn is in flight (through tool execution
-    /// and streaming), so the live "working … + elapsed" signal stays
-    /// consistently present in the conversation flow. Carries no payload; at
-    /// most one exists (always the last row). Suppressed only while blocked on a
-    /// permission prompt (via `awaiting_response`); it stays visible even when
-    /// the response is manually collapsed — pinned below the still-visible
-    /// conclusion — so a folded in-flight turn still shows the live signal.
+    /// Synthetic "agent is working" indicator pinned to the last turn's tail for
+    /// the whole time a turn is in flight (through tool execution and
+    /// streaming). At most one exists (always the last row). Suppressed only
+    /// while blocked on a permission prompt; stays visible even when the
+    /// response is manually collapsed (pinned below the still-visible
+    /// conclusion).
     WorkingIndicator,
 }
 
@@ -80,9 +68,8 @@ pub(in crate::workspace) struct RenderRow {
 
 impl RenderRow {
     /// Whether two rows occupy the same logical slot — same kind + same key,
-    /// ignoring `hidden` / cached display fields. Drives `rebuild_rows`'
-    /// longest-common-prefix diff so a fold toggle (same slots, only `hidden`
-    /// changed) splices nothing and a streamed append splices only the tail.
+    /// ignoring `hidden` / payload fields. Drives `rebuild_rows`' LCP diff so a
+    /// fold toggle splices nothing and a streamed append splices only the tail.
     pub(in crate::workspace) fn same_slot(&self, other: &Self) -> bool {
         match (&self.kind, &other.kind) {
             (RowKind::User(a), RowKind::User(b))
@@ -110,27 +97,21 @@ const RESPONSE_MIN_BLOCKS: usize = 2;
 
 /// Project the flat `items` into renderable rows, deciding each row's
 /// visibility from `fold`. Structure (derived, not stored):
-/// - A **turn** is a `UserText` (the always-visible anchor) plus the run of
-///   agent items up to the next `UserText`.
+/// - A **turn** is a `UserText` anchor plus the run of agent items up to the
+///   next `UserText`.
 /// - A **non-trivial response** (≥ 1 tool or ≥ [`RESPONSE_MIN_BLOCKS`] blocks)
-///   gets a collapsible `ResponseHeader`; collapsing it hides the whole run.
-///   A trivial response renders inline (no header, no fold).
-/// - Inside a response, a consecutive run of ≥ [`TOOL_GROUP_MIN`] tool calls
-///   gets a collapsible `ToolGroupHeader`. Nesting deepens `indent`.
+///   gets a collapsible `ResponseHeader`; a trivial one renders inline.
+/// - Inside a response, a run of ≥ [`TOOL_GROUP_MIN`] tool calls gets a
+///   collapsible `ToolGroupHeader`. Nesting deepens `indent`.
 ///
-/// Defaults via `ExpandedWhileActive`: the last turn / a streaming response is
-/// expanded, settled past responses collapse; a settled tool group collapses.
-/// Pure and total.
+/// Defaults via `ExpandedWhileActive`: the last/streaming turn stays expanded,
+/// settled past responses and tool groups collapse. Pure and total.
 ///
-/// `awaiting_response` (the view's "the agent is actively working" flag —
-/// `activity_state() == Working`, which folds in background-tool activity as
-/// well as an in-flight prompt turn) drives a
-/// trailing [`RowKind::WorkingIndicator`] pinned to the last turn's tail: it
-/// stays for the whole turn — through tool execution and streaming — so the
-/// "working … + elapsed" signal is consistently present, not just in the gap
-/// between blocks. Suppressed only when blocked on a permission prompt (the
-/// card carries that state); it stays visible even when the turn's response is
-/// manually collapsed, pinned below the still-visible conclusion.
+/// `awaiting_response` (the view's `activity_state() == Working` flag, which
+/// includes background-tool activity as well as an in-flight prompt) drives a
+/// trailing [`RowKind::WorkingIndicator`] pinned to the last turn's tail for the
+/// whole turn. Suppressed only when blocked on a permission prompt; stays
+/// visible when the response is manually collapsed, pinned below the conclusion.
 pub(in crate::workspace) fn project(
     items: &[ChatItem],
     fold: &FoldState,
@@ -152,8 +133,8 @@ pub(in crate::workspace) fn project(
                 i += 1;
                 Some(a)
             }
-            // Leading agent items with no preceding user message (uncommon):
-            // render the run at the top level with no response header.
+            // Leading agent items with no preceding user message: render the
+            // run at top level with no response header.
             _ => None,
         };
 
@@ -176,8 +157,8 @@ pub(in crate::workspace) fn project(
             .rev()
             .find(|&k| matches!(items[k], ChatItem::AssistantText { .. }));
 
-        // Indent of this turn's run, reused to place the trailing working
-        // indicator at the same nesting as the run's conclusion.
+        // Run indent, reused to place the trailing working indicator at the
+        // same nesting as the conclusion.
         let run_indent = if let (true, Some(a)) = (non_trivial, anchor) {
             let collapsed = !fold.is_expanded(
                 &FoldKey::Response(a),
@@ -207,13 +188,10 @@ pub(in crate::workspace) fn project(
         };
 
         // While a turn is in flight (and not blocked on a permission prompt),
-        // pin a live "agent is working" indicator to the last turn's tail — for
-        // the whole turn, through tool execution and streaming alike — so the
-        // "working … + elapsed" signal is consistently present instead of
-        // flickering out whenever a block is active. Last turn only; it stays
-        // visible even when the response is manually collapsed (pinned below the
-        // still-visible conclusion, at the run's indent) so a folded in-flight
-        // turn still shows it's working.
+        // pin the working indicator to the last turn's tail so the signal stays
+        // present through tool execution and streaming. Stays visible even under
+        // a manually-collapsed response (at the run's indent, below the
+        // conclusion).
         if awaiting_response && is_last_turn {
             rows.push(RenderRow {
                 kind: RowKind::WorkingIndicator,
@@ -225,15 +203,11 @@ pub(in crate::workspace) fn project(
     rows
 }
 
-/// Project one agent run (the items of a single response) into rows at
-/// `base_indent`, grouping consecutive tool-call runs. `response_collapsed`
-/// hides every row in the run (the response is folded); a settled tool group
-/// additionally hides its own members.
-///
-/// `conclusion_ix`, when set, is the run's final assistant-text item — the
-/// turn's conclusion. It stays visible even while the response is collapsed, so
-/// a folded turn reads as "user question → conclusion" with the intermediate
-/// process tucked behind the response bar.
+/// Project one agent run into rows at `base_indent`, grouping consecutive
+/// tool-call runs. `response_collapsed` hides every row in the run; a settled
+/// tool group additionally hides its own members. `conclusion_ix`, when set, is
+/// the run's final assistant-text item — it stays visible even while the
+/// response is collapsed, so a folded turn reads as "question → conclusion".
 fn project_run(
     items: &[ChatItem],
     fold: &FoldState,
@@ -246,9 +220,8 @@ fn project_run(
     let mut k = run.start;
     while k < run.end {
         // A subagent's inner tool call renders nested inside its parent's card
-        // (see `tool_card`), so it earns no row of its own here — skip it. The
-        // Claude adapter flattens subagent activity into the one session and
-        // links a child to its parent only via `parent_tool_id`.
+        // (see `tool_card`), so it earns no row of its own — skip it. The Claude
+        // adapter links a child to its parent via `parent_tool_id`.
         if matches!(&items[k], ChatItem::ToolCall(tc) if is_nested_child(items, tc)) {
             k += 1;
             continue;
@@ -256,19 +229,18 @@ fn project_run(
         if matches!(items[k], ChatItem::ToolCall(_)) {
             let gstart = k;
             k += 1;
-            // Extend the group over consecutive *top-level* tool calls; a nested
-            // child belongs to the preceding parent, so it ends the run.
+            // Extend over consecutive *top-level* tool calls; a nested child
+            // belongs to the preceding parent, so it ends the run.
             while k < run.end
                 && matches!(&items[k], ChatItem::ToolCall(t) if !is_nested_child(items, t))
             {
                 k += 1;
             }
             let grun = gstart..k;
-            // A tool group with a still-running member (or a live subagent
-            // descendant) stays surfaced even when the response is collapsed —
-            // its header pops out (still folded) below the conclusion so a
-            // folded in-flight turn shows *what* is running; the members stay
-            // hidden until the user expands the group.
+            // A group with a still-running member (or live subagent descendant)
+            // keeps its header surfaced (still folded) under a collapsed
+            // response, so a folded in-flight turn shows *what* is running;
+            // members stay hidden until the group is expanded.
             let group_live = grun.clone().any(
                 |j| matches!(&items[j], ChatItem::ToolCall(tc) if tool_or_subtree_live(items, tc)),
             );
@@ -301,13 +273,13 @@ fn project_run(
                 });
             }
         } else {
-            // Two kinds of block stay visible even when the response is
-            // collapsed; every other block hides with the fold:
+            // Two block kinds stay visible when the response is collapsed; every
+            // other block folds away:
             //   - the conclusion (run's last assistant text), and
-            //   - a still-pending permission request — it is actionable, so
-            //     folding away its Allow/Reject buttons would strand the user.
+            //   - a still-pending permission — it is actionable, so folding away
+            //     its Allow/Reject buttons would strand the user.
             // The conclusion under a response bar becomes a `ConclusionItem`
-            // (its own fold toggle); at the top level a plain assistant block
+            // (its own fold toggle); at top level a plain assistant block
             // already carries one.
             let is_conclusion = Some(k) == conclusion_ix;
             let pending_permission =
@@ -328,12 +300,10 @@ fn project_run(
     }
 }
 
-/// Whether `tc` is a subagent's inner call whose parent is present in `items`.
-/// Such a child renders nested inside its parent's card (see `tool_card`), so it
-/// earns no row of its own. A child whose `parent_tool_id` matches no tool call
-/// in `items` (a dangling ref — parent never arrived, or a malformed adapter) is
-/// NOT nested by anyone, so it is treated as a top-level call and keeps its row
-/// rather than being silently dropped.
+/// Whether `tc` is a subagent's inner call whose parent is present in `items`
+/// (such a child renders nested inside its parent's card, so it earns no row).
+/// A child with a dangling `parent_tool_id` (no matching parent) is nested by
+/// nobody, so it is treated as top-level and keeps its row rather than vanishing.
 fn is_nested_child(items: &[ChatItem], tc: &ToolCallItem) -> bool {
     let Some(pid) = tc.parent_tool_id.as_deref() else {
         return false;
@@ -345,26 +315,23 @@ fn is_nested_child(items: &[ChatItem], tc: &ToolCallItem) -> bool {
 
 /// Recursion cap for walking flattened subagent nesting (`parent_tool_id`
 /// links). Real nesting is one or two levels; the cap only fires on a malformed
-/// / cyclic id from the adapter, bounding the stack instead of overflowing it.
-/// Shared by the render's card nesting and `subagent_subtree_live`.
+/// / cyclic id from the adapter, bounding the stack. Shared by the render's card
+/// nesting and `subagent_subtree_live`.
 pub(in crate::workspace) const SUBAGENT_NEST_DEPTH_CAP: usize = 8;
 
-/// Whether a tool call is still working as a unit — its own status is live, or
-/// (for a subagent parent the adapter marked `Completed` when its SDK call
-/// returned) a flattened descendant is still running. Keeps a running tool /
-/// group visible under a collapsed response and its card badge reading as
-/// in-progress.
+/// Whether a tool call is still working as a unit — its own status is live, or a
+/// flattened descendant is still running (a subagent parent the adapter marked
+/// `Completed` when its SDK call returned). Keeps a running tool / group visible
+/// under a collapsed response and its card badge reading in-progress.
 pub(in crate::workspace) fn tool_or_subtree_live(items: &[ChatItem], tc: &ToolCallItem) -> bool {
     tc.status.is_live() || subagent_subtree_live(items, &tc.id, SUBAGENT_NEST_DEPTH_CAP)
 }
 
 /// Whether the subagent unit rooted at `parent_id` is still working — some
-/// (transitive, depth-bounded) descendant tool call linked via `parent_tool_id`
-/// is live. `remaining_depth` bounds the walk exactly like the render's nesting
-/// cap, so a malformed / cyclic `parent_tool_id` from the adapter can't recurse
-/// without bound. The tool card reads this so a subagent parent the adapter
-/// marked `Completed` when its SDK call returned — while the flattened child
-/// tool calls stream in and run afterward — still reads as running, not "done".
+/// transitive, depth-bounded descendant linked via `parent_tool_id` is live.
+/// `remaining_depth` bounds the walk so a malformed / cyclic id can't recurse
+/// without bound. Lets a subagent parent the adapter marked `Completed` still
+/// read as running while its flattened children stream in and run afterward.
 pub(in crate::workspace) fn subagent_subtree_live(
     items: &[ChatItem],
     parent_id: &str,

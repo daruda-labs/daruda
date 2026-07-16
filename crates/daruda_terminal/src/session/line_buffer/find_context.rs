@@ -448,11 +448,11 @@ mod tests {
         b.append("beta foo", &[], EolKind::Hard);
         b.append("gamma foo", &[], EolKind::Hard);
         assert_eq!(b.overflow(), 1);
-        // The cursor advanced past abs 0 inside `next_match`; under
-        // pre-Step 4 ring-local indexing it would now point at the
-        // 2nd ring-local line (gamma's row). With abs anchoring it
-        // clamps to abs 1 (now ring-local 0, "beta foo"), so the next
-        // hit is the "foo" inside "beta foo".
+        // The cursor advanced past abs 0 inside `next_match`; naive
+        // ring-local indexing would now point at the 2nd ring-local line
+        // (gamma's row). With abs anchoring it clamps to abs 1 (now
+        // ring-local 0, "beta foo"), so the next hit is the "foo" inside
+        // "beta foo".
         let second = ctx.next_match(&b).unwrap();
         assert_eq!(second.start_line, 0);
         let line = b.get(second.start_line).unwrap();

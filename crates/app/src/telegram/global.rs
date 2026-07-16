@@ -1,23 +1,12 @@
-//! GPUI wiring for the Telegram bridge — a process-wide background
-//! service that owns the `getUpdates` long-poll loop, the outbound
-//! send loop, and re-entry into whichever `Workspace` a routed
-//! `Update` targets.
+//! GPUI wiring for the process-wide Telegram bridge.
 //!
-//! This is the only file in `crate::telegram` that touches GPUI. All
-//! Bot API wire knowledge stays in `client.rs` and all routing policy
-//! (auth gate, pairing, reply-to resolution, token bookkeeping) stays
-//! in `bridge.rs`; this file only calls `core.route()` /
-//! `core.build_ping()` / `core.record_sent()` and dispatches on the
-//! returned [`InboundAction`].
+//! Owns the long-poll loop, outbound send loop, and routed re-entry into
+//! workspaces. Bot API details stay in `client.rs`; routing policy stays in
+//! `bridge.rs`.
 //!
-//! `BridgeCore` lives as a plain owned field on the `TelegramBridge`
-//! Global rather than behind `Arc<Mutex<..>>`: GPUI Globals are only
-//! ever mutated from the single foreground executor thread via
-//! `cx.global_mut::<T>()`, and every `cx.update(...)` closure runs
-//! atomically to completion before the next one starts — the same
-//! reasoning `WindowRegistry` already relies on. See
-//! `crate::watcher_pumps` for the detached-pump idiom this module
-//! follows.
+//! `BridgeCore` is a plain field on the GPUI Global, not `Arc<Mutex<_>>`:
+//! globals are mutated on the foreground executor via atomic `cx.update(...)`
+//! closures, matching the `WindowRegistry` confinement model.
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::{UnboundedSender, unbounded};
@@ -47,10 +36,7 @@ const POLL_TIMEOUT_SECS: u64 = 25;
 /// `IDLE_RECHECK` idle-backoff idiom.
 const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Process-wide Telegram bridge state. `core` owns the pure routing
-/// state machine; `outbound_tx` is the send side of the channel the
-/// poll/send loops share — a later task (`Workspace::relay_to_telegram`)
-/// reaches it via `cx.global_mut::<TelegramBridge>()`.
+/// Process-wide Telegram bridge state.
 pub struct TelegramBridge {
     core: BridgeCore,
     // `Workspace::relay_to_telegram` sends into this via
@@ -61,18 +47,12 @@ pub struct TelegramBridge {
 impl Global for TelegramBridge {}
 
 impl TelegramBridge {
-    /// Queue a ping for the outbound send loop. Fire-and-forget — a send
-    /// failure means the send task has already ended (app shutting down),
-    /// which the caller learns about some other way; mirrors
-    /// `AcpSessionHandle::send_prompt`'s `let _ = ...unbounded_send(...)`
-    /// idiom used throughout this codebase.
+    /// Queue a ping for the outbound send loop.
     pub(crate) fn send(&self, ping: BridgePing) {
         let _ = self.outbound_tx.unbounded_send(ping);
     }
 
-    /// Generate a fresh pairing code for display in Settings. Overwrites
-    /// any previously-generated code that wasn't used — only one pairing
-    /// flow is active at a time (`BridgeCore::new_pair_code`'s own doc).
+    /// Generate a fresh Settings pairing code; only one pairing flow is active.
     pub(crate) fn generate_pair_code(cx: &mut App) -> String {
         cx.global_mut::<TelegramBridge>().core.new_pair_code()
     }
@@ -371,12 +351,9 @@ fn dispatch_to_workspace(
 }
 
 /// The plain-text fallback body for `header`/`tail`: verbatim, no escaping
-/// or markdown parsing — exactly what used to be sent unconditionally
-/// before HTML formatting was added, and what [`spawn_send_task`] falls
-/// back to when the HTML attempt fails. Split out (mirrors
-/// `client.rs::parse_send_message_response`'s "split so tests can exercise
-/// it directly" reasoning) so the header/tail composition is unit-testable
-/// without a network mock.
+/// or markdown parsing. What [`spawn_send_task`] falls back to when the
+/// HTML attempt fails. Split out so the header/tail composition is
+/// unit-testable without a network mock.
 fn plain_body(header: &str, tail: &TelegramTail) -> String {
     let tail_text = match tail {
         TelegramTail::Plain(t) | TelegramTail::Markdown(t) => t.as_str(),

@@ -1,20 +1,11 @@
 //! Per-lane gitignore matcher for the left-dock Files view.
 //!
-//! Supports nested `.gitignore` files: each subdirectory that contains a
-//! `.gitignore` gets its own `Gitignore` object anchored to that directory.
-//! When checking a path, only the matchers whose directory is an ancestor of
-//! the path are consulted, so a rule in `packages/ui/.gitignore` never leaks
-//! out of `packages/ui/`.
-//!
-//! The discovery walk skips any subtree that is already ignored by the
-//! root-level rules (`.gitignore` + `.git/info/exclude`) **or** by any
-//! intermediate nested matcher collected so far, so a `dist/` rule in
-//! `packages/.gitignore` prevents descending into `packages/dist/`.
-//!
-//! Evaluation order in `is_ignored` goes from most-specific (deepest
-//! subdirectory) to least-specific (root), so a `!negation` pattern in a
-//! subdirectory's `.gitignore` can un-ignore a path that a parent rule would
-//! otherwise ignore — matching real Git semantics.
+//! Supports nested `.gitignore` files: each subdirectory with one gets a
+//! `Gitignore` anchored to it, applied only to paths under that directory.
+//! Discovery skips subtrees already ignored by the root rules (`.gitignore`
+//! + `.git/info/exclude`) or an ancestor nested matcher. `is_ignored`
+//! evaluates most-specific (deepest) to least-specific (root), so a
+//! subdirectory `!negation` can override a parent rule — matching Git.
 
 use std::path::{Path, PathBuf};
 
@@ -91,21 +82,14 @@ impl GitignoreSet {
     }
 }
 
-/// Recursively visit `dir`, building a per-directory `Gitignore` for every
-/// subdirectory that has a `.gitignore` file, and appending it to `out`.
+/// Recursively visit `dir`, appending a `Gitignore` to `out` for every
+/// subdirectory that has a `.gitignore`. Subtrees already ignored by
+/// `root_gi` or an ancestor nested matcher are skipped.
 ///
-/// Subtrees already ignored by `root_gi` **or** by any ancestor nested
-/// matcher already in `out` are skipped, preventing descent into directories
-/// like `packages/dist/` when `packages/.gitignore` contains `dist/`.
-///
-/// **Ordering invariant**: a directory's own `.gitignore` is pushed into
-/// `out` before `collect_nested` recurses into it. This guarantees that the
-/// ancestor-pruning check for any child directory can always find the
-/// parent's matcher in `out`. The check relies on the ancestor `starts_with`
-/// guard: sibling directories are never in each other's `starts_with`
-/// relationship, so their relative insertion order does not matter.
-///
-/// `depth` guards against stack overflow on pathological trees.
+/// **Ordering invariant**: a directory's own `.gitignore` is pushed before
+/// recursing into it, so the ancestor-pruning check for any child always
+/// finds the parent's matcher (the `starts_with` guard makes sibling order
+/// irrelevant). `depth` guards against stack overflow on pathological trees.
 fn collect_nested(
     dir: &Path,
     root_gi: &Gitignore,

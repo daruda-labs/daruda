@@ -1,9 +1,8 @@
-//! ViewSwitcher for the right dock (RightDock).
+//! ViewSwitcher for the right dock.
 //!
 //! Four tabs (Usage / Skills / Tools / Tasks) map to
 //! `daruda_store::project::RightDockView`. Clicking a tab dispatches
-//! `set_right_dock_view` on `Workspace` via the snapshot's `workspace`
-//! weak-entity handle. Mirrors `workspace/left_dock/view_tabs.rs`.
+//! `set_right_dock_view` on `Workspace` via the snapshot's weak handle.
 
 use daruda_store::project::RightDockView;
 use gpui::{AnyElement, Context, IntoElement, prelude::*, px};
@@ -36,10 +35,8 @@ fn entries() -> Vec<(RightDockView, gpui::SharedString)> {
     ]
 }
 
-/// Map a tab strip index back to its `RightDockView`. Falls back to
-/// the first entry on out-of-bounds — `TabBar::on_click` only emits
-/// indices within the children we passed, so this is a defensive
-/// ceiling.
+/// Map a tab strip index back to its `RightDockView`, falling back to
+/// the first entry on out-of-bounds (defensive).
 fn view_by_index(ix: usize) -> RightDockView {
     entries()
         .get(ix)

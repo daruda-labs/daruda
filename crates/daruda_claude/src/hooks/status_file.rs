@@ -102,11 +102,10 @@ impl StatusFile {
 pub enum StatusFileError {
     Io(std::io::Error),
     Json(serde_json::Error),
-    /// Retained for the hook handler's error match even though
     /// `default_dir()` (via `daruda_store::persistence::default_data_dir`)
-    /// no longer has an unresolvable-home code path — kept so a future
-    /// resolver change has somewhere to signal it without a breaking
-    /// enum change.
+    /// has no unresolvable-home code path today; this variant exists so a
+    /// future resolver change has somewhere to signal one without a
+    /// breaking enum change.
     NoHome,
 }
 
@@ -215,7 +214,7 @@ pub struct StatusFileEntry {
     pub modified: SystemTime,
 }
 
-/// Enumerate every `*.json` in `dir`. Used by cold restore (A-9).
+/// Enumerate every `*.json` in `dir`. Used by cold restore.
 /// Files that fail to stat are skipped silently (best-effort).
 pub fn list_dir(dir: &Path) -> Result<Vec<StatusFileEntry>, StatusFileError> {
     let mut out = Vec::new();

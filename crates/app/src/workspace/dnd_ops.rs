@@ -1,20 +1,15 @@
 //! Project / group reordering driven by the left-dock DnD pipeline.
+//! Lanes stay inside their parent project ([`super::Workspace::reorder_lane`]);
+//! this module handles the other two payload kinds:
 //!
-//! Lanes stay inside their parent project (see
-//! [`super::Workspace::reorder_lane`]); this module handles the
-//! other two payload kinds from the multi-project plan:
+//! - Projects move freely between groups and the top-level pool,
+//!   inheriting the drop target's group membership.
+//! - Groups only live at the top level, sharing one `tab_order` pool
+//!   with ungrouped projects.
 //!
-//! - Projects move freely between groups and the top-level pool. The
-//!   target's group membership is inherited so dropping a project onto
-//!   another project re-parents it to that project's group (or demotes
-//!   it to ungrouped).
-//! - Groups only live at the top level, alongside ungrouped projects,
-//!   sharing one `tab_order` pool.
-//!
-//! Every op resolves the destination pool, performs an in-place move,
-//! and renumbers `tab_order` as a contiguous `0..N`. Renumbering on
-//! every drop keeps the persisted state free of stale gaps and removes
-//! ties between the shared top-level pool and per-group pools.
+//! Every op resolves the destination pool, moves in place, and renumbers
+//! `tab_order` to a contiguous `0..N` on every drop — keeping persisted
+//! state free of stale gaps and ties between pools.
 
 use daruda_store::project::{GroupId, ProjectId};
 use gpui::Context;
@@ -32,22 +27,14 @@ pub(in crate::workspace) enum TopRow {
 
 impl Workspace {
     /// Move project `from` onto the slot occupied by `to`, inheriting
-    /// `to`'s `group_id`. Dropping onto a grouped project re-parents
-    /// `from` into that group; dropping onto an ungrouped project
-    /// demotes `from` to the top-level pool. No-ops when either id is
-    /// unknown or the move is a self-drop.
+    /// `to`'s `group_id` (re-parents into `to`'s group, or demotes to the
+    /// top-level pool). No-op when an id is unknown or on a self-drop.
     ///
-    /// Direction-aware within the same pool: dragging downward (from
-    /// precedes to) lands `from` AFTER `to`, dragging upward lands
-    /// `from` BEFORE `to`. Cross-pool drops always land at `to`'s slot
-    /// (before `to`). This matches the typical list-DnD expectation
-    /// that "drop X onto Y's slot" makes X take Y's row regardless of
-    /// drag direction. Implementation trick: inserting `from` at
-    /// `to`'s ORIGINAL index gives both behaviors uniformly — when
-    /// `from` precedes `to` in the same pool, the retain shifts `to`
-    /// down one slot, so inserting at `to`'s original index lands
-    /// after the now-shifted `to`; in every other case, `to` keeps its
-    /// index and the insert lands before it.
+    /// Direction-aware within the same pool: dragging down lands `from`
+    /// AFTER `to`, dragging up lands it BEFORE; cross-pool drops land at
+    /// `to`'s slot. Inserting at `to`'s ORIGINAL index gives both uniformly
+    /// — when `from` precedes `to`, the retain shifts `to` down so the
+    /// insert lands after it; otherwise `to` keeps its index (insert before).
     pub(in crate::workspace) fn reorder_project_before(
         &mut self,
         from: ProjectId,
@@ -118,16 +105,14 @@ impl Workspace {
             }
         }
 
-        // When `from` left its previous pool, that pool's tab_order is
-        // now sparse; renumber so the persisted ordering stays
-        // 0..N-contiguous and matches the snapshot's sort.
+        // `from` left its previous pool, so renumber it back to a
+        // contiguous 0..N matching the snapshot's sort.
         if from_group_old != to_group {
             self.renumber_pool(from_group_old);
         }
 
-        // Empty closure: see group_ops.rs:83 for the rationale (multi-stage
-        // mutation already complete, intermediate borrows cannot cross the
-        // closure boundary).
+        // Empty closure: mutation is already complete above; see
+        // group_ops.rs `add_group` for the rationale.
         self.mutate_durable(cx, |_, _| {});
         cx.notify();
     }

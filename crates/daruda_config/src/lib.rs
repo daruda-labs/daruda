@@ -226,9 +226,8 @@ impl Config {
     /// Apply a project-layer override on top of `self` (the user
     /// layer) and return the resolved [`Config`]. Sections present in
     /// `project` replace the corresponding user section wholesale;
-    /// sections absent from `project` keep the user value. Phase 1
-    /// only honours `[shell]`; future fields plug in here as they
-    /// become project-overridable.
+    /// sections absent from `project` keep the user value. Only
+    /// `[shell]` is honoured today.
     pub fn resolve(mut self, project: &ProjectConfig) -> Self {
         if let Some(shell) = project.shell.clone() {
             self.shell = shell;
@@ -240,12 +239,9 @@ impl Config {
 /// Resolve the config file path — same profile-scoped data directory as
 /// logs, workspaces, and every other persisted file
 /// (`daruda_store::persistence::default_data_dir`): the release build
-/// keeps the existing un-suffixed `daruda/config.toml` (no migration for
-/// existing users), while a debug build or any `DARUDA_PROFILE`-named
-/// run (tests, staging, etc.) gets its own `daruda-<profile>/config.toml`,
-/// isolated from the release file. Previously this hardcoded
-/// `dirs::config_dir()/daruda` unconditionally, so a debug/test run could
-/// silently read and overwrite a real user's config.
+/// keeps the un-suffixed `daruda/config.toml`, while a debug build or any
+/// `DARUDA_PROFILE`-named run (tests, staging, etc.) gets its own
+/// `daruda-<profile>/config.toml`, isolated from the release file.
 pub fn config_path() -> PathBuf {
     daruda_store::persistence::default_data_dir().join("config.toml")
 }
@@ -296,10 +292,9 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
     });
 
     patch_section(&mut doc, "theme", |t| {
-        // Phase 2 split the legacy `preset` key into `terminal_preset`
-        // (cell palette) and `ui_preset` (chrome palette). Drop the
-        // old key on first write so user config.toml ends up with
-        // only the new names.
+        // Drop the legacy `preset` key on first write so `config.toml` ends
+        // up with only `terminal_preset` (cell palette) / `ui_preset`
+        // (chrome palette).
         t.remove("preset");
         t["terminal_preset"] = toml_edit::value(config.theme.terminal_preset.clone());
         t["ui_preset"] = toml_edit::value(config.theme.ui_preset.clone());

@@ -1,19 +1,12 @@
 //! Bridge routing core — a pure, GPUI-free state machine that turns
-//! parsed `Update`s (from `client.rs`) into routing decisions, and
-//! shapes outbound pings into `OutboundMsg`s ready for
-//! `client::send_message`. All bridge *policy* (auth gate, pairing,
+//! parsed `Update`s into routing decisions and shapes outbound pings
+//! into `OutboundMsg`s. All bridge policy (auth gate, pairing,
 //! reply-to resolution, permission-token routing, offset bookkeeping)
-//! lives here and is unit-tested with plain function calls — no
-//! mocks, no network, no GPUI entities.
+//! lives here and is unit-tested with plain function calls.
 //!
-//! All I/O (HTTP calls, GPUI entity updates) happens one layer up, in
-//! the poll loop (`global.rs`). This file must never import `gpui`,
+//! All I/O happens one layer up in `global.rs`'s poll loop, which owns
+//! the `BridgeCore` instance. This file must never import `gpui`,
 //! `daruda_acp`, or `ureq`.
-//!
-//! `BridgeCore` and its types are driven by `global.rs`'s poll loop,
-//! which owns the `BridgeCore` instance, feeds it parsed `Update`s
-//! from `client::get_updates`, and turns `RouteResult`/`OutboundMsg`
-//! into `client::answer_callback`/`client::send_message` calls.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -22,25 +15,16 @@ use uuid::Uuid;
 use crate::telegram::client::{InlineKeyboard, Update, UpdateKind};
 use daruda_store::project::WorkspaceUuid;
 
-/// Upper bound on how many `(message_id -> PaneRef)` entries
-/// `sent_pings` keeps. Oldest entries are evicted first once a new
-/// entry pushes the map past this size — a reply-to lookup for an
-/// evicted message_id simply falls back to `last_pinged`.
+/// Upper bound on `(message_id -> PaneRef)` entries in `sent_pings`.
+/// Oldest entries are evicted first; a reply-to lookup for an evicted
+/// message_id falls back to `last_pinged`.
 const SENT_PINGS_CAP: usize = 64;
 
-/// Upper bound on how many outstanding permission-callback tokens
-/// `pending_permissions` keeps. Each permission-wait ping registers one
-/// token per button `build_ping` renders — typically 2 (Allow + Reject)
-/// but as many as the agent's option set carries; if the user resolves
-/// the permission through the in-app desktop UI instead of tapping a
-/// phone button, none of that ping's tokens are ever consumed by
-/// `route_callback` and they'd otherwise accumulate forever over a
-/// long-running session. 64 tokens is the same order of magnitude as
-/// `SENT_PINGS_CAP` — generous for the common 2-button case, and still a
-/// meaningful backlog even for richer option sets. Oldest tokens are
-/// evicted first, same shape as `sent_pings`; an evicted token simply
-/// routes to `Ignore` on a later tap, same as any other unknown/consumed
-/// token.
+/// Upper bound on outstanding permission-callback tokens in
+/// `pending_permissions`. Tokens whose permission is resolved in-app
+/// (never tapped on the phone) are never consumed and would otherwise
+/// accumulate forever; oldest are evicted first, and an evicted token
+/// routes to `Ignore` on a later tap like any unknown one.
 const PENDING_PERMISSIONS_CAP: usize = 64;
 
 /// How long a generated `/pair` code stays valid. After this, `/pair`
@@ -54,34 +38,30 @@ const PAIR_CODE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 /// attempts against an unresolved code at no cost.
 const PAIR_CODE_MAX_ATTEMPTS: u32 = 5;
 
-/// Identifies one agent-chat pane across the whole process — a
+/// Identifies one agent-chat pane across the whole process: a
 /// workspace (window) uuid plus that workspace's locally-scoped pane
-/// id. `PaneId` is only unique WITHIN a workspace (each window has
-/// its own `next_id` counter), so routing an inbound reply needs both
-/// halves. Mirrors the existing `LaneRef { project, lane }` newtype
-/// pattern (`daruda_store::project::LaneRef`).
+/// id. `PaneId` is only unique within a workspace, so routing an
+/// inbound reply needs both halves. Mirrors `LaneRef { project, lane }`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PaneRef {
     pub workspace: WorkspaceUuid,
     pub pane: u64,
 }
 
-/// The host's decision on a permission request — deliberately NOT
-/// `daruda_acp::session::PermissionDecision` (that type lives in a
-/// different crate and this file must not depend on `daruda_acp`).
-/// The poll-loop task converts this into the real ACP type when it
-/// calls `AcpSessionHandle::respond_permission`.
+/// The host's decision on a permission request — deliberately not
+/// `daruda_acp::session::PermissionDecision` (this file must not depend
+/// on `daruda_acp`). The poll-loop task converts it into the real ACP
+/// type at `AcpSessionHandle::respond_permission`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionDecision {
     Allow(String),
     Reject(String),
 }
 
-/// Result of routing a phone-tapped permission decision into a pane, so the
-/// poll loop can give the user accurate feedback (callback toast + message
-/// rewrite) instead of a blind, textless acknowledgement. Set by the
-/// workspace-side handler (`Workspace::respond_bot_permission`); this pure layer
-/// only defines the shape.
+/// Outcome of routing a phone-tapped permission decision into a pane,
+/// so the poll loop can give accurate feedback (callback toast +
+/// message rewrite). Set by `Workspace::respond_bot_permission`; this
+/// pure layer only defines the shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BotPermissionOutcome {
     /// The decision was routed to the agent.
@@ -101,11 +81,9 @@ pub enum InboundAction {
     /// already-consumed callback token.
     Ignore,
     /// A pairing code matched; the caller should persist this chat_id
-    /// as `TelegramConfig::authorized_chat_id` (`BridgeCore` already
-    /// updated its own in-memory `authorized_chat_id` before returning
-    /// this, so subsequent updates in the same run are authorized
-    /// immediately — the caller's persistence is for surviving a
-    /// restart).
+    /// as `TelegramConfig::authorized_chat_id`. `BridgeCore` already
+    /// updated its own in-memory copy, so the caller's persistence is
+    /// only for surviving a restart.
     Paired {
         chat_id: i64,
     },
@@ -121,20 +99,17 @@ pub enum InboundAction {
 }
 
 /// `BridgeCore::route`'s full result: the action, plus whether
-/// Telegram's `answerCallbackQuery` must be called (only for
-/// `UpdateKind::Callback` updates — required by the Bot API so the
-/// phone's button stops showing a loading spinner, REGARDLESS of what
-/// action was taken, including `Ignore` for an unknown/consumed
-/// token).
+/// `answerCallbackQuery` must be called (only for `Callback` updates,
+/// so the phone's button stops spinning — regardless of the action,
+/// including `Ignore`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteResult {
     pub action: InboundAction,
     pub answer_callback_id: Option<String>,
-    /// For a `Callback` update, the coordinates + current text of the tapped
-    /// message so the caller can rewrite it (drop the buttons + append the
-    /// outcome). `None` for a `Message` update. Independent of `action` because
-    /// even an `Ignore` (stale/consumed token) callback should still edit the
-    /// message to reflect that it was already handled.
+    /// For a `Callback` update, the coordinates + current text of the
+    /// tapped message so the caller can rewrite it (drop buttons +
+    /// append outcome). `None` for a `Message`. Independent of `action`
+    /// because even an `Ignore` callback should still edit the message.
     pub callback_edit: Option<CallbackEdit>,
 }
 
@@ -143,36 +118,30 @@ pub struct RouteResult {
 pub struct CallbackEdit {
     pub chat_id: i64,
     pub message_id: i64,
-    /// The message's current display text, so the rewrite can preserve the
-    /// original prompt and append an outcome line rather than replacing it.
+    /// The message's current display text, so the rewrite can preserve
+    /// the original prompt and append an outcome line.
     pub original_text: String,
 }
 
-/// One row of inline buttons for a permission-wait ping: every option the
-/// agent offered, as pre-formatted `(label, decision)` pairs in the same
-/// order the in-app permission card renders them — no collapsing to a
-/// single Allow/Reject pair, so a richer option set (e.g. codex-acp's
-/// "Allow Once" / "Allow for Session" / an execpolicy-amendment allow,
-/// alongside Reject) stays fully choosable from the phone. Labels arrive
-/// pre-localized from the caller (`surface::strings` — this file does not
-/// touch i18n); `BridgeCore` only needs the label text and the
-/// already-resolved decision to route a later button tap back to the
-/// right outcome.
+/// One row of inline buttons for a permission-wait ping: every option
+/// the agent offered, as pre-formatted `(label, decision)` pairs in the
+/// order the in-app card renders them — never collapsed to a single
+/// Allow/Reject pair, so richer option sets stay fully choosable from
+/// the phone. Labels arrive pre-localized (this file does not touch
+/// i18n); `BridgeCore` uses them only to route a later tap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPromptRef {
     pub perm_id: u64,
     pub buttons: Vec<(String, PermissionDecision)>,
 }
 
-/// The event-specific trailing content of a Telegram ping — kept separate
-/// from `header` (always plain: a pane title, or a project + agent name)
-/// because only some pings carry genuine agent-authored markdown that's
-/// safe to run through `telegram::markdown::to_telegram_html`. The rest (a
-/// "waiting"/"completed" label, a tool title, a `raw_input` summary) is
-/// plain administrative text that must never be markdown-parsed: parsing it
-/// would misread incidental punctuation in a file path or shell command
-/// (`file_name.txt`, `rm -rf *.log`) as CommonMark emphasis and silently
-/// reformat it into something the source never intended.
+/// The event-specific trailing content of a ping, kept separate from
+/// the always-plain `header`. Only some pings carry genuine
+/// agent-authored markdown safe to run through
+/// `telegram::markdown::to_telegram_html`; plain administrative text (a
+/// label, a tool title, a `raw_input` summary) must never be
+/// markdown-parsed, or incidental punctuation in a path or command
+/// (`file_name.txt`, `rm -rf *.log`) gets misread as emphasis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TelegramTail {
     /// Plain text — HTML-escaped for transport, never markdown-parsed.
@@ -183,12 +152,10 @@ pub enum TelegramTail {
 }
 
 /// A ping to relay to the phone. `header` and `tail` are pre-formatted,
-/// already-localized text (a later task's job to build via
-/// `surface::strings`) — `BridgeCore` treats their *content* as opaque, it
-/// only cares which `TelegramTail` variant `tail` is so the send loop knows
-/// how to render it. `permission` is `Some` only for a permission-wait ping
-/// (adds one button per option the agent offered); `None` for a plain
-/// completion ping (text only).
+/// already-localized text whose content `BridgeCore` treats as opaque —
+/// it only cares which `TelegramTail` variant `tail` is. `permission`
+/// is `Some` only for a permission-wait ping (one button per option),
+/// `None` for a plain completion ping.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgePing {
     pub pane: PaneRef,
@@ -197,11 +164,9 @@ pub struct BridgePing {
     pub permission: Option<PermissionPromptRef>,
 }
 
-/// Internal bookkeeping for the currently pending `/pair` code — the
-/// code text plus when it was minted and how many wrong guesses have
-/// been made against it, so `route_message` can enforce `PAIR_CODE_TTL`
-/// expiry and `PAIR_CODE_MAX_ATTEMPTS` throttling. Private to this
-/// file — not part of the public API surface.
+/// The currently pending `/pair` code: text, mint time, and wrong-guess
+/// count, so `route_message` can enforce `PAIR_CODE_TTL` expiry and
+/// `PAIR_CODE_MAX_ATTEMPTS` throttling.
 struct PendingPairCode {
     code: String,
     generated_at: std::time::Instant,
@@ -217,11 +182,9 @@ pub struct OutboundMsg {
     pub keyboard: Option<InlineKeyboard>,
 }
 
-/// Pure check: has a pairing code minted at `generated_at` aged past
-/// `ttl` as of `now`? Extracted as a free function (rather than inlined
-/// into `route_message`) so it's directly unit-testable with real
-/// `Instant` arithmetic — construct a past `Instant` via subtraction —
-/// without needing to sleep or mock the clock.
+/// Has a pairing code minted at `generated_at` aged past `ttl` as of
+/// `now`? A free function so it's unit-testable with real `Instant`
+/// arithmetic (a past `Instant` via subtraction) — no sleep or clock mock.
 fn pair_code_expired(
     generated_at: std::time::Instant,
     now: std::time::Instant,

@@ -1,21 +1,18 @@
 //! Background file-tree operations + visible-row cache for the left dock
 //! Files view.
 //!
-//! `Workspace::ensure_file_tree` lazily creates the per-lane
-//! `FileTree` and kicks a root scan; `toggle_files_expand` flips the
-//! expanded set, and on `UnloadedDir → expanded` transitions kicks a
-//! `load_dir` task that comes back via `apply_dir_load_result`. All
-//! filesystem reads run on `cx.background_executor()` so the UI thread
-//! never blocks.
+//! `ensure_file_tree` lazily creates the per-lane `FileTree` and kicks a
+//! root scan; `toggle_files_expand` flips the expanded set and, on
+//! `UnloadedDir → expanded`, kicks a `load_dir` task returning via
+//! `apply_dir_load_result`. All filesystem reads run on
+//! `cx.background_executor()` so the UI thread never blocks.
 //!
 //! `cached_or_rebuild_visible` flattens the tree into the linear list
-//! that `uniform_list` consumes; results are memoised in
-//! `Workspace::files_visible_cache` so repeated `cx.notify()` cycles do
-//! not re-walk the tree. The cache is only invalidated at the seven
-//! trigger points listed in the W-7 plan (toggle expand, load result,
-//! watcher event (W-7g), focused-file-viewer change (W-7f),
-//! activate_lane, git status update, config change). Anything else
-//! that calls `cx.notify()` reads the cached `Arc` directly.
+//! `uniform_list` consumes, memoised in `files_visible_cache`. The cache
+//! is invalidated only at fixed trigger points (toggle expand, load
+//! result, watcher event, focused-file-viewer change, activate_lane, git
+//! status update, config change); other `cx.notify()` calls read the
+//! cached `Arc` directly.
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -35,9 +32,8 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::FileViewMode;
 
 /// Distinguishes the two `apply_dir_load_result` call sites so the
-/// watcher-driven path can stay silent on `NotFound` (the directory was
-/// legitimately deleted between the change event and the actual read —
-/// expected, not user-actionable).
+/// watcher-driven path can stay silent on `NotFound` (a directory
+/// deleted between the change event and the read — expected).
 #[derive(Copy, Clone)]
 pub(in crate::workspace) enum DirLoadSource {
     UserExpand,
@@ -60,8 +56,8 @@ pub(in crate::workspace) struct FilesReloadQueue {
     /// When set, every pending Changed entry is dropped — a Bulk
     /// reload (root + currently expanded) supersedes them.
     pending_bulk: bool,
-    /// `true` while `kick_files_reload`'s drain task is running. New
-    /// events do not need to spawn another task — they just enqueue.
+    /// `true` while `kick_files_reload`'s drain task is running; new
+    /// events just enqueue rather than spawning another task.
     running: bool,
 }
 
@@ -93,11 +89,10 @@ impl Workspace {
         };
         let root = wt.path.clone();
 
-        // An unavailable lane root (deleted / unreadable) cannot be
-        // scanned — `read_dir` would fail every tick and spam the toast.
-        // Skip the root load, watcher spawn, and gitignore build, and
-        // tear down any file-tree state built while the directory was
-        // still present (see `teardown_unavailable_lane_state`).
+        // An unavailable lane root (deleted / unreadable) can't be
+        // scanned without `read_dir` failing every tick and spamming the
+        // toast. Tear down any state built while it was present and skip
+        // the load / watcher / gitignore build.
         if wt.availability != LaneAvailability::Present {
             self.teardown_unavailable_lane_state(wt_ref);
             return;
@@ -127,34 +122,29 @@ impl Workspace {
             self.kick_dir_load(wt_ref, EntryId(0), root.clone(), cx);
         }
 
-        // Start a watcher the first time this lane's tree is
-        // touched. The watcher itself is GPUI-free; the polling task
-        // belongs to Workspace and is created lazily on demand.
+        // Start a watcher on first touch. The watcher is GPUI-free; the
+        // polling task belongs to Workspace and is created lazily.
         if !self.file_tree.file_watchers.contains_key(&wt_ref) {
             self.spawn_files_watcher(wt_ref, root.clone(), cx);
         }
-        // Build the gitignore matcher once on a background thread.
-        // Rebuilt when `.gitignore` changes (see `queue_files_event`).
+        // Build the gitignore matcher once on a background thread;
+        // rebuilt when `.gitignore` changes.
         if !self.file_tree.files_gitignore_index.contains_key(&wt_ref) {
             self.kick_gitignore_build(wt_ref, root.clone(), cx);
         }
     }
 
-    /// Tear down the file-tree state built while a lane's root was still
-    /// present, once that root has flipped to non-`Present` (deleted or
-    /// unreadable). Removes the watcher (so it stops firing reload
-    /// events against the missing path), the stale tree, the visible
-    /// cache, the gitignore matcher, and the pending reload queue.
-    /// Per-lane git and cursor state are left untouched — they are reset
-    /// by the lane-removal path, not by a transient availability flip.
+    /// Tear down file-tree state for a lane whose root flipped to
+    /// non-`Present` (deleted / unreadable): removes the watcher (so it
+    /// stops firing against the missing path), the stale tree, visible
+    /// cache, gitignore matcher, and reload queue. Per-lane git and
+    /// cursor state stay untouched — those are reset by lane removal, not
+    /// a transient availability flip.
     ///
-    /// Called from two sites: `ensure_file_tree` (the lazy-create path,
-    /// which only runs when no tree exists yet — so it catches a lane
-    /// that went missing between sessions) and `apply_dir_load_result`
-    /// (the watcher-driven path, which catches an *active* lane whose
-    /// tree already exists and goes missing mid-session — the case
-    /// `ensure_file_tree` never reaches, since render skips it once a
-    /// tree is present).
+    /// Called from `ensure_file_tree` (lazy-create path, catches a lane
+    /// gone missing between sessions) and `apply_dir_load_result`
+    /// (watcher-driven, catches an active lane going missing mid-session,
+    /// which `ensure_file_tree` never reaches once a tree exists).
     pub(in crate::workspace) fn teardown_unavailable_lane_state(&mut self, wt_ref: LaneRef) {
         self.file_tree.file_watchers.remove(&wt_ref);
         self.file_tree.file_trees.remove(&wt_ref);
@@ -217,9 +207,9 @@ impl Workspace {
         .detach();
     }
 
-    /// Rebuild the gitignore matcher for `wt_ref` on a background
-    /// thread. The existing entry (if any) stays in place until the new
-    /// one is ready, so gitignore filtering never lapses during the build.
+    /// Rebuild the gitignore matcher for `wt_ref` on a background thread.
+    /// The existing entry stays in place until the new one is ready, so
+    /// filtering never lapses during the build.
     pub(in crate::workspace) fn kick_gitignore_build(
         &mut self,
         wt_ref: LaneRef,
@@ -239,12 +229,12 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------
-    // Watcher / event queue / serial reload (W-7g)
+    // Watcher / event queue / serial reload
     // ------------------------------------------------------------
 
-    /// Create a `FileTreeWatcher` for `wt_ref` and start (or
-    /// reuse) the workspace-level polling task that drains every
-    /// watcher's `events_rx` once per tick.
+    /// Create a `FileTreeWatcher` for `wt_ref` and start (or reuse) the
+    /// workspace-level polling task that drains every watcher's
+    /// `events_rx` once per tick.
     pub(in crate::workspace) fn spawn_files_watcher(
         &mut self,
         wt_ref: LaneRef,
@@ -314,16 +304,13 @@ impl Workspace {
             }
             return;
         }
-        // Decide whether this event warrants a git-status refresh
-        // *before* `ev` is consumed by the match below. Events that
-        // only touch paths inside `.git/` are skipped — `git status`
-        // itself writes `.git/index` (stat-cache update), which would
-        // re-fire fsevents and create a self-sustaining poll loop
-        // costing ~3.5% idle CPU. External git activity that matters
-        // (commit, checkout) also writes files *outside* `.git/`
-        // (working tree), so this filter does not blind us to user
-        // actions; the rare `.git/HEAD`-only change is recovered via
-        // the manual "Refresh Git Status" command.
+        // Decide whether to refresh git status *before* the match
+        // consumes `ev`. Pure-`.git/` events are skipped: `git status`
+        // writes `.git/index`, which would re-fire fsevents into a
+        // self-sustaining poll loop (~3.5% idle CPU). Meaningful git
+        // activity (commit, checkout) also touches the working tree, so
+        // this doesn't blind us; a rare `.git/HEAD`-only change is
+        // recovered via the manual "Refresh Git Status" command.
         let should_refresh_git_status = event_has_non_git_path(&ev);
         let root = self
             .file_tree
@@ -347,11 +334,10 @@ impl Workspace {
                 q.pending_seen.clear();
             }
             DebouncedEvent::Removed { paths } if !bulk_pending => {
-                // Apply notify's Remove(_) events directly — avoids
-                // the NotFound race where a follow-up parent reload
-                // would fail. Sibling Modify events in the same
-                // debounce window arrive as a separate Changed event
-                // and trigger the parent reload normally.
+                // Apply Remove events directly to avoid the NotFound
+                // race a follow-up parent reload would hit. Sibling
+                // Modify events arrive as a separate Changed event and
+                // reload the parent normally.
                 let Some(root) = root.clone() else { return };
                 if let Some(tree) = self.file_tree.file_trees.get_mut(&wt_ref) {
                     for abs in paths {
@@ -361,17 +347,17 @@ impl Workspace {
                     }
                 }
                 self.invalidate_visible_files_cache(wt_ref);
-                // The `refresh_git_status` below early-returns for non-git
+                // `refresh_git_status` below early-returns for non-git
                 // lanes, so this direct tree mutation needs its own
-                // left-dock notify (Pitfall #10).
+                // notify (Pitfall #10).
                 cx.notify();
             }
             DebouncedEvent::Removed { .. } => {}
             DebouncedEvent::Changed { paths } if !bulk_pending => {
                 let Some(root) = root.clone() else { return };
                 // `.gitignore` / `.git/info/exclude` changes invalidate
-                // the matcher. Detect via filename so subdir tweaks
-                // (Zed-style nested ignore) get picked up later.
+                // the matcher; detect via filename so nested-ignore
+                // tweaks get picked up.
                 let mut gitignore_dirty = false;
                 for p in &paths {
                     if let Some(name) = p.file_name()
@@ -419,10 +405,9 @@ impl Workspace {
             }
         }
         self.kick_files_reload(wt_ref, cx);
-        // Watcher events also stale the Git Changes view. The
-        // refresh's own in-flight guard collapses bursts, but the
-        // `should_refresh_git_status` gate skips pure `.git/` noise
-        // entirely so the refresh never re-triggers itself.
+        // Watcher events also stale the Git Changes view. The refresh's
+        // in-flight guard collapses bursts; the `should_refresh_git_status`
+        // gate skips pure `.git/` noise so it never re-triggers itself.
         if should_refresh_git_status {
             self.refresh_git_status(wt_ref, cx);
         }
@@ -470,9 +455,8 @@ impl Workspace {
 
                 match task {
                     ReloadTask::Bulk => {
-                        // Reload root + every currently-expanded dir,
-                        // sequentially so the queue's serial guarantee
-                        // holds.
+                        // Reload root + every expanded dir sequentially so
+                        // the queue's serial guarantee holds.
                         let plan = this
                             .update(cx, |ws, _| {
                                 let tree = ws.file_tree.file_trees.get(&wt_ref)?;
@@ -592,12 +576,9 @@ impl Workspace {
         self.refresh_git_status(wt_ref, cx);
     }
 
-    /// Open `path` from the active lane's tree in a new tab as a
-    /// `PaneContent::File` viewer (Raw mode by default; Markdown opens
-    /// in Preview). Same `(lane, path)` re-clicked activates the
-    /// existing tab instead of opening another viewer (close via
-    /// Cmd+W). Delegates to `open_pane_file_view` so the loading +
-    /// invalidation logic stays in one place.
+    /// Open `path` in a new tab as a `PaneContent::File` viewer (Raw by
+    /// default; Markdown in Preview). Re-clicking the same `(lane, path)`
+    /// reactivates the existing tab. Delegates to `open_pane_file_view`.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
         wt_ref: LaneRef,
@@ -644,50 +625,44 @@ impl Workspace {
                     entry.kind = EntryKind::UnloadedDir;
                 }
                 if is_root {
-                    // The lane root failed to read. Classify the failure:
-                    // only a genuine "gone / unusable" kind (NotFound /
-                    // PermissionDenied / NotADir) flips the lane to
-                    // non-Present and takes the silent teardown path — the
-                    // feature's intended suppression of the per-tick toast
-                    // spam. A transient/unknown I/O error maps to `Present`
-                    // (`From<&FileTreeError>` yields `Present` for `Io`):
-                    // the directory likely still exists, so we must NOT
-                    // tear down. Surfacing it as a normal Error toast keeps
-                    // a real I/O failure visible instead of silently
-                    // swallowing it (the no-op `set_*(Present)` otherwise
-                    // would).
+                    // Root read failed. Classify: only a genuine "gone /
+                    // unusable" kind (NotFound / PermissionDenied /
+                    // NotADir) flips the lane to non-Present and takes the
+                    // silent teardown path (suppressing per-tick toast
+                    // spam). A transient/unknown I/O error maps to
+                    // `Present`, so we must NOT tear down — surface it as a
+                    // normal Error toast so a real failure stays visible.
                     let classified: LaneAvailability = (&e).into();
                     if classified == LaneAvailability::Present {
-                        // Transient/unknown failure on a root that is
-                        // still (probably) present — keep the lane as-is
-                        // and report it like any other dir-read error.
+                        // Transient/unknown failure on a still-present
+                        // root — keep the lane and report like any
+                        // dir-read error.
                         Some((
                             format!("Cannot read directory: {e}"),
                             ErrorSeverity::Error,
                             "files.dir_read.root",
                         ))
                     } else {
-                        // Root is genuinely gone/unreadable: flip the lane's
-                        // availability so the file-tree scan / watcher / PTY
+                        // Root genuinely gone/unreadable: flip
+                        // availability so file-tree scan / watcher / PTY
                         // spawn all short-circuit instead of repeating an
                         // Error toast.
                         self.set_lane_availability(wt_ref, classified);
-                        // Tear down watcher + tree now — for an already-active
-                        // lane whose tree exists, render never re-calls
-                        // `ensure_file_tree`, so skipping this would leave the
-                        // watcher looping reload → repaint. Safe here: the
-                        // `tree.entry_mut` borrow above has ended, and this
-                        // guard also covers the lane-removed-between-
-                        // schedule-and-apply race (`None != Some(Present)`).
+                        // Tear down watcher + tree now: for an active lane
+                        // whose tree exists, render never re-calls
+                        // `ensure_file_tree`, so skipping this leaves the
+                        // watcher looping reload → repaint. Safe — the
+                        // `entry_mut` borrow above has ended; the guard
+                        // also covers the lane-removed-between-schedule-
+                        // and-apply race (`None != Some(Present)`).
                         if self.lane_for(wt_ref).map(|l| l.availability)
                             != Some(LaneAvailability::Present)
                         {
                             self.teardown_unavailable_lane_state(wt_ref);
                             // Reconcile the owning project's availability
-                            // too: a root that died takes the project
-                            // header's live `[+]` with it. Collect the root
-                            // path before the `&mut self` setter to avoid a
-                            // borrow conflict.
+                            // too — a dead root takes the project header's
+                            // live `[+]` with it. Collect the root path
+                            // before the `&mut self` setter (borrow).
                             if let Some(root) =
                                 self.project_for(wt_ref.project).map(|p| p.root.clone())
                             {
@@ -700,22 +675,20 @@ impl Workspace {
                 } else if matches!(source, DirLoadSource::WatcherReload)
                     && matches!(e, FileTreeError::NotFound)
                 {
-                    // Watcher-driven NotFound on a child directory is
-                    // expected — the directory was deleted between the
-                    // change event and the read. The fs watcher will send
-                    // a parent-reload event next and the stale entry drops
-                    // out naturally.
+                    // Watcher-driven NotFound on a child is expected — it
+                    // was deleted between the change event and the read.
+                    // A parent-reload event follows and the stale entry
+                    // drops out naturally.
                     None
                 } else if self.lane_for(wt_ref).map(|l| l.availability)
                     != Some(LaneAvailability::Present)
                 {
-                    // The lane is already non-Present (its root flipped on
-                    // an earlier load failure and the tree was torn down).
-                    // A child load that was in flight before teardown can
-                    // still land here — suppress its Warning toast, since
-                    // the empty-state already tells the user the lane is
-                    // gone. A genuinely-Present lane with a transient child
-                    // error still falls through to the Warning below.
+                    // Lane already non-Present (root flipped earlier, tree
+                    // torn down). A child load in flight before teardown
+                    // can still land here — suppress its Warning toast
+                    // since the empty-state already says the lane is gone.
+                    // A Present lane with a transient child error still
+                    // falls through to the Warning below.
                     None
                 } else {
                     Some((
@@ -811,7 +784,7 @@ impl Workspace {
     }
 
     // ------------------------------------------------------------
-    // Keyboard navigation (W-7i)
+    // Keyboard navigation
     // ------------------------------------------------------------
 
     /// Move the keyboard cursor by `delta` rows (positive = down) in
@@ -884,8 +857,8 @@ impl Workspace {
         }
     }
 
-    /// Right-arrow on the cursor row: if the row is a collapsed dir,
-    /// expand it. Otherwise no-op (parent navigation lives in W-7+).
+    /// Right-arrow on the cursor row: expand it if it's a collapsed dir,
+    /// else no-op.
     pub(in crate::workspace) fn expand_at_files_selection(&mut self, cx: &mut Context<Self>) {
         let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
@@ -905,8 +878,8 @@ impl Workspace {
         }
     }
 
-    /// Left-arrow on the cursor row: if the row is an expanded dir,
-    /// collapse it. Otherwise no-op (move-to-parent lives in W-7+).
+    /// Left-arrow on the cursor row: collapse it if it's an expanded dir,
+    /// else no-op.
     pub(in crate::workspace) fn collapse_at_files_selection(&mut self, cx: &mut Context<Self>) {
         let wt_ref = self.active_ref();
         let Some(sel) = self.file_tree.files_selection else {
@@ -935,12 +908,10 @@ impl Workspace {
         self.queue_files_event(wt_ref, DebouncedEvent::Bulk, cx);
     }
 
-    /// Recursive collapse: drop `entry_id` from the expanded set
-    /// along with every descendant currently in it. Useful for
-    /// cleaning up a deep subtree with one Alt+click. Recursive
-    /// expand is more involved (each layer needs its own async
-    /// load) and lands in W-7+; for now Alt+click on a collapsed
-    /// dir falls through to the regular toggle.
+    /// Recursive collapse: drop `entry_id` and every expanded descendant
+    /// from the expanded set — cleans up a deep subtree with one
+    /// Alt+click. (Recursive expand isn't supported; Alt+click on a
+    /// collapsed dir falls through to the regular toggle.)
     pub(in crate::workspace) fn collapse_files_subtree(
         &mut self,
         wt_ref: LaneRef,

@@ -187,20 +187,14 @@ pub fn spawn(lane_dirs: Vec<(PathBuf, PathBuf)>) -> JsonlWatcherHandle {
     }
 }
 
-/// How a `process_jsonl_file` caller wants the file's lines read.
-///
-/// The two strategies trade memory for completeness:
-/// - [`ReadStrategy::Tail`]: byte-seek to a chunk near the end, read
-///   forward via `read_last_n_lines`. Cheap; the right choice for
-///   FSEvent fires where each modification typically appends just
-///   a handful of lines. **Caveat:** the seek can land mid-UTF-8,
-///   in which case `BufReader::lines()` errors out and stops the
-///   iterator early — fine for the latest 20 entries, brittle for
-///   deeper history.
-/// - [`ReadStrategy::Full`]: `read_to_string` then split — uses one
-///   string allocation the size of the file, but every line is
-///   returned. Used at cold-restore so historical sessions that
-///   contain non-ASCII content don't get silently dropped.
+/// How `process_jsonl_file` reads a file's lines — memory vs completeness:
+/// - [`ReadStrategy::Tail`]: cheap byte-seek near the end via
+///   `read_last_n_lines`, for FSEvent fires that append a few lines.
+///   The seek can land mid-UTF-8 and stop the iterator early — fine for
+///   the latest entries, brittle for deep history.
+/// - [`ReadStrategy::Full`]: `read_to_string` + split; one file-sized
+///   allocation but every line is returned. Used at cold-restore so
+///   non-ASCII history isn't silently dropped.
 #[derive(Clone, Copy, Debug)]
 enum ReadStrategy {
     Tail(usize),
@@ -226,12 +220,7 @@ fn read_jsonl_lines(path: &Path, strategy: ReadStrategy) -> std::io::Result<Vec<
 /// Read one jsonl file and turn it into a `JsonlEvent`. Returns
 /// `None` for non-`.jsonl` extensions, the `agent-*` subagent
 /// pattern, unreadable files, or empty files (no parsed entries).
-///
-/// The `strategy` parameter picks `Tail(N)` for FSEvent-driven
-/// fires (cheap, latest entries only) and `Full` for the one-shot
-/// startup walk where every historical entry matters and the file
-/// might contain non-ASCII content the seek-and-parse path can't
-/// safely chunk.
+/// See [`ReadStrategy`] for `strategy`.
 fn process_jsonl_file(
     path: &Path,
     cwd: &Path,

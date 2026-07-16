@@ -1,17 +1,13 @@
-//! ACP client connection — spike.
+//! One-shot ACP connection: runs `initialize` -> `session/new` ->
+//! `session/prompt` against the adapter, auto-approving the first permission
+//! option offered. Used by this crate's examples; production session
+//! handling (multi-turn prompts, inline permission UI, chat render-model
+//! mapping) lives in [`crate::session`].
 //!
-//! Proves the four Task-1 unknowns end to end:
-//! 1. the `agent-client-protocol` connection runs on the smol executor
-//!    (gpui's executor) — the crate spawns via `async-process`, not tokio;
-//! 2. adapter auth is handled by the adapter itself (daruda supplies no
-//!    credentials) — see [`AdapterCommand::default`];
-//! 3. a full `initialize` -> `session/new` -> `session/prompt` round-trip;
-//! 4. a `session/request_permission` round-trip (auto-approved here; the real
-//!    inline-card UI is a later task).
-//!
-//! This is the one-shot seed of the future long-lived `AcpConnection`. The
-//! multi-turn prompt loop and the chat render-model mapping are deliberately
-//! out of scope for the spike.
+//! The `agent-client-protocol` connection runs on the smol executor (gpui's),
+//! not tokio — the crate spawns via `async-process`. Adapter auth
+//! (subscription or API key) is the adapter's own responsibility; daruda
+//! supplies no credentials — see [`AdapterCommand::default`].
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -55,7 +51,7 @@ impl Default for AdapterCommand {
     }
 }
 
-/// Errors surfaced by the spike connection.
+/// Errors surfaced while connecting or driving the protocol exchange.
 #[derive(Debug, thiserror::Error)]
 pub enum AcpClientError {
     /// The adapter command string could not be parsed into a transport.
@@ -70,8 +66,9 @@ pub enum AcpClientError {
     Runtime(#[from] crate::node::NodeError),
 }
 
-/// Minimal observable surface that proves the round-trip. The real connection
-/// (later task) maps protocol traffic into the chat render model instead.
+/// Events emitted by [`run_one_shot`] as the exchange progresses. Production
+/// session handling maps protocol traffic into the chat render model instead
+/// (see [`crate::session`]).
 #[derive(Debug)]
 pub enum SpikeEvent {
     /// `initialize` succeeded; carries the agent's self-description.
@@ -80,11 +77,11 @@ pub enum SpikeEvent {
     SessionCreated,
     /// A `session/update` notification arrived mid-turn.
     Notification(String),
-    /// The agent asked for tool permission (auto-approved by the spike).
+    /// The agent asked for tool permission (auto-approved here).
     PermissionRequested(String),
     /// `session/prompt` completed; carries the stop reason.
     PromptCompleted(String),
-    /// Raw wire line (stdin/stdout/stderr of the adapter) — spike diagnostics.
+    /// Raw wire line (stdin/stdout/stderr of the adapter), for diagnostics.
     Wire { direction: String, line: String },
 }
 
@@ -135,8 +132,8 @@ pub async fn run_one_shot(
             async move |request: RequestPermissionRequest, responder, _connection| {
                 let _ =
                     perm_tx.unbounded_send(SpikeEvent::PermissionRequested(format!("{request:?}")));
-                // Spike: auto-approve the first option. The inline allow/reject
-                // card that routes the user's real choice back is a later task.
+                // Auto-approves the first option; production permission handling
+                // routes the user's actual choice (see crate::session).
                 match request.options.first().map(|opt| opt.option_id.clone()) {
                     Some(id) => responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),

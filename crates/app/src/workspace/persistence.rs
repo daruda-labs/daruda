@@ -1,12 +1,7 @@
-//! Workspace state persistence — save / restore project state plus
-//! the helpers (`serialize_layout`, `normalize_ratios`,
-//! `rebuild_layout`) that translate between the in-memory pane tree
-//! and the on-disk JSON form.
-//!
-//! Owns `LaneRuntime`, the per-lane runtime stored in the single
-//! `runtimes` map; both `restore_from_disk` and `activate_lane`
-//! live across persistence + lane_ops, but the *type* belongs here
-//! so the runtime store and the save format share a single definition.
+//! Workspace state persistence — save / restore project state plus the
+//! helpers (`serialize_layout`, `normalize_ratios`, `rebuild_layout`)
+//! translating between the in-memory pane tree and the on-disk JSON form.
+//! Owns `LaneRuntime`, the per-lane runtime in the single `runtimes` map.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -33,19 +28,16 @@ pub(in crate::workspace) struct LaneRuntime {
     pub tabs: Vec<pane::TabEntry>,
     pub panes: Vec<pane::Pane>,
     pub active_tab_index: usize,
-    /// Tab navigation history (most-recent-last). Not serialized —
-    /// history is a session-only convenience; cold-restoring it would
-    /// be confusing because the user's intent from a previous session
-    /// is unknown. Starts empty on every app launch.
+    /// Tab navigation history (most-recent-last). Not serialized — a
+    /// session-only convenience; starts empty on every app launch.
     pub tab_history: Vec<usize>,
     pub focused_pane_id: pane_tree::PaneId,
 }
 
 impl Workspace {
-    /// The active lane's live runtime, resolved from the unified
-    /// `runtimes` map by `self.active`. The entry is an invariant: it is
-    /// seeded at construction (`new_with_project_impl`), on every
-    /// `activate_lane`, and on `reset_to_empty_workspace`, so the
+    /// The active lane's live runtime, resolved from `runtimes` by
+    /// `self.active`. Invariant: the entry is seeded at construction, on
+    /// every `activate_lane`, and on `reset_to_empty_workspace`, so the
     /// `expect` never fires in correct code.
     pub(in crate::workspace) fn active_runtime(&self) -> &LaneRuntime {
         self.main_area
@@ -70,20 +62,13 @@ impl Workspace {
     }
 
     /// Snapshot the workspace into the UUID-keyed disk shape
-    /// (`(WorkspaceState, Vec<ProjectState>)`).
-    ///
-    /// Each project's intrinsic data (root / name / lanes / last-
-    /// active hint) lives in its own [`ProjectState`]; per-workspace
-    /// decoration (color / tab order / group / collapsed flag) lives
-    /// in [`WorkspaceState::project_overrides`]. The active focus is
-    /// projected from `self.active` (runtime `LaneRef`) into
-    /// `(active_project: ProjectUuid, active_lane: LaneId)` —
-    /// runtime `ProjectId` is per-session and therefore not persisted.
-    ///
-    /// Returns `None` when `self.projects` is empty (Welcome state) —
-    /// the caller has nothing to write.
-    ///
-    /// Drives [`Workspace::persist_state`].
+    /// (`(WorkspaceState, Vec<ProjectState>)`). Each project's intrinsic
+    /// data lives in its own [`ProjectState`]; per-workspace decoration
+    /// (color / tab order / group / collapsed) lives in
+    /// [`WorkspaceState::project_overrides`]. Active focus projects from
+    /// `self.active` onto persisted `(ProjectUuid, LaneId)` — runtime
+    /// `ProjectId` is per-session and not persisted. `None` for an empty
+    /// workspace (Welcome). Drives [`Workspace::persist_state`].
     pub(in crate::workspace) fn snapshot_for_disk(
         &self,
         cx: &App,
@@ -110,10 +95,9 @@ impl Workspace {
                         project: project.id,
                         lane: wt.id,
                     };
-                    // Every lane's runtime — active or parked — lives in the
-                    // single `runtimes` map, so one lookup covers both. A
-                    // lane with no registered runtime (never activated) keeps
-                    // its serialized form untouched.
+                    // Every lane's runtime — active or parked — lives in
+                    // the single `runtimes` map. A lane with no registered
+                    // runtime (never activated) keeps its serialized form.
                     let Some(rt) = self.main_area.runtimes.get(&wt_ref) else {
                         return s;
                     };
@@ -132,10 +116,9 @@ impl Workspace {
                 })
                 .collect();
 
-            // `next_lane_id`: smallest id strictly greater than every
-            // lane currently registered for this project (both live
-            // lanes and every runtime key for the same project). Matches
-            // the "monotonic — never reused" invariant enforced by
+            // `next_lane_id`: smallest id strictly greater than every lane
+            // registered for this project (live lanes + runtime keys).
+            // Upholds the "monotonic — never reused" invariant from
             // `allocate_lane_id`.
             let max_live = project.lanes.iter().map(|w| w.id).max();
             let max_runtime = self
@@ -185,9 +168,8 @@ impl Workspace {
             );
         }
 
-        // Project the runtime `LaneRef` (per-session `ProjectId`)
-        // onto the persisted UUID. If the active project has been
-        // closed, both fields fall to `None`.
+        // Project the runtime `LaneRef` onto the persisted UUID. If the
+        // active project has been closed, both fields fall to `None`.
         let active_project = self
             .projects
             .iter()
@@ -226,12 +208,9 @@ impl Workspace {
         Some((workspace, project_states))
     }
 
-    /// Sample the current window's windowed bounds (position + size)
-    /// and store them in `cached_window_bounds`. Skips fullscreen and
-    /// maximized states — persisting those would relaunch the app in
-    /// that mode next time even if the user exited it before quitting.
-    /// The last known windowed geometry (from before entering those
-    /// states) remains cached.
+    /// Sample the window's windowed bounds into `cached_window_bounds`.
+    /// Skips fullscreen / maximized — persisting those would relaunch in
+    /// that mode; the last windowed geometry stays cached instead.
     pub(in crate::workspace) fn capture_window_bounds(&mut self, window: &Window) {
         let bounds = match window.window_bounds() {
             gpui::WindowBounds::Windowed(b) => b,
@@ -249,18 +228,12 @@ impl Workspace {
         self.cached_window_bounds = Some(new);
     }
 
-    /// Persist state to disk via the new UUID-keyed layout.
-    ///
-    /// Writes one workspace file (`workspaces/<uuid>.json`) referencing
-    /// each project, plus one project file (`projects/<uuid>.json`) per
-    /// owned project. No fan-out — each project's intrinsic data lives
-    /// in exactly one file, and only this workspace's file references
-    /// them. Other workspaces holding the same project see updates via
-    /// the shared project file (last-writer-wins on intrinsic lane
-    /// list).
-    ///
-    /// Updates `recent-workspaces.json` with this workspace's display
-    /// name.
+    /// Persist state to disk: one workspace file
+    /// (`workspaces/<uuid>.json`) referencing each project, plus one
+    /// project file (`projects/<uuid>.json`) per owned project. Each
+    /// project's intrinsic data lives in exactly one file, so workspaces
+    /// sharing a project see updates via it (last-writer-wins on the lane
+    /// list). Also touches `recent-workspaces.json` with the display name.
     pub fn persist_state(&self, cx: &App) {
         let Some((workspace, projects)) = self.snapshot_for_disk(cx) else {
             return;
@@ -308,19 +281,14 @@ impl Workspace {
         }
     }
 
-    /// Restore from the UUID-keyed disk shape
-    /// (`(WorkspaceState, &[ProjectState])` from
-    /// [`Workspace::snapshot_for_disk`]). Rebuilds every project's
-    /// lanes, dock open/size, font settings, and the full tab /
-    /// split-tree layout from the persisted state. Each restored leaf
-    /// starts at its serialized cwd so the shell opens where it was
-    /// last tracked. On any pane spawn failure, falls back to a single
-    /// fresh tab and surfaces the error in the status bar.
-    ///
-    /// Each runtime [`crate::project::Project`] is hydrated from its
-    /// `ProjectState` plus the per-workspace `ProjectOverride`; runtime
-    /// `ProjectId`s are minted dense `0..N` so the canonical ordering
-    /// is `project_states` iteration order.
+    /// Restore from the UUID-keyed disk shape (from
+    /// [`Workspace::snapshot_for_disk`]). Rebuilds every project's lanes,
+    /// dock open/size, font settings, and the full tab / split-tree
+    /// layout; each restored leaf starts at its serialized cwd. On any
+    /// pane spawn failure, aborts and surfaces the error. Each runtime
+    /// [`crate::project::Project`] is hydrated from its `ProjectState` +
+    /// `ProjectOverride`; runtime `ProjectId`s are minted dense `0..N` in
+    /// `project_states` iteration order.
     pub(crate) fn restore_from_disk(
         &mut self,
         workspace: &WorkspaceState,
@@ -380,10 +348,9 @@ impl Workspace {
             return;
         }
 
-        // Mint dense runtime ids `0..N` for the hydrated projects. The
-        // new schema has no `next_project_id`, so the counter advances
-        // past the highest minted id — same monotonic invariant
-        // `add_project` enforces.
+        // Mint dense runtime ids `0..N` for the hydrated projects; the
+        // counter advances past the highest minted id — same monotonic
+        // invariant `add_project` enforces.
         self.projects = project_states
             .iter()
             .enumerate()
@@ -402,31 +369,26 @@ impl Workspace {
             .collect();
         self.next_project_id = self.projects.len() as daruda_store::project::ProjectId;
 
-        // Classify every project / lane root against the live filesystem
-        // before the pane-rebuild loop runs. The persisted set may
-        // reference directories that no longer exist (lane deleted, repo
-        // moved); stamping the runtime `availability` flag here lets the
-        // skip below and the read side (file-tree scan, watcher, PTY
-        // spawn) short-circuit instead of spamming directory-read errors.
+        // Classify every project / lane root against the filesystem before
+        // the pane-rebuild loop. The persisted set may reference gone
+        // directories; stamping `availability` here lets the skip below and
+        // the read side (file-tree scan, watcher, PTY spawn) short-circuit
+        // instead of spamming directory-read errors.
         self.recompute_availability();
 
-        // Re-detect each git project's `default_branch` from git and
-        // update the runtime project if it drifted. Backfills legacy
-        // state files (where `default_branch` is `None`) and absorbs
-        // external drift. Runs async on the background executor; the
-        // persisted value stands until detection completes. Placed
-        // before the pane-rebuild loop so it fires even when a later
-        // restore step early-returns.
+        // Re-detect each git project's `default_branch` and update if it
+        // drifted; backfills legacy `None` state. Async on the background
+        // executor (persisted value stands until it completes). Placed
+        // before the pane-rebuild loop so it fires even if a later step
+        // early-returns.
         self.reconcile_project_default_branches(cx);
         // Heal any project persisted while its lanes were still the
-        // construction placeholder (single `Default` lane for a git
-        // root — e.g. the app died before the async discovery
+        // construction placeholder (app died before async discovery
         // returned). Same async upgrade pass as fresh-open.
         self.reconcile_bootstrapped_lanes(cx);
 
-        // Project the persisted (active_project: ProjectUuid,
-        // active_lane: LaneId) onto the runtime `LaneRef`
-        // by looking up the UUID → runtime `ProjectId` mapping.
+        // Project persisted (ProjectUuid, LaneId) onto the runtime
+        // `LaneRef` via the UUID → runtime `ProjectId` mapping.
         let requested = match (workspace.active_project, workspace.active_lane) {
             (Some(p_uuid), Some(wt_id)) => self
                 .projects
@@ -442,10 +404,9 @@ impl Workspace {
         self.active = self.resolve_active(requested);
 
         // Drop every bootstrapped runtime; rebuild each lane's runtime
-        // from the persisted SerializedTab lists carried on its
-        // `SerializedLane`. The active entry is re-seeded after the loop
-        // so the "active runtime always present" invariant holds even if
-        // the active lane was skipped (unavailable / absent from disk).
+        // from its `SerializedLane` tab lists. The active entry is
+        // re-seeded after the loop so the "active runtime always present"
+        // invariant holds even if the active lane was skipped.
         self.main_area.runtimes.clear();
         self.main_area.activity_counter.clear();
 
@@ -464,12 +425,10 @@ impl Workspace {
                     project: runtime_project_id,
                     lane: swt.id,
                 };
-                // `recompute_availability` above already classified this
-                // lane's root. A non-`Present` lane cannot host a usable
-                // PTY/file-tree, so skip its pane/tab rebuild entirely —
-                // including the active lane, so a missing active root does
-                // not spawn a shell into a dead cwd. The Warning toast
-                // still fires (it carries the path the user lost).
+                // A non-`Present` lane cannot host a usable PTY/file-tree,
+                // so skip its pane/tab rebuild — including the active lane,
+                // so a missing active root never spawns a shell into a dead
+                // cwd. The Warning toast still fires (carries the lost path).
                 let unavailable = self
                     .lane_for(wt_ref)
                     .map(|l| l.availability != LaneAvailability::Present)
@@ -487,8 +446,8 @@ impl Workspace {
 
                 // Build this lane's panes into a local scratch buffer so
                 // the recursion never touches `self`'s runtimes — the
-                // finished `Vec` becomes the lane's `LaneRuntime.panes` in
-                // one `insert`, uniform for active and parked alike.
+                // finished `Vec` becomes `LaneRuntime.panes` in one
+                // `insert`, uniform for active and parked alike.
                 let mut scratch: Vec<pane::Pane> = Vec::new();
                 let mut id_map: HashMap<u64, pane_tree::PaneId> = HashMap::new();
                 let mut tabs: Vec<TabEntry> = Vec::new();
@@ -565,19 +524,15 @@ impl Workspace {
         }
 
         // Invariant: the active lane's runtime must exist before any
-        // `active_runtime()` read below. The loop inserts one per present
-        // lane, but the active lane may have been skipped (unavailable) or
-        // absent from disk — seed an empty entry so the seed-or-render
-        // tail never panics.
+        // `active_runtime()` read below. The active lane may have been
+        // skipped (unavailable) or absent from disk — seed an empty entry
+        // so the tail never panics.
         self.main_area.runtimes.entry(self.active).or_default();
 
         if self.active_runtime().tabs.is_empty() {
-            // An empty active lane is a first-class state, not something to
-            // paper over: restore never auto-seeds a shell. Whether the
-            // lane is Present (the user closed its tabs, or it was never
-            // opened) or inaccessible, the main area renders the
-            // empty-state and the user opens content from there. This is
-            // the persistence half of the unified rule — an emptied lane
+            // An empty active lane is a first-class state: restore never
+            // auto-seeds a shell. The main area renders the empty-state and
+            // the user opens content from there, so an emptied lane
             // round-trips across restart instead of springing a fresh tab.
             return;
         }
@@ -585,13 +540,11 @@ impl Workspace {
         if let Some(focus) = active_focus {
             self.bump_activity(focus);
             self.focus_pane(focus, window, cx);
-            // Seed the input-draft owner so text typed into the bottom input
-            // before the first focus change is attributed to the restored
-            // focused pane (and saved on the next pane switch). Drafts aren't
-            // persisted, so there's nothing to restore — only the owner needs
-            // seeding. `set_focused_pane` is deliberately avoided here: it would
-            // notify a not-yet-cached view (see its doc), and `focused_pane_id`
-            // is already restored from the persisted runtime.
+            // Seed the input-draft owner so text typed into the bottom
+            // input before the first focus change is attributed to the
+            // restored pane. `set_focused_pane` is avoided here: it would
+            // notify a not-yet-cached view (see its doc), and
+            // `focused_pane_id` is already restored from the runtime.
             if self.pane_consumes_bottom_input(focus) {
                 self.input_owner = Some(focus);
             }
@@ -649,12 +602,10 @@ impl Workspace {
     }
 
     /// Recursively materialize a serialized layout into live panes.
-    /// `id_map` records the new PaneId for each serialized pane_id so
-    /// cross-references (focus, last focused per tab) can be rewritten.
-    /// `fallback_cwd` is the cwd to use when a leaf's serialized cwd is
-    /// missing — typically the owning lane's path so restore keeps
-    /// each pane inside its lane even for sessions saved before OSC 7
-    /// first reported the live cwd.
+    /// `id_map` records the new PaneId per serialized pane_id so
+    /// cross-references (focus) can be rewritten. `fallback_cwd` is used
+    /// when a leaf's serialized cwd is missing — typically the owning
+    /// lane's path, keeping each pane inside its lane.
     fn rebuild_layout(
         &mut self,
         slayout: &daruda_store::project::SerializedLayout,
@@ -672,11 +623,10 @@ impl Workspace {
                 agent_chat,
             } => {
                 let pane = if let Some(fc) = file {
-                    // File pane — `file_status` is not persisted; the
-                    // git badge re-derives when the lane's git
-                    // status next refreshes. Content stays at
-                    // `Loading` until the owning lane becomes
-                    // active and `load_pending_file_panes` fires.
+                    // File pane — `file_status` is not persisted; the git
+                    // badge re-derives on the next git refresh. Content
+                    // stays `Loading` until the owning lane becomes active
+                    // and `load_pending_file_panes` fires.
                     self.create_file_pane(
                         fc.lane_id,
                         fc.path.clone(),
@@ -687,17 +637,16 @@ impl Workspace {
                         cx,
                     )
                 } else if let Some(ac) = agent_chat {
-                    // AgentChat pane — restore re-opens at the saved lane cwd in
-                    // the dormant `Idle` state, seeded with the persisted session
-                    // id + title. The live session is *not* started here —
-                    // `focus_pane` connects it lazily on first focus; when a
-                    // session id is present that lazy connect resumes the prior
-                    // conversation via `session/load` instead of starting fresh.
+                    // AgentChat pane — re-opens dormant (`Idle`) at the saved
+                    // cwd, seeded with the persisted session id + title. The
+                    // live session is not started here; `focus_pane` connects
+                    // it lazily on first focus, resuming via `session/load`
+                    // when a session id is present.
                     //
                     // Resolve which agent the pane relaunches under: its own
-                    // owning agent when still in the catalog (session id kept,
-                    // resume valid), else the default agent (session id dropped —
-                    // it belongs to a now-absent agent and could not resume).
+                    // owning agent when still in the catalog (session id kept),
+                    // else the default agent (session id dropped — it belongs
+                    // to a now-absent agent and could not resume).
                     let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
                     self.create_agent_chat_pane(
                         ac.cwd.clone(),

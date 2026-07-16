@@ -1,49 +1,16 @@
-//! `DarudaTheme` — runtime container for every themable colour
-//! that lives in `app/src/ui/theme/palette.rs`.
+//! Runtime container for app-side theme colours.
 //!
-//! Every `pub const FOO: Hsla` in `palette` has a matching field
-//! here (lowercase + snake_case). `Default::default()` clones the
-//! compile-time constants, so an uninitialised `DarudaTheme` is
-//! visually identical to the pre-Phase-3 build — the field-based
-//! lookup gains its purpose only once `DarudaTheme::from_json`
-//! (Phase 3-C) and `Theme::change()` (Phase 3-D) start mutating
-//! the live instance.
-//!
-//! Registered as a GPUI `Global` so any entity can read the current
-//! palette through `cx.global::<DarudaTheme>().<slot>` — the same
-//! access pattern Zed uses for `SettingsStore` / `ThemeRegistry`.
-//! `init(cx)` is idempotent (`if !cx.has_global::<DarudaTheme>()`)
-//! so test fixtures and defensive bootstrap calls do not stomp on
-//! a live theme.
-//!
-//! Serde notes:
-//! - `gpui::Hsla` deserialises from a CSS-style `"#rrggbb"` /
-//!   `"#rrggbbaa"` string (via the upstream `Rgba` round-trip), so a
-//!   JSON file reads like `{ "title_bar_bg": "#1a1a1a", ... }`.
-//! - Every field is `#[serde(default)]` at the struct level so a
-//!   partial JSON file (missing keys, comments-removed minified
-//!   form, etc.) still produces a valid `DarudaTheme`; missing keys
-//!   fall through to the compile-time `palette` constants.
-//!
-//! Adding a new theme slot:
-//! 1. Add a `pub const FOO: Hsla = ...` to `palette.rs`.
-//! 2. Add `foo => FOO,` to the [`daruda_theme_fields!`] call below.
-//!
-//! No other site needs editing — the macro keeps the struct
-//! definition, the field list, and `Default::default()` in lockstep.
+//! Each `palette::FOO` has a matching snake_case field; defaults copy the
+//! compile-time palette, while JSON overrides can replace any subset. The
+//! field list macro keeps the struct, defaults, and generated docs in lockstep.
 
 use crate::ui::theme::palette;
 use gpui::{App, Global, Hsla};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Generate the `DarudaTheme` struct and its `Default` impl from a
-/// single `field => CONST,` list. Replaces the previous pattern
-/// where the field declaration, the `Default::default()` map, and
-/// the docstring lived in three separate sites.
-///
-/// The macro is intentionally local (not `#[macro_export]`) so the
-/// `palette::` resolution stays tied to *this* module's `use`.
+/// Generate the struct and defaults from one `field => CONST` list.
+/// Kept local so `palette::` resolution stays tied to this module.
 macro_rules! daruda_theme_fields {
     ( $( $field:ident => $const:ident ),* $(,)? ) => {
         #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -64,12 +31,8 @@ macro_rules! daruda_theme_fields {
         }
 
         impl DarudaTheme {
-            /// Return a copy with every colour blended toward
-            /// `palette::DIM_GRAY_LEVEL` by `amount` (alpha preserved) — the
-            /// inactive-pane dim. `amount == 0.0` is an identity clone. Mirrors
-            /// the terminal's per-cell `dim_toward_gray`, so an inactive
-            /// agent-chat pane grays to the same tone while keeping the window
-            /// translucency (a scrim overlay cannot — it fills the see-through).
+            /// Return an inactive-pane dim copy, preserving alpha like the
+            /// terminal's per-cell dimming.
             pub fn dimmed(&self, amount: f32) -> Self {
                 Self {
                     $($field: super::dim_toward_gray(self.$field, amount),)*
@@ -233,10 +196,9 @@ impl DarudaTheme {
         serde_json::from_str(s)
     }
 
-    /// Serialise this theme to JSON. Used by:
-    /// - the build-time `daruda_dark.json` generator (so the bundled
-    ///   asset stays in lockstep with `palette` const tweaks).
-    /// - the Phase-3-D Settings UI's "Export current theme" affordance.
+    /// Serialise this theme to JSON. Used by the build-time
+    /// `daruda_dark.json` generator so the bundled asset stays in
+    /// lockstep with `palette` const tweaks.
     ///
     /// Pretty-printed for human-friendly diffs.
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {

@@ -1,26 +1,8 @@
-//! File-system watcher for `config.toml` live reload.
+//! File-system watcher for layered `config.toml` live reload.
 //!
-//! Watches the user-config directory recursively so that any
-//! `config.toml` under it (the user-global file plus per-project
-//! files at `projects/<repo>-<hash>/config.toml`) triggers a reload.
-//! The recursive scope keeps a single watcher thread responsible for
-//! the entire layered-config tree; a filename filter ignores other
-//! state files (`recent.json`, `state.json`, etc.) under the same
-//! root. The reload signal is debounced for 200 ms.
-//!
-//! The pump in [`crate::settings_store::spawn_file_watch`] consumes
-//! the debounced channel and folds each tick into a
-//! `cx.update_global::<SettingsStore, _>` mutation — the user
-//! layer is refreshed in place and every workspace that subscribed
-//! via `cx.observe_global` re-evaluates `effective_for` on the next
-//! tick.
-//!
-//! ## Lifecycle
-//!
-//! [`spawn_config_watcher`] returns a [`ConfigWatcherHandle`] that
-//! couples the `Receiver<()>` with the live `notify::Watcher`.
-//! Callers keep the handle alive as long as they poll; dropping it
-//! shuts the kernel-side watch + the debounce thread cleanly.
+//! Watches the config root recursively so user-global and per-project files
+//! share one debounced signal path. [`ConfigWatcherHandle`] owns the live
+//! watcher; dropping it disconnects the debounce thread cleanly.
 
 use std::path::Path;
 use std::sync::mpsc;
@@ -31,17 +13,10 @@ use std::time::Duration;
 /// prevents flicker from partial writes.
 pub(crate) const DEBOUNCE: Duration = Duration::from_millis(200);
 
-/// RAII handle returned by [`spawn_config_watcher`]. Owns the
-/// [`crate::dir_watch::DirWatcher`] so the kernel-side subscription stays
-/// attached for the handle's lifetime — dropping the handle ends the watch,
-/// which disconnects the raw channel and lets the debounce thread exit
-/// cleanly.
+/// RAII handle: keep it alive while reload notifications are needed.
 pub struct ConfigWatcherHandle {
     debounced_rx: mpsc::Receiver<()>,
-    /// Dropping this stops the watch; the debounce thread then sees its raw
-    /// `Receiver` disconnect and exits. Declared after `debounced_rx` so it is
-    /// dropped first, but ordering is not load-bearing — either drop ends the
-    /// thread.
+    /// Dropping this stops the watch and lets the debounce thread exit.
     _watcher: crate::dir_watch::DirWatcher,
 }
 
@@ -52,11 +27,8 @@ impl ConfigWatcherHandle {
     }
 }
 
-/// Start watching the config file. Returns a [`ConfigWatcherHandle`]
-/// the caller must keep alive for as long as it wants reload
-/// notifications. Dropping the handle ends the kernel-side watch +
-/// the debounce thread. On an FSEvents drop (sleep/wake) one reload signal is
-/// emitted so the layered config is re-read.
+/// Start watching all `config.toml` files under the config root.
+/// On an FSEvents rescan, emit one reload so layered config is re-read.
 pub fn spawn_config_watcher() -> ConfigWatcherHandle {
     use notify::RecursiveMode;
 
@@ -74,17 +46,14 @@ pub fn spawn_config_watcher() -> ConfigWatcherHandle {
         });
         if relevant { vec![()] } else { vec![] }
     };
-    // Recursive so the same watcher picks up
-    // `<config_dir>/daruda/projects/<...>/config.toml` writes alongside the
-    // user-global file. `classify`'s filename filter gates which events fire.
+    // Recursive so project overlays share the user-global watcher.
     let anchors = [watch_dir];
     let (raw_rx, watcher) =
         crate::dir_watch::spawn_dir_watcher(&anchors, RecursiveMode::Recursive, classify, || {
             vec![()]
         });
 
-    // Collapse a burst into one signal (shared helper; the thread exits when
-    // the watcher is dropped and `raw_rx` disconnects).
+    // Collapse a save burst into one reload signal.
     let debounced_rx = crate::dir_watch::debounce(raw_rx, DEBOUNCE);
 
     ConfigWatcherHandle {

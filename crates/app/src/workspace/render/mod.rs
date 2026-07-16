@@ -1405,12 +1405,11 @@ impl Render for Workspace {
                 },
             )
             // gpui_component overlay layers. The window root is
-            // `gpui_component::Root` (Phase 3), but `Root::render` only
+            // `gpui_component::Root`, but `Root::render` only
             // renders the inner view — Dialog/Sheet/Notification layers
             // must be rendered by the inner view explicitly. Without
             // these, `window.open_dialog(...)` registers a dialog into
-            // `Root.active_dialogs` but nothing ever paints it. All
-            // daruda modals route through these layers post Phase 4.d.
+            // `Root.active_dialogs` but nothing ever paints it.
             .children(gpui_component::Root::render_sheet_layer(window, cx))
             .children(gpui_component::Root::render_dialog_layer(window, cx))
             .children(gpui_component::Root::render_notification_layer(window, cx))

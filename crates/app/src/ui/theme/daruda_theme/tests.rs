@@ -4,8 +4,8 @@ use super::*;
 fn default_clones_compile_time_palette() {
     // Every field must equal the underlying `pub const` so a
     // fresh `DarudaTheme::default()` is observationally identical
-    // to reading `palette::FOO` directly — the invariant Phase 3-B
-    // relies on when it switches call sites over.
+    // to reading `palette::FOO` directly — the invariant call sites
+    // rely on when they read through `theme::current(cx)` instead.
     let t = DarudaTheme::default();
     assert_eq!(t.title_bar_bg, palette::BG_BASE);
     assert_eq!(t.tab_inactive_bg, palette::BG_PANEL);
@@ -276,10 +276,9 @@ fn json_round_trip_preserves_default_within_8bit_tolerance() {
 
 #[test]
 fn from_json_empty_object_fills_defaults() {
-    // `{}` is the minimal valid theme — every slot falls back to
-    // the compile-time `palette` const. Phase 3-C relies on this
-    // when a user-authored JSON omits slots they don't care to
-    // override.
+    // `{}` is the minimal valid theme — every slot falls back to the
+    // compile-time `palette` const, which the runtime JSON loader relies on
+    // when a user-authored JSON omits slots they don't care to override.
     let parsed = DarudaTheme::from_json("{}").expect("empty object parses");
     let defaults = DarudaTheme::default();
     assert_eq!(parsed.tab_inactive_bg, defaults.tab_inactive_bg);
@@ -306,9 +305,9 @@ fn from_json_partial_overrides_only_listed_keys() {
 #[test]
 fn bundled_daruda_dark_json_matches_default() {
     // `assets/themes/daruda_dark.json` is committed alongside the
-    // crate so the runtime loader (Phase 3-C) can read a real
-    // file. This test asserts the bundled JSON has not drifted
-    // from the compile-time defaults — if a future palette tweak
+    // crate so the runtime loader can read a real file. This test
+    // asserts the bundled JSON has not drifted from the compile-time
+    // defaults — if a future palette tweak
     // changes a default colour, regenerate the asset via
     //   cargo run --example dump_default_theme  # or the build script
     // and re-commit. Catching drift in CI is far cheaper than

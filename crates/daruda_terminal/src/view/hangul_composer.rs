@@ -18,10 +18,10 @@
 //! input, a syllable boundary (choseong-overlap), or explicit
 //! [`HangulComposer::flush`] / [`HangulComposer::reset`] releases it.
 //!
-//! Phase 1 scope (LV / LVT): single-consonant choseong + jungseong +
+//! Handles LV / LVT syllables: single-consonant choseong + jungseong +
 //! optional single-consonant jongseong + jong-migration when a vowel
-//! follows a jong. Phase 2 (compound jong / compound jung / cluster
-//! split) is deferred.
+//! follows a jong. Does not compose compound jong / compound jung /
+//! cluster splits.
 
 use super::jamo::{
     HANGUL_S_BASE, choseong_index, is_compat_choseong, is_compat_jongseong, is_compat_jungseong,
@@ -131,8 +131,8 @@ impl HangulComposer {
                     // the user was starting a new syllable with the
                     // jong as its cho. Flush LV (without the jong)
                     // and transition. Only safe when the jong is a
-                    // single consonant that's also a valid cho —
-                    // Phase 1 skips cluster-splitting (ㄳ → ㄱ+ㅅ).
+                    // single consonant that's also a valid cho — cluster
+                    // jongs are not split (ㄳ → ㄱ+ㅅ).
                     if is_compat_choseong(t) {
                         let lv = compose_lv(c, v);
                         self.state = State::ChoJung(t, ch);
@@ -150,9 +150,9 @@ impl HangulComposer {
                     self.state = State::Cho(ch);
                     vec![lvt.to_string()]
                 } else {
-                    // Another jongseong / cluster after an LVT.
-                    // Phase 1 does not compose compound jongs; flush
-                    // what we have and emit the input as-is.
+                    // Another jongseong / cluster after an LVT. Compound
+                    // jongs are not composed; flush what we have and emit
+                    // the input as-is.
                     let lvt = compose_lvt(c, v, t);
                     self.state = State::Empty;
                     vec![lvt.to_string(), ch.to_string()]
@@ -323,9 +323,9 @@ mod tests {
 
     #[test]
     fn reset_during_composition_drops_buffer() {
-        // Per plan Phase 1: reset drops partial composition without
-        // emitting. Protects against leaking a syllable into an
-        // unrelated PTY when e.g. the search overlay takes focus.
+        // Reset drops partial composition without emitting. Protects
+        // against leaking a syllable into an unrelated PTY when e.g. the
+        // search overlay takes focus.
         let mut c = HangulComposer::new();
         c.feed('ㄱ');
         c.feed('ㅏ');
@@ -391,17 +391,17 @@ mod tests {
     fn lvt_with_cluster_jong_flushes_on_vowel() {
         // Manually seed a ChoJungJong where the jong is a cluster
         // (ㄳ is jong-valid but not a choseong). A following vowel
-        // must NOT migrate a cluster onto the next syllable under
-        // Phase 1 — flush full LVT and emit the vowel standalone.
+        // must NOT migrate a cluster onto the next syllable —
+        // flush full LVT and emit the vowel standalone.
         let mut c = HangulComposer::new();
         c.feed('ㄱ');
         c.feed('ㅏ');
         // ㄳ (cluster jong, not a choseong)
         c.feed('ㄳ');
         let out = c.feed('ㅏ');
-        // ㄱ + ㅏ + ㄳ = U+AC03 "갃"; the trailing vowel cannot
-        // migrate a cluster jong onto a new syllable under Phase 1,
-        // so the full LVT flushes and ㅏ lands as a standalone jamo.
+        // ㄱ + ㅏ + ㄳ = U+AC03 "갃"; the trailing vowel cannot migrate a
+        // cluster jong onto a new syllable, so the full LVT flushes and
+        // ㅏ lands as a standalone jamo.
         assert_eq!(out, vec!["갃", "ㅏ"]);
         assert!(c.flush().is_none());
     }

@@ -1,23 +1,13 @@
 //! Layer 2 of the error-reporting pipeline — the Details modal.
 //!
-//! Opened from a toast pill's `[Details]` button, this dialog renders
-//! the full plain-text [`ErrorReport`] body (severity, location, message,
-//! source chain, context, backtrace, system-info trailer) inside a
-//! scrollable monospace panel and exposes three actions:
+//! Opened from a toast pill's `[Details]` button, this dialog renders the full
+//! plain-text [`ErrorReport`] body in a scrollable monospace panel and exposes
+//! three actions: Copy report (clipboard; label flips to `Copied` briefly),
+//! Open log file (system handler on today's NDJSON log), and Close.
 //!
-//! - **Copy report** — writes the full plain-text rendering to the
-//!   clipboard. The button label flips to `Copied` for a 1-second
-//!   confirmation and reverts via a background timer.
-//! - **Open log file** — defers to the system handler (`open` on
-//!   macOS) so the user lands in their default text editor on
-//!   today's NDJSON log file.
-//! - **Close** — dismisses via [`gpui_component::WindowExt::close_dialog`].
-//!
-//! The modal owns its full body (G9): Dialog supplies only the outer
-//! chrome (panel bg, border, padding, backdrop, ESC handling). The
-//! report is captured at open time so dismissing doesn't depend on
-//! the live toast queue (which may have already auto-expired the
-//! source toast).
+//! The modal owns its full body (G9); the report is captured at open time so
+//! dismissing doesn't depend on the live toast queue (which may have
+//! auto-expired the source toast).
 
 use std::time::Duration;
 

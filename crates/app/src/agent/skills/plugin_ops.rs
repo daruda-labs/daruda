@@ -1,23 +1,17 @@
 //! Blocking wrappers around `claude plugin install / uninstall`.
 //!
-//! Synchronous on purpose — UI callers shell out from
-//! `cx.background_executor().spawn` so the main thread stays free.
-//! Keeping the module GPUI-free lets it be unit-tested without a
-//! GPUI fixture and reused from CLI helpers later.
-//!
-//! Spec lives behind `claude plugin --help`. Daruda only invokes:
-//! - `claude plugin install <id>  --scope <s>`
+//! Synchronous and GPUI-free; UI callers shell out from
+//! `background_executor().spawn`. Daruda invokes only:
+//! - `claude plugin install <id> --scope <s>`
 //! - `claude plugin uninstall <id> --scope <s> --yes`
 //!
-//! The `--yes` flag is mandatory for uninstall when stdin is not a
-//! TTY (background_executor never has one). Scope defaults to `user`
-//! to mirror the CLI itself.
+//! `--yes` is mandatory for uninstall since stdin is never a TTY here.
+//! Scope defaults to `user`, mirroring the CLI.
 
 use std::process::{Command, Output};
 
-/// Which CLI subcommand to invoke. Encoded as an enum so callers can
-/// share the same plumbing for both verbs (toast text differs, but
-/// the spawn / output handling is identical).
+/// Which CLI subcommand to invoke — an enum so both verbs share the
+/// same spawn/output plumbing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluginAction {
     Install,
@@ -35,7 +29,7 @@ impl PluginAction {
 }
 
 /// Installation scope passed via `--scope`. Mirrors the CLI's three
-/// values; `user` is the default both here and in the CLI itself.
+/// values; `user` is the default in both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PluginScope {
     #[default]
@@ -63,8 +57,8 @@ pub enum PluginOpError {
     Spawn(std::io::Error),
     /// The CLI ran but exited non-zero.
     Exit { code: Option<i32>, stderr: String },
-    /// CLI output wasn't valid UTF-8 — extremely unlikely in practice
-    /// but kept for parity with `lane::git`'s error shape.
+    /// CLI output wasn't valid UTF-8 (kept for parity with
+    /// `lane::git`'s error shape).
     Utf8,
 }
 
@@ -88,18 +82,14 @@ impl std::fmt::Display for PluginOpError {
 impl std::error::Error for PluginOpError {}
 
 /// Run `claude plugin <action> <plugin_id> --scope <scope> [--yes]`
-/// and return stdout on success.
-///
-/// `plugin_id` is the fully-qualified `<plugin>@<marketplace>` form
-/// daruda already uses everywhere else. Caller is responsible for
-/// deciding the scope.
+/// and return stdout on success. `plugin_id` is the fully-qualified
+/// `<plugin>@<marketplace>` form; the caller chooses the scope.
 pub fn run_plugin_action(
     action: PluginAction,
     plugin_id: &str,
     scope: PluginScope,
 ) -> Result<String, PluginOpError> {
-    // Pre-spawn guard: a clear "claude not found" error instead of an
-    // opaque spawn failure when the CLI isn't installed.
+    // Pre-spawn guard for a clear "claude not found" error.
     which::which("claude").map_err(|_| PluginOpError::NotFound)?;
     let mut cmd = Command::new("claude");
     cmd.arg("plugin")
@@ -107,8 +97,7 @@ pub fn run_plugin_action(
         .arg(plugin_id)
         .arg("--scope")
         .arg(scope.flag());
-    // Uninstall prompts for confirmation when stdin isn't a TTY; the
-    // `--yes` flag is what the CLI itself recommends in that case.
+    // Uninstall prompts for confirmation without a TTY; `--yes` skips it.
     if matches!(action, PluginAction::Uninstall) {
         cmd.arg("--yes");
     }

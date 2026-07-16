@@ -1,10 +1,9 @@
 //! Project-local config layer.
 //!
 //! Each opened project (the repo root the user pointed daruda at) can
-//! optionally carry its own `config.toml` that overrides selected
-//! sections of the user-global config. Phase 1 supports the `[shell]`
-//! section only — the rest of the schema continues to read from the
-//! user layer. The on-disk shape lives at:
+//! optionally carry its own `config.toml` that overrides the `[shell]`
+//! section — the rest of the schema continues to read from the user layer.
+//! The on-disk shape lives at:
 //!
 //! ```text
 //! ~/.config/daruda/projects/<basename>-<hash>/config.toml
@@ -15,10 +14,6 @@
 //! land on the same config file. The leading `<basename>` makes the
 //! directory list human-readable when a user browses
 //! `~/.config/daruda/projects/` directly.
-//!
-//! See `Projects/daruda/Tasks/Project-Local-Config-Layer-Plan.md` for
-//! the full design rationale (lane-isolation use case, why
-//! out-of-tree storage, layered priority).
 
 use std::path::{Path, PathBuf};
 

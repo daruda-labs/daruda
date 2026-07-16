@@ -1,32 +1,11 @@
 //! Tasks tab body — renders the lane-isolated Claude Code agent
-//! task list pulled from `Workspace::tasks` (R-11 ~ R-18 + R-26 / R-27).
+//! task list pulled from `Workspace::tasks`.
 //!
-//! Layout (top to bottom):
-//! ```text
-//! ┌─ Tasks ──────────────────────────────────── [All ▼] [+ New] ─┐
-//! │  🔍 Search tasks…                                       ✕   │
-//! │  ◉ fix-auth-bug        [Running ▾]   abc12345                │
-//! │  ○ add-payment-page    [Backlog ▾]                           │
-//! │  ✓ refactor-db-layer   [Done ▾]                              │
-//! │  ✕ upgrade-deps        [Error ▾]                             │
-//! │  ⊘ wip-experiment      [Cancelled ▾]                         │
-//! └──────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! Filter chip cycles `All → Backlog → Running → Done → All` on
-//! click; `[+ New]` opens `CreateTaskModal` (R-13). Every state
-//! transition + meta action (Edit / Delete / Open lane) lives
-//! inside the per-row status-pill dropdown — see `status_pill.rs`
-//! for the state → menu matrix (plan I-9 / R-26).
-//!
-//! Search input (R-27) substring-filters `title / prompt / notes /
-//! branch_name` simultaneously with the state filter (AND). The
-//! in-field `✕` clears the query.
-//!
-//! Static text comes from `surface::strings::TASK_*` /
-//! `daruda_terminal::ux::strings::RIGHT_PANEL_TASK_*`; pixel + color
-//! values from `daruda_terminal::ux::theme`. Direct `hsla(...)` /
-//! `px(N)` literals are caught by `scripts/lint-inline-literals.sh`.
+//! The filter chip cycles `All → Backlog → Running → Done`; `[+ New]`
+//! opens the TaskEdit pane; every state transition + meta action lives
+//! in the per-row status-pill dropdown (see `status_pill.rs`). The
+//! search input substring-filters `title / prompt / notes / branch_name`
+//! (AND with the state filter), with an in-field `✕` to clear.
 
 use crate::ui::Sizable as _;
 use crate::ui::theme;
@@ -68,10 +47,8 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
         .child(search);
 
     if visible.is_empty() {
-        // Distinguish "no tasks match this query" from "no tasks in
-        // this filter bucket" — the former is search-recoverable
-        // (the inline `✕` clears the query), the latter is a state
-        // hint.
+        // "No tasks match this query" (search-recoverable via the inline
+        // `✕`) vs. "no tasks in this filter bucket" (a state hint).
         let empty = if query.is_empty() {
             empty_state(snap.task_filter, cx)
         } else {
@@ -90,14 +67,10 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     body.into_any_element()
 }
 
-/// Lowercase substring match across the task's plain-text metadata —
-/// `title`, `prompt`, `notes`, the derived `branch_name`, and every
-/// `SubTask::title` (R-21 + R-27). Session-id prefixes are
-/// intentionally excluded (UUID false positives — plan C-4).
-///
-/// Subtask matching covers both manual (`source_session_id == None`)
-/// and auto-injected (`source_session_id == Some(...)`) rows so the
-/// hook-fed TODO list is searchable just like the user-typed one.
+/// Lowercase substring match across `title`, `prompt`, `notes`, the
+/// derived `branch_name`, and every `SubTask::title` (manual and
+/// auto-injected). Session-id prefixes are excluded (UUID false
+/// positives).
 fn matches_task(t: &Task, query_lower: &str) -> bool {
     t.title.to_ascii_lowercase().contains(query_lower)
         || t.prompt.to_ascii_lowercase().contains(query_lower)
@@ -157,10 +130,9 @@ fn header_row(snap: &RightDockSnapshot) -> impl IntoElement {
 // Search bar
 // ---------------------------------------------------------------------------
 
-/// Search input row. Mirrors `right_panel/skills/render.rs::search_row`
-/// — wraps `RightDockSnapshot::task_search_input` in a relative container
-/// so the in-field `✕` button can sit absolutely on the trailing edge.
-/// The icon only renders while the query is non-empty.
+/// Search input row: wraps `task_search_input` in a relative container
+/// so the in-field `✕` button sits absolutely on the trailing edge. The
+/// icon renders only while the query is non-empty.
 fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
     let has_query = !snap.task_search_query.trim().is_empty();
     let workspace = snap.workspace.clone();
@@ -188,9 +160,8 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
                     .hover(move |s| s.text_color(chip_hover_text))
                     .child(strings::TASK_SEARCH_CLEAR_ICON)
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        // Land on the overlay rather than the Input,
-                        // so the input never observes this click. The
-                        // stop is belt-and-braces.
+                        // Stop propagation so the click lands on the
+                        // overlay, not the underlying Input.
                         cx.stop_propagation();
                         if let Some(ws) = workspace.upgrade() {
                             ws.update(cx, |ws, cx| ws.clear_task_search(window, cx));
@@ -200,9 +171,8 @@ fn search_row(snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoElement {
         })
 }
 
-/// Body shown when a non-empty search yields zero matches across
-/// every state bucket. Text-only — the in-field `✕` already provides
-/// one-click recovery so a second affordance here would be redundant.
+/// Body shown when a non-empty search yields zero matches. Text-only;
+/// the in-field `✕` already provides one-click recovery.
 fn search_empty_hint(query: String, t: &crate::ui::theme::DarudaTheme) -> impl IntoElement {
     div()
         .text_size(px(theme::RIGHT_PANEL_BODY_FONT_SIZE))
@@ -270,10 +240,8 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
         .children(session_badge)
         .children(failures)
         .child(subtask_progress)
-        // Status pill sits at the trailing edge — its own mouse-down
-        // closes the popup; we still need to stop propagation so the
-        // row's expansion toggle doesn't fire when the user is just
-        // dismissing the dropdown.
+        // Stop propagation on the trailing status pill so dismissing its
+        // dropdown doesn't also trigger the row's click handler.
         .child(
             div()
                 .flex_none()
@@ -285,10 +253,8 @@ fn task_row(task: &Task, snap: &RightDockSnapshot, cx: &gpui::App) -> impl IntoE
 }
 
 /// Subtask progress badge — `☑done/total`. Rendered for every row,
-/// including `0/0`, so the column position stays stable across rows
-/// regardless of whether the task has any subtasks yet, keeping the
-/// column position stable across rows. Clicking the row body already
-/// opens the TaskEdit pane, so the badge itself carries no click handler.
+/// including `0/0`, so the column position stays stable. Carries no
+/// click handler; clicking the row body already opens the TaskEdit pane.
 fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
     let (done, total) = task.subtask_progress();
     div()
@@ -303,14 +269,10 @@ fn subtask_progress_cell(task: &Task, cx: &gpui::App) -> AnyElement {
         .into_any_element()
 }
 
-/// Leading state-indicator cell. For `Running` rows we paint a
-/// filled circle whose alpha oscillates between
-/// [`theme::RIGHT_PANEL_TASK_PULSE_MIN_ALPHA`] and
-/// [`theme::RIGHT_PANEL_TASK_PULSE_MAX_ALPHA`] over
-/// [`theme::RIGHT_PANEL_TASK_PULSE_PERIOD_SEC`]; the workspace's
-/// background live tick (`spawn_task_live_tick`) drives the redraws
-/// that make the dot animate. Every other state stays static and
-/// just renders its glyph in the matching state color.
+/// Leading state-indicator cell. `Running` rows paint a filled circle
+/// whose alpha pulses (see `pulse_alpha`), driven by the workspace's
+/// `spawn_task_live_tick` redraws; every other state renders a static
+/// glyph in its state color.
 fn indicator_cell(state: &TaskState, now: DateTime<Utc>, cx: &gpui::App) -> AnyElement {
     let cell = div()
         .w(px(theme::RIGHT_PANEL_TASK_INDICATOR_W))
@@ -341,19 +303,14 @@ fn indicator_cell(state: &TaskState, now: DateTime<Utc>, cx: &gpui::App) -> AnyE
     }
 }
 
-/// Triangular pulse wave bounded by
-/// [`theme::RIGHT_PANEL_TASK_PULSE_MIN_ALPHA`] /
-/// [`theme::RIGHT_PANEL_TASK_PULSE_MAX_ALPHA`] with period
-/// [`theme::RIGHT_PANEL_TASK_PULSE_PERIOD_SEC`]. The phase is derived
-/// from `now`'s sub-period offset, so every `Running` row across the
-/// workspace breathes in lockstep — visually consistent and free of
-/// per-row state.
+/// Triangular pulse wave bounded by the pulse min/max alpha over the
+/// pulse period. Phase derives from `now`'s sub-period offset, so every
+/// `Running` row breathes in lockstep with no per-row state.
 ///
-/// The modulo runs in integer-millisecond space because the raw
-/// `timestamp() as f32` path burns ~31 of f32's 24 mantissa bits on
-/// the seconds-since-epoch magnitude alone, leaving sub-second
-/// resolution below the noise floor — the pulse would visibly snap
-/// to a single alpha and never animate.
+/// The modulo runs in integer-millisecond space: `timestamp() as f32`
+/// spends f32's mantissa on the seconds-since-epoch magnitude, dropping
+/// sub-second resolution below the noise floor so the pulse would freeze
+/// at a single alpha.
 fn pulse_alpha(now: DateTime<Utc>) -> f32 {
     let period_ms = (theme::RIGHT_PANEL_TASK_PULSE_PERIOD_SEC * 1000.0) as i64;
     let phase_ms = now.timestamp_millis().rem_euclid(period_ms);
@@ -369,11 +326,9 @@ fn pulse_alpha(now: DateTime<Utc>) -> f32 {
 }
 
 fn title_cell(title: &str, t: &crate::ui::theme::DarudaTheme) -> impl IntoElement {
-    // `flex_1` claims the row's slack, but a flex item's implicit
-    // `min-width: auto` would keep it at its content width and shove
-    // the trailing fixed cells (duration / badge / status pill) past
-    // the dock edge. `min_w_0` resets that floor so the cell shrinks,
-    // and `truncate` clips the overflow with an ellipsis on one line.
+    // `min_w_0` resets the flex item's implicit `min-width: auto` floor
+    // so the cell can shrink instead of pushing the trailing fixed cells
+    // past the dock edge; `truncate` clips overflow with an ellipsis.
     div()
         .flex_1()
         .min_w_0()
@@ -434,9 +389,8 @@ fn done_flavour_label(reason: SessionEndReason) -> String {
         SessionEndReason::PromptInputExit => strings::task_done_flavour_prompt_input_exit(),
         SessionEndReason::Logout => strings::task_done_flavour_logout(),
         SessionEndReason::Other => strings::task_done_flavour_other(),
-        // `Error` lives on the `Error` state, not the `Done` state —
-        // any path that reaches here means the row was migrated from
-        // an older daruda. Fall back to the generic "Other" flavour.
+        // `Error` belongs to the `Error` state, not `Done`; reaching
+        // here means a migrated row — fall back to "Other".
         SessionEndReason::Error => strings::task_done_flavour_other(),
     }
 }
@@ -446,12 +400,9 @@ fn done_flavour_label(reason: SessionEndReason) -> String {
 // ---------------------------------------------------------------------------
 
 /// Inline span showing the task's run duration — live for `Running`
-/// rows (re-rendered by `spawn_task_live_tick`) and frozen at
-/// `finished_at - created_at` for terminal states. `Backlog` rows
-/// have no meaningful duration so the cell drops out entirely. Sub-
-/// second rounding follows `surface::strings::format_duration_compact`,
-/// which already powers the long-running notification body so a
-/// single helper keeps both surfaces in sync.
+/// rows (re-rendered by `spawn_task_live_tick`), frozen at
+/// `finished_at - created_at` for terminal states, dropped for
+/// `Backlog`. Formatting reuses `format_duration_compact`.
 fn duration_cell(
     task: &Task,
     snap: &RightDockSnapshot,
@@ -539,7 +490,7 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
 
 // ---------------------------------------------------------------------------
 // Failure indicator — `failures N/M` once a session crosses the
-// soft display threshold (R-11 counter, R-23 visualization)
+// soft display threshold
 // ---------------------------------------------------------------------------
 
 /// Renders a small `failures 3/5` chip when any session attached to
@@ -602,8 +553,8 @@ mod tests {
         Task::new("fix-bug".into(), "prompt body".into(), None)
     }
 
-    /// Title / prompt / notes / branch_name remain matched after the
-    /// R-21 subtask addition — guard against accidental regression.
+    /// Title / prompt / notes / branch_name stay matched even once
+    /// subtasks are present — guard against accidental regression.
     #[test]
     fn matches_task_still_matches_core_metadata_fields() {
         let mut t = fresh_task();
@@ -615,7 +566,7 @@ mod tests {
         assert!(!matches_task(&t, "zzz"), "no match → false");
     }
 
-    /// R-27 follow-up: subtask titles join the search corpus.
+    /// Subtask titles join the search corpus.
     #[test]
     fn matches_task_finds_subtask_titles() {
         let mut t = fresh_task();
@@ -625,8 +576,8 @@ mod tests {
         assert!(matches_task(&t, "refresh"), "second subtask title hit");
     }
 
-    /// Auto-injected subtasks (R-22 TodoWrite merge) carry the same
-    /// title text as manual ones, so they must be searchable too.
+    /// Auto-injected subtasks (from the TodoWrite hook merge) carry the
+    /// same title text as manual ones, so they must be searchable too.
     #[test]
     fn matches_task_finds_auto_subtasks() {
         let mut t = fresh_task();

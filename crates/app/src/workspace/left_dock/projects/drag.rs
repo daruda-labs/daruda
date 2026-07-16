@@ -1,14 +1,10 @@
 //! Drag payload + ghost preview for the lanes view tree.
 //!
-//! `DragPayload` discriminates the three drag sources the tree
-//! supports — a lane row, a project header, and a group header.
-//! Each carries its own identifier alongside a display label so the
-//! ghost preview can render without re-reading the workspace mid-flight.
-//!
-//! Drop handlers branch on the variant to enforce the placement rules
-//! from the multi-project plan (lanes stay in their project,
-//! projects move freely between groups and the top-level pool, groups
-//! reorder only at the top level).
+//! `DragPayload` discriminates the three drag sources (lane row, project
+//! header, group header); each carries an id plus a display label for the
+//! ghost. Drop handlers branch on the variant to enforce placement: lanes
+//! stay in their project, projects move between groups and the top-level
+//! pool, groups reorder only at the top level.
 
 use crate::ui::theme;
 use gpui::{Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};

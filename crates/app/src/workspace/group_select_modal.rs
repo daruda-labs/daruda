@@ -1,14 +1,13 @@
 //! Select modal for the Command Palette's "Move Project to Group…"
-//! entry. Replaces the prior `GroupPickerModal` (searchable list) with
-//! a single `ui::select` dropdown — the group list is small and the
-//! query box on a picker added noise without aiding discovery.
+//! entry. A single `ui::select` dropdown — the group list is small and a
+//! searchable-picker query box would add noise without aiding discovery.
 //!
 //! `Esc` / Cancel dismisses; the **Move** button routes the current
-//! dropdown value through [`Workspace::move_project_to_group`]. The
-//! free-text path the C-2 review flagged stays closed because the
-//! dropdown can only emit values present as options — typo-driven
-//! group creation is structurally unreachable from this entry. To mint
-//! a new group on purpose, use the `New Group` action (`Cmd+Shift+N`).
+//! dropdown value through [`Workspace::move_project_to_group`]. Free-text
+//! entry stays closed because the dropdown can only emit values present as
+//! options — typo-driven group creation is structurally unreachable from
+//! this entry. To mint a new group on purpose, use the `New Group` action
+//! (`Cmd+Shift+N`).
 
 use crate::ui::theme;
 use crate::ui::{

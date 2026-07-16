@@ -126,11 +126,9 @@ pub struct PromptMark {
 /// Init payload for [`TerminalSession::push_prompt_mark`]. Carries every
 /// [`PromptMark`] field except `seq`, which the session assigns from its
 /// monotonic counter — making "every mark in `prompt_marks` has a seq
-/// from the counter" the only constructable shape inside the module.
-/// Previously the call site passed `PromptMark { seq: 0, .. }` as a
-/// placeholder; that pattern silently broke the uniqueness invariant if
-/// `push_prompt_mark` was ever bypassed, and is now structurally
-/// impossible.
+/// from the counter" the only constructable shape inside the module, so a
+/// bypassed `push_prompt_mark` can't silently violate the uniqueness
+/// invariant with a placeholder `seq`.
 struct PromptMarkInit {
     kind: PromptMarkKind,
     abs_y: LogicalLineAbs,
@@ -2122,10 +2120,9 @@ impl TerminalSession {
         // Re-anchor the LineBuffer-space watermark to the buffer's
         // current tail. The buffer's contents are unchanged by resize
         // (only the wrap cache was invalidated), so `next_append_abs`
-        // continues to identify the same logical position. Pre-Step 2
-        // this stored ghostty's `new_top - 1` and conflated two
-        // coordinate spaces; the new value lives entirely in LineBuffer
-        // abs. An empty buffer drops back to `None` — the invariant
+        // continues to identify the same logical position; the value
+        // lives entirely in LineBuffer abs, never ghostty's screen-row
+        // space. An empty buffer drops back to `None` — the invariant
         // sustained everywhere else is "`Some` ⇔ a capture has reached
         // the buffer", and an empty buffer cannot meet that. Leaving an
         // older `Some` here would be the only path to a stale watermark.

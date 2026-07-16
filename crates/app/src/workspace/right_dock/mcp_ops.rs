@@ -1,27 +1,13 @@
 //! Workspace methods for MCP server CRUD.
 //!
-//! Each method opens a `cx.update_global::<McpState, _>` closure so the
-//! persist machinery operates on the app-wide Global. Inside the
-//! closure we mirror the previous pattern: stage a copy of the raw
-//! JSON tree, write it atomically via `tempfile::NamedTempFile::persist`,
-//! and only swap the in-memory tree on success. A failed write leaves
-//! both sides untouched. Non-`mcpServers` keys (permissions, hooks,
-//! etc.) survive every save by definition because
-//! `agent::mcp::persist::*` only ever patches `mcpServers[name]`.
+//! Mutations run inside `cx.update_global::<McpState, _>` and stage raw JSON
+//! before atomic persist, so failed writes leave memory and disk untouched.
+//! Persist helpers patch only `mcpServers[name]`, preserving unrelated
+//! `.claude.json` keys.
 //!
-//! Disk I/O is **synchronous on the main thread**. The files involved
-//! are tiny (a JSON object with a handful of keys) and the writes are
-//! infrequent (only on user CRUD action), so the cost is well below
-//! perceptible. A future revision could move the rename onto a
-//! background task if a slow filesystem ever surfaces.
-//!
-//! There is no self-write suppression: every save we perform fires a
-//! filesystem event that loops back as an `McpEvent`. That's
-//! deliberate — the reload re-parses the same disk content we just
-//! wrote, and the change-gated `apply_mcp_event` notices nothing
-//! changed, so the in-memory state converges to itself with no visible
-//! flicker. Keeping the path simple is worth the negligible duplicate
-//! work.
+//! Disk I/O stays synchronous because files are tiny and writes are user-driven.
+//! Self-write events are allowed to loop back; reload parses the same content
+//! and the change gate converges without visible flicker.
 
 use std::path::{Path, PathBuf};
 
@@ -37,10 +23,7 @@ use crate::agent::mcp::{
 
 use crate::workspace::Workspace;
 
-/// Materialise a draft as a freshly-built `McpServer` for the in-memory
-/// list. The on-disk JSON tree was already updated by the persist
-/// helpers; this keeps the renderer's snapshot in sync without
-/// re-parsing.
+/// Materialize a draft for the in-memory list without re-parsing disk.
 fn make_server_from_draft(scope: McpScope, draft: &McpServerDraft) -> McpServer {
     McpServer {
         name: draft.name.clone(),

@@ -16,14 +16,9 @@
 //! User-visible labels live in `app/src/surface/strings.rs` (G4); this
 //! crate ships only the closed enum + slug helpers used for routing.
 
-/// A page in the Settings window.
-///
-/// Phase 1 only ever constructs `Builtin(...)` variants. The
-/// `non_exhaustive` `Plugin(...)` placeholder is **not** added yet —
-/// adding it now would force every match site to handle a variant
-/// that has no constructor. The forward path is: when plugins land,
-/// add `Plugin(PluginSectionId)` here and let the compiler walk every
-/// `match SettingsSection { ... }` site.
+/// A page in the Settings window. Only constructs `Builtin(...)` today; the
+/// outer enum exists so a future `Plugin(PluginSectionId)` variant becomes a
+/// compiler-enforced follow-up at every match site rather than a refactor.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SettingsSection {
     Builtin(BuiltinSection),

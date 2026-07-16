@@ -1,25 +1,8 @@
-//! Helpers that open `gpui_component::Dialog` based modals.
+//! Helpers for opening `gpui_component::Dialog` based modals.
 //!
-//! Four shapes:
-//!
-//! - [`open_single_field_dialog`] — embeds `gpui_component::Input`.
-//!   Cancel / OK buttons are provided by Dialog itself; Enter inside
-//!   the input propagates to Dialog's `Confirm` action so OK fires
-//!   without a click. On OK the trimmed text (or `None`) is forwarded
-//!   to the caller.
-//! - [`open_form_modal`] — daruda's modal entity is the entire body
-//!   (form fields + validation banner + custom footer buttons). Dialog
-//!   provides only outer chrome (panel bg, border, padding, backdrop,
-//!   Escape-to-close). The entity dismisses itself by calling
-//!   [`gpui_component::WindowExt::close_dialog`].
-//! - [`open_confirm_dialog`] — title + body text + OK/Cancel footer.
-//!   Caller supplies the OK handler. Used for short-lived destructive
-//!   confirmations (Delete macro / skill / tool / lane). Dialog
-//!   owns OK / Cancel button rendering and dismissal.
-//! - [`open_error_report_dialog`] — Layer 2 of the error-reporting
-//!   pipeline. Mounts an [`ErrorReportModal`] for a captured
-//!   [`ErrorReport`]; modal owns [Copy report] / [Open log file] /
-//!   [Close] action buttons.
+//! Covers single-field dialogs, form-body modals, destructive confirmations,
+//! and the error-report modal. Dialog owns outer chrome and Escape handling;
+//! form entities own their custom body/footer behaviour.
 
 use std::rc::Rc;
 
@@ -38,14 +21,8 @@ use crate::workspace::Workspace;
 use crate::workspace::error::modal::ErrorReportModal;
 use crate::workspace::modal_view::ModalView;
 
-/// Open a Dialog with one labelled `gpui_component::Input` and a
-/// Cancel / OK footer. On OK the callback receives the trimmed text
-/// (or `None` if blank) along with `&mut Workspace`.
-///
-/// Enter inside the single-line input propagates out via
-/// `InputState::enter -> cx.propagate()` (see `input/state.rs` Enter
-/// handler) so Dialog's `Confirm` action triggers `on_ok` without a
-/// click. Escape is handled by Dialog's `Cancel` action.
+/// Open a one-input Dialog. Enter propagates to Dialog Confirm; OK receives
+/// trimmed text or `None`.
 pub(in crate::workspace) fn open_single_field_dialog<Cb>(
     workspace: WeakEntity<Workspace>,
     title: impl Into<SharedString>,

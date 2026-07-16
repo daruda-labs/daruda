@@ -1,25 +1,12 @@
-//! Hydrate the process `PATH` from the user's login shell.
+//! Hydrate process `PATH` from the user's login shell on GUI launches.
 //!
-//! A macOS `.app` launched from Finder / Dock / `open` inherits only launchd's
-//! minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) and none of the user's
-//! shell configuration. Tools installed via Homebrew, nvm, or npm-global —
-//! including `npx`, which the ACP agent adapter is spawned as
-//! (`daruda_acp::connection::AdapterCommand`) — then aren't on `PATH`, so the
-//! spawn fails with `No such file or directory` (os error 2). A terminal
-//! launch already inherits the shell `PATH`, so this is a no-op there.
-//!
-//! Mirrors zed's `load_login_shell_environment` and the approach every macOS
-//! dev tool uses. We capture only `PATH` (not the full environment): it is what
-//! subprocess discovery needs, and nvm / Homebrew put the active toolchain
-//! directories on `PATH`, so a `PATH`-only capture is enough to find `npx`,
-//! `node`, and `claude`.
+//! Finder/Dock `.app` launches inherit launchd's minimal PATH, which misses
+//! Homebrew/nvm/npm-global tools needed to spawn `npx`, `node`, and `claude`.
+//! Terminal launches already have the shell PATH, so this is a no-op there.
 
 use std::io::IsTerminal;
 
-/// Sentinels wrapping the captured `PATH` on stdout. An interactive shell
-/// (`-i`) runs the user's prompt / precmd hooks, which can emit stray output
-/// (OSC 7 CWD reports, theme escapes, greetings) around our command. Bracketing
-/// the value lets us extract exactly `PATH` and ignore that noise.
+/// Sentinels let us extract PATH despite prompt/precmd output from `-i`.
 const PATH_START: &str = "__DARUDA_PATH_START__";
 const PATH_END: &str = "__DARUDA_PATH_END__";
 
@@ -36,10 +23,8 @@ pub fn hydrate_path_from_login_shell() {
     let Ok(shell) = std::env::var("SHELL") else {
         return;
     };
-    // `-l -i` so both login (`.zprofile` / `.profile`) and interactive
-    // (`.zshrc` / `.bashrc`) rc files run — Homebrew and nvm typically extend
-    // `PATH` from one of those. The value is bracketed by the sentinels so
-    // interactive-shell prompt noise on stdout doesn't corrupt it.
+    // `-l -i` covers both login and interactive rc files; Homebrew/nvm often
+    // extend PATH from one of them.
     let script = format!("printf '%s%s%s' '{PATH_START}' \"$PATH\" '{PATH_END}'");
     let output = std::process::Command::new(&shell)
         .args(["-l", "-i", "-c", &script])
@@ -61,10 +46,7 @@ pub fn hydrate_path_from_login_shell() {
     }
 }
 
-/// Pull the `PATH` value out of the shell's stdout, taking only the text
-/// between the sentinels (so surrounding prompt noise is dropped) and rejecting
-/// an empty result. `PATH` itself is used verbatim — no trimming — since path
-/// entries may legitimately contain spaces.
+/// Extract the sentinel-bracketed PATH, preserving spaces in path entries.
 fn extract_path(raw: &str) -> Option<String> {
     let start = raw.find(PATH_START)? + PATH_START.len();
     let rest = &raw[start..];

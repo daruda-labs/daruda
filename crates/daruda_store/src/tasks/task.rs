@@ -35,7 +35,7 @@ pub enum SessionEndReason {
     Error,
 }
 
-/// Phase 1 hardcodes `Claude`; the variant set is reserved for future
+/// Hardcodes `Claude` today; the variant set is reserved for future
 /// codex / gemini / copilot / cursor-agent expansion. Stored on every
 /// task so historical rows remain interpretable when the agent fleet
 /// grows.
@@ -64,10 +64,10 @@ pub enum TaskAgentSurface {
     AgentChat,
 }
 
-/// One row in the per-task subtask checklist (R-21). `source_session_id`
-/// distinguishes hook-injected items (R-22 TodoWrite merge) from
+/// One row in the per-task subtask checklist. `source_session_id`
+/// distinguishes hook-injected items (TodoWrite merge) from
 /// manually-added ones; the two never coalesce — duplicates with the
-/// same title are preserved verbatim (plan I-14 namespace policy).
+/// same title are preserved verbatim (namespace-isolation policy).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubTask {
     /// ULID — sortable by creation time, globally unique without
@@ -77,7 +77,7 @@ pub struct SubTask {
     pub completed: bool,
     #[serde(default)]
     pub created_at: Option<DateTime<Utc>>,
-    /// `Some(session_id)` when injected by the R-22 TodoWrite hook;
+    /// `Some(session_id)` when injected by the TodoWrite hook;
     /// `None` for manually-added subtasks. UI displays an "auto" vs.
     /// "manual" label off this flag.
     #[serde(default)]
@@ -194,9 +194,9 @@ pub struct Task {
     #[serde(default = "default_auto_execute")]
     pub auto_execute: bool,
 
-    /// Checklist of finer-grained steps under the task (R-21). Empty
-    /// vec is the default for both fresh tasks and pre-R-21 rows
-    /// loaded from disk (`#[serde(default)]`).
+    /// Checklist of finer-grained steps under the task. Empty
+    /// vec is the default for both fresh tasks and rows saved before
+    /// this field existed (`#[serde(default)]`).
     #[serde(default)]
     pub subtasks: Vec<SubTask>,
 }

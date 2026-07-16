@@ -1,11 +1,8 @@
 //! Telegram bot bridge — lets a phone receive agent-chat notifications
-//! and reply/approve permissions remotely.
-//!
-//! This module holds the storage substrate (the OS keychain wrapper
-//! for the bot token — non-secret settings live in
-//! `daruda_config::TelegramConfig`), the raw Bot API HTTP client, and
-//! the pure routing state machine. GPUI wiring is added by later work
-//! on top of this.
+//! and reply/approve permissions remotely. Holds the keychain wrapper
+//! for the bot token (non-secret settings live in
+//! `daruda_config::TelegramConfig`), the raw Bot API HTTP client, the
+//! pure routing state machine, and the GPUI poll/send wiring.
 
 pub mod bridge;
 pub mod client;

@@ -1,54 +1,16 @@
-//! Compact pill-shaped label, wrapper over `gpui_component::Tag::custom`.
+//! Compact data badge over `gpui_component::Tag::custom`.
 //!
-//! Builds a `Tag` with `TagVariant::Custom` carrying daruda's badge
-//! palette and overrides the size-driven padding/font with daruda's
-//! metric constants. The public builder shape (`Badge::new(label)
-//! .monospace().bg_color(c)...`) is kept verbatim so the existing
-//! call sites (right_panel/usage.rs, right_panel/tasks.rs) compile
-//! unchanged.
-//!
-//! Use cases (current + planned):
-//! - Right-panel Usage tab: short session id `[abc12345]` next to
-//!   each session row.
-//! - Right-panel Tasks tab: per-session status badge `[abc12345]`
-//!   tinted by Claude session status.
-//! - Future: short commit-hash next to a lane row, build-id
-//!   next to a Tasks log entry, etc.
-//!
-//! ## Usage
-//! ```ignore
-//! use crate::ui::Badge;
-//!
-//! parent.child(Badge::new(&session_id[..8]).monospace())
-//!
-//! parent.child(
-//!     Badge::new(&session_id[..8])
-//!         .monospace()
-//!         .text_color(theme::SOMETHING_RED)
-//!         .border_color(theme::SOMETHING_RED.alpha(0.4))
-//! )
-//! ```
-//!
-//! ## Design notes
-//! - **No icon slot.** zed's `Chip` carries an optional `IconName`;
-//!   daruda uses `ui::agent_status_badge` next to a `Badge` instead.
-//! - **No interactivity.** No `on_click`, no tooltip — `Badge` is
-//!   pure data display. Wrap in a clickable parent if needed.
-//! - **`truncate` is opt-in.** Default behaviour lets the badge size
-//!   to its content; callers in width-constrained rows ask for
-//!   truncation explicitly.
+//! The wrapper applies daruda badge metrics/palette while keeping a small
+//! builder API for optional monospace text, explicit colours, and opt-in
+//! truncation. It has no icon or interactivity; wrap it in a parent for clicks.
 
 use crate::ui::theme;
 use gpui::{App, Hsla, IntoElement, RenderOnce, SharedString, Window, prelude::*, px};
 use gpui_component::Sizable as _;
 use gpui_component::tag::Tag;
 
-/// Stateless badge widget. Builder-style; see module docs for usage.
-///
-/// `bg_color` / `border_color` / `text_color` are `Option<Hsla>` so
-/// the default path defers to the live `DarudaTheme` Global at paint
-/// time (light-mode flip works for free) and explicit overrides win
-/// at the call site.
+/// Stateless badge widget. Optional colours defer to the live theme unless
+/// the caller overrides them.
 #[derive(IntoElement)]
 pub struct Badge {
     label: SharedString,
@@ -60,9 +22,7 @@ pub struct Badge {
 }
 
 impl Badge {
-    /// Create a badge with the given label. Default colours fall back
-    /// to `DarudaTheme::badge_bg` / `badge_border` / `badge_text` at
-    /// paint time so theme switches re-tone the badge.
+    /// Create a badge with theme-derived default colours.
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
             label: label.into(),
