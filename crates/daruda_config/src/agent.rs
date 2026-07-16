@@ -287,121 +287,131 @@ pub const ACP_REGISTRY_VERSION: &str = "1.0.0";
 /// Presets generated from registry entries with directly runnable `npx`/`uvx`
 /// distributions. Registry entries that only publish per-platform binary
 /// archives need a downloader/extractor before they can be exposed here.
+///
+/// Every command pins `@latest` (npx dist-tag / uvx version alias) rather than
+/// a specific version — same policy as [`AgentDefinition::claude_default`].
+/// Pinning a snapshot version here meant every upstream release (new model,
+/// bugfix, protocol feature) needed a manual PR to bump it — see the Codex
+/// GPT-5.6 rollout, where the pinned `codex-acp` build predated the model by a
+/// week and it silently never showed up. `@latest` trades that manual-bump tax
+/// for exposure to a bad upstream release reaching every user simultaneously
+/// with no automatic rollback — accepted here because `claude_default` already
+/// carries that same risk for daruda's primary agent.
 pub const ACP_REGISTRY_AGENT_PRESETS: &[AgentPreset] = &[
     AgentPreset {
         id: "agoragentic-acp",
         name: "Agoragentic",
-        command: "npx -y agoragentic-mcp@1.3.0 --acp",
+        command: "npx -y agoragentic-mcp@latest --acp",
     },
     AgentPreset {
         id: "auggie",
         name: "Auggie CLI",
-        command: "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@0.32.0 --acp",
+        command: "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y @augmentcode/auggie@latest --acp",
     },
     AgentPreset {
         id: "autohand",
         name: "Autohand Code",
-        command: "npx -y @autohandai/autohand-acp@0.2.1",
+        command: "npx -y @autohandai/autohand-acp@latest",
     },
     AgentPreset {
         id: "claude-acp",
         name: "Claude Agent",
-        command: "npx -y @agentclientprotocol/claude-agent-acp@0.57.0",
+        command: "npx -y @agentclientprotocol/claude-agent-acp@latest",
     },
     AgentPreset {
         id: "cline",
         name: "Cline",
-        command: "npx -y cline@3.0.38 --acp",
+        command: "npx -y cline@latest --acp",
     },
     AgentPreset {
         id: "codebuddy-code",
         name: "Codebuddy Code",
-        command: "npx -y @tencent-ai/codebuddy-code@2.106.7 --acp",
+        command: "npx -y @tencent-ai/codebuddy-code@latest --acp",
     },
     AgentPreset {
         id: "codex-acp",
         name: "Codex",
-        command: "npx -y @agentclientprotocol/codex-acp@1.1.0",
+        command: "npx -y @agentclientprotocol/codex-acp@latest",
     },
     AgentPreset {
         id: "deepagents",
         name: "DeepAgents",
-        command: "npx -y deepagents-acp@0.1.7",
+        command: "npx -y deepagents-acp@latest",
     },
     AgentPreset {
         id: "dimcode",
         name: "DimCode",
-        command: "npx -y dimcode@0.2.22 acp",
+        command: "npx -y dimcode@latest acp",
     },
     AgentPreset {
         id: "dirac",
         name: "Dirac",
-        command: "npx -y dirac-cli@0.4.13 --acp",
+        command: "npx -y dirac-cli@latest --acp",
     },
     AgentPreset {
         id: "factory-droid",
         name: "Factory Droid",
-        command: "DROID_DISABLE_AUTO_UPDATE=true FACTORY_DROID_AUTO_UPDATE_ENABLED=false npx -y droid@0.167.0 exec --output-format acp-daemon",
+        command: "DROID_DISABLE_AUTO_UPDATE=true FACTORY_DROID_AUTO_UPDATE_ENABLED=false npx -y droid@latest exec --output-format acp-daemon",
     },
     AgentPreset {
         id: "fast-agent",
         name: "fast-agent",
-        command: "uvx fast-agent-acp==0.9.2 -x",
+        command: "uvx fast-agent-acp@latest -x",
     },
     AgentPreset {
         id: "gemini",
         name: "Gemini CLI",
-        command: "npx -y @google/gemini-cli@0.49.0 --acp",
+        command: "npx -y @google/gemini-cli@latest --acp",
     },
     AgentPreset {
         id: "github-copilot-cli",
         name: "GitHub Copilot",
-        command: "npx -y @github/copilot@1.0.69 --acp",
+        command: "npx -y @github/copilot@latest --acp",
     },
     AgentPreset {
         id: "glm-acp-agent",
         name: "GLM Agent",
-        command: "npx -y glm-acp-agent@1.1.4",
+        command: "npx -y glm-acp-agent@latest",
     },
     AgentPreset {
         id: "grok-build",
         name: "Grok Build",
-        command: "npx -y @xai-official/grok@0.2.92 agent stdio",
+        command: "npx -y @xai-official/grok@latest agent stdio",
     },
     AgentPreset {
         id: "kilo",
         name: "Kilo",
-        command: "npx -y @kilocode/cli@7.4.1 acp",
+        command: "npx -y @kilocode/cli@latest acp",
     },
     AgentPreset {
         id: "minion-code",
         name: "Minion Code",
-        command: "uvx minion-code@0.1.44 acp",
+        command: "uvx minion-code@latest acp",
     },
     AgentPreset {
         id: "nova",
         name: "Nova",
-        command: "npx -y @compass-ai/nova@1.1.25 acp",
+        command: "npx -y @compass-ai/nova@latest acp",
     },
     AgentPreset {
         id: "pi-acp",
         name: "pi ACP",
-        command: "npx -y pi-acp@0.0.31",
+        command: "npx -y pi-acp@latest",
     },
     AgentPreset {
         id: "qoder",
         name: "Qoder CLI",
-        command: "npx -y @qoder-ai/qodercli@0.2.14 --acp",
+        command: "npx -y @qoder-ai/qodercli@latest --acp",
     },
     AgentPreset {
         id: "qwen-code",
         name: "Qwen Code",
-        command: "npx -y @qwen-code/qwen-code@0.19.7 --acp --experimental-skills",
+        command: "npx -y @qwen-code/qwen-code@latest --acp --experimental-skills",
     },
     AgentPreset {
         id: "sigit",
         name: "siGit Code",
-        command: "npx -y @smbcloud/sigit@1.4.0",
+        command: "npx -y @smbcloud/sigit@latest",
     },
 ];
 
@@ -617,7 +627,7 @@ mod tests {
         assert_eq!(d.name, "Codex");
         assert_eq!(
             d.launch,
-            AgentLaunch::Raw("npx -y @agentclientprotocol/codex-acp@1.1.0".to_string())
+            AgentLaunch::Raw("npx -y @agentclientprotocol/codex-acp@latest".to_string())
         );
     }
 

@@ -202,11 +202,16 @@ impl Workspace {
             .and_then(|view| view.read(cx).modes.clone())
             .filter(|m| !m.available.is_empty())
             .map(|m| (focused_id, m));
-        // Model / effort chips: same focused-agent-pane gate as the mode chip,
-        // sourced from `config_options`. Only Model and ThoughtLevel categories
-        // surface as chips (mode renders via `agent_mode`; Other / ModelConfig
-        // are not exposed). `None` when the focused pane is not an agent pane or
-        // advertises no such options.
+        // Config-option chips: same focused-agent-pane gate as the mode chip,
+        // sourced from `config_options`. Every category except `Mode` surfaces
+        // as a chip (mode renders separately via `agent_mode`, sourced from
+        // `ModeStateView` — the adapter advertises mode on both paths, so
+        // keeping it out here avoids a duplicate chip). This is deliberately
+        // not an allowlist of known categories: whatever a given agent
+        // advertises (Model, ThoughtLevel, ModelConfig, a future protocol
+        // category, …) rides the same generic `config_chip` UI without daruda
+        // needing to special-case it per agent. `None` when the focused pane is
+        // not an agent pane or advertises no such options.
         let agent_config_options = self
             .active_runtime()
             .panes
@@ -217,13 +222,7 @@ impl Workspace {
                 view.read(cx)
                     .config_options
                     .iter()
-                    .filter(|o| {
-                        matches!(
-                            o.category,
-                            daruda_acp::ConfigOptionCategoryView::Model
-                                | daruda_acp::ConfigOptionCategoryView::ThoughtLevel
-                        )
-                    })
+                    .filter(|o| !matches!(o.category, daruda_acp::ConfigOptionCategoryView::Mode))
                     .cloned()
                     .collect::<Vec<_>>()
             })

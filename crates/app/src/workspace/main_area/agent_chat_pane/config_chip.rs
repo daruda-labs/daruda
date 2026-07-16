@@ -7,8 +7,12 @@
 //! choice dispatches `Workspace::set_agent_config_option` for that pane (one-line
 //! dispatch — no state logic here, MVU view purity + one-way data flow).
 //!
-//! One chip is built per option the caller passes; the caller filters which
-//! categories surface (Model / ThoughtLevel) and gates on a focused Agent pane.
+//! One chip is built per option the caller passes; the caller surfaces every
+//! advertised category except `Mode` (see `render/snapshots.rs`) and gates on
+//! a focused Agent pane. Category-agnostic by design: a chip renders from
+//! `id` / `current_value` / `options` alone, so a new agent advertising an
+//! unfamiliar select option (e.g. Codex's `fast-mode` speed toggle) needs no
+//! per-agent UI code.
 
 use daruda_acp::ConfigOptionView;
 use gpui::{IntoElement, SharedString, Styled as _, WeakEntity, px};
