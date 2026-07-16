@@ -6,15 +6,16 @@
 //! (0–100) and a reset timestamp. The Usage tab renders these as
 //! gauge bars so the user can see when they will throttle.
 //!
-//! Token discovery is macOS-only — the Anthropic OAuth token lives
-//! in the macOS Keychain under `Claude Code-credentials`. On every
-//! other platform `read_keychain_credentials` returns
+//! Token discovery mirrors wherever Claude Code CLI itself stores its OAuth
+//! credentials: the macOS Keychain (`Claude Code-credentials`) on macOS,
+//! or the plain `~/.claude/.credentials.json` file (`$CLAUDE_CONFIG_DIR`
+//! override respected) it falls back to everywhere else — daruda reads a
+//! file/entry another program owns, never one it writes. Either source
+//! failing (no Claude Code login yet, malformed contents) collapses to
 //! [`FetchError::NoToken`] and the Usage tab falls back to placeholder
-//! gauges. This is intentional: the Linux / Windows ports of Claude
-//! Code use a different storage scheme and we'd rather not silently
-//! pretend to fetch from a non-existent token than half-implement a
-//! cross-platform reader. The same Keychain JSON also carries the
-//! subscription metadata surfaced as [`PlanInfo`].
+//! gauges — the caller doesn't distinguish "not on this OS" from "not
+//! logged in" from "malformed". The same JSON also carries the subscription
+//! metadata surfaced as [`PlanInfo`].
 
 use std::time::SystemTime;
 
@@ -188,19 +189,57 @@ fn read_keychain_credentials() -> Result<(String, PlanInfo), FetchError> {
     parse_keychain_credentials(&raw)
 }
 
+/// Read the Anthropic OAuth credentials from Claude Code CLI's own
+/// non-macOS storage: a plain JSON file at `~/.claude/.credentials.json`
+/// (or `$CLAUDE_CONFIG_DIR/.credentials.json` when that's set), mode `0600`
+/// — Claude Code's Linux/Windows fallback for platforms with no OS keyring
+/// convention it can rely on. This is daruda reading a file another program
+/// owns, not one it writes itself.
 #[cfg(not(target_os = "macos"))]
 fn read_keychain_credentials() -> Result<(String, PlanInfo), FetchError> {
-    Err(FetchError::NoToken)
+    let path = credentials_path().ok_or(FetchError::NoToken)?;
+    let raw = std::fs::read_to_string(path).map_err(|_| FetchError::NoToken)?;
+    parse_keychain_credentials(&raw)
 }
 
-/// Extract `(access token, plan info)` from the Keychain credentials
-/// JSON. Pure — split from the `security` subprocess call so it can
-/// be unit-tested with fixtures. A missing token is fatal
-/// (`FetchError::NoToken`); missing subscription fields are not —
-/// they just leave the corresponding [`PlanInfo`] slots `None`.
+#[cfg(not(target_os = "macos"))]
+fn credentials_path() -> Option<std::path::PathBuf> {
+    credentials_path_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
+}
+
+/// Pure core of [`credentials_path`], split out so the `$CLAUDE_CONFIG_DIR`
+/// override and the `~/.claude` default can be unit-tested without mutating
+/// the real process environment (parallel `cargo test` runs share one
+/// process).
+#[cfg(not(target_os = "macos"))]
+fn credentials_path_from(
+    config_dir: Option<std::ffi::OsString>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if let Some(dir) = config_dir {
+        return Some(std::path::PathBuf::from(dir).join(".credentials.json"));
+    }
+    Some(home?.join(".claude").join(".credentials.json"))
+}
+
+/// Extract `(access token, plan info)` from the credentials JSON, shared by
+/// the macOS Keychain read and the Linux/Windows `.credentials.json` read
+/// below. Pure — split from the OS-specific fetch so it can be unit-tested
+/// with fixtures. A missing token is fatal (`FetchError::NoToken`); missing
+/// subscription fields are not — they just leave the corresponding
+/// [`PlanInfo`] slots `None`.
+///
+/// Accepts two shapes: macOS Keychain nests the OAuth fields under a
+/// `claudeAiOauth` object; the Linux/Windows credentials file's exact shape
+/// wasn't confirmed against a live install when this was written, so this
+/// also tries the same fields at the top level. If neither shape yields a
+/// token, that's `NoToken`, same as a missing/malformed Keychain entry.
 fn parse_keychain_credentials(raw: &str) -> Result<(String, PlanInfo), FetchError> {
     let v: serde_json::Value = serde_json::from_str(raw.trim()).map_err(|_| FetchError::NoToken)?;
-    let oauth = &v["claudeAiOauth"];
+    let oauth = match &v["claudeAiOauth"] {
+        Value::Object(_) => &v["claudeAiOauth"],
+        _ => &v,
+    };
     let token = oauth["accessToken"]
         .as_str()
         .map(str::to_string)
@@ -381,10 +420,53 @@ mod tests {
         assert!(matches!(err, FetchError::NoToken));
     }
 
+    #[test]
+    fn keychain_credentials_accepts_flat_shape() {
+        // Claude Code CLI's Linux/Windows `.credentials.json` shape wasn't
+        // confirmed against a live install when this was written — this
+        // fixture is the defensive fallback (fields at the top level,
+        // no `claudeAiOauth` wrapper), not a verified-real sample.
+        let raw = r#"{
+            "accessToken": "sk-ant-oat01-flat",
+            "subscriptionType": "pro",
+            "rateLimitTier": "default_claude_ai"
+        }"#;
+        let (token, plan) = parse_keychain_credentials(raw).unwrap();
+        assert_eq!(token, "sk-ant-oat01-flat");
+        assert_eq!(plan.subscription_type.as_deref(), Some("pro"));
+        assert_eq!(plan.rate_limit_tier.as_deref(), Some("default_claude_ai"));
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[test]
-    fn read_keychain_credentials_returns_no_token_off_macos() {
-        let err = read_keychain_credentials().unwrap_err();
-        assert!(matches!(err, FetchError::NoToken));
+    fn credentials_path_prefers_claude_config_dir_override() {
+        let path = credentials_path_from(
+            Some(std::ffi::OsString::from("/custom/claude-dir")),
+            Some(std::path::PathBuf::from("/home/someone")),
+        );
+        assert_eq!(
+            path,
+            Some(std::path::PathBuf::from(
+                "/custom/claude-dir/.credentials.json"
+            ))
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn credentials_path_falls_back_to_home_dot_claude() {
+        let path = credentials_path_from(None, Some(std::path::PathBuf::from("/home/someone")));
+        assert_eq!(
+            path,
+            Some(std::path::PathBuf::from(
+                "/home/someone/.claude/.credentials.json"
+            ))
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn credentials_path_is_none_without_config_dir_or_home() {
+        assert_eq!(credentials_path_from(None, None), None);
     }
 }

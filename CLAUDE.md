@@ -32,8 +32,10 @@ daruda/
 ## Requirements
 
 - **Rust**: 2024 edition (1.95.0+)
-- **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh`)
-- **macOS**: Apple Silicon or Intel + Xcode Command Line Tools
+- **Zig**: 0.14.1 (`./scripts/bootstrap-zig.sh` on macOS; on Linux install manually and set `ZIG=<path>` or put `zig` on `PATH`)
+- **macOS**: Apple Silicon or Intel + Xcode Command Line Tools — the primary, fully-verified target.
+- **Linux**: builds and tests pass; GUI runtime (window/menu/tray) not yet verified on a real desktop. Needs system `libfontconfig`/`libxcb`.
+- **Windows**: not yet ported.
 
 ## Build
 
@@ -65,21 +67,11 @@ scripts/lint-file-size.sh
 scripts/lint-mark-dirty-direct-call.sh
 ```
 
-Note: `.github/workflows/ci.yml` gates only a subset of the above (fmt, the
-7-crate clippy list, and the 6 lints through `lint-viewport-row-scroll.sh`);
-`lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`,
-`lint-file-size.sh`, and `lint-mark-dirty-direct-call.sh` are local/reviewer checks
-not yet wired into CI, and neither the CI clippy/test `-p` list nor the commands
-above include `daruda_acp`.
+Note: `.github/workflows/ci.yml` gates only a subset of the above (fmt, the 7-crate clippy list, and the 6 lints through `lint-viewport-row-scroll.sh`); `lint-no-silent-update.sh`, `lint-agent-activity.sh`, `lint-daruda-path-literals.sh`, `lint-file-size.sh`, and `lint-mark-dirty-direct-call.sh` are local/reviewer checks not yet wired into CI, and neither the CI clippy/test `-p` list nor the commands above include `daruda_acp`.
 
 ## Visual verification
 
-Render the UI offscreen to a PNG and read it back — text, layout, colors,
-images, and toasts all render, permission-free (no Screen Recording grant).
-Capture goes through gpui's `render_to_image`, gated upstream behind
-`test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit`
-(without that feature glyphs don't rasterize — shapes render but **text is
-invisible**, the post-bump regression).
+Render the UI offscreen to a PNG and read it back — text, layout, colors, images, and toasts all render, permission-free (no Screen Recording grant). Capture goes through gpui's `render_to_image`, gated upstream behind `test-support`; the `--screenshot` path below requires it, plus `gpui_macos/font-kit` (without that feature glyphs don't rasterize — shapes render but **text is invisible**).
 
 **Whole app** — the `--screenshot` flag captures the live workspace window:
 
@@ -88,42 +80,25 @@ cargo build -p daruda --features screenshot
 target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures, quits
 ```
 
-The opt-in `screenshot` feature enables `gpui/test-support` +
-`gpui_macos/font-kit`; it is off by default to keep the shipping binary clean.
-Entry point: `crates/app/src/screenshot.rs`.
+The opt-in `screenshot` feature enables `gpui/test-support` + `gpui_macos/font-kit`; it is off by default to keep the shipping binary clean. Entry point: `crates/app/src/screenshot.rs`.
 
-Verification loop: render → PNG → an agent reads the PNG and checks the result.
-This catches both rendering bugs and runtime state (e.g. error toasts), so it
-doubles as a smoke test of the real app's startup.
+Verification loop: render → PNG → an agent reads the PNG and checks the result. This catches both rendering bugs and runtime state (e.g. error toasts), so it doubles as a smoke test of the real app's startup.
 
 ### Driving the captured state
 
-`--screenshot` takes no view argument — it captures the **restored** workspace
-(or welcome screen), so you steer it by steering what gets restored *before*
-launch. Two isolation levers + three reach tiers:
+`--screenshot` takes no view argument — it captures the **restored** workspace (or welcome screen), so you steer it by steering what gets restored *before* launch. Two isolation levers + three reach tiers:
 
-- **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim).
-  Pre-seed it; isolates from your real workspace.
-- **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`.
-  Debug builds already use `daruda-debug/`, so runs are isolated by default.
+- **`DARUDA_DATA_DIR=<dir>`** — points the whole state dir at `<dir>` (verbatim). Pre-seed it; isolates from your real workspace.
+- **`DARUDA_PROFILE=<name>`** — `release` → `daruda/`, else `daruda-<name>/`. Debug builds already use `daruda-debug/`, so runs are isolated by default.
 
 ```bash
 export DARUDA_DATA_DIR=/tmp/daruda-shot-state   # throwaway, pre-seeded state
 cargo build -p daruda --features screenshot && target/debug/daruda --screenshot /tmp/shot.png
 ```
 
-**Tier 1 — `config.toml` (appearance, mostly live-reload):** `[theme]`
-(terminal_preset / ui_preset), `[colors]`, `[font]` (size/spacing/inset), `[cursor]`,
-`[window]`, `[file_viewer]`, `[left_dock]`, `[panels]`, `[render]`, etc. Does **not**
-control which tab/pane/view is active — that's Tier 2.
+**Tier 1 — `config.toml` (appearance, mostly live-reload):** `[theme]` (terminal_preset / ui_preset), `[colors]`, `[font]` (size/spacing/inset), `[cursor]`, `[window]`, `[file_viewer]`, `[left_dock]`, `[panels]`, `[render]`, etc. Does **not** control which tab/pane/view is active — that's Tier 2.
 
-For the UI theme specifically, `--screenshot-theme <light|dark>` overrides
-`ui_preset` at capture time (via `apply_ui_theme`) without touching config —
-orthogonal to and composable with `--screenshot-scenario` (e.g. shoot the command
-palette in light mode). Pass a **comma list** (`light,dark`) for a batch: one PNG
-per theme in a single launch (output names get a `.<theme>` suffix —
-`shot.png` → `shot.light.png` / `shot.dark.png`), the scenario stays applied and is
-re-themed in place between captures.
+For the UI theme specifically, `--screenshot-theme <light|dark>` overrides `ui_preset` at capture time (via `apply_ui_theme`) without touching config — orthogonal to and composable with `--screenshot-scenario` (e.g. shoot the command palette in light mode). Pass a **comma list** (`light,dark`) for a batch: one PNG per theme in a single launch (output names get a `.<theme>` suffix — `shot.png` → `shot.light.png` / `shot.dark.png`), the scenario stays applied and is re-themed in place between captures.
 
 ```bash
 target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light --screenshot-scenario command-palette
@@ -131,29 +106,12 @@ target/debug/daruda --screenshot /tmp/s.png --screenshot-theme light,dark   # ba
 ```
 
 Two more capture knobs (compose with everything above):
-- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead
-  of the restored bounds; for stable doc / pixel-regression shots.
-- `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on
-  slow CI / big workspaces, lower for quick local shots).
+- `--screenshot-size WxH` — fix the captured window size (e.g. `1280x800`) instead of the restored bounds; for stable doc / pixel-regression shots.
+- `DARUDA_SCREENSHOT_SETTLE_MS=<ms>` — override the 2 s post-launch settle (raise on slow CI / big workspaces, lower for quick local shots).
 
-**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):**
-`workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active
-project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups),
-`projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path
-+ view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in
-`daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set
-`DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with
-`--screenshot` against the same dir** — no schema guessing.
+**Tier 2 — persisted state under `DARUDA_DATA_DIR` (layout & structure):** `workspaces/<uuid>.json` (`WorkspaceState`: dock open/size, window bounds, active project+lane, `active_dock_view`, `active_right_panel_view`, focused pane, groups), `projects/<uuid>.json` (`ProjectState`: lanes, tabs, pane split tree, file-pane path + view_mode), `panels.json` (macro grid), `tasks.json` (task list). (Schemas in `daruda_store::project::{WorkspaceState,ProjectState}`.) **Easiest seeding: set `DARUDA_DATA_DIR`, drive the app by hand to the scenario once, quit, re-run with `--screenshot` against the same dir** — no schema guessing.
 
-**Tier 3 — transient / live state: NOT reachable by config or state alone.**
-Restore recomputes these fresh. The `--screenshot-scenario <name>` flag drives one
-transient overlay into view after settle and before capture (it forces a repaint
-since `render_to_image` captures the last *painted* frame). Implemented scenarios:
-`command-palette`, `error-modal`, `settings` / `settings:<section-slug>` (Settings is
-a separate window — the scenario captures *that* window; slug = `BuiltinSection::slug`,
-e.g. `font`, `keymap`, `notifications`), `toast`. Add a variant to `ScreenshotScenario` +
-`screenshot_scenario::drive` (`crates/app/src/workspace/screenshot_scenario.rs`) to
-cover more. The rest below still need a real backing source, not just a scenario:
+**Tier 3 — transient / live state: NOT reachable by config or state alone.** Restore recomputes these fresh. The `--screenshot-scenario <name>` flag drives one transient overlay into view after settle and before capture (it forces a repaint since `render_to_image` captures the last *painted* frame). Implemented scenarios: `command-palette`, `error-modal`, `settings` / `settings:<section-slug>` (Settings is a separate window — the scenario captures *that* window; slug = `BuiltinSection::slug`, e.g. `font`, `keymap`, `notifications`), `toast`. Add a variant to `ScreenshotScenario` + `screenshot_scenario::drive` (`crates/app/src/workspace/screenshot_scenario.rs`) to cover more. The rest below still need a real backing source, not just a scenario:
 
 ```bash
 target/debug/daruda --screenshot /tmp/shot.png --screenshot-scenario command-palette
@@ -201,8 +159,7 @@ Before starting, classify the task:
 - ❌ Two `Option` fields that are always `Some`/`None` together
   → `Option<(A, B)>` or a dedicated struct
 - ❌ The same group of fields set directly across multiple call paths
-  → extract a single `fn` and seal the fields with `pub(super)`.
-     Two or more call paths copying the same N-step sequence is the extraction signal
+  → extract a single `fn` and seal the fields with `pub(super)` — two or more call paths copying the same N-step sequence is the extraction signal
 
 ### MVU-flavored guiding rules
 
@@ -292,56 +249,20 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  gpui, gpui_component, portable-pty
 ```
 
-`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0),
-forwarded as-is so re-vendoring stays a pure file copy — it is excluded from
-clippy/lint/comment-cleanup passes; app code reaches it only through
-`crate::ui::*` (see "`gpui_component` access" below).
+`gpui_component` is a vendored copy of `longbridge/gpui-component` (Apache-2.0), forwarded as-is so re-vendoring stays a pure file copy — it is excluded from clippy/lint/comment-cleanup passes; app code reaches it only through `crate::ui::*` (see "`gpui_component` access" above).
 
-`daruda_config` and `daruda_claude` both depend on `daruda_store` for
-`persistence::default_data_dir()` — the single profile-scoped (release
-`daruda/` vs. debug/named `daruda-<profile>/`) base directory every
-on-disk file (config, logs, workspaces, panels, hook status) resolves
-through, so a debug/test run never reads or writes a real release
-install's state.
+`daruda_config` and `daruda_claude` both depend on `daruda_store` for `persistence::default_data_dir()` (see Cross-profile data isolation below).
 
 ### Cross-profile data isolation
 
-**Rule: any path or identifier for something daruda itself writes and
-reads back across restarts must go through
-`daruda_store::persistence::default_data_dir()`** (or
-`profile_suffix()` for a non-path identifier, e.g. a Keychain service
-name) — never a fresh `dirs::config_dir()` / hardcoded `daruda`
-directory literal.
+**Rule: any path or identifier for something daruda itself writes and reads back across restarts must go through `daruda_store::persistence::default_data_dir()`** (or `profile_suffix()` for a non-path identifier, e.g. a Keychain service name) — never a fresh `dirs::config_dir()` / hardcoded `daruda` directory literal.
 
-**Why this is called out explicitly:** four separate places
-independently re-derived a `daruda`/`.daruda` path instead of calling
-the shared resolver — `daruda_config::config_path`,
-`daruda_config::project::project_config_dir`,
-`daruda_claude::hooks::status_file::default_dir`, and
-`workspace::sync::limits::activity_paths`'s cache path — so a debug
-build silently read and overwrote a real release install's
-`config.toml`, hook-status files, and activity cache. A fifth case
-(the Telegram bridge's Keychain-stored bot token sharing one service
-name across profiles) caused two profiles to 409-conflict polling
-Telegram with the same token, since Telegram's `getUpdates` rejects a
-second concurrent poller on one token. Each was fixed independently
-before the pattern was named — this section and the guardrails below
-exist so the next one is caught before it ships, not after a live
-incident.
+**Why this is called out explicitly:** four separate places independently re-derived a `daruda`/`.daruda` path instead of calling the shared resolver — `daruda_config::config_path`, `daruda_config::project::project_config_dir`, `daruda_claude::hooks::status_file::default_dir`, and `workspace::sync::limits::activity_paths`'s cache path — so a debug build silently read and overwrote a real release install's `config.toml`, hook-status files, and activity cache. A fifth case (the Telegram bridge's Keychain-stored bot token sharing one service name across profiles) caused two profiles to 409-conflict polling Telegram with the same token, since Telegram's `getUpdates` rejects a second concurrent poller on one token. Each was fixed independently before the pattern was named — this section and the guardrails below exist so the next one is caught before it ships, not after a live incident.
 
 **Enforcement:**
-- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir`
-  call outside `daruda_store::persistence`'s own two call sites (each
-  marked `#[allow(clippy::disallowed_methods)]` with a comment).
-- `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled
-  `.join("daruda")` / `.join(".daruda")` outside the canonical files
-  (`persistence.rs`, `profile.rs`, `observability/log_writer.rs`) and a
-  short, explicit allow-list of genuinely non-profile-scoped exceptions
-  (the per-repo `.daruda/task-*.md` files, the single global
-  `~/.daruda/hooks/notify.sh`).
-- Neither tool catches a hardcoded Keychain/OS-credential-store service
-  name (not a directory path) — review any new one by hand against
-  `crates/app/src/telegram/keychain.rs`'s `service_name()`.
+- `clippy.toml`'s `disallowed-methods` bans a bare `dirs::config_dir` call outside `daruda_store::persistence`'s own two call sites (each marked `#[allow(clippy::disallowed_methods)]` with a comment).
+- `scripts/lint-daruda-path-literals.sh` greps for a hand-rolled `.join("daruda")` / `.join(".daruda")` outside the canonical files (`persistence.rs`, `profile.rs`, `observability/log_writer.rs`) and a short, explicit allow-list of genuinely non-profile-scoped exceptions (the per-repo `.daruda/task-*.md` files, the single global `~/.daruda/hooks/notify.sh`).
+- Neither tool catches a hardcoded Keychain/OS-credential-store service name (not a directory path) — review any new one by hand against `crates/app/src/telegram/keychain.rs`'s `service_name()`.
 
 ### UI component hierarchy
 
@@ -384,7 +305,7 @@ Workspace
     └── ToastView
 ```
 
-**Concept-to-code mapping** (updated after refactoring — identifiers now match hierarchy names):
+**Concept-to-code mapping** — identifiers match the hierarchy names above:
 
 | Hierarchy name | Code identifier | Location |
 |---|---|---|

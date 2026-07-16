@@ -39,15 +39,12 @@ daruda_config = { path = "../daruda_config" }
 daruda_terminal = { path = "../daruda_terminal" }
 daruda_update = { path = "../daruda_update" }
 gpui = { workspace = true }
-gpui_macos = { workspace = true }
+gpui_platform = { workspace = true }
 gpui_component = { workspace = true }
 gpui_component_assets = { workspace = true }
 ignore = "0.4"
 imara-diff = "0.2"
 lsp-types = { workspace = true }
-notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }
 portable-pty = "0.9"
 pulldown-cmark = { version = "0.13", default-features = false }
 resvg = "0.45"
@@ -69,7 +66,32 @@ open = "5.3.5"
 which = "6"
 nucleo-matcher = "0.3.1"
 
+# OS APIs daruda calls directly, beyond what `gpui_platform` already selects
+# for the window/rendering backend — dock/taskbar attention, idle time,
+# Keychain-equivalent secret storage. See crates/app/src/platform/attention.rs
+# and crates/app/src/telegram/keychain.rs for the call sites. `gpui_macos` is
+# also listed here (not just pulled transitively via `gpui_platform`) because
+# the `screenshot` feature below references `gpui_macos/test-support` directly.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_macos = { workspace = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSThread"] }
+notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# `screensaver` is the X11 extension attention.rs queries for system idle time
+# (XScreenSaverQueryInfo); `allow-unsafe-code` is required by x11rb's FFI shims.
+# Already in the dependency tree via gpui_platform -> gpui_linux's x11 feature,
+# so this only turns on one more extension — no new crate download.
+x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
+# No Linux-specific feature needed — notify's inotify backend is unconditional;
+# `macos_fsevent` is the only opt-in OS backend (default-enabled upstream,
+# hence disabling default-features + opting back in only on macOS above).
+notify = { version = "7", default-features = false }
+
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui_macos = { workspace = true, features = ["test-support"] }
 serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_macos = { workspace = true, features = ["test-support"] }

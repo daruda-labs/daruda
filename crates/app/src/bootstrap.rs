@@ -65,7 +65,7 @@ pub(crate) fn init_observability() {
 /// `applicationShouldHandleReopen:hasVisibleWindows:` callback —
 /// fires when the user clicks the Dock icon with no windows visible.
 pub(crate) fn new_application() -> Application {
-    let app = Application::with_platform(std::rc::Rc::new(gpui_macos::MacPlatform::new(false)))
+    let app = Application::with_platform(gpui_platform::current_platform(false))
         .with_assets(crate::assets::DarudaAssets)
         .with_quit_mode(QuitMode::Default);
     app.on_reopen(|cx| {

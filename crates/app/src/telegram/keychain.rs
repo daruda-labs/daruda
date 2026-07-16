@@ -1,10 +1,18 @@
-//! macOS Keychain storage for the Telegram bot token.
+//! OS keyring storage for the Telegram bot token.
 //!
-//! Mirrors `daruda_claude::limits`'s Anthropic OAuth token read: shell
-//! out to `/usr/bin/security` rather than link a Keychain crate. The
-//! bot token is a secret and never touches `config.toml` — see
-//! `daruda_config::TelegramConfig` for the non-secret settings that do
-//! (master switch, paired chat id).
+//! Mirrors `daruda_claude::limits`'s Anthropic OAuth token read: shell out to
+//! a CLI (`/usr/bin/security` on macOS, `secret-tool` on Linux) rather than
+//! link a keyring crate. The bot token is a secret and never touches
+//! `config.toml` — see `daruda_config::TelegramConfig` for the non-secret
+//! settings that do (master switch, paired chat id).
+//!
+//! Linux uses the freedesktop Secret Service (`secret-tool`, part of
+//! `libsecret-tools` — ships with GNOME Keyring / KWallet's Secret Service
+//! bridge). Headless/minimal Linux often has no Secret Service provider
+//! running at all; that degrades the same way a missing/failed `security`
+//! call does on macOS — `read_token` returns `None`, `write_token` /
+//! `delete_token` log a warning and return `Err`. Telegram is an opt-in
+//! feature (master switch in Settings), so daruda works fully without it.
 //!
 //! `read_token` / `write_token` / `delete_token` are called from the
 //! Settings window's Telegram section (`settings_window::sections`) —
@@ -81,7 +89,26 @@ fn normalize_token(raw: &[u8]) -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Read the bot token via `secret-tool lookup`. Same test-hermeticity
+/// concern as the macOS path — a real read during `cargo test` would feed a
+/// live token into the poll loop.
+#[cfg(target_os = "linux")]
+pub fn read_token() -> Option<String> {
+    if cfg!(test) {
+        return None;
+    }
+    let out = Command::new("secret-tool")
+        .args(["lookup", "service", &service_name(), "account", ACCOUNT])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    normalize_token(&out.stdout)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn read_token() -> Option<String> {
     None
 }
@@ -135,7 +162,70 @@ pub fn write_token(token: &str) -> std::io::Result<()> {
     Err(err)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Write (or replace) the bot token via `secret-tool store`, which reads the
+/// secret from stdin rather than an argument (keeps it off the process
+/// argv/`ps` output). `store` replaces any existing item with the same
+/// service+account, so re-pairing from Settings doesn't leave duplicates.
+#[cfg(target_os = "linux")]
+pub fn write_token(token: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    fn spawn_and_write(token: &str) -> std::io::Result<std::process::Output> {
+        let label = format!("Telegram bot token ({})", service_name());
+        let mut child = Command::new("secret-tool")
+            .args([
+                "store",
+                "--label",
+                &label,
+                "service",
+                &service_name(),
+                "account",
+                ACCOUNT,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // `secret-tool store` reads exactly one line of secret from stdin.
+        child
+            .stdin
+            .take()
+            .expect("stdin was piped")
+            .write_all(token.as_bytes())?;
+        child.wait_with_output()
+    }
+
+    let output = match spawn_and_write(token) {
+        Ok(output) => output,
+        Err(e) => {
+            LogWriter::log(
+                ErrorReport::new("Telegram token keyring write failed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("telegram.keychain.write")
+                    .build(),
+            );
+            return Err(e);
+        }
+    };
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let err = std::io::Error::other(format!("secret-tool store failed: {stderr}"));
+    LogWriter::log(
+        ErrorReport::new("Telegram token keyring write failed")
+            .severity(ErrorSeverity::Warning)
+            .from_error(&err)
+            .at(file!(), line!())
+            .dedup("telegram.keychain.write")
+            .build(),
+    );
+    Err(err)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn write_token(_token: &str) -> std::io::Result<()> {
     Ok(())
 }
@@ -185,18 +275,56 @@ pub fn delete_token() -> std::io::Result<()> {
     Err(err)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Delete the bot token via `secret-tool clear` (the Settings "clear"
+/// affordance).
+#[cfg(target_os = "linux")]
+pub fn delete_token() -> std::io::Result<()> {
+    let output = Command::new("secret-tool")
+        .args(["clear", "service", &service_name(), "account", ACCOUNT])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            LogWriter::log(
+                ErrorReport::new("Telegram token keyring delete failed")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&e)
+                    .at(file!(), line!())
+                    .dedup("telegram.keychain.delete")
+                    .build(),
+            );
+            return Err(e);
+        }
+    };
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let err = std::io::Error::other(format!("secret-tool clear failed: {stderr}"));
+    LogWriter::log(
+        ErrorReport::new("Telegram token keyring delete failed")
+            .severity(ErrorSeverity::Warning)
+            .from_error(&err)
+            .at(file!(), line!())
+            .dedup("telegram.keychain.delete")
+            .build(),
+    );
+    Err(err)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn delete_token() -> std::io::Result<()> {
     Ok(())
 }
 
-// `normalize_token` tests run unconditionally (it's a plain function,
-// no subprocess). The `read_token` / `write_token` / `delete_token`
-// no-op tests exercise the non-macOS fallback path, so only those
-// individual test functions are gated off macOS (matching
-// `daruda_claude::limits`'s `read_keychain_credentials_returns_no_token_off_macos`
-// pattern) rather than the whole module — keeping the module itself
-// compiling and selectable by `cargo test` on macOS CI.
+// `normalize_token` tests run unconditionally (it's a plain function, no
+// subprocess). macOS and Linux both shell out for a real read, so both get
+// the hermetic-under-test guard check; `write_token` / `delete_token` are
+// untested on either (only ever fire from an explicit user click, never an
+// automated code path — same reasoning on both platforms). The true no-op
+// fallback (`not(any(macos, linux))`) gets its own three tests.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,7 +333,7 @@ mod tests {
     fn service_name_is_suffixed_off_release() {
         // Test binaries compile with debug_assertions, so the active
         // profile here is "debug" (never "release") — asserts the
-        // fix's whole point: a non-release build's Keychain service name
+        // fix's whole point: a non-release build's keyring service name
         // must differ from the bare `SERVICE`, or it would share (and
         // 409-conflict) the same stored token as a real release install.
         let name = service_name();
@@ -213,10 +341,10 @@ mod tests {
         assert!(name.starts_with(SERVICE));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn read_token_is_hermetic_under_test() {
-        // Tests must never read the real Keychain: `cargo test` runs a debug
+        // Tests must never read the real keyring: `cargo test` runs a debug
         // build, whose profile-suffixed service name matches a developer's
         // real `daruda-telegram-bot-debug` token, so an un-stubbed read would
         // feed a live token into the poll loop — real network + teardown hang.
@@ -252,20 +380,20 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn read_token_returns_none_off_macos() {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn read_token_returns_none_off_macos_and_linux() {
         assert_eq!(read_token(), None);
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn write_token_is_noop_ok_off_macos() {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn write_token_is_noop_ok_off_macos_and_linux() {
         assert!(write_token("fake-token").is_ok());
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
-    fn delete_token_is_noop_ok_off_macos() {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    fn delete_token_is_noop_ok_off_macos_and_linux() {
         assert!(delete_token().is_ok());
     }
 }
