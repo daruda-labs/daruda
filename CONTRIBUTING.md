@@ -7,6 +7,7 @@ Thank you for your interest in contributing. This document covers everything you
 ## Table of contents
 
 - [Setup](#setup)
+- [Contributor License Agreement](#contributor-license-agreement)
 - [Code style](#code-style)
 - [Commit conventions](#commit-conventions)
 - [Pull requests](#pull-requests)
@@ -32,6 +33,15 @@ cargo run -p daruda
 ```
 
 **Requirements**: macOS 12+, Rust 1.95+, Zig 0.14.1 (installed above), Xcode Command Line Tools.
+
+---
+
+## Contributor License Agreement
+
+Contributions are accepted under the [Contributor License Agreement](CLA.md).
+The CLA is not a copyright assignment: contributors keep ownership of their
+contributions while granting daruda the rights needed to review, maintain, and
+distribute accepted work.
 
 ---
 
@@ -112,8 +122,9 @@ Keep the summary line under 72 characters. Use the body for the *why*, not the *
 1. **Open an issue first** for non-trivial changes to align on approach before writing code.
 2. Keep PRs focused — one logical change per PR.
 3. Update tests for any behavior change.
-4. All CI checks must be green before review.
-5. Squash or rebase before the PR is merged — no merge commits on `main`.
+4. Confirm that the CLA applies to the contribution before review.
+5. All CI checks must be green before review.
+6. Squash or rebase before the PR is merged — no merge commits on `main`.
 
 PR title follows the same `type(scope): summary` format as commit messages.
 
