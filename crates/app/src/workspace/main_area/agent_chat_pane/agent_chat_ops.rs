@@ -765,30 +765,7 @@ impl Workspace {
                             if matches!(v.status, AgentSessionStatus::PreparingRuntime(_)) {
                                 v.set_connecting(cx);
                             }
-                            // Forward the first prompt submitted before the
-                            // handle existed (queued during the handshake or
-                            // dispatched into the pane before it connected).
-                            // One per turn: each `TurnEnded` pumps the next,
-                            // so the view tracks a single live turn. No-op
-                            // when nothing was buffered.
-                            v.pump_pending_prompt(cx);
                         });
-                        // `pump_pending_prompt` may have flipped the turn
-                        // Idle→InFlight. Reconcile immediately — exactly as the
-                        // prompt-send driver does — so the idle→busy edge stamps
-                        // `was_busy`. Without this, if the pane buffered its first
-                        // prompt and the first ACP event is `TurnEnded`, the pump
-                        // event's later reconcile would see `was_busy == false`,
-                        // miss the busy→idle edge, and strand `pending_completion`
-                        // forever (task stuck `Running`, no notification). A
-                        // returned `Some` on this open edge is unexpected but
-                        // harmless — firing it keeps the single completion point
-                        // consistent.
-                        let edge =
-                            view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
-                        if let Some(outcome) = edge {
-                            ws.fire_activity_completion(pane_id, outcome, cx);
-                        }
                         true
                     });
                     if !matches!(stored, Ok(true)) {
@@ -820,6 +797,12 @@ impl Workspace {
                                     view.update(cx, |v, cx| {
                                         // Release the replay gate and return to a
                                         // plain connecting state before the retry.
+                                        // Drop the stale handle too: until the
+                                        // fresh connect reaches `Connected`, user
+                                        // prompts must remain queued client-side
+                                        // rather than entering the failed load's
+                                        // closed command channel.
+                                        v.handle = None;
                                         v.restoring = false;
                                         v.set_connecting(cx);
                                     });

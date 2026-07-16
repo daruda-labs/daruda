@@ -267,12 +267,13 @@ pub(in crate::workspace) struct AgentChatView {
     /// shuts the connection task down.
     pub(in crate::workspace) handle: Option<AcpSessionHandle>,
     /// Prompts buffered because they could not be sent yet, in submission
-    /// order. A prompt is buffered when the session is not connected (`handle`
-    /// is still `None` — the lazy connect happens on first focus) **or** a turn
-    /// is already in flight. The session runs one turn at a time, so exactly one
-    /// buffered prompt is drained per turn-completion by
-    /// [`Self::pump_pending_prompt`]: the connect site pumps the first, and each
-    /// `TurnEnded` pumps the next, keeping only one turn tracked at a time.
+    /// order. A prompt is buffered when the session is not ready to prompt
+    /// (`status != Connected` or `handle` is still `None` — the lazy connect
+    /// happens on first focus) **or** a turn is already in flight. The session
+    /// runs one turn at a time, so exactly one buffered prompt is drained per
+    /// turn-completion by [`Self::pump_pending_prompt`]: the `Connected` event
+    /// pumps the first, and each `TurnEnded` pumps the next, keeping only one
+    /// turn tracked at a time.
     /// Cleared on a connect failure / terminal `Error` (there is no reconnect
     /// path, so buffered prompts can never be delivered); never serialized.
     ///
@@ -984,6 +985,7 @@ impl AgentChatView {
                     self.pending_completion = None;
                     self.cancel_in_flight = false;
                 }
+                self.pump_pending_prompt(cx);
             }
             AcpEvent::ConfigOptionsChanged(options) => {
                 self.config_options = options;
@@ -1214,6 +1216,21 @@ impl AgentChatView {
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
         self.rebuild_rows();
+        // A tool update can mutate a non-tail card in place (status, output,
+        // raw-output fallback, diff body, or a nested subagent child rendered
+        // inside its parent). `rebuild_rows` only knows row slots, not which
+        // card body changed, so its same-slot path remeasures the streaming tail.
+        // Force a full tool-event remeasure to avoid stale row-height cache for
+        // mid-list tool cards. `ToolCallUpdate` fires per streamed chunk, so use
+        // `remeasure_items` (Absolute anchor) rather than `remeasure()`
+        // (Proportional) — same reasoning as the turn-settled case below: a
+        // Proportional re-anchor would shift the viewport on every chunk if the
+        // user has scrolled back to read history.
+        if touched_tool {
+            let n = self.rows.len();
+            self.list_state.remeasure_items(0..n);
+            self.trace_list_sync("tool-update", 0, n, n);
+        }
         // Re-measure after a structural settle so no row keeps a stale streaming
         // height. Two triggers, two anchor policies:
         // (a) a `session/load` replay just spliced many rows at once — force a
@@ -1415,7 +1432,8 @@ impl AgentChatView {
             cx.notify();
             return;
         }
-        if let Some(handle) = &self.handle
+        if matches!(self.status, AgentSessionStatus::Connected)
+            && let Some(handle) = &self.handle
             && !self.turn.is_in_flight()
             && !self.cancel_in_flight
         {
@@ -1431,9 +1449,9 @@ impl AgentChatView {
             // (`cancel_in_flight` — buffer client-side so a second Stop can clear
             // it and it can't race the cancel's ack onto the wire). Enqueue in
             // submission order without echoing; it drains one-per-turn via
-            // `pump_pending_prompt` (at connect, on each `TurnEnded`, and when the
-            // cancel window closes) and is echoed then. Do *not* mark the turn in
-            // flight: nothing new is on the wire yet.
+            // `pump_pending_prompt` (after `Connected`, on each `TurnEnded`, and
+            // when the cancel window closes) and is echoed then. Do *not* mark
+            // the turn in flight: nothing new is on the wire yet.
             self.enqueue_prompt(text);
         }
         cx.notify();
@@ -1445,6 +1463,7 @@ impl AgentChatView {
     /// and the drain in [`Self::pump_pending_prompt`] — the echo now happens at
     /// *send* time, not when a prompt is queued.
     fn echo_prompt(&mut self, text: String, cx: &mut Context<Self>) {
+        self.preserve_tail_response_expansion();
         self.items.push(ChatItem::UserText(text));
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
         // be a no-op here; diff editors are reconciled solely on the event-pump
@@ -1460,6 +1479,26 @@ impl AgentChatView {
         // that lands at the bottom (gpui `list` re-arms following there), so the
         // streaming response keeps sticking — no manual stick flag needed.
         self.list_state.scroll_to_end();
+    }
+
+    /// Preserve the currently visible tail response before appending the next
+    /// user prompt. Response folds naturally expand while they are the last
+    /// turn; appending a new `UserText` would otherwise make that same response
+    /// non-last and auto-collapse it, hiding agent prose at the exact moment the
+    /// user submits a follow-up. If the user explicitly collapsed it, the
+    /// effective state is already `false`, so no override is written.
+    fn preserve_tail_response_expansion(&mut self) {
+        let Some(anchor) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, ChatItem::UserText(_)))
+        else {
+            return;
+        };
+        let key = FoldKey::Response(anchor);
+        if self.fold.is_expanded(&key, fold_active(&key, &self.items)) {
+            self.fold.set_all([key], true);
+        }
     }
 
     /// Push `text` onto the pending-prompt queue with a freshly minted
@@ -1551,10 +1590,11 @@ impl AgentChatView {
     /// turns are still streaming. A queued prompt was NOT echoed when it was
     /// buffered, so the drain echoes it here (at send time).
     pub(in crate::workspace) fn pump_pending_prompt(&mut self, cx: &mut Context<Self>) {
-        // Hold the queue while a cancel is still outstanding (`cancel_in_flight`):
-        // the buffered re-prompt drains only once that window closes, via the
-        // `TurnEnded` ack path that clears the flag and calls this.
-        if self.handle.is_none() {
+        // Hold the queue until the session is fully connected and while a cancel
+        // is still outstanding (`cancel_in_flight`): a handle exists before the
+        // ACP handshake/load has completed, but prompt delivery is only safe once
+        // `Connected` has opened the session's prompt loop.
+        if !matches!(self.status, AgentSessionStatus::Connected) || self.handle.is_none() {
             return;
         };
         let Some(text) = self.drain_next_queued_prompt(cx) else {
@@ -1767,6 +1807,7 @@ impl AgentChatView {
     /// retry keeps it so the reconnect resumes the same one via
     /// `session/load` instead of losing history.
     fn teardown_transient_session_state(&mut self) {
+        cancel_pending_permission(self);
         self.handle = None;
         self._event_pump = None;
         self.items.clear();
@@ -1888,6 +1929,75 @@ mod tests {
                 cx,
             )
         })
+    }
+
+    /// Appending a follow-up prompt must not make the previously visible agent
+    /// response collapse out from under the user. The model still keeps every
+    /// item either way; this pins the row projection so the prior response's
+    /// process prose remains visible after the new `UserText` anchor is added.
+    #[gpui::test]
+    fn echo_prompt_preserves_visible_tail_response(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
+                view.items.push(assistant_text_item("process"));
+                view.items.push(assistant_text_item("final"));
+                view.rebuild_rows();
+
+                assert!(
+                    view.rows
+                        .iter()
+                        .any(|r| matches!(r.kind, super::RowKind::AgentItem(1)) && !r.hidden),
+                    "tail response starts expanded"
+                );
+
+                view.echo_prompt("q2".to_string(), cx);
+
+                assert!(
+                    view.rows
+                        .iter()
+                        .any(|r| matches!(r.kind, super::RowKind::AgentItem(1)) && !r.hidden),
+                    "submitting the next prompt must not hide prior agent prose"
+                );
+                assert!(
+                    view.rows
+                        .iter()
+                        .any(|r| matches!(r.kind, super::RowKind::ConclusionItem(2)) && !r.hidden),
+                    "the prior conclusion remains visible too"
+                );
+            })
+            .unwrap();
+    }
+
+    /// The preservation hook only freezes a response that is currently visible;
+    /// a user collapse remains authoritative across the next prompt.
+    #[gpui::test]
+    fn echo_prompt_respects_collapsed_tail_response(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.items.push(daruda_acp::ChatItem::UserText("q1".into()));
+                view.items.push(assistant_text_item("process"));
+                view.items.push(assistant_text_item("final"));
+                view.toggle_fold(super::FoldKey::Response(0), cx);
+
+                view.echo_prompt("q2".to_string(), cx);
+
+                assert!(
+                    view.rows
+                        .iter()
+                        .any(|r| matches!(r.kind, super::RowKind::AgentItem(1)) && r.hidden),
+                    "an explicitly collapsed response stays collapsed after the next prompt"
+                );
+                assert!(
+                    view.rows
+                        .iter()
+                        .any(|r| matches!(r.kind, super::RowKind::ConclusionItem(2)) && !r.hidden),
+                    "the conclusion still surfaces from the collapsed response"
+                );
+            })
+            .unwrap();
     }
 
     /// `reconcile_post_turn` withholds the delta until `quiescence` has
