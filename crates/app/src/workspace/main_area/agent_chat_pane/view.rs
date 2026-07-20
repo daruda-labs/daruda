@@ -197,6 +197,20 @@ pub(in crate::workspace) struct QueuedPrompt {
     pub text: String,
 }
 
+/// What the Escape shortcut resolved to for a focused Agent chat pane. Returned
+/// by [`AgentChatView::handle_escape`] so the `Workspace` shim fires the
+/// settle-edge completion only when a turn was actually cancelled.
+pub(in crate::workspace) enum EscapeOutcome {
+    /// Cancelled an in-flight turn (or trailing background-subagent work) — the
+    /// caller must run `reconcile_activity` + `fire_activity_completion`.
+    Cancelled,
+    /// Discarded a parked queue (the "Esc twice clears the queue" gesture); no
+    /// turn was running, so there is no completion to fire.
+    ClearedQueue,
+    /// Nothing to act on — the caller reports not-handled so Escape propagates.
+    Ignored,
+}
+
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
 ///
 /// Owns the live session: the [`daruda_acp::AcpSessionHandle`] the workspace
@@ -283,6 +297,16 @@ pub(in crate::workspace) struct AgentChatView {
     /// send time. The user can remove an individual entry ([`Self::remove_queued`])
     /// or clear the whole queue ([`Self::clear_queue`]) from the strip.
     pub(in crate::workspace) pending_prompts: Vec<QueuedPrompt>,
+    /// Prompts parked by a Stop (`cancel_turn`) while a queue was buffered
+    /// behind the cancelled turn. Unlike [`Self::pending_prompts`], these are
+    /// NOT auto-drained: they live outside the live queue so the cancel-ack /
+    /// `TurnEnded` pump never touches them. The user resumes them explicitly
+    /// (the queue strip's Resume button → [`Self::resume_queue`], which moves
+    /// them back to the front of the live queue) or discards them (a second
+    /// Esc / the strip's clear-all → [`Self::clear_queue`]). A prompt typed
+    /// *after* the Stop sends immediately as a fresh turn, ahead of these.
+    /// Runtime-only; never serialized; wiped on a session teardown / reset.
+    pub(in crate::workspace) paused_prompts: Vec<QueuedPrompt>,
     /// Monotonic counter minting the next [`PromptId`] for a queued prompt.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) next_prompt_id: u64,
@@ -748,6 +772,7 @@ impl AgentChatView {
             items: Vec::new(),
             handle: None,
             pending_prompts: Vec::new(),
+            paused_prompts: Vec::new(),
             next_prompt_id: 0,
             editing_prompt: None,
             _event_pump: None,
@@ -1176,10 +1201,13 @@ impl AgentChatView {
                 // edge (via `reconcile_activity`), same as a normal completion.
                 self.pending_completion = Some(TurnOutcome::Errored);
                 // The session is dead with no reconnect path, so any buffered
-                // prompts can never be delivered — drop them rather than leaving
-                // them to be pumped (they were never echoed, so nothing dangles
-                // in the transcript).
+                // prompts can never be delivered — drop both the live queue and
+                // a parked queue (a Stop may have parked one before this Error)
+                // rather than leaving them to be pumped or shown with a Resume
+                // button that can't send (they were never echoed, so nothing
+                // dangles in the transcript).
                 self.pending_prompts.clear();
+                self.paused_prompts.clear();
                 self.editing_prompt = None;
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
@@ -1423,7 +1451,11 @@ impl AgentChatView {
         // the second `let` fails and we fall through to handle `text` as a
         // brand-new prompt so nothing typed is lost.
         if let Some(id) = self.editing_prompt.take()
-            && let Some(qp) = self.pending_prompts.iter_mut().find(|q| q.id == id)
+            && let Some(qp) = self
+                .pending_prompts
+                .iter_mut()
+                .chain(self.paused_prompts.iter_mut())
+                .find(|q| q.id == id)
         {
             qp.text = text;
             // Queue-only change: `items` (and thus the projected rows) are
@@ -1501,6 +1533,25 @@ impl AgentChatView {
         }
     }
 
+    /// Resume a parked queue that a Stop preserved. Moves the parked prompts
+    /// back to the FRONT of the live queue (FIFO — they were submitted before
+    /// anything queued after the Stop), then pumps so the first one dispatches
+    /// when the session is connected and idle. No-op (no notify) when nothing is
+    /// parked. Backs the queue strip's Resume button via the
+    /// `Workspace::resume_queued_prompts` shim (one-way data flow).
+    pub(in crate::workspace) fn resume_queue(&mut self, cx: &mut Context<Self>) {
+        if self.paused_prompts.is_empty() {
+            return;
+        }
+        let mut resumed = std::mem::take(&mut self.paused_prompts);
+        resumed.append(&mut self.pending_prompts);
+        self.pending_prompts = resumed;
+        // Dispatch the first one now if the session can prompt; a no-op offline
+        // (the queue just sits in `pending_prompts` and drains on connect).
+        self.pump_pending_prompt(cx);
+        cx.notify();
+    }
+
     /// Push `text` onto the pending-prompt queue with a freshly minted
     /// [`PromptId`], returning that id. Does NOT echo into the transcript and
     /// does NOT notify — the caller notifies once after mutating.
@@ -1511,27 +1562,38 @@ impl AgentChatView {
         id
     }
 
-    /// Remove the queued prompt with `id` from the queue. No-op (no notify) when
-    /// `id` is not present. Backs the bottom-dock strip's per-item × button via
-    /// the `Workspace::remove_queued_prompt` shim (one-way data flow).
+    /// Remove the queued prompt with `id` from the queue — the live queue OR the
+    /// parked queue, since the strip renders the × affordance on both. No-op (no
+    /// notify) when `id` is not present. Backs the bottom-dock strip's per-item
+    /// × button via the `Workspace::remove_queued_prompt` shim (one-way data
+    /// flow).
     pub(in crate::workspace) fn remove_queued(&mut self, id: PromptId, cx: &mut Context<Self>) {
-        let before = self.pending_prompts.len();
+        let before = self.pending_prompts.len() + self.paused_prompts.len();
         self.pending_prompts.retain(|q| q.id != id);
-        if self.pending_prompts.len() != before {
+        self.paused_prompts.retain(|q| q.id != id);
+        if self.pending_prompts.len() + self.paused_prompts.len() != before {
+            // Deliberately does NOT clear `editing_prompt` if the removed row was
+            // the edit target: `send_prompt_text` takes the flag and, finding the
+            // id gone from both queues, falls through to enqueue the composer text
+            // as a new prompt — so nothing typed is lost (see that path + the
+            // `send_prompt_text_editing_target_gone_falls_through_to_new` test).
             // Queue-only change: the transcript rows are unaffected, so notify
             // re-stages the strip without a transcript reproject.
             cx.notify();
         }
     }
 
-    /// Drop every queued prompt. No-op (no notify) when the queue is already
-    /// empty. Backs the bottom-dock strip's "clear all" button via the
-    /// `Workspace::clear_queued_prompts` shim (one-way data flow).
+    /// Drop every queued prompt — both the live and the parked queue (clear-all
+    /// empties the strip regardless of parking). No-op (no notify) when both are
+    /// already empty. Backs the bottom-dock strip's "clear all" button via the
+    /// `Workspace::clear_queued_prompts` shim (one-way data flow), and the
+    /// second-Esc discard via `Workspace::cancel_agent_turn_if_active`.
     pub(in crate::workspace) fn clear_queue(&mut self, cx: &mut Context<Self>) {
-        if self.pending_prompts.is_empty() {
+        if self.pending_prompts.is_empty() && self.paused_prompts.is_empty() {
             return;
         }
         self.pending_prompts.clear();
+        self.paused_prompts.clear();
         self.editing_prompt = None;
         // Queue-only change: the transcript rows are unaffected, so notify
         // re-stages the strip without a transcript reproject.
@@ -1606,6 +1668,34 @@ impl AgentChatView {
         cx.notify();
     }
 
+    /// Resolve what the Escape shortcut should do for this pane and apply it,
+    /// reporting the kind so the `Workspace` shim fires the settle-edge
+    /// completion only when a turn was cancelled. Priority:
+    ///
+    /// 1. An in-flight turn → cancel + park the queue ([`Self::cancel_turn`]).
+    /// 2. Else a parked queue → discard it (the "Esc twice clears the queue"
+    ///    gesture). This takes precedence over trailing background-subagent
+    ///    liveness so the gesture isn't blocked while a post-Stop subagent is
+    ///    still inside its quiescence window (`is_busy()` can stay true there).
+    /// 3. Else a still-running background subagent (no parked queue) → cancel it
+    ///    (keeps parity with the Stop button, which shows whenever `is_busy()`).
+    /// 4. Else nothing to do → propagate Escape.
+    pub(in crate::workspace) fn handle_escape(&mut self, cx: &mut Context<Self>) -> EscapeOutcome {
+        if self.turn.is_in_flight() {
+            self.cancel_turn(cx);
+            return EscapeOutcome::Cancelled;
+        }
+        if !self.paused_prompts.is_empty() {
+            self.clear_queue(cx);
+            return EscapeOutcome::ClearedQueue;
+        }
+        if self.is_busy() {
+            self.cancel_turn(cx);
+            return EscapeOutcome::Cancelled;
+        }
+        EscapeOutcome::Ignored
+    }
+
     /// Stop the active turn. Sends `session/cancel` *and* ends the turn locally,
     /// right now — it does not wait for the agent's stop reason.
     ///
@@ -1638,10 +1728,17 @@ impl AgentChatView {
             self.cancel_in_flight = true;
         }
         self.settle_turn();
-        // Stop halts everything queued *before* it: drop prompts buffered prior to
-        // this Stop. A prompt the user types *after* Stop is pushed after this
-        // clear and runs as a fresh turn.
-        self.pending_prompts.clear();
+        // Stop cancels the running turn but PRESERVES the queue: move everything
+        // buffered before this Stop into the parked queue rather than dropping
+        // it. Parked prompts do NOT auto-drain — they live outside
+        // `pending_prompts`, so the cancel-ack / `TurnEnded` pump is a no-op on
+        // them. The user resumes them explicitly (the queue strip's Resume
+        // button → `resume_queue`) or discards them (a second Esc / clear-all).
+        // A prompt typed *after* Stop is pushed onto the now-empty live queue and
+        // (idle + connected) sends immediately as a fresh turn, ahead of the
+        // parked queue. `append` preserves FIFO order and stacks after any items
+        // parked by a prior Stop.
+        self.paused_prompts.append(&mut self.pending_prompts);
         self.editing_prompt = None;
         // `settle_turn` mutated items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing fold visibility and row
@@ -1812,6 +1909,7 @@ impl AgentChatView {
         self._event_pump = None;
         self.items.clear();
         self.pending_prompts.clear();
+        self.paused_prompts.clear();
         self.editing_prompt = None;
         self.pending_permissions.clear();
         self.turn = Turn::Idle;
@@ -1995,6 +2093,174 @@ mod tests {
                         .iter()
                         .any(|r| matches!(r.kind, super::RowKind::ConclusionItem(2)) && !r.hidden),
                     "the conclusion still surfaces from the collapsed response"
+                );
+            })
+            .unwrap();
+    }
+
+    fn queued(id: u64, text: &str) -> super::QueuedPrompt {
+        super::QueuedPrompt {
+            id: super::PromptId(id),
+            text: text.to_string(),
+        }
+    }
+
+    fn texts(prompts: &[super::QueuedPrompt]) -> Vec<String> {
+        prompts.iter().map(|q| q.text.clone()).collect()
+    }
+
+    /// Stop must NOT discard the queue. A turn in flight with prompts buffered
+    /// behind it: `cancel_turn` settles the turn and moves the whole live queue
+    /// into the parked queue (preserved), leaving the live queue empty.
+    #[gpui::test]
+    fn cancel_turn_parks_the_queue_instead_of_clearing(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.set_turn_in_flight();
+                view.pending_prompts.push(queued(1, "a"));
+                view.pending_prompts.push(queued(2, "b"));
+
+                view.cancel_turn(cx);
+
+                assert!(view.turn_is_idle(), "Stop settles the turn locally");
+                assert!(
+                    view.pending_prompts.is_empty(),
+                    "the live queue is emptied by the Stop"
+                );
+                assert_eq!(
+                    texts(&view.paused_prompts),
+                    vec!["a".to_string(), "b".to_string()],
+                    "Stop parks the queue (FIFO) instead of dropping it"
+                );
+            })
+            .unwrap();
+    }
+
+    /// Resuming a parked queue moves the parked prompts back to the FRONT of the
+    /// live queue (they were submitted before anything queued after the Stop).
+    /// Offline (no handle) the pump can't dispatch, so they simply land in the
+    /// live queue in order — the reorder is what this pins.
+    #[gpui::test]
+    fn resume_queue_moves_parked_to_front_of_live(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.paused_prompts.push(queued(1, "p1"));
+                view.paused_prompts.push(queued(2, "p2"));
+                // A prompt queued (behind a since-cancelled turn) after the Stop.
+                view.pending_prompts.push(queued(3, "live"));
+
+                view.resume_queue(cx);
+
+                assert!(
+                    view.paused_prompts.is_empty(),
+                    "resume drains the parked queue"
+                );
+                assert_eq!(
+                    texts(&view.pending_prompts),
+                    vec!["p1".to_string(), "p2".to_string(), "live".to_string()],
+                    "parked prompts resume ahead of the live queue (FIFO)"
+                );
+            })
+            .unwrap();
+    }
+
+    /// The per-item remove (×) and clear-all reach parked prompts too — the
+    /// strip renders those affordances on parked rows, so they must act on
+    /// `paused_prompts`, not just the live queue.
+    #[gpui::test]
+    fn remove_and_clear_reach_parked_prompts(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.paused_prompts.push(queued(1, "a"));
+                view.paused_prompts.push(queued(2, "b"));
+                view.pending_prompts.push(queued(3, "c"));
+
+                view.remove_queued(super::PromptId(1), cx);
+                assert_eq!(
+                    texts(&view.paused_prompts),
+                    vec!["b".to_string()],
+                    "removing a parked prompt drops it from the parked queue"
+                );
+                assert_eq!(
+                    texts(&view.pending_prompts),
+                    vec!["c".to_string()],
+                    "the live queue is untouched by removing a parked prompt"
+                );
+
+                view.clear_queue(cx);
+                assert!(
+                    view.paused_prompts.is_empty() && view.pending_prompts.is_empty(),
+                    "clear-all empties both the parked and live queues"
+                );
+            })
+            .unwrap();
+    }
+
+    /// Editing a parked prompt then sending replaces it in place (order kept),
+    /// rather than falling through and enqueuing a duplicate as a new prompt.
+    #[gpui::test]
+    fn editing_a_parked_prompt_replaces_it_in_place(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.paused_prompts.push(queued(1, "old"));
+                view.begin_edit(super::PromptId(1), cx);
+
+                view.send_prompt_text("new".to_string(), cx);
+
+                assert_eq!(
+                    texts(&view.paused_prompts),
+                    vec!["new".to_string()],
+                    "the parked prompt's text is replaced in place"
+                );
+                assert!(
+                    view.pending_prompts.is_empty(),
+                    "editing does not enqueue a new prompt"
+                );
+                assert_eq!(view.editing_prompt, None, "the edit flag is cleared");
+            })
+            .unwrap();
+    }
+
+    /// The "Esc twice clears the queue" gesture must not be blocked by trailing
+    /// background-subagent liveness: after a Stop parks the queue, a running
+    /// subagent keeps `is_busy()` true (its quiescence window), but `handle_escape`
+    /// still clears the parked queue rather than routing back into a cancel.
+    #[gpui::test]
+    fn escape_clears_parked_queue_even_while_a_subagent_runs(cx: &mut gpui::TestAppContext) {
+        use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolStatusView};
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                // A queue parked by a prior Stop.
+                view.paused_prompts.push(queued(1, "a"));
+                // A live child tool under a subagent parent → `is_busy()` true
+                // even though no foreground turn is in flight.
+                view.items.push(ChatItem::ToolCall(ToolCallItem {
+                    id: "child".into(),
+                    title: "child".into(),
+                    kind: ToolKindView::Read,
+                    status: ToolStatusView::InProgress,
+                    diffs: Vec::new(),
+                    output: Vec::new(),
+                    raw_input: None,
+                    parent_tool_id: Some("parent".into()),
+                }));
+                assert!(view.is_busy(), "the trailing subagent keeps the pane busy");
+                assert!(view.turn_is_idle(), "but no foreground turn is in flight");
+
+                let outcome = view.handle_escape(cx);
+
+                assert!(
+                    matches!(outcome, super::EscapeOutcome::ClearedQueue),
+                    "Escape clears the parked queue instead of re-cancelling"
+                );
+                assert!(
+                    view.paused_prompts.is_empty(),
+                    "the parked queue is discarded"
                 );
             })
             .unwrap();

@@ -338,6 +338,8 @@ bottom_dock:
   queue_edit: "편집"
   queue_edit_cancel: "편집 취소"
   queue_editing: "편집 중…"
+  queue_resume: "재개"
+  queue_paused: "일시정지"
 
 # Projects view
 projects:

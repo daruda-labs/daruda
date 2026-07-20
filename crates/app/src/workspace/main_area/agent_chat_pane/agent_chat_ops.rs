@@ -25,7 +25,9 @@ use std::path::PathBuf;
 use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::telegram_ops::DeferKind;
-use super::view::{AgentChatView, AgentSessionStatus, PromptId, RuntimePrepPhase, TurnOutcome};
+use super::view::{
+    AgentChatView, AgentSessionStatus, EscapeOutcome, PromptId, RuntimePrepPhase, TurnOutcome,
+};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
@@ -1158,13 +1160,14 @@ impl Workspace {
         };
         // Reading the view entity here is safe — it is a different entity from
         // `self` (Workspace) and from `terminal_input`.
-        let Some(text) = view
-            .read(cx)
+        let v = view.read(cx);
+        let found = v
             .pending_prompts
             .iter()
+            .chain(v.paused_prompts.iter())
             .find(|q| q.id == id)
-            .map(|q| q.text.clone())
-        else {
+            .map(|q| q.text.clone());
+        let Some(text) = found else {
             return;
         };
         // Pull the text into the composer, cursor at end (mirrors
@@ -1192,6 +1195,21 @@ impl Workspace {
         }
         self.terminal_input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
+    }
+
+    /// Resume a parked prompt queue that a Stop preserved. Shim for the
+    /// bottom-dock queued-prompt strip's Resume button: routes into the view,
+    /// which moves the parked prompts back to the front of the live queue and
+    /// pumps the first one (one-way data flow). No-op when `pane_id` is gone,
+    /// is not an Agent chat pane, or nothing is parked.
+    pub(in crate::workspace) fn resume_queued_prompts(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| v.resume_queue(cx));
+        }
     }
 
     /// Request cancellation of the active turn. Shim for the bottom-dock "Stop"
@@ -1229,16 +1247,23 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return false;
         };
-        if !view.read(cx).is_busy() {
-            return false;
+        // The pane's own state machine decides: cancel a running turn, discard a
+        // parked queue (Esc twice), cancel a trailing subagent, or do nothing.
+        match view.update(cx, |v, cx| v.handle_escape(cx)) {
+            EscapeOutcome::Cancelled => {
+                // Same settle-edge firing as `cancel_agent_turn`.
+                let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                if let Some(outcome) = edge {
+                    self.fire_activity_completion(pane_id, outcome, cx);
+                }
+                true
+            }
+            // Clearing a parked queue has no turn to complete; still handled, so
+            // Escape is consumed rather than propagating.
+            EscapeOutcome::ClearedQueue => true,
+            // Nothing to act on — report not-handled so Escape keeps propagating.
+            EscapeOutcome::Ignored => false,
         }
-        view.update(cx, |v, cx| v.cancel_turn(cx));
-        // Same settle-edge firing as `cancel_agent_turn`.
-        let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
-        if let Some(outcome) = edge {
-            self.fire_activity_completion(pane_id, outcome, cx);
-        }
-        true
     }
 
     /// Switch the active session mode of an Agent chat pane. Shim for the

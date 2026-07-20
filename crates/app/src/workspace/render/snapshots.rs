@@ -240,14 +240,22 @@ impl Workspace {
             .map(|view| {
                 let view = view.read(cx);
                 let editing = view.editing_prompt;
-                view.pending_prompts
-                    .iter()
-                    .map(|q| crate::workspace::layout::QueuedPromptView {
-                        id: q.id,
-                        text: q.text.clone(),
-                        editing: editing == Some(q.id),
-                    })
-                    .collect::<Vec<_>>()
+                // Parked prompts (kept by a Stop) sort ahead of the live queue —
+                // they were submitted before anything queued after the Stop.
+                let mut out: Vec<crate::workspace::layout::QueuedPromptView> = Vec::new();
+                for (prompts, paused) in
+                    [(&view.paused_prompts, true), (&view.pending_prompts, false)]
+                {
+                    for q in prompts {
+                        out.push(crate::workspace::layout::QueuedPromptView {
+                            id: q.id,
+                            text: q.text.clone(),
+                            editing: editing == Some(q.id),
+                            paused,
+                        });
+                    }
+                }
+                out
             })
             .filter(|q| !q.is_empty())
             .map(|q| (focused_id, q));

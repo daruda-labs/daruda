@@ -43,7 +43,7 @@ pub(in crate::workspace) fn render(
     let editing_bg = t.overlay_selected;
     let editing_color = t.text_primary;
 
-    // Header: "N queued" + clear-all button.
+    // Header: "N queued" + Resume (only when a Stop parked prompts) + clear-all.
     let clear_all = {
         let workspace = snap.workspace.clone();
         crate::ui::button("agent-queue-clear-all", s::bottom_input_queue_clear_all())
@@ -55,6 +55,20 @@ pub(in crate::workspace) fn render(
                 }
             }))
     };
+    // A parked queue (kept by a Stop) shows a Resume button that drains it back
+    // into the live queue. Absent when nothing is parked (normal live queue).
+    let has_paused = prompts.iter().any(|qp| qp.paused);
+    let resume = has_paused.then(|| {
+        let workspace = snap.workspace.clone();
+        crate::ui::button("agent-queue-resume", s::bottom_input_queue_resume())
+            .ghost()
+            .xsmall()
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.resume_queued_prompts(pane_id, cx));
+                }
+            }))
+    });
     let header = div()
         .flex()
         .flex_row()
@@ -68,7 +82,15 @@ pub(in crate::workspace) fn render(
                     prompts.len(),
                 ))),
         )
-        .child(clear_all);
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(theme::AGENT_QUEUE_STRIP_GAP))
+                .children(resume)
+                .child(clear_all),
+        );
 
     // One row per queued prompt: single-line text + × remove button.
     let mut list = div()
@@ -80,11 +102,23 @@ pub(in crate::workspace) fn render(
         .overflow_y_scroll();
     for qp in prompts {
         let id = qp.id;
-        // Text cell — brighter tone + an "editing…" suffix on the edit target.
+        // Text cell — the edit target reads brightest; a parked row is dimmed
+        // and marked "Paused"; a live queued row uses the normal body tone. The
+        // trailing marker (editing / paused) reuses one slot: editing wins when
+        // both apply (the composer is actively holding that row).
         let text_color = if qp.editing {
             editing_color
+        } else if qp.paused {
+            header_color
         } else {
             item_color
+        };
+        let marker = if qp.editing {
+            Some(s::bottom_input_queue_editing())
+        } else if qp.paused {
+            Some(s::bottom_input_queue_paused())
+        } else {
+            None
         };
         let mut text_cell = div()
             .flex()
@@ -102,13 +136,13 @@ pub(in crate::workspace) fn render(
                     .text_color(text_color)
                     .child(SharedString::from(qp.text.clone())),
             );
-        if qp.editing {
+        if let Some(marker) = marker {
             text_cell = text_cell.child(
                 div()
                     .flex_shrink_0()
                     .text_size(px(theme::FONT_SIZE_SM))
                     .text_color(header_color)
-                    .child(SharedString::from(s::bottom_input_queue_editing())),
+                    .child(SharedString::from(marker)),
             );
         }
 

@@ -1506,6 +1506,15 @@ pub fn bottom_input_queue_edit_cancel() -> String {
 pub fn bottom_input_queue_editing() -> String {
     rust_i18n::t!("bottom_dock.queue_editing").into_owned()
 }
+/// Queued-prompt strip header — Resume button label (shown when a Stop parked
+/// the queue; resumes draining it).
+pub fn bottom_input_queue_resume() -> String {
+    rust_i18n::t!("bottom_dock.queue_resume").into_owned()
+}
+/// Queued-prompt strip — inline label on a row parked by a Stop (awaiting Resume).
+pub fn bottom_input_queue_paused() -> String {
+    rust_i18n::t!("bottom_dock.queue_paused").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Projects view — section header + empty state

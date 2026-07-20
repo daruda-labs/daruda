@@ -582,10 +582,19 @@ impl Workspace {
     /// ([`Self::do_history_navigate`]) and its consume predicate
     /// ([`Self::history_navigate_possible`]). `None` for a terminal focus, an
     /// agent pane with an empty queue, or the Welcome state.
+    ///
+    /// Prefers the live queue's last entry; falls back to the parked queue's
+    /// last entry so ↑ still edits the most-recent prompt after a Stop parked
+    /// the queue (the strip renders parked rows as editable).
     fn focused_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
         let focused = self.active_runtime().focused_pane_id;
         let view = self.agent_chat_view(focused)?;
-        let id = view.read(cx).pending_prompts.last()?.id;
+        let v = view.read(cx);
+        let id = v
+            .pending_prompts
+            .last()
+            .or_else(|| v.paused_prompts.last())?
+            .id;
         Some((focused, id))
     }
 

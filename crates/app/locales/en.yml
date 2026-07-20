@@ -338,6 +338,8 @@ bottom_dock:
   queue_edit: "Edit"
   queue_edit_cancel: "Cancel edit"
   queue_editing: "Editing…"
+  queue_resume: "Resume"
+  queue_paused: "Paused"
 
 # Projects view
 projects:

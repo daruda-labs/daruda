@@ -1427,13 +1427,13 @@ async fn prompt_before_connect_is_buffered_not_dropped(cx: &mut TestAppContext) 
     });
 }
 
-/// Stop must halt everything queued, not just the live turn. `cancel_turn`
-/// clears the whole queue so the cancelled turn's later `TurnEnded` →
-/// `pump_pending_prompt` finds an empty buffer and cannot silently auto-fire
-/// the next prompt. (Send is not gated on `turn.is_in_flight()`, so a
+/// Stop must PRESERVE the queue, not discard it. The first Escape (turn in
+/// flight) cancels the turn and parks the buffered queue; a second Escape (now
+/// idle, with a parked queue) clears it; a third Escape (idle, empty) is a
+/// no-op that propagates. (Send is not gated on `turn.is_in_flight()`, so a
 /// queue-behind-a-turn state is reachable in normal use.)
 #[gpui::test]
-async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
+async fn escape_parks_the_queue_then_a_second_escape_clears_it(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
@@ -1456,6 +1456,8 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
                 ws.send_agent_prompt_text(id, "a".to_string(), cx);
                 ws.send_agent_prompt_text(id, "b".to_string(), cx);
                 ws.send_agent_prompt_text(id, "c".to_string(), cx);
+                // Simulate a live turn so the first Escape treats the pane as busy.
+                agent_view(ws, id).update(cx, |v, _| v.set_turn_in_flight());
                 id
             })
         })
@@ -1465,26 +1467,66 @@ async fn cancel_turn_clears_queued_prompts(cx: &mut TestAppContext) {
     let view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
     view.read_with(cx, |v, _| {
         assert_eq!(
-            v.pending_prompts.len(),
-            3,
-            "three prompts queued behind the turn"
+            queue_texts(v),
+            vec!["a", "b", "c"],
+            "three queued behind the turn"
         );
     });
 
-    // Stop.
+    // First Escape: busy → cancels the turn and parks the queue.
     cx.update_window(window_handle.into(), |_, _window, cx| {
-        workspace.update(cx, |ws, cx| ws.cancel_agent_turn(pane_id, cx));
+        workspace.update(cx, |ws, cx| {
+            assert!(
+                ws.cancel_agent_turn_if_active(pane_id, cx),
+                "first Escape handles the key (cancels the running turn)"
+            );
+        });
     })
     .unwrap();
     cx.run_until_parked();
 
     view.read_with(cx, |v, _| {
+        assert!(v.turn_is_idle(), "the turn is settled");
         assert!(
             v.pending_prompts.is_empty(),
-            "Stop clears the queued prompts so nothing auto-resumes"
+            "the live queue is emptied by the park"
         );
-        assert!(v.turn_is_idle(), "Stop ends the turn");
+        assert_eq!(
+            v.paused_prompts
+                .iter()
+                .map(|q| q.text.clone())
+                .collect::<Vec<_>>(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            "Stop parks the queue instead of dropping it"
+        );
     });
+
+    // Second Escape: idle with a parked queue → clears it, still handled.
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(
+                ws.cancel_agent_turn_if_active(pane_id, cx),
+                "second Escape handles the key (clears the parked queue)"
+            );
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    view.read_with(cx, |v, _| {
+        assert!(v.paused_prompts.is_empty(), "the parked queue is cleared");
+    });
+
+    // Third Escape: idle, no queue → not handled, so Escape propagates.
+    cx.update_window(window_handle.into(), |_, _window, cx| {
+        workspace.update(cx, |ws, cx| {
+            assert!(
+                !ws.cancel_agent_turn_if_active(pane_id, cx),
+                "a third Escape with no queue is a no-op and propagates"
+            );
+        });
+    })
+    .unwrap();
 }
 
 /// Prompts submitted while disconnected buffer in FIFO order and never mark a
@@ -2869,11 +2911,12 @@ async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAp
 /// Regression for the Stop-then-reprompt(-then-Stop) race. Stop settles the turn
 /// locally (responsive + hung-safe) and opens the cancel window; a re-prompt then
 /// buffers **client-side** (not raced onto the wire), so it can't be
-/// misattributed to the cancelled turn's ack AND a *second* Stop can still clear
-/// it. The first `TurnEnded` after the Stop closes the window and drains the
-/// queue (as a fresh turn).
+/// misattributed to the cancelled turn's ack. A *second* Stop then parks that
+/// re-prompt (queue-preserving Stop) instead of dropping it — still client-side,
+/// so the ack still can't misattribute it. The cancel's `TurnEnded` closes the
+/// window without draining (the parked queue does not auto-resume).
 #[gpui::test]
-async fn stop_buffers_reprompt_and_second_stop_clears_it(cx: &mut TestAppContext) {
+async fn stop_buffers_reprompt_and_second_stop_parks_it(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
     let view = make_activity_view(cx, window_handle, &workspace);
@@ -2909,16 +2952,26 @@ async fn stop_buffers_reprompt_and_second_stop_clears_it(cx: &mut TestAppContext
             "the re-prompt buffers client-side"
         );
 
-        // Because it's client-side, a SECOND Stop can still clear it — the case a
-        // wire-side stash (the pre-fix behaviour) would have made unstoppable.
+        // A SECOND Stop parks the buffered re-prompt (queue-preserving Stop):
+        // moved out of the live queue into the parked queue, still client-side
+        // (never raced onto the wire), so a stale ack still can't misattribute
+        // it. It stays resumable rather than being silently dropped.
         v.cancel_turn(cx);
         assert!(
             v.pending_prompts.is_empty(),
-            "a second Stop clears the buffered re-prompt"
+            "the second Stop empties the live queue"
+        );
+        assert_eq!(
+            v.paused_prompts
+                .iter()
+                .map(|q| q.text.clone())
+                .collect::<Vec<_>>(),
+            vec!["again".to_string()],
+            "the re-prompt is parked (preserved), not dropped"
         );
 
-        // The cancel's `TurnEnded` ack closes the window (and would drain the
-        // queue — empty here). It neither re-settles nor re-completes.
+        // The cancel's `TurnEnded` ack closes the window. The parked queue does
+        // not auto-drain, so nothing runs; it neither re-settles nor re-completes.
         v.apply_event(
             daruda_acp::AcpEvent::TurnEnded {
                 completed_normally: false,

@@ -220,6 +220,11 @@ pub(in crate::workspace) struct QueuedPromptView {
     /// of the ✎ / × buttons. `PartialEq` on this field drives the bottom dock's
     /// `.cached()` re-stage when the edit target changes.
     pub editing: bool,
+    /// True when this prompt was parked by a Stop (`AgentChatView::paused_prompts`)
+    /// rather than sitting in the live queue. The strip renders parked rows in a
+    /// dimmed "Paused" state and surfaces a Resume affordance; parked rows sort
+    /// ahead of live ones. `PartialEq` re-stages the dock when parking changes.
+    pub paused: bool,
 }
 
 /// Point-in-time copy of `Workspace` fields consumed by the bottom
