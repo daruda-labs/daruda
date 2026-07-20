@@ -23,11 +23,13 @@ use crate::workspace::main_area::agent_chat_pane::rows::{
 use crate::workspace::main_area::agent_chat_pane::view::AgentChatView;
 
 /// Tool invocation card — foldable (default collapsed once done, expanded while
-/// in progress). The header is the existing title + status-badge row, which
-/// already reads as the summary, so no extra inline summary line is added. The
-/// body (diffs + plain-text output) shows only when expanded; the card's
-/// border / bg chrome wraps the fold assembly either way. The nested diffs are
-/// independently foldable.
+/// in progress). The header holds a fixed-width label (the agent's own tool
+/// name, else the kind) + the status badge, so it never grows with a long or
+/// multiline title; collapsed, a dimmed one-line summary of the title fills the
+/// header row instead. The
+/// body — full untruncated title, then diffs + plain-text output — shows only
+/// when expanded; the card's border / bg chrome wraps the fold assembly either
+/// way. The nested diffs are independently foldable.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tool_card(
     key: FoldKey,
@@ -64,9 +66,13 @@ pub(super) fn tool_card(
         badge_text
     };
 
-    // Title + status badge: the header IS the summary. A tool-kind icon leads
-    // (so a bash call reads differently from a file read at a glance), then the
-    // title fills the row and the badge pins right.
+    // Header: a tool-kind icon + a short label — the agent's own tool name
+    // (Bash/Grep/…) when it surfaced one, else the fixed-vocabulary kind label
+    // (Read/Edit/Search/…). Either way it's a short identifier, never the long
+    // or multiline title, so the header line never grows — the full title is not
+    // a summary here, it moves to the expanded body (below) instead. Collapsed,
+    // a dimmed one-line summary of the title fills the gap before the badge so
+    // the card still reads at a glance without expanding.
     let fg = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
     let failed = matches!(tc.status, ToolStatusView::Failed);
     let font_size = px(theme::agent_chat_font_size(cx));
@@ -87,21 +93,24 @@ pub(super) fn tool_card(
                 .items_center()
                 .gap(px(theme::GAP_SM))
                 .child(Icon::new(tool_kind_icon(tc.kind)).xsmall().text_color(fg))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_color(fg)
-                        .text_size(font_size)
-                        .child(
-                            crate::ui::selectable_text(
-                                SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
-                                tool_title_summary(tc.kind, &tc.title),
-                            )
-                            .color(fg)
-                            .text_size(font_size),
-                        ),
-                ),
+                .child(div().flex_none().text_color(fg).text_size(font_size).child(
+                    SharedString::from(tool_header_label(tc.tool_name.as_deref(), tc.kind)),
+                ))
+                .when(!expanded, |d| {
+                    d.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_color(theme::dim_toward_gray(
+                                theme::agent_chat_fg_subtle(cx),
+                                dim,
+                            ))
+                            .text_size(font_size)
+                            .child(SharedString::from(tool_title_summary(&tc.title))),
+                    )
+                }),
         )
         // Detached shell command (`run_in_background: true`): the tool completes
         // immediately with an ack while the real process keeps running, so a
@@ -127,9 +136,26 @@ pub(super) fn tool_card(
         )
         .into_any_element();
 
-    // Body: an optional raw-input disclosure (generic tools), then nested diffs
-    // (each independently foldable), then plain-text output.
-    let mut body = div().flex().flex_col().gap(px(theme::AGENT_CHAT_MSG_GAP));
+    // Body: the full, untruncated title first (dropped from the header above,
+    // so it needs a home — un-muted `fg` so it reads as the primary statement
+    // ahead of the muted raw-input/output labels and the diff blocks' own
+    // hunk-bg chrome below it), then an optional raw-input disclosure (generic
+    // tools), then nested diffs (each independently foldable), then plain-text
+    // output.
+    let mut body = div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::AGENT_CHAT_MSG_GAP))
+        .child(
+            div().text_color(fg).text_size(font_size).child(
+                crate::ui::selectable_text(
+                    SharedString::from(format!("agent-chat-tool-title-{}", tc.id)),
+                    SharedString::from(tc.title.clone()),
+                )
+                .color(fg)
+                .text_size(font_size),
+            ),
+        );
     if renders_raw_input(tc)
         && let Some(raw) = &tc.raw_input
     {
@@ -257,8 +283,11 @@ pub(super) fn tool_card(
         }
     }
 
-    // Card chrome (border + bg) wraps the fold assembly; the header IS the
-    // summary, so no separate inline summary line.
+    // Card chrome (border + bg) wraps the fold assembly. The collapsed-only
+    // summary is built into `header` itself (not passed as `foldable_block`'s
+    // `summary` slot): the badge must stay pinned to the header's right edge
+    // in both fold states, and `foldable_block` appends its `summary` slot as
+    // a sibling *after* the whole header, which would land it past the badge.
     div()
         .w_full()
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
@@ -326,21 +355,46 @@ fn output_block_view(
     }
 }
 
-/// Collapse a multiline tool title to its first line + "…" so the card header
-/// stays a single line. `Execute` (shell command) titles are exempt — the
-/// command *is* the title and has no other home, so truncating would hide lines
-/// the user needs; every other kind's title is a description whose second-line
-/// detail (when it exists) is recoverable from the body / raw-input disclosure.
-/// Mirrors zed's kind-gated title in `ToolCall::from_acp`. A single-line title —
-/// or one whose only newline is trailing (no real second line) — is returned
+/// Collapse a multiline tool title to its first line + "…" so the collapsed
+/// header's inline summary always stays a single line. Safe to truncate for
+/// every kind (including `Execute`) now: the full, untruncated title has its
+/// own line in the expanded body (see `tool_card`), so nothing is lost by
+/// truncating here — the card is always expandable. A single-line title — or
+/// one whose only newline is trailing (no real second line) — is returned
 /// unchanged, so the "…" only appears when content is actually hidden.
-fn tool_title_summary(kind: ToolKindView, title: &str) -> String {
-    if matches!(kind, ToolKindView::Execute) {
-        return title.to_string();
-    }
+fn tool_title_summary(title: &str) -> String {
     match title.split_once('\n') {
         Some((first, rest)) if !rest.trim().is_empty() => format!("{first}…"),
         _ => title.to_string(),
+    }
+}
+
+/// The header's primary label. Prefers the agent's own tool name (`Bash`,
+/// `Grep`, …) — the vocabulary the user knows from the agent's CLI and more
+/// specific than the normalized kind — falling back to the fixed-vocabulary
+/// kind label when the agent surfaced no tool name. The leading icon already
+/// conveys the kind, so the specific name here adds information rather than
+/// duplicating the icon.
+fn tool_header_label(tool_name: Option<&str>, kind: ToolKindView) -> String {
+    tool_name
+        .map(str::to_owned)
+        .unwrap_or_else(|| tool_kind_label(kind))
+}
+
+/// Map a tool kind to its short, fixed-vocabulary header label (Read/Edit/
+/// Search/…), independent of the (possibly long) per-call title.
+fn tool_kind_label(kind: ToolKindView) -> String {
+    match kind {
+        ToolKindView::Read => s::agent_chat_tool_kind_read(),
+        ToolKindView::Edit => s::agent_chat_tool_kind_edit(),
+        ToolKindView::Delete => s::agent_chat_tool_kind_delete(),
+        ToolKindView::Move => s::agent_chat_tool_kind_move(),
+        ToolKindView::Search => s::agent_chat_tool_kind_search(),
+        ToolKindView::Execute => s::agent_chat_tool_kind_execute(),
+        ToolKindView::Think => s::agent_chat_tool_kind_think(),
+        ToolKindView::Fetch => s::agent_chat_tool_kind_fetch(),
+        ToolKindView::SwitchMode => s::agent_chat_tool_kind_switch_mode(),
+        ToolKindView::Other => s::agent_chat_tool_kind_other(),
     }
 }
 
@@ -516,39 +570,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn multiline_non_execute_title_summarizes_to_first_line() {
+    fn header_label_prefers_tool_name_over_kind() {
+        // The agent's own tool name wins: "Bash" reads better than the generic
+        // "Execute" kind, and the leading icon still carries the kind.
         assert_eq!(
-            tool_title_summary(ToolKindView::Read, "Read src/main.rs\nlines 1-40"),
+            tool_header_label(Some("Bash"), ToolKindView::Execute),
+            "Bash"
+        );
+    }
+
+    #[test]
+    fn header_label_falls_back_to_kind_without_tool_name() {
+        // No tool name (e.g. an adapter that omits it) → the kind label, same as
+        // before this feature. Locale-independent: compare against the kind label
+        // rather than a hardcoded string.
+        assert_eq!(
+            tool_header_label(None, ToolKindView::Execute),
+            tool_kind_label(ToolKindView::Execute)
+        );
+    }
+
+    #[test]
+    fn multiline_title_summarizes_to_first_line() {
+        assert_eq!(
+            tool_title_summary("Read src/main.rs\nlines 1-40"),
             "Read src/main.rs…"
         );
     }
 
     #[test]
     fn single_line_title_is_unchanged() {
-        assert_eq!(
-            tool_title_summary(ToolKindView::Search, "Search TODO"),
-            "Search TODO"
-        );
+        assert_eq!(tool_title_summary("Search TODO"), "Search TODO");
     }
 
     #[test]
     fn trailing_only_newline_does_not_add_ellipsis() {
         // A trailing newline (or a blank/whitespace second line) hides no real
         // content, so the title is returned as-is — no misleading "…".
-        assert_eq!(
-            tool_title_summary(ToolKindView::Read, "Read foo\n"),
-            "Read foo\n"
-        );
-        assert_eq!(
-            tool_title_summary(ToolKindView::Read, "Read foo\n   "),
-            "Read foo\n   "
-        );
+        assert_eq!(tool_title_summary("Read foo\n"), "Read foo\n");
+        assert_eq!(tool_title_summary("Read foo\n   "), "Read foo\n   ");
     }
 
     #[test]
-    fn execute_title_keeps_every_line() {
-        // The shell command is the title and has no other home — never truncate.
+    fn multiline_execute_title_also_summarizes() {
+        // The full multiline command still has its own line in the expanded
+        // body, so the collapsed one-line summary truncates it like any other
+        // kind now — nothing is lost since the card is always expandable.
         let cmd = "cd /repo &&\n  cargo build\n  cargo test";
-        assert_eq!(tool_title_summary(ToolKindView::Execute, cmd), cmd);
+        assert_eq!(tool_title_summary(cmd), "cd /repo &&…");
     }
 }

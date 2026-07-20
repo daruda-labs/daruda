@@ -515,6 +515,7 @@ mod tests {
             id: id.to_owned(),
             title: format!("Tool {id}"),
             kind: ToolKindView::Edit,
+            tool_name: None,
             status,
             diffs: Vec::new(),
             output: Vec::new(),

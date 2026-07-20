@@ -48,6 +48,12 @@ pub struct ToolCallItem {
     pub id: String,
     pub title: String,
     pub kind: ToolKindView,
+    /// The agent's own tool name (`Bash`, `Read`, `Grep`, …), read from the
+    /// agent's vendor `_meta` via [`crate::adapter::AcpAdapter::tool_name`].
+    /// More specific than `kind` and in the agent-CLI vocabulary the user
+    /// knows, so the renderer prefers it as the header label. `None` when the
+    /// agent surfaces no tool name — the renderer falls back to `kind`.
+    pub tool_name: Option<String>,
     pub status: ToolStatusView,
     /// File modifications shown as diffs (rendered via daruda's diff editor).
     pub diffs: Vec<DiffView>,
@@ -533,6 +539,7 @@ mod tests {
             id: "t1".into(),
             title: "cmd".into(),
             kind,
+            tool_name: None,
             status: ToolStatusView::InProgress,
             diffs: vec![],
             output: vec![],

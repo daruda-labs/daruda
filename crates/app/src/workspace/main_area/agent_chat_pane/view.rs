@@ -2243,6 +2243,7 @@ mod tests {
                     id: "child".into(),
                     title: "child".into(),
                     kind: ToolKindView::Read,
+                    tool_name: None,
                     status: ToolStatusView::InProgress,
                     diffs: Vec::new(),
                     output: Vec::new(),

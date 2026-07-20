@@ -19,6 +19,13 @@ pub trait AcpAdapter: Send + Sync {
     /// from the agent's vendor `_meta`. `None` for a top-level call or for an
     /// agent that does not nest subagent tool calls.
     fn parent_tool_id(&self, meta: &Option<Meta>) -> Option<String>;
+
+    /// The agent's own tool name (e.g. `Bash`, `Read`, `Grep`), read from the
+    /// agent's vendor `_meta`. More specific than the normalized `ToolKindView`
+    /// and in the vocabulary the user already knows from the agent's CLI, so the
+    /// renderer prefers it as the header label. `None` for an agent that does not
+    /// surface a tool name, in which case the renderer falls back to the kind.
+    fn tool_name(&self, meta: &Option<Meta>) -> Option<String>;
 }
 
 /// Superset behavior for any agent without a dedicated strategy. Handles the one
@@ -35,6 +42,15 @@ impl AcpAdapter for DefaultAdapter {
             .as_str()
             .map(str::to_owned)
     }
+
+    fn tool_name(&self, meta: &Option<Meta>) -> Option<String> {
+        meta.as_ref()?
+            .get("claudeCode")?
+            .get("toolName")?
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_owned)
+    }
 }
 
 /// codex-acp. Currently identical to [`DefaultAdapter`]; kept as the explicit
@@ -45,6 +61,10 @@ pub struct CodexAdapter;
 impl AcpAdapter for CodexAdapter {
     fn parent_tool_id(&self, meta: &Option<Meta>) -> Option<String> {
         DefaultAdapter.parent_tool_id(meta)
+    }
+
+    fn tool_name(&self, meta: &Option<Meta>) -> Option<String> {
+        DefaultAdapter.tool_name(meta)
     }
 }
 
@@ -88,12 +108,47 @@ mod tests {
     }
 
     #[test]
+    fn default_reads_claude_tool_name() {
+        // The Claude adapter surfaces its own tool name here (confirmed on real
+        // wire traffic: a Bash tool_call carries `_meta.claudeCode.toolName`).
+        assert_eq!(
+            DefaultAdapter.tool_name(&meta(json!({"claudeCode": {"toolName": "Bash"}}))),
+            Some("Bash".to_owned())
+        );
+    }
+
+    #[test]
+    fn default_tool_name_is_none_without_the_key() {
+        assert_eq!(DefaultAdapter.tool_name(&None), None);
+        assert_eq!(
+            DefaultAdapter.tool_name(&meta(json!({"claudeCode": {"parentToolUseId": "p"}}))),
+            None
+        );
+    }
+
+    #[test]
+    fn default_tool_name_treats_blank_as_absent() {
+        // A blank name would render as a blank header label with no fallback to
+        // the kind, breaking the "never blank" guarantee — treat empty and
+        // whitespace-only alike as absent.
+        assert_eq!(
+            DefaultAdapter.tool_name(&meta(json!({"claudeCode": {"toolName": ""}}))),
+            None
+        );
+        assert_eq!(
+            DefaultAdapter.tool_name(&meta(json!({"claudeCode": {"toolName": "   "}}))),
+            None
+        );
+    }
+
+    #[test]
     fn codex_delegates_to_default_for_now() {
-        let m = meta(json!({"claudeCode": {"parentToolUseId": "toolu_x"}}));
+        let m = meta(json!({"claudeCode": {"parentToolUseId": "toolu_x", "toolName": "Bash"}}));
         assert_eq!(
             CodexAdapter.parent_tool_id(&m),
             DefaultAdapter.parent_tool_id(&m)
         );
+        assert_eq!(CodexAdapter.tool_name(&m), DefaultAdapter.tool_name(&m));
     }
 
     #[test]

@@ -1079,6 +1079,40 @@ pub fn agent_chat_thinking_label() -> String {
     rust_i18n::t!("agent_chat.thinking_label").into_owned()
 }
 
+/// Short, fixed-vocabulary tool-kind labels for the tool-call card header
+/// (Read/Edit/Search/…) — the full title moves to the expanded body instead,
+/// so the header never grows with a long or multiline title.
+pub fn agent_chat_tool_kind_read() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_read").into_owned()
+}
+pub fn agent_chat_tool_kind_edit() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_edit").into_owned()
+}
+pub fn agent_chat_tool_kind_delete() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_delete").into_owned()
+}
+pub fn agent_chat_tool_kind_move() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_move").into_owned()
+}
+pub fn agent_chat_tool_kind_search() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_search").into_owned()
+}
+pub fn agent_chat_tool_kind_execute() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_execute").into_owned()
+}
+pub fn agent_chat_tool_kind_think() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_think").into_owned()
+}
+pub fn agent_chat_tool_kind_fetch() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_fetch").into_owned()
+}
+pub fn agent_chat_tool_kind_switch_mode() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_switch_mode").into_owned()
+}
+pub fn agent_chat_tool_kind_other() -> String {
+    rust_i18n::t!("agent_chat.tool_kind_other").into_owned()
+}
+
 /// Label above a tool call's plain-text output.
 pub fn agent_chat_tool_output_label() -> String {
     rust_i18n::t!("agent_chat.tool_output_label").into_owned()

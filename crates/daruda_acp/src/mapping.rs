@@ -397,6 +397,7 @@ fn upsert_tool_call(items: &mut Vec<ChatItem>, tool_call: &ToolCall, adapter: &d
         id: id.clone(),
         title: tool_call.title.clone(),
         kind: kind_of(&tool_call.kind),
+        tool_name: adapter.tool_name(&tool_call.meta),
         status: status_of(&tool_call.status),
         diffs,
         output,
@@ -649,6 +650,13 @@ mod tests {
             ) -> Option<String> {
                 Some("stub-parent".to_owned())
             }
+
+            fn tool_name(
+                &self,
+                _meta: &Option<agent_client_protocol::schema::v1::Meta>,
+            ) -> Option<String> {
+                Some("stub-tool".to_owned())
+            }
         }
         let mut items = Vec::new();
         apply_update_with(
@@ -660,6 +668,9 @@ mod tests {
             panic!("expected a tool call");
         };
         assert_eq!(tc.parent_tool_id, Some("stub-parent".to_owned()));
+        // The tool name must likewise come from the injected strategy, not a
+        // hardcoded meta read.
+        assert_eq!(tc.tool_name, Some("stub-tool".to_owned()));
     }
 
     #[test]
@@ -1011,6 +1022,7 @@ mod tests {
                 id: "t1".to_string(),
                 title: "Read".to_string(),
                 kind: ToolKindView::Read,
+                tool_name: None,
                 status: ToolStatusView::Completed,
                 diffs: Vec::new(),
                 output: Vec::new(),
@@ -1046,6 +1058,7 @@ mod tests {
                 id: id.to_string(),
                 title: id.to_string(),
                 kind: ToolKindView::Read,
+                tool_name: None,
                 status,
                 diffs: Vec::new(),
                 output: Vec::new(),
@@ -1083,6 +1096,7 @@ mod tests {
             id: format!("{parent}-child"),
             title: "child".to_string(),
             kind: ToolKindView::Read,
+            tool_name: None,
             status,
             diffs: Vec::new(),
             output: Vec::new(),
@@ -1331,6 +1345,7 @@ mod tests {
             id: "t1".to_string(),
             title: "perl -0pi -e ...".to_string(),
             kind: ToolKindView::Execute,
+            tool_name: None,
             status: ToolStatusView::InProgress,
             diffs: Vec::new(),
             output: Vec::new(),

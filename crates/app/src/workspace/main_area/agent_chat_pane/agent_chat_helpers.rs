@@ -856,6 +856,7 @@ mod tests {
             id: id.to_owned(),
             title: "t".to_owned(),
             kind: daruda_acp::ToolKindView::Edit,
+            tool_name: None,
             status,
             diffs: (0..diffs)
                 .map(|i| DiffView {
@@ -1120,6 +1121,7 @@ mod tests {
             id: "c1".to_owned(),
             title: "Grep".to_owned(),
             kind: ToolKindView::Search,
+            tool_name: None,
             status: ToolStatusView::Completed,
             diffs: Vec::new(),
             output: Vec::new(),
