@@ -47,7 +47,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Disclosure, IconName, StatusPulseClock, button_bare, disclosure};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    DiffStat, activity_bar_title, is_active, tool_fold_key,
+    DiffStat, activity_bar_title, is_active, summary_preview_line, tool_fold_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{RenderRow, RowKind};
@@ -738,29 +738,32 @@ pub(super) fn foldable_block<
 }
 
 /// The collapsed-only inline summary for a text block (assistant / thinking):
-/// the first non-empty line of `text`, dimmed (`theme::agent_chat_fg_subtle(cx)`) and
-/// single-line ellipsized via `flex_1().min_w_0()` + `overflow_hidden()` — the
-/// same truncation idiom the path / title elements use, so layout (not a
-/// hardcoded char limit) does the ellipsizing. `italic` matches the thinking
-/// block's treatment. `None` when the text has no non-empty line (nothing to
-/// summarize).
+/// the first non-empty line of `text` with inline markdown flattened to plain
+/// text (via [`summary_preview_line`], so `**bold**` reads as prose, not raw
+/// `**`), dimmed (`theme::agent_chat_fg_subtle(cx)`) and single-line ellipsized
+/// via `flex_1().min_w_0()` + `overflow_hidden()` — the same truncation idiom
+/// the path / title elements use, so layout (not a hardcoded char limit) does
+/// the ellipsizing. A left margin (`AGENT_CHAT_SUMMARY_GAP`) separates it from
+/// the header label. `italic` matches the thinking block's treatment. `None`
+/// when the text has no non-empty line (nothing to summarize).
 pub(super) fn collapsed_text_summary(
     text: &str,
     italic: bool,
     dim: f32,
     cx: &App,
 ) -> Option<AnyElement> {
-    let line = text.lines().find(|l| !l.trim().is_empty())?;
+    let line = summary_preview_line(text)?;
     Some(
         div()
             .flex_1()
             .min_w_0()
+            .ml(px(theme::AGENT_CHAT_SUMMARY_GAP))
             .overflow_hidden()
             .whitespace_nowrap()
             .when(italic, |el| el.italic())
             .text_color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim))
             .text_size(px(theme::agent_chat_font_size(cx)))
-            .child(SharedString::from(line.to_string()))
+            .child(SharedString::from(line))
             .into_any_element(),
     )
 }

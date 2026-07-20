@@ -828,6 +828,10 @@ pub const AGENT_CHAT_FG_MUTED_ALPHA: f32 = 0.62;
 pub const AGENT_CHAT_FG_SUBTLE_ALPHA: f32 = 0.5;
 /// Agent chat message gap (px).
 pub const AGENT_CHAT_MSG_GAP: f32 = GAP_XS;
+/// Extra left gap (px) between a collapsed foldable header's label (agent name /
+/// "Thinking") and its inline one-line preview, so the two read as distinct
+/// rather than running together at the tight `AGENT_CHAT_MSG_GAP`.
+pub const AGENT_CHAT_SUMMARY_GAP: f32 = GAP_STANDARD;
 /// Agent chat message list gap (px).
 pub const AGENT_CHAT_LIST_GAP: f32 = GAP_LG;
 /// Agent chat turn-boundary gap (px) — extra space above a new user message,

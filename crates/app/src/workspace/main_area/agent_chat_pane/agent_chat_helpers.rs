@@ -174,6 +174,39 @@ fn normalize_prompt_title(text: &str) -> String {
     }
 }
 
+/// The single-line preview shown next to a collapsed assistant / thinking
+/// header: the first non-empty line of `text` with inline markdown flattened to
+/// plain text, so `**bold**`, `` `code` ``, `[link](url)`, headings, and list
+/// markers read as clean prose instead of raw syntax (agents routinely open a
+/// reasoning block with a bolded one-liner like `**Planning the change**`).
+///
+/// The whole source is parsed, then text / code spans are concatenated with a
+/// newline on each soft/hard break and block end, so the "first line" is the
+/// first non-empty *rendered* line even when an emphasis run wraps across a
+/// source newline. Returns `None` when there is no visible content.
+pub(in crate::workspace) fn summary_preview_line(text: &str) -> Option<String> {
+    use pulldown_cmark::{Event, Options, Parser, TagEnd};
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    let mut flattened = String::with_capacity(text.len());
+    for event in Parser::new_ext(text, opts) {
+        match event {
+            Event::Text(t) | Event::Code(t) => flattened.push_str(&t),
+            Event::SoftBreak | Event::HardBreak => flattened.push('\n'),
+            Event::End(TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item) => {
+                flattened.push('\n')
+            }
+            _ => {}
+        }
+    }
+    flattened
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
 /// The markdown body of a chat item that can carry a ` ```mermaid ` fence —
 /// assistant / thinking / user text. Tool / permission / error items carry no
 /// markdown body and contribute none. Drives the mermaid scan.
@@ -557,6 +590,36 @@ mod tests {
             activity_bar_title(Some("   "), &items).as_deref(),
             Some("hello")
         );
+    }
+
+    #[test]
+    fn summary_preview_line_flattens_inline_markdown() {
+        // Bold one-liner (the common reasoning-block opener) reads as prose.
+        assert_eq!(
+            summary_preview_line("**Planning the change** and more").as_deref(),
+            Some("Planning the change and more")
+        );
+        // Inline code, links, and italics all flatten to their visible text.
+        assert_eq!(
+            summary_preview_line("Call `foo()` in [the module](https://x)").as_deref(),
+            Some("Call foo() in the module")
+        );
+        // Leading blank lines and a heading marker are skipped / stripped.
+        assert_eq!(
+            summary_preview_line("\n\n# Title here\nbody").as_deref(),
+            Some("Title here")
+        );
+        // A list marker on the first line is dropped, keeping the item text.
+        assert_eq!(
+            summary_preview_line("- first item\n- second").as_deref(),
+            Some("first item")
+        );
+    }
+
+    #[test]
+    fn summary_preview_line_is_none_when_empty() {
+        assert_eq!(summary_preview_line(""), None);
+        assert_eq!(summary_preview_line("   \n\t\n"), None);
     }
 
     #[test]
