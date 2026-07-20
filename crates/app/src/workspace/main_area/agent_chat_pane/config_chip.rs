@@ -52,6 +52,7 @@ pub(in crate::workspace) fn config_chip(
         .collect();
     let current = option.current_value.clone();
     let config_id = option.id.clone();
+    let option_name = option.name.clone();
 
     let chip_id = SharedString::from(format!("agent-chat-config-chip-{pane_id}-{}", option.id));
 
@@ -63,21 +64,42 @@ pub(in crate::workspace) fn config_chip(
         .h(px(theme::BUTTON_HEIGHT))
         .rounded(px(theme::RADIUS_MD))
         .dropdown_menu(move |menu, _window, _cx| {
-            build_config_menu(pane_id, &config_id, &choices, &current, &workspace, menu)
+            build_config_menu(
+                pane_id,
+                &config_id,
+                &option_name,
+                &choices,
+                &current,
+                &workspace,
+                menu,
+            )
         })
 }
 
-/// Build the choice popup menu. One item per choice; the active one gets a
-/// checkmark. Each item is a one-line dispatch into
-/// `Workspace::set_agent_config_option` (render purity; no logic here).
+/// Build the choice popup menu. A non-interactive header names the option
+/// (the chip label only shows the current *value*, e.g. "Off", so the option's
+/// own name — "Fast mode", "Model", … — would otherwise be invisible). One item
+/// per choice follows; the active one gets a checkmark. Each item is a one-line
+/// dispatch into `Workspace::set_agent_config_option` (render purity; no logic
+/// here).
 fn build_config_menu(
     pane_id: PaneId,
     config_id: &str,
+    option_name: &str,
     choices: &[(String, String)],
     current: &str,
     workspace: &WeakEntity<Workspace>,
     menu: PopupMenu,
 ) -> PopupMenu {
+    // Skip the header if the adapter advertised no name — an empty disabled row
+    // would just reserve blank vertical space and the check-icon gutter. A
+    // separator sets the title apart from the choices below.
+    let menu = if option_name.is_empty() {
+        menu
+    } else {
+        menu.label(SharedString::from(option_name.to_string()))
+            .separator()
+    };
     choices.iter().fold(menu, |m, (value, name)| {
         let workspace = workspace.clone();
         let config_id = config_id.to_string();
