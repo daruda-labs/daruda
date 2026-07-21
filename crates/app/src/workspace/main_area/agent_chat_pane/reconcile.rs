@@ -1,7 +1,8 @@
-//! Async reconcilers for the agent chat pane — the two build-once passes that
-//! turn conversation content into GPU-ready artifacts: read-only diff editors
-//! for tool-call file edits, and rasterized mermaid diagrams for ` ```mermaid `
-//! fences.
+//! Async reconcilers for the agent chat pane — the two passes that turn
+//! conversation content into GPU-ready artifacts: read-only diff editors for
+//! tool-call file edits (rebuilt whenever the underlying diff content
+//! changes), and rasterized mermaid diagrams for ` ```mermaid ` fences
+//! (build-once).
 //!
 //! Split out of [`view`](super::view) because both are distinct, async-heavy
 //! responsibilities (window re-entry to build editor entities; background-executor
@@ -18,7 +19,7 @@ use gpui::Context;
 
 use super::agent_chat_helpers::{
     DiffStat, build_diff_view_model, chat_item_markdown, create_diff_editor, diff_editor_key,
-    diff_editor_language, mermaid_key, mermaid_sources,
+    diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources,
 };
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
@@ -28,14 +29,26 @@ use crate::workspace::main_area::file_view_pane::visual;
 
 impl AgentChatView {
     /// Build the read-only diff editor entity for every tool-call file
-    /// modification that does not yet have one. Called from `apply_event` after
-    /// `items` mutates, so the (cached) subtree shows the diff through the same
-    /// editor the File viewer uses rather than the inline fallback.
+    /// modification whose current diff content doesn't match the editor
+    /// already cached for it. Called from `apply_event` after `items` mutates,
+    /// so the (cached) subtree shows the diff through the same editor the File
+    /// viewer uses rather than the inline fallback.
     ///
     /// Keyed by `"{tool_call_id}#{diff_index}"` — one editor per file. A diff is
     /// converted to a `DiffEditorModel` purely (no GPUI), then the editor entity
     /// is created + configured inside a single window re-entry against the
-    /// stored `window_handle`. Build-once: keys are only filled when absent.
+    /// stored `window_handle`.
+    ///
+    /// Rebuilt-on-change, not build-once: `apply_tool_call_update`
+    /// (`daruda_acp::mapping`) replaces a tool call's `diffs` wholesale on every
+    /// `ToolCallUpdate`, so a streaming write/edit can hand this the same
+    /// `{tool_call_id}#{diff_index}` key with growing content across several
+    /// events. Comparing `diff_source_fingerprint` against the fingerprint
+    /// stored when the cached editor was built catches that case — an
+    /// unchanged fingerprint skips the rebuild, a changed one replaces the
+    /// stale editor so it doesn't stay frozen on an early partial snapshot
+    /// (the diff box then undersizes and its tail visually merges into the
+    /// tool card's Output section).
     pub(in crate::workspace) fn reconcile_diff_editors(
         &mut self,
         syntax_theme: &str,
@@ -64,44 +77,61 @@ impl AgentChatView {
 
         // Collect the pure work first; entity creation re-enters the window,
         // which can't happen while the immutable `items` borrow is live.
-        let mut pending: Vec<(String, String, DiffEditorModel, DiffStat)> = Vec::new();
+        let mut pending: Vec<(String, u64, String, DiffEditorModel, DiffStat)> = Vec::new();
+        // A diff that converged to no hunks since its editor was built (the
+        // rare reverted-mid-stream case) needs that stale editor dropped so
+        // the body falls back to the "no changes" / inline render instead of
+        // keeping a frozen one around forever.
+        let mut stale: Vec<String> = Vec::new();
         for item in &self.items {
             let ChatItem::ToolCall(tc) = item else {
                 continue;
             };
             for (di, diff) in tc.diffs.iter().enumerate() {
                 let key = diff_editor_key(&tc.id, di);
-                if self.diff_editors.contains_key(&key) {
+                let fingerprint = diff_source_fingerprint(diff);
+                if self.diff_editor_sources.get(&key) == Some(&fingerprint) {
                     continue;
                 }
                 let Some((model, stat)) =
                     build_diff_view_model(diff, syntax_theme, is_light, &colors)
                 else {
+                    if self.diff_editors.contains_key(&key) {
+                        stale.push(key);
+                    }
                     continue;
                 };
                 let language = diff_editor_language(diff).to_owned();
-                pending.push((key, language, model, stat));
+                pending.push((key, fingerprint, language, model, stat));
             }
         }
-        if pending.is_empty() {
+        if pending.is_empty() && stale.is_empty() {
             return;
+        }
+
+        for key in stale {
+            self.diff_editors.remove(&key);
+            self.diff_stats.remove(&key);
+            self.diff_editor_sources.remove(&key);
         }
 
         let window_handle = self.window_handle;
         let pane_id = self.pane_id;
-        for (key, language, model, stat) in pending {
+        for (key, fingerprint, language, model, stat) in pending {
             if let Some(editor) = create_diff_editor(cx, window_handle, pane_id, &language, model) {
                 // Cache the stat under the same key as the editor so the fold
                 // summary (`+N −M`) reads it back via `diff_editor_key`. Stored
                 // only when the editor builds — a no-change diff yields no
                 // editor and no stat (absent ≡ `0/0`).
                 self.diff_stats.insert(key.clone(), stat);
+                self.diff_editor_sources.insert(key.clone(), fingerprint);
                 self.diff_editors.insert(key, editor);
             }
         }
-        // A tool card just grew, and the touched call may sit mid-list (a
-        // `ToolCallUpdate` to an earlier call), so `sync_list_after`'s tail-only
-        // remeasure isn't enough — do a full one. Once per diff-bearing event.
+        // A tool card just grew (or a stale editor was dropped/replaced), and
+        // the touched call may sit mid-list (a `ToolCallUpdate` to an earlier
+        // call), so `sync_list_after`'s tail-only remeasure isn't enough — do a
+        // full one. Once per diff-bearing event.
         self.list_state.remeasure();
     }
 

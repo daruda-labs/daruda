@@ -8,8 +8,9 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId, Entity,
     EntityId, FocusHandle, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
-    KeyBinding, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Point, RenderOnce, SharedString, Size, StyleRefinement, Styled, Window, div, px,
+    KeyBinding, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, RenderOnce, SharedString, Size, StyleRefinement, Styled, Window,
+    div, px,
 };
 use smol::Timer;
 use smol::stream::StreamExt;
@@ -847,7 +848,14 @@ impl Element for TextView {
             window.on_mouse_event({
                 let state = self.state.clone();
                 move |event: &MouseDownEvent, phase, _, cx| {
-                    if !bounds.contains(&event.position) || !phase.bubble() {
+                    // Only the left button starts/resets a drag selection. A
+                    // right/middle click must leave an existing selection intact
+                    // (e.g. so it survives long enough to act on) — matching
+                    // editor behavior in zed.
+                    if event.button != MouseButton::Left
+                        || !bounds.contains(&event.position)
+                        || !phase.bubble()
+                    {
                         return;
                     }
 
@@ -892,7 +900,15 @@ impl Element for TextView {
                         state.update(cx, |state, _| {
                             state.end_selection();
                         });
-                        GlobalState::global_mut(cx).selecting_state = None;
+                        // Keep this block registered as the current selection
+                        // after the drag ends (mouse released) so a post-drag
+                        // consumer — e.g. a right-click "Copy" context menu — can
+                        // still read it. A drag that ended empty (a plain click)
+                        // deregisters; a later left-down elsewhere clears it via
+                        // the outside-clear handler.
+                        let has_sel = state.read(cx).has_selection();
+                        GlobalState::global_mut(cx).selecting_state =
+                            has_sel.then(|| state.clone());
                         cx.notify(entity_id);
                     }
                 });
@@ -903,7 +919,10 @@ impl Element for TextView {
                 window.on_mouse_event({
                     let state = self.state.clone();
                     move |event: &MouseDownEvent, _, _, cx| {
-                        if bounds.contains(&event.position) {
+                        // Only a left click outside the block clears the
+                        // selection; a right/middle click must not (same
+                        // left-only selection contract as the start handler).
+                        if event.button != MouseButton::Left || bounds.contains(&event.position) {
                             return;
                         }
 
@@ -919,11 +938,12 @@ impl Element for TextView {
     }
 }
 
-/// Opaque handle to the selectable text-view block that currently has an
-/// active drag-selection (mouse held down). Obtained via
-/// [`active_text_selection`]. Lets a host driver (e.g. agent-chat autoscroll)
-/// read the block's bounds and extend or clear the live selection while the
-/// drag runs, without reaching into the private `TextViewState`.
+/// Opaque handle to the selectable text-view block that currently holds a
+/// selection — during a drag *or* after the mouse is released, until the
+/// selection is cleared. Obtained via [`active_text_selection`]. Lets a host
+/// driver read the block's bounds, extend/clear the live selection while a
+/// drag runs (agent-chat autoscroll), or read the selected text for a
+/// right-click "Copy" — without reaching into the private `TextViewState`.
 pub struct TextSelectionHandle(Entity<TextViewState>);
 
 impl TextSelectionHandle {
@@ -932,9 +952,15 @@ impl TextSelectionHandle {
         self.0.read(cx).bounds
     }
 
-    /// Whether the block is still in an active drag-selection.
+    /// Whether the block is still in an active drag-selection (mouse held).
+    /// `false` once the mouse is released even while the selection persists.
     pub fn is_selecting(&self, cx: &App) -> bool {
         self.0.read(cx).is_selecting
+    }
+
+    /// The currently-selected text, if the selection is non-empty.
+    pub fn selection_text(&self, cx: &App) -> Option<String> {
+        self.0.read(cx).selection_text()
     }
 
     /// Extend the selection's end to `pos` (window coordinates). Reuses the
@@ -952,8 +978,8 @@ impl TextSelectionHandle {
     }
 }
 
-/// Return a handle to the selectable text-view block that currently has an
-/// active drag-selection, if any. `None` when no block is mid-drag.
+/// Return a handle to the selectable text-view block that currently holds a
+/// selection (during or after a drag), if any. `None` when nothing is selected.
 pub fn active_text_selection(cx: &App) -> Option<TextSelectionHandle> {
     GlobalState::global(cx)
         .selecting_state

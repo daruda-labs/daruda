@@ -30,7 +30,7 @@ use gpui::{
 
 use super::agent_chat_helpers::{
     DiffStat, apply_info_field, cancel_pending_permission, collect_foldable_keys, fold_active,
-    permission_card_mut,
+    fold_key_item_index, permission_card_mut,
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
@@ -385,11 +385,17 @@ pub(in crate::workspace) struct AgentChatView {
     pub(in crate::workspace) cancel_in_flight: bool,
     /// Read-only diff editor entities for tool-call file modifications, keyed by
     /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
-    /// Built once per diff by `reconcile_diff_editors` — the same
-    /// diff-through-editor renderer the File viewer uses. Entities are created
-    /// in the reconcile op, never in `render` (which only embeds them).
+    /// Built (and rebuilt on content change) by `reconcile_diff_editors` — the
+    /// same diff-through-editor renderer the File viewer uses. Entities are
+    /// created in the reconcile op, never in `render` (which only embeds them).
     pub(in crate::workspace) diff_editors:
         HashMap<String, Entity<gpui_component::input::InputState>>,
+    /// `diff_source_fingerprint` of the diff each `diff_editors` entry was
+    /// built from, same keys as `diff_editors`. Lets `reconcile_diff_editors`
+    /// detect a `ToolCallUpdate` that replaced a tool call's diffs (streaming
+    /// write/edit growing from a partial snapshot) and rebuild instead of
+    /// leaving the cached editor frozen on stale content.
+    pub(in crate::workspace) diff_editor_sources: HashMap<String, u64>,
     /// Added / removed line counts per tool-call diff, keyed by the same
     /// `"{tool_call_id}#{diff_index}"` as `diff_editors`. Runtime cache —
     /// never serialized (the conversation itself is not persisted, only `cwd`).
@@ -786,6 +792,7 @@ impl AgentChatView {
             post_turn_dirty_at: None,
             cancel_in_flight: false,
             diff_editors: HashMap::new(),
+            diff_editor_sources: HashMap::new(),
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
             mermaid_inflight: HashSet::new(),
@@ -1823,10 +1830,27 @@ impl AgentChatView {
         // `rows::project` uses to derive the default collapsed state — so the
         // first click flips the *visible* state rather than a stale re-derivation.
         let active = fold_active(&key, &self.items);
+        // Resolve before the key moves into `fold.toggle` below: a nested fold
+        // (a tool card's own body, one of its diffs, its raw-input disclosure,
+        // or a nested subagent card) only changes its *owning row's* rendered
+        // height in place — no `RenderRow::hidden` flip anywhere — so
+        // `rebuild_rows`'s hidden-range diff can't see it and falls back to
+        // remeasuring the tail, leaving that row's cached height stale (content
+        // clips or overlaps the next row). Remeasure it explicitly whenever we
+        // can resolve which row owns the toggled key.
+        let item_ix = fold_key_item_index(&key, &self.items);
         self.fold.toggle(key, active);
         // A fold change flips row `hidden` flags (and may collapse a group):
         // reproject + reflow the affected span.
         self.rebuild_rows();
+        if let Some(item_ix) = item_ix
+            && let Some(row_ix) = self
+                .rows
+                .iter()
+                .position(|r| matches!(r.kind, RowKind::AgentItem(ix) if ix == item_ix))
+        {
+            self.list_state.remeasure_items(row_ix..row_ix + 1);
+        }
         cx.notify();
     }
 
@@ -1837,6 +1861,12 @@ impl AgentChatView {
         self.fold.set_all(keys, expanded);
         // Bulk expand/collapse flips many row `hidden` flags: reproject + reflow.
         self.rebuild_rows();
+        // Unlike a single `toggle_fold`, this can change dozens of rows' inner
+        // content height at once (every tool card's body, every diff, every
+        // raw-input disclosure) with no per-row hidden flip to key a targeted
+        // remeasure off of — a full remeasure is the correct (if broader) fix
+        // here, same as `respond_permission`'s reflow.
+        self.list_state.remeasure();
         cx.notify();
     }
 
@@ -1920,6 +1950,7 @@ impl AgentChatView {
         self.cancel_in_flight = false;
         self.session_usage = None;
         self.diff_editors.clear();
+        self.diff_editor_sources.clear();
         self.diff_stats.clear();
         self.mermaid_inflight.clear();
         if let Ok(mut m) = self.mermaid_images.lock() {

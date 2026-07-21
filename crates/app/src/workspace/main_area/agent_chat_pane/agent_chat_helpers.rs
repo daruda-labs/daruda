@@ -13,7 +13,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AnyWindowHandle, AppContext as _, Context, Entity};
 
 use super::fold::{FoldKey, FoldState};
-use super::rows::{RowKind, project};
+use super::rows::{RowKind, SUBAGENT_NEST_DEPTH_CAP, project};
 use super::view::AgentChatView;
 use crate::path_ext::PathExt as _;
 use crate::workspace::main_area::file_view_pane::diff_editor::{
@@ -131,6 +131,23 @@ pub(in crate::workspace) fn renders_raw_input(tc: &daruda_acp::ToolCallItem) -> 
 /// with the renderer so the embed lookup matches the insert key.
 pub(in crate::workspace) fn diff_editor_key(tool_call_id: &str, di: usize) -> String {
     format!("{tool_call_id}#{di}")
+}
+
+/// Content fingerprint of a diff's editor-relevant fields (`old_text` +
+/// `new_text`). `reconcile_diff_editors` stores this alongside each built
+/// editor and compares it against the diff's *current* fingerprint on every
+/// pass: unchanged means the cached editor still matches; changed means a
+/// `ToolCallUpdate` replaced the diff since the editor was built (e.g. a
+/// streaming write growing from a partial snapshot to the final content) and
+/// the editor is stale and must be rebuilt. Not cryptographic — a same-key
+/// collision would only skip a rebuild it should have done, an acceptable
+/// cost for a `DefaultHasher` over ordinary diff sizes.
+pub(in crate::workspace) fn diff_source_fingerprint(diff: &DiffView) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    diff.old_text.hash(&mut hasher);
+    diff.new_text.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Max glyphs the first-prompt fallback title keeps before ellipsizing, and the
@@ -485,6 +502,64 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
         // Diff (DefaultExpanded), raw-input and subagent (DefaultCollapsed) all
         // ignore `active` in their policy, so the value is irrelevant here.
         FoldKey::Diff(_) | FoldKey::ToolRawInput(_) | FoldKey::Subagent(_) => false,
+    }
+}
+
+/// The `items` index of the tool call that owns a `RenderRow` for `tool_id`:
+/// itself if it has no live parent in `items`, else walked up through
+/// `parent_tool_id` to the ancestor `rows::project` actually gives a row
+/// (nested subagent children render inside their parent's card and earn no
+/// row of their own — see `is_nested_child`). Depth-bounded like
+/// `subagent_subtree_live`, for the same malformed/cyclic-id safety.
+fn top_level_tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usize> {
+    use daruda_acp::ChatItem;
+    let mut current = tool_id;
+    let mut owned = String::new();
+    for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
+        let (ix, parent) = items.iter().enumerate().find_map(|(ix, item)| match item {
+            ChatItem::ToolCall(tc) if tc.id == current => Some((ix, tc.parent_tool_id.clone())),
+            _ => None,
+        })?;
+        match parent {
+            Some(pid)
+                if items
+                    .iter()
+                    .any(|it| matches!(it, ChatItem::ToolCall(p) if p.id == pid)) =>
+            {
+                owned = pid;
+                current = &owned;
+            }
+            _ => return Some(ix),
+        }
+    }
+    None
+}
+
+/// The `self.rows` index a fold toggle on `key` must remeasure so its stale
+/// cached row height doesn't clip/overlap neighboring rows. `Assistant` /
+/// `Thinking` are their own row, keyed directly by item index. `Tool` /
+/// `Subagent` / `ToolRawInput` / `Diff` (keyed by tool-call id, `Diff` as
+/// `"{tool_id}#{diff_index}"`) only ever change *their owning row's* rendered
+/// height in place — never a `RenderRow::hidden` flip anywhere — so
+/// `rebuild_rows`'s hidden-range diff can't see them and falls back to
+/// remeasuring the tail, leaving a stale height on whichever row actually
+/// changed (the diff-collapse clipping bug). `Response` / `ToolGroup`
+/// collapse instead hides their child rows, which the hidden-range diff
+/// already catches correctly, so they resolve to `None` here.
+pub(in crate::workspace) fn fold_key_item_index(
+    key: &FoldKey,
+    items: &[daruda_acp::ChatItem],
+) -> Option<usize> {
+    match key {
+        FoldKey::Assistant(ix) | FoldKey::Thinking(ix) => Some(*ix),
+        FoldKey::Tool(id) | FoldKey::Subagent(id) | FoldKey::ToolRawInput(id) => {
+            top_level_tool_item_index(items, id)
+        }
+        FoldKey::Diff(diff_key) => {
+            let tool_id = diff_key.split('#').next().unwrap_or(diff_key.as_str());
+            top_level_tool_item_index(items, tool_id)
+        }
+        FoldKey::Response(_) | FoldKey::ToolGroup(_) => None,
     }
 }
 
@@ -847,6 +922,39 @@ mod tests {
         assert_eq!(diff_editor_key("call-1", 0), "call-1#0");
         assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-1", 1));
         assert_ne!(diff_editor_key("call-1", 0), diff_editor_key("call-2", 0));
+    }
+
+    /// A diff whose `new_text` grows (the streaming-write case: an editor was
+    /// built from an early partial snapshot, then a later `ToolCallUpdate`
+    /// replaces the diff with the full content) must fingerprint differently
+    /// so `reconcile_diff_editors` rebuilds instead of keeping the stale
+    /// editor. Same content must fingerprint identically so an unrelated
+    /// tool-call touch doesn't churn the editor every pass.
+    #[test]
+    fn diff_source_fingerprint_changes_when_content_changes() {
+        let partial = DiffView {
+            path: std::path::PathBuf::from("/tmp/x.rs"),
+            old_text: None,
+            new_text: "fn greet() {}\n".to_owned(),
+        };
+        let full = DiffView {
+            path: std::path::PathBuf::from("/tmp/x.rs"),
+            old_text: None,
+            new_text: "fn greet() {}\nfn farewell() {}\n".to_owned(),
+        };
+        let partial_again = DiffView {
+            path: std::path::PathBuf::from("/tmp/x.rs"),
+            old_text: None,
+            new_text: "fn greet() {}\n".to_owned(),
+        };
+        assert_ne!(
+            diff_source_fingerprint(&partial),
+            diff_source_fingerprint(&full)
+        );
+        assert_eq!(
+            diff_source_fingerprint(&partial),
+            diff_source_fingerprint(&partial_again)
+        );
     }
 
     /// A tool-call item with a given status and diff list, for `is_active` and

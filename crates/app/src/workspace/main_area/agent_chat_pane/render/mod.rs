@@ -45,7 +45,10 @@ use tool::{permission_card, tool_card};
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{Disclosure, IconName, StatusPulseClock, button_bare, disclosure};
+use crate::ui::{
+    ContextMenuExt, Disclosure, IconName, PopupMenuItem, StatusPulseClock, active_text_selection,
+    button_bare, disclosure, menu_builder,
+};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
     DiffStat, activity_bar_title, is_active, summary_preview_line, tool_fold_key,
 };
@@ -182,6 +185,27 @@ pub(in crate::workspace) fn render(
                 t.file_viewer_scrollbar_thumb_hover,
             ))
             .children(scroll_btn)
+            // Right-click over selected text offers Copy. The selected text is
+            // captured at menu-build time (the right-click) because clicking the
+            // item is a left-click outside the text block, which clears the
+            // selection before the item handler runs. No selection → empty menu,
+            // which `ContextMenu` suppresses (nothing shows on an empty area).
+            .context_menu(menu_builder(|menu, _window, cx| {
+                let Some(text) = active_text_selection(cx)
+                    .and_then(|sel| sel.selection_text(cx))
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                else {
+                    return menu;
+                };
+                menu.item(
+                    PopupMenuItem::new(SharedString::from(s::menu_copy())).on_click(
+                        move |_, _window, app| {
+                            app.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                        },
+                    ),
+                )
+            }))
             .into_any_element()
     };
 
