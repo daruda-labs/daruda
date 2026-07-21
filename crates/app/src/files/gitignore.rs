@@ -2,10 +2,10 @@
 //!
 //! Supports nested `.gitignore` files: each subdirectory with one gets a
 //! `Gitignore` anchored to it, applied only to paths under that directory.
-//! Discovery skips subtrees already ignored by the root rules (`.gitignore`
-//! + `.git/info/exclude`) or an ancestor nested matcher. `is_ignored`
-//! evaluates most-specific (deepest) to least-specific (root), so a
-//! subdirectory `!negation` can override a parent rule — matching Git.
+//! Discovery skips subtrees already ignored by the root rules
+//! (`.gitignore` and `.git/info/exclude`) or an ancestor nested matcher.
+//! `is_ignored` evaluates most-specific (deepest) to least-specific (root),
+//! so a subdirectory `!negation` can override a parent rule — matching Git.
 
 use std::path::{Path, PathBuf};
 

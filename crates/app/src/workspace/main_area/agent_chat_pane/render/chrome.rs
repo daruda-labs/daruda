@@ -111,11 +111,12 @@ pub(super) fn activity_bar(
         // detail + optional cost in the tooltip. Distinct from the cumulative
         // Usage tab. Shown only once the agent reports usage.
         .when_some(props.usage, |row, u| {
-            let pct = if u.size > 0 {
-                (u.used.saturating_mul(100) / u.size).min(100) as u8
-            } else {
-                0
-            };
+            let pct = u
+                .used
+                .saturating_mul(100)
+                .checked_div(u.size)
+                .map(|p| p.min(100) as u8)
+                .unwrap_or(0);
             let cost = u
                 .cost
                 .as_ref()

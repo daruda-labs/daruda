@@ -526,7 +526,7 @@ pub(in crate::workspace) fn fold_active(key: &FoldKey, items: &[daruda_acp::Chat
 fn top_level_tool_item_index(items: &[daruda_acp::ChatItem], tool_id: &str) -> Option<usize> {
     use daruda_acp::ChatItem;
     let mut current = tool_id;
-    let mut owned = String::new();
+    let mut owned: String;
     for _ in 0..SUBAGENT_NEST_DEPTH_CAP {
         let (ix, parent) = items.iter().enumerate().find_map(|(ix, item)| match item {
             ChatItem::ToolCall(tc) if tc.id == current => Some((ix, tc.parent_tool_id.clone())),

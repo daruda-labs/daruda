@@ -1,5 +1,5 @@
 //! Lane lifecycle operations on `Workspace`: create / remove validation
-//! + execution, modal openers, slot-id allocation, and the lane
+//! and execution, modal openers, slot-id allocation, and the lane
 //! activation path (re-points `active` into the single runtimes map).
 //! Git CLI runs on `cx.background_executor`; post-git state mutations
 //! return via `cx.update`.
