@@ -9,12 +9,12 @@ use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, div, prelude::*, px
 
 use super::chrome::pulse_dots;
 use super::diff::diff_block;
-use super::{DiffEditors, DiffStats, ToggleTarget, foldable_block};
+use super::{DiffEditors, DiffStats, ToggleTarget, ToolImages, foldable_block};
 use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{Icon, IconName, Sizable as _};
 use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::{
-    diff_editor_key, fold_active, renders_raw_input, tool_fold_key,
+    diff_editor_key, fold_active, renders_raw_input, tool_fold_key, tool_image_key,
 };
 use crate::workspace::main_area::agent_chat_pane::fold::{FoldKey, FoldState};
 use crate::workspace::main_area::agent_chat_pane::rows::{
@@ -38,6 +38,7 @@ pub(super) fn tool_card(
     items: &[ChatItem],
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
+    tool_images: &ToolImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
@@ -216,7 +217,7 @@ pub(super) fn tool_card(
                 .child(SharedString::from(s::agent_chat_tool_output_label())),
         );
         for (ix, block) in tc.output.iter().enumerate() {
-            body = body.child(output_block_view(&tc.id, ix, block, dim, cx));
+            body = body.child(output_block_view(&tc.id, ix, block, tool_images, dim, cx));
         }
     }
 
@@ -272,6 +273,7 @@ pub(super) fn tool_card(
                     items,
                     diff_editors,
                     diff_stats,
+                    tool_images,
                     fold,
                     t,
                     dim,
@@ -332,17 +334,74 @@ fn output_block_view(
     tool_id: &str,
     ix: usize,
     block: &ToolOutputBlock,
+    tool_images: &ToolImages,
     dim: f32,
     cx: &App,
 ) -> AnyElement {
     match block {
-        ToolOutputBlock::Text(text) => crate::ui::markdown(
-            SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
-            text.clone(),
-        )
-        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .into_any_element(),
+        ToolOutputBlock::Text {
+            text,
+            truncated_from,
+        } => {
+            let markdown = crate::ui::markdown(
+                SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
+                text.clone(),
+            )
+            .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .into_any_element();
+            let Some(original_len) = truncated_from else {
+                return markdown;
+            };
+            div()
+                .flex()
+                .flex_col()
+                .child(markdown)
+                .child(
+                    div()
+                        .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                        .text_size(px(theme::agent_chat_font_size(cx)))
+                        .child(s::agent_chat_tool_output_truncated(*original_len)),
+                )
+                .into_any_element()
+        }
+        ToolOutputBlock::Image { data, mime } => {
+            let key = tool_image_key(data);
+            let cached = tool_images.lock().unwrap().get(&key).cloned();
+            match cached {
+                // Decoded and GPU-ready — render the real bitmap.
+                Some(Some(image)) => image.block(),
+                // Decode failed (malformed base64 / unsupported format) —
+                // fall back to the binary-descriptor label (mime + the
+                // approximate decoded byte size, `base64_len / 4 * 3`) so the
+                // card still shows something useful instead of a dead
+                // placeholder that never resolves.
+                Some(None) => div()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(s::agent_chat_tool_media_label(
+                        mime,
+                        data.len() / 4 * 3,
+                    )))
+                    .into_any_element(),
+                // Not yet decoded / still in flight — a dimmed placeholder
+                // stands in so the card shows *something* useful instead of a
+                // (truncated) base64 blob. `reconcile_tool_images` fills the
+                // cache and notifies once the decode lands.
+                None => div()
+                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                    .text_size(px(theme::agent_chat_font_size(cx)))
+                    .child(SharedString::from(s::agent_chat_tool_image_placeholder()))
+                    .into_any_element(),
+            }
+        }
+        ToolOutputBlock::Media { mime, byte_len } => div()
+            .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+            .text_size(px(theme::agent_chat_font_size(cx)))
+            .child(SharedString::from(s::agent_chat_tool_media_label(
+                mime, *byte_len,
+            )))
+            .into_any_element(),
         ToolOutputBlock::ResourceLink { uri, name } => {
             let uri = uri.clone();
             crate::ui::button(

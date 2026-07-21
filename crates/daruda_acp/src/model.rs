@@ -100,13 +100,23 @@ impl ToolCallItem {
     }
 }
 
-/// A single block of tool-call output. Typed so non-text content (resource
-/// links) survives rather than being flattened to a string. Image / audio /
-/// embedded-resource blocks are not carried yet (dropped in `split_content`).
+/// A single block of tool-call output. Typed so non-text content (images,
+/// audio, embedded blobs, resource links) survives rather than being
+/// flattened to a base64 text blob.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolOutputBlock {
-    /// Plain text — rendered verbatim and selectable.
-    Text(String),
+    /// Plain text — rendered verbatim and selectable. `truncated_from` is
+    /// `Some(original_byte_len)` when the text was capped, `None` otherwise.
+    Text {
+        text: String,
+        truncated_from: Option<usize>,
+    },
+    /// A decodable image; `data` is base64 (decoded to a real image at the app
+    /// render boundary). `mime` may be empty when the source omitted it.
+    Image { data: String, mime: String },
+    /// A non-rendered binary payload (audio, embedded blob). Carries only a
+    /// descriptor; `byte_len` is the estimated decoded size for a label.
+    Media { mime: String, byte_len: usize },
     /// A resource the tool produced or referenced — rendered as an open button.
     ResourceLink { uri: String, name: String },
 }

@@ -252,6 +252,18 @@ pub(in crate::workspace) fn mermaid_key(source: &str, dark: bool) -> u64 {
     hasher.finish()
 }
 
+/// Stable cache key for a tool-output `Image` block's base64 payload, shared
+/// between the decoder (`reconcile_tool_images`, insert) and the renderer
+/// (`output_block_view`, lookup) so the embed matches what was cached.
+/// `DefaultHasher` is process-stable, which is all the in-memory cache needs —
+/// not cryptographic, so a collision would at worst reuse a cached texture.
+pub(in crate::workspace) fn tool_image_key(data: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Extract the source of every **closed** ` ```mermaid ` fence in `text`, in
 /// document order. Only closed fences are returned: a still-streaming (never
 /// terminated) trailing `mermaid` fence is skipped so a half-arrived diagram
@@ -1141,6 +1153,14 @@ mod tests {
             mermaid_key("graph TD\nA-->B", true),
             mermaid_key("graph TD\nA-->B", false)
         );
+    }
+
+    /// The tool-image cache key is stable for the same base64 payload and
+    /// distinct across different payloads — mirrors `mermaid_key_is_stable_and_distinct`.
+    #[test]
+    fn tool_image_key_is_stable_and_distinct() {
+        assert_eq!(tool_image_key("abcd1234"), tool_image_key("abcd1234"));
+        assert_ne!(tool_image_key("abcd1234"), tool_image_key("wxyz5678"));
     }
 
     /// The visible foldable-key set the expand-all / collapse-all op builds.

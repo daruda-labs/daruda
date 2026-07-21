@@ -1128,6 +1128,51 @@ pub fn agent_chat_tool_group_count(count: usize) -> String {
     rust_i18n::t!("agent_chat.tool_group_count", count = count).into_owned()
 }
 
+/// Marker shown below a tool-output text block that was capped before
+/// reaching the render model (`ToolOutputBlock::Text::truncated_from`),
+/// e.g. "… (truncated, 1.2 MB total)". `original_bytes` is the untruncated
+/// byte length.
+pub fn agent_chat_tool_output_truncated(original_bytes: usize) -> String {
+    let size = format_byte_size(original_bytes);
+    rust_i18n::t!("agent_chat.tool_output_truncated", size = size).into_owned()
+}
+
+/// Placeholder shown in place of a tool's image output block while its base64
+/// payload is still being decoded (or hasn't been scanned yet) — decode runs
+/// asynchronously on the background executor via `reconcile_tool_images`, so
+/// this dimmed one-line stand-in covers the brief gap before the real image
+/// (or, on decode failure, `agent_chat_tool_media_label`) replaces it.
+pub fn agent_chat_tool_image_placeholder() -> String {
+    rust_i18n::t!("agent_chat.tool_image_placeholder").into_owned()
+}
+
+/// Descriptor label for a non-rendered binary tool-output block (audio, or an
+/// embedded blob resource), e.g. "[audio/mp3 · 128 KB]". `mime` may be empty
+/// (the source omitted it, an explicitly allowed case) — rendering it through
+/// the `mime`-carrying key then would produce a stray leading space and
+/// middot ("[ · 128 KB]"), so an empty `mime` renders through a dedicated
+/// no-mime key instead, e.g. "[128 KB]".
+pub fn agent_chat_tool_media_label(mime: &str, byte_len: usize) -> String {
+    let size = format_byte_size(byte_len);
+    if mime.is_empty() {
+        rust_i18n::t!("agent_chat.tool_media_label_no_mime", size = size).into_owned()
+    } else {
+        rust_i18n::t!("agent_chat.tool_media_label", mime = mime, size = size).into_owned()
+    }
+}
+
+/// Human-readable byte size in KB/MB, e.g. "64 KB" / "1.2 MB".
+fn format_byte_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= MB {
+        format!("{:.1} MB", bytes / MB)
+    } else {
+        format!("{:.0} KB", bytes / KB)
+    }
+}
+
 /// Tool-call status badge — executing.
 pub fn agent_chat_tool_status_running() -> String {
     rust_i18n::t!("agent_chat.tool_status_running").into_owned()
@@ -3282,6 +3327,32 @@ mod tests {
     #[test]
     fn telegram_reply_ack_is_non_empty() {
         assert!(!super::agent_notification_telegram_reply_ack().is_empty());
+    }
+
+    #[test]
+    fn format_byte_size_below_512_rounds_down_to_0_kb() {
+        // `{:.0}` rounds a KB fraction to the nearest integer, so everything
+        // below the 512-byte half-KB midpoint (inclusive, round-half-to-even)
+        // reads "0 KB" rather than "1 KB".
+        assert_eq!(format_byte_size(0), "0 KB");
+        assert_eq!(format_byte_size(511), "0 KB");
+        assert_eq!(format_byte_size(512), "0 KB");
+        assert_eq!(format_byte_size(513), "1 KB");
+    }
+
+    #[test]
+    fn format_byte_size_mb_range_shows_one_decimal() {
+        assert_eq!(format_byte_size(2 * 1024 * 1024), "2.0 MB");
+    }
+
+    #[test]
+    fn tool_media_label_empty_mime_has_no_stray_separator() {
+        // An empty `mime` (the source omitted it) must not render through the
+        // `mime`-carrying key, which would leave a stray leading space and
+        // middot ("[ · 128 KB]").
+        let label = agent_chat_tool_media_label("", 1024);
+        assert_eq!(label, "[1 KB]");
+        assert!(!label.contains('·'));
     }
 
     #[test]

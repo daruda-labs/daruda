@@ -411,6 +411,17 @@ pub(in crate::workspace) struct AgentChatView {
     /// `reconcile_mermaid` doesn't re-spawn the same diagram while it is still
     /// rendering on the background executor. Runtime cache; never serialized.
     pub(in crate::workspace) mermaid_inflight: HashSet<u64>,
+    /// Decoded tool-output images keyed by base64-content hash
+    /// (`tool_image_key`). `Some` = decoded & GPU-ready; `None` = decode failed
+    /// (so a failure label renders instead and the key is never re-spawned).
+    /// Filled async by `reconcile_tool_images`. Shared `Arc<Mutex<…>>` for the
+    /// same reason as `mermaid_images`. Runtime cache; never serialized.
+    pub(in crate::workspace) tool_images: Arc<Mutex<HashMap<u64, Option<CachedImage>>>>,
+    /// Content hashes with a decode currently spawned, so
+    /// `reconcile_tool_images` doesn't re-spawn the same image while it is
+    /// still decoding on the background executor. Runtime cache; never
+    /// serialized.
+    pub(in crate::workspace) tool_image_inflight: HashSet<u64>,
     /// Per-conversation fold state — which blocks the user has explicitly
     /// expanded / collapsed. Transient / session-only; never serialized.
     pub(in crate::workspace) fold: FoldState,
@@ -761,6 +772,7 @@ impl AgentChatView {
         let theme_observer = cx.observe_global::<crate::ui::theme::DarudaTheme>(|this, cx| {
             let dark = Self::host_is_dark(cx);
             this.reconcile_mermaid(dark, cx);
+            this.reconcile_tool_images(cx);
         });
         Self {
             pane_id,
@@ -796,6 +808,8 @@ impl AgentChatView {
             diff_stats: HashMap::new(),
             mermaid_images: Arc::new(Mutex::new(HashMap::new())),
             mermaid_inflight: HashSet::new(),
+            tool_images: Arc::new(Mutex::new(HashMap::new())),
+            tool_image_inflight: HashSet::new(),
             fold: FoldState::default(),
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
@@ -1233,6 +1247,12 @@ impl AgentChatView {
         // rescan the whole `items` vec per chunk — O(n²) over a long turn.
         if touched_tool {
             self.reconcile_diff_editors(syntax_theme, is_light, cx);
+            // Tool-output images arrive on a `ToolCall`/`ToolCallUpdate`
+            // (`touched_tool`), never on `touched_text` (that flag is set only
+            // for assistant/thinking/user message text) — gate here, not next
+            // to `reconcile_mermaid` below, or an image-only tool update would
+            // never get scanned.
+            self.reconcile_tool_images(cx);
         }
         if touched_text {
             self.reconcile_mermaid(!is_light, cx);
@@ -1506,9 +1526,10 @@ impl AgentChatView {
         self.items.push(ChatItem::UserText(text));
         // There is no `ToolCall` at a prompt-echo, so the diff reconcile would
         // be a no-op here; diff editors are reconciled solely on the event-pump
-        // path. The echoed `UserText` renders its markdown directly; a prompt
-        // may carry a ` ```mermaid ` fence, so rasterize those (no-op when
-        // there are none).
+        // path. Same reasoning rules out `reconcile_tool_images` here — no
+        // ToolCall at a prompt echo, so no tool image to reconcile. The echoed
+        // `UserText` renders its markdown directly; a prompt may carry a
+        // ` ```mermaid ` fence, so rasterize those (no-op when there are none).
         let dark = Self::host_is_dark(cx);
         self.reconcile_mermaid(dark, cx);
         self.rebuild_rows();
@@ -1954,6 +1975,10 @@ impl AgentChatView {
         self.diff_stats.clear();
         self.mermaid_inflight.clear();
         if let Ok(mut m) = self.mermaid_images.lock() {
+            m.clear();
+        }
+        self.tool_image_inflight.clear();
+        if let Ok(mut m) = self.tool_images.lock() {
             m.clear();
         }
         self.fold = FoldState::default();

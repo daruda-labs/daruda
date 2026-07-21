@@ -36,6 +36,19 @@ pub(super) type MermaidImages = std::sync::Arc<
     >,
 >;
 
+/// Decoded tool-output images keyed by base64-content hash (`tool_image_key`).
+/// `Some` = decoded & GPU-ready; `None` = a cached decode failure. Shared so
+/// `output_block_view` sees async decode arrivals landed by
+/// `reconcile_tool_images`.
+pub(super) type ToolImages = std::sync::Arc<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            u64,
+            Option<crate::workspace::main_area::file_view_pane::render::CachedImage>,
+        >,
+    >,
+>;
+
 use blocks::{
     assistant_block, assistant_markdown, conclusion_block, error_block, thinking_block, user_bubble,
 };
@@ -287,6 +300,7 @@ fn render_row(
                 &this.diff_editors,
                 &this.diff_stats,
                 &this.mermaid_images,
+                &this.tool_images,
                 &this.fold,
                 t,
                 this.dim_amount,
@@ -654,6 +668,7 @@ fn render_item(
     diff_editors: &DiffEditors,
     diff_stats: &DiffStats,
     mermaid_images: &MermaidImages,
+    tool_images: &ToolImages,
     fold: &FoldState,
     t: &theme::DarudaTheme,
     dim: f32,
@@ -698,6 +713,7 @@ fn render_item(
                 items,
                 diff_editors,
                 diff_stats,
+                tool_images,
                 fold,
                 t,
                 dim,

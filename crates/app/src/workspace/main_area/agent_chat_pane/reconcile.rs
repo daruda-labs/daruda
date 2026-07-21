@@ -13,13 +13,13 @@
 //! [`AgentChatView::apply_event`](super::view::AgentChatView::apply_event) gated
 //! on `touched_tool` / `touched_text`.
 
-use daruda_acp::ChatItem;
+use daruda_acp::{ChatItem, ToolOutputBlock};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::Context;
 
 use super::agent_chat_helpers::{
     DiffStat, build_diff_view_model, chat_item_markdown, create_diff_editor, diff_editor_key,
-    diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources,
+    diff_editor_language, diff_source_fingerprint, mermaid_key, mermaid_sources, tool_image_key,
 };
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
@@ -208,6 +208,95 @@ impl AgentChatView {
                         view.list_state.remeasure();
                         cx.notify();
                     }
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// Decode every tool-output `Image` block in the conversation that does not
+    /// yet have a cached bitmap (and isn't already being decoded). Mirrors
+    /// [`Self::reconcile_mermaid`]'s collect-then-spawn shape, minus the `dark`
+    /// theming (tool images are rendered as-is, not re-themed) — collect the
+    /// pure work first, then decode each on the background executor
+    /// (`image::load_from_memory` can be costly for a large screenshot), and
+    /// re-enter the view to fill the cache + `cx.notify()` when it lands.
+    ///
+    /// A decode failure caches `None` under the key rather than leaving it
+    /// absent, so a malformed payload renders a failure label once instead of
+    /// retrying forever.
+    pub(in crate::workspace) fn reconcile_tool_images(&mut self, cx: &mut Context<Self>) {
+        // Collect the not-yet-cached, not-in-flight images first; the spawn
+        // re-enters the view, which can't happen while the `items` borrow is
+        // live.
+        let mut pending: Vec<(u64, String)> = Vec::new();
+        for item in &self.items {
+            let ChatItem::ToolCall(tc) = item else {
+                continue;
+            };
+            for block in &tc.output {
+                let ToolOutputBlock::Image { data, .. } = block else {
+                    continue;
+                };
+                let key = tool_image_key(data);
+                if self.tool_images.lock().unwrap().contains_key(&key)
+                    || self.tool_image_inflight.contains(&key)
+                    || pending.iter().any(|(k, _)| *k == key)
+                {
+                    continue;
+                }
+                pending.push((key, data.clone()));
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+
+        // Mark all pending keys in-flight before spawning so a second event
+        // arriving before any task resolves doesn't re-spawn the same image.
+        for (key, _) in &pending {
+            self.tool_image_inflight.insert(*key);
+        }
+
+        for (key, data) in pending {
+            cx.spawn(async move |this, cx| {
+                let raster = cx
+                    .background_executor()
+                    .spawn(async move {
+                        // The decoder is a third-party crate over untrusted
+                        // agent-supplied bytes; guard against a panic on
+                        // malformed input so one bad payload can't take the
+                        // executor down — on panic / error we drop it (cached
+                        // as a failure below) instead of retrying.
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            use base64::Engine as _;
+                            base64::engine::general_purpose::STANDARD
+                                .decode(&data)
+                                .ok()
+                                .and_then(|bytes| visual::decode_image(&bytes).ok())
+                        }))
+                        .ok()
+                        .flatten()
+                    })
+                    .await;
+                // SILENT-OK: view/window dropped before the decode resolved — nothing left to cache it on.
+                let _ = this.update(cx, |view, cx| {
+                    view.tool_image_inflight.remove(&key);
+                    // Convert the raster to a GPU-ready image here (main
+                    // thread), same as `reconcile_mermaid` — once, so the
+                    // render hook clones the same `CachedImage` each frame.
+                    // `None` (decode failed, or the conversion itself failed)
+                    // is cached too, so a malformed payload renders a failure
+                    // label once instead of retrying forever.
+                    let cached = raster.and_then(|r| CachedImage::from_raster(&r));
+                    view.tool_images.lock().unwrap().insert(key, cached);
+                    // The block just resolved from a pending placeholder to a
+                    // decoded image (or a failure label), so its cached height
+                    // is stale — remeasure before repainting or it clips.
+                    // Index is unknown here, so this is a full remeasure, but
+                    // it's one-shot per landed decode.
+                    view.list_state.remeasure();
+                    cx.notify();
                 });
             })
             .detach();

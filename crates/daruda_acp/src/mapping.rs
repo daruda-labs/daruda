@@ -9,8 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionRequest,
-    SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    ContentBlock, ContentChunk, EmbeddedResourceResource, PermissionOption, PermissionOptionKind,
+    RequestPermissionRequest, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolKind,
 };
 
 use crate::adapter::{AcpAdapter, DefaultAdapter};
@@ -422,7 +423,7 @@ fn highlight_tool_output(item: &mut ToolCallItem) {
         return;
     };
     for block in &mut item.output {
-        if let ToolOutputBlock::Text(text) = block {
+        if let ToolOutputBlock::Text { text, .. } = block {
             *text = crate::output_highlight::rewrite_fenced_output(text, lang);
         }
     }
@@ -468,8 +469,8 @@ fn find_tool_call<'a>(items: &'a mut [ChatItem], id: &str) -> Option<&'a mut Too
 }
 
 /// Partition tool-call content into diffs and typed output blocks. Embedded
-/// terminals, images, audio, and embedded resources are not rendered yet and
-/// are dropped.
+/// terminals (and any future content kind [`output_block_of`] doesn't
+/// recognize) are dropped.
 fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputBlock>) {
     let mut diffs = Vec::new();
     let mut output = Vec::new();
@@ -492,28 +493,111 @@ fn split_content(content: &[ToolCallContent]) -> (Vec<DiffView>, Vec<ToolOutputB
     (diffs, output)
 }
 
+/// Max bytes of tool-output text carried into the render model. Larger text is
+/// truncated at a char boundary so expanding a tool card can't feed megabytes
+/// to the markdown renderer (the expand-freeze bug). Not user-tunable yet.
+const MAX_TOOL_OUTPUT_TEXT_BYTES: usize = 64 * 1024;
+
+/// Max bytes of a tool-output image's base64 `data` carried into the render
+/// model as an `Image` block. Same trust-boundary rationale as
+/// [`MAX_TOOL_OUTPUT_TEXT_BYTES`]: nothing in the protocol bounds what an
+/// adapter sends, and unlike text, an oversized image can't be truncated in
+/// place (a truncated base64 string is either invalid or decodes to a corrupt
+/// image) — so a payload over this cap is remapped to a `Media` descriptor
+/// (via [`media_block`]) instead, which is cheap to carry, rather than an
+/// `Image` block, which is retained, cloned, decoded, and re-hashed every
+/// frame. 8 MiB of base64 (~6 MB decoded) is generous for a normal
+/// screenshot/PNG; only pathological payloads fall back.
+const MAX_TOOL_OUTPUT_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Build a `Text` block, truncating at a UTF-8 char boundary when the input
+/// exceeds `MAX_TOOL_OUTPUT_TEXT_BYTES`. `truncated_from` records the original
+/// byte length so the renderer can show a marker.
+fn bounded_text(s: String) -> ToolOutputBlock {
+    let cap = MAX_TOOL_OUTPUT_TEXT_BYTES;
+    if s.len() <= cap {
+        return ToolOutputBlock::Text {
+            text: s,
+            truncated_from: None,
+        };
+    }
+    let original_len = s.len();
+    let mut boundary = cap;
+    while !s.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    let mut text = s;
+    text.truncate(boundary);
+    ToolOutputBlock::Text {
+        text,
+        truncated_from: Some(original_len),
+    }
+}
+
 /// Map a content block to a renderable output block. `None` for empty text and
-/// for kinds we don't render yet (image, audio, embedded resource).
+/// for any future content kind the protocol adds that this build doesn't know
+/// about (`ContentBlock` is `#[non_exhaustive]`).
 fn output_block_of(block: &ContentBlock) -> Option<ToolOutputBlock> {
     match block {
-        ContentBlock::Text(t) if !t.text.is_empty() => Some(ToolOutputBlock::Text(t.text.clone())),
+        ContentBlock::Text(t) if !t.text.is_empty() => Some(bounded_text(t.text.clone())),
+        ContentBlock::Image(img) => Some(if img.data.len() > MAX_TOOL_OUTPUT_IMAGE_BYTES {
+            media_block(img.mime_type.clone(), &img.data)
+        } else {
+            ToolOutputBlock::Image {
+                data: img.data.clone(),
+                mime: img.mime_type.clone(),
+            }
+        }),
+        ContentBlock::Audio(a) => Some(media_block(a.mime_type.clone(), &a.data)),
         ContentBlock::ResourceLink(rl) => Some(ToolOutputBlock::ResourceLink {
             uri: rl.uri.clone(),
             // Prefer the human title; the `name` field is always present.
             name: rl.title.clone().unwrap_or_else(|| rl.name.clone()),
         }),
+        ContentBlock::Resource(er) => match &er.resource {
+            EmbeddedResourceResource::TextResourceContents(t) if !t.text.trim().is_empty() => {
+                Some(bounded_text(t.text.clone()))
+            }
+            EmbeddedResourceResource::TextResourceContents(_) => None,
+            EmbeddedResourceResource::BlobResourceContents(b) => Some(media_block(
+                b.mime_type.clone().unwrap_or_default(),
+                &b.blob,
+            )),
+            // `EmbeddedResourceResource` is `#[non_exhaustive]`.
+            #[allow(unreachable_patterns)]
+            _ => None,
+        },
         _ => None,
     }
 }
 
-/// Append a fallback output block derived from a tool call's `raw_output`, but
-/// only when the typed `content` produced no renderable text. Adapters that
+/// Estimated decoded byte size of a base64 string (ignoring padding/whitespace),
+/// good enough for a human-readable descriptor. `daruda_acp` carries no base64
+/// dependency, so this is arithmetic only — the real decode (and image
+/// rasterization) happens at the app render boundary.
+fn est_decoded_len(b64: &str) -> usize {
+    b64.len() / 4 * 3
+}
+
+/// Build a `Media` descriptor block — the shared shape for every non-rendered
+/// binary payload (audio, embedded blob, and an image over
+/// [`MAX_TOOL_OUTPUT_IMAGE_BYTES`]), so every call site computes `byte_len` the
+/// same way and orders the fields the same way.
+fn media_block(mime: String, data: &str) -> ToolOutputBlock {
+    ToolOutputBlock::Media {
+        mime,
+        byte_len: est_decoded_len(data),
+    }
+}
+
+/// Append fallback output blocks derived from a tool call's `raw_output`, but
+/// only when the typed `content` produced no renderable output. Adapters that
 /// report results through an embedded terminal (which we drop) or *only* in
 /// `raw_output` — codex-acp streams a shell command's output through a terminal
 /// and repeats it in `raw_output`, and its MCP calls carry results solely there
 /// — would otherwise render an empty card. Claude-style adapters embed the same
-/// text as a `content` block, so their `output` is already non-empty and this is
-/// a no-op (no duplication).
+/// content as `content` blocks, so their `output` is already non-empty and this
+/// is a no-op (no duplication).
 fn push_raw_output_fallback(
     output: &mut Vec<ToolOutputBlock>,
     raw_output: &Option<serde_json::Value>,
@@ -521,30 +605,133 @@ fn push_raw_output_fallback(
     if !output.is_empty() {
         return;
     }
-    if let Some(raw) = raw_output
-        && let Some(block) = raw_output_block(raw)
-    {
-        output.push(block);
+    if let Some(raw) = raw_output {
+        output.extend(raw_output_blocks(raw));
     }
 }
 
-/// Render a `raw_output` value as a single text block, or `None` when it carries
-/// no visible text. codex-acp's command execution stores the human-facing output
-/// as a `formatted_output` string, surfaced verbatim; a bare string is used as
-/// is; anything else (a structured object such as an MCP `{ result, error }`)
-/// renders as pretty JSON.
-fn raw_output_block(raw: &serde_json::Value) -> Option<ToolOutputBlock> {
-    let text = match raw
+/// Render a `raw_output` value as output blocks. codex-acp's command execution
+/// stores the human-facing output as a `formatted_output` string, surfaced
+/// verbatim (highest priority — codex-acp relies on it); a bare string is used
+/// as is. A JSON **array** is Anthropic's raw content-block shape (e.g.
+/// `[{"type":"image",...}, {"type":"text",...}]`) — each element is parsed via
+/// [`raw_content_block`], in order, and recognized elements (image / audio /
+/// text / embedded resource) are kept while unrecognized ones are skipped; if
+/// *none* of the array's elements are recognized the whole array falls back to
+/// pretty JSON below (so a genuinely unrelated array isn't silently dropped). A
+/// bare JSON object that is itself one recognized content block parses to that
+/// one block. Anything else (a structured object such as an MCP
+/// `{ result, error }`, or an array/object with nothing recognizable) renders
+/// as pretty JSON. Returns an empty `Vec` when there is no visible text.
+fn raw_output_blocks(raw: &serde_json::Value) -> Vec<ToolOutputBlock> {
+    if let Some(s) = raw
         .get("formatted_output")
         .and_then(serde_json::Value::as_str)
     {
-        Some(s) => s.to_string(),
-        None => match raw {
-            serde_json::Value::String(s) => s.clone(),
-            _ => serde_json::to_string_pretty(raw).ok()?,
-        },
-    };
-    (!text.trim().is_empty()).then_some(ToolOutputBlock::Text(text))
+        return bounded_text_blocks(s.to_string());
+    }
+    match raw {
+        serde_json::Value::String(s) => return bounded_text_blocks(s.clone()),
+        serde_json::Value::Array(elements) => {
+            let recognized: Vec<ToolOutputBlock> =
+                elements.iter().filter_map(raw_content_block).collect();
+            if !recognized.is_empty() {
+                return recognized;
+            }
+            // No element recognized — fall through to the pretty-JSON fallback
+            // below rather than silently dropping the whole array.
+        }
+        _ => {
+            if let Some(block) = raw_content_block(raw) {
+                return vec![block];
+            }
+        }
+    }
+    match serde_json::to_string_pretty(raw) {
+        Ok(text) => bounded_text_blocks(text),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// A bounded `Text` block wrapped in a `Vec`, or an empty `Vec` for
+/// whitespace-only text — the shared tail of every [`raw_output_blocks`] path
+/// that renders to text.
+fn bounded_text_blocks(text: String) -> Vec<ToolOutputBlock> {
+    if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![bounded_text(text)]
+    }
+}
+
+/// Parse one raw JSON value as a single content block — either one element of
+/// a `rawOutput` array, or a bare `rawOutput` object that is itself a content
+/// block. Recognizes Anthropic's raw shape: `type` discriminates
+/// `"text"` / `"image"` / `"audio"` / `"resource"`, with image/audio payload
+/// nested under `source.data` / `source.media_type` (Anthropic's own shape) or
+/// falling back to a flat `data` / `media_type` / `mime_type` (defensive, in
+/// case another adapter sends the flatter ACP-like shape instead). Returns
+/// `None` for a value with no recognized `type`, or a recognized `type` missing
+/// its required payload field.
+fn raw_content_block(el: &serde_json::Value) -> Option<ToolOutputBlock> {
+    let ty = el.get("type").and_then(serde_json::Value::as_str)?;
+    match ty {
+        "text" => {
+            let text = el.get("text").and_then(serde_json::Value::as_str)?;
+            (!text.trim().is_empty()).then(|| bounded_text(text.to_string()))
+        }
+        "image" => {
+            let data = raw_media_data(el)?;
+            let mime = raw_media_mime(el);
+            Some(if data.len() > MAX_TOOL_OUTPUT_IMAGE_BYTES {
+                media_block(mime, &data)
+            } else {
+                ToolOutputBlock::Image { data, mime }
+            })
+        }
+        "audio" => {
+            let data = raw_media_data(el)?;
+            Some(media_block(raw_media_mime(el), &data))
+        }
+        "resource" => {
+            let resource = el.get("resource")?;
+            if let Some(blob) = resource.get("blob").and_then(serde_json::Value::as_str) {
+                let mime = resource
+                    .get("mime_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                Some(media_block(mime, blob))
+            } else {
+                let text = resource.get("text").and_then(serde_json::Value::as_str)?;
+                (!text.trim().is_empty()).then(|| bounded_text(text.to_string()))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The base64 payload of a raw image/audio content-block element: Anthropic's
+/// nested `source.data`, falling back to a flat `data`.
+fn raw_media_data(el: &serde_json::Value) -> Option<String> {
+    el.get("source")
+        .and_then(|s| s.get("data"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| el.get("data").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+}
+
+/// The MIME type of a raw image/audio content-block element: Anthropic's
+/// nested `source.media_type`, falling back to a flat `media_type` or
+/// `mime_type`. Empty string when none is present — the source omitted it.
+fn raw_media_mime(el: &serde_json::Value) -> String {
+    el.get("source")
+        .and_then(|s| s.get("media_type"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| el.get("media_type").and_then(serde_json::Value::as_str))
+        .or_else(|| el.get("mime_type").and_then(serde_json::Value::as_str))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// The owned `message_id` of a streamed content chunk, if the agent supplied
@@ -628,7 +815,10 @@ mod tests {
         assert_eq!(
             output,
             vec![
-                ToolOutputBlock::Text("hello".to_string()),
+                ToolOutputBlock::Text {
+                    text: "hello".to_string(),
+                    truncated_from: None,
+                },
                 ToolOutputBlock::ResourceLink {
                     uri: "file:///tmp/file.rs".to_string(),
                     name: "file.rs".to_string(),
@@ -710,9 +900,10 @@ mod tests {
         };
         assert_eq!(
             tc.output,
-            vec![ToolOutputBlock::Text(
-                "total 0\ndrwxr-xr-x  2 me  staff".to_string()
-            )]
+            vec![ToolOutputBlock::Text {
+                text: "total 0\ndrwxr-xr-x  2 me  staff".to_string(),
+                truncated_from: None,
+            }]
         );
     }
 
@@ -736,7 +927,10 @@ mod tests {
         };
         assert_eq!(
             tc.output,
-            vec![ToolOutputBlock::Text("real output".to_string())]
+            vec![ToolOutputBlock::Text {
+                text: "real output".to_string(),
+                truncated_from: None,
+            }]
         );
     }
 
@@ -756,7 +950,7 @@ mod tests {
         let ChatItem::ToolCall(tc) = &items[0] else {
             panic!("expected a tool call");
         };
-        let [ToolOutputBlock::Text(text)] = tc.output.as_slice() else {
+        let [ToolOutputBlock::Text { text, .. }] = tc.output.as_slice() else {
             panic!("expected one text block, got {:?}", tc.output);
         };
         assert!(text.contains("\"result\""), "pretty JSON, got: {text}");
@@ -1280,9 +1474,10 @@ mod tests {
         };
         assert_eq!(
             tc.output,
-            vec![ToolOutputBlock::Text(
-                "```rust\nfn main() {}\n// end\n```".to_string()
-            )]
+            vec![ToolOutputBlock::Text {
+                text: "```rust\nfn main() {}\n// end\n```".to_string(),
+                truncated_from: None,
+            }]
         );
     }
 
@@ -1467,5 +1662,404 @@ mod tests {
     #[test]
     fn summarize_raw_input_is_none_without_raw_input() {
         assert_eq!(summarize_raw_input(None), None);
+    }
+
+    #[test]
+    fn bounded_text_truncates_overlong_text_at_the_cap() {
+        let long_text = "a".repeat(MAX_TOOL_OUTPUT_TEXT_BYTES + 1000);
+        let original_len = long_text.len();
+        let ToolOutputBlock::Text {
+            text,
+            truncated_from,
+        } = bounded_text(long_text)
+        else {
+            panic!("expected a Text block");
+        };
+        assert_eq!(text.len(), MAX_TOOL_OUTPUT_TEXT_BYTES);
+        assert_eq!(truncated_from, Some(original_len));
+    }
+
+    #[test]
+    fn bounded_text_leaves_short_text_unchanged() {
+        let short_text = "hello world".to_string();
+        let ToolOutputBlock::Text {
+            text,
+            truncated_from,
+        } = bounded_text(short_text.clone())
+        else {
+            panic!("expected a Text block");
+        };
+        assert_eq!(text, short_text);
+        assert_eq!(truncated_from, None);
+    }
+
+    #[test]
+    fn bounded_text_never_splits_a_multibyte_char_at_the_cap_boundary() {
+        // Build a string whose byte length lands exactly one byte past the cap
+        // with a multibyte (3-byte) char straddling the boundary, so a naive
+        // byte-index truncate would split it and panic / produce invalid UTF-8.
+        let filler_len = MAX_TOOL_OUTPUT_TEXT_BYTES - 1;
+        let mut s = "a".repeat(filler_len);
+        // "€" is 3 bytes in UTF-8; its first byte lands exactly at the cap.
+        s.push('€');
+        assert_eq!(s.len(), MAX_TOOL_OUTPUT_TEXT_BYTES + 2);
+
+        let ToolOutputBlock::Text {
+            text,
+            truncated_from,
+        } = bounded_text(s)
+        else {
+            panic!("expected a Text block");
+        };
+        // The truncated text must be valid UTF-8 (guaranteed by type) and must
+        // not include a partial "€" — the boundary walk backs off to `filler_len`.
+        assert_eq!(text.len(), filler_len);
+        assert!(text.chars().all(|c| c == 'a'));
+        assert_eq!(truncated_from, Some(MAX_TOOL_OUTPUT_TEXT_BYTES + 2));
+    }
+
+    #[test]
+    fn raw_output_bare_string_is_bounded() {
+        let long = "x".repeat(MAX_TOOL_OUTPUT_TEXT_BYTES + 10);
+        let blocks = raw_output_blocks(&serde_json::Value::String(long.clone()));
+        let [
+            ToolOutputBlock::Text {
+                text,
+                truncated_from,
+            },
+        ] = blocks.as_slice()
+        else {
+            panic!("expected one Text block, got {blocks:?}");
+        };
+        assert_eq!(text.len(), MAX_TOOL_OUTPUT_TEXT_BYTES);
+        assert_eq!(*truncated_from, Some(long.len()));
+    }
+
+    #[test]
+    fn raw_output_pretty_json_is_bounded() {
+        // A structured object with no `formatted_output` falls back to
+        // pretty-printed JSON — verify that path is bounded too.
+        let big_value: String = "v".repeat(MAX_TOOL_OUTPUT_TEXT_BYTES + 10);
+        let raw = serde_json::json!({ "result": big_value });
+        let blocks = raw_output_blocks(&raw);
+        let [
+            ToolOutputBlock::Text {
+                text,
+                truncated_from,
+            },
+        ] = blocks.as_slice()
+        else {
+            panic!("expected one Text block, got {blocks:?}");
+        };
+        assert!(text.len() <= MAX_TOOL_OUTPUT_TEXT_BYTES);
+        assert!(truncated_from.is_some());
+    }
+
+    #[test]
+    fn raw_output_image_array_produces_image_block() {
+        // Anthropic's raw content-block shape: an array with one image block,
+        // base64 data nested under `source.data` / `source.media_type`.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "generate image").raw_output(
+                serde_json::json!([
+                    {
+                        "type": "image",
+                        "source": { "type": "base64", "data": "iVBORw0KGgo=", "media_type": "image/png" },
+                    }
+                ]),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Image {
+                data: "iVBORw0KGgo=".to_string(),
+                mime: "image/png".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn raw_output_audio_array_produces_media_block() {
+        let data = "QUJDRA==";
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "transcribe").raw_output(
+                serde_json::json!([
+                    {
+                        "type": "audio",
+                        "source": { "type": "base64", "data": data, "media_type": "audio/mp3" },
+                    }
+                ]),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Media {
+                mime: "audio/mp3".to_string(),
+                byte_len: est_decoded_len(data),
+            }]
+        );
+    }
+
+    #[test]
+    fn raw_output_image_then_text_preserves_order() {
+        // A mixed array (image + text) must yield both blocks, in order — not
+        // just the first recognized one.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "mixed").raw_output(serde_json::json!([
+                {
+                    "type": "image",
+                    "source": { "data": "abcd", "media_type": "image/jpeg" },
+                },
+                { "type": "text", "text": "caption" },
+            ]))),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![
+                ToolOutputBlock::Image {
+                    data: "abcd".to_string(),
+                    mime: "image/jpeg".to_string(),
+                },
+                ToolOutputBlock::Text {
+                    text: "caption".to_string(),
+                    truncated_from: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_output_array_of_unrecognized_objects_falls_back_to_pretty_json() {
+        // No element has a recognized `type` — the whole array must still
+        // surface as pretty JSON, not be silently dropped.
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(
+                ToolCall::new("c1", "weird")
+                    .raw_output(serde_json::json!([{ "foo": "bar" }, { "baz": 1 }])),
+            ),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        let [ToolOutputBlock::Text { text, .. }] = tc.output.as_slice() else {
+            panic!("expected one text block, got {:?}", tc.output);
+        };
+        assert!(text.contains("\"foo\""), "pretty JSON, got: {text}");
+    }
+
+    #[test]
+    fn split_content_maps_image_content_block() {
+        use agent_client_protocol::schema::v1::{Content, ImageContent};
+        let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
+            ImageContent::new("b64data", "image/png"),
+        )))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Image {
+                data: "b64data".to_string(),
+                mime: "image/png".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn split_content_maps_audio_content_block_to_media() {
+        use agent_client_protocol::schema::v1::{AudioContent, Content};
+        let data = "b64audio";
+        let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Audio(
+            AudioContent::new(data, "audio/wav"),
+        )))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Media {
+                mime: "audio/wav".to_string(),
+                byte_len: est_decoded_len(data),
+            }]
+        );
+    }
+
+    #[test]
+    fn split_content_maps_embedded_blob_resource_to_media() {
+        use agent_client_protocol::schema::v1::{
+            BlobResourceContents, Content, EmbeddedResource, EmbeddedResourceResource,
+        };
+        let blob = "b64blob";
+        let content = vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::BlobResourceContents(
+                    BlobResourceContents::new(blob, "file:///tmp/x.bin")
+                        .mime_type("application/octet-stream"),
+                ),
+            )),
+        ))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Media {
+                mime: "application/octet-stream".to_string(),
+                byte_len: est_decoded_len(blob),
+            }]
+        );
+    }
+
+    #[test]
+    fn split_content_maps_embedded_text_resource_to_bounded_text() {
+        use agent_client_protocol::schema::v1::{
+            Content, EmbeddedResource, EmbeddedResourceResource, TextResourceContents,
+        };
+        let content = vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "hello resource",
+                    "file:///tmp/x.txt",
+                )),
+            )),
+        ))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Text {
+                text: "hello resource".to_string(),
+                truncated_from: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn split_content_drops_whitespace_only_text_resource() {
+        use agent_client_protocol::schema::v1::{
+            Content, EmbeddedResource, EmbeddedResourceResource, TextResourceContents,
+        };
+        let content = vec![ToolCallContent::Content(Content::new(
+            ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                    "   \n",
+                    "file:///tmp/x.txt",
+                )),
+            )),
+        ))];
+        let (_, output) = split_content(&content);
+        assert!(
+            output.is_empty(),
+            "whitespace-only embedded resource text is dropped, not an empty block"
+        );
+    }
+
+    #[test]
+    fn image_content_block_over_cap_falls_back_to_media() {
+        use agent_client_protocol::schema::v1::{Content, ImageContent};
+        let data = "A".repeat(MAX_TOOL_OUTPUT_IMAGE_BYTES + 1);
+        let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
+            ImageContent::new(data.clone(), "image/png"),
+        )))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Media {
+                mime: "image/png".to_string(),
+                byte_len: est_decoded_len(&data),
+            }],
+            "an oversized image must fall back to a Media descriptor, not an Image block"
+        );
+    }
+
+    #[test]
+    fn image_content_block_under_cap_stays_image() {
+        use agent_client_protocol::schema::v1::{Content, ImageContent};
+        let data = "A".repeat(1024);
+        let content = vec![ToolCallContent::Content(Content::new(ContentBlock::Image(
+            ImageContent::new(data.clone(), "image/png"),
+        )))];
+        let (_, output) = split_content(&content);
+        assert_eq!(
+            output,
+            vec![ToolOutputBlock::Image {
+                data,
+                mime: "image/png".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn raw_output_oversized_image_falls_back_to_media() {
+        // The raw-content path (Anthropic's array shape) must honor the same
+        // cap as the typed `ContentBlock::Image` path.
+        let data = "B".repeat(MAX_TOOL_OUTPUT_IMAGE_BYTES + 1);
+        let mut items = Vec::new();
+        apply_update(
+            &mut items,
+            &SessionUpdate::ToolCall(ToolCall::new("c1", "generate image").raw_output(
+                serde_json::json!([
+                    {
+                        "type": "image",
+                        "source": { "data": data, "media_type": "image/png" },
+                    }
+                ]),
+            )),
+        );
+        let ChatItem::ToolCall(tc) = &items[0] else {
+            panic!("expected a tool call");
+        };
+        assert_eq!(
+            tc.output,
+            vec![ToolOutputBlock::Media {
+                mime: "image/png".to_string(),
+                byte_len: est_decoded_len(&data),
+            }]
+        );
+    }
+
+    #[test]
+    fn raw_output_array_with_only_empty_text_falls_back_to_pretty_json() {
+        // The one element parses as a recognized "text" type but with empty
+        // text — `raw_content_block` drops empty text (mirroring the
+        // `ContentBlock::Text` guard in `output_block_of`), so the array has no
+        // recognized blocks and falls through to the pretty-JSON fallback
+        // rather than surfacing an empty `Text` block.
+        let raw = serde_json::json!([{ "type": "text", "text": "" }]);
+        let blocks = raw_output_blocks(&raw);
+        let [ToolOutputBlock::Text { text, .. }] = blocks.as_slice() else {
+            panic!("expected one pretty-JSON text block, got {blocks:?}");
+        };
+        assert!(
+            text.contains("\"type\""),
+            "pretty JSON of the raw array, got: {text}"
+        );
+    }
+
+    #[test]
+    fn raw_output_array_partial_recognition_keeps_recognized_and_drops_junk() {
+        // One recognized `text` element plus one element with no `type` at
+        // all: the junk element is silently dropped and only the recognized
+        // block survives — documents the "partially recognized array" behavior
+        // distinct from the "nothing recognized" pretty-JSON fallback above.
+        let raw = serde_json::json!([{ "type": "text", "text": "hi" }, { "foo": "bar" }]);
+        let blocks = raw_output_blocks(&raw);
+        assert_eq!(
+            blocks,
+            vec![ToolOutputBlock::Text {
+                text: "hi".to_string(),
+                truncated_from: None,
+            }]
+        );
     }
 }
