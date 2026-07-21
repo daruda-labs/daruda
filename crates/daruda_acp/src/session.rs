@@ -419,12 +419,14 @@ fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
 
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
-/// `initial_mode` is an optional ACP mode id (e.g. `"bypassPermissions"`) to
-/// apply right after `session/new` via `session/set_mode`. The mode is applied
-/// only when the adapter advertises it in the session's available modes and it
-/// differs from the session's current mode; if the adapter does not support
-/// modes or the id is not in the advertised list, `Connected` is emitted
-/// unchanged. Pass `None` to keep whatever mode the adapter defaults to.
+/// `initial_modes` is a priority-ordered list of ACP mode ids (e.g.
+/// `["bypassPermissions", "auto"]`) to apply right after `session/new` via
+/// `session/set_mode`. The first mode the adapter both advertises and accepts
+/// wins; a candidate that is unadvertised or whose `set_mode` is rejected falls
+/// through to the next, so a preferred-but-unavailable mode degrades to its
+/// fallback instead of leaving the session in an arbitrary state. If none apply
+/// (empty list, no advertised candidate, or the adapter doesn't support modes),
+/// `Connected` is emitted with whatever mode the adapter defaults to.
 ///
 /// Spawns the protocol connection as a detached smol task and returns a handle
 /// plus the event receiver. The task runs until the handle is dropped (command
@@ -438,7 +440,7 @@ fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
 pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
-    initial_mode: Option<String>,
+    initial_modes: Vec<String>,
     resume: Option<SessionId>,
     agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
@@ -460,7 +462,7 @@ pub fn connect_session(
         if let Err(err) = run_connection(
             agent,
             cwd,
-            initial_mode,
+            initial_modes,
             resume,
             command_rx,
             task_event_tx.clone(),
@@ -497,7 +499,7 @@ pub fn connect_agent_session(
     command: String,
     node_install_dir: PathBuf,
     cwd: PathBuf,
-    initial_mode: Option<String>,
+    initial_modes: Vec<String>,
     resume: Option<SessionId>,
     agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
@@ -508,7 +510,7 @@ pub fn connect_agent_session(
     } else {
         AdapterCommand(command)
     };
-    connect_session(adapter, cwd, initial_mode, resume, agent_id)
+    connect_session(adapter, cwd, initial_modes, resume, agent_id)
 }
 
 /// Wall-clock budget for `initialize` and — on a *fresh* session —
@@ -567,7 +569,7 @@ async fn with_connect_timeout<T>(
 async fn run_connection(
     agent: AcpAgent,
     cwd: PathBuf,
-    initial_mode: Option<String>,
+    initial_modes: Vec<String>,
     resume: Option<SessionId>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
@@ -749,19 +751,32 @@ async fn run_connection(
             };
 
             // Apply the configured initial mode on a *fresh* session (including a
-            // resume downgraded to session/new), when the adapter advertised it,
-            // the requested id is in the available list, and it differs from the
-            // session's current mode. Skipped on a real load (preserve the resumed
-            // mode) and silently when any condition is false, so a misconfigured
-            // or non-advertising adapter is forward-compatible.
+            // resume downgraded to session/new). `initial_modes` is a
+            // priority-ordered candidate list — try each in turn and stop at the
+            // first the adapter both advertises and accepts. A candidate that is
+            // not advertised is skipped without a request; one whose set_mode is
+            // rejected falls through to the next, so a preferred-but-unavailable
+            // mode (e.g. `bypassPermissions`) degrades to its fallback (`auto`)
+            // rather than leaving the session in an arbitrary state. Skipped on a
+            // real load (preserve the resumed mode).
             //
-            // A set_mode failure is NON-FATAL: the session/new already
-            // succeeded and the session is usable. Leave mode_state.current
-            // at the adapter's real current mode (the chip will reflect that),
-            // emit a Notice so the host can log it, and continue to Connected.
-            if fresh && let (Some(id), Some(ref mut mode_state)) = (initial_mode, modes.as_mut()) {
-                let available = mode_state.available.iter().any(|m| m.id == id);
-                if available && mode_state.current != id {
+            // Every candidate failing is NON-FATAL: the session/new already
+            // succeeded and the session is usable. Leave mode_state.current at
+            // the adapter's real current mode (the chip reflects that), emit a
+            // Notice so the host can log it, and continue to Connected.
+            if fresh && let Some(mode_state) = modes.as_mut() {
+                let mut applied = false;
+                let mut last_reject: Option<(String, String)> = None;
+                for id in &initial_modes {
+                    // Not advertised — this candidate can't apply; try the next.
+                    if !mode_state.available.iter().any(|m| &m.id == id) {
+                        continue;
+                    }
+                    // Already in this mode — nothing to send, we're done.
+                    if &mode_state.current == id {
+                        applied = true;
+                        break;
+                    }
                     let _ = event_tx
                         .unbounded_send(AcpEvent::ConnectProgress(ConnectPhase::ApplyingMode));
                     let set_mode_result = with_connect_timeout(
@@ -777,15 +792,22 @@ async fn run_connection(
                     .await;
                     match set_mode_result {
                         Ok(_) => {
-                            mode_state.current = id;
+                            mode_state.current = id.clone();
+                            applied = true;
+                            break;
                         }
-                        Err(e) => {
-                            let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
-                                "set_mode({id}) on connect failed — session is active \
-                                 in the adapter's default mode: {e:?}"
-                            )));
-                        }
+                        // Rejected — remember it and fall through to the fallback.
+                        Err(e) => last_reject = Some((id.clone(), format!("{e:?}"))),
                     }
+                }
+                // Only notice when a candidate was actually attempted and rejected
+                // and no later candidate applied — a purely non-advertised list is
+                // forward-compatible silence (matches a non-modes adapter).
+                if !applied && let Some((id, err)) = last_reject {
+                    let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
+                        "set_mode({id}) on connect failed — session is active in the \
+                         adapter's default mode: {err}"
+                    )));
                 }
             }
 

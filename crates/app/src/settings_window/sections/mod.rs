@@ -332,9 +332,11 @@ impl SettingsWindow {
             .and_then(|v| M::from_mode_id(v.as_ref()))
             .unwrap_or_default();
         let mode_description = match selected_mode {
+            M::Auto => s::settings_agent_mode_auto(),
             M::Default => s::settings_agent_mode_default(),
             M::AcceptEdits => s::settings_agent_mode_accept_edits(),
             M::Plan => s::settings_agent_mode_plan(),
+            M::DontAsk => s::settings_agent_mode_dont_ask(),
             M::BypassPermissions => s::settings_agent_mode_bypass(),
         };
         let mut body = div()

@@ -611,12 +611,20 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // Always offer the default permission mode; `run_connection` applies it
-        // only on a *fresh* session (new, or a resume downgraded to session/new)
-        // and skips it on a real load, preserving the resumed session's own mode.
-        // Passing it unconditionally lets a downgraded resume still get the
-        // configured default.
-        let initial_mode = Some(self.agent.default_permission_mode.mode_id().to_string());
+        // Offer the default permission mode as a priority list — the configured
+        // mode first, then an `auto` fallback for when the adapter no longer
+        // advertises it or refuses the switch. `run_connection` applies the
+        // first candidate that works only on a *fresh* session (new, or a resume
+        // downgraded to session/new) and skips it on a real load, preserving the
+        // resumed session's own mode. Passing it unconditionally lets a
+        // downgraded resume still get the configured default.
+        let initial_modes: Vec<String> = self
+            .agent
+            .default_permission_mode
+            .connect_mode_priority()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         let node_root = daruda_store::persistence::node_install_dir();
 
         // Resolve the pane's agent_id → launch spec, reconciling a stale
@@ -743,7 +751,7 @@ impl Workspace {
                         command,
                         node_root,
                         connect_cwd,
-                        initial_mode,
+                        initial_modes,
                         resume.map(daruda_acp::SessionId::new),
                         &agent_id,
                         &mut progress,

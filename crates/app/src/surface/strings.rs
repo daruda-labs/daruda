@@ -2260,6 +2260,9 @@ pub fn settings_telegram_unpair() -> String {
 pub fn settings_label_agent_mode() -> String {
     rust_i18n::t!("settings.label_agent_mode").into_owned()
 }
+pub fn settings_agent_mode_auto() -> String {
+    rust_i18n::t!("settings.agent_mode_auto").into_owned()
+}
 pub fn settings_agent_mode_default() -> String {
     rust_i18n::t!("settings.agent_mode_default").into_owned()
 }
@@ -2268,6 +2271,9 @@ pub fn settings_agent_mode_accept_edits() -> String {
 }
 pub fn settings_agent_mode_plan() -> String {
     rust_i18n::t!("settings.agent_mode_plan").into_owned()
+}
+pub fn settings_agent_mode_dont_ask() -> String {
+    rust_i18n::t!("settings.agent_mode_dont_ask").into_owned()
 }
 pub fn settings_agent_mode_bypass() -> String {
     rust_i18n::t!("settings.agent_mode_bypass").into_owned()

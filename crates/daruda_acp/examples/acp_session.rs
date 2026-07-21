@@ -24,13 +24,14 @@ fn main() {
     let cwd = std::env::current_dir().expect("current dir");
 
     smol::block_on(async move {
-        let (handle, mut events) = match connect_session(Default::default(), cwd, None, None, "") {
-            Ok(pair) => pair,
-            Err(err) => {
-                eprintln!("connect failed: {err}");
-                std::process::exit(1);
-            }
-        };
+        let (handle, mut events) =
+            match connect_session(Default::default(), cwd, Vec::new(), None, "") {
+                Ok(pair) => pair,
+                Err(err) => {
+                    eprintln!("connect failed: {err}");
+                    std::process::exit(1);
+                }
+            };
 
         let prompts = [
             "What is 2 + 2? Reply in one short sentence.",

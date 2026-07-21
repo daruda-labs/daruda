@@ -2,10 +2,16 @@ use serde::{Deserialize, Serialize};
 
 /// Permission mode the agent chat session starts in. Mirrors Claude Code's
 /// permission modes; applied on connect via ACP session/set_mode when the
-/// adapter advertises it. `BypassPermissions` runs every tool call without a
-/// prompt (intended for isolated environments) — it is the default here.
+/// adapter advertises it. Variants and ids track the adapter's advertised
+/// `availableModes` set. `BypassPermissions` (everything runs without asking)
+/// is the default here; when the adapter no longer advertises it or refuses
+/// the switch, the connect falls back to [`Self::CONNECT_FALLBACK`] (`Auto`) —
+/// see `daruda_acp`'s set_mode application.
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum DefaultPermissionMode {
+    /// A model classifier approves/denies each permission prompt.
+    #[serde(rename = "auto")]
+    Auto,
     /// Only reads run without asking; edits/commands prompt each time.
     #[serde(rename = "default")]
     Default,
@@ -16,6 +22,9 @@ pub enum DefaultPermissionMode {
     /// Reads only; Claude analyzes/proposes but does not edit.
     #[serde(rename = "plan")]
     Plan,
+    /// Never prompts; denies anything not already pre-approved.
+    #[serde(rename = "dontAsk")]
+    DontAsk,
     /// Everything runs without asking, no safety checks. Intended for isolated
     /// containers/VMs; refused under root/sudo.
     #[default]
@@ -24,21 +33,26 @@ pub enum DefaultPermissionMode {
 }
 
 impl DefaultPermissionMode {
-    /// All variants in declaration order — used to enumerate options without
-    /// hardcoding strings at call sites.
-    pub const ALL: [DefaultPermissionMode; 4] = [
+    /// All variants in declaration order (matches the adapter's advertised
+    /// order) — used to enumerate options without hardcoding strings at call
+    /// sites.
+    pub const ALL: [DefaultPermissionMode; 6] = [
+        Self::Auto,
         Self::Default,
         Self::AcceptEdits,
         Self::Plan,
+        Self::DontAsk,
         Self::BypassPermissions,
     ];
 
     /// The ACP/Claude-Code mode id string (matches advertised SessionMode ids).
     pub fn mode_id(self) -> &'static str {
         match self {
+            DefaultPermissionMode::Auto => "auto",
             DefaultPermissionMode::Default => "default",
             DefaultPermissionMode::AcceptEdits => "acceptEdits",
             DefaultPermissionMode::Plan => "plan",
+            DefaultPermissionMode::DontAsk => "dontAsk",
             DefaultPermissionMode::BypassPermissions => "bypassPermissions",
         }
     }
@@ -47,6 +61,26 @@ impl DefaultPermissionMode {
     /// does not match any known variant.
     pub fn from_mode_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|m| m.mode_id() == id)
+    }
+
+    /// The mode a connect falls back to when the configured mode is not
+    /// advertised by the adapter or its `set_mode` is rejected. `Auto` (a model
+    /// classifier that approves/denies each prompt) is a safe, always-current
+    /// choice — it is the adapter's own default and the least likely mode to be
+    /// removed.
+    pub const CONNECT_FALLBACK: DefaultPermissionMode = DefaultPermissionMode::Auto;
+
+    /// Priority-ordered mode ids to try on connect: the configured mode first,
+    /// then [`Self::CONNECT_FALLBACK`]. `daruda_acp` applies the first one the
+    /// adapter both advertises and accepts, so a session lands on the fallback
+    /// only when the preferred mode is unavailable. The fallback is omitted when
+    /// it equals the configured mode (no redundant candidate).
+    pub fn connect_mode_priority(self) -> Vec<&'static str> {
+        let mut priority = vec![self.mode_id()];
+        if self != Self::CONNECT_FALLBACK {
+            priority.push(Self::CONNECT_FALLBACK.mode_id());
+        }
+        priority
     }
 }
 
@@ -511,9 +545,11 @@ mod tests {
 
     #[test]
     fn mode_id_strings_are_exact() {
+        assert_eq!(DefaultPermissionMode::Auto.mode_id(), "auto");
         assert_eq!(DefaultPermissionMode::Default.mode_id(), "default");
         assert_eq!(DefaultPermissionMode::AcceptEdits.mode_id(), "acceptEdits");
         assert_eq!(DefaultPermissionMode::Plan.mode_id(), "plan");
+        assert_eq!(DefaultPermissionMode::DontAsk.mode_id(), "dontAsk");
         assert_eq!(
             DefaultPermissionMode::BypassPermissions.mode_id(),
             "bypassPermissions"
@@ -529,6 +565,24 @@ mod tests {
         assert_eq!(
             AgentConfig::default().default_permission_mode.mode_id(),
             "bypassPermissions"
+        );
+    }
+
+    #[test]
+    fn connect_mode_priority_appends_auto_fallback() {
+        // The configured mode is tried first, then the auto fallback.
+        assert_eq!(
+            DefaultPermissionMode::BypassPermissions.connect_mode_priority(),
+            vec!["bypassPermissions", "auto"]
+        );
+        assert_eq!(
+            DefaultPermissionMode::DontAsk.connect_mode_priority(),
+            vec!["dontAsk", "auto"]
+        );
+        // When the configured mode already is the fallback, it appears once.
+        assert_eq!(
+            DefaultPermissionMode::Auto.connect_mode_priority(),
+            vec!["auto"]
         );
     }
 
@@ -558,9 +612,11 @@ mod tests {
     fn toml_round_trip_all_variants() {
         // Verify serde(rename_all = "camelCase") produces the right TOML keys.
         let cases = [
+            (DefaultPermissionMode::Auto, "auto"),
             (DefaultPermissionMode::Default, "default"),
             (DefaultPermissionMode::AcceptEdits, "acceptEdits"),
             (DefaultPermissionMode::Plan, "plan"),
+            (DefaultPermissionMode::DontAsk, "dontAsk"),
             (
                 DefaultPermissionMode::BypassPermissions,
                 "bypassPermissions",
