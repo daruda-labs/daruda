@@ -16,6 +16,8 @@ use crate::telegram::bridge::TelegramTail;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
+use super::view::PromptDispatch;
+
 /// Below this char count, [`preview_for`] sends the text verbatim.
 const TELEGRAM_PREVIEW_THRESHOLD: usize = 2000;
 /// Leading/trailing characters kept when a response is truncated — head carries
@@ -53,6 +55,22 @@ fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str
             tail.push('\n');
             tail.push_str(line);
         }
+    }
+    tail
+}
+
+/// Compose the "went straight to a tool call" first-response ack's tail: the
+/// fixed i18n label, plus the tool's title on its own line when the agent
+/// supplied a non-empty one.
+// TODO(telegram-first-response-ack task 3): called from
+// `relay_first_response_to_telegram` once the event pump wires that in —
+// remove this `allow` at that point.
+#[cfg_attr(not(test), allow(dead_code))]
+fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
+    let mut tail = s::agent_notification_telegram_first_tool_ack();
+    if let Some(title) = tool_title.filter(|t| !t.is_empty()) {
+        tail.push('\n');
+        tail.push_str(title);
     }
     tail
 }
@@ -456,10 +474,68 @@ impl Workspace {
         });
     }
 
-    /// Send a lightweight "received, working" ack to Telegram the instant a
-    /// phone-relayed reply is injected. Plain tail (fixed i18n copy, not
-    /// agent-authored markdown). Gated by `relay_to_telegram`.
-    pub(in crate::workspace) fn relay_ack_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
+    /// Send the "queued behind the current turn" notice — fires the instant
+    /// `AgentChatView::send_prompt_text_for_telegram` reports
+    /// [`PromptDispatch::Queued`], since a queued reply hasn't reached the
+    /// agent yet and there is nothing to watch a first response for. Plain
+    /// tail (fixed i18n copy). Gated by `relay_to_telegram`.
+    pub(in crate::workspace) fn relay_queued_notice_to_telegram(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) {
+        let header = self.telegram_header(pane_id, cx);
+        self.relay_to_telegram(
+            pane_id,
+            header,
+            TelegramTail::Plain(s::agent_notification_telegram_reply_queued()),
+            None,
+            cx,
+        );
+    }
+
+    /// Relay a phone-triggered turn's resolved first response: the agent's own
+    /// text (markdown, truncated like the completion ping) or a fixed
+    /// "checking via tool" note naming it. Bypasses the presence-defer gate
+    /// (calls `relay_to_telegram` directly) — the whole point of this relay is
+    /// a phone-originated interaction, so instant delivery is what the sender
+    /// wants regardless of whether the app happens to be foreground right now.
+    // TODO(telegram-first-response-ack task 3): called from the event pump's
+    // post-`apply_event` hook once that's wired in — remove this `allow`.
+    #[allow(dead_code)]
+    pub(in crate::workspace) fn relay_first_response_to_telegram(
+        &self,
+        pane_id: PaneId,
+        outcome: FirstResponseOutcome,
+        cx: &Context<Self>,
+    ) {
+        let header = self.telegram_header(pane_id, cx);
+        let tail = match outcome {
+            FirstResponseOutcome::Text(text) => TelegramTail::Markdown(preview_for(
+                &text,
+                &s::agent_notification_telegram_truncated_marker(),
+            )),
+            FirstResponseOutcome::Tool { tool_title } => {
+                TelegramTail::Plain(first_tool_ack_tail(tool_title.as_deref()))
+            }
+        };
+        self.relay_to_telegram(pane_id, header, tail, None, cx);
+    }
+
+    /// Relay the fixed fallback ack for a phone-triggered turn that went 60s
+    /// without producing text or a tool call, or settled with nothing having
+    /// appeared at all. Plain tail (fixed i18n copy, not agent-authored
+    /// markdown) — the same copy the old always-immediate ack used. Gated by
+    /// `relay_to_telegram`.
+    // TODO(telegram-first-response-ack tasks 3-4): called from
+    // `fire_activity_completion`'s settle-without-content branch and the 60s
+    // fallback pump once those land — remove this `allow` at that point.
+    #[allow(dead_code)]
+    pub(in crate::workspace) fn relay_first_response_fallback_to_telegram(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) {
         let header = self.telegram_header(pane_id, cx);
         self.relay_to_telegram(
             pane_id,
@@ -505,23 +581,29 @@ impl Workspace {
         self.uuid
     }
 
-    /// Inject a phone-relayed reply as a prompt in this pane, and first send an
-    /// immediate Telegram ack (`relay_ack_to_telegram`) confirming receipt. The
-    /// prompt itself still goes through the existing `send_agent_prompt_text`
-    /// funnel — no new *prompt* delivery path, only the added ack ping. A
-    /// `pub(crate)` entry point for `crate::telegram::global`'s poll loop to
-    /// call into (which lives outside `workspace/` and can't reach the
-    /// `pub(in crate::workspace)` version).
+    /// Inject a phone-relayed reply as a prompt in this pane via
+    /// `AgentChatView::send_prompt_text_for_telegram`. If it has to queue
+    /// behind an in-flight turn, sends the immediate "queued" notice (there's
+    /// nothing yet to watch a first response for); otherwise it dispatches
+    /// straight onto the wire and the view itself arms the first-response
+    /// watch — from there, `agent_chat_ops.rs`'s event pump resolves it into
+    /// the agent's own first-response ack, or the periodic flush pump's 60s
+    /// fallback catches it. A `pub(crate)` entry point for
+    /// `crate::telegram::global`'s poll loop to call into (which lives outside
+    /// `workspace/` and can't reach the `pub(in crate::workspace)` version).
     pub(crate) fn inject_bot_reply(
         &mut self,
         pane_id: PaneId,
         text: String,
         cx: &mut Context<Self>,
     ) {
-        // Immediately confirm receipt on the phone — closes the blind gap
-        // between the reply landing and the turn producing any output.
-        self.relay_ack_to_telegram(pane_id, cx);
-        self.send_agent_prompt_text(pane_id, text, cx);
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
+        let dispatch = view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx));
+        if dispatch == PromptDispatch::Queued {
+            self.relay_queued_notice_to_telegram(pane_id, cx);
+        }
     }
 
     /// Resolve a phone-tapped Allow/Reject button against this pane's
@@ -853,6 +935,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn first_tool_ack_tail_appends_the_title_when_present() {
+        assert_eq!(
+            super::first_tool_ack_tail(Some("Write /tmp/x.rs")),
+            format!(
+                "{}\n{}",
+                s::agent_notification_telegram_first_tool_ack(),
+                "Write /tmp/x.rs"
+            )
+        );
+    }
+
+    #[test]
+    fn first_tool_ack_tail_treats_an_empty_title_as_absent() {
+        assert_eq!(
+            super::first_tool_ack_tail(Some("")),
+            s::agent_notification_telegram_first_tool_ack()
+        );
+    }
+
+    #[test]
+    fn first_tool_ack_tail_without_a_title() {
+        assert_eq!(
+            super::first_tool_ack_tail(None),
+            s::agent_notification_telegram_first_tool_ack()
+        );
+    }
+
     fn choice(option_id: &str, name: &str, kind: PermissionKindView) -> PermissionChoice {
         PermissionChoice {
             option_id: option_id.to_string(),
@@ -954,6 +1064,73 @@ mod tests {
     #[test]
     fn permission_buttons_empty_options_is_empty() {
         assert!(permission_buttons(&[]).is_empty());
+    }
+
+    /// A phone reply injected into a pane that has never connected (no
+    /// `handle`, so `send_prompt_text_for_telegram` always queues) sends the
+    /// "queued" notice — there's nothing yet to watch a first response for.
+    #[gpui::test]
+    async fn inject_bot_reply_sends_the_queued_notice_when_it_has_to_wait(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let pane_id = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        workspace.update(cx, |ws, cx| {
+            ws.inject_bot_reply(pane_id, "hello from telegram".to_string(), cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, cx| {
+            let view = ws.agent_chat_view(pane_id).cloned().expect("pane present");
+            assert_eq!(
+                view.read(cx)
+                    .pending_prompts
+                    .iter()
+                    .map(|q| q.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["hello from telegram"],
+                "the reply queues (never connected)"
+            );
+            assert!(
+                view.read(cx).telegram_first_response_watch.is_none(),
+                "queuing alone must not arm the watch"
+            );
+        });
+
+        let sent = outbound
+            .next()
+            .await
+            .expect("the queued notice should be sent");
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain(s::agent_notification_telegram_reply_queued())
+        );
     }
 
     /// Cross-workspace routing coverage: `crate::telegram::global`'s

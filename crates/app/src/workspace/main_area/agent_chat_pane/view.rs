@@ -1506,10 +1506,6 @@ impl AgentChatView {
     /// Sugar over [`Self::send_prompt_text_inner`] with [`PromptOrigin::Telegram`]
     /// — the caller (`Workspace::inject_bot_reply`) needs the returned
     /// [`PromptDispatch`] to know whether to send a "queued" notice.
-    // TODO(telegram-first-response-ack task 2): wired up once
-    // `Workspace::inject_bot_reply` is rewritten to call this instead of
-    // `send_prompt_text` — remove this `allow` at that point.
-    #[allow(dead_code)]
     pub(in crate::workspace) fn send_prompt_text_for_telegram(
         &mut self,
         text: String,

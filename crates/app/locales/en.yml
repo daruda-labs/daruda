@@ -777,6 +777,8 @@ notification:
   agent_waiting: "Agent is waiting for your input"
   telegram_truncated_marker: "…(truncated)…"
   telegram_reply_ack: "Agent received — generating response / working…"
+  telegram_reply_queued: "Received — queued behind the current turn…"
+  telegram_first_tool_ack: "Checking using a tool…"
   telegram_background_update: "🔔 Background update"
   telegram_permission_allowed: "✅ Allowed"
   telegram_permission_rejected: "🚫 Rejected"

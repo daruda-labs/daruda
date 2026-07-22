@@ -2682,10 +2682,25 @@ pub fn agent_notification_telegram_truncated_marker() -> String {
     rust_i18n::t!("notification.telegram_truncated_marker").into_owned()
 }
 
-/// Body for the Telegram ack sent the moment a phone-relayed reply is injected —
-/// closes the "did it go through?" gap before the turn produces any output.
+/// Body for the fixed Telegram ack sent when a phone-triggered turn goes 60s
+/// without producing text or a tool call, or settles with nothing having
+/// appeared at all — the fallback behind the agent's own first-response text
+/// or tool-ack (see `Workspace::relay_first_response_fallback_to_telegram`).
 pub fn agent_notification_telegram_reply_ack() -> String {
     rust_i18n::t!("notification.telegram_reply_ack").into_owned()
+}
+
+/// Body for the Telegram notice sent when a phone-relayed reply has to wait
+/// behind an in-flight turn — it hasn't reached the agent yet, so there is
+/// nothing to watch for a first response from.
+pub fn agent_notification_telegram_reply_queued() -> String {
+    rust_i18n::t!("notification.telegram_reply_queued").into_owned()
+}
+
+/// Body for the Telegram ack sent when a phone-triggered turn goes straight to
+/// a tool call with no preceding text.
+pub fn agent_notification_telegram_first_tool_ack() -> String {
+    rust_i18n::t!("notification.telegram_first_tool_ack").into_owned()
 }
 
 /// Prefix for a Telegram follow-up carrying a message the agent produced *after*
@@ -3327,6 +3342,16 @@ mod tests {
     #[test]
     fn telegram_reply_ack_is_non_empty() {
         assert!(!super::agent_notification_telegram_reply_ack().is_empty());
+    }
+
+    #[test]
+    fn telegram_reply_queued_is_non_empty() {
+        assert!(!super::agent_notification_telegram_reply_queued().is_empty());
+    }
+
+    #[test]
+    fn telegram_first_tool_ack_is_non_empty() {
+        assert!(!super::agent_notification_telegram_first_tool_ack().is_empty());
     }
 
     #[test]

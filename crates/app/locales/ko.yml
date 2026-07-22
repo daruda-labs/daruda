@@ -777,6 +777,8 @@ notification:
   agent_waiting: "에이전트가 입력을 기다리고 있습니다"
   telegram_truncated_marker: "…(중략)…"
   telegram_reply_ack: "에이전트 수신 확인 — 응답 생성 또는 작업중…"
+  telegram_reply_queued: "수신됨 — 현재 턴 처리 후 진행됩니다…"
+  telegram_first_tool_ack: "관련 도구를 활용해 확인 중입니다…"
   telegram_background_update: "🔔 백그라운드 업데이트"
   telegram_permission_allowed: "✅ 허용됨"
   telegram_permission_rejected: "🚫 거부됨"
