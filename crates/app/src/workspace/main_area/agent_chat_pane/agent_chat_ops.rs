@@ -26,7 +26,8 @@ use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::telegram_ops::DeferKind;
 use super::view::{
-    AgentChatView, AgentSessionStatus, EscapeOutcome, PromptId, RuntimePrepPhase, TurnOutcome,
+    AgentChatView, AgentSessionStatus, EscapeOutcome, PromptDispatch, PromptId, PromptOrigin,
+    RuntimePrepPhase, TelegramFirstResponseEffect, TurnOutcome,
 };
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -202,7 +203,7 @@ impl Workspace {
         // permission request; the `let else` is defensive. Passing the view's
         // current items lets it prefer an already-clean `raw_input` (from an
         // earlier tool_call for this id) over the request's own copy.
-        let Some(view) = self.agent_chat_view(pane_id) else {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return;
         };
         let daruda_acp::ChatItem::Permission(card) =
@@ -866,9 +867,14 @@ impl Workspace {
                             // `apply_event` below. Turn *completion* fires later,
                             // at the activity-settle edge (see the reconcile below).
                             ws.maybe_notify_agent_event(pane_id, &event, cx);
-                            view.update(cx, |v, cx| {
+                            let telegram_first_response = view.update(cx, |v, cx| {
                                 v.apply_event(event, &syntax_theme, is_light, cx)
                             });
+                            ws.relay_telegram_first_response_effect(
+                                pane_id,
+                                telegram_first_response,
+                                cx,
+                            );
                             // Advance the activity span now that the event folded
                             // in. When this event drove the last busy→idle
                             // transition (the turn ended and no subagent is still
@@ -948,7 +954,7 @@ impl Workspace {
                             view.update(cx, |v, cx| v.abort_restore(cx));
                             if was_connecting {
                                 let (syntax_theme, is_light) = ws.agent_chat_theme_params(cx);
-                                view.update(cx, |v, cx| {
+                                let telegram_first_response = view.update(cx, |v, cx| {
                                     v.apply_event(
                                         daruda_acp::AcpEvent::Error(
                                             s::agent_chat_error_stream_ended(),
@@ -958,6 +964,11 @@ impl Workspace {
                                         cx,
                                     )
                                 });
+                                ws.relay_telegram_first_response_effect(
+                                    pane_id,
+                                    telegram_first_response,
+                                    cx,
+                                );
                                 // Connecting → Error clears the badge; dirty the
                                 // cached docks so it doesn't linger stale.
                                 ws.notify_status_docks(cx);
@@ -1084,28 +1095,74 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        match classify_slash(&text) {
+        let _ = self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::InApp, cx);
+    }
+
+    fn relay_telegram_first_response_effect(
+        &self,
+        pane_id: PaneId,
+        effect: TelegramFirstResponseEffect,
+        cx: &Context<Self>,
+    ) {
+        match effect {
+            TelegramFirstResponseEffect::None => {}
+            TelegramFirstResponseEffect::Relay(outcome) => {
+                self.relay_first_response_to_telegram(pane_id, outcome, cx);
+            }
+            TelegramFirstResponseEffect::Fallback => {
+                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+            }
+        }
+    }
+
+    /// Telegram-specific submit shim. It uses the same Workspace funnel as the
+    /// bottom-dock composer (slash handling, post-turn flush, activity reconcile)
+    /// but preserves the dispatch result so `inject_bot_reply` knows whether the
+    /// reply reached the agent now or only entered the pane queue.
+    pub(in crate::workspace) fn send_agent_prompt_text_from_telegram(
+        &mut self,
+        pane_id: PaneId,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> Option<PromptDispatch> {
+        self.send_agent_prompt_text_with_origin(pane_id, text, PromptOrigin::Telegram, cx)
+    }
+
+    fn send_agent_prompt_text_with_origin(
+        &mut self,
+        pane_id: PaneId,
+        text: String,
+        origin: PromptOrigin,
+        cx: &mut Context<Self>,
+    ) -> Option<PromptDispatch> {
+        let dispatch = classify_slash(&text);
+        match dispatch {
             SlashDispatch::Local(LocalSlashCommand::Clear) => {
                 self.reset_agent_chat_session(pane_id, cx);
+                None
             }
             SlashDispatch::Forward => {
-                if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-                    // Flush a not-yet-quiesced post-turn follow-up before this new
-                    // turn subsumes it (else its delta would be lost/merged).
-                    if let Some(delta) = view.update(cx, |v, _| v.take_pending_post_turn()) {
-                        self.relay_post_turn_to_telegram(pane_id, delta, cx);
-                    }
-                    view.update(cx, |v, cx| v.send_prompt_text(text, cx));
-                    // Open the activity span on the idle→busy edge (stamps the
-                    // working-indicator elapsed anchor at send). A returned
-                    // `Some` is unexpected on open but harmless to fire — the
-                    // single completion firing point stays consistent.
-                    let edge =
-                        view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
-                    if let Some(outcome) = edge {
-                        self.fire_activity_completion(pane_id, outcome, cx);
-                    }
+                let view = self.agent_chat_view(pane_id).cloned()?;
+                // Flush a not-yet-quiesced post-turn follow-up before this new
+                // turn subsumes it (else its delta would be lost/merged).
+                if let Some(delta) = view.update(cx, |v, _| v.take_pending_post_turn()) {
+                    self.relay_post_turn_to_telegram(pane_id, delta, cx);
                 }
+                let prompt_dispatch = if origin == PromptOrigin::Telegram {
+                    view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
+                } else {
+                    view.update(cx, |v, cx| v.send_prompt_text(text, cx));
+                    PromptDispatch::SentNow
+                };
+                // Open the activity span on the idle→busy edge (stamps the
+                // working-indicator elapsed anchor at send). A returned
+                // `Some` is unexpected on open but harmless to fire — the
+                // single completion firing point stays consistent.
+                let edge = view.update(cx, |v, _| v.reconcile_activity(std::time::Instant::now()));
+                if let Some(outcome) = edge {
+                    self.fire_activity_completion(pane_id, outcome, cx);
+                }
+                Some(prompt_dispatch)
             }
         }
     }

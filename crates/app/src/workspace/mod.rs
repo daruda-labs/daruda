@@ -1589,7 +1589,7 @@ impl Workspace {
             return;
         }
         let quiet_secs = self.telegram.active_idle_secs;
-        if !self.telegram.defer_while_active {
+        if !self.telegram.defer_while_active || quiet_secs == 0 {
             self.deliver_deferred_telegram(false, 0.0, quiet_secs, cx);
             return;
         }

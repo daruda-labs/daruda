@@ -74,14 +74,16 @@ fn spawn_needs_attention_demote(cx: &mut App) {
     );
 }
 
-/// Deliver Telegram pings after presence drops; idle work is just an empty-map
-/// check, and the 15s cadence bounds notification delay.
+/// Re-check held Telegram pings and silent phone-triggered turns against their
+/// quiet windows; idle work is just cheap empty/pane checks, and the 15s cadence
+/// bounds notification delay.
 fn spawn_deferred_telegram_flush(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(15),
         |cx: &mut App| {
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
                 ws.flush_deferred_telegram(cx);
+                ws.flush_telegram_first_response_fallbacks(cx);
             });
         },
         cx,

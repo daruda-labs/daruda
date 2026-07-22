@@ -34,7 +34,7 @@ use super::agent_chat_helpers::{
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
-use super::telegram_ops::FirstResponseWatch;
+use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use crate::surface::strings as s;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -204,6 +204,16 @@ pub(in crate::workspace) enum PromptDispatch {
     Queued,
 }
 
+/// A Telegram-origin turn's first-response watch side effect, returned by
+/// [`AgentChatView::apply_event`] so the Workspace event pump can relay exactly
+/// one phone-visible acknowledgement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum TelegramFirstResponseEffect {
+    None,
+    Relay(FirstResponseOutcome),
+    Fallback,
+}
+
 /// A prompt the user submitted while a turn was in flight (or before the
 /// session connected), held in the queue until it can be dispatched. Unlike
 /// the send-now path, a queued prompt is NOT echoed into the transcript — it
@@ -361,7 +371,7 @@ pub(in crate::workspace) struct AgentChatView {
     /// `agent_chat_ops.rs` event pump and the periodic Telegram flush pump
     /// (`Workspace::flush_telegram_first_response_fallbacks`) are the only
     /// consumers. Runtime-only; never serialized.
-    pub(in crate::workspace) telegram_first_response_watch: Option<FirstResponseWatch>,
+    telegram_first_response_watch: Option<FirstResponseWatch>,
     /// Whether a prompt turn is in flight (between submit and the matching
     /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
     /// re-submit while the agent is busy, and carries the turn's start instant
@@ -585,6 +595,17 @@ impl AgentChatView {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         self.drain_next_queued_prompt(cx)
+    }
+
+    /// Test-only hook: arm the Telegram first-response watch without needing a
+    /// live ACP handle.
+    #[cfg(test)]
+    pub(in crate::workspace) fn start_telegram_first_response_watch_for_test(
+        &mut self,
+        started_at: std::time::Instant,
+    ) {
+        self.telegram_first_response_watch =
+            Some(FirstResponseWatch::start(started_at, self.items.len()));
     }
 
     /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
@@ -955,7 +976,7 @@ impl AgentChatView {
         syntax_theme: &str,
         is_light: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> TelegramFirstResponseEffect {
         // Session errors surface inline in the status banner (the `Error` arm
         // below sets `status`), so this only records to the NDJSON log — no
         // toast. A toast here is pure noise: it duplicates the banner, and on
@@ -997,6 +1018,10 @@ impl AgentChatView {
         // re-derive them (defensive: prevents a stale streaming height from
         // lingering and inflating the scroll geometry into an oversized gap).
         let mut turn_settled = false;
+        // Returned to the Workspace pump after the model mutation, so it can
+        // send the first phone-visible reply without letting this self-owned
+        // pane reach into Workspace/Telegram state.
+        let mut telegram_first_response_effect = TelegramFirstResponseEffect::None;
 
         match event {
             AcpEvent::ConnectProgress(phase) => {
@@ -1120,11 +1145,15 @@ impl AgentChatView {
                             .insert(parent, std::time::Instant::now());
                     }
                 }
+                if let Some(outcome) = self.take_telegram_first_response() {
+                    telegram_first_response_effect = TelegramFirstResponseEffect::Relay(outcome);
+                }
             }
             AcpEvent::PermissionRequested { id, request } => {
                 let item = permission_item(id, &request, &self.items);
                 self.items.push(item);
                 self.pending_permissions.insert(id);
+                self.clear_telegram_first_response_watch();
             }
             AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_) if self.cancel_in_flight => {
                 // The terminal signal (a `cancelled` `TurnEnded`, or a
@@ -1137,6 +1166,7 @@ impl AgentChatView {
                 // `cancel_in_flight` guard), so nothing raced this ack and a
                 // second Stop could still have cleared it.
                 self.cancel_in_flight = false;
+                self.clear_telegram_first_response_watch();
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::TurnEnded {
@@ -1147,6 +1177,7 @@ impl AgentChatView {
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
                 turn_settled = true;
+                telegram_first_response_effect = self.finish_telegram_first_response_watch();
                 // Capture the outcome; it fires only when the pane settles
                 // busy→idle (via `reconcile_activity`), which may trail this
                 // `end_turn` while trailing subagents finish.
@@ -1211,6 +1242,7 @@ impl AgentChatView {
                 // guarded arm above; here the turn was not being cancelled.)
                 self.settle_turn();
                 turn_settled = true;
+                telegram_first_response_effect = self.finish_telegram_first_response_watch();
                 // Capture the errored outcome; it fires (notification +
                 // backing-task done) on the busy→idle settle edge that
                 // `reconcile_activity` detects, same as a normal completion.
@@ -1250,6 +1282,7 @@ impl AgentChatView {
                 // is already dead.
                 self.settle_turn();
                 turn_settled = true;
+                telegram_first_response_effect = self.finish_telegram_first_response_watch();
                 // Capture the failure outcome; it fires on the busy→idle settle
                 // edge (via `reconcile_activity`), same as a normal completion.
                 self.pending_completion = Some(TurnOutcome::Errored);
@@ -1298,7 +1331,7 @@ impl AgentChatView {
         // reconciles are unchanged, so replay cost is no better than live-
         // streaming the same events; this only removes the redundant rebuilds.)
         if self.restoring {
-            return;
+            return telegram_first_response_effect;
         }
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
@@ -1342,6 +1375,7 @@ impl AgentChatView {
             self.trace_list_sync("turn-settled", 0, n, n);
         }
         cx.notify();
+        telegram_first_response_effect
     }
 
     /// Release a stuck replay gate. A `session/load` normally ends in either a
@@ -1535,7 +1569,8 @@ impl AgentChatView {
         // still queued; if it drained onto the wire while the user was editing,
         // the second `let` fails and we fall through to handle `text` as a
         // brand-new prompt so nothing typed is lost.
-        if let Some(id) = self.editing_prompt.take()
+        if origin == PromptOrigin::InApp
+            && let Some(id) = self.editing_prompt.take()
             && let Some(qp) = self
                 .pending_prompts
                 .iter_mut()
@@ -1591,6 +1626,60 @@ impl AgentChatView {
                 self.items.len(),
             ));
         }
+    }
+
+    /// Whether this pane is still waiting to produce the first phone-visible
+    /// response for a Telegram-origin prompt.
+    pub(in crate::workspace) fn is_waiting_for_telegram_first_response(&self) -> bool {
+        self.telegram_first_response_watch.is_some()
+    }
+
+    /// Resolve and clear the active Telegram first-response watch if a completed
+    /// text reply or first tool call has appeared since the watched prompt was
+    /// echoed. Returns `None` when there is no watch or the turn has not yet
+    /// produced a qualifying visible response.
+    fn take_telegram_first_response(&mut self) -> Option<FirstResponseOutcome> {
+        let watch = self.telegram_first_response_watch?;
+        let outcome = watch.resolve(&self.items)?;
+        self.telegram_first_response_watch = None;
+        Some(outcome)
+    }
+
+    /// Finish the active watch at a terminal boundary. A final streaming text is
+    /// resolved first (because `settle_turn` has just finalized it); otherwise
+    /// the old immediate "received" ack is used as the fallback.
+    fn finish_telegram_first_response_watch(&mut self) -> TelegramFirstResponseEffect {
+        if let Some(outcome) = self.take_telegram_first_response() {
+            return TelegramFirstResponseEffect::Relay(outcome);
+        }
+        if self.telegram_first_response_watch.take().is_some() {
+            return TelegramFirstResponseEffect::Fallback;
+        }
+        TelegramFirstResponseEffect::None
+    }
+
+    /// Clear a watch that was superseded by a stronger phone-visible signal
+    /// (currently a permission prompt) without emitting the generic fallback.
+    fn clear_telegram_first_response_watch(&mut self) {
+        self.telegram_first_response_watch = None;
+    }
+
+    /// Periodic safety net for turns that stay silent for the first-response
+    /// window. Returns true only once, clearing the watch so later flush ticks do
+    /// not repeat the fallback ack.
+    pub(in crate::workspace) fn take_telegram_first_response_fallback_if_overdue(
+        &mut self,
+        now: std::time::Instant,
+        timeout_secs: u64,
+    ) -> bool {
+        if self
+            .telegram_first_response_watch
+            .is_some_and(|watch| watch.is_overdue(now, timeout_secs))
+        {
+            self.telegram_first_response_watch = None;
+            return true;
+        }
+        false
     }
 
     /// Append `text` to the transcript as a `UserText` item and refresh the
@@ -1836,6 +1925,7 @@ impl AgentChatView {
             self.cancel_in_flight = true;
         }
         self.settle_turn();
+        self.clear_telegram_first_response_watch();
         // Stop cancels the running turn but PRESERVES the queue: move everything
         // buffered before this Stop into the parked queue rather than dropping
         // it. Parked prompts do NOT auto-drain — they live outside
@@ -2043,6 +2133,7 @@ impl AgentChatView {
         self.paused_prompts.clear();
         self.editing_prompt = None;
         self.pending_permissions.clear();
+        self.telegram_first_response_watch = None;
         self.turn = Turn::Idle;
         self.subagent_last_activity.clear();
         self.activity_started_at = None;
@@ -2369,13 +2460,13 @@ mod tests {
             .update(cx, |view, _window, _cx| {
                 view.start_telegram_watch_if(super::PromptOrigin::InApp);
                 assert!(
-                    view.telegram_first_response_watch.is_none(),
+                    !view.is_waiting_for_telegram_first_response(),
                     "an in-app dispatch never arms the watch"
                 );
 
                 view.start_telegram_watch_if(super::PromptOrigin::Telegram);
                 assert!(
-                    view.telegram_first_response_watch.is_some(),
+                    view.is_waiting_for_telegram_first_response(),
                     "a telegram-origin dispatch arms the watch"
                 );
             })
@@ -2393,15 +2484,44 @@ mod tests {
                 view.set_turn_in_flight();
                 view.enqueue_prompt("from telegram".to_string(), super::PromptOrigin::Telegram);
                 assert!(
-                    view.telegram_first_response_watch.is_none(),
+                    !view.is_waiting_for_telegram_first_response(),
                     "queuing alone must not arm the watch"
                 );
 
                 view.set_turn_idle();
                 view.drain_next_queued_prompt_for_test(cx);
                 assert!(
-                    view.telegram_first_response_watch.is_some(),
+                    view.is_waiting_for_telegram_first_response(),
                     "draining the telegram-origin prompt arms the watch"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.set_turn_in_flight();
+                let id = view.enqueue_prompt("local draft".to_string(), super::PromptOrigin::InApp);
+                view.begin_edit(id, cx);
+
+                let dispatch = view.send_prompt_text_for_telegram("from phone".to_string(), cx);
+
+                assert_eq!(dispatch, super::PromptDispatch::Queued);
+                assert_eq!(
+                    view.pending_prompts
+                        .iter()
+                        .map(|q| q.text.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["local draft", "from phone"],
+                    "a phone reply is a new prompt, not an edit commit"
+                );
+                assert_eq!(
+                    view.editing_prompt,
+                    Some(id),
+                    "the in-app edit target remains active"
                 );
             })
             .unwrap();
@@ -2418,8 +2538,47 @@ mod tests {
 
                 view.drain_next_queued_prompt_for_test(cx);
                 assert!(
-                    view.telegram_first_response_watch.is_none(),
+                    !view.is_waiting_for_telegram_first_response(),
                     "an in-app-origin drain must not arm the watch"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.set_turn_in_flight();
+                view.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+                view.items.push(daruda_acp::ChatItem::AssistantText {
+                    text: "done".to_string(),
+                    streaming: true,
+                    message_id: None,
+                });
+
+                let effect = view.apply_event(
+                    daruda_acp::AcpEvent::TurnEnded {
+                        completed_normally: true,
+                        stop_reason: "EndTurn".into(),
+                    },
+                    "",
+                    false,
+                    cx,
+                );
+
+                assert_eq!(
+                    effect,
+                    super::TelegramFirstResponseEffect::Relay(super::FirstResponseOutcome::Text(
+                        "done".to_string()
+                    ))
+                );
+                assert!(
+                    !view.is_waiting_for_telegram_first_response(),
+                    "the resolved watch is cleared at the terminal boundary"
                 );
             })
             .unwrap();

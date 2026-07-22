@@ -25,6 +25,9 @@ const TELEGRAM_PREVIEW_THRESHOLD: usize = 2000;
 /// detail already visible in the app.
 const TELEGRAM_PREVIEW_HEAD_CHARS: usize = 1000;
 const TELEGRAM_PREVIEW_TAIL_CHARS: usize = 1000;
+/// Maximum time a phone-triggered turn can stay silent before Telegram receives
+/// the fixed fallback acknowledgement.
+pub(in crate::workspace) const FIRST_RESPONSE_FALLBACK_SECS: u64 = 60;
 
 /// Keep `text` verbatim under [`TELEGRAM_PREVIEW_THRESHOLD`] characters; past
 /// it, keep the first [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last
@@ -62,10 +65,6 @@ fn permission_wait_tail(tool_title: Option<&str>, raw_input_summary: Option<&str
 /// Compose the "went straight to a tool call" first-response ack's tail: the
 /// fixed i18n label, plus the tool's title on its own line when the agent
 /// supplied a non-empty one.
-// TODO(telegram-first-response-ack task 3): called from
-// `relay_first_response_to_telegram` once the event pump wires that in —
-// remove this `allow` at that point.
-#[cfg_attr(not(test), allow(dead_code))]
 fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
     let mut tail = s::agent_notification_telegram_first_tool_ack();
     if let Some(title) = tool_title.filter(|t| !t.is_empty()) {
@@ -103,13 +102,20 @@ pub(in crate::workspace) struct DeferredRelay {
 /// `BridgeCore`'s `SENT_PINGS_CAP` eviction in `telegram::bridge`.
 const MAX_DEFERRED_PER_PANE: usize = 20;
 
-/// Hold a presence-gated relay instead of sending now: the feature is on and
-/// the app is foreground. Whether a *held* ping is later actually delivered is
+/// Hold a presence-gated relay instead of sending now: the feature is on, the
+/// app is foreground, and the quiet window is positive. `quiet_secs == 0`
+/// means "do not hold" so changing the setting to zero releases existing
+/// queues on the next flush instead of creating an always-ready but still-held
+/// foreground queue. Whether a *held* ping is later actually delivered is
 /// decided per-entry by [`ready_to_deliver`] — this only gates whether it goes
 /// into the queue at all. Pure so it is unit-testable without a live
 /// `NSApplication`.
-pub(in crate::workspace) fn should_defer_relay(enabled: bool, app_active: bool) -> bool {
-    enabled && app_active
+pub(in crate::workspace) fn should_defer_relay(
+    enabled: bool,
+    app_active: bool,
+    quiet_secs: u64,
+) -> bool {
+    enabled && app_active && quiet_secs > 0
 }
 
 /// Whether a held ping, queued at `queued_at`, is ready to actually go out now.
@@ -246,7 +252,6 @@ impl FirstResponseWatch {
     /// Whether `timeout_secs` has elapsed since this watch started with
     /// nothing qualifying found yet — the periodic fallback pump's readiness
     /// check.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::workspace) fn is_overdue(
         &self,
         now: std::time::Instant,
@@ -260,7 +265,6 @@ impl FirstResponseWatch {
     /// and any `Thinking` item are skipped: reasoning isn't the visible
     /// reply, and a text reply must be complete before it's worth sending
     /// (see `daruda_acp::ChatItem::AssistantText`'s `streaming` field).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::workspace) fn resolve(
         &self,
         items: &[daruda_acp::ChatItem],
@@ -364,9 +368,13 @@ impl Workspace {
     /// `daruda_acp::PermissionItem` fields the in-app card is built
     /// from — see [`permission_wait_tail`] — so the phone ping names the
     /// actual action awaiting approval instead of just "waiting for your
-    /// input". Always a [`TelegramTail::Plain`] tail: none of `tool_title`,
-    /// `raw_input_summary`, or the "waiting" label is agent-authored
-    /// markdown — see [`TelegramTail`]'s doc comment for why that matters.
+    /// input". When this permission is the first visible response to a
+    /// phone-originated prompt, it bypasses active-window deferral so the phone
+    /// immediately gets the action buttons; later permission waits keep the
+    /// normal presence gate. Always a [`TelegramTail::Plain`] tail: none of
+    /// `tool_title`, `raw_input_summary`, or the "waiting" label is
+    /// agent-authored markdown — see [`TelegramTail`]'s doc comment for why
+    /// that matters.
     pub(in crate::workspace) fn relay_permission_wait_to_telegram(
         &mut self,
         pane_id: PaneId,
@@ -376,27 +384,40 @@ impl Workspace {
         raw_input_summary: Option<&str>,
         cx: &Context<Self>,
     ) {
+        let is_telegram_first_response = self
+            .agent_chat_view(pane_id)
+            .is_some_and(|view| view.read(cx).is_waiting_for_telegram_first_response());
         let buttons = permission_buttons(options);
         if buttons.is_empty() {
+            if is_telegram_first_response {
+                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+            }
             return;
         }
         let tail = permission_wait_tail(tool_title, raw_input_summary);
-        self.relay_or_defer_to_telegram(
-            pane_id,
-            DeferKind::Permission { perm_id },
-            self.pane_title(pane_id, cx),
-            TelegramTail::Plain(tail),
-            Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons }),
-            cx,
-        );
+        let header = self.pane_title(pane_id, cx);
+        let permission = Some(crate::telegram::bridge::PermissionPromptRef { perm_id, buttons });
+        if is_telegram_first_response {
+            self.relay_to_telegram(pane_id, header, TelegramTail::Plain(tail), permission, cx);
+        } else {
+            self.relay_or_defer_to_telegram(
+                pane_id,
+                DeferKind::Permission { perm_id },
+                header,
+                TelegramTail::Plain(tail),
+                permission,
+                cx,
+            );
+        }
     }
 
     /// Presence-gated entry point for the completion / permission / post-turn
     /// relays. While the user is present (app foreground) the composed ping is
     /// held per-pane; the periodic flush (`Workspace::flush_deferred_telegram`)
     /// later decides, per entry, when it's actually ready to go out (see
-    /// `ready_to_deliver`). Otherwise it is sent immediately. Ack deliberately
-    /// bypasses this and calls `relay_to_telegram` directly.
+    /// `ready_to_deliver`). Otherwise it is sent immediately. First-response
+    /// acks and first-response permission waits deliberately bypass this and
+    /// call `relay_to_telegram` directly.
     pub(in crate::workspace) fn relay_or_defer_to_telegram(
         &mut self,
         pane_id: PaneId,
@@ -421,6 +442,7 @@ impl Workspace {
         let defer = should_defer_relay(
             self.telegram.defer_while_active,
             crate::platform::attention::is_app_active(),
+            self.telegram.active_idle_secs,
         );
         if defer {
             push_deferred(
@@ -500,9 +522,6 @@ impl Workspace {
     /// (calls `relay_to_telegram` directly) — the whole point of this relay is
     /// a phone-originated interaction, so instant delivery is what the sender
     /// wants regardless of whether the app happens to be foreground right now.
-    // TODO(telegram-first-response-ack task 3): called from the event pump's
-    // post-`apply_event` hook once that's wired in — remove this `allow`.
-    #[allow(dead_code)]
     pub(in crate::workspace) fn relay_first_response_to_telegram(
         &self,
         pane_id: PaneId,
@@ -527,10 +546,6 @@ impl Workspace {
     /// appeared at all. Plain tail (fixed i18n copy, not agent-authored
     /// markdown) — the same copy the old always-immediate ack used. Gated by
     /// `relay_to_telegram`.
-    // TODO(telegram-first-response-ack tasks 3-4): called from
-    // `fire_activity_completion`'s settle-without-content branch and the 60s
-    // fallback pump once those land — remove this `allow` at that point.
-    #[allow(dead_code)]
     pub(in crate::workspace) fn relay_first_response_fallback_to_telegram(
         &self,
         pane_id: PaneId,
@@ -544,6 +559,37 @@ impl Workspace {
             None,
             cx,
         );
+    }
+
+    /// Periodic safety net for phone-triggered turns that produce no completed
+    /// assistant text or tool call within [`FIRST_RESPONSE_FALLBACK_SECS`].
+    /// The view clears each watch as it is taken, so a pane can emit this
+    /// fallback at most once per phone-dispatched turn.
+    pub(crate) fn flush_telegram_first_response_fallbacks(&mut self, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        let panes: Vec<PaneId> = self
+            .main_area
+            .runtimes
+            .values()
+            .flat_map(|runtime| runtime.panes.iter())
+            .filter(|pane| pane.agent_chat_view().is_some())
+            .map(|pane| pane.id)
+            .collect();
+
+        for pane_id in panes {
+            let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+                continue;
+            };
+            let overdue = view.update(cx, |v, _| {
+                v.take_telegram_first_response_fallback_if_overdue(
+                    now,
+                    FIRST_RESPONSE_FALLBACK_SECS,
+                )
+            });
+            if overdue {
+                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+            }
+        }
     }
 
     /// Relay a post-turn follow-up (agent text that arrived after the turn ended,
@@ -581,14 +627,13 @@ impl Workspace {
         self.uuid
     }
 
-    /// Inject a phone-relayed reply as a prompt in this pane via
-    /// `AgentChatView::send_prompt_text_for_telegram`. If it has to queue
+    /// Inject a phone-relayed reply as a prompt in this pane through the same
+    /// Workspace submit funnel as the bottom-dock composer. If it has to queue
     /// behind an in-flight turn, sends the immediate "queued" notice (there's
     /// nothing yet to watch a first response for); otherwise it dispatches
     /// straight onto the wire and the view itself arms the first-response
-    /// watch — from there, `agent_chat_ops.rs`'s event pump resolves it into
-    /// the agent's own first-response ack, or the periodic flush pump's 60s
-    /// fallback catches it. A `pub(crate)` entry point for
+    /// watch. Local-only slash commands never reach the agent, so they receive
+    /// the fixed fallback ack immediately. A `pub(crate)` entry point for
     /// `crate::telegram::global`'s poll loop to call into (which lives outside
     /// `workspace/` and can't reach the `pub(in crate::workspace)` version).
     pub(crate) fn inject_bot_reply(
@@ -597,12 +642,13 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+        if self.agent_chat_view(pane_id).is_none() {
             return;
-        };
-        let dispatch = view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx));
-        if dispatch == PromptDispatch::Queued {
-            self.relay_queued_notice_to_telegram(pane_id, cx);
+        }
+        match self.send_agent_prompt_text_from_telegram(pane_id, text, cx) {
+            Some(PromptDispatch::Queued) => self.relay_queued_notice_to_telegram(pane_id, cx),
+            Some(PromptDispatch::SentNow) => {}
+            None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
         }
     }
 
@@ -657,9 +703,10 @@ mod tests {
 
     #[test]
     fn should_defer_only_when_enabled_and_active() {
-        assert!(super::should_defer_relay(true, true));
-        assert!(!super::should_defer_relay(true, false));
-        assert!(!super::should_defer_relay(false, true));
+        assert!(super::should_defer_relay(true, true, 60));
+        assert!(!super::should_defer_relay(true, false, 60));
+        assert!(!super::should_defer_relay(false, true, 60));
+        assert!(!super::should_defer_relay(true, true, 0));
     }
 
     fn tool_call(title: &str) -> daruda_acp::ChatItem {
@@ -1118,7 +1165,7 @@ mod tests {
                 "the reply queues (never connected)"
             );
             assert!(
-                view.read(cx).telegram_first_response_watch.is_none(),
+                !view.read(cx).is_waiting_for_telegram_first_response(),
                 "queuing alone must not arm the watch"
             );
         });
@@ -1502,6 +1549,135 @@ mod tests {
             super::TelegramTail::Plain("completion".to_string())
         );
         assert!(outbound.next().now_or_never().is_none());
+    }
+
+    #[gpui::test]
+    async fn flush_telegram_first_response_fallbacks_sends_once_for_overdue_watch(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    let view = ws.agent_chat_view(id).cloned().expect("view present");
+                    view.update(cx, |v, _| {
+                        let started = std::time::Instant::now()
+                            - std::time::Duration::from_secs(
+                                super::FIRST_RESPONSE_FALLBACK_SECS + 1,
+                            );
+                        v.start_telegram_first_response_watch_for_test(started);
+                    });
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        workspace.update(cx, |ws, cx| {
+            ws.flush_telegram_first_response_fallbacks(cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, cx| {
+            let view = ws.agent_chat_view(pane).cloned().unwrap();
+            assert!(
+                !view.read(cx).is_waiting_for_telegram_first_response(),
+                "the overdue fallback consumes the watch"
+            );
+        });
+
+        let sent = outbound
+            .next()
+            .await
+            .expect("the fallback ack should be sent");
+        assert_eq!(sent.pane.pane, pane);
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
+        );
+
+        workspace.update(cx, |ws, cx| {
+            ws.flush_telegram_first_response_fallbacks(cx);
+        });
+        cx.run_until_parked();
+        assert!(outbound.next().now_or_never().is_none());
+    }
+
+    #[gpui::test]
+    async fn first_response_permission_without_buttons_sends_fallback_ack(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    let view = ws.agent_chat_view(id).cloned().expect("view present");
+                    view.update(cx, |v, _| {
+                        v.start_telegram_first_response_watch_for_test(std::time::Instant::now());
+                    });
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        workspace.update(cx, |ws, cx| {
+            ws.relay_permission_wait_to_telegram(
+                pane,
+                7,
+                &[],
+                Some("Tool without choices"),
+                None,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        let sent = outbound
+            .next()
+            .await
+            .expect("empty-button first response should still ack the phone");
+        assert_eq!(sent.pane.pane, pane);
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain(s::agent_notification_telegram_reply_ack())
+        );
     }
 
     /// A phone tap routes by permission id, not by position: with two
