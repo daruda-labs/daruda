@@ -1,4 +1,5 @@
 mod agent_chat;
+mod agent_diff_layout;
 mod annotation_ops_tests;
 mod config_mirror;
 mod diag_scroll;

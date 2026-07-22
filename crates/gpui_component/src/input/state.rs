@@ -946,11 +946,32 @@ impl InputState {
         cx.notify();
     }
 
+    /// Whether the input is currently disabled (read-only).
+    ///
+    /// daruda vendor patch — lets a host wrapper forward the state's own
+    /// disabled flag into the [`super::Input`] element builder. `Input::render`
+    /// unconditionally writes `state.disabled = self.disabled` every frame, so
+    /// an element built without `.disabled(true)` clobbers a
+    /// [`Self::set_disabled`]`(true)` on the next paint; forwarding this value
+    /// keeps that reconciliation a no-op and preserves read-only mode.
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
     /// The editor's internal scroll handle — exposed so a host can overlay
     /// its own scrollbar driven by the editor's scroll position (paired
     /// with [`super::Input::show_scrollbar(false)`]).
     pub fn scroll_handle(&self) -> &ScrollHandle {
         &self.scroll_handle
+    }
+
+    /// The text element's bounds from the last paint, if it has painted.
+    ///
+    /// daruda vendor patch — layout probe for host tests measuring the
+    /// editor's painted viewport (e.g. the agent-chat diff embed), mirroring
+    /// the [`Self::scroll_handle`] accessor.
+    pub fn last_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_bounds
     }
 
     /// Set with password masked state.

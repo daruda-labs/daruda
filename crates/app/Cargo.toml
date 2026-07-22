@@ -90,6 +90,7 @@ x11rb = { version = "0.13.1", features = ["screensaver", "allow-unsafe-code"] }
 notify = { version = "7", default-features = false }
 
 [dev-dependencies]
+agent-client-protocol = "1.0"
 gpui = { workspace = true, features = ["test-support"] }
 serde_json = "1"
 

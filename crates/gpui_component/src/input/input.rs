@@ -221,39 +221,48 @@ impl Input {
         v_flex()
             .size_full()
             .children(state.search_panel.clone())
-            .child(div().flex_1().child(input_state.clone()).map(|this| {
-                if show_scrollbar && let Some(last_layout) = state.last_layout.as_ref() {
-                    let left = if last_layout.line_number_width.is_zero() {
-                        px(0.)
-                    } else {
-                        // Align left edge to the Line number.
-                        paddings.left + last_layout.line_number_width - LINE_NUMBER_RIGHT_MARGIN
-                    };
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .child(input_state.clone())
+                    .map(|this| {
+                        if show_scrollbar && let Some(last_layout) = state.last_layout.as_ref() {
+                            let left = if last_layout.line_number_width.is_zero() {
+                                px(0.)
+                            } else {
+                                // Align left edge to the Line number.
+                                paddings.left + last_layout.line_number_width
+                                    - LINE_NUMBER_RIGHT_MARGIN
+                            };
 
-                    let scroll_size = gpui::Size {
-                        width: state.scroll_size.width - left + paddings.right + RIGHT_MARGIN,
-                        height: state.scroll_size.height,
-                    };
+                            let scroll_size = gpui::Size {
+                                width: state.scroll_size.width - left
+                                    + paddings.right
+                                    + RIGHT_MARGIN,
+                                height: state.scroll_size.height,
+                            };
 
-                    let scrollbar = if !state.soft_wrap {
-                        Scrollbar::new(&state.scroll_handle)
-                    } else {
-                        Scrollbar::vertical(&state.scroll_handle)
-                    };
+                            let scrollbar = if !state.soft_wrap {
+                                Scrollbar::new(&state.scroll_handle)
+                            } else {
+                                Scrollbar::vertical(&state.scroll_handle)
+                            };
 
-                    this.relative().child(
-                        div()
-                            .absolute()
-                            .top(-paddings.top)
-                            .left(left)
-                            .right(-paddings.right)
-                            .bottom(-paddings.bottom)
-                            .child(scrollbar.scroll_size(scroll_size)),
-                    )
-                } else {
-                    this
-                }
-            }))
+                            this.relative().child(
+                                div()
+                                    .absolute()
+                                    .top(-paddings.top)
+                                    .left(left)
+                                    .right(-paddings.right)
+                                    .bottom(-paddings.bottom)
+                                    .child(scrollbar.scroll_size(scroll_size)),
+                            )
+                        } else {
+                            this
+                        }
+                    }),
+            )
     }
 }
 

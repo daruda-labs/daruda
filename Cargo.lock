@@ -1498,6 +1498,7 @@ dependencies = [
 name = "daruda"
 version = "0.2.7"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "base64",
  "chrono",

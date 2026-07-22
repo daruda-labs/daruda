@@ -60,10 +60,18 @@ pub(super) fn diff_block(
     // The hunk-bg + padding chrome lives on the header row; the rounded /
     // overflow-hidden container wraps the whole foldable block. The body's own
     // backgrounds paint over the container, so only the header carries hunk-bg.
+    //
+    // `flex_none` is load-bearing: `overflow_hidden` zeroes this flex item's
+    // automatic minimum size, and the chat list lays rows out at min-content
+    // height (gpui `list.rs` `available_item_space`) — without it, the row's
+    // measured height undercounts the diff and this container absorbs the
+    // whole deficit, clipping the diff body / folded header.
     div()
         .w_full()
+        .flex_none()
         .rounded(px(theme::RADIUS_XS))
         .overflow_hidden()
+        .debug_selector(|| format!("agent-chat-diff-container-{diff_key}"))
         .child(foldable_block(
             SharedString::from(format!("agent-chat-diff-{diff_key}")),
             key,
@@ -94,14 +102,13 @@ fn diff_body(
     let mut block = div().flex().flex_col().w_full();
 
     if let Some(editor) = editor {
-        // The embedded code editor stretches via `flex_grow` / `height: 100%`,
-        // which only resolves against a definite-height flex parent — without
-        // one it collapses to its single-line `min_height`, hiding all but the
-        // first diff row (the hunk header). The tool-card diff body has no
-        // definite height of its own, so give the wrapper an explicit
-        // `rows × line_height` and `.flex()` to reveal the whole diff. `rows` is
-        // the editor's display-row count, seeded at build time so it is correct
-        // from the first render.
+        // The embedded code editor stretches only when the `Input` itself gets
+        // a definite height. A definite-height parent alone is not enough:
+        // `Input::render` switches multi-line inputs back to `h_auto()` unless
+        // `Input::h(...)` is set, which leaves the editor at its one-line
+        // minimum inside a taller reserved wrapper. Pin both wrapper and input
+        // to `rows × line_height` so the list measures the full block and the
+        // editor paints every diff row.
         let rows = editor.read(cx).display_rows().max(1);
         let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
         return block.child(
@@ -110,7 +117,7 @@ fn diff_body(
                 .w_full()
                 .h(height)
                 .bg(t.file_viewer_bg)
-                .child(crate::ui::file_viewer_editor(editor, cx)),
+                .child(crate::ui::file_viewer_editor(editor, cx).h(height)),
         );
     }
 

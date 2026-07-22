@@ -127,10 +127,16 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
     // (which lands in `self.style`) wins over the Sizable default — the
     // raw + diff editor and its line-number gutter render at the
     // configured size instead of gpui_component's `text_sm`.
+    // Forward the state's own read-only flag into the element. `Input::render`
+    // rewrites `state.disabled = self.disabled` every frame, so an element left
+    // at the builder default (`false`) clobbers a `set_disabled(true)` the host
+    // applied to the state (the diff viewer's read-only mode) on the next paint.
+    // Reading it back keeps that reconciliation a no-op instead of a clobber.
     Input::new(state)
         .appearance(false)
         .input_padding(false)
         .show_scrollbar(false)
+        .disabled(state.read(cx).is_disabled())
         .text_size(px(theme::editor_font_size(cx)))
         .text_color(fg)
 }
