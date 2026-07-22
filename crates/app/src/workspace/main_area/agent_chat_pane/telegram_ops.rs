@@ -191,6 +191,79 @@ fn permission_buttons(
         .collect()
 }
 
+/// What a chat item appended since a [`FirstResponseWatch`] started resolves
+/// to, if anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum FirstResponseOutcome {
+    /// The agent's first visible reply was text.
+    Text(String),
+    /// The agent went straight to a tool call with no preceding text.
+    /// `tool_title` names it when the agent supplied a non-empty title.
+    Tool { tool_title: Option<String> },
+}
+
+/// Tracks whether a pane's in-flight turn was dispatched from a phone-injected
+/// reply and, if so, since when — so the caller knows both whether to keep
+/// waiting and where in `items` to resume scanning from. Owned by
+/// `AgentChatView` as `Option<FirstResponseWatch>`; `None` means no phone-
+/// triggered turn is currently being watched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) struct FirstResponseWatch {
+    started_at: std::time::Instant,
+    items_len_at_start: usize,
+}
+
+impl FirstResponseWatch {
+    /// Starts a watch anchored at `now`, scanning `items` from `items_len`
+    /// onward (the length of the pane's chat items at the moment this turn's
+    /// prompt was echoed — so the echoed `UserText` itself is never mistaken
+    /// for a response).
+    pub(in crate::workspace) fn start(now: std::time::Instant, items_len: usize) -> Self {
+        Self {
+            started_at: now,
+            items_len_at_start: items_len,
+        }
+    }
+
+    /// Whether `timeout_secs` has elapsed since this watch started with
+    /// nothing qualifying found yet — the periodic fallback pump's readiness
+    /// check.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::workspace) fn is_overdue(
+        &self,
+        now: std::time::Instant,
+        timeout_secs: u64,
+    ) -> bool {
+        now.saturating_duration_since(self.started_at).as_secs() >= timeout_secs
+    }
+
+    /// The first item appended since this watch started that resolves it, if
+    /// any — `None` means keep watching. A still-streaming `AssistantText`
+    /// and any `Thinking` item are skipped: reasoning isn't the visible
+    /// reply, and a text reply must be complete before it's worth sending
+    /// (see `daruda_acp::ChatItem::AssistantText`'s `streaming` field).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::workspace) fn resolve(
+        &self,
+        items: &[daruda_acp::ChatItem],
+    ) -> Option<FirstResponseOutcome> {
+        items
+            .get(self.items_len_at_start..)?
+            .iter()
+            .find_map(|item| match item {
+                daruda_acp::ChatItem::AssistantText {
+                    text,
+                    streaming: false,
+                    ..
+                } => Some(FirstResponseOutcome::Text(text.clone())),
+                daruda_acp::ChatItem::ToolCall(tool) => Some(FirstResponseOutcome::Tool {
+                    tool_title: Some(tool.title.clone()).filter(|t| !t.is_empty()),
+                }),
+                _ => None,
+            })
+    }
+}
+
 impl Workspace {
     /// The owning project's display name for `pane_id` (found via whichever
     /// `main_area.runtimes` entry's pane list contains it). `None` for a pane
@@ -505,6 +578,83 @@ mod tests {
         assert!(super::should_defer_relay(true, true));
         assert!(!super::should_defer_relay(true, false));
         assert!(!super::should_defer_relay(false, true));
+    }
+
+    fn tool_call(title: &str) -> daruda_acp::ChatItem {
+        use daruda_acp::{ToolCallItem, ToolKindView, ToolStatusView};
+        daruda_acp::ChatItem::ToolCall(ToolCallItem {
+            id: "tool-1".to_string(),
+            title: title.to_string(),
+            kind: ToolKindView::Edit,
+            tool_name: None,
+            status: ToolStatusView::InProgress,
+            diffs: Vec::new(),
+            output: Vec::new(),
+            raw_input: None,
+            parent_tool_id: None,
+        })
+    }
+
+    fn assistant_text(text: &str, streaming: bool) -> daruda_acp::ChatItem {
+        daruda_acp::ChatItem::AssistantText {
+            text: text.to_string(),
+            streaming,
+            message_id: None,
+        }
+    }
+
+    fn thinking(text: &str) -> daruda_acp::ChatItem {
+        daruda_acp::ChatItem::Thinking {
+            text: text.to_string(),
+            streaming: false,
+            message_id: None,
+        }
+    }
+
+    #[test]
+    fn resolve_ignores_thinking_and_still_streaming_text() {
+        let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+        let items = vec![thinking("pondering"), assistant_text("partial", true)];
+        assert_eq!(watch.resolve(&items), None);
+    }
+
+    #[test]
+    fn resolve_returns_the_first_completed_assistant_text() {
+        let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+        let items = vec![thinking("hmm"), assistant_text("done", false)];
+        assert_eq!(
+            watch.resolve(&items),
+            Some(super::FirstResponseOutcome::Text("done".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_returns_a_tool_call_with_no_preceding_text() {
+        let watch = super::FirstResponseWatch::start(std::time::Instant::now(), 0);
+        let items = vec![thinking("hmm"), tool_call("Write /tmp/x.rs")];
+        assert_eq!(
+            watch.resolve(&items),
+            Some(super::FirstResponseOutcome::Tool {
+                tool_title: Some("Write /tmp/x.rs".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_only_scans_items_appended_after_the_watch_started() {
+        // A prior turn's completed AssistantText, present *before* the watch's
+        // anchor point, must not be mistaken for this turn's first response.
+        let items = vec![assistant_text("previous turn's answer", false)];
+        let watch = super::FirstResponseWatch::start(std::time::Instant::now(), items.len());
+        assert_eq!(watch.resolve(&items), None);
+    }
+
+    #[test]
+    fn is_overdue_boundary_at_exactly_the_timeout() {
+        let started = std::time::Instant::now();
+        let watch = super::FirstResponseWatch::start(started, 0);
+        assert!(!watch.is_overdue(started + std::time::Duration::from_secs(59), 60));
+        assert!(watch.is_overdue(started + std::time::Duration::from_secs(60), 60));
     }
 
     /// `queued_at` no longer participates in the push-time decision; a fresh

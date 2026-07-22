@@ -34,6 +34,7 @@ use super::agent_chat_helpers::{
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
+use super::telegram_ops::FirstResponseWatch;
 use crate::surface::strings as s;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -185,6 +186,24 @@ impl std::fmt::Display for PromptId {
     }
 }
 
+/// Where a prompt came from — the bottom-dock composer, or a phone-relayed
+/// Telegram reply. Only the latter arms [`AgentChatView::telegram_first_response_watch`]
+/// on dispatch; an in-app prompt never does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PromptOrigin {
+    InApp,
+    Telegram,
+}
+
+/// Whether [`AgentChatView::send_prompt_text_for_telegram`] put the prompt on
+/// the wire immediately or only queued it behind an in-flight turn — the
+/// Telegram relay needs this to decide whether a "queued" notice is owed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PromptDispatch {
+    SentNow,
+    Queued,
+}
+
 /// A prompt the user submitted while a turn was in flight (or before the
 /// session connected), held in the queue until it can be dispatched. Unlike
 /// the send-now path, a queued prompt is NOT echoed into the transcript — it
@@ -195,6 +214,7 @@ impl std::fmt::Display for PromptId {
 pub(in crate::workspace) struct QueuedPrompt {
     pub id: PromptId,
     pub text: String,
+    pub origin: PromptOrigin,
 }
 
 /// What the Escape shortcut resolved to for a focused Agent chat pane. Returned
@@ -331,6 +351,17 @@ pub(in crate::workspace) struct AgentChatView {
     /// it holds *every* outstanding request, so parallel tool-call permissions
     /// each resolve to their own park instead of the newest clobbering the rest.
     pub(in crate::workspace) pending_permissions: HashSet<u64>,
+    /// Set the instant a Telegram-origin prompt (see [`PromptOrigin::Telegram`])
+    /// actually dispatches — immediately in [`Self::send_prompt_text_inner`], or
+    /// later in [`Self::drain_next_queued_prompt`] if it had to wait behind an
+    /// in-flight turn. `None` means no phone-triggered turn is currently being
+    /// watched: either none was ever armed, or it already resolved (a
+    /// qualifying chat item landed), was consumed by a permission request, or
+    /// the turn settled. Cleared by whichever of those happens first; the
+    /// `agent_chat_ops.rs` event pump and the periodic Telegram flush pump
+    /// (`Workspace::flush_telegram_first_response_fallbacks`) are the only
+    /// consumers. Runtime-only; never serialized.
+    pub(in crate::workspace) telegram_first_response_watch: Option<FirstResponseWatch>,
     /// Whether a prompt turn is in flight (between submit and the matching
     /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
     /// re-submit while the agent is busy, and carries the turn's start instant
@@ -795,6 +826,7 @@ impl AgentChatView {
             editing_prompt: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
+            telegram_first_response_watch: None,
             turn: Turn::Idle,
             subagent_last_activity: HashMap::new(),
             activity_started_at: None,
@@ -1462,15 +1494,45 @@ impl AgentChatView {
         );
     }
 
+    /// Send `text` as a prompt from the bottom-dock composer. Sugar over
+    /// [`Self::send_prompt_text_inner`] with [`PromptOrigin::InApp`] — an
+    /// in-app prompt never arms [`Self::telegram_first_response_watch`], so the
+    /// dispatch outcome is uninteresting here.
+    pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
+        self.send_prompt_text_inner(text, PromptOrigin::InApp, cx);
+    }
+
+    /// Send `text` as a prompt relayed from a phone-tapped Telegram reply.
+    /// Sugar over [`Self::send_prompt_text_inner`] with [`PromptOrigin::Telegram`]
+    /// — the caller (`Workspace::inject_bot_reply`) needs the returned
+    /// [`PromptDispatch`] to know whether to send a "queued" notice.
+    // TODO(telegram-first-response-ack task 2): wired up once
+    // `Workspace::inject_bot_reply` is rewritten to call this instead of
+    // `send_prompt_text` — remove this `allow` at that point.
+    #[allow(dead_code)]
+    pub(in crate::workspace) fn send_prompt_text_for_telegram(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
+        self.send_prompt_text_inner(text, PromptOrigin::Telegram, cx)
+    }
+
     /// Send `text` as a prompt. When the session is connected and idle, echo it
     /// into the transcript and forward it over the session, marking a turn in
     /// flight. Otherwise (not connected yet, a turn already in flight, or a
     /// Stop's cancel still outstanding) enqueue it WITHOUT echoing — a queued
     /// prompt lives only in the queue (surfaced by the bottom-dock strip) until
     /// [`Self::pump_pending_prompt`] drains it and echoes it at send time.
-    /// Driven by the bottom-dock input via the Workspace shim
-    /// (`send_agent_prompt_text`).
-    pub(in crate::workspace) fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) {
+    /// `origin` carries through to [`Self::start_telegram_watch_if`] at
+    /// whichever point (here, or later in [`Self::drain_next_queued_prompt`])
+    /// the prompt actually reaches the wire.
+    fn send_prompt_text_inner(
+        &mut self,
+        text: String,
+        origin: PromptOrigin,
+        cx: &mut Context<Self>,
+    ) -> PromptDispatch {
         // Editing an existing queued prompt: replace that slot's text in place
         // (order preserved) and return — this is not a new turn or a new queue
         // entry. `.take()` clears the editing flag whether or not the target is
@@ -1489,9 +1551,9 @@ impl AgentChatView {
             // untouched, so notifying re-stages the strip without a transcript
             // reproject.
             cx.notify();
-            return;
+            return PromptDispatch::Queued;
         }
-        if matches!(self.status, AgentSessionStatus::Connected)
+        let dispatch = if matches!(self.status, AgentSessionStatus::Connected)
             && let Some(handle) = &self.handle
             && !self.turn.is_in_flight()
             && !self.cancel_in_flight
@@ -1502,6 +1564,8 @@ impl AgentChatView {
                 started_at: std::time::Instant::now(),
             };
             self.echo_prompt(text, cx);
+            self.start_telegram_watch_if(origin);
+            PromptDispatch::SentNow
         } else {
             // Not connected yet (lazy connect happens on first focus), a turn is
             // already in flight, or a Stop's cancel is still outstanding
@@ -1511,9 +1575,26 @@ impl AgentChatView {
             // `pump_pending_prompt` (after `Connected`, on each `TurnEnded`, and
             // when the cancel window closes) and is echoed then. Do *not* mark
             // the turn in flight: nothing new is on the wire yet.
-            self.enqueue_prompt(text);
-        }
+            self.enqueue_prompt(text, origin);
+            PromptDispatch::Queued
+        };
         cx.notify();
+        dispatch
+    }
+
+    /// Arms [`Self::telegram_first_response_watch`] the instant a
+    /// Telegram-origin prompt actually reaches the wire — called from both
+    /// dispatch paths (immediate-send in [`Self::send_prompt_text_inner`],
+    /// queue-drain in [`Self::drain_next_queued_prompt`]) so the watch always
+    /// starts at the true dispatch point, never at enqueue time. A no-op for
+    /// [`PromptOrigin::InApp`].
+    fn start_telegram_watch_if(&mut self, origin: PromptOrigin) {
+        if origin == PromptOrigin::Telegram {
+            self.telegram_first_response_watch = Some(FirstResponseWatch::start(
+                std::time::Instant::now(),
+                self.items.len(),
+            ));
+        }
     }
 
     /// Append `text` to the transcript as a `UserText` item and refresh the
@@ -1582,11 +1663,13 @@ impl AgentChatView {
 
     /// Push `text` onto the pending-prompt queue with a freshly minted
     /// [`PromptId`], returning that id. Does NOT echo into the transcript and
-    /// does NOT notify — the caller notifies once after mutating.
-    fn enqueue_prompt(&mut self, text: String) -> PromptId {
+    /// does NOT notify — the caller notifies once after mutating. `origin`
+    /// travels with the entry so [`Self::drain_next_queued_prompt`] knows
+    /// whether to arm the Telegram watch once this prompt actually dispatches.
+    fn enqueue_prompt(&mut self, text: String, origin: PromptOrigin) -> PromptId {
         let id = PromptId(self.next_prompt_id);
         self.next_prompt_id += 1;
-        self.pending_prompts.push(QueuedPrompt { id, text });
+        self.pending_prompts.push(QueuedPrompt { id, text, origin });
         id
     }
 
@@ -1665,6 +1748,7 @@ impl AgentChatView {
         };
         let text = qp.text;
         self.echo_prompt(text.clone(), cx);
+        self.start_telegram_watch_if(qp.origin);
         Some(text)
     }
 
@@ -2158,6 +2242,7 @@ mod tests {
         super::QueuedPrompt {
             id: super::PromptId(id),
             text: text.to_string(),
+            origin: super::PromptOrigin::InApp,
         }
     }
 
@@ -2277,6 +2362,69 @@ mod tests {
                     "editing does not enqueue a new prompt"
                 );
                 assert_eq!(view.editing_prompt, None, "the edit flag is cleared");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn start_telegram_watch_if_arms_only_for_telegram_origin(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, _cx| {
+                view.start_telegram_watch_if(super::PromptOrigin::InApp);
+                assert!(
+                    view.telegram_first_response_watch.is_none(),
+                    "an in-app dispatch never arms the watch"
+                );
+
+                view.start_telegram_watch_if(super::PromptOrigin::Telegram);
+                assert!(
+                    view.telegram_first_response_watch.is_some(),
+                    "a telegram-origin dispatch arms the watch"
+                );
+            })
+            .unwrap();
+    }
+
+    /// A telegram-origin prompt that has to wait behind an in-flight turn must
+    /// not arm the watch while merely queued — only once it actually drains
+    /// onto the wire.
+    #[gpui::test]
+    fn queued_telegram_prompt_arms_the_watch_only_once_drained(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.set_turn_in_flight();
+                view.enqueue_prompt("from telegram".to_string(), super::PromptOrigin::Telegram);
+                assert!(
+                    view.telegram_first_response_watch.is_none(),
+                    "queuing alone must not arm the watch"
+                );
+
+                view.set_turn_idle();
+                view.drain_next_queued_prompt_for_test(cx);
+                assert!(
+                    view.telegram_first_response_watch.is_some(),
+                    "draining the telegram-origin prompt arms the watch"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn queued_in_app_prompt_never_arms_the_watch(cx: &mut gpui::TestAppContext) {
+        let window = make_test_view(cx);
+        window
+            .update(cx, |view, _window, cx| {
+                view.set_turn_in_flight();
+                view.enqueue_prompt("typed in app".to_string(), super::PromptOrigin::InApp);
+                view.set_turn_idle();
+
+                view.drain_next_queued_prompt_for_test(cx);
+                assert!(
+                    view.telegram_first_response_watch.is_none(),
+                    "an in-app-origin drain must not arm the watch"
+                );
             })
             .unwrap();
     }
