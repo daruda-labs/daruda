@@ -53,7 +53,7 @@ use gpui::{AppContext, Context, FocusHandle, Window, actions};
 
 use daruda_terminal::TerminalConfig;
 
-use main_area::agent_chat_pane::telegram_ops::{deliverable_entries, should_defer_relay};
+use main_area::agent_chat_pane::telegram_ops::partition_deferred;
 
 // ----------------------------------------------------------------
 // Actions
@@ -1580,38 +1580,50 @@ impl Workspace {
         self.agent_pulse_prev = busy_ids;
     }
 
-    /// Deliver deferred Telegram pings once the user is no longer present at
-    /// this window (app backgrounded, or foreground but idle past
-    /// `active_idle_secs`). Runs on the periodic flush pump.
+    /// Re-evaluate every pane's deferred Telegram queue against the current
+    /// presence signal. Runs on the periodic flush pump; each entry flushes
+    /// individually once its own quiet window clears (see `ready_to_deliver`)
+    /// rather than the whole map draining at once.
     pub(crate) fn flush_deferred_telegram(&mut self, cx: &mut Context<Self>) {
         if self.deferred_telegram.is_empty() {
             return;
         }
-        let still_present = should_defer_relay(
-            self.telegram.defer_while_active,
-            crate::platform::attention::is_app_active(),
-            crate::platform::attention::system_idle_seconds(),
-            self.telegram.active_idle_secs,
-        );
-        if still_present {
+        let quiet_secs = self.telegram.active_idle_secs;
+        if !self.telegram.defer_while_active {
+            self.deliver_deferred_telegram(false, 0.0, quiet_secs, cx);
             return;
         }
-        self.deliver_deferred_telegram(cx);
+        let app_active = crate::platform::attention::is_app_active();
+        let idle_secs = crate::platform::attention::system_idle_seconds();
+        self.deliver_deferred_telegram(app_active, idle_secs, quiet_secs, cx);
     }
 
-    /// Presence already dropped: drain and deliver. Split out so tests can drive
-    /// delivery without controlling live OS presence signals. Skips panes that
-    /// have since closed and drops permission pings whose request is no longer
-    /// the pane's live pending permission.
-    pub(in crate::workspace) fn deliver_deferred_telegram(&mut self, cx: &mut Context<Self>) {
+    /// Split out so tests can drive delivery without controlling live OS
+    /// presence signals. For each pane's queue: drops permission pings whose
+    /// request is no longer the pane's live pending permission, delivers
+    /// entries `ready_to_deliver` clears, and re-queues the rest for a later
+    /// tick. Skips (and drops) panes that have since closed.
+    pub(in crate::workspace) fn deliver_deferred_telegram(
+        &mut self,
+        app_active: bool,
+        idle_secs: f64,
+        quiet_secs: u64,
+        cx: &mut Context<Self>,
+    ) {
+        let now = std::time::Instant::now();
         let pending = std::mem::take(&mut self.deferred_telegram);
         for (pane_id, queue) in pending {
             let Some(view) = self.agent_chat_view(pane_id).cloned() else {
                 continue;
             };
             let live_perms = view.read(cx).pending_permissions.clone();
-            for entry in deliverable_entries(queue, &live_perms) {
+            let (ready, still_holding) =
+                partition_deferred(queue, &live_perms, now, app_active, idle_secs, quiet_secs);
+            for entry in ready {
                 self.relay_to_telegram(pane_id, entry.header, entry.tail, entry.permission, cx);
+            }
+            if !still_holding.is_empty() {
+                self.deferred_telegram.insert(pane_id, still_holding);
             }
         }
     }

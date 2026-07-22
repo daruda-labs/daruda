@@ -67,52 +67,99 @@ pub(in crate::workspace) enum DeferKind {
 }
 
 /// A composed Telegram ping held back because the user was present when it fired.
+/// `queued_at` anchors [`ready_to_deliver`]'s quiet-window check to *this ping's
+/// own* settle time rather than to whatever raw idle streak preceded it.
 #[derive(Clone)]
 pub(in crate::workspace) struct DeferredRelay {
     pub kind: DeferKind,
     pub header: String,
     pub tail: TelegramTail,
     pub permission: Option<crate::telegram::bridge::PermissionPromptRef>,
+    pub queued_at: std::time::Instant,
 }
 
-/// Hold a presence-gated relay instead of sending now: the feature is on, the
-/// app is foreground, and the user gave system input within `active_idle_secs`.
-/// Pure so it is unit-testable without a live `NSApplication`.
-pub(in crate::workspace) fn should_defer_relay(
-    enabled: bool,
+/// Cap on entries held per pane. `Completion` is deduped to at most one by
+/// [`push_deferred`], but `PostTurn`/`Permission` accumulate freely — without a
+/// bound, a pane that stays continuously present (never triggers a flush) could
+/// grow this Vec without limit. Oldest entries are evicted first, mirroring
+/// `BridgeCore`'s `SENT_PINGS_CAP` eviction in `telegram::bridge`.
+const MAX_DEFERRED_PER_PANE: usize = 20;
+
+/// Hold a presence-gated relay instead of sending now: the feature is on and
+/// the app is foreground. Whether a *held* ping is later actually delivered is
+/// decided per-entry by [`ready_to_deliver`] — this only gates whether it goes
+/// into the queue at all. Pure so it is unit-testable without a live
+/// `NSApplication`.
+pub(in crate::workspace) fn should_defer_relay(enabled: bool, app_active: bool) -> bool {
+    enabled && app_active
+}
+
+/// Whether a held ping, queued at `queued_at`, is ready to actually go out now.
+/// The user leaving the app delivers immediately regardless of age — there's no
+/// reason to keep waiting once they're gone. While still foregrounded, delivery
+/// additionally requires BOTH: at least `quiet_secs` of real time since *this*
+/// ping was queued, AND at least `quiet_secs` of current system-input
+/// idleness — i.e. a full quiet window that starts at this ping's own settle
+/// time, not at whatever idle streak happened to precede it (a long turn the
+/// user watches without touching input must not itself burn down the window).
+/// Pure so it is unit-testable without a live `NSApplication`/HID query.
+pub(in crate::workspace) fn ready_to_deliver(
+    queued_at: std::time::Instant,
+    now: std::time::Instant,
     app_active: bool,
     idle_secs: f64,
-    active_idle_secs: u64,
+    quiet_secs: u64,
 ) -> bool {
-    enabled && app_active && idle_secs < active_idle_secs as f64
+    if !app_active {
+        return true;
+    }
+    let quiet_secs = quiet_secs as f64;
+    let elapsed_since_queued = now.saturating_duration_since(queued_at).as_secs_f64();
+    elapsed_since_queued >= quiet_secs && idle_secs >= quiet_secs
 }
 
 /// Append a deferred relay to a pane's pending queue, keeping at most one
 /// pending `Completion` (a newer completion supersedes an older one's "last
-/// response"); post-turn deltas and permissions accumulate.
+/// response"); post-turn deltas and permissions accumulate, bounded by
+/// [`MAX_DEFERRED_PER_PANE`] (oldest evicted first).
 fn push_deferred(queue: &mut Vec<DeferredRelay>, entry: DeferredRelay) {
     if entry.kind == DeferKind::Completion {
         queue.retain(|e| e.kind != DeferKind::Completion);
     }
     queue.push(entry);
+    while queue.len() > MAX_DEFERRED_PER_PANE {
+        queue.remove(0);
+    }
 }
 
-/// From a pane's deferred queue, the entries still worth delivering given the
-/// pane's set of live pending-permission ids: drop permission pings whose
-/// `perm_id` is no longer outstanding (resolved or cancelled in-app). Several
-/// permissions can be outstanding at once, so the filter tests set membership
-/// rather than equality against a single id.
-pub(in crate::workspace) fn deliverable_entries(
+/// Splits a pane's deferred queue into `(ready, still_holding)`: a permission
+/// ping whose `perm_id` is no longer outstanding (resolved or cancelled
+/// in-app) is dropped outright — never delivered, never re-queued. Of the
+/// rest, an entry moves to `ready` when [`ready_to_deliver`] says so; anything
+/// not yet ready is returned in `still_holding` for a later flush tick.
+pub(in crate::workspace) fn partition_deferred(
     queue: Vec<DeferredRelay>,
     live_perms: &HashSet<u64>,
-) -> Vec<DeferredRelay> {
-    queue
-        .into_iter()
-        .filter(|e| match e.kind {
-            DeferKind::Permission { perm_id } => live_perms.contains(&perm_id),
-            _ => true,
-        })
-        .collect()
+    now: std::time::Instant,
+    app_active: bool,
+    idle_secs: f64,
+    quiet_secs: u64,
+) -> (Vec<DeferredRelay>, Vec<DeferredRelay>) {
+    let mut ready = Vec::new();
+    let mut still_holding = Vec::new();
+    for entry in queue {
+        if let DeferKind::Permission { perm_id } = entry.kind
+            && !live_perms.contains(&perm_id)
+        {
+            continue;
+        }
+        if ready_to_deliver(entry.queued_at, now, app_active, idle_secs, quiet_secs) {
+            ready.push(entry);
+        } else {
+            still_holding.push(entry);
+        }
+    }
+    (ready, still_holding)
 }
 
 /// Build one Telegram button per permission choice, in the same order and with
@@ -254,9 +301,11 @@ impl Workspace {
     }
 
     /// Presence-gated entry point for the completion / permission / post-turn
-    /// relays. When the user is present (app foreground + recent input) the
-    /// composed ping is held per-pane; otherwise it is sent immediately. Ack
-    /// deliberately bypasses this and calls `relay_to_telegram` directly.
+    /// relays. While the user is present (app foreground) the composed ping is
+    /// held per-pane; the periodic flush (`Workspace::flush_deferred_telegram`)
+    /// later decides, per entry, when it's actually ready to go out (see
+    /// `ready_to_deliver`). Otherwise it is sent immediately. Ack deliberately
+    /// bypasses this and calls `relay_to_telegram` directly.
     pub(in crate::workspace) fn relay_or_defer_to_telegram(
         &mut self,
         pane_id: PaneId,
@@ -281,8 +330,6 @@ impl Workspace {
         let defer = should_defer_relay(
             self.telegram.defer_while_active,
             crate::platform::attention::is_app_active(),
-            crate::platform::attention::system_idle_seconds(),
-            self.telegram.active_idle_secs,
         );
         if defer {
             push_deferred(
@@ -292,6 +339,7 @@ impl Workspace {
                     header,
                     tail,
                     permission,
+                    queued_at: std::time::Instant::now(),
                 },
             );
         } else {
@@ -453,72 +501,161 @@ mod tests {
     use daruda_store::project::PaneCwd;
 
     #[test]
-    fn should_defer_only_when_enabled_active_and_recently_used() {
-        assert!(super::should_defer_relay(true, true, 5.0, 60));
-        assert!(!super::should_defer_relay(true, true, 90.0, 60));
-        assert!(!super::should_defer_relay(true, false, 5.0, 60));
-        assert!(!super::should_defer_relay(false, true, 5.0, 60));
+    fn should_defer_only_when_enabled_and_active() {
+        assert!(super::should_defer_relay(true, true));
+        assert!(!super::should_defer_relay(true, false));
+        assert!(!super::should_defer_relay(false, true));
+    }
+
+    /// `queued_at` no longer participates in the push-time decision; a fresh
+    /// timestamp is enough for every test entry here.
+    fn mk_relay(kind: super::DeferKind) -> super::DeferredRelay {
+        super::DeferredRelay {
+            kind,
+            header: String::new(),
+            tail: super::TelegramTail::Plain(String::new()),
+            permission: None,
+            queued_at: std::time::Instant::now(),
+        }
     }
 
     #[test]
     fn push_deferred_keeps_one_completion_but_accumulates_others() {
-        use super::{DeferKind, DeferredRelay, TelegramTail};
-        let mk = |k| DeferredRelay {
-            kind: k,
-            header: String::new(),
-            tail: TelegramTail::Plain(String::new()),
-            permission: None,
-        };
+        use super::DeferKind;
         let mut q = Vec::new();
-        super::push_deferred(&mut q, mk(DeferKind::Completion));
-        super::push_deferred(&mut q, mk(DeferKind::PostTurn));
-        super::push_deferred(&mut q, mk(DeferKind::Completion));
+        super::push_deferred(&mut q, mk_relay(DeferKind::Completion));
+        super::push_deferred(&mut q, mk_relay(DeferKind::PostTurn));
+        super::push_deferred(&mut q, mk_relay(DeferKind::Completion));
         assert_eq!(q.len(), 2);
         assert_eq!(q[0].kind, DeferKind::PostTurn);
         assert_eq!(q[1].kind, DeferKind::Completion);
     }
 
     #[test]
-    fn deliverable_entries_drops_stale_permission() {
-        use super::{DeferKind, DeferredRelay, TelegramTail};
-        let mk = |k| DeferredRelay {
-            kind: k,
-            header: String::new(),
-            tail: TelegramTail::Plain(String::new()),
-            permission: None,
-        };
-        let q = vec![
-            mk(DeferKind::Completion),
-            mk(DeferKind::Permission { perm_id: 7 }),
-        ];
-        // Only id 9 is outstanding, so the ping for the resolved id 7 is dropped.
-        let live: std::collections::HashSet<u64> = [9].into_iter().collect();
-        let out = super::deliverable_entries(q, &live);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].kind, DeferKind::Completion);
+    fn push_deferred_evicts_oldest_beyond_cap() {
+        use super::DeferKind;
+        let mut q = Vec::new();
+        let extra = 5;
+        for i in 0..(super::MAX_DEFERRED_PER_PANE + extra) as u64 {
+            super::push_deferred(&mut q, mk_relay(DeferKind::Permission { perm_id: i }));
+        }
+        assert_eq!(q.len(), super::MAX_DEFERRED_PER_PANE);
+        // The oldest entries (ids 0..extra) were evicted; the newest survive.
+        assert_eq!(
+            q[0].kind,
+            DeferKind::Permission {
+                perm_id: extra as u64
+            }
+        );
+        assert_eq!(
+            q.last().unwrap().kind,
+            DeferKind::Permission {
+                perm_id: (super::MAX_DEFERRED_PER_PANE + extra - 1) as u64
+            }
+        );
     }
 
     #[test]
-    fn deliverable_entries_keeps_each_outstanding_permission() {
-        use super::{DeferKind, DeferredRelay, TelegramTail};
-        let mk = |k| DeferredRelay {
-            kind: k,
-            header: String::new(),
-            tail: TelegramTail::Plain(String::new()),
-            permission: None,
-        };
+    fn partition_deferred_drops_stale_permission() {
+        use super::DeferKind;
+        let now = std::time::Instant::now();
         let q = vec![
-            mk(DeferKind::Permission { perm_id: 7 }),
-            mk(DeferKind::Permission { perm_id: 8 }),
-            mk(DeferKind::Permission { perm_id: 9 }),
+            mk_relay(DeferKind::Completion),
+            mk_relay(DeferKind::Permission { perm_id: 7 }),
+        ];
+        // Only id 9 is outstanding, so the ping for the resolved id 7 is dropped
+        // outright — not delivered, not held for later.
+        let live: std::collections::HashSet<u64> = [9].into_iter().collect();
+        // `app_active: false` makes every non-stale entry immediately ready,
+        // isolating the staleness filter from the readiness check below.
+        let (ready, still_holding) = super::partition_deferred(q, &live, now, false, 0.0, 60);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].kind, DeferKind::Completion);
+        assert!(still_holding.is_empty());
+    }
+
+    #[test]
+    fn partition_deferred_keeps_each_outstanding_permission() {
+        use super::DeferKind;
+        let now = std::time::Instant::now();
+        let q = vec![
+            mk_relay(DeferKind::Permission { perm_id: 7 }),
+            mk_relay(DeferKind::Permission { perm_id: 8 }),
+            mk_relay(DeferKind::Permission { perm_id: 9 }),
         ];
         // 7 and 9 are still outstanding; 8 was answered → its ping is dropped,
         // the other two both survive (a single live id could not express this).
         let live: std::collections::HashSet<u64> = [7, 9].into_iter().collect();
-        let out = super::deliverable_entries(q, &live);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].kind, DeferKind::Permission { perm_id: 7 });
-        assert_eq!(out[1].kind, DeferKind::Permission { perm_id: 9 });
+        let (ready, still_holding) = super::partition_deferred(q, &live, now, false, 0.0, 60);
+        assert_eq!(ready.len(), 2);
+        assert_eq!(ready[0].kind, DeferKind::Permission { perm_id: 7 });
+        assert_eq!(ready[1].kind, DeferKind::Permission { perm_id: 9 });
+        assert!(still_holding.is_empty());
+    }
+
+    #[test]
+    fn partition_deferred_holds_back_entries_not_yet_ready() {
+        // Still foregrounded, just queued (age 0), currently idle — not ready:
+        // the quiet window anchors to this entry's own `queued_at`, not to the
+        // (already-past-threshold) idle reading alone.
+        use super::DeferKind;
+        let now = std::time::Instant::now();
+        let q = vec![mk_relay(DeferKind::Completion)];
+        let live = std::collections::HashSet::new();
+        let (ready, still_holding) = super::partition_deferred(q, &live, now, true, 90.0, 60);
+        assert!(ready.is_empty());
+        assert_eq!(still_holding.len(), 1);
+    }
+
+    #[test]
+    fn ready_to_deliver_fires_immediately_once_app_is_not_active() {
+        let now = std::time::Instant::now();
+        // Just queued, and idle_secs is 0 (input this instant) — would fail
+        // every other condition, but leaving the app delivers regardless.
+        assert!(super::ready_to_deliver(now, now, false, 0.0, 60));
+    }
+
+    #[test]
+    fn ready_to_deliver_requires_both_elapsed_and_idle_while_foregrounded() {
+        let queued_at = std::time::Instant::now();
+        let past_window = queued_at + std::time::Duration::from_secs(61);
+
+        // Enough real time has passed AND the user has been idle that whole
+        // time → ready.
+        assert!(super::ready_to_deliver(
+            queued_at,
+            past_window,
+            true,
+            90.0,
+            60
+        ));
+        let already_quiet = past_window - std::time::Duration::from_secs(61);
+        assert!(super::ready_to_deliver(
+            already_quiet,
+            past_window,
+            true,
+            60.0,
+            60
+        ));
+        // Enough real time has passed, but `idle_secs` shows recent input
+        // (the user came back and used the keyboard) → still held.
+        assert!(!super::ready_to_deliver(
+            queued_at,
+            past_window,
+            true,
+            5.0,
+            60
+        ));
+        // Not enough real time has passed yet, even though `idle_secs` alone
+        // would clear the threshold — the ping's own quiet window hasn't
+        // elapsed, so a long turn's leftover idle streak can't fire it early.
+        assert!(!super::ready_to_deliver(
+            queued_at,
+            queued_at + std::time::Duration::from_secs(5),
+            true,
+            90.0,
+            60
+        ));
     }
 
     #[test]
@@ -815,6 +952,7 @@ mod tests {
             header: "header".to_string(),
             tail: super::TelegramTail::Plain(tail.to_string()),
             permission: None,
+            queued_at: std::time::Instant::now(),
         };
 
         workspace.update(cx, |ws, _| {
@@ -828,16 +966,18 @@ mod tests {
                 .push(mk(super::DeferKind::Completion, "completion"));
             // Live pane, but a permission id that is not in the pane's
             // `pending_permissions` set (empty — no permission was ever
-            // requested on this pane) — exercises the `deliverable_entries`
-            // filter path on a real view.
+            // requested on this pane) — exercises the `partition_deferred`
+            // staleness filter path on a real view.
             ws.deferred_telegram
                 .entry(live_pane)
                 .or_default()
                 .push(mk(super::DeferKind::Permission { perm_id: 42 }, "stale"));
         });
 
+        // `app_active: false` mirrors "presence already dropped" — every
+        // non-stale entry is immediately ready regardless of age/idle.
         workspace.update(cx, |ws, cx| {
-            ws.deliver_deferred_telegram(cx);
+            ws.deliver_deferred_telegram(false, 999.0, 60, cx);
         });
         cx.run_until_parked();
 
@@ -863,6 +1003,178 @@ mod tests {
             outbound.next().now_or_never().is_none(),
             "closed panes and stale permissions must not emit extra pings"
         );
+    }
+
+    /// A ping that hasn't cleared its own quiet window yet stays queued, then
+    /// drains once the same foregrounded/idle pane has cleared that window.
+    #[gpui::test]
+    async fn deliver_deferred_telegram_holds_until_entry_quiet_window_clears(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        workspace.update(cx, |ws, _| {
+            ws.deferred_telegram
+                .entry(pane)
+                .or_default()
+                .push(super::DeferredRelay {
+                    kind: super::DeferKind::Completion,
+                    header: "header".to_string(),
+                    tail: super::TelegramTail::Plain("completion".to_string()),
+                    permission: None,
+                    queued_at: std::time::Instant::now(),
+                });
+        });
+
+        // Foregrounded, and `idle_secs` alone would already clear the
+        // threshold — but the entry was just queued, so its own window
+        // hasn't elapsed yet.
+        workspace.update(cx, |ws, cx| {
+            ws.deliver_deferred_telegram(true, 90.0, 60, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, _| {
+            assert_eq!(
+                ws.deferred_telegram.get(&pane).map(Vec::len),
+                Some(1),
+                "the entry stays queued instead of firing early"
+            );
+        });
+        assert!(
+            outbound.next().now_or_never().is_none(),
+            "nothing should have been sent yet"
+        );
+
+        workspace.update(cx, |ws, _| {
+            ws.deferred_telegram
+                .get_mut(&pane)
+                .and_then(|q| q.get_mut(0))
+                .expect("held entry should still be queued")
+                .queued_at = std::time::Instant::now() - std::time::Duration::from_secs(61);
+        });
+
+        workspace.update(cx, |ws, cx| {
+            ws.deliver_deferred_telegram(true, 60.0, 60, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, _| {
+            assert!(
+                ws.deferred_telegram.is_empty(),
+                "the entry drains once its foreground quiet window clears"
+            );
+        });
+        let sent = outbound
+            .next()
+            .await
+            .expect("the quiet-window-cleared entry should be sent");
+        assert_eq!(sent.pane.pane, pane);
+        assert_eq!(sent.header, "header");
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain("completion".to_string())
+        );
+    }
+
+    /// Turning off active-window deferral should release already-held pings on
+    /// the next flush instead of leaving them governed by the old foreground
+    /// quiet-window rules.
+    #[gpui::test]
+    async fn flush_deferred_telegram_drains_existing_queue_when_defer_disabled(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut outbound =
+            cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+        let mut config = daruda_config::Config::default();
+        config.telegram.enabled = true;
+        config.telegram.authorized_chat_id = Some(42);
+        config.telegram.defer_while_active = false;
+        let (handle, workspace) = make_window(cx, &config);
+        cx.run_until_parked();
+
+        let tmp = std::env::temp_dir();
+        let pane = cx
+            .update_window(handle.into(), |_, window, cx| {
+                workspace.update(cx, |ws, cx| {
+                    let pane = ws.create_agent_chat_pane(
+                        Some(PaneCwd::Local(tmp.clone())),
+                        None,
+                        daruda_config::AgentDefinition::claude_default().id,
+                        None,
+                        window,
+                        cx,
+                    );
+                    let id = pane.id;
+                    ws.active_runtime_mut().panes.push(pane);
+                    id
+                })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        workspace.update(cx, |ws, _| {
+            ws.deferred_telegram
+                .entry(pane)
+                .or_default()
+                .push(super::DeferredRelay {
+                    kind: super::DeferKind::Completion,
+                    header: "header".to_string(),
+                    tail: super::TelegramTail::Plain("completion".to_string()),
+                    permission: None,
+                    queued_at: std::time::Instant::now(),
+                });
+        });
+
+        workspace.update(cx, |ws, cx| {
+            ws.flush_deferred_telegram(cx);
+        });
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |ws, _| {
+            assert!(
+                ws.deferred_telegram.is_empty(),
+                "defer-disabled flush should drain the held queue"
+            );
+        });
+
+        let sent = outbound
+            .next()
+            .await
+            .expect("the held completion entry should be sent");
+        assert_eq!(sent.pane.pane, pane);
+        assert_eq!(sent.header, "header");
+        assert_eq!(
+            sent.tail,
+            super::TelegramTail::Plain("completion".to_string())
+        );
+        assert!(outbound.next().now_or_never().is_none());
     }
 
     /// A phone tap routes by permission id, not by position: with two
