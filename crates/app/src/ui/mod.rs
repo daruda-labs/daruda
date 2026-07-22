@@ -59,8 +59,8 @@ pub use chart::BarChart;
 pub use checkbox::{Checkbox, checkbox};
 pub use code_copy_button::code_copy_button;
 pub use code_editor::{
-    LineDecoration, file_viewer_editor, make_markdown_prose_state, make_markdown_state,
-    markdown_editor,
+    LineDecoration, code_diff_viewer, file_viewer_editor, make_markdown_prose_state,
+    make_markdown_state, markdown_editor,
 };
 pub use context_menu::{ContextMenu, ContextMenuCorner, ContextMenuItem};
 pub use disclosure::{Disclosure, disclosure};
@@ -69,7 +69,7 @@ pub use form_helpers::{checkbox_row, field_row};
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputGrowMode, InputState, Rope, RopeExt,
-    input, input_with_action, input_with_action_grow,
+    ScrollWheelBehavior, input, input_with_action, input_with_action_grow,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,

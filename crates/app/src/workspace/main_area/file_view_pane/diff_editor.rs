@@ -162,9 +162,18 @@ fn line_spans(
 }
 
 /// Convert the diff rows into editor inputs.
+///
+/// `show_line_numbers` drives the gutter: `true` packs the dual old/new line
+/// numbers (a full-file diff whose numbers are the real file lines — the git
+/// file viewer, an agent-chat file *creation*); `false` blanks every gutter
+/// (a snippet diff — an agent-chat `Edit` whose old/new text is only the
+/// replaced region, so "line 1" is not the file's line 1). Blank gutters keep
+/// the row backgrounds (those are decoration-driven, independent of the
+/// number) but reserve no gutter width.
 pub(in crate::workspace) fn build_diff_editor_model(
     rows: &[VisualRow],
     colors: &DiffColors,
+    show_line_numbers: bool,
 ) -> DiffEditorModel {
     let left_w = rows
         .iter()
@@ -192,7 +201,11 @@ pub(in crate::workspace) fn build_diff_editor_model(
         let (bg, base_fg) = row_colors(row.kind, colors);
 
         // Gutter: "old new", each column right-aligned; blank for headers.
-        let gutter = if row.kind == VisualRowKind::HunkHeader {
+        // When numbers are hidden every row's gutter is empty (an empty custom
+        // gutter reserves no width in the editor element).
+        let gutter = if !show_line_numbers {
+            String::new()
+        } else if row.kind == VisualRowKind::HunkHeader {
             format!("{:>w$}", "", w = left_w + 1 + right_w)
         } else {
             format!(
@@ -287,7 +300,7 @@ mod tests {
             row(VisualRowKind::Removed, "2", "", "let x = 1;"),
             row(VisualRowKind::Added, "", "2", "let y = 2;"),
         ];
-        let m = build_diff_editor_model(&rows, &colors());
+        let m = build_diff_editor_model(&rows, &colors(), true);
         // No `+`/`-` markers: lines are the bare content.
         assert_eq!(m.text, "fn a() {}\nlet x = 1;\nlet y = 2;");
         // Dual gutter, right-aligned columns ("old new").
@@ -295,6 +308,29 @@ mod tests {
         assert_eq!(m.decorations[1].gutter.as_deref(), Some("2  "));
         assert_eq!(m.decorations[2].gutter.as_deref(), Some("  2"));
         // Add/remove rows carry a background; context does not.
+        assert!(m.decorations[0].background.is_none());
+        assert!(m.decorations[1].background.is_some());
+        assert!(m.decorations[2].background.is_some());
+        assert_contiguous(&m);
+    }
+
+    /// With `show_line_numbers = false` (a snippet diff whose numbers would
+    /// mislead) every gutter is blank — but the row backgrounds still stand,
+    /// so the diff still reads as add/remove.
+    #[test]
+    fn hidden_line_numbers_blank_every_gutter_but_keep_backgrounds() {
+        let rows = vec![
+            row(VisualRowKind::Context, "1", "1", "fn a() {}"),
+            row(VisualRowKind::Removed, "2", "", "let x = 1;"),
+            row(VisualRowKind::Added, "", "2", "let y = 2;"),
+        ];
+        let m = build_diff_editor_model(&rows, &colors(), false);
+        // Every gutter is the empty string (present, so the editor doesn't
+        // fall back to its own sequential 1,2,3 numbering).
+        for d in &m.decorations {
+            assert_eq!(d.gutter.as_deref(), Some(""));
+        }
+        // Backgrounds are unchanged — add/remove tint survives hidden numbers.
         assert!(m.decorations[0].background.is_none());
         assert!(m.decorations[1].background.is_some());
         assert!(m.decorations[2].background.is_some());
@@ -323,7 +359,7 @@ mod tests {
         ];
         // The "y" differs at the word level (bytes 4..5).
         r.word_changes = vec![WordChange { start: 4, end: 5 }];
-        let m = build_diff_editor_model(&[r], &colors());
+        let m = build_diff_editor_model(&[r], &colors(), true);
         assert_contiguous(&m);
         // Exactly the word-change range carries the add word background.
         let with_bg: Vec<_> = m
@@ -339,7 +375,7 @@ mod tests {
     fn hunk_header_packs_context_and_blank_gutter() {
         let mut r = row(VisualRowKind::HunkHeader, "", "", "@@ -1,3 +1,4 @@");
         r.header_context = "fn a()".into();
-        let m = build_diff_editor_model(&[r], &colors());
+        let m = build_diff_editor_model(&[r], &colors(), true);
         assert_eq!(m.text, "@@ -1,3 +1,4 @@  fn a()");
         // Blank gutter for headers.
         assert_eq!(m.decorations[0].gutter.as_deref(), Some(" "));

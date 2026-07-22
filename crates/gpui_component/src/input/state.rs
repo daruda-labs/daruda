@@ -20,8 +20,8 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    blink_cursor::BlinkCursor, change::Change, element::TextElement, mask_pattern::MaskPattern,
-    mode::InputMode, number_input, text_wrapper::TextWrapper,
+    ScrollWheelBehavior, blink_cursor::BlinkCursor, change::Change, element::TextElement,
+    mask_pattern::MaskPattern, mode::InputMode, number_input, text_wrapper::TextWrapper,
 };
 use crate::Size;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
@@ -353,6 +353,9 @@ pub struct InputState {
     pub(super) select_anchor: std::ops::Range<usize>,
     pub(super) size: Size,
     pub(super) disabled: bool,
+    /// How the scroll wheel is handled — set each frame by the [`super::Input`]
+    /// element from its builder. See [`ScrollWheelBehavior`].
+    pub(super) scroll_wheel: ScrollWheelBehavior,
     /// Per-row visual decorations (background + custom gutter) for
     /// read-only render surfaces such as the diff viewer. Empty = the
     /// editor's default sequential gutter with no line backgrounds.
@@ -499,6 +502,7 @@ impl InputState {
             select_mode: SelectMode::default(),
             select_anchor: 0..0,
             disabled: false,
+            scroll_wheel: ScrollWheelBehavior::default(),
             line_decorations: Vec::new(),
             highlight_override: None,
             masked: false,
@@ -1667,9 +1671,27 @@ impl InputState {
             .map(|layout| layout.line_height)
             .unwrap_or(window.line_height());
         let delta = event.delta.pixel_delta(line_height);
-
         let old_offset = self.scroll_handle.offset();
-        self.update_scroll_offset(Some(old_offset + delta), cx);
+
+        let target = match self.scroll_wheel {
+            // Only a horizontal-dominant gesture is ours; a vertical swipe
+            // belongs to the outer scroller, so bail without consuming it.
+            ScrollWheelBehavior::Horizontal => {
+                if delta.x.abs() <= delta.y.abs() {
+                    return;
+                }
+                point(old_offset.x + delta.x, old_offset.y)
+            }
+            // The mirror: only a vertical-dominant gesture is ours.
+            ScrollWheelBehavior::Vertical => {
+                if delta.y.abs() < delta.x.abs() {
+                    return;
+                }
+                point(old_offset.x, old_offset.y + delta.y)
+            }
+            ScrollWheelBehavior::Both => old_offset + delta,
+        };
+        self.update_scroll_offset(Some(target), cx);
 
         // Only stop propagation if the offset actually changed
         if self.scroll_handle.offset() != old_offset {

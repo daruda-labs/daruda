@@ -15,6 +15,7 @@ use gpui_component::Sizable as _;
 
 pub use gpui_component::input::{
     CompletionProvider, HistoryDir, Input, InputEvent, InputState, Rope, RopeExt,
+    ScrollWheelBehavior,
 };
 
 /// Tab-participation specifier for [`input`].

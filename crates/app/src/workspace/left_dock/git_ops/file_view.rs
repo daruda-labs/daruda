@@ -348,7 +348,7 @@ impl Workspace {
                 rows_all
             };
             cx.try_global::<crate::ui::theme::DarudaTheme>()
-                .map(|t| build_diff_editor_model(rows, &DiffColors::from_theme(t)))
+                .map(|t| build_diff_editor_model(rows, &DiffColors::from_theme(t), true))
         } else {
             None
         };
@@ -557,14 +557,15 @@ impl Workspace {
                         // renderer for raw and diff): convert the rows into a
                         // synthetic buffer + decorations + injected highlight
                         // spans before moving `content`.
-                        let diff_model =
-                            if let PaneFileContent::LoadedDiff { rows_all, .. } = &content {
-                                cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
-                                    build_diff_editor_model(rows_all, &DiffColors::from_theme(t))
-                                })
-                            } else {
-                                None
-                            };
+                        let diff_model = if let PaneFileContent::LoadedDiff { rows_all, .. } =
+                            &content
+                        {
+                            cx.try_global::<crate::ui::theme::DarudaTheme>().map(|t| {
+                                build_diff_editor_model(rows_all, &DiffColors::from_theme(t), true)
+                            })
+                        } else {
+                            None
+                        };
                         fc.view.content = content;
                         if let Some(model) = diff_model {
                             let editor = fc.editor_state.clone();

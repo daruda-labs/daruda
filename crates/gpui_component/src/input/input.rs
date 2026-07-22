@@ -17,6 +17,31 @@ use crate::{Sizable, StyleSized};
 
 use super::InputState;
 
+/// Which axes the editor scrolls on the wheel. Chosen with
+/// [`Input::scroll_wheel`]; the handler ([`InputState::on_scroll_wheel`])
+/// dispatches on the value stored on the state. The unhandled axis bubbles to
+/// an outer scroll container instead of being consumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollWheelBehavior {
+    /// Scroll both axes and consume the event when the offset changes — a
+    /// standalone scrollable editor (the file viewer). This is the default.
+    #[default]
+    Both,
+    /// Scroll (and consume) only horizontal-dominant gestures
+    /// (`|delta.x| > |delta.y|`); let vertical-dominant gestures bubble to an
+    /// outer scroller. For an editor embedded in a vertical list whose long,
+    /// non-wrapped lines still need horizontal scroll — the agent-chat diff
+    /// embed: a vertical swipe scrolls the transcript, a horizontal swipe
+    /// scrolls the diff. Without it `on_scroll_wheel` consumes any event that
+    /// nudges the horizontal offset (a diagonal trackpad delta), swallowing
+    /// the list's vertical scroll.
+    Horizontal,
+    /// The mirror of [`Self::Horizontal`]: scroll (and consume) only
+    /// vertical-dominant gestures and let horizontal ones bubble to an outer
+    /// horizontal scroller.
+    Vertical,
+}
+
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
@@ -36,6 +61,7 @@ pub struct Input {
     selected: bool,
     show_scrollbar: bool,
     input_padding: bool,
+    scroll_wheel: ScrollWheelBehavior,
 }
 
 impl Sizable for Input {
@@ -76,6 +102,7 @@ impl Input {
             selected: false,
             show_scrollbar: true,
             input_padding: true,
+            scroll_wheel: ScrollWheelBehavior::default(),
         }
     }
 
@@ -96,6 +123,15 @@ impl Input {
     /// the other viewer modes).
     pub fn show_scrollbar(mut self, show: bool) -> Self {
         self.show_scrollbar = show;
+        self
+    }
+
+    /// Set which axes the editor scrolls on the wheel (default
+    /// [`ScrollWheelBehavior::Both`]). Pick `Horizontal` / `Vertical` for an
+    /// editor embedded in an outer scroller on the other axis — see
+    /// [`ScrollWheelBehavior`].
+    pub fn scroll_wheel(mut self, behavior: ScrollWheelBehavior) -> Self {
+        self.scroll_wheel = behavior;
         self
     }
 
@@ -278,6 +314,7 @@ impl RenderOnce for Input {
 
         self.state.update(cx, |state, _| {
             state.disabled = self.disabled;
+            state.scroll_wheel = self.scroll_wheel;
             state.size = self.size;
         });
 

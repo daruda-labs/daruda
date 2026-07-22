@@ -14,7 +14,7 @@
 use crate::ui::theme;
 use gpui::{App, AppContext as _, Entity, SharedString, Styled as _, Window, px};
 use gpui_component::Sizable as _;
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputState, ScrollWheelBehavior};
 
 /// Re-export so app code (the diff viewer) can build per-row editor
 /// decorations without importing `gpui_component` directly.
@@ -96,42 +96,28 @@ fn apply_initial(state: Entity<InputState>, initial: &str, window: &mut Window, 
     state.update(cx, |state, cx| state.set_value(initial, window, cx));
 }
 
-/// Render `state` as a full-size code editor for the file-viewer raw pane.
-/// `appearance(false)` hides the focus-ring border; the parent sets the bg.
-/// `input_padding(false)` drops the size-default inner padding so the
-/// line-number gutter sits flush left like the markdown-raw / preview
-/// renderers (the body frame owns any surrounding spacing).
-pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
+/// Shared chrome for the borderless, read-only code/diff editors: no
+/// appearance ring, no size-default padding (gutter flush left), the built-in
+/// scrollbar suppressed (hosts overlay their own thin daruda thumb), the
+/// config-driven editor font size, and the state's own read-only flag
+/// forwarded back into the element.
+///
+/// The read-only forward matters because `Input::render` rewrites
+/// `state.disabled = self.disabled` every frame, so an element left at the
+/// builder default (`false`) would clobber a `set_disabled(true)` the host
+/// applied to the state on the next paint. The base text colour is pinned
+/// because `Input` never sets one, so tree-sitter-uncaptured runs (whitespace,
+/// unmapped captures) would inherit gpui's default black `text_style` and
+/// vanish on a dark theme; `HighlightTheme::editor_foreground` (set light-aware
+/// by `apply_daruda_palette`) is the host's slot for it.
+fn code_editor_chrome(state: &Entity<InputState>, cx: &App) -> Input {
     use gpui_component::ActiveTheme as _;
-    // Suppress the built-in scrollbar; the file viewer overlays a thin
-    // daruda thumb so raw and diff match the other viewer modes.
-    //
-    // Pin the base text color. `Input` never sets one, so code-editor runs
-    // left uncoloured by tree-sitter (uncaptured identifiers, whitespace,
-    // any capture without a `SyntaxColors` mapping) inherit gpui's default
-    // black `window.text_style()` and vanish on the dark theme. The
-    // `HighlightTheme::editor_foreground` slot is upstream's home for this,
-    // but gpui_component never applies it as a text color — the host must.
-    // Read it back from the live theme (set light-aware by
-    // `apply_daruda_palette`) rather than the fixed dark-variant default,
-    // so uncaptured runs stay legible on the light theme too.
     let fg = cx
         .theme()
         .highlight_theme
         .style
         .editor_foreground
         .unwrap_or_else(|| theme::palette::syntax_theme().default);
-    // Size the editor text from the config-driven file-viewer font
-    // (`font.editor_size`). `input.rs` applies `input_text_size(self.size)`
-    // and then `refine_style(self.style)`, so this explicit `text_size`
-    // (which lands in `self.style`) wins over the Sizable default — the
-    // raw + diff editor and its line-number gutter render at the
-    // configured size instead of gpui_component's `text_sm`.
-    // Forward the state's own read-only flag into the element. `Input::render`
-    // rewrites `state.disabled = self.disabled` every frame, so an element left
-    // at the builder default (`false`) clobbers a `set_disabled(true)` the host
-    // applied to the state (the diff viewer's read-only mode) on the next paint.
-    // Reading it back keeps that reconciliation a no-op instead of a clobber.
     Input::new(state)
         .appearance(false)
         .input_padding(false)
@@ -139,4 +125,27 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
         .disabled(state.read(cx).is_disabled())
         .text_size(px(theme::editor_font_size(cx)))
         .text_color(fg)
+}
+
+/// Render `state` as a full-size code editor for the file-viewer pane (raw +
+/// diff). Standalone in its own pane, so it scrolls both axes
+/// ([`ScrollWheelBehavior::Both`], the default) and fills the body via
+/// `.flex()` at the call site.
+pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
+    code_editor_chrome(state, cx)
+}
+
+/// Render `state` as a diff editor **embedded in an outer vertical scroller**
+/// (the agent-chat tool-card transcript). Shares [`file_viewer_editor`]'s
+/// chrome but differs on scroll: the wheel scrolls
+/// [`ScrollWheelBehavior::Horizontal`] only (a vertical swipe belongs to the
+/// transcript list), and the built-in scrollbar is *kept* (unlike the file
+/// viewer, which overlays its own vertical thumb) so a long non-wrapped diff
+/// line gets a real draggable horizontal bar. The bar auto-hides the vertical
+/// axis — the embed is sized to its full height, so there is no vertical
+/// overflow. The caller pins an explicit height (`rows × row_h`).
+pub fn code_diff_viewer(state: &Entity<InputState>, cx: &App) -> Input {
+    code_editor_chrome(state, cx)
+        .scroll_wheel(ScrollWheelBehavior::Horizontal)
+        .show_scrollbar(true)
 }

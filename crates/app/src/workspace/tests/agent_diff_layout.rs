@@ -52,9 +52,9 @@ impl Focusable for DiffProbe {
 
 impl Render for DiffProbe {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Exact copy of `render/diff.rs::diff_body`'s editor branch at HEAD:
-        // wrapper reserves `rows × AGENT_CHAT_DIFF_ROW_H`, editor embedded via
-        // `file_viewer_editor` (no explicit `Input::h`).
+        // Mirrors `render/diff.rs::diff_body`'s editor branch: wrapper reserves
+        // `rows × AGENT_CHAT_DIFF_ROW_H`, editor embedded via `code_diff_viewer`
+        // (the agent-chat diff wrapper) pinned to the same height.
         let rows = self.editor.read(cx).display_rows().max(1);
         let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
         div().flex().flex_col().w_full().child(
@@ -64,7 +64,7 @@ impl Render for DiffProbe {
                 .flex()
                 .w_full()
                 .h(height)
-                .child(crate::ui::file_viewer_editor(&self.editor, cx)),
+                .child(crate::ui::code_diff_viewer(&self.editor, cx).h(height)),
         )
     }
 }

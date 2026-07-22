@@ -549,7 +549,17 @@ impl TextElement {
                 .max(1)
         };
 
-        let line_number_width = if state.mode.line_number() {
+        // Custom gutters that are all empty (the diff viewer hiding
+        // snippet-relative line numbers) reserve no width — otherwise the
+        // 6px + margin gap reads as an unexplained indent. Sequential
+        // numbering (no decorations) and any non-empty custom gutter keep
+        // their width.
+        let has_gutter_content = state.line_decorations.is_empty()
+            || state
+                .line_decorations
+                .iter()
+                .any(|d| d.gutter.as_ref().is_some_and(|g| !g.is_empty()));
+        let line_number_width = if state.mode.line_number() && has_gutter_content {
             let empty_line_number = window.text_system().shape_line(
                 "+".repeat(line_number_len).into(),
                 font_size,

@@ -345,6 +345,13 @@ pub(in crate::workspace) fn diff_editor_language(diff: &DiffView) -> &'static st
 /// Returns `None` when the two sides are identical (no hunks → nothing to
 /// render), so the caller leaves the inline fallback in place and records no
 /// stat entry (absent ≡ `0/0`).
+///
+/// The gutter shows line numbers only for a full-file diff (`old_text` is
+/// `None` — a file *creation* / whole-file write, where the numbers are the
+/// real file lines). An `Edit` sends only the replaced snippet as
+/// `old_text`/`new_text`, so its diff would be numbered from 1 regardless of
+/// where in the file the edit lands (the ACP `Diff` carries no line offset) —
+/// those numbers would mislead, so they are hidden.
 pub(in crate::workspace) fn build_diff_view_model(
     diff: &DiffView,
     syntax_theme: &str,
@@ -370,7 +377,11 @@ pub(in crate::workspace) fn build_diff_view_model(
     highlight_hunks(&mut hunks, ext, syntax_theme, is_light);
     apply_word_diff(&mut hunks);
     let rows = build_diff_rows(&hunks, false);
-    Some((build_diff_editor_model(&rows, colors), stat))
+    let show_line_numbers = diff.old_text.is_none();
+    Some((
+        build_diff_editor_model(&rows, colors, show_line_numbers),
+        stat,
+    ))
 }
 
 /// Tally a [`DiffStat`] from parsed diff hunks. Pure / GPUI-free wrapper over
@@ -866,6 +877,35 @@ mod tests {
     fn diff_view_model_none_when_unchanged() {
         let d = diff(Some("same\n"), "same\n", "same.txt");
         assert!(build_diff_view_model(&d, TEST_SYNTAX_THEME, false, &diff_colors()).is_none());
+    }
+
+    /// A file creation (`old_text == None`) keeps its gutter line numbers —
+    /// they are the real file lines (1..N). An edit (`old_text == Some`) sends
+    /// only the replaced snippet, so its numbers would be relative to the
+    /// snippet, not the file; the gutter is blanked for it.
+    #[test]
+    fn line_numbers_shown_for_creation_hidden_for_edit_snippet() {
+        // Creation: gutter carries a non-empty number for the added line.
+        let created = diff(None, "line one\nline two\n", "new.txt");
+        let (m, _) = build_diff_view_model(&created, TEST_SYNTAX_THEME, false, &diff_colors())
+            .expect("a created file produces hunks");
+        assert!(
+            m.decorations
+                .iter()
+                .any(|d| d.gutter.as_deref().is_some_and(|g| !g.trim().is_empty())),
+            "creation keeps real line numbers in the gutter"
+        );
+
+        // Edit snippet: every gutter is blank (numbers would mislead).
+        let edited = diff(Some("let x = 1;\n"), "let y = 2;\n", "existing.rs");
+        let (m, _) = build_diff_view_model(&edited, TEST_SYNTAX_THEME, false, &diff_colors())
+            .expect("a modified snippet produces hunks");
+        assert!(
+            m.decorations
+                .iter()
+                .all(|d| d.gutter.as_deref() == Some("")),
+            "an edit snippet blanks every gutter"
+        );
     }
 
     /// A simple one-line modification must report the *changed* line on each

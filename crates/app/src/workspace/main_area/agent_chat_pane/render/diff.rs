@@ -108,16 +108,19 @@ fn diff_body(
         // `Input::h(...)` is set, which leaves the editor at its one-line
         // minimum inside a taller reserved wrapper. Pin both wrapper and input
         // to `rows × line_height` so the list measures the full block and the
-        // editor paints every diff row.
+        // editor paints every diff row. `code_diff_viewer` keeps the built-in
+        // (draggable) horizontal scrollbar for the embed's long lines; reserve
+        // one scrollbar width below the last row so the bar sits in its own
+        // strip instead of overlapping the bottom line.
         let rows = editor.read(cx).display_rows().max(1);
-        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H);
+        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H + theme::SCROLLBAR_W);
         return block.child(
             div()
                 .flex()
                 .w_full()
                 .h(height)
                 .bg(t.file_viewer_bg)
-                .child(crate::ui::file_viewer_editor(editor, cx).h(height)),
+                .child(crate::ui::code_diff_viewer(editor, cx).h(height)),
         );
     }
 
