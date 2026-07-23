@@ -10,6 +10,7 @@
 //! - [`observability`] — error reports, NDJSON log writer, system info
 //!   summary used by the toast / modal / log-file pipeline
 
+pub mod accounts;
 pub mod marks;
 pub mod observability;
 pub mod panels;
