@@ -57,7 +57,7 @@ impl AgentChatView {
     ) {
         let Some(colors) = cx
             .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(DiffColors::from_theme)
+            .map(|t| DiffColors::from_agent_chat_theme(t, cx))
         else {
             // Theme global not yet installed (transient cold-start) — skip
             // editor creation; every diff renders via the inline fallback.

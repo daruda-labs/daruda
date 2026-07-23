@@ -68,6 +68,14 @@ pub const AGENT_CHAT_CARD_TINT_ALPHA: f32 = 0.05;
 /// step stronger than the fill tint, drawn from the same neutral overlay so
 /// the edge tracks the background instead of a fixed line color.
 pub const AGENT_CHAT_CARD_BORDER_ALPHA: f32 = 0.12;
+/// Alpha for the code/diff editor's current-line band. Same neutral-overlay
+/// technique as [`AGENT_CHAT_CARD_TINT_ALPHA`] (white lift on dark, black
+/// recess on light) rather than a fixed solid colour, so the band reads
+/// reasonably on either surface the editor chrome paints on — the UI-themed
+/// File-viewer surface and the agent-chat diff embed's terminal-derived
+/// background — without per-instance wiring. A touch stronger than the card
+/// tint since the band needs to read as "this line", not just "elevated".
+pub const EDITOR_ACTIVE_LINE_ALPHA: f32 = 0.10;
 /// User-message bubble fill: a translucent *accent* tint (not the neutral
 /// white/black used for code) so the user's turn is set off by hue while code
 /// stays quiet. Accent-hued rather than neutral is the one sanctioned

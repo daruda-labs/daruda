@@ -49,19 +49,24 @@ pub(in crate::workspace) fn render_pane_file_viewer(
 
     // One thin daruda thumb; editor modes use the editor scroll handle.
     let scrollbar: Option<AnyElement> = if is_editor_mode {
-        let editor_scroll = editor_state.read(cx).scroll_handle().clone();
-        let viewport_h = editor_scroll.bounds().size.height;
-        let content_h = viewport_h + editor_scroll.max_offset().y;
-        file_viewer_scrollbar(&editor_scroll, toolbar_h, content_h, cx)
+        let editor = editor_state.read(cx);
+        // `editor_scroll.bounds()`/`.max_offset()` never populate for this
+        // vendored editor (see `InputState::scroll_size` doc comment) — the
+        // real viewport/content geometry lives in `last_bounds()` /
+        // `scroll_size()` instead.
+        let editor_scroll = editor.scroll_handle().clone();
+        let viewport_h = editor.last_bounds().map_or(px(0.), |b| b.size.height);
+        let content_h = editor.scroll_size().height;
+        file_viewer_scrollbar(&editor_scroll, toolbar_h, viewport_h, content_h, cx)
     } else {
+        let viewport_h = scroll_handle.bounds().size.height;
         let content_h = if is_preview_mode {
-            let viewport_h = scroll_handle.bounds().size.height;
             viewport_h + scroll_handle.max_offset().y
         } else {
             let total_rows = fv.visible_row_count();
             px(total_rows as f32 * theme::FILE_VIEWER_LINE_H)
         };
-        file_viewer_scrollbar(scroll_handle, toolbar_h, content_h, cx)
+        file_viewer_scrollbar(scroll_handle, toolbar_h, viewport_h, content_h, cx)
     };
     // The editor provides its own find (Cmd+F); the custom search panel
     // only drives the non-editor renderers.

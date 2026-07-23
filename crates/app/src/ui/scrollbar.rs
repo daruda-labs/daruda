@@ -8,6 +8,10 @@
 //! that starts below its own origin), and the theme colours differ — so
 //! those are the parameters. Callers keep their handle-extraction code
 //! (handle types differ) and pass plain pixels in.
+//!
+//! [`horizontal_thumb`] is the X-axis mirror, for a region that only scrolls
+//! horizontally (the agent-chat diff embed's long, non-wrapped lines) —
+//! same [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
 
 use gpui::{AnyElement, ElementId, Hsla, ListState, Pixels, div, prelude::*, px};
 
@@ -50,9 +54,44 @@ pub fn vertical_thumb(
     )
 }
 
-/// Pure thumb geometry: `(thumb_top, thumb_h)` in pixels, or `None` when
-/// the content fits the viewport (so no thumb is drawn). Split out from
-/// [`vertical_thumb`] so the math is testable without a window.
+/// [`vertical_thumb`]'s horizontal mirror — for a region that only scrolls on
+/// the X axis (the agent-chat diff embed's long, non-wrapped lines, which
+/// keep the built-in scrollbar's drag interaction traded away in favour of
+/// matching every other pane's display-only daruda thumb). `scroll_offset_x`
+/// is the handle's `offset().x` (negative as content scrolls right). Unlike
+/// [`vertical_thumb`] there is no `top_offset` — the diff embed reserves its
+/// own bottom strip (see `AGENT_CHAT_DIFF_ROW_H` + `SCROLLBAR_W` at the call
+/// site) so the thumb sits flush at the bottom of its container.
+pub fn horizontal_thumb(
+    id: impl Into<ElementId>,
+    viewport_w: Pixels,
+    content_w: Pixels,
+    scroll_offset_x: Pixels,
+    thumb_bg: Hsla,
+    thumb_hover_bg: Hsla,
+) -> Option<AnyElement> {
+    let (thumb_left, thumb_w) = thumb_geometry(viewport_w, content_w, scroll_offset_x, px(0.))?;
+    let h = px(theme::SCROLLBAR_W);
+    Some(
+        div()
+            .id(id)
+            .absolute()
+            .left(thumb_left)
+            .bottom(px(theme::SCROLLBAR_MARGIN_R))
+            .h(h)
+            .w(thumb_w)
+            .rounded(h / 2.0)
+            .bg(thumb_bg)
+            .hover(move |d| d.bg(thumb_hover_bg))
+            .into_any_element(),
+    )
+}
+
+/// Pure thumb geometry: `(thumb_start, thumb_len)` in pixels along one axis,
+/// or `None` when the content fits the viewport (so no thumb is drawn).
+/// Axis-agnostic 1-D math — [`vertical_thumb`] feeds it height/Y values,
+/// [`horizontal_thumb`] feeds it width/X values. Split out so the math is
+/// testable without a window.
 fn thumb_geometry(
     viewport_h: Pixels,
     content_h: Pixels,

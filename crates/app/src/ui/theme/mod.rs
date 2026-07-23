@@ -316,11 +316,23 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // theme — a black gutter stripe beside the light content. Pin it to the
     // file-viewer surface so the gutter matches the content in both modes.
     highlight.style.editor_background = Some(d.file_viewer_bg);
-    // The default-dark active-line band is dark; on a light editor it reads
-    // as a black stripe. Use a faint cool-light band in light mode.
-    if syntax_is_light {
-        highlight.style.editor_active_line = Some(LIGHT_SURFACE_1);
-    }
+    // The current-line band is one App-wide slot shared by every editor
+    // instance (the File viewer's UI-themed surface *and* the agent-chat
+    // diff embed's terminal-preset-derived background — see
+    // `theme::agent_chat_bg`), so it can't be tuned to match either
+    // surface's exact color. A translucent neutral overlay (the same
+    // white-lift/black-recess technique as `agent_chat_tint`) instead of a
+    // fixed solid color reads reasonably on any background under it,
+    // regardless of which surface a given editor instance is painting on.
+    let active_line_overlay = if syntax_is_light {
+        p::OVERLAY_BLACK
+    } else {
+        p::OVERLAY_WHITE
+    };
+    highlight.style.editor_active_line = Some(p::with_alpha(
+        active_line_overlay,
+        p::EDITOR_ACTIVE_LINE_ALPHA,
+    ));
     t.highlight_theme = Arc::new(highlight);
 }
 

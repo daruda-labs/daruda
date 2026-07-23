@@ -55,7 +55,7 @@ pub(super) fn diff_block(
         .get(&diff_key)
         .map(|stat| diff_stat_summary(stat, t, cx));
 
-    let body = diff_body(diff, editor, t, dim, cx).into_any_element();
+    let body = diff_body(diff, editor, t, &diff_key, dim, cx).into_any_element();
     // Background-derived tint (not the fixed UI `BG_RAISED` surface) so the
     // header matches the same terminal-preset background the rest of the
     // tool card chrome tracks (`tool.rs` / `plan.rs` card bg). Not part of
@@ -105,6 +105,7 @@ fn diff_body(
     diff: &DiffView,
     editor: Option<&Entity<crate::ui::InputState>>,
     t: &theme::DarudaTheme,
+    diff_key: &str,
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
@@ -117,14 +118,40 @@ fn diff_body(
         // `Input::h(...)` is set, which leaves the editor at its one-line
         // minimum inside a taller reserved wrapper. Pin both wrapper and input
         // to `rows × line_height` so the list measures the full block and the
-        // editor paints every diff row. `code_diff_viewer` keeps the built-in
-        // (draggable) horizontal scrollbar for the embed's long lines; reserve
-        // one scrollbar width below the last row so the bar sits in its own
-        // strip instead of overlapping the bottom line.
+        // editor paints every diff row. The built-in scrollbar is off
+        // (`code_diff_viewer` sets `show_scrollbar(false)`); reserve one
+        // scrollbar width below the last row so the custom thumb overlay
+        // below sits in its own strip instead of overlapping the bottom line.
         let rows = editor.read(cx).display_rows().max(1);
         let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H + theme::SCROLLBAR_W);
+        // Snapshot the editor's painted geometry into plain values before
+        // building the thumb — `InputState::scroll_handle().bounds()`/
+        // `.max_offset()` never populate (see its `scroll_size` doc comment),
+        // so the viewport/content extents come from `last_bounds()` /
+        // `scroll_size()` instead, mirroring the File-viewer's fix for the
+        // same underlying gap.
+        let (viewport_w, content_w, offset_x) = {
+            let state = editor.read(cx);
+            (
+                state.last_bounds().map_or(px(0.), |b| b.size.width),
+                state.scroll_size().width,
+                state.scroll_handle().offset().x,
+            )
+        };
+        // `t.scrollbar_thumb`/`.file_viewer_scrollbar_thumb_hover` come from
+        // the already-dimmed `t` snapshot — same colours as the File viewer
+        // and agent-chat transcript thumbs, no separate dim wrap needed.
+        let thumb = crate::ui::scrollbar::horizontal_thumb(
+            format!("agent-chat-diff-scrollbar-{diff_key}"),
+            viewport_w,
+            content_w,
+            offset_x,
+            t.scrollbar_thumb,
+            t.file_viewer_scrollbar_thumb_hover,
+        );
         return block.child(
             div()
+                .relative()
                 .flex()
                 .w_full()
                 .h(height)
@@ -136,7 +163,8 @@ fn diff_body(
                 // and the diff's own tree-sitter spans are highlighted with
                 // `agent_chat_syntax_is_light` — all three stay in lockstep.
                 .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
-                .child(crate::ui::code_diff_viewer(editor, cx).h(height)),
+                .child(crate::ui::code_diff_viewer(editor, cx).h(height))
+                .children(thumb),
         );
     }
 

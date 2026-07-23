@@ -143,11 +143,12 @@ pub fn file_viewer_editor(state: &Entity<InputState>, cx: &App) -> Input {
 /// (the agent-chat tool-card transcript). Shares [`file_viewer_editor`]'s
 /// chrome but differs on scroll: the wheel scrolls
 /// [`ScrollWheelBehavior::Horizontal`] only (a vertical swipe belongs to the
-/// transcript list), and the built-in scrollbar is *kept* (unlike the file
-/// viewer, which overlays its own vertical thumb) so a long non-wrapped diff
-/// line gets a real draggable horizontal bar. The bar auto-hides the vertical
-/// axis — the embed is sized to its full height, so there is no vertical
-/// overflow. The caller pins an explicit height (`rows × row_h`).
+/// transcript list). The built-in scrollbar is suppressed — the host
+/// overlays its own thin daruda thumb (`crate::ui::scrollbar::horizontal_thumb`,
+/// paired with `InputState::last_bounds`/`scroll_size`), matching every other
+/// scrollable surface in the app (File viewer, right dock, files/git-changes
+/// views) instead of gpui_component's globally-themed bar. The caller pins an
+/// explicit height (`rows × row_h`) that reserves a strip for the thumb.
 pub fn code_diff_viewer(state: &Entity<InputState>, cx: &App) -> Input {
     // Paints on `theme::agent_chat_bg` (the terminal-preset background
     // mirrored into the pane), not the UI theme's editor surface — so the
@@ -161,5 +162,5 @@ pub fn code_diff_viewer(state: &Entity<InputState>, cx: &App) -> Input {
     .default;
     code_editor_chrome(state, fg, cx)
         .scroll_wheel(ScrollWheelBehavior::Horizontal)
-        .show_scrollbar(true)
+        .show_scrollbar(false)
 }

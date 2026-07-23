@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
+use gpui::{App, FontStyle, FontWeight, HighlightStyle, Hsla, SharedString};
 
 use crate::ui::theme::TokenStyle;
 
@@ -32,7 +32,9 @@ pub(in crate::workspace) struct DiffColors {
 }
 
 impl DiffColors {
-    /// Snapshot the diff palette from the active `DarudaTheme`.
+    /// Snapshot the diff palette from the active `DarudaTheme`. Used by the
+    /// File viewer's own diff pane, which paints on the UI theme's fixed
+    /// `file_viewer_bg` editor surface.
     pub(in crate::workspace) fn from_theme(t: &crate::ui::theme::DarudaTheme) -> Self {
         Self {
             add_bg: t.file_diff_add_bg,
@@ -45,6 +47,26 @@ impl DiffColors {
             hunk_ctx_text: t.file_diff_hunk_ctx_text,
             word_add_bg: t.file_diff_word_add_bg,
             word_del_bg: t.file_diff_word_del_bg,
+        }
+    }
+
+    /// [`Self::from_theme`]'s agent-chat variant. The add/del/word-diff
+    /// colours stay the git-convention palette shared with the File viewer
+    /// (unchanged semantics, not a surface colour) — only the hunk-header row
+    /// (`@@ -a,b +c,d @@`) switches from the fixed UI `BG_RAISED` surface to
+    /// the same terminal-preset-derived tint the rest of the diff embed's
+    /// chrome uses (header row, editor background — see `render/diff.rs`),
+    /// so the header row blends with its own card instead of standing out as
+    /// a UI-theme island.
+    pub(in crate::workspace) fn from_agent_chat_theme(
+        t: &crate::ui::theme::DarudaTheme,
+        cx: &App,
+    ) -> Self {
+        Self {
+            hunk_bg: crate::ui::theme::agent_chat_tint(cx),
+            hunk_text: crate::ui::theme::agent_chat_fg(cx),
+            hunk_ctx_text: crate::ui::theme::agent_chat_fg_muted(cx),
+            ..Self::from_theme(t)
         }
     }
 }

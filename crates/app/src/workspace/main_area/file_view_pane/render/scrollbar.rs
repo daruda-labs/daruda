@@ -12,16 +12,22 @@ use gpui::{AnyElement, App};
 /// Returns `None` when there is nothing to scroll (content fits in viewport).
 ///
 /// `body_top` offsets the thumb within the `.relative()` file-viewer container.
-/// `content_h` is the pre-computed total content height:
+/// `viewport_h` and `content_h` are supplied by the caller rather than read
+/// off `scroll_handle.bounds()` here: for the Raw/Diff editor mode the
+/// "scroll handle" is `gpui_component::input::InputState`'s own internal
+/// one, whose `.bounds()` this vendored fork's text element never populates
+/// (it never calls `div().track_scroll(&handle)` — see `InputState::scroll_size`'s
+/// doc comment) and would silently draw no thumb. `content_h`:
 /// - Raw/Changes: `total_rows * FILE_VIEWER_LINE_H` (stable across virtual-list shifts).
 /// - Preview: `viewport_h + max_offset().y` (measured after layout; variable blocks).
+/// - Raw/Diff editor: `InputState::scroll_size().height`.
 pub(super) fn file_viewer_scrollbar(
     scroll_handle: &gpui::ScrollHandle,
     body_top: gpui::Pixels,
+    viewport_h: gpui::Pixels,
     content_h: gpui::Pixels,
     cx: &App,
 ) -> Option<AnyElement> {
-    let viewport_h = scroll_handle.bounds().size.height;
     let t = theme::current(cx);
     // `body_top` offsets the thumb within the `.relative()` file-viewer
     // container; the thumb range is [body_top, body_top + viewport_h].
