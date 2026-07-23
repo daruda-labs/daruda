@@ -408,7 +408,7 @@ impl CodeBlock {
                         gpui::hsla(0., 0., 0., 0.28)
                     })
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(cx.theme().mono_font_size)
+                    // daruda patch: no fixed `.text_size(mono_font_size)` — inherit the host's ambient size instead.
                     .relative()
                     .refine_style(&style.code_block)
                     .child(Inline::new(
