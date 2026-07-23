@@ -568,3 +568,45 @@ pub fn agent_chat_border_tint(cx: &App) -> gpui::Hsla {
     };
     p::with_alpha(overlay, p::AGENT_CHAT_CARD_BORDER_ALPHA)
 }
+
+/// Whether agent-chat content should pick the *light* variant of a
+/// light/dark-aware palette (diff/markdown syntax highlighting, mermaid
+/// diagrams, the diff embed's own fallback text colour) — judged by
+/// [`agent_chat_bg`]'s own lightness, not the UI theme's `DarudaTheme::is_dark`.
+/// The pane's actual paint surface is the terminal-preset background mirrored
+/// into `agent_chat_bg`, which can disagree with the UI theme on light vs
+/// dark; content painted on it needs to match *that* background. Single
+/// source shared by `Workspace::agent_chat_theme_params` (feeds the diff/
+/// mermaid reconcilers) and `ui::code_editor`'s agent-chat diff viewer.
+pub fn agent_chat_syntax_is_light(cx: &App) -> bool {
+    agent_chat_bg(cx).l >= 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn agent_chat_syntax_is_light_switches_at_the_midpoint(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            assert!(!agent_chat_syntax_is_light(cx), "unset default is dark");
+
+            set_agent_chat_bg(cx, 0, 0, 0);
+            assert!(!agent_chat_syntax_is_light(cx), "black background is dark");
+
+            set_agent_chat_bg(cx, 255, 255, 255);
+            assert!(agent_chat_syntax_is_light(cx), "white background is light");
+
+            // The finest boundary an 8-bit RGB mirror can actually produce:
+            // grayscale lightness is `v / 255`, so 127 sits just under the
+            // `l >= 0.5` cutoff and 128 sits just over it. Matches
+            // `agent_chat_tint`'s `l < 0.5` dark-branch cutoff — both treat
+            // `l == 0.5` as the light side.
+            set_agent_chat_bg(cx, 127, 127, 127);
+            assert!(!agent_chat_syntax_is_light(cx), "l=127/255 is still dark");
+
+            set_agent_chat_bg(cx, 128, 128, 128);
+            assert!(agent_chat_syntax_is_light(cx), "l=128/255 crosses to light");
+        });
+    }
+}

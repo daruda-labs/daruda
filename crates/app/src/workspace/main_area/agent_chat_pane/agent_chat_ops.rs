@@ -1389,20 +1389,22 @@ impl Workspace {
         true
     }
 
-    /// The (syntax theme, is-light) pair the Markdown / diff reconcilers read
-    /// from the active theme. `is_light = !is_dark`, mirroring the file-viewer
-    /// loader; defaults to dark (`is_light = false`) when the theme global is
-    /// not yet installed. The Workspace owns `syntax_theme` (config mirror), so
-    /// it reads it here and passes it to the view per event.
+    /// The (syntax theme, is-light) pair the Markdown / diff reconcilers read.
+    /// `is_light` is judged by [`crate::ui::theme::agent_chat_syntax_is_light`]
+    /// — the agent-chat pane's actual paint surface (the terminal-preset
+    /// background mirrored into `agent_chat_bg`), not the UI theme's own
+    /// light/dark bit, so highlighted diffs and mermaid diagrams stay legible
+    /// against the background they really render on even when the terminal
+    /// preset and UI theme disagree on light vs dark. `agent_chat_bg` itself
+    /// falls back to a dark default before any config load, so this needs no
+    /// separate "theme global not installed" guard. The Workspace owns
+    /// `syntax_theme` (config mirror), so it reads it here and passes it to
+    /// the view per event.
     pub(in crate::workspace) fn agent_chat_theme_params(
         &self,
         cx: &Context<Self>,
     ) -> (String, bool) {
-        let is_light = cx
-            .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(crate::ui::theme::DarudaTheme::is_dark)
-            .map(|dark| !dark)
-            .unwrap_or(false);
+        let is_light = crate::ui::theme::agent_chat_syntax_is_light(cx);
         (self.syntax_theme.clone(), is_light)
     }
 

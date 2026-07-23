@@ -55,7 +55,15 @@ pub(super) fn diff_block(
         .get(&diff_key)
         .map(|stat| diff_stat_summary(stat, t, cx));
 
-    let body = diff_body(diff, editor, t, cx).into_any_element();
+    let body = diff_body(diff, editor, t, dim, cx).into_any_element();
+    // Background-derived tint (not the fixed UI `BG_RAISED` surface) so the
+    // header matches the same terminal-preset background the rest of the
+    // tool card chrome tracks (`tool.rs` / `plan.rs` card bg). Not part of
+    // `t` (the pre-dimmed theme snapshot), so it needs its own dim wrap.
+    // Computed up front (rather than inside the `header_chrome` closure
+    // below) because the closure runs during `foldable_block`'s own `cx`
+    // borrow, and `agent_chat_tint` needs its own immutable `cx` read.
+    let header_bg = theme::dim_toward_gray(theme::agent_chat_tint(cx), dim);
 
     // The hunk-bg + padding chrome lives on the header row; the rounded /
     // overflow-hidden container wraps the whole foldable block. The body's own
@@ -83,7 +91,7 @@ pub(super) fn diff_block(
             |row| {
                 row.px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
                     .py(px(theme::GAP_XS))
-                    .bg(t.file_diff_hunk_bg)
+                    .bg(header_bg)
             },
             dim,
             cx,
@@ -97,6 +105,7 @@ fn diff_body(
     diff: &DiffView,
     editor: Option<&Entity<crate::ui::InputState>>,
     t: &theme::DarudaTheme,
+    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let mut block = div().flex().flex_col().w_full();
@@ -119,7 +128,14 @@ fn diff_body(
                 .flex()
                 .w_full()
                 .h(height)
-                .bg(t.file_viewer_bg)
+                // Opaque terminal-preset background (not the UI theme's fixed
+                // `file_viewer_bg` editor surface), so the diff embed matches
+                // the terminal theme the way the rest of the tool card already
+                // does. `code_diff_viewer` picks its fallback text colour off
+                // the same background (`ui::code_editor::code_diff_viewer`),
+                // and the diff's own tree-sitter spans are highlighted with
+                // `agent_chat_syntax_is_light` — all three stay in lockstep.
+                .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
                 .child(crate::ui::code_diff_viewer(editor, cx).h(height)),
         );
     }
@@ -133,13 +149,14 @@ fn diff_body(
             div()
                 .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
                 .py(px(theme::GAP_XS))
-                .bg(t.file_viewer_bg)
-                // Editor-surface island (mirrors the File viewer), so its text
-                // follows the UI/editor muted color — NOT the terminal
-                // foreground, which would render dark-on-dark here on a light
-                // terminal theme since `file_viewer_bg` is an opaque fixed
-                // editor surface (unlike the translucent pane tints).
-                .text_color(t.text_muted)
+                // Matches the editor-embed background above (both empty-diff
+                // and populated-diff cases paint the same terminal-derived
+                // surface); text follows the terminal foreground so it stays
+                // in the same matched fg/bg pair the terminal theme itself
+                // guarantees contrast for, instead of a UI-muted colour that
+                // could mismatch an opaque terminal-derived background.
+                .bg(theme::dim_toward_gray(theme::agent_chat_bg(cx), dim))
+                .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(SharedString::from(s::file_viewer_empty_diff())),
         );
