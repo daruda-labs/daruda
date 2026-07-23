@@ -198,6 +198,57 @@ impl AgentLaunch {
             }
         }
     }
+
+    /// Like [`Self::wrap`], but injects `env.inject` and removes `env.strip`
+    /// for the spawned process. `Raw` uses a `KEY=value` prefix (preserved by
+    /// the managed Node path); `Ssh`/`Docker` fold it into the remote shell
+    /// via export/unset.
+    #[allow(clippy::result_unit_err)]
+    pub fn wrap_with_env(
+        &self,
+        remote_path: Option<&str>,
+        env: &crate::account_env::AccountEnv,
+    ) -> Result<String, ()> {
+        let base = self.wrap(remote_path)?;
+        match self {
+            AgentLaunch::Raw(_) => {
+                // Single-quoted so a value containing a space (an account
+                // config dir under `default_data_dir()`, which on macOS
+                // sits under `~/Library/Application Support`) survives the
+                // downstream quote-aware re-tokenization in
+                // `daruda_acp::node::split_env_prefixed_tokens` /
+                // `AcpAgent::from_str`'s `shell_words::split` as one value
+                // instead of splitting into two tokens. No inner escaping is
+                // needed: a filesystem config-dir path never contains a
+                // single quote.
+                let mut prefix = String::new();
+                for (k, v) in &env.inject {
+                    prefix.push_str(&format!("{k}='{v}' "));
+                }
+                Ok(format!("{prefix}{base}"))
+            }
+            AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => {
+                // `base` is `ssh host sh -c 'cd "<p>" && <cmd>'`. Inject
+                // exports inside the inner shell by rewriting the trailing
+                // `&& <cmd>`.
+                let mut env_script = String::new();
+                for s in &env.strip {
+                    env_script.push_str(&format!("unset {s}; "));
+                }
+                for (k, v) in &env.inject {
+                    env_script.push_str(&format!("export {k}=\"{v}\"; "));
+                }
+                // The inner command starts after the last `&& `.
+                match base.rfind("&& ") {
+                    Some(idx) => {
+                        let (head, tail) = base.split_at(idx + 3);
+                        Ok(format!("{head}{env_script}{tail}"))
+                    }
+                    None => Ok(base),
+                }
+            }
+        }
+    }
 }
 
 /// Private wire representation for [`AgentDefinition`]. `id`/`name` stay flat
@@ -922,6 +973,44 @@ mod tests {
         };
         assert_eq!(launch.wrap(None), Err(()));
         assert_eq!(launch.wrap(Some("")), Err(()));
+    }
+
+    #[test]
+    fn wrap_with_env_prefixes_raw_command() {
+        // The value carries a space — like a real account config dir under
+        // `default_data_dir()`, which on macOS lands under `~/Library/
+        // Application Support` — so the assertion also guards that the
+        // emitted prefix is single-quoted, not just concatenated.
+        use crate::account_env::AccountEnv;
+        let launch = AgentLaunch::Raw("npx -y some-acp".to_string());
+        let env = AccountEnv {
+            inject: vec![(
+                "CLAUDE_CONFIG_DIR".into(),
+                "/Users/x/Library/Application Support/daruda/acc/alice".into(),
+            )],
+            strip: vec!["ANTHROPIC_API_KEY"],
+        };
+        let cmd = launch.wrap_with_env(None, &env).unwrap();
+        assert!(cmd.starts_with(
+            "CLAUDE_CONFIG_DIR='/Users/x/Library/Application Support/daruda/acc/alice' "
+        ));
+        assert!(cmd.contains("npx -y some-acp"));
+    }
+
+    #[test]
+    fn wrap_with_env_ssh_exports_and_unsets() {
+        use crate::account_env::AccountEnv;
+        let launch = AgentLaunch::Ssh {
+            adapter_command: "npx -y some-acp".to_string(),
+            host: "vm".to_string(),
+        };
+        let env = AccountEnv {
+            inject: vec![("CLAUDE_CONFIG_DIR".into(), "/remote/acc".into())],
+            strip: vec!["ANTHROPIC_API_KEY"],
+        };
+        let cmd = launch.wrap_with_env(Some("/work"), &env).unwrap();
+        assert!(cmd.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
+        assert!(cmd.contains("unset ANTHROPIC_API_KEY"));
     }
 
     #[test]

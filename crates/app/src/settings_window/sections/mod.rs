@@ -11,6 +11,7 @@
 //! standard sibling-module pattern.
 
 mod about;
+mod accounts;
 mod plugin;
 
 use crate::surface::strings as s;

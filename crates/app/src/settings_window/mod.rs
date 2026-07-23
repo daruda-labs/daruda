@@ -57,6 +57,13 @@ pub struct SettingsWindow {
     agent_preset_select: Entity<SelectState>,
     agent_use_modifier_to_send: bool,
     agent_rows: Vec<AgentCatalogRow>,
+    // Accounts (Task 9). Snapshot loaded from `accounts.json` at
+    // construction; every write goes through the section's own
+    // `set_default_account`/`remove_account` handlers, which persist
+    // immediately (no Save-button batching, unlike the config-backed
+    // fields above) and broadcast the new state to every open
+    // `Workspace` window. See `sections/accounts.rs`'s module doc.
+    accounts: daruda_store::accounts::AccountsState,
     // Render
     max_fps_select: Entity<SelectState>,
     // Shell
@@ -638,6 +645,8 @@ impl SettingsWindow {
         let _updater_subscription =
             crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
 
+        let accounts = daruda_store::accounts::load_accounts().unwrap_or_default();
+
         let result = Self {
             panel_focus_handle: cx.focus_handle(),
             base_config: config.clone(),
@@ -658,6 +667,7 @@ impl SettingsWindow {
             agent_preset_select,
             agent_use_modifier_to_send: config.agent.use_modifier_to_send,
             agent_rows,
+            accounts,
             max_fps_select,
             close_pane_on_exit: config.shell.close_pane_on_exit,
             opacity_input,
@@ -1097,6 +1107,7 @@ impl SettingsWindow {
             | BuiltinSection::Cursor
             | BuiltinSection::Shell
             | BuiltinSection::LeftDock
+            | BuiltinSection::Accounts
             | BuiltinSection::ClaudeStatus
             | BuiltinSection::Keymap
             | BuiltinSection::Plugin

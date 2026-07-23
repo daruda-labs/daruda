@@ -180,3 +180,18 @@ pub const SHORTCUT_FOCUS_SKILL_SEARCH: &str = "cmd-/";
 /// chord pattern (modifier + capital letter) without colliding with
 /// the existing `cmd-shift-p` Command Palette.
 pub const SHORTCUT_INVOKE_SKILL_PALETTE: &str = "cmd-shift-s";
+
+// ============================================================================
+// Status bar — account switcher
+// ============================================================================
+//
+// `SwitchPaneAccount` has no keybinding const (and no `action_map`/command
+// palette entry — an intentional exception to the usual G3 chain). Unlike
+// `NewSkill` (a plain marker action a user *could* bind to any key),
+// `SwitchPaneAccount` carries a concrete `AccountId` chosen from the
+// status-bar dropdown's live account list; there is no "the" account to
+// give it as a static default, so a keymap.json binding or a static
+// palette entry would have nothing meaningful to target. It is dispatched
+// only from the status-bar account dropdown
+// (`workspace::status_bar::build_account_menu`), one item per managed
+// account.

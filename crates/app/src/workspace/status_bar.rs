@@ -2,10 +2,102 @@
 //! pane title. Always visible at the bottom of the workspace.
 
 use crate::ui::theme;
-use gpui::{App, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px};
+use crate::ui::{
+    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
+    menu_builder,
+};
+use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::{OpenSettings, Workspace};
+use daruda_store::accounts::{AccountId, AgentProvider, ManagedAccount};
+use gpui::{App, IntoElement, RenderOnce, SharedString, WeakEntity, Window, div, prelude::*, px};
 
 /// Fixed height of the status bar in pixels.
 pub(super) const STATUS_BAR_HEIGHT: f32 = theme::STATUS_BAR_HEIGHT;
+
+/// Display + dropdown data for the focused pane's account, shown as a
+/// clickable slot in the status bar's right section. Resolved by the
+/// snapshot builder in `render/mod.rs` from the focused pane's
+/// `account_id` + `Workspace.accounts`.
+#[derive(Clone)]
+pub(super) struct AccountSlot {
+    /// `"email (plan)"`, `"email"`, or the "System" fallback — see
+    /// [`account_label`].
+    pub label: SharedString,
+    /// The account's provider (Claude / Codex) — filters which managed
+    /// accounts the dropdown lists. Resolved from the current account
+    /// when set, else the provider default (`AgentProvider::default()`,
+    /// Claude) — every switchable pane kind resolves against Claude only
+    /// until Codex account management ships (see
+    /// `pane::resolve_account_config_dir`).
+    pub provider: AgentProvider,
+    /// The focused pane the dropdown's menu items dispatch
+    /// `Workspace::switch_pane_account` against.
+    pub pane_id: PaneId,
+    /// The pane's own override (`None` = provider default), so the
+    /// dropdown can mark the active entry.
+    pub current: Option<AccountId>,
+    /// Managed accounts matching `provider`, for the dropdown's entries.
+    pub accounts: Vec<ManagedAccount>,
+    /// Dispatch target for the dropdown's menu-item clicks.
+    pub workspace: WeakEntity<Workspace>,
+}
+
+impl AccountSlot {
+    /// Resolve the status-bar account slot for a Terminal/AgentChat pane's
+    /// `account_id` (`None` = no override, falls back to the provider
+    /// default at spawn time — see `resolve_account_config_dir`) against
+    /// the workspace's `AccountsState`. Always produces a slot: an id that
+    /// no longer resolves (deleted account) falls back to the same
+    /// "System" label as a `None` id, rather than surfacing a dangling
+    /// reference to the user.
+    pub(super) fn resolve(
+        pane_id: PaneId,
+        account_id: Option<AccountId>,
+        accounts: &daruda_store::accounts::AccountsState,
+        workspace: WeakEntity<Workspace>,
+    ) -> Self {
+        let (label, provider) = match account_id.and_then(|id| accounts.find(id)) {
+            Some(account) => (
+                account_label(account.email.as_deref(), account.organization.as_deref()),
+                account.provider,
+            ),
+            None => (account_label(None, None), AgentProvider::default()),
+        };
+        let matching = accounts
+            .accounts
+            .iter()
+            .filter(|a| a.provider == provider)
+            .cloned()
+            .collect();
+        Self {
+            label: label.into(),
+            provider,
+            pane_id,
+            current: account_id,
+            accounts: matching,
+            workspace,
+        }
+    }
+}
+
+/// Pure label formatter for [`AccountSlot::label`]: prefers `email (plan)`,
+/// falls back to just `email`, and finally to the "system account" label
+/// when neither is available (no account resolved for the pane).
+fn account_label(email: Option<&str>, plan: Option<&str>) -> String {
+    match (email, plan) {
+        (Some(email), Some(plan)) => format!("{email} ({plan})"),
+        (Some(email), None) => email.to_string(),
+        (None, _) => crate::surface::strings::status_bar_account_system(),
+    }
+}
+
+/// Display name for the dropdown's provider section header.
+fn provider_label(provider: AgentProvider) -> String {
+    match provider {
+        AgentProvider::Claude => crate::surface::strings::status_bar_account_provider_claude(),
+        AgentProvider::Codex => crate::surface::strings::status_bar_account_provider_codex(),
+    }
+}
 
 /// Collected status bar data — snapshot taken before rendering to
 /// avoid entity reads during element construction (GPUI re-entrant
@@ -31,6 +123,11 @@ pub(super) struct StatusBarData {
     /// disk. Drives a small dot in the right section so the user sees
     /// at a glance that some user-global keys are being shadowed.
     pub has_project_config: bool,
+    /// The focused pane's resolved account slot. `None` when the focused
+    /// pane doesn't track an account (File / TaskEdit panes) — hides the
+    /// slot entirely. `Some` for Terminal / AgentChat panes, even when no
+    /// account is configured (shows the "System" fallback label).
+    pub account: Option<AccountSlot>,
 }
 
 /// GPUI render-once wrapper for the status bar element.
@@ -119,6 +216,18 @@ impl RenderOnce for StatusBar {
                         )),
                 )
             })
+            .when_some(data.account.clone(), |el, slot| {
+                el.child(
+                    button("status-account", slot.label.clone())
+                        .ghost()
+                        .xsmall()
+                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+                        .text_color(muted)
+                        .dropdown_menu(menu_builder(move |menu, _window, _cx| {
+                            build_account_menu(&slot, menu)
+                        })),
+                )
+            })
             .when_some(data.error.clone(), |el, err| {
                 el.child(
                     div()
@@ -141,5 +250,75 @@ impl RenderOnce for StatusBar {
             .border_color(border)
             .child(left)
             .child(right)
+    }
+}
+
+/// Build the account slot's dropdown menu: one item per managed account
+/// matching the slot's provider (checkmark on the pane's current
+/// override), then the Plan-B "add account" placeholder (disabled — login
+/// isn't implemented yet) and a "manage accounts" entry that opens
+/// Settings. Each account item is a one-line dispatch into
+/// `Workspace::switch_pane_account` (render purity; no logic here).
+fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
+    // A header names the provider once its account list is non-empty, so a
+    // future multi-provider catalog reads as grouped sections rather than
+    // one flat list (today there's only ever one section — Claude is the
+    // only provider Plan A manages).
+    let menu = if slot.accounts.is_empty() {
+        menu
+    } else {
+        menu.label(SharedString::from(provider_label(slot.provider)))
+            .separator()
+    };
+    let menu = slot.accounts.iter().fold(menu, |m, account| {
+        let workspace = slot.workspace.clone();
+        let pane_id = slot.pane_id;
+        let account_id = account.id;
+        let is_current = slot.current == Some(account_id);
+        let label = account_label(account.email.as_deref(), account.organization.as_deref());
+        m.item(
+            PopupMenuItem::new(SharedString::from(label))
+                .checked(is_current)
+                .on_click(move |_, window, app| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(app, |ws, cx| {
+                            ws.switch_pane_account(pane_id, account_id, window, cx)
+                        });
+                    }
+                }),
+        )
+    });
+    menu.separator()
+        .item(
+            PopupMenuItem::new(SharedString::from(
+                crate::surface::strings::status_bar_add_account(),
+            ))
+            .disabled(true),
+        )
+        .item(
+            PopupMenuItem::new(SharedString::from(
+                crate::surface::strings::status_bar_manage_accounts(),
+            ))
+            .on_click(|_, window, app| {
+                window.dispatch_action(
+                    Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
+                    app,
+                );
+            }),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::account_label;
+
+    #[test]
+    fn account_slot_label_prefers_email_then_falls_back() {
+        assert_eq!(
+            account_label(Some("alice@x.com"), Some("Team")),
+            "alice@x.com (Team)"
+        );
+        assert_eq!(account_label(Some("alice@x.com"), None), "alice@x.com");
+        assert_eq!(account_label(None, None), "System (~/.claude)");
     }
 }

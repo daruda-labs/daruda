@@ -84,26 +84,52 @@ pub fn command_needs_node(command: &str) -> bool {
     if trimmed.starts_with('{') {
         return false;
     }
-    matches!(launcher_after_env_prefix(trimmed), Some("npx" | "node"))
+    matches!(
+        launcher_after_env_prefix(trimmed).as_deref(),
+        Some("npx" | "node")
+    )
 }
 
-fn launcher_after_env_prefix(command: &str) -> Option<&str> {
+fn launcher_after_env_prefix(command: &str) -> Option<String> {
     let (_, tokens) = split_env_prefixed_tokens(command);
-    tokens.first().copied()
+    tokens.into_iter().next()
 }
 
-fn split_env_prefixed_tokens(command: &str) -> (Vec<(&str, &str)>, Vec<&str>) {
+/// Split `command` into its leading `NAME=value` env-prefix assignments and
+/// the remaining command tokens.
+///
+/// Tokenizes with [`shell_words::split`] (quote-aware) rather than
+/// [`str::split_whitespace`] so a quoted assignment value with an embedded
+/// space — e.g. `CLAUDE_CONFIG_DIR='/Users/x/Library/Application
+/// Support/daruda/acc/alice'`, produced by `daruda_config`'s
+/// `AgentLaunch::wrap_with_env` (`Raw` branch) — is tokenized as a single
+/// word and parsed as one assignment with its value's quotes stripped,
+/// instead of exploding into two command tokens partway through the path.
+/// This mirrors how the eventual consumer, `AcpAgent::from_str`, re-tokenizes
+/// the same string (see [`prefix_with_host_arch_env`]'s doc comment) — both
+/// must agree on where the env prefix ends and the command begins. An
+/// unquoted `NAME=value` token still parses exactly as before, since
+/// `shell_words::split` treats it as one plain word when it contains no
+/// whitespace to begin with.
+///
+/// Falls back to a plain whitespace split on a `shell_words` parse error
+/// (e.g. an unmatched quote in a hand-written command) so a malformed string
+/// still yields *some* tokens instead of dropping the command entirely.
+fn split_env_prefixed_tokens(command: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let words = shell_words::split(command)
+        .unwrap_or_else(|_| command.split_whitespace().map(str::to_string).collect());
+
     let mut env = Vec::new();
     let mut command_tokens = Vec::new();
     let mut saw_command = false;
 
-    for token in command.split_whitespace() {
-        if !saw_command && let Some((name, value)) = parse_env_assignment(token) {
-            env.push((name, value));
+    for word in words {
+        if !saw_command && let Some((name, value)) = parse_env_assignment(&word) {
+            env.push((name.to_string(), value.to_string()));
             continue;
         }
         saw_command = true;
-        command_tokens.push(token);
+        command_tokens.push(word);
     }
 
     (env, command_tokens)
@@ -167,14 +193,10 @@ impl NodeRuntime {
                 let (env_assignments, tokens) = split_env_prefixed_tokens(command);
                 let has_cache_override = env_assignments
                     .iter()
-                    .any(|(name, _)| *name == "npm_config_cache");
-                let launcher = tokens.first().copied().unwrap_or_default();
-                let abs_launcher = bin_dir.join(launcher);
-                let args = tokens
-                    .iter()
-                    .skip(1)
-                    .map(|arg| (*arg).to_string())
-                    .collect::<Vec<_>>();
+                    .any(|(name, _)| name == "npm_config_cache");
+                let launcher = tokens.first().cloned().unwrap_or_default();
+                let abs_launcher = bin_dir.join(&launcher);
+                let args = tokens.into_iter().skip(1).collect::<Vec<_>>();
                 let path = prepend_to_path(&bin_dir);
                 let mut env = env_assignments
                     .into_iter()
@@ -651,6 +673,71 @@ mod tests {
         assert!(!command_needs_node(""));
     }
 
+    #[test]
+    fn split_env_prefixed_tokens_dequotes_a_single_quoted_spaced_value() {
+        // Regression: `AgentLaunch::wrap_with_env`'s `Raw` branch
+        // single-quotes an env value that can contain a space (a real
+        // account config dir under `default_data_dir()`, e.g. macOS
+        // `~/Library/Application Support/...`). Naive `split_whitespace`
+        // would break this into two command tokens; the quote-aware split
+        // must parse it as one assignment with the quotes stripped and the
+        // internal space intact.
+        let command =
+            "CLAUDE_CONFIG_DIR='/Users/x/Library/Application Support/daruda/acc/alice' npx -y pkg";
+        let (env, tokens) = split_env_prefixed_tokens(command);
+        assert_eq!(
+            env,
+            vec![(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                "/Users/x/Library/Application Support/daruda/acc/alice".to_string()
+            )]
+        );
+        assert_eq!(
+            tokens,
+            vec!["npx".to_string(), "-y".to_string(), "pkg".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_env_prefixed_tokens_dequotes_a_double_quoted_spaced_value() {
+        let command = r#"CLAUDE_CONFIG_DIR="/Users/x/Library/Application Support/daruda/acc/alice" npx -y pkg"#;
+        let (env, tokens) = split_env_prefixed_tokens(command);
+        assert_eq!(
+            env,
+            vec![(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                "/Users/x/Library/Application Support/daruda/acc/alice".to_string()
+            )]
+        );
+        assert_eq!(
+            tokens,
+            vec!["npx".to_string(), "-y".to_string(), "pkg".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_env_prefixed_tokens_still_parses_an_unquoted_assignment() {
+        // Regression: the pre-existing, still-legal unquoted `NAME=value`
+        // prefix (e.g. `AUGMENT_DISABLE_AUTO_UPDATE=1 npx ...`) must keep
+        // working after switching the tokenizer from `split_whitespace` to
+        // `shell_words::split`.
+        let command = "AUGMENT_DISABLE_AUTO_UPDATE=1 npx -y pkg --acp";
+        let (env, tokens) = split_env_prefixed_tokens(command);
+        assert_eq!(
+            env,
+            vec![("AUGMENT_DISABLE_AUTO_UPDATE".to_string(), "1".to_string())]
+        );
+        assert_eq!(
+            tokens,
+            vec![
+                "npx".to_string(),
+                "-y".to_string(),
+                "pkg".to_string(),
+                "--acp".to_string()
+            ]
+        );
+    }
+
     /// Fixed test `install_root`, distinct from `node_dir` (which itself
     /// lives under a real one in production) so assertions can tell the two
     /// paths apart.
@@ -717,6 +804,41 @@ mod tests {
                     .find(|e| e.name == "npm_config_cache")
                     .expect("npm_config_cache env present");
                 assert_eq!(cache.value, npx_cache_dir(&install_root).to_string_lossy());
+            }
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_runtime_preserves_a_single_quoted_spaced_env_prefix() {
+        // End-to-end regression for the two-sided fix: `AgentLaunch::
+        // wrap_with_env`'s `Raw` branch single-quotes an injected env value
+        // that can contain a space (a real account config dir under
+        // `default_data_dir()`). The wrapped command must still detect
+        // `npx` as the launcher, and the final string must still parse back
+        // into one env assignment with the space intact via
+        // `AcpAgent::from_str`.
+        let install_root = test_install_root();
+        let cmd = format!(
+            "CLAUDE_CONFIG_DIR='/Users/x/Library/Application Support/daruda/acc/alice' npx -y {ADAPTER_NPM_PACKAGE}"
+        );
+        assert!(command_needs_node(&cmd));
+
+        let wrapped = NodeRuntime::System.wrap_command(&cmd, &install_root);
+        let agent = AcpAgent::from_str(&wrapped.0).expect("wrapped command parses");
+        match agent.into_server() {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.command, PathBuf::from("npx"));
+                assert_eq!(stdio.args, vec!["-y", ADAPTER_NPM_PACKAGE]);
+                let config_dir = stdio
+                    .env
+                    .iter()
+                    .find(|e| e.name == "CLAUDE_CONFIG_DIR")
+                    .expect("CLAUDE_CONFIG_DIR env present");
+                assert_eq!(
+                    config_dir.value,
+                    "/Users/x/Library/Application Support/daruda/acc/alice"
+                );
             }
             other => panic!("expected stdio transport, got {other:?}"),
         }

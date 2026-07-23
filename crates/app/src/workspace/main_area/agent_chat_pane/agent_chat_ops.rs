@@ -297,6 +297,12 @@ impl Workspace {
     /// `Pane` for an already-decided cwd `outcome`. `outcome` is one enum so a
     /// resolved-but-unattachable cwd goes through this single path carrying its
     /// own reason, distinct from the generic "no working directory" reason.
+    ///
+    /// `account_id` always starts `None` here — no construction path in this
+    /// function has a persisted override to seed. Session restore
+    /// (`Workspace::rebuild_layout` in `persistence.rs`) is the only source
+    /// of a real value, and patches it onto the returned `Pane` afterward via
+    /// `Pane::agent_chat_content_mut`.
     fn build_agent_chat_pane(
         &mut self,
         outcome: PaneCwdOutcome,
@@ -349,6 +355,7 @@ impl Workspace {
                 view,
                 cached_title,
                 cwd,
+                account_id: None,
             }),
         }
     }
@@ -661,7 +668,20 @@ impl Workspace {
         // never spawn a connection with a broken command, park the pane in
         // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
         // bail out of this connect attempt entirely.
-        let command = match launch.wrap(remote_path) {
+        // Plan A only manages Claude accounts, so every connect resolves
+        // against the Claude provider regardless of which agent this pane
+        // runs — an agent_id → provider mapping isn't needed yet.
+        let account_config_dir = crate::workspace::main_area::pane::resolve_account_config_dir(
+            &self.accounts,
+            &self.data_dir,
+            self.agent_chat_account_id(pane_id),
+            daruda_store::accounts::AgentProvider::Claude,
+        );
+        let wrapped = match account_config_dir.as_deref() {
+            Some(dir) => launch.wrap_with_env(remote_path, &daruda_config::account_env(dir)),
+            None => launch.wrap(remote_path),
+        };
+        let command = match wrapped {
             Ok(command) => command,
             Err(()) => {
                 if let Some(view) = self.agent_chat_view(pane_id).cloned() {
@@ -1439,6 +1459,24 @@ impl Workspace {
             .flat_map(|rt| rt.panes.iter())
             .find(|p| p.id == pane_id)?
             .agent_chat_view()
+    }
+
+    /// The AgentChat pane's persisted account override (`None` = provider
+    /// default). Same cross-lane scan as [`Self::agent_chat_view`] and for
+    /// the same reason — `connect_agent_chat` resolves this at connect time,
+    /// which can happen after a lane switch moved the pane out of the
+    /// active runtime.
+    pub(in crate::workspace) fn agent_chat_account_id(
+        &self,
+        pane_id: PaneId,
+    ) -> Option<daruda_store::accounts::AccountId> {
+        self.main_area
+            .runtimes
+            .values()
+            .flat_map(|rt| rt.panes.iter())
+            .find(|p| p.id == pane_id)?
+            .agent_chat_content()?
+            .account_id
     }
 }
 

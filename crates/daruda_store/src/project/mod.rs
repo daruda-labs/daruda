@@ -184,6 +184,11 @@ pub enum SerializedLayout {
         /// Mutually exclusive with `file`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_chat: Option<SerializedAgentChatContent>,
+        /// Managed account this leaf's terminal shell runs under; `None` =
+        /// provider default. Ignored for `file`/`agent_chat` leaves, which
+        /// carry their own `account_id` (`SerializedAgentChatContent`'s).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_id: Option<crate::accounts::AccountId>,
     },
     Split {
         direction: SplitDirectionSerde,
@@ -308,6 +313,9 @@ pub struct SerializedAgentChatContent {
     /// `None` = a pre-feature save, treated as the built-in Claude agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Managed account this pane runs under; `None` = provider default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<crate::accounts::AccountId>,
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

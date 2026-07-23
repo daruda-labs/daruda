@@ -9,22 +9,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod persistence;
-pub use persistence::{load_accounts, save_accounts};
+pub use persistence::{load_accounts, load_accounts_in, save_accounts, save_accounts_in};
 
 /// Bump when `AccountsState`'s shape changes incompatibly.
 pub const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentProvider {
+    #[default]
     Claude,
     Codex,
-}
-
-impl Default for AgentProvider {
-    fn default() -> Self {
-        AgentProvider::Claude
-    }
 }
 
 /// Stable, globally-unique account identifier (see `ProjectUuid` precedent).
@@ -116,7 +111,10 @@ mod tests {
         let back: AccountsState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.accounts.len(), 1);
         assert_eq!(back.accounts[0].email.as_deref(), Some("alice@company.com"));
-        assert_eq!(back.default_by_provider.get(&AgentProvider::Claude), Some(&id));
+        assert_eq!(
+            back.default_by_provider.get(&AgentProvider::Claude),
+            Some(&id)
+        );
     }
 
     #[test]

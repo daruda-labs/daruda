@@ -98,7 +98,12 @@ pub(in crate::workspace) fn open_single_field_dialog<Cb>(
 /// button. `on_ok` runs inside the live `App` context after the user
 /// confirms; the helper closes the dialog regardless of the handler's
 /// outcome.
-pub(in crate::workspace) fn open_confirm_dialog<F>(
+///
+/// `pub(crate)` (not `pub(in crate::workspace)`) so `settings_window`'s
+/// account-delete confirm can reuse the same `gpui_component::Dialog`
+/// chrome instead of duplicating it — the signature has no `Workspace`
+/// coupling.
+pub(crate) fn open_confirm_dialog<F>(
     title: impl Into<SharedString>,
     body: impl Into<SharedString>,
     ok_label: impl Into<SharedString>,

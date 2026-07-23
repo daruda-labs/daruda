@@ -4,6 +4,7 @@
 //! `~/Library/Application Support/daruda/config.toml` (macOS fallback).
 //! Missing file or parse errors fall back to defaults silently.
 
+pub mod account_env;
 pub mod agent;
 pub mod claude_status;
 pub mod clipboard;
@@ -35,6 +36,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub use account_env::{AccountEnv, account_env};
 pub use agent::{
     ACP_REGISTRY_AGENT_PRESETS, ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentConfig,
     AgentDefinition, AgentLaunch, AgentPreset, DefaultPermissionMode,

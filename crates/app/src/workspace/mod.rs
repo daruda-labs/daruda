@@ -4,6 +4,7 @@
 //! Never use bare `header` / `title_bar` — always `tab_*` or `pane_*`.
 //! `terminal_title()` (daruda_terminal) feeds both tab cells and pane headers.
 
+mod account_ops;
 mod actions;
 mod annotation_dialog;
 mod annotation_ops;
@@ -14,7 +15,7 @@ pub(in crate::workspace) mod command;
 mod config_ops;
 mod config_sync;
 pub(crate) mod delete_project_modal;
-pub(in crate::workspace) mod dialog_helpers;
+pub(crate) mod dialog_helpers;
 mod dnd_ops;
 mod durable;
 pub(in crate::workspace) mod error;
@@ -77,6 +78,18 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
+
+/// Switch the focused pane's managed account (Task 8, A+C hybrid). Carries
+/// the chosen [`daruda_store::accounts::AccountId`] so the dropdown's
+/// per-account menu item can dispatch a concrete target; there is no
+/// sensible default account to bind a keyboard shortcut to, so this has no
+/// `SHORTCUT_*` const (see `surface::keybindings`) — dispatched only from
+/// the status-bar account dropdown (`status_bar::build_account_menu`) via
+/// `window.dispatch_action` / a direct `Workspace::switch_pane_account`
+/// call. `no_json`: never loaded from keymap.json.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = workspace, no_json)]
+pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountId);
 
 /// Active lane's branch state, derived once per render and shared
 /// by the status bar (text label + inline detached chip) and the
@@ -448,6 +461,14 @@ pub struct Workspace {
     /// through `main_area::bottom_dock::macro_ops` and persist via
     /// `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
+    /// Managed AI-provider accounts (Plan A: Claude only) — the catalog a
+    /// pane's `account_id` resolves against, plus the per-provider default
+    /// used when a pane has no explicit override. Loaded from
+    /// `accounts.json` on construction via `data_dir` (same isolation as
+    /// `panels`); absent/corrupt/unreadable file falls back to an empty
+    /// state (no managed accounts — panes spawn with the ambient
+    /// environment unchanged, see `main_area::pane::resolve_account_config_dir`).
+    pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
     /// Subscription that calls `cx.notify()` whenever the app-wide
     /// `GlobalTasks` changes — so the Tasks tab in this workspace
     /// re-renders after a CRUD or lifecycle mutation triggered by any
@@ -998,6 +1019,7 @@ impl Workspace {
             git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
+            accounts: daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default(),
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the

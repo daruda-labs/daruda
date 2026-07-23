@@ -59,8 +59,10 @@ mod tests {
     fn load_rejects_newer_schema() {
         let dir = std::env::temp_dir().join(format!("daruda-acct-test-{}", AccountId::new().0));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut state = AccountsState::default();
-        state.schema_version = SCHEMA_VERSION + 1;
+        let state = AccountsState {
+            schema_version: SCHEMA_VERSION + 1,
+            ..Default::default()
+        };
         save_accounts_in(&dir, &state).unwrap();
         assert!(load_accounts_in(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();

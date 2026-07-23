@@ -309,9 +309,24 @@ impl Workspace {
         // focus — the `activate_lane` below focuses it, starting the ACP
         // session.
         let pane = match surface {
-            TaskAgentSurface::Terminal => self
-                .create_pane_with_cwd(Some(new_path.clone()), window, cx)
-                .map_err(|e| e.to_string())?,
+            TaskAgentSurface::Terminal => {
+                // A brand-new lane's terminal carries no account override
+                // yet — resolve straight to the Claude provider default.
+                let account_config_dir = pane::resolve_account_config_dir(
+                    &self.accounts,
+                    &self.data_dir,
+                    None,
+                    daruda_store::accounts::AgentProvider::Claude,
+                );
+                self.create_pane_with_cwd(
+                    Some(new_path.clone()),
+                    None,
+                    account_config_dir.as_deref(),
+                    window,
+                    cx,
+                )
+                .map_err(|e| e.to_string())?
+            }
             TaskAgentSurface::AgentChat => {
                 // No source pane (new lane), so open under the
                 // session-sticky default. A brand-new lane has no

@@ -333,6 +333,9 @@ modal:
   edit_window_title_placeholder: "Window title (e.g. daruda — review window)"
   group_rename_title: "Rename Group"
   group_rename_placeholder: "Group name"
+  switch_account_new_pane_title: "Switch Account"
+  switch_account_new_pane_body: "This pane is busy — switching accounts will open a new pane under the selected account instead of interrupting it."
+  switch_account_new_pane_confirm: "Open New Pane"
 
 # Bottom dock
 bottom_dock:
@@ -635,6 +638,28 @@ settings:
   project_config_no_dir: "Cannot resolve project config directory."
   status_bar_project_config_tooltip: "Project config active — this workspace's [shell] section is overridden."
   status_bar_detached_chip: "detached"
+  status_bar_account_system: "System (~/.claude)"
+  status_bar_add_account: "+ Add account…"
+  status_bar_manage_accounts: "Manage accounts…"
+  status_bar_account_provider_claude: "Claude"
+  status_bar_account_provider_codex: "Codex"
+  nav_accounts: "Accounts"
+  section_accounts: "ACCOUNTS"
+  accounts_empty: "No managed accounts yet. Panes spawn under the ambient system credentials until one is added."
+  accounts_unknown_email: "Unknown"
+  accounts_default_badge: "Default"
+  accounts_set_default: "Set default"
+  accounts_reauthenticate: "Reauthenticate"
+  accounts_delete: "Delete"
+  accounts_add: "+ Add account"
+  accounts_remove_confirm_title: "Delete this account?"
+  accounts_remove_confirm_body: "%{count} pane(s) using this account will fall back to the provider default."
+  accounts_remove_confirm_ok: "Delete"
+  accounts_last_auth_never: "Never authenticated"
+  accounts_last_auth_just_now: "Authenticated just now"
+  accounts_last_auth_minutes: "Authenticated %{n}m ago"
+  accounts_last_auth_hours: "Authenticated %{n}h ago"
+  accounts_last_auth_days: "Authenticated %{n}d ago"
 
 # Skills tab
 skills:

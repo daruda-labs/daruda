@@ -29,12 +29,14 @@ fn split_layout_round_trip() {
                 cwd: Some(PathBuf::from("/a")),
                 file: None,
                 agent_chat: None,
+                account_id: None,
             },
             SerializedLayout::Leaf {
                 pane_id: 2,
                 cwd: Some(PathBuf::from("/b")),
                 file: None,
                 agent_chat: None,
+                account_id: None,
             },
         ],
         ratios: vec![0.5, 0.5],
@@ -67,6 +69,7 @@ fn file_leaf_round_trip_preserves_viewer_state() {
             view_mode: SerializedFileViewMode::Raw,
         }),
         agent_chat: None,
+        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
@@ -106,12 +109,81 @@ fn file_leaf_skips_serialization_when_terminal() {
         cwd: Some(PathBuf::from("/tmp")),
         file: None,
         agent_chat: None,
+        account_id: None,
     };
     let json = serde_json::to_string(&leaf).unwrap();
     assert!(
         !json.contains("\"file\""),
         "terminal leaves must not write a `file` key, got: {json}"
     );
+}
+
+#[test]
+fn terminal_leaf_round_trip_preserves_account_id() {
+    // A terminal pane pinned to a managed account persists that override
+    // through a save/restore cycle, and an unset override round-trips as
+    // `None` without writing an `account_id` key at all.
+    use crate::accounts::AccountId;
+    let id = AccountId::new();
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 3,
+        cwd: Some(PathBuf::from("/repo")),
+        file: None,
+        agent_chat: None,
+        account_id: Some(id),
+    };
+    let json = serde_json::to_string(&leaf).unwrap();
+    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+    match restored {
+        SerializedLayout::Leaf { account_id, .. } => assert_eq!(account_id, Some(id)),
+        _ => panic!("expected Leaf with account_id"),
+    }
+
+    let unset = SerializedLayout::Leaf {
+        pane_id: 4,
+        cwd: Some(PathBuf::from("/repo")),
+        file: None,
+        agent_chat: None,
+        account_id: None,
+    };
+    let json = serde_json::to_string(&unset).unwrap();
+    assert!(
+        !json.contains("\"account_id\""),
+        "unset account_id must not write a key, got: {json}"
+    );
+}
+
+#[test]
+fn legacy_leaf_without_account_id_field_loads_as_none() {
+    // Forward-compat: state files written before per-pane accounts existed
+    // omit the `account_id` key entirely.
+    let legacy_json = r#"{"type":"Leaf","pane_id":1,"cwd":"/some/dir"}"#;
+    let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
+    match restored {
+        SerializedLayout::Leaf { account_id, .. } => assert!(account_id.is_none()),
+        _ => panic!("expected Leaf"),
+    }
+}
+
+#[test]
+fn agent_chat_content_round_trip_preserves_account_id() {
+    use crate::accounts::AccountId;
+    let id = AccountId::new();
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: None,
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: Some(id),
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.account_id, Some(id));
+
+    // Legacy payload (pre-account_id) still loads, defaulting to None.
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert!(legacy.account_id.is_none());
 }
 
 #[test]
@@ -128,7 +200,9 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             session_id: Some("sess-abc123".to_string()),
             title: Some("Fix the parser".to_string()),
             agent_id: Some("claude".to_string()),
+            account_id: None,
         }),
+        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
@@ -164,7 +238,9 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             session_id: None,
             title: None,
             agent_id: None,
+            account_id: None,
         }),
+        account_id: None,
     };
 
     let json = serde_json::to_string(&leaf).unwrap();
@@ -239,6 +315,7 @@ fn agent_chat_leaf_skips_serialization_when_absent() {
         cwd: Some(PathBuf::from("/tmp")),
         file: None,
         agent_chat: None,
+        account_id: None,
     };
     let json = serde_json::to_string(&leaf).unwrap();
     assert!(
@@ -480,6 +557,7 @@ fn serialized_tab_user_label_round_trip() {
             cwd: None,
             file: None,
             agent_chat: None,
+            account_id: None,
         },
         last_focused_pane: 7,
         user_label: Some("PR #123 review".into()),
@@ -512,6 +590,7 @@ fn serialized_tab_user_label_none_is_skipped_in_json() {
             cwd: None,
             file: None,
             agent_chat: None,
+            account_id: None,
         },
         last_focused_pane: 1,
         user_label: None,

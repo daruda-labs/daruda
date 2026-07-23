@@ -14,6 +14,7 @@
 //! Both channels feed the same [`SessionStatus`] enum; the consumer
 //! (`app/src/hooks/store.rs`) merges them with hook-wins-on-tie semantics.
 
+pub mod accounts;
 pub mod activity;
 pub mod hooks;
 mod http;

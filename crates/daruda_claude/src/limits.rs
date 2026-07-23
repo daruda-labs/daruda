@@ -234,7 +234,7 @@ fn credentials_path_from(
 /// wasn't confirmed against a live install when this was written, so this
 /// also tries the same fields at the top level. If neither shape yields a
 /// token, that's `NoToken`, same as a missing/malformed Keychain entry.
-fn parse_keychain_credentials(raw: &str) -> Result<(String, PlanInfo), FetchError> {
+pub(crate) fn parse_keychain_credentials(raw: &str) -> Result<(String, PlanInfo), FetchError> {
     let v: serde_json::Value = serde_json::from_str(raw.trim()).map_err(|_| FetchError::NoToken)?;
     let oauth = match &v["claudeAiOauth"] {
         Value::Object(_) => &v["claudeAiOauth"],

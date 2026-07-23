@@ -1013,6 +1013,26 @@ impl Render for Workspace {
             .find(|p| p.id == self.active_runtime().focused_pane_id)
             .map(|p| p.title())
             .unwrap_or_else(|| "shell".into());
+        // Same focused-pane lookup for the account slot: Terminal/AgentChat
+        // panes track an `account_id` override (`None` = provider default);
+        // File/TaskEdit panes don't track an account at all, so the slot
+        // is hidden (`None`) rather than showing a misleading "System".
+        let focused_pane_id = self.active_runtime().focused_pane_id;
+        let weak_workspace = cx.entity().downgrade();
+        let focused_account = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused_pane_id)
+            .and_then(|p| p.account_id())
+            .map(|account_id| {
+                status_bar::AccountSlot::resolve(
+                    focused_pane_id,
+                    account_id,
+                    &self.accounts,
+                    weak_workspace.clone(),
+                )
+            });
         // `project_config_path` (canonicalize) + `Path::exists` are
         // filesystem stats, and `render()` re-runs on every animation frame
         // (status badges request frames without `cx.notify`). Memoize the
@@ -1040,6 +1060,7 @@ impl Render for Workspace {
             title: focused_title,
             error: self.last_error.clone(),
             has_project_config,
+            account: focused_account,
         };
         let status_bar = status_bar::StatusBar(status_data);
 
@@ -1321,6 +1342,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_git_changes_toggle_stage))
             .on_action(cx.listener(Self::on_git_changes_activate))
             .on_action(cx.listener(Self::on_open_settings))
+            .on_action(cx.listener(Self::on_switch_pane_account))
             .on_action(cx.listener(Self::on_open_project_config))
             .on_action(cx.listener(Self::on_install_agent_hooks))
             .on_action(cx.listener(Self::on_uninstall_agent_hooks))

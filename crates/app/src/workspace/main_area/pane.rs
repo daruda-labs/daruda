@@ -86,6 +86,12 @@ pub(in crate::workspace) struct TerminalContent {
     /// drained at the fast interval. Poked by the keyboard path
     /// (`TerminalInput` closure) and by `Pane::send_input`.
     pub(in crate::workspace) poke_tx: UnboundedSender<()>,
+    /// Managed account this pane's shell was spawned under; `None` = the
+    /// provider default at spawn time. Cached here (it never changes after
+    /// construction) purely so the layout serializer can persist it —
+    /// re-resolving the actual `CLAUDE_CONFIG_DIR` at spawn is
+    /// `resolve_account_config_dir`'s job, not a runtime read of this field.
+    pub(in crate::workspace) account_id: Option<daruda_store::accounts::AccountId>,
 }
 
 /// File-viewer content. Each open file lives in its own `Pane`, owning
@@ -285,6 +291,11 @@ pub(in crate::workspace) struct AgentChatContent {
     /// changes after construction) so `Pane::cwd()` stays cx-free and can hand
     /// back a borrow; the view holds its own copy for connect / persistence.
     pub(in crate::workspace) cwd: Option<PaneCwd>,
+    /// Managed account this pane's ACP session runs under; `None` = the
+    /// provider default. Cached here so the layout serializer can persist
+    /// it cx-free; `connect_agent_chat` resolves the actual config dir from
+    /// it at connect time via `resolve_account_config_dir`.
+    pub(in crate::workspace) account_id: Option<daruda_store::accounts::AccountId>,
 }
 
 pub(in crate::workspace) struct Pane {
@@ -408,6 +419,36 @@ impl Pane {
         }
     }
 
+    /// The account override cached on a Terminal pane's `TerminalContent`,
+    /// or `None` for any other content kind. Used by the layout serializer
+    /// to persist `SerializedLayout::Leaf::account_id`.
+    pub(in crate::workspace) fn terminal_account_id(
+        &self,
+    ) -> Option<daruda_store::accounts::AccountId> {
+        match &self.content {
+            PaneContent::Terminal(t) => t.account_id,
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) | PaneContent::AgentChat(_) => None,
+        }
+    }
+
+    /// The account override for either account-tracking pane kind
+    /// (Terminal or AgentChat). Outer `Option` is "does this pane kind
+    /// track an account at all" (`None` for File/TaskEdit — the status
+    /// bar hides the slot entirely rather than showing a misleading
+    /// "System"); inner `Option` is the pane's own override, `None`
+    /// meaning "provider default". Single accessor behind the status
+    /// bar's account slot and the account-switcher handler, so the two
+    /// don't each re-derive their own copy of this match.
+    pub(in crate::workspace) fn account_id(
+        &self,
+    ) -> Option<Option<daruda_store::accounts::AccountId>> {
+        match &self.content {
+            PaneContent::Terminal(t) => Some(t.account_id),
+            PaneContent::AgentChat(ac) => Some(ac.account_id),
+            PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
+        }
+    }
+
     /// Write `bytes` directly to the pane's PTY stdin. Returns `true`
     /// when the channel accepted the buffer; `false` for non-terminal
     /// panes, stub panes (no `pty_input_tx`), or a writer thread that
@@ -481,6 +522,17 @@ impl Pane {
     /// serializer to persist the anchored lane cwd (cx-free).
     pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
         match &self.content {
+            PaneContent::AgentChat(ac) => Some(ac),
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
+        }
+    }
+
+    /// Mutable counterpart to `agent_chat_content`. Used by session restore
+    /// (`Workspace::rebuild_layout`) to patch the freshly-built pane's
+    /// `account_id` from the persisted `SerializedAgentChatContent` — the
+    /// constructor path itself has no override to seed with.
+    pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
+        match &mut self.content {
             PaneContent::AgentChat(ac) => Some(ac),
             PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::TaskEditPane(_) => None,
         }
@@ -813,6 +865,32 @@ pub(in crate::workspace) fn resolve_default_cwd(
     candidates.active_lane.or(candidates.project_root)
 }
 
+/// Inject the account's `CLAUDE_CONFIG_DIR` and remove auth-override vars
+/// from a pty config so OAuth account selection wins (see
+/// `daruda_config::account_env`).
+fn apply_account_env(pty: &mut PtyConfig, config_dir: &Path) {
+    let env = daruda_config::account_env(config_dir);
+    pty.env.retain(|(k, _)| !env.strip.contains(&k.as_str()));
+    pty.env.extend(env.inject);
+}
+
+/// Resolve the isolated `CLAUDE_CONFIG_DIR` a new pane should spawn under:
+/// the pane's own `account_id` when explicitly set, else `provider`'s
+/// configured default account. Returns `None` when neither resolves to a
+/// real account — the pane spawns with the ambient environment unchanged
+/// (system `~/.claude`).
+pub(in crate::workspace) fn resolve_account_config_dir(
+    state: &daruda_store::accounts::AccountsState,
+    data_dir: &Path,
+    account_id: Option<daruda_store::accounts::AccountId>,
+    provider: daruda_store::accounts::AgentProvider,
+) -> Option<PathBuf> {
+    let id = account_id.or_else(|| state.default_by_provider.get(&provider).copied())?;
+    // Only resolve to a dir if the account actually exists.
+    state.find(id)?;
+    Some(daruda_claude::accounts::account_config_dir(data_dir, id))
+}
+
 impl Workspace {
     /// Default cwd for a new pane. Thin wrapper that gathers the
     /// candidates from `Workspace` state and delegates to
@@ -837,16 +915,33 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
         let cwd = self.default_cwd_for_new_pane();
-        self.create_pane_with_cwd(cwd, window, cx)
+        // A fresh `Cmd+T` pane carries no explicit account override — resolve
+        // straight to the Claude provider default (`None` when unset).
+        let account_config_dir = resolve_account_config_dir(
+            &self.accounts,
+            &self.data_dir,
+            None,
+            daruda_store::accounts::AgentProvider::Claude,
+        );
+        self.create_pane_with_cwd(cwd, None, account_config_dir.as_deref(), window, cx)
     }
 
     /// Like `create_pane` but forces a specific initial cwd. Used by
     /// session restore so each restored pane starts at the directory
     /// it last tracked, independent of the focused-pane / project
     /// inheritance rules.
+    ///
+    /// `account_id` is the pane's own persisted account override (`None` =
+    /// provider default), cached on the resulting `TerminalContent` purely
+    /// for re-serialization. `account_config_dir` is the already-resolved
+    /// `CLAUDE_CONFIG_DIR` to inject into the spawned shell (see
+    /// `apply_account_env` / `resolve_account_config_dir`); `None` spawns
+    /// with the ambient environment unchanged.
     pub(in crate::workspace) fn create_pane_with_cwd(
         &mut self,
         cwd: Option<PathBuf>,
+        account_id: Option<daruda_store::accounts::AccountId>,
+        account_config_dir: Option<&Path>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
@@ -862,6 +957,9 @@ impl Workspace {
         };
         if let Some(program) = self.shell_program.as_deref() {
             pty_config.shell = program.to_string();
+        }
+        if let Some(config_dir) = account_config_dir {
+            apply_account_env(&mut pty_config, config_dir);
         }
         let handle = spawn_pty(&pty_config).map_err(PaneSpawnError::Pty)?;
         let pty_pid = handle.child_pid;
@@ -947,6 +1045,7 @@ impl Workspace {
                 _view_event_subscription: view_event_sub,
                 pty_input_tx: Some(pty_input_tx),
                 poke_tx,
+                account_id,
             }),
         })
     }
@@ -1287,6 +1386,23 @@ mod tests {
     }
 
     #[test]
+    fn apply_account_env_injects_and_strips() {
+        use daruda_terminal::pty::PtyConfig;
+        let mut cfg = PtyConfig::default();
+        cfg.env.push(("ANTHROPIC_API_KEY".into(), "leak".into()));
+        apply_account_env(&mut cfg, std::path::Path::new("/data/acc/alice"));
+        assert!(
+            cfg.env
+                .iter()
+                .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == "/data/acc/alice")
+        );
+        assert!(
+            !cfg.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"),
+            "auth override stripped"
+        );
+    }
+
+    #[test]
     fn high_fps_cap_bounds_the_fast_interval() {
         let cap = Duration::from_millis(8); // 120 fps
         assert_eq!(stdout_poll_interval(cap, 0, 0), cap);
@@ -1308,5 +1424,35 @@ mod tests {
         // A real cell-boundary crossing in either dimension is forwarded.
         assert!(grid_resize_needed((80, 24), (81, 24)));
         assert!(grid_resize_needed((80, 24), (80, 25)));
+    }
+
+    #[test]
+    fn resolve_falls_back_to_provider_default() {
+        use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAccount};
+        let id = AccountId::new();
+        let mut st = AccountsState::default();
+        st.accounts.push(ManagedAccount {
+            id,
+            provider: AgentProvider::Claude,
+            email: None,
+            organization: None,
+            config_dir: std::path::PathBuf::from("/x"),
+            created_at: 0,
+            last_authenticated_at: 0,
+        });
+        st.default_by_provider.insert(AgentProvider::Claude, id);
+        let data = std::path::Path::new("/data");
+        // explicit None → default account's config dir
+        let dir = resolve_account_config_dir(&st, data, None, AgentProvider::Claude);
+        assert_eq!(
+            dir,
+            Some(daruda_claude::accounts::account_config_dir(data, id))
+        );
+        // no default set → None (uses system ~/.claude)
+        let empty = AccountsState::default();
+        assert_eq!(
+            resolve_account_config_dir(&empty, data, None, AgentProvider::Claude),
+            None
+        );
     }
 }

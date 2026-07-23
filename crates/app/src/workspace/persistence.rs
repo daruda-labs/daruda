@@ -621,6 +621,7 @@ impl Workspace {
                 cwd,
                 file,
                 agent_chat,
+                account_id,
             } => {
                 let pane = if let Some(fc) = file {
                     // File pane — `file_status` is not persisted; the git
@@ -648,7 +649,7 @@ impl Workspace {
                     // else the default agent (session id dropped — it belongs
                     // to a now-absent agent and could not resume).
                     let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
-                    self.create_agent_chat_pane(
+                    let mut restored = self.create_agent_chat_pane(
                         ac.cwd.clone(),
                         if keep_session {
                             ac.session_id.clone()
@@ -659,10 +660,28 @@ impl Workspace {
                         ac.title.clone(),
                         window,
                         cx,
-                    )
+                    );
+                    // The constructor always seeds `account_id: None` — patch
+                    // in the persisted override now that the pane exists.
+                    if let Some(content) = restored.agent_chat_content_mut() {
+                        content.account_id = ac.account_id;
+                    }
+                    restored
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
-                    self.create_pane_with_cwd(effective, window, cx)?
+                    let account_config_dir = pane::resolve_account_config_dir(
+                        &self.accounts,
+                        &self.data_dir,
+                        *account_id,
+                        daruda_store::accounts::AgentProvider::Claude,
+                    );
+                    self.create_pane_with_cwd(
+                        effective,
+                        *account_id,
+                        account_config_dir.as_deref(),
+                        window,
+                        cx,
+                    )?
                 };
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
@@ -697,8 +716,18 @@ impl Workspace {
                 if n == 0 {
                     // Degenerate serialization — materialize a fresh leaf
                     // so we never surface an empty Split to the renderer.
+                    // No serialized leaf survives to carry an account_id
+                    // here, so this resolves straight to the provider default.
+                    let account_config_dir = pane::resolve_account_config_dir(
+                        &self.accounts,
+                        &self.data_dir,
+                        None,
+                        daruda_store::accounts::AgentProvider::Claude,
+                    );
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
+                        None,
+                        account_config_dir.as_deref(),
                         window,
                         cx,
                     )?;
@@ -852,6 +881,7 @@ fn serialize_layout(
                     session_id: v.session_id.clone(),
                     title: v.session_title.clone(),
                     agent_id: Some(v.agent_id.clone()),
+                    account_id: ac.account_id,
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {
@@ -859,11 +889,17 @@ fn serialize_layout(
             } else {
                 pane.and_then(|p| p.cwd().map(std::path::Path::to_path_buf))
             };
+            // Terminal leaves persist their own `account_id`; File/AgentChat
+            // leaves carry it on their own sub-content (`agent_chat.account_id`)
+            // instead, so this stays `None` for those (mutually exclusive with
+            // `agent_chat`/`file` the same way `cwd` is).
+            let account_id = pane.and_then(|p| p.terminal_account_id());
             daruda_store::project::SerializedLayout::Leaf {
                 pane_id: *id,
                 cwd,
                 file,
                 agent_chat,
+                account_id,
             }
         }
         pane_tree::PaneLayout::Split {

@@ -1677,6 +1677,19 @@ pub fn group_rename_dialog_placeholder() -> String {
     rust_i18n::t!("modal.group_rename_placeholder").into_owned()
 }
 
+/// Confirm-dialog copy shown before opening a new pane for a busy
+/// pane's account switch (`Workspace::confirm_open_pane_with_account`,
+/// account_ops.rs — Task 8's `SwitchKind::NewPane` path).
+pub fn switch_account_new_pane_title() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_title").into_owned()
+}
+pub fn switch_account_new_pane_body() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_body").into_owned()
+}
+pub fn switch_account_new_pane_confirm() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_confirm").into_owned()
+}
+
 /// Color presets exposed by the Group context menu. Hex strings are
 /// stored on `SerializedGroup::color` so the dock's group header
 /// chip can decode them via `gpui::Rgba::try_from(...)` without any
@@ -1945,6 +1958,112 @@ pub fn status_bar_project_config_tooltip() -> String {
 /// tag, not a sentence.
 pub fn status_bar_detached_chip() -> String {
     rust_i18n::t!("settings.status_bar_detached_chip").into_owned()
+}
+
+/// Status-bar account slot label when the focused pane has no managed
+/// account resolved (no `account_id` set, or the id no longer resolves) —
+/// the pane runs under the ambient system `~/.claude` credentials.
+pub fn status_bar_account_system() -> String {
+    rust_i18n::t!("settings.status_bar_account_system").into_owned()
+}
+
+/// Disabled placeholder entry in the status-bar account dropdown for
+/// adding a new managed account. Login (Plan B) isn't implemented yet, so
+/// the entry renders but never dispatches — see the Settings Accounts
+/// section (a later task) for the real flow once it ships.
+pub fn status_bar_add_account() -> String {
+    rust_i18n::t!("settings.status_bar_add_account").into_owned()
+}
+
+/// Status-bar account dropdown entry that opens the Settings window
+/// directly on the Accounts section.
+pub fn status_bar_manage_accounts() -> String {
+    rust_i18n::t!("settings.status_bar_manage_accounts").into_owned()
+}
+
+/// Section-header labels for the status-bar account dropdown, one per
+/// [`daruda_store::accounts::AgentProvider`] variant — shown above the
+/// account list once it's non-empty, so a future multi-provider catalog
+/// reads as grouped sections rather than one flat list.
+pub fn status_bar_account_provider_claude() -> String {
+    rust_i18n::t!("settings.status_bar_account_provider_claude").into_owned()
+}
+pub fn status_bar_account_provider_codex() -> String {
+    rust_i18n::t!("settings.status_bar_account_provider_codex").into_owned()
+}
+
+/// Sidebar nav label + section header for the Settings "Accounts" page
+/// (Task 9): list managed accounts, set the per-provider default, delete.
+pub fn settings_nav_accounts() -> String {
+    rust_i18n::t!("settings.nav_accounts").into_owned()
+}
+pub fn settings_section_accounts() -> String {
+    rust_i18n::t!("settings.section_accounts").into_owned()
+}
+/// Shown instead of the provider groups when no managed account exists
+/// yet (the common case until Plan B login ships).
+pub fn settings_accounts_empty() -> String {
+    rust_i18n::t!("settings.accounts_empty").into_owned()
+}
+/// Placeholder for an account with no captured email (shouldn't happen
+/// once Plan B login always captures `oauthAccount`, but the field is
+/// `Option` today).
+pub fn settings_accounts_unknown_email() -> String {
+    rust_i18n::t!("settings.accounts_unknown_email").into_owned()
+}
+/// Badge next to the account that's currently the provider default.
+pub fn settings_accounts_default_badge() -> String {
+    rust_i18n::t!("settings.accounts_default_badge").into_owned()
+}
+/// "Set default" row button — makes this account the provider default
+/// for new panes. Hidden on the row that's already the default.
+pub fn settings_accounts_set_default() -> String {
+    rust_i18n::t!("settings.accounts_set_default").into_owned()
+}
+/// Disabled "Reauthenticate" row button — real login is Plan B
+/// (`unstable_auth_methods`); rendered so the row's affordances are
+/// discoverable ahead of time, never wired to a handler.
+pub fn settings_accounts_reauthenticate() -> String {
+    rust_i18n::t!("settings.accounts_reauthenticate").into_owned()
+}
+/// "Delete" row button — opens the remove-confirm dialog.
+pub fn settings_accounts_delete() -> String {
+    rust_i18n::t!("settings.accounts_delete").into_owned()
+}
+/// Disabled "+ Add account" placeholder — real account creation is Plan B.
+pub fn settings_accounts_add() -> String {
+    rust_i18n::t!("settings.accounts_add").into_owned()
+}
+pub fn settings_accounts_remove_confirm_title() -> String {
+    rust_i18n::t!("settings.accounts_remove_confirm_title").into_owned()
+}
+/// `count` = panes across every open Workspace window currently
+/// pointing at the account being deleted (see
+/// `Workspace::panes_referencing_account`).
+pub fn settings_accounts_remove_confirm_body(count: usize) -> String {
+    rust_i18n::t!("settings.accounts_remove_confirm_body", count => count).into_owned()
+}
+pub fn settings_accounts_remove_confirm_ok() -> String {
+    rust_i18n::t!("settings.accounts_remove_confirm_ok").into_owned()
+}
+/// Relative "last authenticated" label buckets — mirrors the Usage tab's
+/// `usage.cache_*` cache-age badge shape, kept as a separate key family
+/// since the two express different concepts (credential freshness vs.
+/// fetch-cache age) that could diverge in wording later.
+pub fn settings_accounts_last_auth_never() -> String {
+    rust_i18n::t!("settings.accounts_last_auth_never").into_owned()
+}
+pub fn settings_accounts_last_auth_just_now() -> String {
+    rust_i18n::t!("settings.accounts_last_auth_just_now").into_owned()
+}
+pub fn settings_accounts_last_auth_minutes(n: u64) -> String {
+    rust_i18n::t!("settings.accounts_last_auth_minutes", n => n).into_owned()
+}
+pub fn settings_accounts_last_auth_hours(n: u64) -> String {
+    rust_i18n::t!("settings.accounts_last_auth_hours", n => n).into_owned()
+}
+pub fn settings_accounts_last_auth_days(n: u64) -> String {
+    rust_i18n::t!("settings.accounts_last_auth_days", n => n).into_owned()
 }
 
 /// Initial contents of a freshly-created
