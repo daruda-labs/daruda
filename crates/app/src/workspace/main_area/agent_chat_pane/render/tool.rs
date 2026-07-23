@@ -1,6 +1,9 @@
 //! Tool-call cards (title + status badge + foldable body of diffs and output)
 //! and the inline permission cards with their per-choice buttons.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use daruda_acp::{
     ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
     ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
@@ -343,13 +346,49 @@ fn output_block_view(
             text,
             truncated_from,
         } => {
-            let markdown = crate::ui::markdown(
-                SharedString::from(format!("agent-chat-tool-out-{tool_id}-{ix}")),
-                text.clone(),
-            )
-            .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-            .text_size(px(theme::agent_chat_font_size(cx)))
-            .into_any_element();
+            let plain_id_prefix = format!("agent-chat-tool-out-{tool_id}-{ix}");
+            let plain_color = theme::dim_toward_gray(theme::agent_chat_fg(cx), dim);
+            let font_size = px(theme::agent_chat_font_size(cx));
+            let markdown =
+                crate::ui::markdown(SharedString::from(plain_id_prefix.clone()), text.clone())
+                    .color(plain_color)
+                    .text_size(font_size)
+                    .code_block_render(move |lang, source, _window, cx| {
+                        // The Claude ACP adapter wraps every tool result in a bare,
+                        // language-less fence (`daruda_acp::output_highlight`) even
+                        // when the content isn't source code (command output, search
+                        // hits, …). A tagged fence — e.g. Read's syntax-highlighted
+                        // snippet — keeps the default boxed/highlighted rendering;
+                        // a bare one renders as flush plain text instead, so
+                        // non-code output doesn't double the tool card's own
+                        // border/bg chrome for content that reads as prose, not code.
+                        if !lang.is_empty() {
+                            return None;
+                        }
+                        let mut hasher = DefaultHasher::new();
+                        source.hash(&mut hasher);
+                        let id = SharedString::from(format!(
+                            "{plain_id_prefix}-plain-{}",
+                            hasher.finish()
+                        ));
+                        Some(
+                            div()
+                                .min_w_0()
+                                .font_family(theme::FONT_FAMILY_MONOSPACE)
+                                .text_color(plain_color)
+                                .text_size(px(theme::agent_chat_font_size(cx)))
+                                .child(
+                                    crate::ui::selectable_text(
+                                        id,
+                                        SharedString::from(source.to_string()),
+                                    )
+                                    .color(plain_color)
+                                    .text_size(px(theme::agent_chat_font_size(cx))),
+                                )
+                                .into_any_element(),
+                        )
+                    })
+                    .into_any_element();
             let Some(original_len) = truncated_from else {
                 return markdown;
             };
