@@ -119,11 +119,15 @@ fn diff_body(
         // minimum inside a taller reserved wrapper. Pin both wrapper and input
         // to `rows × line_height` so the list measures the full block and the
         // editor paints every diff row. The built-in scrollbar is off
-        // (`code_diff_viewer` sets `show_scrollbar(false)`); reserve one
-        // scrollbar width below the last row so the custom thumb overlay
-        // below sits in its own strip instead of overlapping the bottom line.
+        // (`code_diff_viewer` sets `show_scrollbar(false)`); reserve the
+        // thumb's full footprint below the last row — `SCROLLBAR_W` (its
+        // height) plus `SCROLLBAR_MARGIN_R` (`horizontal_thumb`'s `.bottom()`
+        // inset) — so the custom thumb overlay sits in its own strip instead
+        // of its top edge overlapping the bottom text row.
         let rows = editor.read(cx).display_rows().max(1);
-        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H + theme::SCROLLBAR_W);
+        let height = px(rows as f32 * theme::AGENT_CHAT_DIFF_ROW_H
+            + theme::SCROLLBAR_W
+            + theme::SCROLLBAR_MARGIN_R);
         // Snapshot the editor's painted geometry into plain values before
         // building the thumb — `InputState::scroll_handle().bounds()`/
         // `.max_offset()` never populate (see its `scroll_size` doc comment),

@@ -2324,38 +2324,6 @@ impl InputState {
     }
 }
 
-// TEMP-DIAG(ime): capture the exact macOS IME call sequence for a Korean
-// composition-loss repro. Gated behind `DARUDA_IME_TRACE`; appends to
-// `/tmp/daruda-ime.log`. Remove once the sequence is captured.
-fn ime_trace(line: String) {
-    use std::io::Write as _;
-    if std::env::var_os("DARUDA_IME_TRACE").is_none() {
-        return;
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/daruda-ime.log")
-    {
-        let _ = writeln!(f, "{line}");
-    }
-}
-
-impl InputState {
-    // TEMP-DIAG(ime): render the current IME-relevant state as a one-liner.
-    fn ime_state(&self) -> String {
-        let sel: Range<usize> = self.selected_range.into();
-        let marked = self.ime_marked_range.map(|r| (r.start, r.end));
-        format!(
-            "text={:?} bytes_len={} marked_bytes={:?} sel_bytes={:?}",
-            self.text.to_string(),
-            self.text.len(),
-            marked,
-            (sel.start, sel.end),
-        )
-    }
-}
-
 impl EntityInputHandler for InputState {
     fn text_for_range(
         &mut self,
@@ -2391,10 +2359,6 @@ impl EntityInputHandler for InputState {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        ime_trace(format!(
-            "unmark_text               IN  | {}",
-            self.ime_state()
-        ));
         self.ime_marked_range = None;
     }
 
@@ -2412,11 +2376,6 @@ impl EntityInputHandler for InputState {
         if self.disabled {
             return;
         }
-
-        ime_trace(format!(
-            "replace_text_in_range     IN  range_utf16={range_utf16:?} new_text={new_text:?} | {}",
-            self.ime_state()
-        ));
 
         self.pause_blink_cursor(cx);
 
@@ -2483,11 +2442,6 @@ impl EntityInputHandler for InputState {
         if !self.silent_replace_text {
             self.handle_completion_trigger(&range, &new_text, window, cx);
         }
-        ime_trace(format!(
-            "replace_text_in_range     OUT resolved_range_bytes={:?} | {}",
-            (range.start, range.end),
-            self.ime_state()
-        ));
         cx.emit(InputEvent::Change);
         cx.notify();
     }
@@ -2504,11 +2458,6 @@ impl EntityInputHandler for InputState {
         if self.disabled {
             return;
         }
-
-        ime_trace(format!(
-            "replace_and_mark          IN  range_utf16={range_utf16:?} new_text={new_text:?} new_sel_utf16={new_selected_range_utf16:?} | {}",
-            self.ime_state()
-        ));
 
         self.lsp.reset();
 
@@ -2556,11 +2505,6 @@ impl EntityInputHandler for InputState {
         self.mode.update_auto_grow(&self.text_wrapper);
         self.history.start_grouping();
         self.push_history(&old_text, &range, new_text);
-        ime_trace(format!(
-            "replace_and_mark          OUT resolved_range_bytes={:?} | {}",
-            (range.start, range.end),
-            self.ime_state()
-        ));
         cx.notify();
     }
 
