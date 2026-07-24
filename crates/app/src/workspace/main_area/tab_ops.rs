@@ -3,7 +3,7 @@ use gpui::{Context, Window};
 use super::nav::{NavDirection, pane_in_direction};
 use super::pane::{PaneContent, TabEntry};
 use super::pane_tree::{
-    PaneId, PaneLayout, SplitDirection, collect_pane_rects, insert_split_at,
+    PaneId, PaneLayout, SplitDirection, collect_pane_rects, insert_node_at, insert_split_at,
     remove_pane_from_layout,
 };
 use crate::workspace::Workspace;
@@ -294,14 +294,7 @@ impl Workspace {
 
         // Adjust history for the removed tab: drop direct references to it
         // and shift all higher indices down by one so they remain valid.
-        self.active_runtime_mut()
-            .tab_history
-            .retain(|&i| i != index);
-        for idx in &mut self.active_runtime_mut().tab_history {
-            if *idx > index {
-                *idx -= 1;
-            }
-        }
+        rebase_tab_history_after_removal(&mut self.active_runtime_mut().tab_history, index);
 
         // Choose next active tab. Prefer the most-recent history entry;
         // fall back to the nearest neighbor when history is empty.
@@ -338,42 +331,71 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Shared core behind `activate_tab` and `switch_tab_for_drag_preview`:
+    /// the guard, zoom/hover-clear, tab-history push + cap, and the
+    /// `active_tab_index` write. Returns the new tab's `last_focused_pane`
+    /// on a real switch, `None` on a no-op (out-of-range or already
+    /// active) — callers branch on that to decide whether to focus/persist.
+    fn switch_active_tab_index(&mut self, index: usize) -> Option<PaneId> {
+        if index >= self.active_runtime().tabs.len()
+            || index == self.active_runtime().active_tab_index
+        {
+            return None;
+        }
+        self.main_area.zoomed_pane_id = None;
+        // Drop any in-flight drag hover so a stale half-fill overlay does
+        // not linger on the newly-activated tab. The caller's notify covers it.
+        self.main_area.pane_drop_hover = None;
+        // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
+        if self.active_runtime().tab_history.last() != Some(&self.active_runtime().active_tab_index)
+        {
+            let cur_tab = self.active_runtime().active_tab_index;
+            self.active_runtime_mut().tab_history.push(cur_tab);
+        }
+        // Cap size to bound memory use across long sessions.
+        const TAB_HISTORY_CAP: usize = 64;
+        if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
+            let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
+            self.active_runtime_mut().tab_history.drain(..drain_to);
+        }
+        self.active_runtime_mut().active_tab_index = index;
+        Some(self.active_runtime().tabs[index].last_focused_pane)
+    }
+
     pub(in crate::workspace) fn activate_tab(
         &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if index < self.active_runtime().tabs.len()
-            && index != self.active_runtime().active_tab_index
-        {
-            self.main_area.zoomed_pane_id = None;
-            // Drop any in-flight drag hover so a stale half-fill overlay does
-            // not linger on the newly-activated tab. The notify below covers it.
-            self.main_area.pane_drop_hover = None;
-            // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
-            if self.active_runtime().tab_history.last()
-                != Some(&self.active_runtime().active_tab_index)
-            {
-                let cur_tab = self.active_runtime().active_tab_index;
-                self.active_runtime_mut().tab_history.push(cur_tab);
-            }
-            // Cap size to bound memory use across long sessions.
-            const TAB_HISTORY_CAP: usize = 64;
-            if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
-                let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
-                self.active_runtime_mut().tab_history.drain(..drain_to);
-            }
-            self.active_runtime_mut().active_tab_index = index;
-            let focused = self.active_runtime().tabs[index].last_focused_pane;
-            // Switching tabs changes the focused pane — route through the
-            // chokepoint so the bottom-dock draft swaps to the new tab's
-            // pane. `set_focused_pane` also runs `refresh_pane_dimming`.
-            self.set_focused_pane(focused, window, cx);
-            self.mutate_durable_in(window, cx, |ws, window, cx| {
-                ws.bump_activity(focused);
-                ws.focus_pane(focused, window, cx);
-            });
+        let Some(focused) = self.switch_active_tab_index(index) else {
+            return;
+        };
+        // Switching tabs changes the focused pane — route through the
+        // chokepoint so the bottom-dock draft swaps to the new tab's
+        // pane. `set_focused_pane` also runs `refresh_pane_dimming`.
+        self.set_focused_pane(focused, window, cx);
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.bump_activity(focused);
+            ws.focus_pane(focused, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Tab-bar drag-reorder's hover-to-switch preview: swap the active tab
+    /// without focusing the new tab's pane or persisting. No focus, no
+    /// persist — the hover timer's `cx.update` re-entry only gives
+    /// App-level access, not `&mut Window`, so `set_focused_pane` /
+    /// `focus_pane` are unreachable here; and stealing OS keyboard focus
+    /// mid-drag would be disruptive anyway. The switch is purely visual
+    /// until `drop_tab_onto_bar` commits a real reorder through
+    /// `mutate_durable`.
+    pub(in crate::workspace) fn switch_tab_for_drag_preview(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.switch_active_tab_index(index).is_some() {
             cx.notify();
         }
     }
@@ -674,6 +696,157 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Detach `pane_id` out of its current tab's split tree and re-parent it
+    /// as the sole leaf of a brand-new tab inserted at `insert_at`. Mirrors
+    /// the removal half of `close_pane_by_id` exactly (leaf_count guard,
+    /// `prev_pane`/`first_leaf` fallback, `pane_drop_hover` reset,
+    /// `remove_pane_from_layout`), but the pane stays alive — it is
+    /// re-parented, not destroyed, so `release_pane_tracking` and the
+    /// `panes` retain are skipped. Returns `false` when there is nothing to
+    /// detach (inaccessible lane, zoomed pane, unknown pane, or a tab that
+    /// is already a single leaf).
+    pub(in crate::workspace) fn detach_pane_to_new_tab(
+        &mut self,
+        pane_id: PaneId,
+        insert_at: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_lane_is_inaccessible() || self.main_area.zoomed_pane_id.is_some() {
+            return false;
+        }
+        let Some(tab_index) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|t| t.layout.pane_ids().contains(&pane_id))
+        else {
+            return false;
+        };
+        if self.active_runtime().tabs[tab_index].layout.leaf_count() <= 1 {
+            // Nothing to detach — mirrors close_pane_by_id's leaf_count guard.
+            return false;
+        }
+
+        let next_focus = self.active_runtime().tabs[tab_index]
+            .layout
+            .prev_pane(pane_id)
+            .unwrap_or_else(|| self.active_runtime().tabs[tab_index].layout.first_leaf());
+
+        self.main_area.pane_drop_hover = None;
+        remove_pane_from_layout(
+            &mut self.active_runtime_mut().tabs[tab_index].layout,
+            pane_id,
+        );
+        self.active_runtime_mut().tabs[tab_index].last_focused_pane = next_focus;
+        if tab_index == self.active_runtime().active_tab_index {
+            self.set_focused_pane(next_focus, window, cx);
+            self.focus_pane(next_focus, window, cx);
+        }
+
+        let new_tab_id = self.alloc_id();
+        let insert_at = insert_at.min(self.active_runtime().tabs.len());
+        self.active_runtime_mut().tabs.insert(
+            insert_at,
+            TabEntry {
+                id: new_tab_id,
+                layout: PaneLayout::Pane(pane_id),
+                last_focused_pane: pane_id,
+                user_label: None,
+            },
+        );
+        rebase_tab_history_after_insertion(&mut self.active_runtime_mut().tab_history, insert_at);
+        if self.active_runtime().active_tab_index >= insert_at {
+            self.active_runtime_mut().active_tab_index += 1;
+        }
+
+        self.activate_tab(insert_at, window, cx);
+        self.resize_all_tabs(window, cx);
+        true
+    }
+
+    /// Merge `source_tab_id`'s whole tab (its layout subtree, which may
+    /// itself be a multi-leaf split) in next to `target_pane_id` inside the
+    /// currently-active tab, on the half `direction`/`before` describe.
+    /// Returns `false` on a no-op: inaccessible lane, unknown `source_tab_id`,
+    /// dragging a tab onto its own (already active) content, or a
+    /// `target_pane_id` not present in the active tab.
+    ///
+    /// Deliberately checks `target_pane_id`'s presence in the active tab's
+    /// *live* layout before removing the source tab from `tabs` — mirroring
+    /// `rearrange_pane`'s "verify target exists, then mutate" precedent in
+    /// `pane_tree.rs` — rather than removing first and restoring on a failed
+    /// `insert_node_at`. `insert_node_at` hands back only a `bool`, not the
+    /// unconsumed subtree, on failure: if the source tab were removed first,
+    /// a failed insert would have already dropped `source.layout` with no
+    /// way to reconstruct the removed `TabEntry` for a restore. Checking
+    /// containment first, before anything is mutated, makes a vanished
+    /// target (the pane closed between hover and drop) a true no-op — and,
+    /// because this whole function runs synchronously with nothing able to
+    /// mutate the active tab's layout in between, the `insert_node_at` call
+    /// below is then guaranteed to succeed.
+    pub(in crate::workspace) fn merge_tab_into_pane(
+        &mut self,
+        source_tab_id: u64,
+        target_pane_id: PaneId,
+        direction: SplitDirection,
+        before: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_lane_is_inaccessible() {
+            return false;
+        }
+        let Some(src_index) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|t| t.id == source_tab_id)
+        else {
+            return false;
+        };
+        let active_index = self.active_runtime().active_tab_index;
+        if src_index == active_index {
+            return false; // dragged tab is the one currently showing this content
+        }
+        let Some(active_tab) = self.active_runtime().tabs.get(active_index) else {
+            return false;
+        };
+        if !active_tab.layout.contains(target_pane_id) {
+            return false; // target pane closed between hover and drop
+        }
+
+        let source = self.active_runtime_mut().tabs.remove(src_index);
+        rebase_tab_history_after_removal(&mut self.active_runtime_mut().tab_history, src_index);
+        if self.active_runtime().active_tab_index > src_index {
+            self.active_runtime_mut().active_tab_index -= 1;
+        }
+        let active_index = self.active_runtime().active_tab_index;
+        let last_focused = source.last_focused_pane;
+
+        let inserted = insert_node_at(
+            &mut self.active_runtime_mut().tabs[active_index].layout,
+            target_pane_id,
+            direction,
+            source.layout,
+            before,
+        );
+        debug_assert!(
+            inserted,
+            "target_pane_id was verified present in the active tab's live layout \
+             just above, and nothing between that check and this call can mutate it"
+        );
+        if !inserted {
+            return false;
+        }
+
+        self.active_runtime_mut().tabs[active_index].last_focused_pane = last_focused;
+        self.set_focused_pane(last_focused, window, cx);
+        self.focus_pane(last_focused, window, cx);
+        self.resize_all_tabs(window, cx);
+        true
+    }
+
     pub(in crate::workspace) fn close_focused_pane(
         &mut self,
         window: &mut Window,
@@ -912,5 +1085,29 @@ impl Workspace {
             });
         })
         .detach();
+    }
+}
+
+/// Symmetric inverse of the tab_history shift in `close_tab_at`: a new tab
+/// pushed into the list at `inserted_index` shifts every later slot up by
+/// one, so every history entry `>= inserted_index` must move up by one to
+/// keep pointing at the tab it originally referenced.
+fn rebase_tab_history_after_insertion(history: &mut [usize], inserted_index: usize) {
+    for idx in history {
+        if *idx >= inserted_index {
+            *idx += 1;
+        }
+    }
+}
+
+/// Shared by `close_tab_at` and `merge_tab_into_pane` — both remove one tab
+/// by index. Drops any history entries pointing at the removed index and
+/// shifts every higher index down by one so the remainder stay valid.
+fn rebase_tab_history_after_removal(history: &mut Vec<usize>, removed_index: usize) {
+    history.retain(|&i| i != removed_index);
+    for idx in history.iter_mut() {
+        if *idx > removed_index {
+            *idx -= 1;
+        }
     }
 }

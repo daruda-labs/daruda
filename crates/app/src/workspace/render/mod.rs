@@ -11,9 +11,9 @@ use crate::ui::{
     ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, menu_builder,
 };
 use gpui::{
-    ClickEvent, ClipboardItem, Context, CursorStyle, Focusable as _, IntoElement, KeyContext,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString, Window, div,
-    prelude::*, px,
+    ClickEvent, ClipboardItem, Context, CursorStyle, DragMoveEvent, Focusable as _, IntoElement,
+    KeyContext, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
+    Window, div, prelude::*, px,
 };
 
 use gpui::KeyDownEvent;
@@ -25,6 +25,7 @@ use super::layout::DockSnapshot;
 use super::main_area::pane::PaneContent;
 use super::main_area::pane_drag_ops::PaneHeaderDrag;
 use super::main_area::pane_tree::{DIVIDER_PX, SplitDirection};
+use super::main_area::tab_drag_ops::{TabDrag, TabDragGhost};
 use super::main_area::tab_ops::NewPaneKind;
 use super::status_bar::{self, StatusBarData};
 use super::{
@@ -367,18 +368,22 @@ impl Render for Workspace {
         let tab_inactive_bg = t.tab_inactive_bg;
         let tab_inactive_text = t.text_muted;
         let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
+        let tab_insertion_line_color = t.terminal_drop_target_bg;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         // User-set label (Window > Edit Tab Title…) wins; otherwise fall
         // back to cwd basename, then PTY title — iTerm2's "Show profile
         // name → working directory" preference.
         //
-        // Each entry: (index, is_active, display_label, file_abs_path, worktree_root)
-        // file_abs_path / worktree_root are Some only for File panes and drive the
-        // right-click "Copy File Path" / "Copy Relative Path" items.
+        // Each entry: (index, tab_id, is_active, display_label, file_abs_path, worktree_root)
+        // tab_id is the stable TabEntry id (drag payload identity, survives
+        // reorder). file_abs_path / worktree_root are Some only for File
+        // panes and drive the right-click "Copy File Path" / "Copy Relative
+        // Path" items.
         #[allow(clippy::type_complexity)]
         let tab_titles: Vec<(
             usize,
+            u64,
             bool,
             SharedString,
             Option<std::path::PathBuf>,
@@ -437,6 +442,7 @@ impl Render for Workspace {
                 };
                 (
                     i,
+                    tab.id,
                     i == self.active_runtime().active_tab_index,
                     label,
                     file_path,
@@ -585,6 +591,13 @@ impl Render for Workspace {
             .child(dock_toggles);
 
         // ── Tab bar ──────────────────────────────────────
+        // Reorder-insertion indicator: `Some(k)` means "insert the dragged
+        // tab before slot k" (k == tab_titles.len() means "at the end").
+        // Rendered as a border on the adjacent cell (or the "+" button for
+        // the end slot) rather than an absolute-positioned overlay, so it
+        // never has to re-derive the tab bar's flex-computed x offsets.
+        let tab_reorder_preview = self.main_area.tab_reorder_preview;
+        let tab_count = tab_titles.len();
         let tab_bar = div()
             .flex()
             .flex_row()
@@ -594,7 +607,7 @@ impl Render for Workspace {
             .bg(tab_bar_bg)
             .items_center()
             .children(tab_titles.into_iter().map(
-                |(i, is_active, display, file_path, worktree_root)| {
+                |(i, tab_id, is_active, display, file_path, worktree_root)| {
                     // Stop the left-press from bubbling to the tab cell's
                     // `on_mouse_down(Left, activate_tab)` below — clicking ×
                     // must close the tab without first activating it. The
@@ -604,6 +617,7 @@ impl Render for Workspace {
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.request_close_tab(i, window, cx);
                         }));
+                    let drag_title = display.clone();
 
                     div()
                         .id(("tab", i))
@@ -623,6 +637,9 @@ impl Render for Workspace {
                         .whitespace_nowrap()
                         .text_size(px(theme::TAB_FONT_SIZE))
                         .cursor_pointer()
+                        .when(Some(i) == tab_reorder_preview, |d| {
+                            d.border_l_2().border_color(tab_insertion_line_color)
+                        })
                         .when(is_active, |d| {
                             let active_bg = if file_path.is_some() {
                                 tab_active_file_bg
@@ -859,6 +876,26 @@ impl Render for Workspace {
                                 this.open_context_menu(ev.position, items, cx);
                             }),
                         )
+                        .on_drag(
+                            TabDrag {
+                                tab_id,
+                                title: drag_title,
+                            },
+                            |d, offset, _window, cx| {
+                                cx.new(|_| TabDragGhost {
+                                    title: d.title.clone(),
+                                    offset,
+                                })
+                            },
+                        )
+                        .on_drag_move::<TabDrag>(cx.listener(
+                            move |this, event: &DragMoveEvent<TabDrag>, window, cx| {
+                                this.update_tab_drag_from_move(tab_id, i, event, window, cx);
+                            },
+                        ))
+                        .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
+                            this.drop_tab_onto_bar(d.tab_id, window, cx);
+                        }))
                         .child({
                             div()
                                 .flex_1()
@@ -894,6 +931,12 @@ impl Render for Workspace {
                     .mx(px(theme::NEW_TAB_MARGIN_X))
                     .rounded(px(theme::NEW_TAB_RADIUS))
                     .text_size(px(theme::NEW_TAB_FONT_SIZE))
+                    // Reorder-insertion indicator for "drop at the very
+                    // end" — the counterpart of the per-cell border above
+                    // when `tab_reorder_preview` points past the last tab.
+                    .when(tab_reorder_preview == Some(tab_count), |d| {
+                        d.border_l_2().border_color(tab_insertion_line_color)
+                    })
                     .dropdown_menu(menu_builder(move |menu, window, cx| {
                         build_new_tab_menu(menu, &ws, &agents, lane_has_remote_cwd, window, cx)
                     }))
@@ -906,7 +949,30 @@ impl Render for Workspace {
                     .size_full()
                     .border_b_1()
                     .border_color(tab_bar_border),
-            );
+            )
+            // Dropping a dragged pane header onto the tab bar itself (rather
+            // than onto another pane's content) detaches it into a new tab,
+            // appended at the end — a positional insert by drop x-offset is
+            // out of scope for v1.
+            .on_drop::<PaneHeaderDrag>(cx.listener(|this, d: &PaneHeaderDrag, window, cx| {
+                this.mutate_durable_in(window, cx, |ws, window, cx| {
+                    let at = ws.active_runtime().tabs.len();
+                    ws.detach_pane_to_new_tab(d.dragged, at, window, cx);
+                });
+            }))
+            // Fallback for a `TabDrag` released on the tab bar but off every
+            // individual cell's own hitbox (e.g. over the "+" new-tab
+            // button, which is exactly where the "insert at the end"
+            // indicator renders). A per-cell `on_drop::<TabDrag>` handling
+            // the drop first calls `cx.stop_propagation()`, so this
+            // container-level listener only runs when no cell caught it —
+            // without it, that drop would silently no-op and leave
+            // `tab_reorder_preview` / `tab_hover_switch` stuck showing a
+            // stale indicator (only an outside-window release is caught by
+            // the root `clear_tab_drag_state` call).
+            .on_drop::<TabDrag>(cx.listener(|this, d: &TabDrag, window, cx| {
+                this.drop_tab_onto_bar(d.tab_id, window, cx);
+            }));
 
         // Content area — the active tab's pane layout, the inaccessible-
         // lane empty state, or a blank fallback. Built in `center.rs` so
@@ -922,6 +988,7 @@ impl Render for Workspace {
             .w_full()
             .flex()
             .on_drag_move::<PaneHeaderDrag>(cx.listener(Self::update_pane_drag_from_move))
+            .on_drag_move::<TabDrag>(cx.listener(Self::update_tab_merge_hover_from_move))
             .child(center_content);
         let main_area = div()
             .flex_1()
@@ -1238,6 +1305,7 @@ impl Render for Workspace {
                     this.end_stale_resize_drags(cx);
                     this.end_file_selection_drag(cx);
                     this.clear_pane_drop_hover(cx);
+                    this.clear_tab_drag_state(cx);
                     return;
                 }
                 if let Some(drag) = this.dock_drag {

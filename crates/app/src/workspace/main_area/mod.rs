@@ -18,6 +18,7 @@ pub(in crate::workspace) mod pane_input_ops;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
+pub(in crate::workspace) mod tab_drag_ops;
 pub(in crate::workspace) mod tab_ops;
 pub(in crate::workspace) mod task_edit_pane;
 
@@ -38,6 +39,7 @@ use self::file_view_pane::render::render_pane_file_viewer;
 use self::pane::Pane;
 use self::pane_drag_ops::{PaneHeaderDrag, PaneHeaderDragGhost};
 use self::pane_tree::{DIVIDER_PX, DropHalf, PaneId, PaneLayout, SplitDirection};
+use self::tab_drag_ops::TabDrag;
 use self::tab_ops::NewPaneKind;
 use super::Workspace;
 
@@ -331,7 +333,10 @@ pub(in crate::workspace) fn render_layout(
                     move |this, d: &PaneHeaderDrag, window, cx| {
                         this.drop_pane_onto(d.dragged, window, cx)
                     },
-                ));
+                ))
+                .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
+                    this.drop_tab_onto_pane(d.tab_id, window, cx)
+                }));
 
             if has_splits {
                 let basename = pane.display_cwd();

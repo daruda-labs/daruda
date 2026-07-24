@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use daruda_store::project::LaneRef;
+use gpui::Task;
 
 use super::pane_tree::{DropHalf, PaneId};
 use crate::workspace::LaneRuntime;
@@ -40,4 +41,11 @@ pub(in crate::workspace) struct MainAreaContext {
     /// the pane under the cursor and which half it would split. Single
     /// source of truth for the drop-overlay; `None` = no active hover.
     pub pane_drop_hover: Option<(PaneId, DropHalf)>,
+    /// Tab currently armed to switch-on-hover during a `TabDrag`, and the
+    /// cancellable timer task backing it. Overwriting drops the previous
+    /// `Task`, which cancels it (mirrors GPUI's own tooltip-delay mechanism).
+    pub tab_hover_switch: Option<(u64, Task<()>)>,
+    /// Live reorder-insertion index while a `TabDrag` is over the tab bar.
+    /// `None` = not currently hovering the tab bar.
+    pub tab_reorder_preview: Option<usize>,
 }

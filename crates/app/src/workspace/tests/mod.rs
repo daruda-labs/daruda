@@ -25,6 +25,8 @@ mod restore_from_disk;
 mod screenshot_scenario;
 mod snapshot_for_disk;
 mod splits;
+mod tab_drag;
+mod tab_merge;
 mod task_edit_tab_cycle;
 mod tasks;
 
