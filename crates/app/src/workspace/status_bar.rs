@@ -266,15 +266,35 @@ impl RenderOnce for StatusBar {
     }
 }
 
-/// Build the account slot's dropdown menu: one item per managed account
-/// matching the slot's provider (checkmark on the pane's current
-/// override), then either "+ Add account" (disabled while the session's
-/// active agent launch is remote — see `login_unavailable`) or, while a
-/// headless login is running (`login_pending`), an in-progress row +
-/// Cancel in its place, and finally a "manage accounts" entry that opens
-/// Settings. Each item is a one-line dispatch into a `Workspace` method
-/// or action (render purity; no logic here).
+/// Build the account slot's dropdown menu: a "System default" entry
+/// (`~/.claude`, always present so a managed-account pane can always be
+/// reverted), then one item per managed account matching the slot's
+/// provider (checkmark on the pane's current override), then either "+ Add
+/// account" (disabled while the session's active agent launch is remote —
+/// see `login_unavailable`) or, while a headless login is running
+/// (`login_pending`), an in-progress row + Cancel in its place, and finally
+/// a "manage accounts" entry that opens Settings. Each item is a one-line
+/// dispatch into a `Workspace` method or action (render purity; no logic
+/// here).
 fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
+    let menu = {
+        let workspace = slot.workspace.clone();
+        let pane_id = slot.pane_id;
+        let is_current = slot.current.is_none();
+        menu.item(
+            PopupMenuItem::new(SharedString::from(
+                crate::surface::strings::status_bar_account_system(),
+            ))
+            .checked(is_current)
+            .on_click(move |_, window, app| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(app, |ws, cx| {
+                        ws.switch_pane_account(pane_id, None, window, cx)
+                    });
+                }
+            }),
+        )
+    };
     // A header names the provider once its account list is non-empty, so a
     // future multi-provider catalog reads as grouped sections rather than
     // one flat list (today there's only ever one section — Claude is the
@@ -282,7 +302,8 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     let menu = if slot.accounts.is_empty() {
         menu
     } else {
-        menu.label(SharedString::from(provider_label(slot.provider)))
+        menu.separator()
+            .label(SharedString::from(provider_label(slot.provider)))
             .separator()
     };
     let menu = slot.accounts.iter().fold(menu, |m, account| {
@@ -297,7 +318,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 .on_click(move |_, window, app| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(app, |ws, cx| {
-                            ws.switch_pane_account(pane_id, account_id, window, cx)
+                            ws.switch_pane_account(pane_id, Some(account_id), window, cx)
                         });
                     }
                 }),

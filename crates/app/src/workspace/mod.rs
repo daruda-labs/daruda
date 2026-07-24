@@ -81,16 +81,18 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
 
 /// Switch the focused pane's managed account (Task 8, A+C hybrid). Carries
-/// the chosen [`daruda_store::accounts::AccountId`] so the dropdown's
-/// per-account menu item can dispatch a concrete target; there is no
-/// sensible default account to bind a keyboard shortcut to, so this has no
-/// `SHORTCUT_*` const (see `surface::keybindings`) — dispatched only from
-/// the status-bar account dropdown (`status_bar::build_account_menu`) via
-/// `window.dispatch_action` / a direct `Workspace::switch_pane_account`
-/// call. `no_json`: never loaded from keymap.json.
+/// `Option<`[`daruda_store::accounts::AccountId`]`>` so the dropdown's
+/// per-account menu item can dispatch a concrete managed-account target
+/// (`Some`) while its "System default" entry dispatches `None` — reverting
+/// the pane back to `~/.claude`. There is no sensible default account to
+/// bind a keyboard shortcut to, so this has no `SHORTCUT_*` const (see
+/// `surface::keybindings`) — dispatched only from the status-bar account
+/// dropdown (`status_bar::build_account_menu`) via `window.dispatch_action`
+/// / a direct `Workspace::switch_pane_account` call. `no_json`: never
+/// loaded from keymap.json.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
-pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountId);
+pub struct SwitchPaneAccount(pub Option<daruda_store::accounts::AccountId>);
 
 /// Start a headless add-account login (Plan B — see
 /// `account_login_ops::add_managed_account`). Carries the [`AgentProvider`]

@@ -89,15 +89,15 @@ impl Workspace {
         self.switch_pane_account(pane_id, action.0, window, cx);
     }
 
-    /// Switch `pane_id`'s account to `account_id`. Dispatches on pane kind:
-    /// an Agent chat pane consults [`switch_kind`] (idle → in-place
-    /// reconnect, busy → new pane); a Terminal pane always opens a new pane
-    /// (see the module doc); File/TaskEdit panes don't track an account and
-    /// are a no-op.
+    /// Switch `pane_id`'s account to `account_id` (`None` = system default,
+    /// i.e. `~/.claude`). Dispatches on pane kind: an Agent chat pane
+    /// consults [`switch_kind`] (idle → in-place reconnect, busy → new
+    /// pane); a Terminal pane always opens a new pane (see the module doc);
+    /// File/TaskEdit panes don't track an account and are a no-op.
     pub(in crate::workspace) fn switch_pane_account(
         &mut self,
         pane_id: PaneId,
-        account_id: AccountId,
+        account_id: Option<AccountId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -162,15 +162,17 @@ impl Workspace {
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
-    /// override, then reuse [`Self::reset_agent_chat_session`] — the same
-    /// path the `/clear` slash command runs — to tear down and reconnect
-    /// the session. `connect_agent_chat` resolves the new `CLAUDE_CONFIG_DIR`
-    /// from the override this just wrote (`agent_chat_account_id`), so the
-    /// fresh session runs under the newly selected account.
+    /// override (`None` reverts it to the system default), then reuse
+    /// [`Self::reset_agent_chat_session`] — the same path the `/clear`
+    /// slash command runs — to tear down and reconnect the session.
+    /// `connect_agent_chat` resolves the new `CLAUDE_CONFIG_DIR` from the
+    /// override this just wrote (`agent_chat_account_id`), so the fresh
+    /// session runs under the newly selected account (or `~/.claude` when
+    /// `account_id` is `None`).
     fn switch_agent_chat_account_in_place(
         &mut self,
         pane_id: PaneId,
-        account_id: AccountId,
+        account_id: Option<AccountId>,
         cx: &mut Context<Self>,
     ) {
         {
@@ -185,7 +187,7 @@ impl Workspace {
             let Some(content) = pane.agent_chat_content_mut() else {
                 return;
             };
-            content.account_id = Some(account_id);
+            content.account_id = account_id;
         }
         self.reset_agent_chat_session(pane_id, cx);
     }
@@ -197,7 +199,7 @@ impl Workspace {
         &mut self,
         source_pane_id: PaneId,
         kind: NewPaneAccountKind,
-        account_id: AccountId,
+        account_id: Option<AccountId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -231,7 +233,7 @@ impl Workspace {
         &mut self,
         source_pane_id: PaneId,
         kind: NewPaneAccountKind,
-        account_id: AccountId,
+        account_id: Option<AccountId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -244,12 +246,12 @@ impl Workspace {
                 let account_config_dir = pane::resolve_account_config_dir(
                     &self.accounts,
                     &self.data_dir,
-                    Some(account_id),
+                    account_id,
                     AgentProvider::Claude,
                 );
                 match self.create_pane_with_cwd(
                     cwd,
-                    Some(account_id),
+                    account_id,
                     account_config_dir.as_deref(),
                     window,
                     cx,
@@ -272,7 +274,7 @@ impl Workspace {
                 let mut new_pane =
                     self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx);
                 if let Some(content) = new_pane.agent_chat_content_mut() {
-                    content.account_id = Some(account_id);
+                    content.account_id = account_id;
                 }
                 new_pane
             }
