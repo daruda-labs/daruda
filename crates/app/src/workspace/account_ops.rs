@@ -382,6 +382,12 @@ impl Workspace {
     /// pointing at a config dir that no longer exists. A Terminal pane's
     /// shell keeps running under whatever env it already spawned with;
     /// only the cached label used for persistence/display is cleared.
+    ///
+    /// Also prunes this account's entries from the per-account usage
+    /// caches (`self.claude.plan_limits_by_account` /
+    /// `activity_by_account`) — this is the per-window delete hook, so it
+    /// is the only place that sees both the deleted `account_id` and
+    /// `self.claude`. The system-default (`None`) entry is never touched.
     pub(crate) fn clear_account_override(&mut self, account_id: AccountId, cx: &mut Context<Self>) {
         let mut changed = false;
         for rt in self.main_area.runtimes.values_mut() {
@@ -399,6 +405,8 @@ impl Workspace {
                 }
             }
         }
+        self.claude.plan_limits_by_account.remove(&Some(account_id));
+        self.claude.activity_by_account.remove(&Some(account_id));
         if changed {
             self.mark_dirty_and_save(cx);
             cx.notify();
