@@ -151,20 +151,107 @@ impl PaneLayout {
     }
 }
 
-/// Insert `new_id` next to `target`, following iTerm2's split rules.
+/// Insert `new_node` (a leaf or an arbitrary subtree) next to `target`,
+/// following iTerm2's split rules.
 ///
-/// Returns true when the target was found and the split applied.
+/// Returns `Ok(())` when the target was found and `new_node` was consumed
+/// into the tree. Returns `Err(new_node)` — handing the subtree back
+/// unconsumed — when no match was found at this level or below, so the
+/// caller can retry with the next sibling or give up.
 ///
 /// Mirrors `PTYTab.m -splitVertically:newSession:before:targetSession:`:
 ///
 /// - **Case C (root leaf):** replace root with a 2-child Split. `before`
-///   orders the new pane ahead of the original.
-/// - **Case A (same direction parent):** splice `new_id` next to `target` in
-///   the parent's children; redistribute ratios so the new pane takes half of
-///   `target`'s share. `before` inserts on `target`'s left/top side.
+///   orders the new subtree ahead of the original.
+/// - **Case A (same direction parent):** splice `new_node` next to `target`
+///   in the parent's children; redistribute ratios so the new subtree takes
+///   half of `target`'s share. `before` inserts on `target`'s left/top side.
 /// - **Case B (opposite direction parent):** replace the target leaf with a
-///   new Split whose children are `[target, new]` (or `[new, target]` when
-///   `before`) in the requested direction.
+///   new Split whose children are `[target, new_node]` (or `[new_node,
+///   target]` when `before`) in the requested direction.
+fn try_insert_node_at(
+    layout: &mut PaneLayout,
+    target: PaneId,
+    direction: SplitDirection,
+    new_node: PaneLayout,
+    before: bool,
+) -> Result<(), PaneLayout> {
+    // Case C: root is the target leaf.
+    if let PaneLayout::Pane(id) = layout
+        && *id == target
+    {
+        let original = PaneLayout::Pane(*id);
+        let children = if before {
+            vec![new_node, original]
+        } else {
+            vec![original, new_node]
+        };
+        *layout = PaneLayout::new_split(direction, children);
+        return Ok(());
+    }
+
+    let PaneLayout::Split {
+        direction: parent_dir,
+        children,
+        ratios,
+    } = layout
+    else {
+        return Err(new_node);
+    };
+
+    // Direct child matches target?
+    for i in 0..children.len() {
+        if let PaneLayout::Pane(id) = children[i]
+            && id == target
+        {
+            if *parent_dir == direction {
+                // Case A: splice next to target, halve its ratio.
+                let share = ratios[i] / 2.0;
+                ratios[i] = share;
+                let slot = if before { i } else { i + 1 };
+                ratios.insert(slot, share);
+                children.insert(slot, new_node);
+            } else {
+                // Case B: wrap target in a new Split.
+                let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(0));
+                let inner = if before {
+                    vec![new_node, target_leaf]
+                } else {
+                    vec![target_leaf, new_node]
+                };
+                children[i] = PaneLayout::new_split(direction, inner);
+            }
+            return Ok(());
+        }
+    }
+
+    // Target lives deeper — recurse, handing new_node back on a miss so the
+    // next child (or the caller) can retry inserting it.
+    let mut new_node = new_node;
+    for child in children.iter_mut() {
+        match try_insert_node_at(child, target, direction, new_node, before) {
+            Ok(()) => return Ok(()),
+            Err(returned) => new_node = returned,
+        }
+    }
+    Err(new_node)
+}
+
+/// Insert `new_node` (a leaf or an arbitrary subtree) next to `target`. See
+/// `try_insert_node_at` for the case-by-case rules. Returns true when the
+/// target was found and the subtree inserted.
+pub(in crate::workspace) fn insert_node_at(
+    layout: &mut PaneLayout,
+    target: PaneId,
+    direction: SplitDirection,
+    new_node: PaneLayout,
+    before: bool,
+) -> bool {
+    try_insert_node_at(layout, target, direction, new_node, before).is_ok()
+}
+
+/// Insert a single new leaf `new_id` next to `target`. Thin wrapper around
+/// `insert_node_at` for the common single-pane case.
 pub(in crate::workspace) fn insert_split_at(
     layout: &mut PaneLayout,
     target: PaneId,
@@ -172,63 +259,7 @@ pub(in crate::workspace) fn insert_split_at(
     new_id: PaneId,
     before: bool,
 ) -> bool {
-    // Case C: root is the target leaf.
-    if let PaneLayout::Pane(id) = layout
-        && *id == target
-    {
-        let original = PaneLayout::Pane(*id);
-        let children = if before {
-            vec![PaneLayout::Pane(new_id), original]
-        } else {
-            vec![original, PaneLayout::Pane(new_id)]
-        };
-        *layout = PaneLayout::new_split(direction, children);
-        return true;
-    }
-
-    if let PaneLayout::Split {
-        direction: parent_dir,
-        children,
-        ratios,
-    } = layout
-    {
-        // Direct child matches target?
-        for i in 0..children.len() {
-            if let PaneLayout::Pane(id) = children[i]
-                && id == target
-            {
-                if *parent_dir == direction {
-                    // Case A: splice next to target, halve its ratio.
-                    let share = ratios[i] / 2.0;
-                    ratios[i] = share;
-                    let slot = if before { i } else { i + 1 };
-                    ratios.insert(slot, share);
-                    children.insert(slot, PaneLayout::Pane(new_id));
-                } else {
-                    // Case B: wrap target in a new Split.
-                    let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(0));
-                    let inner = if before {
-                        vec![PaneLayout::Pane(new_id), target_leaf]
-                    } else {
-                        vec![target_leaf, PaneLayout::Pane(new_id)]
-                    };
-                    children[i] = PaneLayout::new_split(direction, inner);
-                }
-                return true;
-            }
-        }
-
-        // Target lives deeper — recurse. If a child Split contains target and
-        // is in same direction as the requested split AND target is a direct
-        // leaf of *this* level, it was already handled above. Otherwise recurse.
-        for child in children.iter_mut() {
-            if insert_split_at(child, target, direction, new_id, before) {
-                return true;
-            }
-        }
-    }
-
-    false
+    insert_node_at(layout, target, direction, PaneLayout::Pane(new_id), before)
 }
 
 /// Move an existing leaf `dragged` to become a split sibling of `target`
@@ -706,6 +737,56 @@ mod tests {
             false
         ));
         assert_eq!(child_ids(&layout), vec![1, 2, 3]);
+        assert_ratios_sum_to_one(&layout);
+    }
+
+    #[test]
+    fn insert_node_at_case_a_inserts_multi_leaf_subtree() {
+        // [A | B] horizontal, insert a 2-leaf vertical Split [C / D] next to
+        // B (before=false) → [A | B | (C / D)] with the subtree landing
+        // intact as a single unit, not flattened into individual leaves.
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        let subtree = PaneLayout::new_split(SplitDirection::Vertical, vec![leaf(3), leaf(4)]);
+        assert!(insert_node_at(
+            &mut layout,
+            2,
+            SplitDirection::Horizontal,
+            subtree,
+            false
+        ));
+
+        if let PaneLayout::Split {
+            direction,
+            children,
+            ratios,
+        } = &layout
+        {
+            assert_eq!(*direction, SplitDirection::Horizontal);
+            assert_eq!(children.len(), 3);
+            assert_eq!(ratios.len(), 3);
+            // A and B (the original pair) retain their leaf identity.
+            assert!(matches!(children[0], PaneLayout::Pane(1)));
+            assert!(matches!(children[1], PaneLayout::Pane(2)));
+            // The inserted subtree lands whole as the third child, both
+            // leaves present and in order — not merged/flattened away.
+            if let PaneLayout::Split {
+                direction: inner_dir,
+                children: inner,
+                ..
+            } = &children[2]
+            {
+                assert_eq!(*inner_dir, SplitDirection::Vertical);
+                let ids: Vec<PaneId> = inner.iter().map(|c| c.first_leaf()).collect();
+                assert_eq!(ids, vec![3, 4]);
+            } else {
+                panic!("expected inserted subtree to remain a nested Split");
+            }
+        } else {
+            panic!("expected Split");
+        }
+        assert!(
+            layout.contains(1) && layout.contains(2) && layout.contains(3) && layout.contains(4)
+        );
         assert_ratios_sum_to_one(&layout);
     }
 

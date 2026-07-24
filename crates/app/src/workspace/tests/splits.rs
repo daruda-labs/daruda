@@ -98,6 +98,90 @@ async fn test_close_pane_in_split(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_detach_pane_to_new_tab(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                NewPaneKind::Terminal,
+                SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+
+    let (pane_a, pane_b) = workspace.read_with(cx, |ws, _| {
+        let ids = ws.active_runtime().tabs[0].layout.pane_ids();
+        (ids[0], ids[1])
+    });
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().tabs[0].layout.leaf_count(), 2);
+    });
+
+    let detached = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let at = ws.active_runtime().tabs.len();
+                ws.detach_pane_to_new_tab(pane_b, at, window, cx)
+            })
+        })
+        .unwrap();
+    assert!(detached, "detaching a split pane should succeed");
+
+    workspace.read_with(cx, |ws, _| {
+        // Original tab shrank back to a single leaf holding only pane_a.
+        assert_eq!(ws.active_runtime().tabs[0].layout.leaf_count(), 1);
+        assert!(matches!(
+            ws.active_runtime().tabs[0].layout,
+            PaneLayout::Pane(id) if id == pane_a
+        ));
+
+        // A new tab was appended holding exactly the detached pane.
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert!(matches!(
+            ws.active_runtime().tabs[1].layout,
+            PaneLayout::Pane(id) if id == pane_b
+        ));
+        assert_eq!(ws.active_runtime().tabs[1].last_focused_pane, pane_b);
+
+        // Both panes stayed alive — re-parented, not destroyed.
+        assert_eq!(ws.active_runtime().panes.len(), 2);
+
+        // The new tab was activated and holds keyboard focus.
+        assert_eq!(ws.active_runtime().active_tab_index, 1);
+        assert_eq!(ws.active_runtime().focused_pane_id, pane_b);
+    });
+}
+
+#[gpui::test]
+async fn test_detach_pane_noop_when_tab_has_single_pane(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    let pane_id = workspace.read_with(cx, |ws, _| ws.active_runtime().panes[0].id);
+
+    let detached = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.detach_pane_to_new_tab(pane_id, 1, window, cx)
+            })
+        })
+        .unwrap();
+
+    assert!(
+        !detached,
+        "detaching the only pane in a tab must be a no-op"
+    );
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.len(), 1);
+        assert_eq!(ws.active_runtime().panes.len(), 1);
+    });
+}
+
+#[gpui::test]
 async fn test_focus_next_prev_pane(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 
