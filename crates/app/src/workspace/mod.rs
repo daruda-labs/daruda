@@ -4,6 +4,7 @@
 //! Never use bare `header` / `title_bar` — always `tab_*` or `pane_*`.
 //! `terminal_title()` (daruda_terminal) feeds both tab cells and pane headers.
 
+mod account_login_ops;
 mod account_ops;
 mod actions;
 mod annotation_dialog;
@@ -92,7 +93,7 @@ pub struct OpenSettings(pub daruda_config::BuiltinSection);
 pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountId);
 
 /// Start a headless add-account login (Plan B — see
-/// `account_ops::add_managed_account`). Carries the [`AgentProvider`]
+/// `account_login_ops::add_managed_account`). Carries the [`AgentProvider`]
 /// bucket the resulting account is filed under; the login *command* itself
 /// comes from the session's currently active/configured agent
 /// (`Workspace::agent_launch_for` + `last_agent_id`), not from this
@@ -110,7 +111,7 @@ pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountId);
 pub struct AddManagedAccount(pub daruda_store::accounts::AgentProvider);
 
 /// Re-run a headless login for an **existing** managed account (Plan B —
-/// see `account_ops::reauthenticate_account`). Carries the target
+/// see `account_login_ops::reauthenticate_account`). Carries the target
 /// [`daruda_store::accounts::AccountId`] rather than a provider: unlike
 /// [`AddManagedAccount`], this reuses the account's existing config dir
 /// and identity row instead of minting a new one, so the concrete account
@@ -262,7 +263,7 @@ pub(in crate::workspace) enum CommitMode {
 }
 
 /// State of an in-flight headless add-account login (Plan B — see
-/// `account_ops::add_managed_account`). At most one at a time; a second
+/// `account_login_ops::add_managed_account`). At most one at a time; a second
 /// `AddManagedAccount` while `InProgress` is expected to be blocked by the
 /// UI (a disabled "+ Add account" affordance while a login is running),
 /// not by this enum itself.
@@ -284,7 +285,7 @@ pub(in crate::workspace) enum CommitMode {
 /// credentials.
 ///
 /// `Preparing` covers the window before a login process even exists: the
-/// managed-node resolve (`account_ops::resolve_node_path_env`) is blocking
+/// managed-node resolve (`account_login_ops::resolve_node_path_env`) is blocking
 /// and, on a first-run machine, downloads Node.js, so it runs on the
 /// background executor rather than the UI thread — this variant is what
 /// `can_start_login` blocks a second concurrent login on, and what
@@ -297,14 +298,14 @@ pub(in crate::workspace) enum PendingLogin {
     None,
     Preparing {
         account_id: daruda_store::accounts::AccountId,
-        mode: account_ops::LoginMode,
+        mode: account_login_ops::LoginMode,
     },
     InProgress {
         account_id: daruda_store::accounts::AccountId,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
         handle: daruda_claude::accounts::LoginProcessHandle,
-        mode: account_ops::LoginMode,
+        mode: account_login_ops::LoginMode,
     },
 }
 
@@ -968,7 +969,7 @@ impl Workspace {
         // `ManagedAccount` — a shallow, one-shot readdir under
         // `claude-accounts/`, cheap enough to run inline here.
         //
-        // `grace = account_ops::LOGIN_TIMEOUT`: multi-window is first-class
+        // `grace = account_login_ops::LOGIN_TIMEOUT`: multi-window is first-class
         // (see `WindowRegistry::for_each_workspace`), so a *different*
         // window's login can still be in flight — its config dir exists but
         // hasn't been promoted to `known_account_ids` yet — while this
@@ -982,7 +983,7 @@ impl Workspace {
         daruda_claude::accounts::sweep_orphan_dirs(
             &data_dir,
             &known_account_ids,
-            account_ops::LOGIN_TIMEOUT,
+            account_login_ops::LOGIN_TIMEOUT,
         );
 
         let mut ws = Self {
