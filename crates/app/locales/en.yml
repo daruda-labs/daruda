@@ -670,6 +670,7 @@ settings:
   accounts_login_in_progress: "Adding account…"
   accounts_reauth_added: "Account reauthenticated."
   accounts_reauth_failed: "Could not reauthenticate account."
+  accounts_reauth_missing: "The account being reauthenticated no longer exists."
 
 # Skills tab
 skills:

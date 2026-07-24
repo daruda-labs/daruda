@@ -911,7 +911,7 @@ impl Workspace {
         let Some(account) = self.accounts.find(account_id) else {
             self.report_error(
                 ErrorReport::new(s::settings_accounts_reauth_failed())
-                    .message("The account being reauthenticated no longer exists.".to_string())
+                    .message(s::account_reauth_missing())
                     .severity(ErrorSeverity::Warning)
                     .dedup("account.reauth.account_missing")
                     .build(),

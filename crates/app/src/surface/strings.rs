@@ -2142,6 +2142,13 @@ pub fn settings_accounts_reauth_added() -> String {
 pub fn settings_accounts_reauth_failed() -> String {
     rust_i18n::t!("settings.accounts_reauth_failed").into_owned()
 }
+/// Authored toast-body detail for `Workspace::reauthenticate_account` when
+/// `account_id` no longer resolves in `self.accounts` — a concurrent
+/// Settings-window delete raced the reauth dispatch. Folded into
+/// `settings_accounts_reauth_failed()`'s report `.message()`.
+pub fn account_reauth_missing() -> String {
+    rust_i18n::t!("settings.accounts_reauth_missing").into_owned()
+}
 
 /// Initial contents of a freshly-created
 /// `~/.config/daruda/projects/<repo>-<hash>/config.toml`. The user

@@ -670,6 +670,7 @@ settings:
   accounts_login_in_progress: "계정 추가 중…"
   accounts_reauth_added: "계정이 재인증되었습니다."
   accounts_reauth_failed: "계정을 재인증할 수 없습니다."
+  accounts_reauth_missing: "재인증하려는 계정이 더 이상 존재하지 않습니다."
 
 # Skills tab
 skills:
