@@ -1967,10 +1967,10 @@ pub fn status_bar_account_system() -> String {
     rust_i18n::t!("settings.status_bar_account_system").into_owned()
 }
 
-/// Disabled placeholder entry in the status-bar account dropdown for
-/// adding a new managed account. Login (Plan B) isn't implemented yet, so
-/// the entry renders but never dispatches — see the Settings Accounts
-/// section (a later task) for the real flow once it ships.
+/// Status-bar account dropdown entry that starts a headless add-account
+/// login (`AddManagedAccount`) — disabled while the session's active
+/// agent launch is remote (`Workspace::active_agent_login_unavailable`)
+/// or while a login is already running (see `build_account_menu`).
 pub fn status_bar_add_account() -> String {
     rust_i18n::t!("settings.status_bar_add_account").into_owned()
 }
@@ -2020,9 +2020,9 @@ pub fn settings_accounts_default_badge() -> String {
 pub fn settings_accounts_set_default() -> String {
     rust_i18n::t!("settings.accounts_set_default").into_owned()
 }
-/// Disabled "Reauthenticate" row button — real login is Plan B
-/// (`unstable_auth_methods`); rendered so the row's affordances are
-/// discoverable ahead of time, never wired to a handler.
+/// "Reauthenticate" row button — re-runs a headless login for this
+/// *existing* account, reusing its `config_dir` (see
+/// `Workspace::reauthenticate_account`).
 pub fn settings_accounts_reauthenticate() -> String {
     rust_i18n::t!("settings.accounts_reauthenticate").into_owned()
 }
@@ -2030,7 +2030,9 @@ pub fn settings_accounts_reauthenticate() -> String {
 pub fn settings_accounts_delete() -> String {
     rust_i18n::t!("settings.accounts_delete").into_owned()
 }
-/// Disabled "+ Add account" placeholder — real account creation is Plan B.
+/// "+ Add account" row button — starts a headless add-account login
+/// against the first open Workspace window (see
+/// `settings_window::sections::accounts::start_add_account`).
 pub fn settings_accounts_add() -> String {
     rust_i18n::t!("settings.accounts_add").into_owned()
 }
@@ -2064,6 +2066,70 @@ pub fn settings_accounts_last_auth_hours(n: u64) -> String {
 }
 pub fn settings_accounts_last_auth_days(n: u64) -> String {
     rust_i18n::t!("settings.accounts_last_auth_days", n => n).into_owned()
+}
+/// Success toast title after a headless add-account login (Plan B)
+/// finishes and the account is saved.
+pub fn settings_accounts_login_added() -> String {
+    rust_i18n::t!("settings.accounts_login_added").into_owned()
+}
+/// Failure toast title for a headless add-account login (Plan B) that
+/// didn't produce a usable account — denied, timed out, the process
+/// failed, or credentials weren't found after a reported success. The
+/// outcome-specific detail rides in the report's untranslated `.message()`
+/// (diagnostic text, same convention as the rest of the error pipeline).
+pub fn settings_accounts_login_failed() -> String {
+    rust_i18n::t!("settings.accounts_login_failed").into_owned()
+}
+/// Toast shown when `AddManagedAccount` is dispatched for a remote
+/// (SSH/Docker) agent — headless login can't open a local desktop browser
+/// for OAuth. Defensive: the UI is expected to disable the affordance for
+/// a remote agent already.
+pub fn settings_accounts_login_remote_unsupported() -> String {
+    rust_i18n::t!("settings.accounts_login_remote_unsupported").into_owned()
+}
+/// Toast shown when `add_managed_account` is called while a previous
+/// headless login is still in progress (`PendingLogin::InProgress`) — a
+/// second concurrent login would overwrite `pending_login`'s
+/// uncancellable process handle and leak the first attempt's process +
+/// config dir.
+pub fn settings_accounts_login_busy() -> String {
+    rust_i18n::t!("settings.accounts_login_busy").into_owned()
+}
+/// Authored toast-body detail for a `LoginOutcome::Denied` add-account
+/// login, folded into `settings_accounts_login_failed()`'s report
+/// `.message()`.
+pub fn settings_accounts_login_denied_detail() -> String {
+    rust_i18n::t!("settings.accounts_login_denied_detail").into_owned()
+}
+/// Authored toast-body detail for a `LoginOutcome::TimedOut` add-account
+/// login, folded into `settings_accounts_login_failed()`'s report
+/// `.message()`.
+pub fn settings_accounts_login_timed_out_detail() -> String {
+    rust_i18n::t!("settings.accounts_login_timed_out_detail").into_owned()
+}
+/// Status-bar dropdown's in-progress row, shown in place of "+ Add
+/// account" while `Workspace::is_login_pending` is true.
+pub fn settings_accounts_login_in_progress() -> String {
+    rust_i18n::t!("settings.accounts_login_in_progress").into_owned()
+}
+/// Status-bar dropdown's Cancel row next to the in-progress indicator —
+/// dispatches `Workspace::cancel_pending_login`. Reuses the shared
+/// `common.btn_cancel` copy (no domain-specific wording needed).
+pub fn settings_account_login_cancel() -> String {
+    rust_i18n::t!("common.btn_cancel").into_owned()
+}
+/// Success toast title after `Workspace::reauthenticate_account` (Plan B,
+/// Task 6) finishes and the existing account's row is refreshed.
+pub fn settings_accounts_reauth_added() -> String {
+    rust_i18n::t!("settings.accounts_reauth_added").into_owned()
+}
+/// Failure toast title for a reauthenticate-account login that didn't
+/// land — denied, timed out, the process failed, or credentials weren't
+/// found after a reported success. Mirrors `settings_accounts_login_failed`'s
+/// convention: the outcome-specific detail rides in the report's
+/// untranslated `.message()`.
+pub fn settings_accounts_reauth_failed() -> String {
+    rust_i18n::t!("settings.accounts_reauth_failed").into_owned()
 }
 
 /// Initial contents of a freshly-created

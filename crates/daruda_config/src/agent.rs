@@ -249,6 +249,16 @@ impl AgentLaunch {
             }
         }
     }
+
+    /// The interactive login command for this agent, or `None` for remote
+    /// launches (SSH/Docker) where a local desktop browser can't complete OAuth.
+    /// The subscription (`--claudeai`) flow; matches orca's add-account command.
+    pub fn login_command(&self) -> Option<String> {
+        match self {
+            AgentLaunch::Raw(command) => Some(format!("{command} --cli auth login --claudeai")),
+            AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => None,
+        }
+    }
 }
 
 /// Private wire representation for [`AgentDefinition`]. `id`/`name` stay flat
@@ -1011,6 +1021,20 @@ mod tests {
         let cmd = launch.wrap_with_env(Some("/work"), &env).unwrap();
         assert!(cmd.contains("export CLAUDE_CONFIG_DIR=\"/remote/acc\""));
         assert!(cmd.contains("unset ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn login_command_appends_cli_login_for_raw_only() {
+        let raw = AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".into());
+        assert_eq!(
+            raw.login_command().as_deref(),
+            Some("npx -y @agentclientprotocol/claude-agent-acp@latest --cli auth login --claudeai")
+        );
+        let ssh = AgentLaunch::Ssh {
+            adapter_command: "x".into(),
+            host: "h".into(),
+        };
+        assert_eq!(ssh.login_command(), None);
     }
 
     #[test]

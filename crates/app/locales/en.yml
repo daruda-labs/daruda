@@ -660,6 +660,15 @@ settings:
   accounts_last_auth_minutes: "Authenticated %{n}m ago"
   accounts_last_auth_hours: "Authenticated %{n}h ago"
   accounts_last_auth_days: "Authenticated %{n}d ago"
+  accounts_login_added: "Account added."
+  accounts_login_failed: "Could not add account."
+  accounts_login_remote_unsupported: "Headless login isn't available for a remote agent. Switch to a local agent to add an account."
+  accounts_login_busy: "An account login is already in progress."
+  accounts_login_denied_detail: "The OAuth consent screen was denied."
+  accounts_login_timed_out_detail: "The login process did not complete before timing out."
+  accounts_login_in_progress: "Adding account…"
+  accounts_reauth_added: "Account reauthenticated."
+  accounts_reauth_failed: "Could not reauthenticate account."
 
 # Skills tab
 skills:

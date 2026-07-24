@@ -4,10 +4,10 @@
 use crate::ui::theme;
 use crate::ui::{
     ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
-    menu_builder,
+    menu_builder, spinner,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
-use crate::workspace::{OpenSettings, Workspace};
+use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
 use daruda_store::accounts::{AccountId, AgentProvider, ManagedAccount};
 use gpui::{App, IntoElement, RenderOnce, SharedString, WeakEntity, Window, div, prelude::*, px};
 
@@ -40,6 +40,15 @@ pub(super) struct AccountSlot {
     pub accounts: Vec<ManagedAccount>,
     /// Dispatch target for the dropdown's menu-item clicks.
     pub workspace: WeakEntity<Workspace>,
+    /// Mirrors `Workspace::active_agent_login_unavailable` — disables the
+    /// dropdown's "+ Add account" entry when the session's active agent
+    /// launch is remote (SSH/Docker) or not in the catalog, so the
+    /// affordance doesn't invite a click `add_managed_account` would
+    /// immediately reject.
+    pub login_unavailable: bool,
+    /// Mirrors `Workspace::is_login_pending` — swaps "+ Add account" for
+    /// an in-progress row + Cancel while a headless login is running.
+    pub login_pending: bool,
 }
 
 impl AccountSlot {
@@ -55,6 +64,8 @@ impl AccountSlot {
         account_id: Option<AccountId>,
         accounts: &daruda_store::accounts::AccountsState,
         workspace: WeakEntity<Workspace>,
+        login_unavailable: bool,
+        login_pending: bool,
     ) -> Self {
         let (label, provider) = match account_id.and_then(|id| accounts.find(id)) {
             Some(account) => (
@@ -76,6 +87,8 @@ impl AccountSlot {
             current: account_id,
             accounts: matching,
             workspace,
+            login_unavailable,
+            login_pending,
         }
     }
 }
@@ -255,10 +268,12 @@ impl RenderOnce for StatusBar {
 
 /// Build the account slot's dropdown menu: one item per managed account
 /// matching the slot's provider (checkmark on the pane's current
-/// override), then the Plan-B "add account" placeholder (disabled — login
-/// isn't implemented yet) and a "manage accounts" entry that opens
-/// Settings. Each account item is a one-line dispatch into
-/// `Workspace::switch_pane_account` (render purity; no logic here).
+/// override), then either "+ Add account" (disabled while the session's
+/// active agent launch is remote — see `login_unavailable`) or, while a
+/// headless login is running (`login_pending`), an in-progress row +
+/// Cancel in its place, and finally a "manage accounts" entry that opens
+/// Settings. Each item is a one-line dispatch into a `Workspace` method
+/// or action (render purity; no logic here).
 fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     // A header names the provider once its account list is non-empty, so a
     // future multi-provider catalog reads as grouped sections rather than
@@ -288,24 +303,56 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 }),
         )
     });
-    menu.separator()
-        .item(
-            PopupMenuItem::new(SharedString::from(
-                crate::surface::strings::status_bar_add_account(),
-            ))
+    let menu = menu.separator();
+    let menu = if slot.login_pending {
+        let cancel_workspace = slot.workspace.clone();
+        menu.item(
+            PopupMenuItem::element(|_window, _cx| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(theme::STATUS_BAR_GAP))
+                    .child(spinner())
+                    .child(SharedString::from(
+                        crate::surface::strings::settings_accounts_login_in_progress(),
+                    ))
+            })
             .disabled(true),
         )
         .item(
             PopupMenuItem::new(SharedString::from(
-                crate::surface::strings::status_bar_manage_accounts(),
+                crate::surface::strings::settings_account_login_cancel(),
             ))
-            .on_click(|_, window, app| {
-                window.dispatch_action(
-                    Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
-                    app,
-                );
+            .on_click(move |_, _window, app| {
+                if let Some(ws) = cancel_workspace.upgrade() {
+                    ws.update(app, |ws, cx| ws.cancel_pending_login(cx));
+                }
             }),
         )
+    } else {
+        let provider = slot.provider;
+        menu.item(
+            PopupMenuItem::new(SharedString::from(
+                crate::surface::strings::status_bar_add_account(),
+            ))
+            .disabled(slot.login_unavailable)
+            .on_click(move |_, window, app| {
+                window.dispatch_action(Box::new(AddManagedAccount(provider)), app);
+            }),
+        )
+    };
+    menu.item(
+        PopupMenuItem::new(SharedString::from(
+            crate::surface::strings::status_bar_manage_accounts(),
+        ))
+        .on_click(|_, window, app| {
+            window.dispatch_action(
+                Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
+                app,
+            );
+        }),
+    )
 }
 
 #[cfg(test)]

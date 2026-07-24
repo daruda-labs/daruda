@@ -43,6 +43,7 @@ pub mod scrollbar;
 pub mod section_header;
 pub mod select;
 pub mod selectable_text;
+pub mod spinner;
 pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
@@ -83,6 +84,7 @@ pub use progress::{Progress, progress};
 pub use radio::{Radio, radio};
 pub use section_header::SectionHeader;
 pub use selectable_text::{SelectableText, selectable_text};
+pub use spinner::{Spinner, spinner};
 pub use tab_bar::{Tab, TabBar, tab, tab_bar};
 
 pub use gpui_component::button::{ButtonVariant, ButtonVariants, DropdownButton};

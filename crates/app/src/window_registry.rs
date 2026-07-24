@@ -156,9 +156,15 @@ impl WindowRegistry {
             .map(|(h, w)| (*h, w.clone()))
     }
 
-    /// First registered workspace, used by screenshot runs where no OS-focused
-    /// active window exists.
-    #[cfg(feature = "screenshot")]
+    /// First registered workspace — used by screenshot runs where no
+    /// OS-focused active window exists, and by the Settings window
+    /// (a separate OS window with no `Workspace` of its own) to pick a
+    /// concrete target for an action that must run against *some* live
+    /// Workspace (e.g. the Accounts section's add-account button — see
+    /// `settings_window::sections::accounts::start_add_account`).
+    /// Deterministic (registration order) but arbitrary when more than one
+    /// workspace window is open; documented simplification, same class as
+    /// `Workspace::panes_referencing_account`'s per-window undercount.
     pub(crate) fn first_workspace(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<Workspace>)> {
         cx.try_global::<WindowRegistry>()?
             .workspaces

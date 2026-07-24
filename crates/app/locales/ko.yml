@@ -660,6 +660,15 @@ settings:
   accounts_last_auth_minutes: "%{n}분 전 인증됨"
   accounts_last_auth_hours: "%{n}시간 전 인증됨"
   accounts_last_auth_days: "%{n}일 전 인증됨"
+  accounts_login_added: "계정이 추가되었습니다."
+  accounts_login_failed: "계정을 추가할 수 없습니다."
+  accounts_login_remote_unsupported: "원격 에이전트에서는 헤드리스 로그인을 사용할 수 없습니다. 계정을 추가하려면 로컬 에이전트로 전환하세요."
+  accounts_login_busy: "이미 계정 로그인이 진행 중입니다."
+  accounts_login_denied_detail: "OAuth 동의 화면이 거부되었습니다."
+  accounts_login_timed_out_detail: "로그인 프로세스가 제한 시간 내에 완료되지 않았습니다."
+  accounts_login_in_progress: "계정 추가 중…"
+  accounts_reauth_added: "계정이 재인증되었습니다."
+  accounts_reauth_failed: "계정을 재인증할 수 없습니다."
 
 # Skills tab
 skills:

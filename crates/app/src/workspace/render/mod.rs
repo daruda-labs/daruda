@@ -1019,6 +1019,8 @@ impl Render for Workspace {
         // is hidden (`None`) rather than showing a misleading "System".
         let focused_pane_id = self.active_runtime().focused_pane_id;
         let weak_workspace = cx.entity().downgrade();
+        let login_unavailable = self.active_agent_login_unavailable();
+        let login_pending = self.is_login_pending();
         let focused_account = self
             .active_runtime()
             .panes
@@ -1031,6 +1033,8 @@ impl Render for Workspace {
                     account_id,
                     &self.accounts,
                     weak_workspace.clone(),
+                    login_unavailable,
+                    login_pending,
                 )
             });
         // `project_config_path` (canonicalize) + `Path::exists` are
@@ -1343,6 +1347,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_git_changes_activate))
             .on_action(cx.listener(Self::on_open_settings))
             .on_action(cx.listener(Self::on_switch_pane_account))
+            .on_action(cx.listener(Self::on_add_managed_account))
+            .on_action(cx.listener(Self::on_reauthenticate_account))
             .on_action(cx.listener(Self::on_open_project_config))
             .on_action(cx.listener(Self::on_install_agent_hooks))
             .on_action(cx.listener(Self::on_uninstall_agent_hooks))

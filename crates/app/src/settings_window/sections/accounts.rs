@@ -17,6 +17,16 @@
 //! why a direct broadcast (not a Global) is the right call here too:
 //! deleting/defaulting an account must work even when no Workspace
 //! window happens to be open.
+//!
+//! The "+ Add account" row is a narrower case: unlike delete/default (pure
+//! `accounts.json` edits), a headless login (`Workspace::add_managed_account`)
+//! needs a `Workspace` to run against — it resolves the login command from
+//! that window's own agent catalog / `last_agent_id`. `start_add_account`
+//! picks `WindowRegistry::first_workspace` (a no-op toast-free log when none
+//! is open) and runs the login there; it deliberately does **not** mirror
+//! `Workspace.pending_login` into this window (see `start_add_account`'s doc)
+//! — the spinner + Cancel affordance lives in the status-bar dropdown, which
+//! reads that state natively in the window the login is actually running in.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -135,7 +145,8 @@ impl SettingsWindow {
             }
         }
 
-        body.child(self.render_add_account_row()).into_any_element()
+        body.child(self.render_add_account_row(cx))
+            .into_any_element()
     }
 
     fn render_account_row(
@@ -207,13 +218,13 @@ impl SettingsWindow {
                 })),
             )
             .child(
-                // Plan B (`unstable_auth_methods` login) isn't implemented —
-                // rendered so the affordance is discoverable, never wired.
                 button(
                     SharedString::from(format!("settings-accounts-reauth-{row_key}")),
                     s::settings_accounts_reauthenticate(),
                 )
-                .disabled(true),
+                .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                    this.start_reauthenticate_account(account_id, cx);
+                })),
             )
             .child(
                 button_danger(
@@ -238,14 +249,116 @@ impl SettingsWindow {
             .into_any_element()
     }
 
-    /// Plan B (account creation via ACP login) isn't implemented — see
-    /// the module doc. Rendered disabled rather than omitted so the row
-    /// is discoverable ahead of that work landing.
-    fn render_add_account_row(&self) -> impl IntoElement + use<> {
-        div()
-            .flex()
-            .flex_row()
-            .child(button("settings-accounts-add", s::settings_accounts_add()).disabled(true))
+    /// Starts a headless add-account login on click — see
+    /// [`Self::start_add_account`] for why there's no live spinner here
+    /// (that lives in the status-bar dropdown, which reads
+    /// `Workspace.pending_login` natively; this window has no `Workspace`
+    /// of its own to observe it on).
+    fn render_add_account_row(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement + use<> {
+        div().flex().flex_row().child(
+            button("settings-accounts-add", s::settings_accounts_add()).on_click(cx.listener(
+                |this, _: &ClickEvent, _window, cx| {
+                    this.start_add_account(cx);
+                },
+            )),
+        )
+    }
+
+    /// Starts a headless add-account login (Plan B) against the first
+    /// live `Workspace` window (`WindowRegistry::first_workspace` — see
+    /// its doc for why "first" rather than the OS-active window: this is
+    /// a Settings-window click handler, so `cx.active_window()` would
+    /// resolve to the Settings window itself, not a workspace).
+    ///
+    /// This window has no progress/spinner affordance of its own:
+    /// `Workspace.pending_login` is `pub(in crate::workspace)` and
+    /// observing it live from here would mean either polling every open
+    /// Workspace window on every Settings repaint (no precedent for
+    /// cross-window reads during `render()` in this codebase — see the
+    /// project CLAUDE.md's "No GPUI re-entry in render()" convention) or
+    /// a dedicated broadcast mirror, neither of which this task's scope
+    /// covers. The login itself still runs for real; its spinner + Cancel
+    /// affordance is the status-bar dropdown (`status_bar::build_account_menu`),
+    /// which reads the state natively in the Workspace window it belongs
+    /// to. A toast in that target window reports success/failure.
+    fn start_add_account(&self, cx: &mut gpui::Context<Self>) {
+        let Some((handle, weak)) = WindowRegistry::first_workspace(cx) else {
+            LogWriter::log(
+                ErrorReport::new("Add-account login has no open Workspace window to run against")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("settings.accounts.add_no_workspace")
+                    .build(),
+            );
+            return;
+        };
+        let result = cx.update_window(handle, |_root, window, cx_w| {
+            if let Some(ws) = weak.upgrade() {
+                ws.update(cx_w, |ws, cx| {
+                    ws.add_managed_account(AgentProvider::Claude, window, cx);
+                });
+            }
+        });
+        if let Err(e) = result {
+            LogWriter::log(
+                ErrorReport::new(
+                    "Failed to start add-account login: target Workspace window is gone",
+                )
+                .message(e.to_string())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("settings.accounts.add_target_window_gone")
+                .build(),
+            );
+        }
+    }
+
+    /// Starts a headless reauthenticate-account login (Plan B, Task 6)
+    /// against the first live `Workspace` window — same
+    /// `WindowRegistry::first_workspace` target-resolution rationale as
+    /// [`Self::start_add_account`]. Unlike that method, this dispatches
+    /// the [`crate::workspace::ReauthenticateAccount`] action into the
+    /// resolved window (rather than calling a `Workspace` method
+    /// directly): the action already carries the target `AccountId` and
+    /// is registered on `Workspace`'s root render tree
+    /// (`Workspace::on_reauthenticate_account`), so dispatching it here
+    /// reaches the same handler without this Settings-window module
+    /// needing `pub(crate)` access into `crate::workspace`'s internals.
+    ///
+    /// Same "no spinner here" rationale as `start_add_account`: the
+    /// in-flight indicator lives in the status-bar dropdown of the
+    /// window the login actually runs in.
+    fn start_reauthenticate_account(&self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
+        let Some((handle, _weak)) = WindowRegistry::first_workspace(cx) else {
+            LogWriter::log(
+                ErrorReport::new(
+                    "Reauthenticate-account login has no open Workspace window to run against",
+                )
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("settings.accounts.reauth_no_workspace")
+                .build(),
+            );
+            return;
+        };
+        let result = cx.update_window(handle, |_root, window, cx_w| {
+            window.dispatch_action(
+                Box::new(crate::workspace::ReauthenticateAccount(account_id)),
+                cx_w,
+            );
+        });
+        if let Err(e) = result {
+            LogWriter::log(
+                ErrorReport::new(
+                    "Failed to start reauthenticate-account login: target Workspace window is gone",
+                )
+                .message(e.to_string())
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .dedup("settings.accounts.reauth_target_window_gone")
+                .build(),
+            );
+        }
     }
 
     /// Immediate (no confirm) — makes `account_id` the provider default
@@ -256,16 +369,20 @@ impl SettingsWindow {
         provider: AgentProvider,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.accounts
-            .default_by_provider
-            .insert(provider, account_id);
-        if let Err(e) = daruda_store::accounts::save_accounts(&self.accounts) {
+        // Apply the change to freshly-loaded disk state, not to this
+        // window's possibly-stale snapshot: a Workspace may have added an
+        // account since this Settings window was built, and a full
+        // overwrite from `self.accounts` would silently destroy it.
+        let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
+        state.default_by_provider.insert(provider, account_id);
+        if let Err(e) = daruda_store::accounts::save_accounts(&state) {
             log_io_error(
                 "Failed to save accounts.json after set-default",
                 "settings.accounts.save_default_failed",
                 &e,
             );
         }
+        self.accounts = state;
         self.broadcast_accounts_state(cx);
         cx.notify();
     }
@@ -308,9 +425,18 @@ impl SettingsWindow {
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
-        let Some(account) = self.accounts.find(account_id).cloned() else {
+        // Operate on freshly-loaded disk state (see set_default_account) so a
+        // stale snapshot can't resurrect or clobber accounts another window
+        // changed while this Settings window was open.
+        let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
+        let Some(account) = state.find(account_id).cloned() else {
+            self.accounts = state;
+            cx.notify();
             return;
         };
+        // Remove the isolated config dir AND its scoped Keychain item —
+        // otherwise the OS credential entry leaks on every deletion.
+        daruda_claude::accounts::delete_scoped_credentials(&account.config_dir);
         if let Err(e) = std::fs::remove_dir_all(&account.config_dir)
             && e.kind() != std::io::ErrorKind::NotFound
         {
@@ -320,18 +446,16 @@ impl SettingsWindow {
                 &e,
             );
         }
-        self.accounts.accounts.retain(|a| a.id != account_id);
-        self.accounts
-            .default_by_provider
-            .retain(|_, id| *id != account_id);
-        if let Err(e) = daruda_store::accounts::save_accounts(&self.accounts) {
+        state.accounts.retain(|a| a.id != account_id);
+        state.default_by_provider.retain(|_, id| *id != account_id);
+        if let Err(e) = daruda_store::accounts::save_accounts(&state) {
             log_io_error(
                 "Failed to save accounts.json after delete",
                 "settings.accounts.save_delete_failed",
                 &e,
             );
         }
-        let state = self.accounts.clone();
+        self.accounts = state.clone();
         WindowRegistry::for_each_workspace(cx, move |ws, _window, cx| {
             ws.clear_account_override(account_id, cx);
             ws.sync_accounts_state(state.clone(), cx);

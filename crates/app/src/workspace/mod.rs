@@ -91,6 +91,37 @@ pub struct OpenSettings(pub daruda_config::BuiltinSection);
 #[action(namespace = workspace, no_json)]
 pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountId);
 
+/// Start a headless add-account login (Plan B — see
+/// `account_ops::add_managed_account`). Carries the [`AgentProvider`]
+/// bucket the resulting account is filed under; the login *command* itself
+/// comes from the session's currently active/configured agent
+/// (`Workspace::agent_launch_for` + `last_agent_id`), not from this
+/// action — Plan B's headless login only implements Claude's
+/// `--cli auth login --claudeai` flow today (see
+/// `AgentLaunch::login_command`), so in practice `provider` is always
+/// [`AgentProvider::Claude`] until a second provider's login command
+/// exists. `no_json`: dispatched only from the status-bar "+ Add
+/// account…" menu item, never from keymap.json.
+///
+/// [`AgentProvider`]: daruda_store::accounts::AgentProvider
+/// [`AgentProvider::Claude`]: daruda_store::accounts::AgentProvider::Claude
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = workspace, no_json)]
+pub struct AddManagedAccount(pub daruda_store::accounts::AgentProvider);
+
+/// Re-run a headless login for an **existing** managed account (Plan B —
+/// see `account_ops::reauthenticate_account`). Carries the target
+/// [`daruda_store::accounts::AccountId`] rather than a provider: unlike
+/// [`AddManagedAccount`], this reuses the account's existing config dir
+/// and identity row instead of minting a new one, so the concrete account
+/// must be known up front. `no_json`: dispatched only from the Settings
+/// window's Accounts section "Reauthenticate" button (via
+/// `Window::dispatch_action` on the target `Workspace` window resolved
+/// through `WindowRegistry::first_workspace`), never from keymap.json.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = workspace, no_json)]
+pub struct ReauthenticateAccount(pub daruda_store::accounts::AccountId);
+
 /// Active lane's branch state, derived once per render and shared
 /// by the status bar (text label + inline detached chip) and the
 /// macOS window title (text only — chip cannot ride along).
@@ -228,6 +259,53 @@ const TAB_BAR_HEIGHT: f32 = crate::ui::theme::TAB_BAR_HEIGHT;
 pub(in crate::workspace) enum CommitMode {
     Normal,
     Amend { saved_draft: String },
+}
+
+/// State of an in-flight headless add-account login (Plan B — see
+/// `account_ops::add_managed_account`). At most one at a time; a second
+/// `AddManagedAccount` while `InProgress` is expected to be blocked by the
+/// UI (a disabled "+ Add account" affordance while a login is running),
+/// not by this enum itself.
+///
+/// `InProgress` carries only the cancel [`LoginProcessHandle`] and the
+/// `account_id` the pending login will file under — not the config dir or
+/// provider, since both are pure functions of data already on `Workspace`
+/// (`daruda_claude::accounts::account_config_dir(&self.data_dir,
+/// account_id)`) or captured directly in the `cx.spawn` continuation, so
+/// there is nothing to gain from duplicating them here.
+///
+/// `mode` distinguishes an add-account login (whose `account_id` names a
+/// throwaway config dir that only becomes real on success) from a
+/// reauthenticate login (whose `account_id` names an *existing*
+/// [`daruda_claude::accounts::ManagedAccount`]'s real, permanent config dir
+/// and Keychain item). `Workspace::cancel_pending_login` reads it to decide
+/// whether cancelling is allowed to delete that directory — for `Reauth`
+/// it must not, or cancelling a reauth would delete a good account's
+/// credentials.
+///
+/// `Preparing` covers the window before a login process even exists: the
+/// managed-node resolve (`account_ops::resolve_node_path_env`) is blocking
+/// and, on a first-run machine, downloads Node.js, so it runs on the
+/// background executor rather than the UI thread — this variant is what
+/// `can_start_login` blocks a second concurrent login on, and what
+/// `cancel_pending_login` can still cancel (no handle to kill yet, so it
+/// just clears the state), during that async gap before `spawn_login`
+/// produces a real [`LoginProcessHandle`] and the state advances to
+/// `InProgress`.
+#[derive(Debug, Clone)]
+pub(in crate::workspace) enum PendingLogin {
+    None,
+    Preparing {
+        account_id: daruda_store::accounts::AccountId,
+        mode: account_ops::LoginMode,
+    },
+    InProgress {
+        account_id: daruda_store::accounts::AccountId,
+        // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
+        // wired to the status-bar dropdown's Cancel row.
+        handle: daruda_claude::accounts::LoginProcessHandle,
+        mode: account_ops::LoginMode,
+    },
 }
 
 pub struct Workspace {
@@ -469,6 +547,11 @@ pub struct Workspace {
     /// state (no managed accounts — panes spawn with the ambient
     /// environment unchanged, see `main_area::pane::resolve_account_config_dir`).
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
+    /// In-flight headless add-account login (Plan B), if any — see
+    /// [`PendingLogin`]. Drives the add-account spinner/cancel affordance;
+    /// `None` outside of `Workspace::add_managed_account`'s call through
+    /// `Workspace::finish_login` / `Workspace::cancel_pending_login`.
+    pub(in crate::workspace) pending_login: PendingLogin,
     /// Subscription that calls `cx.notify()` whenever the app-wide
     /// `GlobalTasks` changes — so the Tasks tab in this workspace
     /// re-renders after a CRUD or lifecycle mutation triggered by any
@@ -879,6 +962,15 @@ impl Workspace {
         let (pty_tracker, pty_rx) = crate::hooks::pty_tracker::PtyTracker::spawn();
         let pty_event_pump = sync::pty::spawn(pty_rx, cx);
 
+        let accounts = daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default();
+        // Sweep any per-account config dir left behind by a login that
+        // was cancelled or crashed before being promoted to a
+        // `ManagedAccount` — a shallow, one-shot readdir under
+        // `claude-accounts/`, cheap enough to run inline here.
+        let known_account_ids: Vec<daruda_store::accounts::AccountId> =
+            accounts.accounts.iter().map(|account| account.id).collect();
+        daruda_claude::accounts::sweep_orphan_dirs(&data_dir, &known_account_ids);
+
         let mut ws = Self {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
@@ -1019,7 +1111,8 @@ impl Workspace {
             git_changes_cursor: std::collections::HashMap::new(),
             git_changes_panel_focus: cx.focus_handle(),
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
-            accounts: daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default(),
+            accounts,
+            pending_login: PendingLogin::None,
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
