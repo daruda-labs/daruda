@@ -27,7 +27,11 @@ use crate::ui::{
 /// Render the Usage tab body.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
-        .child(header(snap.plan_limits.plan.as_ref(), cx))
+        .child(header(
+            snap.plan_limits.plan.as_ref(),
+            snap.account_label.clone(),
+            cx,
+        ))
         .child(status_pill(&snap.service_status, cx))
         .child(usage_section_header(
             snap.plan_limits.fetched_at,
@@ -45,11 +49,17 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 // Header (logo + title + plan badge)
 // ----------------------------------------------------------------
 
-/// `[C] Claude Code            [TEAM 5x]` — logo chip, product title,
-/// and the plan badge pushed to the trailing edge. The badge is
-/// omitted when no plan metadata is available (Keychain miss / before
-/// the first fetch).
-fn header(plan: Option<&PlanInfo>, cx: &gpui::App) -> impl IntoElement {
+/// `[C] Claude Code   alice@co.com   [TEAM 5x]` — logo chip, product
+/// title, the focused pane's account identity, and the plan badge
+/// pushed to the trailing edge. The account label is always present
+/// (falls back to the "System" wording); the plan badge is omitted
+/// when no plan metadata is available (Keychain miss / before the
+/// first fetch).
+fn header(
+    plan: Option<&PlanInfo>,
+    account_label: SharedString,
+    cx: &gpui::App,
+) -> impl IntoElement {
     let t = theme::current(cx);
     let mut row = div()
         .flex()
@@ -63,12 +73,25 @@ fn header(plan: Option<&PlanInfo>, cx: &gpui::App) -> impl IntoElement {
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .text_color(t.text_muted)
                 .child(SharedString::from(strings::usage_brand_title())),
-        );
+        )
+        .child(account_label_text(account_label, t.text_muted));
 
     if let Some(label) = plan_badge_label(plan) {
         row = row.child(plan_badge(label));
     }
     row
+}
+
+/// Display-only identity of the account the tab's usage/activity data
+/// belongs to — the focused pane's managed-account email, or the
+/// "System" fallback. Purely informational: no click target, no
+/// dropdown. An account selector is deferred (plan §6.8 option B).
+fn account_label_text(label: SharedString, muted: Hsla) -> impl IntoElement {
+    div()
+        .flex_none()
+        .text_size(px(theme::USAGE_PLAN_BADGE_FONT_SIZE))
+        .text_color(muted)
+        .child(label)
 }
 
 /// Trailing plan badge ("TEAM 5x").

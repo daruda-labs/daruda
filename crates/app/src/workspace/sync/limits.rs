@@ -16,7 +16,7 @@
 //! cadence; a process-wide singleton would need to outlive Workspace (the
 //! Welcome window has none) to fix it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use daruda_claude::{ActivityStats, PlanLimits, ServiceStatus, activity, limits, service_status};
@@ -72,16 +72,34 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 continue;
             };
 
-            // 3. Run the blocking fetch off the GPUI thread, then
+            // 3. Limits/Activity are keyed by the focused pane's account —
+            //    resolved fresh each tick (on the UI thread, like the
+            //    cadence read above) so a focus switch refetches the
+            //    newly-focused account on the *next* tick. Status is
+            //    account-independent (Anthropic's global service health).
+            let (account_key, config_dir) = match kind {
+                Endpoint::Limits | Endpoint::Activity => {
+                    match this.read_with(cx, |ws, _| ws.focused_account_key()) {
+                        Ok(resolved) => resolved,
+                        Err(_) => break,
+                    }
+                }
+                Endpoint::Status => (None, None),
+            };
+
+            // 4. Run the blocking fetch off the GPUI thread, then
             //    forward into the workspace setter.
             let fetched = cx
                 .background_executor()
-                .spawn(async move { fetch(kind) })
+                .spawn(async move { fetch(kind, config_dir.as_deref()) })
                 .await;
 
             match fetched {
                 Fetched::Limits(Ok(l)) => {
-                    if this.update(cx, |ws, cx| ws.set_plan_limits(l, cx)).is_err() {
+                    if this
+                        .update(cx, |ws, cx| ws.set_plan_limits(account_key, l, cx))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -95,7 +113,7 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 }
                 Fetched::Activity(Some(a)) => {
                     if this
-                        .update(cx, |ws, cx| ws.set_activity_stats(a, cx))
+                        .update(cx, |ws, cx| ws.set_activity_stats(account_key, a, cx))
                         .is_err()
                     {
                         break;
@@ -111,7 +129,7 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 }
             }
 
-            // 4. Sleep and loop.
+            // 5. Sleep and loop.
             cx.background_executor().timer(dur).await;
         }
     })
@@ -129,24 +147,41 @@ enum Fetched {
     Activity(Option<ActivityStats>),
 }
 
-fn fetch(kind: Endpoint) -> Fetched {
+/// Dispatch one fetch. `config_dir` is the focused account's resolved
+/// `CLAUDE_CONFIG_DIR` for `Limits`/`Activity` (`None` = system default);
+/// unused for `Status`, which is account-independent.
+fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     match kind {
-        Endpoint::Limits => Fetched::Limits(limits::fetch_plan_limits()),
+        Endpoint::Limits => Fetched::Limits(match config_dir {
+            Some(dir) => limits::fetch_plan_limits_for(dir),
+            None => limits::fetch_plan_limits(),
+        }),
         Endpoint::Status => Fetched::Status(service_status::fetch_service_status()),
-        Endpoint::Activity => Fetched::Activity(fetch_activity()),
+        Endpoint::Activity => Fetched::Activity(match config_dir {
+            Some(dir) => fetch_activity_for(dir),
+            None => fetch_activity(),
+        }),
     }
 }
 
-/// Resolve the activity source + cache paths and run one incremental
-/// aggregation. Returns `None` when the home directory is unavailable
-/// or the aggregation errors (an unreadable projects root, an I/O
-/// failure mid-read) — the caller keeps the previous snapshot.
+/// Resolve the system-default activity source + cache paths and run one
+/// incremental aggregation. Returns `None` when the home directory is
+/// unavailable or the aggregation errors (an unreadable projects root,
+/// an I/O failure mid-read) — the caller keeps the previous snapshot.
 ///
 /// Blocking (disk I/O over `~/.claude/projects/*/*.jsonl`); only call
 /// from the background executor. Shared by the pump and the Usage tab's
 /// manual-refresh button (`Workspace::refresh_usage_now`).
 pub(in crate::workspace) fn fetch_activity() -> Option<ActivityStats> {
     let (projects_root, cache_path) = activity_paths()?;
+    activity::update_activity(&projects_root, &cache_path).ok()
+}
+
+/// Like [`fetch_activity`], but aggregates a managed account's own
+/// config-dir-scoped JSONL logs (`activity_paths_for`) instead of the
+/// system-default `~/.claude/projects`.
+pub(in crate::workspace) fn fetch_activity_for(config_dir: &Path) -> Option<ActivityStats> {
+    let (projects_root, cache_path) = activity_paths_for(config_dir)?;
     activity::update_activity(&projects_root, &cache_path).ok()
 }
 
@@ -163,4 +198,57 @@ fn activity_paths() -> Option<(PathBuf, PathBuf)> {
         .join("cache")
         .join("activity.json");
     Some((projects_root, cache_path))
+}
+
+/// `(<config_dir>/projects, <profile-scoped data dir>/cache/activity-<key>.json)`.
+/// Sibling of [`activity_paths`] for a managed account's isolated
+/// `CLAUDE_CONFIG_DIR`: `projects_root` is that account's own JSONL logs
+/// (under its own config dir, not the system default `~/.claude`), and
+/// `cache_path` is keyed by the config dir's final path component — the
+/// account UUID, since `account_config_dir` is `accounts_root/<uuid>` — so
+/// each account's cache stays distinct from the system default and from
+/// every other account's cache. Falls back to the system-default cache
+/// file name when the config dir has no final component (e.g. `/`).
+fn activity_paths_for(config_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    let projects_root = config_dir.join("projects");
+    let cache_file_name = config_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|key| format!("activity-{key}.json"))
+        .unwrap_or_else(|| "activity.json".to_string());
+    let cache_path = daruda_store::persistence::default_data_dir()
+        .join("cache")
+        .join(cache_file_name);
+    Some((projects_root, cache_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::activity_paths_for;
+
+    #[test]
+    fn activity_paths_for_scopes_projects_root_and_cache_to_config_dir() {
+        let account_id = "alice-1234";
+        let config_dir = Path::new("/data/claude-accounts").join(account_id);
+
+        let (projects_root, cache_path) = activity_paths_for(&config_dir)
+            .expect("activity_paths_for should always resolve for an explicit config_dir");
+
+        assert_eq!(projects_root, config_dir.join("projects"));
+
+        let cache_file_name = cache_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache path should have a file name");
+        assert!(
+            cache_file_name.contains(account_id),
+            "cache file name {cache_file_name:?} should embed the account key {account_id:?}"
+        );
+        assert_ne!(
+            cache_file_name, "activity.json",
+            "account-scoped cache must not collide with the system-default cache file name"
+        );
+    }
 }

@@ -382,6 +382,15 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity (G2 / pitfall §4).
     pub mcp: crate::agent::mcp::McpSnapshot,
+    /// Display-only identity of the focused pane's account — the
+    /// managed account's email, or the "System" fallback when the
+    /// focused pane has no override / no email captured yet. Resolved
+    /// from `Workspace::focused_account_key` + `Workspace.accounts` at
+    /// snapshot time; the Usage tab header renders it next to the plan
+    /// badge so the user can see whose usage the tab is showing. Purely
+    /// informational — no selector, no `SwitchPaneAccount` dispatch
+    /// (deferred; see plan §6.8 B).
+    pub account_label: gpui::SharedString,
 }
 
 impl RightDockSnapshot {
@@ -404,6 +413,7 @@ impl RightDockSnapshot {
             || self.claude_status_per_session != prev.claude_status_per_session
             || self.tool_use_failure_counts != prev.tool_use_failure_counts
             || self.mcp != prev.mcp
+            || self.account_label != prev.account_label
     }
 }
 

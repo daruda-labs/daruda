@@ -96,7 +96,7 @@ impl AccountSlot {
 /// Pure label formatter for [`AccountSlot::label`]: prefers `email (plan)`,
 /// falls back to just `email`, and finally to the "system account" label
 /// when neither is available (no account resolved for the pane).
-fn account_label(email: Option<&str>, plan: Option<&str>) -> String {
+pub(in crate::workspace) fn account_label(email: Option<&str>, plan: Option<&str>) -> String {
     match (email, plan) {
         (Some(email), Some(plan)) => format!("{email} ({plan})"),
         (Some(email), None) => email.to_string(),

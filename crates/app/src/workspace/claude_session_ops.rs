@@ -6,10 +6,10 @@
 //! JSONL fallback watcher, the PTY tracker, and the plan-limits /
 //! service-status polls. Workspace owns this struct directly (not as
 //! an `Entity`) so the existing access patterns
-//! (`self.claude.plan_limits`, etc.) compile without subscription /
-//! re-render plumbing changes — the goal at this stage is **field
-//! grouping**, not actor isolation. A future refactor can promote
-//! `ClaudeContext` to its own GPUI Entity once the call graph is
+//! (`self.claude.plan_limits_by_account`, etc.) compile without
+//! subscription / re-render plumbing changes — the goal at this stage is
+//! **field grouping**, not actor isolation. A future refactor can
+//! promote `ClaudeContext` to its own GPUI Entity once the call graph is
 //! mapped.
 //!
 //! The `_*` prefixed fields are RAII guards: dropping the struct
@@ -30,24 +30,33 @@ pub(in crate::workspace) struct ClaudeContext {
     /// `read_with` without locking the full `Config`.
     pub(in crate::workspace) usage_poll: daruda_config::PollConfig,
 
-    /// Latest plan-rate response (5-hour + 7-day windows). Default-
-    /// constructed before the first successful fetch — gauges then
-    /// render in their placeholder state. `set_plan_limits` updates
-    /// this and bumps `cx.notify()`.
-    pub(in crate::workspace) plan_limits: daruda_claude::PlanLimits,
+    /// Latest plan-rate response (5-hour + 7-day windows), keyed by the
+    /// account it was fetched for. `None` = the system-default Keychain
+    /// login (no managed account substitution). Default-constructed
+    /// (empty map) before the first successful fetch — gauges then
+    /// render in their placeholder state for whichever account is
+    /// focused. `set_plan_limits` updates the entry for its key and
+    /// bumps `cx.notify()` only when that entry's visible fields changed.
+    pub(in crate::workspace) plan_limits_by_account:
+        HashMap<Option<daruda_store::accounts::AccountId>, daruda_claude::PlanLimits>,
 
     /// Latest service-status indicator from `status.claude.com`.
-    /// Default-constructed (`Unknown`) before the first fetch lands;
-    /// `set_service_status` updates and bumps `cx.notify()`.
+    /// Account-independent — `status.claude.com` reports Anthropic's
+    /// service health, not a per-account quantity. Default-constructed
+    /// (`Unknown`) before the first fetch lands; `set_service_status`
+    /// updates and bumps `cx.notify()`.
     pub(in crate::workspace) service_status: daruda_claude::ServiceStatus,
 
     /// Locally aggregated Claude Code activity (today's counts + the
-    /// 7-day chart + totals), refreshed off the same `limits_secs`
-    /// cadence by the `Activity` pump. Default-constructed (empty) until
-    /// the first aggregation lands, in which case the Usage tab renders
-    /// its activity cards as zeros. `set_activity_stats` updates and
-    /// bumps `cx.notify()`.
-    pub(in crate::workspace) activity: daruda_claude::ActivityStats,
+    /// 7-day chart + totals), keyed by the account it was aggregated for
+    /// (`None` = the system-default `~/.claude/projects` JSONL logs).
+    /// Refreshed off the same `limits_secs` cadence by the `Activity`
+    /// pump. Default-constructed (empty map) until the first aggregation
+    /// lands, in which case the Usage tab renders its activity cards as
+    /// zeros for whichever account is focused. `set_activity_stats`
+    /// updates the entry for its key and bumps `cx.notify()`.
+    pub(in crate::workspace) activity_by_account:
+        HashMap<Option<daruda_store::accounts::AccountId>, daruda_claude::ActivityStats>,
 
     /// Guards `refresh_usage_now` against overlapping manual refreshes —
     /// the button's one-shot fetch sets this on entry and clears it when
@@ -313,17 +322,21 @@ impl Workspace {
             .is_some_and(|(pane_id, _)| *pane_id == self.active_runtime().focused_pane_id)
     }
 
-    /// Replace the cached plan-rate snapshot. Called by `limits_pump`
+    /// Replace the cached plan-rate snapshot for `key` (the account it
+    /// was fetched for; `None` = system default). Called by `limits_pump`
     /// after a successful `/api/oauth/usage` fetch. Skips `cx.notify()`
-    /// when only `fetched_at` moved.
+    /// when only `fetched_at` moved for that account's prior entry.
     pub(in crate::workspace) fn set_plan_limits(
         &mut self,
+        key: Option<daruda_store::accounts::AccountId>,
         limits: daruda_claude::PlanLimits,
         cx: &mut Context<Self>,
     ) {
-        let visible_changed = self.claude.plan_limits.five_hour != limits.five_hour
-            || self.claude.plan_limits.seven_day != limits.seven_day;
-        self.claude.plan_limits = limits;
+        let prev = self.claude.plan_limits_by_account.get(&key);
+        let visible_changed = prev.is_none_or(|prev| {
+            prev.five_hour != limits.five_hour || prev.seven_day != limits.seven_day
+        });
+        self.claude.plan_limits_by_account.insert(key, limits);
         if visible_changed {
             cx.notify();
         }
@@ -344,29 +357,34 @@ impl Workspace {
         }
     }
 
-    /// Replace the cached activity aggregate. Called by the `Activity`
-    /// pump and by `refresh_usage_now` after `update_activity` lands.
-    /// Skips the redraw when the stats are byte-for-byte unchanged (a
-    /// quiet tick that found no new JSONL lines) so an idle pane doesn't
-    /// repaint the whole window tree (Pitfall #10).
+    /// Replace the cached activity aggregate for `key` (the account it
+    /// was aggregated for; `None` = system default). Called by the
+    /// `Activity` pump and by `refresh_usage_now` after `update_activity`
+    /// lands. Skips the redraw when the stats are byte-for-byte unchanged
+    /// vs. that account's prior entry (a quiet tick that found no new
+    /// JSONL lines) so an idle pane doesn't repaint the whole window tree
+    /// (Pitfall #10).
     pub(in crate::workspace) fn set_activity_stats(
         &mut self,
+        key: Option<daruda_store::accounts::AccountId>,
         activity: daruda_claude::ActivityStats,
         cx: &mut Context<Self>,
     ) {
-        if self.claude.activity == activity {
+        if self.claude.activity_by_account.get(&key) == Some(&activity) {
             return;
         }
-        self.claude.activity = activity;
+        self.claude.activity_by_account.insert(key, activity);
         cx.notify();
     }
 
     /// Manual-refresh backend for the Usage tab's ⟳ button. Re-fetches
     /// all three usage sources (plan limits, service status, local
     /// activity) once off the GPUI thread and forwards each into its
-    /// existing setter. The `usage_refresh_in_flight` guard collapses
-    /// rapid clicks into a single in-flight round-trip; it is cleared
-    /// when the fetch resolves (or with the workspace if it is gone).
+    /// existing setter, keyed by the focused pane's account (mirroring
+    /// the background pump — see `sync::limits::spawn_loop`). The
+    /// `usage_refresh_in_flight` guard collapses rapid clicks into a
+    /// single in-flight round-trip; it is cleared when the fetch
+    /// resolves (or with the workspace if it is gone).
     pub(in crate::workspace) fn refresh_usage_now(&mut self, cx: &mut Context<Self>) {
         if self.claude.usage_refresh_in_flight {
             return;
@@ -374,14 +392,22 @@ impl Workspace {
         self.claude.usage_refresh_in_flight = true;
         cx.notify();
 
+        let (account_key, config_dir) = self.focused_account_key();
+
         cx.spawn(async move |this, cx| {
             let (limits, status, activity) = cx
                 .background_executor()
                 .spawn(async move {
                     (
-                        daruda_claude::limits::fetch_plan_limits(),
+                        match config_dir.as_deref() {
+                            Some(dir) => daruda_claude::limits::fetch_plan_limits_for(dir),
+                            None => daruda_claude::limits::fetch_plan_limits(),
+                        },
                         daruda_claude::service_status::fetch_service_status(),
-                        crate::workspace::sync::limits::fetch_activity(),
+                        match config_dir.as_deref() {
+                            Some(dir) => crate::workspace::sync::limits::fetch_activity_for(dir),
+                            None => crate::workspace::sync::limits::fetch_activity(),
+                        },
                     )
                 })
                 .await;
@@ -391,13 +417,13 @@ impl Workspace {
             // SILENT-OK: workspace gone mid-refresh — no state to clear.
             let _ = this.update(cx, |ws, cx| {
                 if let Ok(l) = limits {
-                    ws.set_plan_limits(l, cx);
+                    ws.set_plan_limits(account_key, l, cx);
                 }
                 if let Ok(s) = status {
                     ws.set_service_status(s, cx);
                 }
                 if let Some(a) = activity {
-                    ws.set_activity_stats(a, cx);
+                    ws.set_activity_stats(account_key, a, cx);
                 }
                 ws.claude.usage_refresh_in_flight = false;
                 cx.notify();

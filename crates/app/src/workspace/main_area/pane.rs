@@ -891,6 +891,35 @@ pub(in crate::workspace) fn resolve_account_config_dir(
     Some(daruda_claude::accounts::account_config_dir(data_dir, id))
 }
 
+/// Pure core of [`Workspace::focused_account_key`]: given the focused
+/// pane's own account override (already unwrapped to `None` when the
+/// pane doesn't track an account at all, or tracks one with no override),
+/// resolve the effective account key + config dir the same way
+/// [`resolve_account_config_dir`] resolves the dir alone — but also
+/// surfaces *which* account that resolved to, so per-account caches
+/// (plan-limits / activity usage) can be keyed by it. Split out from the
+/// `Workspace` method so this override → provider-default → dir
+/// resolution is unit-testable without standing up a live `Workspace`
+/// entity.
+///
+/// Returns `(None, None)` when the resolved account has been deleted, or
+/// when no managed account is configured at all — the caller then
+/// fetches against the system-default Keychain login, unchanged from
+/// today's behavior with zero managed accounts.
+fn resolve_focused_account(
+    pane_override: Option<daruda_store::accounts::AccountId>,
+    state: &daruda_store::accounts::AccountsState,
+    data_dir: &Path,
+) -> (Option<daruda_store::accounts::AccountId>, Option<PathBuf>) {
+    let provider = daruda_store::accounts::AgentProvider::Claude;
+    let config_dir = resolve_account_config_dir(state, data_dir, pane_override, provider);
+    let key = config_dir
+        .is_some()
+        .then(|| pane_override.or_else(|| state.default_by_provider.get(&provider).copied()))
+        .flatten();
+    (key, config_dir)
+}
+
 impl Workspace {
     /// Default cwd for a new pane. Thin wrapper that gathers the
     /// candidates from `Workspace` state and delegates to
@@ -907,6 +936,29 @@ impl Workspace {
             project_root: self.active_project().map(|p| p.root.clone()),
         };
         resolve_default_cwd(self.inherit_cwd, candidates).or_else(home_dir)
+    }
+
+    /// Resolve the focused pane's effective Claude account: the account
+    /// key to cache plan-limits / activity usage under, plus that
+    /// account's `CLAUDE_CONFIG_DIR` (when it resolves to a real managed
+    /// account). Gathers the focused pane's own override (`None` when
+    /// the pane kind doesn't track an account at all, has no explicit
+    /// override, or there is no live pane at `focused_pane_id`) and
+    /// delegates the override → provider-default → dir resolution to
+    /// [`resolve_focused_account`].
+    pub(in crate::workspace) fn focused_account_key(
+        &self,
+    ) -> (Option<daruda_store::accounts::AccountId>, Option<PathBuf>) {
+        let focused_pane_id = self.active_runtime().focused_pane_id;
+        let pane_override = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == focused_pane_id)
+            .and_then(Pane::account_id)
+            .unwrap_or(None);
+
+        resolve_focused_account(pane_override, &self.accounts, &self.data_dir)
     }
 
     pub(in crate::workspace) fn create_pane(
@@ -1454,5 +1506,67 @@ mod tests {
             resolve_account_config_dir(&empty, data, None, AgentProvider::Claude),
             None
         );
+    }
+
+    #[test]
+    fn focused_account_key_resolves_to_the_overriding_account() {
+        use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAccount};
+        let id = AccountId::new();
+        let mut st = AccountsState::default();
+        st.accounts.push(ManagedAccount {
+            id,
+            provider: AgentProvider::Claude,
+            email: None,
+            organization: None,
+            config_dir: std::path::PathBuf::from("/x"),
+            created_at: 0,
+            last_authenticated_at: 0,
+        });
+        let data = std::path::Path::new("/data");
+
+        let (key, dir) = resolve_focused_account(Some(id), &st, data);
+        assert_eq!(key, Some(id));
+        assert_eq!(
+            dir,
+            Some(daruda_claude::accounts::account_config_dir(data, id))
+        );
+    }
+
+    #[test]
+    fn focused_account_key_falls_back_to_provider_default() {
+        use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAccount};
+        let id = AccountId::new();
+        let mut st = AccountsState::default();
+        st.accounts.push(ManagedAccount {
+            id,
+            provider: AgentProvider::Claude,
+            email: None,
+            organization: None,
+            config_dir: std::path::PathBuf::from("/x"),
+            created_at: 0,
+            last_authenticated_at: 0,
+        });
+        st.default_by_provider.insert(AgentProvider::Claude, id);
+        let data = std::path::Path::new("/data");
+
+        // No explicit override on the pane → resolves to the provider
+        // default, and the key surfaces which account that was.
+        let (key, dir) = resolve_focused_account(None, &st, data);
+        assert_eq!(key, Some(id));
+        assert_eq!(
+            dir,
+            Some(daruda_claude::accounts::account_config_dir(data, id))
+        );
+    }
+
+    #[test]
+    fn focused_account_key_is_none_without_managed_accounts() {
+        use daruda_store::accounts::AccountsState;
+        // Zero managed accounts (today's default state): no override, no
+        // provider default → system-default Keychain fetch, identical to
+        // pre-account behavior.
+        let empty = AccountsState::default();
+        let data = std::path::Path::new("/data");
+        assert_eq!(resolve_focused_account(None, &empty, data), (None, None));
     }
 }

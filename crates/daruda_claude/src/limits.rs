@@ -113,6 +113,24 @@ pub const LIMIT_HIGH_THRESHOLD: f32 = 80.0;
 /// so the GPUI thread never blocks on `ureq`.
 pub fn fetch_plan_limits() -> Result<PlanLimits, FetchError> {
     let (token, plan) = read_keychain_credentials()?;
+    plan_limits_from_token(token, plan)
+}
+
+/// Like [`fetch_plan_limits`], but reads the given managed account's
+/// config-dir-scoped credentials instead of the system-default login.
+pub fn fetch_plan_limits_for(config_dir: &std::path::Path) -> Result<PlanLimits, FetchError> {
+    let (token, plan) =
+        crate::accounts::read_scoped_credentials(config_dir).map_err(|_| FetchError::NoToken)?;
+    plan_limits_from_token(token, plan)
+}
+
+/// Shared tail of [`fetch_plan_limits`] and [`fetch_plan_limits_for`]:
+/// given an already-resolved token and plan, build the request headers,
+/// fetch `/api/oauth/usage`, and merge `plan` into the parsed response.
+/// Split out so the two credential sources (system-default Keychain vs.
+/// a managed account's config-dir-scoped Keychain item) share this body
+/// instead of duplicating it.
+fn plan_limits_from_token(token: String, plan: PlanInfo) -> Result<PlanLimits, FetchError> {
     let auth = format!("Bearer {token}");
     let headers: [Header<'_>; 3] = [
         ("Authorization", &auth),
@@ -468,5 +486,17 @@ mod tests {
     #[test]
     fn credentials_path_is_none_without_config_dir_or_home() {
         assert_eq!(credentials_path_from(None, None), None);
+    }
+
+    #[test]
+    fn fetch_plan_limits_for_missing_config_dir_is_no_token() {
+        // No account ever logged in against this config dir — its scoped
+        // Keychain item / `.credentials.json` was never written — so
+        // `read_scoped_credentials` fails and the failure must map to
+        // `FetchError::NoToken`, not panic or leak an `AccountError`.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("never-logged-in");
+        let err = fetch_plan_limits_for(&config_dir).unwrap_err();
+        assert!(matches!(err, FetchError::NoToken));
     }
 }

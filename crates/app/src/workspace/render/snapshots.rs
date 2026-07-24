@@ -322,12 +322,40 @@ impl Workspace {
             .filter(|&(_, &n)| n > 0)
             .map(|(sid, &n)| (sid.clone(), n))
             .collect();
+        // Usage tab shows the focused pane's account — plan limits and
+        // activity are cached per-account (`focused_account_key`) so a
+        // lane/pane focus switch renders that account's cache instantly
+        // while the pump refetches it in the background. An account with
+        // no cache entry yet (never fetched, or the pump hasn't ticked
+        // since focus moved) falls back to the placeholder default.
+        let (focused_account, _) = self.focused_account_key();
+        // Display-only identity for the Usage tab header: the focused
+        // account's email when resolved, else the "System" fallback.
+        // Reuses the status bar's `account_label` formatter with
+        // `plan=None` — this header wants identity only, not the
+        // "(plan)" suffix the status-bar dropdown slot shows.
+        let account_label = crate::workspace::status_bar::account_label(
+            focused_account
+                .and_then(|id| self.accounts.find(id))
+                .and_then(|account| account.email.as_deref()),
+            None,
+        );
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
-            plan_limits: self.claude.plan_limits.clone(),
+            plan_limits: self
+                .claude
+                .plan_limits_by_account
+                .get(&focused_account)
+                .cloned()
+                .unwrap_or_default(),
             service_status: self.claude.service_status.clone(),
-            activity: self.claude.activity.clone(),
+            activity: self
+                .claude
+                .activity_by_account
+                .get(&focused_account)
+                .cloned()
+                .unwrap_or_default(),
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()
@@ -350,6 +378,7 @@ impl Workspace {
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
+            account_label: account_label.into(),
         }
     }
 }
