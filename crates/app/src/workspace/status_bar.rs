@@ -69,7 +69,10 @@ impl AccountSlot {
     ) -> Self {
         let (label, provider) = match account_id.and_then(|id| accounts.find(id)) {
             Some(account) => (
-                account_label(account.email.as_deref(), account.organization.as_deref()),
+                // Status-bar slot shows the email only — the organization is
+                // omitted here (it's still shown in the account dropdown to
+                // disambiguate same-email accounts).
+                account_label(account.email.as_deref(), None),
                 account.provider,
             ),
             None => (account_label(None, None), AgentProvider::default()),
