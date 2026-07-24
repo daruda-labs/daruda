@@ -766,6 +766,17 @@ impl Workspace {
                 .background_executor()
                 .spawn(async move {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
+                    // Managed account only (`None` = system default, which
+                    // already reads MCP servers straight out of the
+                    // canonical `~/.claude.json` — no mirror needed). The
+                    // canonical file can be multi-megabyte, so this must
+                    // stay on the background executor, not the UI thread.
+                    // Terminal panes under a managed account don't get this
+                    // mirror yet — deferred extension, agent-chat is the
+                    // only MCP consumer in scope for v1.
+                    if let Some(dir) = account_config_dir.as_deref() {
+                        daruda_claude::accounts::mirror_shared_mcp_servers(dir);
+                    }
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
                     connect_agent_session(
