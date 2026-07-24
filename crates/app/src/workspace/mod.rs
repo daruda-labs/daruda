@@ -967,9 +967,23 @@ impl Workspace {
         // was cancelled or crashed before being promoted to a
         // `ManagedAccount` — a shallow, one-shot readdir under
         // `claude-accounts/`, cheap enough to run inline here.
+        //
+        // `grace = account_ops::LOGIN_TIMEOUT`: multi-window is first-class
+        // (see `WindowRegistry::for_each_workspace`), so a *different*
+        // window's login can still be in flight — its config dir exists but
+        // hasn't been promoted to `known_account_ids` yet — while this
+        // window's constructor runs this sweep. Sparing anything younger
+        // than the login timeout avoids deleting that other window's
+        // live login dir out from under it; a genuine orphan (crash, or a
+        // timed-out login whose cleanup never ran) is always older than
+        // this, since a login can't still be running past its own timeout.
         let known_account_ids: Vec<daruda_store::accounts::AccountId> =
             accounts.accounts.iter().map(|account| account.id).collect();
-        daruda_claude::accounts::sweep_orphan_dirs(&data_dir, &known_account_ids);
+        daruda_claude::accounts::sweep_orphan_dirs(
+            &data_dir,
+            &known_account_ids,
+            account_ops::LOGIN_TIMEOUT,
+        );
 
         let mut ws = Self {
             uuid: daruda_store::project::WorkspaceUuid::new(),

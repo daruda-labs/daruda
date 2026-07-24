@@ -55,7 +55,13 @@ use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 /// and cancelled. Generous — the flow blocks on the user completing OAuth
 /// consent by hand in a system browser window, not on anything this app
 /// controls the pace of.
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+///
+/// `pub(in crate::workspace)`: `Workspace::new_with_project`'s startup
+/// orphan sweep (`daruda_claude::accounts::sweep_orphan_dirs`) passes this
+/// same constant as its `grace` window, so the two can't drift — see that
+/// call site's comment for why a login's own timeout is exactly the right
+/// sweep grace period.
+pub(in crate::workspace) const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Which of the two headless login flows a [`PendingLogin::InProgress`] is
 /// tracking. Carried alongside `account_id` so
@@ -677,10 +683,22 @@ impl Workspace {
     }
 
     /// `LoginOutcome::Success` half of [`Self::finish_login`]: confirms
-    /// credentials actually landed, then either bumps an existing
-    /// duplicate account's freshness or files a brand-new
-    /// [`ManagedAccount`] (making it the provider default when it's the
-    /// first account for `provider`), and persists.
+    /// credentials actually landed, then either discards the freshly
+    /// logged-in throwaway dir as a duplicate of an already-tracked
+    /// account or files a brand-new [`ManagedAccount`] (making it the
+    /// provider default when it's the first account for `provider`), and
+    /// persists.
+    ///
+    /// A dedup hit does **not** bump the existing account's
+    /// `last_authenticated_at`, and reports a distinct
+    /// [`s::settings_accounts_login_already_exists`] toast rather than the
+    /// "added" one: the fresh dir's credentials are discarded
+    /// ([`cleanup_account_dir`]), not adopted, so the existing account's
+    /// credentials are exactly as fresh (or stale) as they were before
+    /// this attempt — claiming "added" and bumping the timestamp here
+    /// would silently lie to a user who used "+ Add account" specifically
+    /// to refresh an expired token (the honest path for that is
+    /// Reauthenticate, which does adopt the fresh credentials).
     fn finish_login_success(
         &mut self,
         account_id: AccountId,
@@ -705,25 +723,31 @@ impl Workspace {
         // in-memory snapshot: another window (Settings, or a second
         // Workspace) may have written the file since this login started,
         // and a full-overwrite from `self.accounts` would silently destroy
-        // whatever it added. Applying the delta to the fresh state, then
-        // adopting it as the new `self.accounts`, keeps the disk correct
-        // regardless of interleaving.
+        // whatever it added. This load-mutate-save narrows the cross-window
+        // race to the load→save gap below (vs. the prior full-snapshot
+        // overwrite, which clobbered unconditionally) — it is not fully
+        // atomic: `save_accounts_in` renames into place but takes no file
+        // lock, so two windows racing this exact window can still each
+        // read the same pre-write state and one's delta can still overwrite
+        // the other's. A real fix needs a file lock (fs4 is already a
+        // dependency but unused here) — tracked as a follow-up, not done
+        // in this pass.
         let mut state =
             daruda_store::accounts::load_accounts_in(&self.data_dir).unwrap_or_default();
 
-        match find_duplicate(
+        let is_duplicate = match find_duplicate(
             &state,
             identity.email.as_deref(),
             identity.organization.as_deref(),
         ) {
-            Some(existing_id) => {
-                if let Some(existing) = state.accounts.iter_mut().find(|a| a.id == existing_id) {
-                    existing.last_authenticated_at = now;
-                }
+            Some(_existing_id) => {
                 // The freshly logged-in config dir duplicates an account
                 // already tracked under a different dir — nothing new to
-                // keep.
+                // keep, and the existing account's credentials are not
+                // refreshed by this (see this method's doc for why
+                // `last_authenticated_at` is deliberately left untouched).
                 cleanup_account_dir(&config_dir);
+                true
             }
             None => {
                 let is_first_for_provider = !state.accounts.iter().any(|a| a.provider == provider);
@@ -739,8 +763,9 @@ impl Workspace {
                 if is_first_for_provider {
                     state.default_by_provider.insert(provider, account_id);
                 }
+                false
             }
-        }
+        };
 
         if let Err(e) = daruda_store::accounts::save_accounts_in(&self.data_dir, &state) {
             log_io_error(
@@ -751,8 +776,13 @@ impl Workspace {
         }
         self.accounts = state;
 
+        let toast = if is_duplicate {
+            s::settings_accounts_login_already_exists()
+        } else {
+            s::settings_accounts_login_added()
+        };
         self.report_error(
-            ErrorReport::new(s::settings_accounts_login_added())
+            ErrorReport::new(toast)
                 .severity(ErrorSeverity::Info)
                 .build(),
             cx,
@@ -1070,8 +1100,9 @@ impl Workspace {
         let now = now_unix();
 
         // Apply the reauth to freshly-loaded disk state (see
-        // finish_login_success) so a stale in-memory snapshot can't clobber
-        // accounts another window added while this reauth was in flight.
+        // `finish_login_success`'s comment for the same load-mutate-save
+        // shape and why it narrows, but does not close, the cross-window
+        // race).
         let mut state =
             daruda_store::accounts::load_accounts_in(&self.data_dir).unwrap_or_default();
 

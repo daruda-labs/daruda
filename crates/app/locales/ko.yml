@@ -661,6 +661,7 @@ settings:
   accounts_last_auth_hours: "%{n}시간 전 인증됨"
   accounts_last_auth_days: "%{n}일 전 인증됨"
   accounts_login_added: "계정이 추가되었습니다."
+  accounts_login_already_exists: "이 계정은 이미 추가되어 있습니다 — 갱신하려면 재인증을 사용하세요."
   accounts_login_failed: "계정을 추가할 수 없습니다."
   accounts_login_remote_unsupported: "원격 에이전트에서는 헤드리스 로그인을 사용할 수 없습니다. 계정을 추가하려면 로컬 에이전트로 전환하세요."
   accounts_login_busy: "이미 계정 로그인이 진행 중입니다."

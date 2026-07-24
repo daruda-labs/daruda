@@ -2072,6 +2072,17 @@ pub fn settings_accounts_last_auth_days(n: u64) -> String {
 pub fn settings_accounts_login_added() -> String {
     rust_i18n::t!("settings.accounts_login_added").into_owned()
 }
+/// Toast shown in place of `settings_accounts_login_added()` when a
+/// headless add-account login (Plan B) succeeds but its email+org matches
+/// an account already tracked (`find_duplicate`'s dedup hit branch of
+/// `Workspace::finish_login_success`): the fresh throwaway dir's
+/// credentials are discarded, not adopted, so the existing account's
+/// freshness is unchanged — this distinct copy tells the user their login
+/// didn't refresh anything and points at Reauthenticate, the flow that
+/// actually does.
+pub fn settings_accounts_login_already_exists() -> String {
+    rust_i18n::t!("settings.accounts_login_already_exists").into_owned()
+}
 /// Failure toast title for a headless add-account login (Plan B) that
 /// didn't produce a usable account — denied, timed out, the process
 /// failed, or credentials weren't found after a reported success. The

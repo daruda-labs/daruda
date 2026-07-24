@@ -372,7 +372,14 @@ impl SettingsWindow {
         // Apply the change to freshly-loaded disk state, not to this
         // window's possibly-stale snapshot: a Workspace may have added an
         // account since this Settings window was built, and a full
-        // overwrite from `self.accounts` would silently destroy it.
+        // overwrite from `self.accounts` would silently destroy it. This
+        // load-mutate-save narrows the cross-window race to the load→save
+        // gap below rather than closing it — `save_accounts` renames into
+        // place but takes no file lock, so two windows racing this exact
+        // sequence can still each read the same state and one's write can
+        // still overwrite the other's delta. A real fix needs a file lock
+        // (fs4 is already a dependency but unused here) — tracked as a
+        // follow-up, not done in this pass.
         let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
         state.default_by_provider.insert(provider, account_id);
         if let Err(e) = daruda_store::accounts::save_accounts(&state) {
@@ -425,9 +432,9 @@ impl SettingsWindow {
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
-        // Operate on freshly-loaded disk state (see set_default_account) so a
-        // stale snapshot can't resurrect or clobber accounts another window
-        // changed while this Settings window was open.
+        // Operate on freshly-loaded disk state (see `set_default_account`'s
+        // comment for the same load-mutate-save shape and why it narrows,
+        // but does not close, the cross-window race).
         let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
         let Some(account) = state.find(account_id).cloned() else {
             self.accounts = state;

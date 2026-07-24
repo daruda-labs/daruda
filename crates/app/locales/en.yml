@@ -661,6 +661,7 @@ settings:
   accounts_last_auth_hours: "Authenticated %{n}h ago"
   accounts_last_auth_days: "Authenticated %{n}d ago"
   accounts_login_added: "Account added."
+  accounts_login_already_exists: "This account is already added — use Reauthenticate to refresh."
   accounts_login_failed: "Could not add account."
   accounts_login_remote_unsupported: "Headless login isn't available for a remote agent. Switch to a local agent to add an account."
   accounts_login_busy: "An account login is already in progress."
