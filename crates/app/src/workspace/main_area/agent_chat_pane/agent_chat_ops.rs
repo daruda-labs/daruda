@@ -298,11 +298,13 @@ impl Workspace {
     /// resolved-but-unattachable cwd goes through this single path carrying its
     /// own reason, distinct from the generic "no working directory" reason.
     ///
-    /// `account_id` always starts `None` here — no construction path in this
-    /// function has a persisted override to seed. Session restore
-    /// (`Workspace::rebuild_layout` in `persistence.rs`) is the only source
-    /// of a real value, and patches it onto the returned `Pane` afterward via
-    /// `Pane::agent_chat_content_mut`.
+    /// `account_id` is seeded with the Claude provider default (`None` when
+    /// unset) — same as every other default-inheriting pane-creation site.
+    /// Session restore (`Workspace::rebuild_layout` in `persistence.rs`) is
+    /// the only caller with a persisted override to honor instead, and it
+    /// unconditionally overwrites this seed on the returned `Pane` via
+    /// `Pane::agent_chat_content_mut`, so seeding here is a no-op for that
+    /// path.
     fn build_agent_chat_pane(
         &mut self,
         outcome: PaneCwdOutcome,
@@ -355,7 +357,7 @@ impl Workspace {
                 view,
                 cached_title,
                 cwd,
-                account_id: None,
+                account_id: self.default_account_id_for_new_pane(),
             }),
         }
     }
@@ -1472,8 +1474,8 @@ impl Workspace {
             .agent_chat_view()
     }
 
-    /// The AgentChat pane's persisted account override (`None` = provider
-    /// default). Same cross-lane scan as [`Self::agent_chat_view`] and for
+    /// The AgentChat pane's account override (`None` = system default,
+    /// `~/.claude`). Same cross-lane scan as [`Self::agent_chat_view`] and for
     /// the same reason — `connect_agent_chat` resolves this at connect time,
     /// which can happen after a lane switch moved the pane out of the
     /// active runtime.

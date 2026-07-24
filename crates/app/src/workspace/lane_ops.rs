@@ -311,16 +311,17 @@ impl Workspace {
         let pane = match surface {
             TaskAgentSurface::Terminal => {
                 // A brand-new lane's terminal carries no account override
-                // yet — resolve straight to the Claude provider default.
+                // yet — seed it with the Claude provider default.
+                let account_id = self.default_account_id_for_new_pane();
                 let account_config_dir = pane::resolve_account_config_dir(
                     &self.accounts,
                     &self.data_dir,
-                    None,
+                    account_id,
                     daruda_store::accounts::AgentProvider::Claude,
                 );
                 self.create_pane_with_cwd(
                     Some(new_path.clone()),
-                    None,
+                    account_id,
                     account_config_dir.as_deref(),
                     window,
                     cx,

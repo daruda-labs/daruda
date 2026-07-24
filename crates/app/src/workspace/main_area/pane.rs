@@ -87,10 +87,14 @@ pub(in crate::workspace) struct TerminalContent {
     /// (`TerminalInput` closure) and by `Pane::send_input`.
     pub(in crate::workspace) poke_tx: UnboundedSender<()>,
     /// Managed account this pane's shell was spawned under; `None` = the
-    /// provider default at spawn time. Cached here (it never changes after
-    /// construction) purely so the layout serializer can persist it —
-    /// re-resolving the actual `CLAUDE_CONFIG_DIR` at spawn is
-    /// `resolve_account_config_dir`'s job, not a runtime read of this field.
+    /// system default (`~/.claude`) at spawn time — a fresh pane already
+    /// got the provider default seeded here at creation (see
+    /// `Workspace::default_account_id_for_new_pane`), so this field's `None`
+    /// is never a stand-in for "look up the provider default". Cached here
+    /// (it never changes after construction) purely so the layout
+    /// serializer can persist it — re-resolving the actual
+    /// `CLAUDE_CONFIG_DIR` at spawn is `resolve_account_config_dir`'s job,
+    /// not a runtime read of this field.
     pub(in crate::workspace) account_id: Option<daruda_store::accounts::AccountId>,
 }
 
@@ -292,9 +296,12 @@ pub(in crate::workspace) struct AgentChatContent {
     /// back a borrow; the view holds its own copy for connect / persistence.
     pub(in crate::workspace) cwd: Option<PaneCwd>,
     /// Managed account this pane's ACP session runs under; `None` = the
-    /// provider default. Cached here so the layout serializer can persist
-    /// it cx-free; `connect_agent_chat` resolves the actual config dir from
-    /// it at connect time via `resolve_account_config_dir`.
+    /// system default (`~/.claude`) — a fresh pane already got the provider
+    /// default seeded here at creation (see
+    /// `Workspace::default_account_id_for_new_pane`). Cached here so the
+    /// layout serializer can persist it cx-free; `connect_agent_chat`
+    /// resolves the actual config dir from it at connect time via
+    /// `resolve_account_config_dir`.
     pub(in crate::workspace) account_id: Option<daruda_store::accounts::AccountId>,
 }
 
@@ -436,9 +443,12 @@ impl Pane {
     /// track an account at all" (`None` for File/TaskEdit — the status
     /// bar hides the slot entirely rather than showing a misleading
     /// "System"); inner `Option` is the pane's own override, `None`
-    /// meaning "provider default". Single accessor behind the status
-    /// bar's account slot and the account-switcher handler, so the two
-    /// don't each re-derive their own copy of this match.
+    /// meaning the explicit system default (`~/.claude`) — never a
+    /// stand-in for "provider default" (see
+    /// `main_area::pane::resolve_account_config_dir`'s doc). Single
+    /// accessor behind the status bar's account slot and the
+    /// account-switcher handler, so the two don't each re-derive their own
+    /// copy of this match.
     pub(in crate::workspace) fn account_id(
         &self,
     ) -> Option<Option<daruda_store::accounts::AccountId>> {
@@ -874,20 +884,32 @@ fn apply_account_env(pty: &mut PtyConfig, config_dir: &Path) {
     pty.env.extend(env.inject);
 }
 
-/// Resolve the isolated `CLAUDE_CONFIG_DIR` a new pane should spawn under:
-/// the pane's own `account_id` when explicitly set, else `provider`'s
-/// configured default account. Returns `None` when neither resolves to a
-/// real account — the pane spawns with the ambient environment unchanged
-/// (system `~/.claude`).
+/// Resolve the isolated `CLAUDE_CONFIG_DIR` for a pane's own `account_id`.
+/// `None` is the explicit "System (~/.claude)" choice — it resolves to
+/// `None` here (ambient environment unchanged), it is **not** a placeholder
+/// for "use `provider`'s configured default". That fallback used to live
+/// here and silently overrode an explicit system-default choice back onto
+/// the default account (the status-bar dropdown and the connect path
+/// disagreeing on what "System" meant); the provider default is now seeded
+/// onto a pane's `account_id` once, at pane-creation time (see
+/// `Workspace::default_account_id_for_new_pane`), so a resolve-time fallback
+/// is no longer needed — and would reintroduce the same bug.
+///
+/// `Some(id)` resolves to that account's dir only if the account still
+/// exists *and* belongs to `provider`; a deleted account, or one that
+/// belongs to a different provider, resolves to `None` the same as an
+/// unset override.
 pub(in crate::workspace) fn resolve_account_config_dir(
     state: &daruda_store::accounts::AccountsState,
     data_dir: &Path,
     account_id: Option<daruda_store::accounts::AccountId>,
     provider: daruda_store::accounts::AgentProvider,
 ) -> Option<PathBuf> {
-    let id = account_id.or_else(|| state.default_by_provider.get(&provider).copied())?;
-    // Only resolve to a dir if the account actually exists.
-    state.find(id)?;
+    let id = account_id?;
+    let account = state.find(id)?;
+    if account.provider != provider {
+        return None;
+    }
     Some(daruda_claude::accounts::account_config_dir(data_dir, id))
 }
 
@@ -898,14 +920,13 @@ pub(in crate::workspace) fn resolve_account_config_dir(
 /// [`resolve_account_config_dir`] resolves the dir alone — but also
 /// surfaces *which* account that resolved to, so per-account caches
 /// (plan-limits / activity usage) can be keyed by it. Split out from the
-/// `Workspace` method so this override → provider-default → dir
-/// resolution is unit-testable without standing up a live `Workspace`
-/// entity.
+/// `Workspace` method so this override → dir resolution is unit-testable
+/// without standing up a live `Workspace` entity.
 ///
-/// Returns `(None, None)` when the resolved account has been deleted, or
-/// when no managed account is configured at all — the caller then
-/// fetches against the system-default Keychain login, unchanged from
-/// today's behavior with zero managed accounts.
+/// `None` is the explicit system default and returns `(None, None)`,
+/// matching [`resolve_account_config_dir`] — no provider-default fallback
+/// here either (see that function's doc for why). Also returns
+/// `(None, None)` when the override points at a deleted account.
 fn resolve_focused_account(
     pane_override: Option<daruda_store::accounts::AccountId>,
     state: &daruda_store::accounts::AccountsState,
@@ -913,10 +934,7 @@ fn resolve_focused_account(
 ) -> (Option<daruda_store::accounts::AccountId>, Option<PathBuf>) {
     let provider = daruda_store::accounts::AgentProvider::Claude;
     let config_dir = resolve_account_config_dir(state, data_dir, pane_override, provider);
-    let key = config_dir
-        .is_some()
-        .then(|| pane_override.or_else(|| state.default_by_provider.get(&provider).copied()))
-        .flatten();
+    let key = config_dir.is_some().then_some(pane_override).flatten();
     (key, config_dir)
 }
 
@@ -944,8 +962,11 @@ impl Workspace {
     /// account). Gathers the focused pane's own override (`None` when
     /// the pane kind doesn't track an account at all, has no explicit
     /// override, or there is no live pane at `focused_pane_id`) and
-    /// delegates the override → provider-default → dir resolution to
-    /// [`resolve_focused_account`].
+    /// delegates the override → dir resolution to [`resolve_focused_account`]
+    /// — `None` resolves to the system default, no provider-default
+    /// fallback (a fresh pane already got the provider default seeded onto
+    /// its own `account_id` at creation time, see
+    /// [`Self::default_account_id_for_new_pane`]).
     pub(in crate::workspace) fn focused_account_key(
         &self,
     ) -> (Option<daruda_store::accounts::AccountId>, Option<PathBuf>) {
@@ -961,21 +982,38 @@ impl Workspace {
         resolve_focused_account(pane_override, &self.accounts, &self.data_dir)
     }
 
+    /// The Claude provider's configured default account id — seeded onto a
+    /// *freshly created* pane's `account_id` so a brand-new pane still opens
+    /// under the user's chosen default, without baking that fallback into
+    /// resolve-time lookups (see [`resolve_account_config_dir`]'s doc).
+    /// `None` when no default is configured, or the configured default
+    /// account has since been deleted (`AccountsState::default_account`
+    /// already drops a stale id).
+    pub(in crate::workspace) fn default_account_id_for_new_pane(
+        &self,
+    ) -> Option<daruda_store::accounts::AccountId> {
+        self.accounts
+            .default_account(daruda_store::accounts::AgentProvider::Claude)
+            .map(|a| a.id)
+    }
+
     pub(in crate::workspace) fn create_pane(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
         let cwd = self.default_cwd_for_new_pane();
-        // A fresh `Cmd+T` pane carries no explicit account override — resolve
-        // straight to the Claude provider default (`None` when unset).
+        // A fresh `Cmd+T` pane carries no explicit account override — seed it
+        // with the Claude provider default (`None` when unset), same as
+        // every other default-inheriting pane-creation site.
+        let account_id = self.default_account_id_for_new_pane();
         let account_config_dir = resolve_account_config_dir(
             &self.accounts,
             &self.data_dir,
-            None,
+            account_id,
             daruda_store::accounts::AgentProvider::Claude,
         );
-        self.create_pane_with_cwd(cwd, None, account_config_dir.as_deref(), window, cx)
+        self.create_pane_with_cwd(cwd, account_id, account_config_dir.as_deref(), window, cx)
     }
 
     /// Like `create_pane` but forces a specific initial cwd. Used by
@@ -983,9 +1021,12 @@ impl Workspace {
     /// it last tracked, independent of the focused-pane / project
     /// inheritance rules.
     ///
-    /// `account_id` is the pane's own persisted account override (`None` =
-    /// provider default), cached on the resulting `TerminalContent` purely
-    /// for re-serialization. `account_config_dir` is the already-resolved
+    /// `account_id` is the pane's own account override (`None` = system
+    /// default, `~/.claude`), cached on the resulting `TerminalContent`
+    /// purely for re-serialization; callers that want a fresh pane to
+    /// inherit the provider default pass
+    /// [`Self::default_account_id_for_new_pane`]'s result here explicitly.
+    /// `account_config_dir` is the already-resolved
     /// `CLAUDE_CONFIG_DIR` to inject into the spawned shell (see
     /// `apply_account_env` / `resolve_account_config_dir`); `None` spawns
     /// with the ambient environment unchanged.
@@ -1479,7 +1520,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_falls_back_to_provider_default() {
+    fn resolve_none_is_the_explicit_system_default_even_with_a_provider_default_set() {
         use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAccount};
         let id = AccountId::new();
         let mut st = AccountsState::default();
@@ -1494,13 +1535,20 @@ mod tests {
         });
         st.default_by_provider.insert(AgentProvider::Claude, id);
         let data = std::path::Path::new("/data");
-        // explicit None → default account's config dir
-        let dir = resolve_account_config_dir(&st, data, None, AgentProvider::Claude);
+        // `None` is the explicit "System (~/.claude)" choice — it must NOT
+        // fall back to the provider default, even when one is configured.
+        // (Seeding a fresh pane with the provider default happens once, at
+        // creation time — see `Workspace::default_account_id_for_new_pane`.)
         assert_eq!(
-            dir,
+            resolve_account_config_dir(&st, data, None, AgentProvider::Claude),
+            None
+        );
+        // An explicit `Some(id)` still resolves normally.
+        assert_eq!(
+            resolve_account_config_dir(&st, data, Some(id), AgentProvider::Claude),
             Some(daruda_claude::accounts::account_config_dir(data, id))
         );
-        // no default set → None (uses system ~/.claude)
+        // no default set → None either way (uses system ~/.claude)
         let empty = AccountsState::default();
         assert_eq!(
             resolve_account_config_dir(&empty, data, None, AgentProvider::Claude),
@@ -1533,7 +1581,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_account_key_falls_back_to_provider_default() {
+    fn focused_account_key_none_is_the_explicit_system_default() {
         use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAccount};
         let id = AccountId::new();
         let mut st = AccountsState::default();
@@ -1549,14 +1597,10 @@ mod tests {
         st.default_by_provider.insert(AgentProvider::Claude, id);
         let data = std::path::Path::new("/data");
 
-        // No explicit override on the pane → resolves to the provider
-        // default, and the key surfaces which account that was.
-        let (key, dir) = resolve_focused_account(None, &st, data);
-        assert_eq!(key, Some(id));
-        assert_eq!(
-            dir,
-            Some(daruda_claude::accounts::account_config_dir(data, id))
-        );
+        // No override on the pane (`None`) is the explicit system default —
+        // it must not resolve to the provider default even though one is
+        // configured, matching `resolve_account_config_dir`.
+        assert_eq!(resolve_focused_account(None, &st, data), (None, None));
     }
 
     #[test]

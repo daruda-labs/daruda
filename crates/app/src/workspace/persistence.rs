@@ -717,16 +717,18 @@ impl Workspace {
                     // Degenerate serialization — materialize a fresh leaf
                     // so we never surface an empty Split to the renderer.
                     // No serialized leaf survives to carry an account_id
-                    // here, so this resolves straight to the provider default.
+                    // here, so this is a fresh pane like any other —
+                    // seed it with the provider default.
+                    let account_id = self.default_account_id_for_new_pane();
                     let account_config_dir = pane::resolve_account_config_dir(
                         &self.accounts,
                         &self.data_dir,
-                        None,
+                        account_id,
                         daruda_store::accounts::AgentProvider::Claude,
                     );
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
-                        None,
+                        account_id,
                         account_config_dir.as_deref(),
                         window,
                         cx,

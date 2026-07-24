@@ -25,16 +25,15 @@ pub(super) struct AccountSlot {
     pub label: SharedString,
     /// The account's provider (Claude / Codex) — filters which managed
     /// accounts the dropdown lists. Resolved from the current account
-    /// when set, else the provider default (`AgentProvider::default()`,
-    /// Claude) — every switchable pane kind resolves against Claude only
-    /// until Codex account management ships (see
-    /// `pane::resolve_account_config_dir`).
+    /// when set, else `AgentProvider::default()` (Claude) — every
+    /// switchable pane kind resolves against Claude only until Codex
+    /// account management ships (see `pane::resolve_account_config_dir`).
     pub provider: AgentProvider,
     /// The focused pane the dropdown's menu items dispatch
     /// `Workspace::switch_pane_account` against.
     pub pane_id: PaneId,
-    /// The pane's own override (`None` = provider default), so the
-    /// dropdown can mark the active entry.
+    /// The pane's own override (`None` = the explicit system default,
+    /// `~/.claude`), so the dropdown can mark the active entry.
     pub current: Option<AccountId>,
     /// Managed accounts matching `provider`, for the dropdown's entries.
     pub accounts: Vec<ManagedAccount>,
@@ -53,12 +52,12 @@ pub(super) struct AccountSlot {
 
 impl AccountSlot {
     /// Resolve the status-bar account slot for a Terminal/AgentChat pane's
-    /// `account_id` (`None` = no override, falls back to the provider
-    /// default at spawn time — see `resolve_account_config_dir`) against
-    /// the workspace's `AccountsState`. Always produces a slot: an id that
-    /// no longer resolves (deleted account) falls back to the same
-    /// "System" label as a `None` id, rather than surfacing a dangling
-    /// reference to the user.
+    /// `account_id` (`None` = the explicit system default, `~/.claude` —
+    /// see `resolve_account_config_dir`'s doc for why this must not fall
+    /// back to the provider default) against the workspace's
+    /// `AccountsState`. Always produces a slot: an id that no longer
+    /// resolves (deleted account) falls back to the same "System" label as
+    /// a `None` id, rather than surfacing a dangling reference to the user.
     pub(super) fn resolve(
         pane_id: PaneId,
         account_id: Option<AccountId>,

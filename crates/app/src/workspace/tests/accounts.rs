@@ -72,6 +72,49 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
     });
 }
 
+/// A freshly created pane (the `Cmd+T` path) must be seeded with the
+/// provider's configured default account, not left `None` — since the
+/// `resolve_account_config_dir` fix, `None` means the explicit system
+/// default (`~/.claude`), so a pane that should inherit the default account
+/// needs that written onto its own `account_id` at creation time instead of
+/// relying on a resolve-time fallback.
+#[gpui::test]
+async fn create_pane_seeds_the_configured_provider_default(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let default_id = AccountId::new();
+    workspace.update(cx, |ws, _| {
+        ws.accounts
+            .accounts
+            .push(daruda_store::accounts::ManagedAccount {
+                id: default_id,
+                provider: daruda_store::accounts::AgentProvider::Claude,
+                email: None,
+                organization: None,
+                config_dir: std::env::temp_dir(),
+                created_at: 0,
+                last_authenticated_at: 0,
+            });
+        ws.accounts
+            .default_by_provider
+            .insert(daruda_store::accounts::AgentProvider::Claude, default_id);
+    });
+
+    let pane = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.create_pane(window, cx))
+        })
+        .unwrap()
+        .expect("fresh pane spawn must succeed");
+
+    assert_eq!(
+        pane.account_id(),
+        Some(Some(default_id)),
+        "a freshly created pane must be seeded with the provider default account"
+    );
+}
+
 #[gpui::test]
 fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);

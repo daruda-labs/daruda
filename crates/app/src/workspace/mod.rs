@@ -544,7 +544,10 @@ pub struct Workspace {
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
     /// Managed AI-provider accounts (Plan A: Claude only) — the catalog a
     /// pane's `account_id` resolves against, plus the per-provider default
-    /// used when a pane has no explicit override. Loaded from
+    /// seeded onto a freshly-created pane's `account_id` (see
+    /// `Workspace::default_account_id_for_new_pane`) — resolution itself
+    /// never falls back to it, an explicit `None` override always means
+    /// the system default. Loaded from
     /// `accounts.json` on construction via `data_dir` (same isolation as
     /// `panels`); absent/corrupt/unreadable file falls back to an empty
     /// state (no managed accounts — panes spawn with the ambient
