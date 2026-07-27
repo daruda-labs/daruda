@@ -191,6 +191,10 @@ pub(super) struct AgentCatalogRow {
     /// Docker container name — only meaningful (and only rendered) when
     /// `transport_select` is `"docker"`.
     pub(super) container_input: Entity<InputState>,
+    /// Optional session mode to request when this agent connects, overriding
+    /// the global default. Free text: a mode id is whatever the agent
+    /// advertises, which varies by agent and by model. Empty = no override.
+    pub(super) default_mode_input: Entity<InputState>,
 }
 
 impl SettingsWindow {
@@ -245,6 +249,7 @@ impl SettingsWindow {
             ),
         };
         let transport_kind = SharedString::from(transport_kind);
+        let default_mode = definition.default_mode.clone().unwrap_or_default();
         AgentCatalogRow {
             id_input: cx.new(|cx_state| {
                 InputState::new(window, cx_state)
@@ -279,6 +284,11 @@ impl SettingsWindow {
                     .placeholder("container-name")
                     .default_value(container)
             }),
+            default_mode_input: cx.new(|cx_state| {
+                InputState::new(window, cx_state)
+                    .placeholder(s::settings_agent_default_mode_placeholder())
+                    .default_value(default_mode)
+            }),
         }
     }
 
@@ -298,6 +308,11 @@ impl SettingsWindow {
             .push(Self::subscribe_input_state(&row.host_input, window, cx));
         self._input_subscriptions.push(Self::subscribe_input_state(
             &row.container_input,
+            window,
+            cx,
+        ));
+        self._input_subscriptions.push(Self::subscribe_input_state(
+            &row.default_mode_input,
             window,
             cx,
         ));
@@ -941,7 +956,14 @@ impl SettingsWindow {
                 },
                 _ => daruda_config::AgentLaunch::Raw(command),
             };
-            agents.push(daruda_config::AgentDefinition { id, name, launch });
+            let default_mode = row.default_mode_input.read(cx).value().trim().to_string();
+            agents.push(daruda_config::AgentDefinition {
+                id,
+                name,
+                launch,
+                // Empty field = no override; the global default applies.
+                default_mode: (!default_mode.is_empty()).then_some(default_mode),
+            });
         }
         if agents.is_empty() {
             return Err(SharedString::from(s::settings_err_agent_catalog_empty()));

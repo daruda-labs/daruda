@@ -334,7 +334,9 @@ modal:
   group_rename_title: "그룹 이름 바꾸기"
   group_rename_placeholder: "그룹 이름"
   switch_account_new_pane_title: "계정 전환"
-  switch_account_new_pane_body: "이 pane은 작업 중입니다 — 계정을 전환하면 중단하는 대신 선택한 계정으로 새 pane을 엽니다."
+  switch_account_new_pane_body_terminal: "실행 중인 셸은 다른 계정으로 옮길 수 없습니다. 전환하면 이 터미널은 그대로 두고 선택한 계정으로 새 pane을 엽니다."
+  switch_account_new_pane_body_busy: "이 pane은 작업 중입니다 — 계정을 전환하면 중단하는 대신 선택한 계정으로 새 pane을 엽니다."
+  switch_account_new_pane_body_conversation: "다른 계정은 별도의 세션이 필요해서 이 대화를 옮겨갈 수 없습니다. 전환하면 대화는 여기 그대로 두고 선택한 계정으로 새 pane을 엽니다. 이 pane을 그대로 쓰려면 먼저 /clear를 실행하세요."
   switch_account_new_pane_confirm: "새 Pane 열기"
 
 # Bottom dock
@@ -569,6 +571,9 @@ settings:
   agent_field_id: "ID"
   agent_field_name: "이름"
   agent_field_command: "명령"
+  agent_field_default_mode: "세션 모드"
+  agent_default_mode_placeholder: "비워 두면 기본 권한 모드를 사용합니다"
+  agent_mode_scope_hint: "이 모드를 광고하는 에이전트(Claude Code)에만 적용됩니다. 다른 어휘를 쓰는 에이전트는 아래 카탈로그의 세션 모드를 사용하며, 광고하지 않는 값은 무시합니다."
   agent_field_transport: "전송 방식"
   agent_transport_raw: "직접"
   agent_transport_ssh: "SSH"

@@ -334,7 +334,9 @@ modal:
   group_rename_title: "Rename Group"
   group_rename_placeholder: "Group name"
   switch_account_new_pane_title: "Switch Account"
-  switch_account_new_pane_body: "This pane is busy — switching accounts will open a new pane under the selected account instead of interrupting it."
+  switch_account_new_pane_body_terminal: "A running shell can't move to another account. Switching leaves this terminal as it is and opens a new pane under the selected account."
+  switch_account_new_pane_body_busy: "This pane is busy — switching accounts will open a new pane under the selected account instead of interrupting it."
+  switch_account_new_pane_body_conversation: "Another account needs its own session, and this conversation can't move to it. Switching keeps the conversation here and opens a new pane under the selected account. To reuse this pane instead, run /clear first."
   switch_account_new_pane_confirm: "Open New Pane"
 
 # Bottom dock
@@ -569,6 +571,9 @@ settings:
   agent_field_id: "ID"
   agent_field_name: "Name"
   agent_field_command: "Command"
+  agent_field_default_mode: "Session mode"
+  agent_default_mode_placeholder: "Leave empty to use the default permission mode"
+  agent_mode_scope_hint: "Applies to agents that advertise these modes (Claude Code). An agent with a different vocabulary uses its own Session mode in the catalog below, and ignores anything it does not advertise."
   agent_field_transport: "Transport"
   agent_transport_raw: "Direct"
   agent_transport_ssh: "SSH"

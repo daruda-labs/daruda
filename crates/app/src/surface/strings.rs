@@ -1683,8 +1683,14 @@ pub fn group_rename_dialog_placeholder() -> String {
 pub fn switch_account_new_pane_title() -> String {
     rust_i18n::t!("modal.switch_account_new_pane_title").into_owned()
 }
-pub fn switch_account_new_pane_body() -> String {
-    rust_i18n::t!("modal.switch_account_new_pane_body").into_owned()
+pub fn switch_account_new_pane_body_terminal() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_body_terminal").into_owned()
+}
+pub fn switch_account_new_pane_body_busy() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_body_busy").into_owned()
+}
+pub fn switch_account_new_pane_body_conversation() -> String {
+    rust_i18n::t!("modal.switch_account_new_pane_body_conversation").into_owned()
 }
 pub fn switch_account_new_pane_confirm() -> String {
     rust_i18n::t!("modal.switch_account_new_pane_confirm").into_owned()
@@ -2584,6 +2590,24 @@ pub fn settings_agent_field_host() -> String {
 /// is `docker`.
 pub fn settings_agent_field_container() -> String {
     rust_i18n::t!("settings.agent_field_container").into_owned()
+}
+
+/// Label for an agent catalog row's optional session-mode override.
+pub fn settings_agent_field_default_mode() -> String {
+    rust_i18n::t!("settings.agent_field_default_mode").into_owned()
+}
+
+/// Placeholder for that field — free text, because a mode id is whatever the
+/// agent advertises and daruda cannot enumerate it ahead of a connect.
+pub fn settings_agent_default_mode_placeholder() -> String {
+    rust_i18n::t!("settings.agent_default_mode_placeholder").into_owned()
+}
+
+/// Hint under the global permission-mode dropdown: its vocabulary is Claude
+/// Code's, and an agent that advertises different modes ignores it in favour of
+/// its own catalog-row override.
+pub fn settings_agent_mode_scope_hint() -> String {
+    rust_i18n::t!("settings.agent_mode_scope_hint").into_owned()
 }
 
 /// Hint line shown under the host/container field for an `ssh`/`docker`

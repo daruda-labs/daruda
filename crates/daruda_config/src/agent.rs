@@ -69,19 +69,6 @@ impl DefaultPermissionMode {
     /// choice — it is the adapter's own default and the least likely mode to be
     /// removed.
     pub const CONNECT_FALLBACK: DefaultPermissionMode = DefaultPermissionMode::Auto;
-
-    /// Priority-ordered mode ids to try on connect: the configured mode first,
-    /// then [`Self::CONNECT_FALLBACK`]. `daruda_acp` applies the first one the
-    /// adapter both advertises and accepts, so a session lands on the fallback
-    /// only when the preferred mode is unavailable. The fallback is omitted when
-    /// it equals the configured mode (no redundant candidate).
-    pub fn connect_mode_priority(self) -> Vec<&'static str> {
-        let mut priority = vec![self.mode_id()];
-        if self != Self::CONNECT_FALLBACK {
-            priority.push(Self::CONNECT_FALLBACK.mode_id());
-        }
-        priority
-    }
 }
 
 /// A selectable ACP agent: an id, a display name, and how its ACP adapter is
@@ -92,6 +79,15 @@ pub struct AgentDefinition {
     pub id: String,
     pub name: String,
     pub launch: AgentLaunch,
+    /// Session mode to request when a fresh session with this agent connects,
+    /// overriding [`AgentConfig::default_permission_mode`].
+    ///
+    /// A free-form id rather than [`DefaultPermissionMode`] because modes are
+    /// agent-advertised: this catalog holds Cline, Codex and a dozen other
+    /// adapters whose vocabularies daruda cannot enumerate, and even one
+    /// agent's list varies per model. An id the agent doesn't advertise is
+    /// skipped at connect, falling through to the global default.
+    pub default_mode: Option<String>,
 }
 
 /// How an ACP agent adapter is launched. `Raw` runs a bash-style command (or
@@ -277,6 +273,8 @@ struct AgentDefinitionRepr {
     ssh: Option<SshLaunchRepr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     docker: Option<DockerLaunchRepr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -324,6 +322,7 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             command,
             ssh,
             docker,
+            default_mode: v.default_mode,
         }
     }
 }
@@ -352,6 +351,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             id: v.id,
             name: v.name,
             launch,
+            default_mode: v.default_mode,
         }
     }
 }
@@ -370,6 +370,10 @@ impl AgentPreset {
             id: self.id.to_string(),
             name: self.name.to_string(),
             launch: AgentLaunch::Raw(self.command.to_string()),
+            // Presets carry no mode: daruda doesn't know what any given
+            // registry adapter advertises, so the global default applies until
+            // the user sets one.
+            default_mode: None,
         }
     }
 }
@@ -523,6 +527,9 @@ impl AgentDefinition {
             launch: AgentLaunch::Raw(
                 "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
             ),
+            // The global default is written in Claude's own mode vocabulary,
+            // so it needs no per-agent override here.
+            default_mode: None,
         }
     }
 
@@ -592,6 +599,33 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
+    /// Priority-ordered mode ids to try when a fresh session connects, most
+    /// preferred first: the agent's own `default_mode` (when its catalog entry
+    /// sets one), then this global default, then [`CONNECT_FALLBACK`].
+    ///
+    /// `daruda_acp` applies the first candidate the adapter both advertises and
+    /// accepts, so an agent whose vocabulary doesn't include a candidate simply
+    /// falls through to the next. That is what makes a per-agent override safe
+    /// to state as free-form text, and what keeps the Claude-flavored global
+    /// default harmless for an agent that never heard of it.
+    ///
+    /// [`CONNECT_FALLBACK`]: DefaultPermissionMode::CONNECT_FALLBACK
+    pub fn connect_mode_priority(&self, agent_default_mode: Option<&str>) -> Vec<String> {
+        let mut priority: Vec<String> = Vec::with_capacity(3);
+        let mut push = |id: &str| {
+            let id = id.trim();
+            if !id.is_empty() && !priority.iter().any(|p| p == id) {
+                priority.push(id.to_string());
+            }
+        };
+        if let Some(id) = agent_default_mode {
+            push(id);
+        }
+        push(self.default_permission_mode.mode_id());
+        push(DefaultPermissionMode::CONNECT_FALLBACK.mode_id());
+        priority
+    }
+
     /// Clamp `input_max_rows` to its valid range.
     pub fn clamp(&mut self) {
         self.input_max_rows = self
@@ -629,21 +663,51 @@ mod tests {
         );
     }
 
+    fn with_default_mode(mode: DefaultPermissionMode) -> AgentConfig {
+        AgentConfig {
+            default_permission_mode: mode,
+            ..AgentConfig::default()
+        }
+    }
+
     #[test]
-    fn connect_mode_priority_appends_auto_fallback() {
-        // The configured mode is tried first, then the auto fallback.
+    fn connect_mode_priority_appends_the_auto_fallback() {
+        let config = with_default_mode(DefaultPermissionMode::BypassPermissions);
         assert_eq!(
-            DefaultPermissionMode::BypassPermissions.connect_mode_priority(),
-            vec!["bypassPermissions", "auto"]
+            config.connect_mode_priority(None),
+            ["bypassPermissions", "auto"]
+        );
+
+        let config = with_default_mode(DefaultPermissionMode::Auto);
+        assert_eq!(
+            config.connect_mode_priority(None),
+            ["auto"],
+            "the fallback is not repeated when it is already the default"
+        );
+    }
+
+    #[test]
+    fn a_per_agent_mode_outranks_the_global_default() {
+        let config = with_default_mode(DefaultPermissionMode::BypassPermissions);
+        assert_eq!(
+            config.connect_mode_priority(Some("yolo")),
+            ["yolo", "bypassPermissions", "auto"],
+            "an agent's own vocabulary is tried first, the global default backs it up"
+        );
+    }
+
+    #[test]
+    fn connect_mode_priority_drops_blank_and_duplicate_candidates() {
+        let config = with_default_mode(DefaultPermissionMode::Plan);
+        assert_eq!(
+            config.connect_mode_priority(Some("  ")),
+            ["plan", "auto"],
+            "a whitespace-only override is no override"
         );
         assert_eq!(
-            DefaultPermissionMode::DontAsk.connect_mode_priority(),
-            vec!["dontAsk", "auto"]
-        );
-        // When the configured mode already is the fallback, it appears once.
-        assert_eq!(
-            DefaultPermissionMode::Auto.connect_mode_priority(),
-            vec!["auto"]
+            config.connect_mode_priority(Some("plan")),
+            ["plan", "auto"],
+            "an override equal to the global default is not tried twice"
         );
     }
 
@@ -775,10 +839,23 @@ mod tests {
             id: "codex".to_string(),
             name: "Codex".to_string(),
             launch: AgentLaunch::Raw("codex acp".to_string()),
+            default_mode: Some("yolo".to_string()),
         };
         let toml_str = toml::to_string(&d).expect("serialize");
         let back: AgentDefinition = toml::from_str(&toml_str).expect("deserialize");
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn a_definition_without_a_default_mode_round_trips_and_stays_absent() {
+        // Pre-`default_mode` configs must keep loading, and daruda must not
+        // start writing an empty key back into them.
+        let d: AgentDefinition =
+            toml::from_str("id = \"codex\"\nname = \"Codex\"\ncommand = \"codex acp\"\n")
+                .expect("deserialize");
+        assert_eq!(d.default_mode, None);
+        let toml_str = toml::to_string(&d).expect("serialize");
+        assert!(!toml_str.contains("default_mode"), "{toml_str}");
     }
 
     #[test]
@@ -810,6 +887,7 @@ mod tests {
                 adapter_command: "npx -y some-acp".to_string(),
                 host: "vm-work".to_string(),
             },
+            default_mode: None,
         };
         let toml_str = toml::to_string(&d).expect("serialize");
         assert!(toml_str.contains("[ssh]"));
@@ -829,6 +907,7 @@ mod tests {
                 adapter_command: "npx -y some-acp".to_string(),
                 container: "ubuntu-dev".to_string(),
             },
+            default_mode: None,
         };
         let toml_str = toml::to_string(&d).expect("serialize");
         assert!(toml_str.contains("[docker]"));

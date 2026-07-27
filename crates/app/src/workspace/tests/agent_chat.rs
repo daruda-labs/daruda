@@ -2211,6 +2211,7 @@ fn codex_agent() -> daruda_config::AgentDefinition {
         id: "codex".to_string(),
         name: "Codex".to_string(),
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
+        default_mode: None,
     }
 }
 
@@ -2648,6 +2649,7 @@ fn codex() -> daruda_config::AgentDefinition {
         id: "codex".to_string(),
         name: "Codex".to_string(),
         launch: daruda_config::AgentLaunch::Raw("codex-acp".to_string()),
+        default_mode: None,
     }
 }
 

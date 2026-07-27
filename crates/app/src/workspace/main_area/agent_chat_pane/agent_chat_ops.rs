@@ -63,6 +63,20 @@ fn agent_name_for(agents: &[daruda_config::AgentDefinition], agent_id: &str) -> 
         .unwrap_or_else(|| agent_id.to_string())
 }
 
+/// The session mode this agent's catalog entry asks for, when it sets one.
+/// `None` for an agent that doesn't set one, or an id no longer in the catalog
+/// — the global default then applies.
+fn agent_default_mode<'a>(
+    agents: &'a [daruda_config::AgentDefinition],
+    agent_id: &str,
+) -> Option<&'a str> {
+    agents
+        .iter()
+        .find(|a| a.id == agent_id)?
+        .default_mode
+        .as_deref()
+}
+
 /// Pure core of [`Workspace::resolve_restored_agent`] — decide the effective
 /// agent for a restored pane and whether its persisted session id survives.
 /// Factored out of the workspace so it is unit-testable without gpui.
@@ -620,20 +634,6 @@ impl Workspace {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // Offer the default permission mode as a priority list — the configured
-        // mode first, then an `auto` fallback for when the adapter no longer
-        // advertises it or refuses the switch. `run_connection` applies the
-        // first candidate that works only on a *fresh* session (new, or a resume
-        // downgraded to session/new) and skips it on a real load, preserving the
-        // resumed session's own mode. Passing it unconditionally lets a
-        // downgraded resume still get the configured default.
-        let initial_modes: Vec<String> = self
-            .agent
-            .default_permission_mode
-            .connect_mode_priority()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
         let node_root = daruda_store::persistence::node_install_dir();
 
         // Resolve the pane's agent_id → launch spec, reconciling a stale
@@ -650,6 +650,14 @@ impl Workspace {
             .agent_chat_view(pane_id)
             .map(|v| v.read(cx).agent_id.clone())
             .unwrap_or_default();
+        // Priority-ordered modes to try on a *fresh* session: this agent's own
+        // `default_mode`, then the global default, then `auto`. Resolved after
+        // the reconcile above so a pane whose agent_id was stale gets the mode
+        // of the agent it actually launches. `run_connection` skips this
+        // entirely on a real `session/load`, preserving the resumed mode.
+        let initial_modes = self
+            .agent
+            .connect_mode_priority(agent_default_mode(&self.agents, &agent_id));
 
         // A `Remote` cwd's launch needs the lane's remote path assembled in;
         // `Local` needs none. This is the only place a connect resolves the
@@ -1503,8 +1511,8 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_new_pane_cwd_core, resolve_open_agent_id, resolve_restored_agent,
-        should_notify_agent_event,
+        agent_default_mode, resolve_new_pane_cwd_core, resolve_open_agent_id,
+        resolve_restored_agent, should_notify_agent_event,
     };
     use daruda_config::{AgentDefinition, AgentLaunch};
     use daruda_store::project::PaneCwd;
@@ -1665,6 +1673,7 @@ mod tests {
                 id: "other".to_string(),
                 name: "Other".to_string(),
                 launch: AgentLaunch::Raw("run-other".to_string()),
+                default_mode: None,
             },
             AgentDefinition::claude_default(),
         ];
@@ -1680,12 +1689,37 @@ mod tests {
         assert!(!keep);
     }
 
+    #[test]
+    fn agent_default_mode_reads_the_matching_catalog_entry() {
+        let agents = vec![
+            AgentDefinition {
+                id: "other".to_string(),
+                name: "Other".to_string(),
+                launch: AgentLaunch::Raw("run-other".to_string()),
+                default_mode: Some("yolo".to_string()),
+            },
+            AgentDefinition::claude_default(),
+        ];
+        assert_eq!(agent_default_mode(&agents, "other"), Some("yolo"));
+        assert_eq!(
+            agent_default_mode(&agents, &AgentDefinition::claude_default().id),
+            None,
+            "an entry without an override leaves the global default to apply"
+        );
+        assert_eq!(
+            agent_default_mode(&agents, "gone"),
+            None,
+            "an id no longer in the catalog is not an override"
+        );
+    }
+
     fn two_agent_catalog() -> Vec<AgentDefinition> {
         vec![
             AgentDefinition {
                 id: "other".to_string(),
                 name: "Other".to_string(),
                 launch: AgentLaunch::Raw("run-other".to_string()),
+                default_mode: None,
             },
             AgentDefinition::claude_default(),
         ]

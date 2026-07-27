@@ -355,6 +355,12 @@ impl SettingsWindow {
                     .text_color(description_color)
                     .child(mode_description),
             )
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(description_color)
+                    .child(s::settings_agent_mode_scope_hint()),
+            )
             .child(checkbox_row(
                 checkbox(
                     "settings-agent-use-modifier-to-send",
@@ -417,6 +423,7 @@ impl SettingsWindow {
                                         id: String::new(),
                                         name: String::new(),
                                         launch: daruda_config::AgentLaunch::Raw(String::new()),
+                                        default_mode: None,
                                     },
                                     window,
                                     cx,
@@ -498,6 +505,10 @@ impl SettingsWindow {
             .child(field_row(
                 s::settings_agent_field_transport(),
                 crate::ui::select::select(&row.transport_select, cx, ()),
+            ))
+            .child(field_row(
+                s::settings_agent_field_default_mode(),
+                crate::ui::input(&row.default_mode_input, cx, ()),
             ));
 
         // Only one of host/container is meaningful per transport kind — show
