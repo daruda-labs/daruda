@@ -122,11 +122,17 @@ impl Inline {
             return (is_selectable, true, Some((0..self.text.len()).into()));
         }
 
-        let line_height = window.line_height();
-        let selection_bounds = text_view_state.selection_bounds();
+        // The layout's own row pitch, not `window.line_height()`: bands must tile
+        // exactly against the rows `position_for_index` reports, and the two are
+        // separate roundings of the same value. `paint_selection` reads it too,
+        // so hit-testing and the painted highlight agree on one number.
+        let line_height = text_layout.line_height();
+        let Some((anchor, cursor)) = text_view_state.selection_span() else {
+            return (is_selectable, false, None);
+        };
 
         // Use for debug selection bounds
-        // self.paint_selected_bounds(selection_bounds, window, cx);
+        // self.paint_selected_bounds(text_view_state.selection_bounds(), window, cx);
 
         // Pass 1: collect the raw byte range covered by the pixel selection bounds.
         let mut raw_start: Option<usize> = None;
@@ -152,7 +158,7 @@ impl Inline {
                 }
             }
 
-            if point_in_text_selection(pos, char_width, &selection_bounds, line_height) {
+            if char_in_text_selection(pos, char_width, anchor, cursor, line_height) {
                 if raw_start.is_none() {
                     raw_start = Some(offset);
                 }
@@ -469,189 +475,231 @@ impl Element for Inline {
     }
 }
 
-/// Check if a `pos` is within a `bounds`, considering multi-line selections.
-fn point_in_text_selection(
+/// Where a drag endpoint cuts the line band `[line_top, line_top + line_height)`,
+/// expressed as an x on that line: an endpoint on an earlier line cuts before
+/// every character, one on a later line cuts after every character.
+///
+/// This is what turns a selection back into a document-ordered range. Reducing
+/// both endpoints to the same line before comparing means the drag's shape —
+/// whether the lower endpoint happens to sit left or right of the upper one —
+/// can no longer decide which side of a line it bounds.
+fn endpoint_cut_x(endpoint: Point<Pixels>, line_top: Pixels, line_height: Pixels) -> f32 {
+    if endpoint.y < line_top {
+        f32::NEG_INFINITY
+    } else if endpoint.y >= line_top + line_height {
+        f32::INFINITY
+    } else {
+        f32::from(endpoint.x)
+    }
+}
+
+/// Whether the character cell at `pos` (width `char_width`) falls inside the
+/// drag from `anchor` to `cursor`.
+///
+/// A line neither endpoint reaches collapses to two equal infinities, which
+/// [`char_cell_hit_x`]'s degenerate-span branch rejects — so lines outside the
+/// drag need no separate vertical test.
+fn char_in_text_selection(
     pos: Point<Pixels>,
     char_width: Pixels,
-    bounds: &Bounds<Pixels>,
+    anchor: Point<Pixels>,
+    cursor: Point<Pixels>,
     line_height: Pixels,
 ) -> bool {
-    let top = bounds.top();
-    let bottom = bounds.bottom();
-    let left = bounds.left();
-    let right = bounds.right();
-
-    // Out of the vertical bounds
-    if pos.y + line_height < top || pos.y >= bottom {
-        return false;
-    }
-
-    let single_line = (bottom - top) <= line_height;
-    if single_line {
-        // Single-line (or zero-height click) selection: decide purely on the
-        // horizontal span. `char_cell_hit_x` handles both a drag span (center
-        // threshold) and a degenerate click point (cell contains the point),
-        // so a word/line click with no drag still hits the char under it.
-        return char_cell_hit_x(
-            f32::from(pos.x),
-            f32::from(char_width),
-            f32::from(left),
-            f32::from(right),
-        );
-    }
-
-    let is_above = pos.y <= top;
-    let is_below = pos.y + line_height >= bottom;
-
-    if is_above {
-        return pos.x + char_width.half() >= left;
-    } else if is_below {
-        return pos.x + char_width.half() <= right;
-    } else {
-        return true;
-    }
+    let a = endpoint_cut_x(anchor, pos.y, line_height);
+    let b = endpoint_cut_x(cursor, pos.y, line_height);
+    char_cell_hit_x(f32::from(pos.x), f32::from(char_width), a.min(b), a.max(b))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::point_in_text_selection;
-    use gpui::{Bounds, point, px, size};
+    use super::{char_in_text_selection, endpoint_cut_x};
+    use gpui::{Pixels, Point, point, px};
+
+    const LINE_HEIGHT: Pixels = px(20.);
+    const CHAR_WIDTH: Pixels = px(10.);
+
+    /// Line `n`'s top, for a grid anchored at y = 0.
+    fn line_top(n: f32) -> Pixels {
+        px(n * 20.)
+    }
+
+    /// Is the character cell starting at (`x`, top of line `line`) selected by
+    /// the drag `anchor` → `cursor`?
+    fn selected(line: f32, x: f32, anchor: Point<Pixels>, cursor: Point<Pixels>) -> bool {
+        char_in_text_selection(
+            point(px(x), line_top(line)),
+            CHAR_WIDTH,
+            anchor,
+            cursor,
+            LINE_HEIGHT,
+        )
+    }
 
     #[test]
-    fn test_point_in_text_selection() {
-        let line_height = px(20.);
-        let char_width = px(10.);
-        let bounds = Bounds {
-            origin: point(px(50.), px(50.)),
-            size: size(px(100.), px(100.)),
-        };
+    fn endpoint_cut_collapses_to_the_side_it_falls_on() {
+        let top = line_top(1.);
+        assert_eq!(
+            endpoint_cut_x(point(px(70.), px(15.)), top, LINE_HEIGHT),
+            f32::NEG_INFINITY,
+            "an endpoint above the line cuts before every character on it"
+        );
+        assert_eq!(
+            endpoint_cut_x(point(px(70.), px(45.)), top, LINE_HEIGHT),
+            f32::INFINITY,
+            "an endpoint below the line cuts after every character on it"
+        );
+        assert_eq!(
+            endpoint_cut_x(point(px(70.), px(25.)), top, LINE_HEIGHT),
+            70.,
+            "an endpoint on the line cuts at its own x"
+        );
+        assert_eq!(
+            endpoint_cut_x(point(px(70.), top), top, LINE_HEIGHT),
+            70.,
+            "the band is inclusive at its top edge"
+        );
+        assert_eq!(
+            endpoint_cut_x(point(px(70.), top + LINE_HEIGHT), top, LINE_HEIGHT),
+            f32::INFINITY,
+            "and exclusive at its bottom edge — that y belongs to the next line"
+        );
+    }
 
-        // First line but haft line height, true
-        // | p --------|
-        // | selection |
-        // |-----------|
-        assert!(point_in_text_selection(
-            point(px(50.), px(40.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
+    /// Drag down from line 0 to line 1, ending LEFT of where it started.
+    ///
+    /// The endpoints' x order says nothing about direction here: line 0 must
+    /// still run from the anchor rightwards, and line 1 from its start to the
+    /// cursor. Treating the drag as a rectangle instead selected the union —
+    /// text before the anchor on line 0, and text past the cursor on line 1.
+    #[test]
+    fn a_downward_drag_ending_left_of_its_anchor_does_not_grow() {
+        let anchor = point(px(100.), px(5.));
+        let cursor = point(px(50.), px(35.));
 
-        // First line in selection, true
-        // | p --------|
-        // | selection |
-        // |-----------|
-        assert!(point_in_text_selection(
-            point(px(50.), px(50.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // First line, but left out of selection, false
-        // p |-----------|
-        //   | selection |
-        //   |-----------|
-        assert!(!point_in_text_selection(
-            point(px(40.), px(50.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // First line but right out of selection, true
-        // |-----------| p
-        // | selection |
-        // |-----------|
-        assert!(point_in_text_selection(
-            point(px(160.), px(50.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
+        assert!(
+            !selected(0., 60., anchor, cursor),
+            "line 0 before the anchor stays unselected"
+        );
+        assert!(
+            selected(0., 120., anchor, cursor),
+            "line 0 after the anchor runs to the end of the line"
+        );
+        assert!(
+            selected(1., 30., anchor, cursor),
+            "line 1 is selected up to the cursor"
+        );
+        assert!(
+            !selected(1., 80., anchor, cursor),
+            "line 1 past the cursor stays unselected"
+        );
+    }
 
-        // Middle line in selection, true
-        // |-----------|
-        // |     p     |
-        // |-----------|
-        assert!(point_in_text_selection(
-            point(px(100.), px(70.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // Middle line, but left out of selection, true
-        //   |-----------|
-        // p | selection |
-        //   |-----------|
-        assert!(point_in_text_selection(
-            point(px(40.), px(70.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // Middle line, but right out of selection, true
-        // |-----------|
-        // | selection | p
-        // |-----------|
-        assert!(point_in_text_selection(
-            point(px(160.), px(70.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
+    /// The same drag, mirrored: moving the cursor further left may only shrink
+    /// the lower line, never extend the upper one.
+    #[test]
+    fn moving_the_cursor_left_only_shrinks_the_lower_line() {
+        let anchor = point(px(100.), px(5.));
+        let near = point(px(90.), px(35.));
+        let far = point(px(20.), px(35.));
 
-        // Last line in selection, true
-        // |-----------|
-        // | selection |
-        // |------- p -|
-        assert!(point_in_text_selection(
-            point(px(100.), px(140.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // Last line, but left out of selection, true
-        //
-        //   |-----------|
-        //   | selection |
-        // p |-----------|
-        assert!(point_in_text_selection(
-            point(px(40.), px(140.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // Last line, but right out of selection, false
-        // |-----------|
-        // | selection |
-        // |-----------| p
-        assert!(!point_in_text_selection(
-            point(px(160.), px(140.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
+        assert!(selected(1., 60., anchor, near));
+        assert!(
+            !selected(1., 60., anchor, far),
+            "dragging further left releases line 1 text"
+        );
+        assert!(selected(0., 120., anchor, near));
+        assert!(
+            selected(0., 120., anchor, far),
+            "line 0 after the anchor is unaffected by the cursor's x"
+        );
+    }
 
-        // Out of vertical bounds (top), false
-        //       p
-        // |-----------|
-        // | selection |
-        // |-----------|
-        assert!(!point_in_text_selection(
-            point(px(100.), px(20.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
-        // Out of vertical bounds (bottom), false
-        // |-----------|
-        // | selection |
-        // |-----------|
-        //       p
-        assert!(!point_in_text_selection(
-            point(px(100.), px(160.)),
-            char_width,
-            &bounds,
-            line_height
-        ));
+    /// Each line is bounded by its own endpoint, not by the drag's shared x
+    /// span. Pass 1 keeps only the first and last hit, so for this rightward
+    /// drag the contiguous envelope hides the difference — but it is the same
+    /// predicate that makes a leftward drag come out right, so pin it directly.
+    #[test]
+    fn each_line_is_bounded_by_its_own_endpoint() {
+        let anchor = point(px(30.), px(5.));
+        let cursor = point(px(80.), px(22.));
+
+        assert!(
+            selected(0., 150., anchor, cursor),
+            "line 0 continues past the cursor's x to the end of the line"
+        );
+        assert!(selected(1., 50., anchor, cursor), "line 1 up to the cursor");
+        assert!(!selected(1., 150., anchor, cursor), "but not past it");
+    }
+
+    #[test]
+    fn a_drag_inside_one_line_never_reaches_its_neighbours() {
+        let anchor = point(px(30.), px(5.));
+        let cursor = point(px(80.), px(18.));
+
+        assert!(selected(0., 50., anchor, cursor));
+        assert!(
+            !selected(1., 50., anchor, cursor),
+            "the line below is outside the drag"
+        );
+        assert!(!selected(-1., 50., anchor, cursor), "so is the line above");
+    }
+
+    #[test]
+    fn a_single_line_drag_selects_between_its_endpoints_in_either_direction() {
+        let left = point(px(30.), px(5.));
+        let right = point(px(80.), px(15.));
+
+        for (anchor, cursor) in [(left, right), (right, left)] {
+            assert!(!selected(0., 10., anchor, cursor), "before the span");
+            assert!(selected(0., 50., anchor, cursor), "inside the span");
+            assert!(!selected(0., 100., anchor, cursor), "after the span");
+        }
+    }
+
+    #[test]
+    fn lines_between_the_endpoints_are_fully_selected() {
+        let anchor = point(px(100.), px(5.));
+        let cursor = point(px(50.), px(55.));
+
+        assert!(selected(1., 0., anchor, cursor));
+        assert!(selected(1., 500., anchor, cursor));
+    }
+
+    /// Direction independence is the whole point of the fix: nothing orders the
+    /// endpoints, so dragging up must give the same selection as dragging down
+    /// between the same two points.
+    #[test]
+    fn an_upward_drag_matches_the_downward_one() {
+        let upper = point(px(100.), px(5.));
+        let lower = point(px(50.), px(55.));
+
+        for (line, x) in [
+            (0., 60.),
+            (0., 120.),
+            (1., 0.),
+            (1., 500.),
+            (2., 30.),
+            (2., 80.),
+        ] {
+            assert_eq!(
+                selected(line, x, upper, lower),
+                selected(line, x, lower, upper),
+                "line {line} x {x} differs by drag direction"
+            );
+        }
+    }
+
+    #[test]
+    fn a_click_with_no_drag_hits_the_character_under_it() {
+        // Word/line clicks produce a zero-width span and re-expand from this
+        // raw scan, so the cell containing the point must still register.
+        let at = point(px(35.), px(5.));
+        assert!(selected(0., 30., at, at), "cell 30..40 contains x = 35");
+        assert!(!selected(0., 40., at, at), "the next cell does not");
+        // A click must not reach other lines — Word/Line expansion re-reads
+        // this scan, so a stray hit there would select a whole foreign line.
+        assert!(!selected(1., 30., at, at), "nor the line below");
+        assert!(!selected(-1., 30., at, at), "nor the line above");
     }
 }

@@ -373,6 +373,19 @@ impl TextViewState {
         )
     }
 
+    /// The drag's two endpoints in window coordinates, anchor first.
+    ///
+    /// Hit-testing needs the endpoints, not [`Self::selection_bounds`]: a
+    /// rectangle is normalized per axis, so it can no longer say which x
+    /// belongs to the drag's upper point and which to its lower one — and that
+    /// pairing is what decides where each line's selection starts and ends.
+    pub(crate) fn selection_span(&self) -> Option<(Point<Pixels>, Point<Pixels>)> {
+        let (Some(anchor), Some(cursor)) = self.selection_positions else {
+            return None;
+        };
+        Some((anchor + self.bounds.origin, cursor + self.bounds.origin))
+    }
+
     fn selection_text(&self) -> Option<String> {
         Some(
             self.parsed_result

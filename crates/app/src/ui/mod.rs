@@ -305,7 +305,7 @@ mod text_view_select_mode_tests {
     /// and `layout_selections` re-expands from the raw pixel-hit scan. The
     /// scan must still hit the char cell under the click — this is the bug
     /// where only quad-click (which bypasses the scan) appeared to work.
-    /// Calls the real `char_cell_hit_x` used by `point_in_text_selection`.
+    /// Calls the real `char_cell_hit_x` used by `char_in_text_selection`.
     #[test]
     fn char_cell_hit_click_point_hits_cell_under_point() {
         // Click at x=102, off the center of any 10px cell — the old
