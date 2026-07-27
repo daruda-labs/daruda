@@ -128,8 +128,6 @@ pub const TEXT_SUBTLE: Hsla = hsla(218.0, 0.053, 0.5, 1.0);
 
 /// Popover, context menu, tooltip background  (#1f2022).
 pub const SURFACE_4: Hsla = hsla(210.0, 0.046, 0.128, 1.0);
-/// Faint overlay border — popover edges (rgba white at 6%).
-pub const HAIRLINE_SOFT: Hsla = hsla(0.0, 0.0, 1.0, 0.06);
 /// Hovered accent elements (#828fff).
 pub const ACCENT_HOVER: Hsla = hsla(233.8, 1.0, 0.755, 1.0);
 /// Low-opacity accent fill — badge background (#1e2050).
@@ -138,30 +136,11 @@ pub const ACCENT_MUTED: Hsla = hsla(237.6, 0.45, 0.216, 1.0);
 pub const ACCENT_FG: Hsla = hsla(0.0, 0.0, 1.0, 1.0);
 
 // ---------------------------------------------------------------------------
-// Claude lane states
-// ---------------------------------------------------------------------------
-
-/// Claude is running in this lane (#f0a020).
-pub const CLAUDE_ACTIVE: Hsla = hsla(36.9, 0.874, 0.533, 1.0);
-/// Last Claude session completed (DESIGN: intentionally = success).
-pub const CLAUDE_DONE: Hsla = SUCCESS;
-/// Last session errored (DESIGN: intentionally = error).
-pub const CLAUDE_ERROR: Hsla = ERROR;
-
-// ---------------------------------------------------------------------------
 // Agent action states (Cursor timeline palette, dark-adapted)
 // ---------------------------------------------------------------------------
 
-/// Steel blue — Thinking / planning (#8faacc).
-pub const AGENT_THINKING: Hsla = hsla(213.4, 0.375, 0.681, 1.0);
-/// Mint green — Reading files / context (#8fcca8).
-pub const AGENT_READING: Hsla = hsla(144.6, 0.375, 0.681, 1.0);
-/// Lavender — Writing / editing output (#b09bcc).
-pub const AGENT_EDITING: Hsla = hsla(265.6, 0.324, 0.704, 1.0);
 /// Gold — Executing tool / running command (#ccaa6e).
 pub const AGENT_RUNNING: Hsla = hsla(38.4, 0.480, 0.616, 1.0);
-/// No active session (#8a8f98 = mute).
-pub const AGENT_IDLE: Hsla = TEXT_MUTE;
 
 // ---------------------------------------------------------------------------
 // Git status
@@ -189,7 +168,6 @@ pub const DIFF_HUNK: Hsla = TEXT_SUBTLE; // #797e86
 // ---------------------------------------------------------------------------
 
 pub const SELECTION_BG: Hsla = with_alpha(PRIMARY, 0.28);
-pub const SELECTION_FG: Hsla = INK;
 
 // ---------------------------------------------------------------------------
 // Semantic — general UI
@@ -276,9 +254,6 @@ pub const DOCK_VIEW_TAB_PAD_X: f32 = PAD_LG;
 /// Dock view tab strip — font size (px).
 pub const DOCK_VIEW_TAB_FONT_SIZE: f32 = FONT_SIZE_SM;
 
-/// Dock view tab strip — active underline thickness (px).
-pub const DOCK_VIEW_TAB_ACCENT_H: f32 = 2.0;
-
 // Lanes list (left dock Lanes view)
 /// Lanes list — horizontal padding (px).
 pub const LANE_ROW_PAD_X: f32 = PAD_LG;
@@ -292,8 +267,6 @@ pub const LANE_SECTION_HEADER_FONT_SIZE: f32 = 10.5;
 pub const LANE_SECTION_PAD_Y: f32 = PAD_SM;
 /// Lanes list — placeholder (non-git info box) padding (px).
 pub const LANE_PLACEHOLDER_PAD: f32 = 12.0;
-/// Context menu max width (px) — wider items get truncated by overflow_hidden.
-pub const CTX_MENU_MAX_WIDTH: f32 = 200.0;
 /// Drag ghost row vertical padding (px) — space above/below label in the
 /// floating preview that follows the cursor during a lane drag.
 pub const LANE_DRAG_GHOST_PAD_Y: f32 = PAD_XS;
@@ -388,8 +361,6 @@ pub const MODAL_PANEL_RADIUS: f32 = RADIUS_LG;
 pub const MODAL_PANEL_WIDTH: f32 = 420.0;
 /// Modal panel inner padding (px).
 pub const MODAL_PANEL_PAD: f32 = 16.0;
-/// Modal panel top offset from window top (px).
-pub const MODAL_TOP_OFFSET: f32 = 140.0;
 /// Modal title font size (px).
 pub const MODAL_TITLE_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Modal body font size (px).
@@ -409,8 +380,6 @@ pub const MODAL_PANEL_GAP: f32 = PAD_LG;
 pub const MODAL_FOOTER_GAP: f32 = GAP_LG;
 /// Top margin of the footer row inside the panel.
 pub const MODAL_FOOTER_MARGIN_TOP: f32 = PAD_SM;
-/// Single-line text-input field height (px).
-pub const MODAL_INPUT_HEIGHT: f32 = 32.0;
 /// Minimum height of the Notes textarea inside `EditTaskModal` (px). Shares
 /// the Prompt's `flex_1` column but is biased smaller (notes are short); this
 /// guarantees ~6 lines without letting the row dominate the column.
@@ -421,38 +390,14 @@ pub const MODAL_RADIO_W: f32 = 14.0;
 /// Wide form modal width (px). Used for split layouts (e.g. Skills:
 /// metadata form on the left + markdown body editor on the right).
 pub const FORM_MODAL_WIDE: f32 = 900.0;
-/// Narrow form modal width (px). Single-column form (e.g. Tools MCP
-/// server registration).
-pub const FORM_MODAL_NARROW: f32 = 480.0;
-/// Fixed overall height for the Tasks Create/Edit modals (px). The
-/// 2-column body fills the panel; Prompt grows to `flex_1` so the
-/// writing surface stays comfortable. ModalLayer caps at viewport
-/// height so this is treated as a target on tall screens and a
-/// scroll trigger on short ones.
-pub const FORM_MODAL_HEIGHT_TASK: f32 = 640.0;
 /// Vertical gap between sections inside a form modal column (px).
 pub const FORM_MODAL_SECTION_GAP: f32 = 12.0;
 /// Horizontal gap between the left/right columns of a split-form
 /// modal body (px).
 pub const FORM_MODAL_SPLIT_GAP: f32 = 16.0;
-/// Bottom-edge breathing room kept clear under modal panels so a tall
-/// modal — once `max_h + overflow_y_scroll` is engaged — has visible
-/// margin instead of butting up against the window edge (px).
-pub const MODAL_BOTTOM_MARGIN: f32 = 24.0;
 /// Height of the 1px separator strip rendered between context-menu
 /// item groups (px). `bg` uses `MODAL_PANEL_BORDER`.
 pub const CONTEXT_MENU_SEPARATOR_H: f32 = 1.0;
-/// Width of the text-input cursor caret (px). 1.5 keeps it visible
-/// at the smaller modal font sizes without looking heavy.
-pub const CARET_WIDTH: f32 = 1.5;
-/// Underline thickness for in-progress IME composition (Hangul / CJK).
-pub const IME_UNDERLINE_THICKNESS: f32 = 1.0;
-/// Side length of the square modal checkbox (px).
-pub const MODAL_CHECKBOX_SIZE: f32 = 14.0;
-/// Corner radius of the modal checkbox (px).
-pub const MODAL_CHECKBOX_RADIUS: f32 = RADIUS_XS;
-/// Font size of the ✓ checkmark inside the checkbox (px).
-pub const MODAL_CHECKBOX_TICK_SIZE: f32 = 10.0;
 /// Banner background — error severity. Red hue, low alpha so the
 /// underlying `MODAL_PANEL_BG` shows through.
 pub const BANNER_ERROR_BG: Hsla = with_alpha(ERROR, 0.10);
@@ -470,14 +415,6 @@ pub const BANNER_INFO_TEXT: Hsla = with_lightness(PRIMARY, 0.75);
 pub const BANNER_SUCCESS_BG: Hsla = with_alpha(SUCCESS, 0.10);
 /// Banner text + icon color — success severity.
 pub const BANNER_SUCCESS_TEXT: Hsla = with_lightness(SUCCESS, 0.65);
-/// Horizontal padding inside a banner (px).
-pub const BANNER_PAD_X: f32 = PAD_LG;
-/// Vertical padding inside a banner (px).
-pub const BANNER_PAD_Y: f32 = PAD_SM;
-/// Banner corner radius (px).
-pub const BANNER_RADIUS: f32 = RADIUS_MD;
-/// Gap between the icon glyph and the message text (px).
-pub const BANNER_GAP: f32 = GAP_STANDARD;
 /// Fixed width of the label column in settings form rows (px).
 pub const SETTINGS_LABEL_W: f32 = 120.0;
 
@@ -503,18 +440,12 @@ pub const SETTINGS_PLUGIN_MASTER_W: f32 = 220.0;
 /// in spirit but slightly narrower since the detail labels are shorter
 /// than the form-field labels.
 pub const SETTINGS_PLUGIN_LABEL_W: f32 = 110.0;
-/// Minimum width for Select dropdown lists in modal/settings contexts (px).
-pub const MODAL_SELECT_MIN_W: f32 = 160.0;
-/// Maximum height for Select dropdown lists before they start scrolling (px).
-pub const MODAL_SELECT_MAX_H: f32 = 280.0;
 /// macOS traffic light X offset from window left edge.
 pub const TRAFFIC_LIGHT_X: f32 = 8.0;
 /// macOS traffic light Y offset from window top edge.
 pub const TRAFFIC_LIGHT_Y: f32 = 6.0;
 /// Width reserved for traffic lights in the title bar.
 pub const TRAFFIC_LIGHT_WIDTH: f32 = 70.0;
-/// Dock panel header height (px).
-pub const DOCK_HEADER_HEIGHT: f32 = 28.0;
 /// Standard button height (px) — DESIGN.md §Fixed Heights "Button (standard): 28px".
 /// Applied to Submit and secondary action buttons in the bottom-dock input chrome.
 pub const BUTTON_HEIGHT: f32 = 28.0;
@@ -553,14 +484,6 @@ pub const GIT_BADGE_GAP: f32 = GAP_SM;
 pub const GIT_BADGE_ARROW_NUM_GAP: f32 = 1.0;
 // Git-changes-view diff shares the file-viewer's diff palette so the two
 // surfaces read identically; see the `FILE_DIFF_*` canonical definitions.
-/// Diff line font size (px) — compact monospace.
-pub const GIT_DIFF_FONT_SIZE: f32 = FONT_SIZE_XS;
-/// Diff line horizontal padding (px).
-pub const GIT_DIFF_LINE_PAD_X: f32 = PAD_SM;
-/// Diff panel max visible height before truncation note (px).
-pub const GIT_DIFF_MAX_HEIGHT: f32 = 320.0;
-/// Maximum diff lines rendered (guards against huge diffs).
-pub const GIT_DIFF_MAX_LINES: usize = 120;
 /// Stage checkbox box size (px).
 pub const GIT_STAGE_CHECKBOX_SIZE: f32 = 13.0;
 /// Stage checkbox border radius (px).
@@ -578,8 +501,6 @@ pub const GIT_HEADER_PAD_Y: f32 = PAD_SM;
 pub const GIT_DIR_HEADER_PAD_Y: f32 = GAP_XS;
 /// Directory group header font size (px).
 pub const GIT_DIR_HEADER_FONT_SIZE: f32 = FONT_SIZE_XS;
-/// Refresh icon size in the Git Changes header (px).
-pub const GIT_REFRESH_ICON_SIZE: f32 = 16.0;
 /// Commit footer inner padding (px).
 pub const GIT_COMMIT_PAD: f32 = PAD_STANDARD;
 /// Gap between Commit and Push buttons (px).
@@ -589,14 +510,6 @@ pub const GIT_COMMIT_BUTTON_GAP: f32 = GAP_STANDARD;
 pub const GIT_COMMIT_FOOTER_H: f32 = 128.0;
 /// Commit message text area height (px) — kept for reference; layout uses GIT_COMMIT_FOOTER_H.
 pub const GIT_COMMIT_INPUT_HEIGHT: f32 = 64.0;
-/// Commit button horizontal padding (px).
-pub const GIT_COMMIT_BTN_PAD_X: f32 = PAD_STANDARD;
-/// Commit button vertical padding (px).
-pub const GIT_COMMIT_BTN_PAD_Y: f32 = PAD_XS;
-/// Commit button corner radius (px).
-pub const GIT_COMMIT_BTN_RADIUS: f32 = RADIUS_SM;
-/// Dropdown arrow button horizontal padding (px).
-pub const GIT_COMMIT_DROP_PAD_X: f32 = 5.0;
 /// Gap between remote action buttons (Fetch / Push) (px).
 pub const GIT_REMOTE_BTN_GAP: f32 = GAP_SM;
 /// Gap between the text area and the action button group in InputPanel (px).
@@ -623,8 +536,6 @@ pub const AGENT_MENU_FLAT_MAX: usize = 5;
 pub const PALETTE_RADIUS: f32 = RADIUS_LG;
 /// Tab label font size (px).
 pub const TAB_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Tab close button font size (px).
-pub const TAB_CLOSE_FONT_SIZE: f32 = FONT_SIZE_SM;
 /// Tab minimum width (px).
 pub const TAB_MIN_WIDTH: f32 = 80.0;
 /// Tab maximum width (px).
@@ -641,10 +552,6 @@ pub const PANE_HEADER_CLOSE_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const STATUS_BAR_FONT_SIZE: f32 = FONT_SIZE_SM;
 /// Status bar horizontal padding (px).
 pub const STATUS_BAR_PAD_X: f32 = PAD_LG;
-/// Dock panel header font size (px).
-pub const DOCK_HEADER_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Dock panel header horizontal padding (px).
-pub const DOCK_HEADER_PAD_X: f32 = PAD_LG;
 /// Dock placeholder message font size (px).
 pub const DOCK_PLACEHOLDER_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Dock toggle icon size (px).
@@ -736,10 +643,6 @@ pub const TAB_PAD_RIGHT: f32 = PAD_XS;
 pub const TAB_PAD_Y: f32 = GAP_XS;
 /// Tab cell horizontal margin (px).
 pub const TAB_MARGIN_X: f32 = 1.0;
-/// Tab close button width/height (px).
-pub const TAB_CLOSE_W: f32 = 16.0;
-/// Tab close button corner radius (px).
-pub const TAB_CLOSE_RADIUS: f32 = RADIUS_XS;
 /// New-tab button horizontal padding (px).
 pub const NEW_TAB_PAD_X: f32 = PAD_STANDARD;
 /// New-tab button vertical padding (px).
@@ -770,8 +673,6 @@ pub const PALETTE_ENTRY_FONT_SIZE: f32 = FONT_SIZE_LG;
 pub const PALETTE_SHORTCUT_FONT_SIZE: f32 = FONT_SIZE_SM;
 /// Command palette "no results" padding Y (px).
 pub const PALETTE_EMPTY_PAD_Y: f32 = 16.0;
-/// Divider drag hit area min dimension (px).
-pub const DIVIDER_MIN_DIM: f32 = 1.0;
 /// Settings window initial origin X from screen top-left (px).
 pub const SETTINGS_WINDOW_ORIGIN_X: f32 = 200.0;
 /// Settings window initial origin Y from screen top-left (px).
@@ -797,24 +698,15 @@ pub const STATUS_BAR_DETACHED_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const STATUS_BAR_DETACHED_PAD_X: f32 = 5.0;
 pub const STATUS_BAR_DETACHED_PAD_Y: f32 = 1.0;
 pub const STATUS_BAR_DETACHED_RADIUS: f32 = RADIUS_XS;
-/// Agent activity log entry font size (px).
-pub const AGENT_LOG_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Agent activity log icon column width (px).
-pub const AGENT_LOG_ICON_W: f32 = 18.0;
-/// Agent activity log entry horizontal gap (px).
-pub const AGENT_LOG_GAP: f32 = GAP_STANDARD;
-/// Agent activity log container horizontal padding (px).
-pub const AGENT_LOG_PAD_X: f32 = PAD_STANDARD;
-/// Agent activity log container vertical padding (px).
-pub const AGENT_LOG_PAD_Y: f32 = PAD_XS;
-/// Agent activity log entry vertical gap (px).
-pub const AGENT_LOG_ENTRY_GAP: f32 = GAP_XS;
-/// Agent activity log pinned status top margin (px).
-pub const AGENT_LOG_STATUS_MT: f32 = PAD_XS;
-/// Agent activity log pinned status padding X (px).
-pub const AGENT_LOG_STATUS_PAD_X: f32 = PAD_STANDARD;
-/// Agent activity log pinned status padding Y (px).
-pub const AGENT_LOG_STATUS_PAD_Y: f32 = PAD_XS;
+/// Account slot chip — fixed height, horizontal padding, corner radius.
+/// 18px leaves 2px of clearance above/below inside the 22px status bar
+/// (same "don't force a row-height increase" constraint as the detached
+/// chip above), with room for the always-on hairline border that gives
+/// the dropdown trigger a resting-state outline (`ghost()` alone paints
+/// no border in any state).
+pub const STATUS_BAR_ACCOUNT_HEIGHT: f32 = 18.0;
+pub const STATUS_BAR_ACCOUNT_PAD_X: f32 = 6.0;
+pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
 /// Agent chat font size (px) — the whole conversation pane (message bodies,
 /// headers, tool titles, chrome) shares this one size. Compile-time default
 /// for the config-driven `font.agent_chat_size`; the render path resolves the
@@ -871,10 +763,6 @@ pub const AGENT_CHAT_HEADER_ICON_SIZE: f32 = 16.0;
 pub const AGENT_CHAT_PAD_X: f32 = PAD_STANDARD;
 /// Agent chat container padding Y (px).
 pub const AGENT_CHAT_PAD_Y: f32 = PAD_XS;
-/// Agent chat input area padding X (px).
-pub const AGENT_CHAT_INPUT_PAD_X: f32 = PAD_STANDARD;
-/// Agent chat input area padding Y (px).
-pub const AGENT_CHAT_INPUT_PAD_Y: f32 = PAD_SM;
 /// Agent chat input box inner padding X (px).
 pub const AGENT_CHAT_INPUT_INNER_PAD_X: f32 = PAD_STANDARD;
 /// Agent chat input box inner padding Y (px).
@@ -890,18 +778,6 @@ pub const AGENT_CHAT_SCROLL_BTN_INSET: f32 = 12.0;
 /// Max height (px) of the bottom plan region's expanded checklist before it
 /// scrolls internally, so a long plan can't crowd out the conversation above.
 pub const AGENT_CHAT_PLAN_MAX_H: f32 = 168.0;
-/// Agent task list entry font size (px).
-pub const AGENT_TASK_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Agent task list icon column width (px).
-pub const AGENT_TASK_ICON_W: f32 = 14.0;
-/// Agent task list entry gap (px).
-pub const AGENT_TASK_GAP: f32 = GAP_STANDARD;
-/// Agent task list entry padding X (px).
-pub const AGENT_TASK_PAD_X: f32 = PAD_STANDARD;
-/// Agent task list entry padding Y (px).
-pub const AGENT_TASK_PAD_Y: f32 = PAD_XS;
-/// Agent task list container padding Y (px).
-pub const AGENT_TASK_LIST_PAD_Y: f32 = PAD_XS;
 /// Left dock default width (px).
 pub const DOCK_LEFT_DEFAULT_W: f32 = 250.0;
 /// Left dock minimum width (px).
@@ -1052,14 +928,8 @@ pub const FILE_DIFF_ADD_TEXT: Hsla = DIFF_ADD_FG;
 pub const FILE_DIFF_DEL_TEXT: Hsla = DIFF_DEL_FG;
 /// Diff hunk-header text color (DESIGN diff-hunk = subtle).
 pub const FILE_DIFF_HUNK_TEXT: Hsla = DIFF_HUNK;
-/// Vertical padding added above and below the hunk-header content (px).
-pub const FILE_DIFF_HUNK_PADDING_Y: f32 = 5.0;
 /// Line number right padding in the raw file view (px).
 pub const FILE_VIEWER_LINE_NO_PAD_R: f32 = PAD_STANDARD;
-/// Line number right padding in the diff view dual-column (px).
-pub const FILE_VIEWER_DIFF_LINE_NO_PAD_R: f32 = PAD_XS;
-/// Diff marker (`+`/`-`/` `) column width (px).
-pub const FILE_VIEWER_DIFF_MARKER_W: f32 = 10.0;
 /// Hunk header trailing context text color (function name / class name, dim).
 pub const FILE_DIFF_HUNK_CTX_TEXT: Hsla = hsla(220.0, 0.20, 0.45, 1.0);
 /// 24-bit hex → `Hsla`. Hex literals live here (the designated colour
@@ -1810,8 +1680,6 @@ pub fn editor_syntax_colors_of(palette: SyntaxPalette, is_light: bool) -> Syntax
         primary: b(Default),
     }
 }
-/// Gap between `@@ -N +M @@` and its trailing context text (px).
-pub const FILE_DIFF_HUNK_CTX_GAP_X: f32 = GAP_LG;
 /// Gap between `+N` and `-N` in the diff stat badge (px).
 pub const FILE_DIFF_STAT_GAP: f32 = GAP_SM;
 /// Diff stat added-lines count color (+N) — same green as the `+` marker.
@@ -1845,18 +1713,8 @@ pub const FILE_VIEWER_SEARCH_PANEL_W: f32 = 380.0;
 pub const FILE_VIEWER_SEARCH_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Gap between items inside the search panel (px).
 pub const FILE_VIEWER_SEARCH_ITEM_GAP: f32 = GAP_LG;
-/// Search input area horizontal padding (px).
-pub const FILE_VIEWER_SEARCH_INPUT_PAD_X: f32 = PAD_STANDARD;
-/// Search input area vertical padding (px).
-pub const FILE_VIEWER_SEARCH_INPUT_PAD_Y: f32 = 3.0;
-/// Search input area corner radius (px).
-pub const FILE_VIEWER_SEARCH_INPUT_RADIUS: f32 = RADIUS_SM;
 /// Match counter font size inside the input area (px).
 pub const FILE_VIEWER_SEARCH_COUNTER_SIZE: f32 = 11.0;
-/// Cursor indicator width (px).
-pub const FILE_VIEWER_SEARCH_CURSOR_W: f32 = 1.0;
-/// Cursor indicator height (px).
-pub const FILE_VIEWER_SEARCH_CURSOR_H: f32 = 14.0;
 /// Button horizontal padding (px).
 pub const FILE_VIEWER_SEARCH_BTN_PAD_X: f32 = PAD_SM;
 /// Left margin of the close button to visually separate it from nav buttons (px).
@@ -1941,8 +1799,6 @@ pub const TOAST_GAP: f32 = 12.0;
 pub const TOAST_MIN_W: f32 = 240.0;
 /// Maximum width of the toast pill (px).
 pub const TOAST_MAX_W: f32 = 480.0;
-/// Distance from the window bottom edge (px).
-pub const TOAST_BOTTOM_MARGIN: f32 = 24.0;
 /// Vertical gap between stacked toasts.
 pub const TOAST_STACK_GAP: f32 = GAP_SM;
 /// Padding below the toast stack before the status bar starts.
@@ -1988,8 +1844,6 @@ pub const SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
 pub const SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Scrollbar track background (subtle, nearly transparent fill).
 pub const SCROLLBAR_TRACK_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.04);
-/// Corner radius of the scrollbar thumb (px).
-pub const SCROLLBAR_THUMB_RADIUS: f32 = 3.0;
 
 // ============================================================================
 // Shared layout tokens — single source of truth for dimensions/metrics
@@ -2024,42 +1878,6 @@ pub const MAIN_EMPTY_STATE_TITLE_FONT_SIZE: f32 = FONT_SIZE_LG;
 pub const MAIN_EMPTY_STATE_BODY_FONT_SIZE: f32 = FONT_SIZE_MD;
 pub const MAIN_EMPTY_STATE_GAP: f32 = 12.0;
 pub const MAIN_EMPTY_STATE_BODY_MAX_W: f32 = 360.0;
-/// Container corner radius (px).
-pub const KEYSTROKE_INPUT_RADIUS: f32 = RADIUS_MD;
-/// Horizontal padding inside the container (px).
-pub const KEYSTROKE_INPUT_PAD_X: f32 = PAD_STANDARD;
-/// Vertical padding inside the container (px).
-pub const KEYSTROKE_INPUT_PAD_Y: f32 = 5.0;
-/// Minimum width so the recording hint has room (px).
-pub const KEYSTROKE_INPUT_MIN_W: f32 = 140.0;
-/// Badge corner radius (px).
-pub const KEYSTROKE_BADGE_RADIUS: f32 = RADIUS_SM;
-/// Badge horizontal padding (px).
-pub const KEYSTROKE_BADGE_PAD_X: f32 = PAD_SM;
-/// Badge vertical padding (px).
-pub const KEYSTROKE_BADGE_PAD_Y: f32 = GAP_XS;
-/// Badge font size (px).
-pub const KEYSTROKE_BADGE_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Gap between key badges in a sequence (px).
-pub const KEYSTROKE_BADGE_GAP: f32 = GAP_SM;
-/// Font size for container hint text (px).
-pub const KEYSTROKE_INPUT_FONT_SIZE: f32 = FONT_SIZE_MD;
-/// Corner radius of the popover panel (px).
-pub const POPOVER_RADIUS: f32 = RADIUS_MD;
-/// Vertical padding above/below the item list inside the panel (px).
-pub const POPOVER_LIST_PAD_Y: f32 = PAD_XS;
-/// Horizontal padding for each item row (px).
-pub const POPOVER_ITEM_PAD_X: f32 = 12.0;
-/// Vertical padding for each item row (px).
-pub const POPOVER_ITEM_PAD_Y: f32 = PAD_SM;
-/// Item font size (px).
-pub const POPOVER_ITEM_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Minimum width of the popover panel (px).
-pub const POPOVER_MIN_WIDTH: f32 = 140.0;
-/// Height of the separator rule inside the popover (px).
-pub const POPOVER_SEPARATOR_HEIGHT: f32 = 1.0;
-/// Edge margin kept between the popover panel and the window boundary (px).
-pub const POPOVER_SNAP_MARGIN: f32 = PAD_STANDARD;
 /// Offset from the cursor hotspot to the top-left corner of the drag pill (px).
 /// Applied as padding inside the transparent ghost wrapper so the pill appears
 /// just below and to the right of the cursor regardless of where the user
@@ -2081,17 +1899,8 @@ pub const STATUS_INDICATOR_CELL_WIDTH: f32 = 22.0;
 /// ones — so the rate is kept low to bound the off-focus repaint cost
 /// (Pitfall #10). The 6-frame comet still reads as motion at 4 fps.
 pub const STATUS_INDICATOR_TICK_MS: u64 = 250;
-/// One full Working-state animation cycle (head sweeps every dot once).
-pub const STATUS_INDICATOR_SPINNER_PERIOD_MS: u64 = 1100;
-/// One full ExecutingTool-state animation cycle (head sweeps the outer ring).
-pub const STATUS_INDICATOR_RING_PERIOD_MS: u64 = 900;
 /// Centre-dot alpha multiplier for the ExecutingTool ring animation.
 pub const STATUS_INDICATOR_RING_CENTER_ALPHA: f32 = 0.15;
-/// One full pulse cycle (NeedsAttention state) — opacity 0.4 → 1.0 → 0.4.
-pub const STATUS_INDICATOR_PULSE_DURATION_MS: u64 = 1000;
-/// One full Connecting-state cycle: plus (+) → cross (×) → plus,
-/// with a smooth cosine cross-fade between the two patterns.
-pub const STATUS_INDICATOR_CONNECTING_PERIOD_MS: u64 = 1200;
 /// Pulse minimum opacity at the off-beat of the NeedsAttention cycle.
 pub const STATUS_INDICATOR_PULSE_OPACITY_MIN: f32 = 0.4;
 /// Diameter of one dot inside its 3×3 cell (Working state), as a ratio
@@ -2116,7 +1925,6 @@ pub const STATUS_BADGES_ROW_TOP_MARGIN: f32 = 3.0;
 pub const STATUS_BADGES_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const STATUS_BADGES_LABEL_GAP: f32 = GAP_STANDARD;
 pub const STATUS_BADGE_ACTIVE_OUTLINE: Hsla = hsla(0.0, 0.0, 1.0, 0.85);
-pub const STATUS_BADGE_ACTIVE_OUTLINE_PX: f32 = 1.0;
 /// Pixels added to the badge frame to host the outline without
 /// occluding the inner colour.
 pub const STATUS_BADGE_ACTIVE_OUTER_PAD: f32 = GAP_XS;
@@ -2160,8 +1968,6 @@ pub const RIGHT_PANEL_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;
 /// Fixed width allocated to the leading state-indicator glyph so titles
 /// across rows align on a single column (px).
 pub const RIGHT_PANEL_TASK_INDICATOR_W: f32 = 14.0;
-/// Horizontal gap between adjacent action buttons in a task row (px).
-pub const RIGHT_PANEL_TASK_BUTTON_GAP: f32 = GAP_SM;
 /// Vertical padding for a right-dock tab header row (px). Shared by the
 /// Tasks / Skills / Tools headers so they sit at a uniform height.
 pub const RIGHT_PANEL_HEADER_PAD_Y: f32 = PAD_SM;
@@ -2202,17 +2008,10 @@ pub const TASK_EDIT_BRANCH_INVALID_BORDER_W: f32 = 1.0;
 /// Corner radius matched to the embedded `TextInput` so the error
 /// border doesn't show as a square halo around a rounded widget (px).
 pub const TASK_EDIT_BRANCH_INVALID_RADIUS: f32 = RADIUS_SM;
-/// Vertical height of the status-pill trigger button. Matches the
-/// `gpui_component::Button::xsmall()` baseline so the pill aligns
-/// flush with the duration / failure cells in the same row.
-pub const RIGHT_PANEL_STATUS_PILL_HEIGHT_PX: f32 = 20.0;
 /// Horizontal padding inside the pill — slightly wider than the
 /// default xsmall padding so the chevron `▾` has room to breathe and
 /// the state label stays visually centered.
 pub const RIGHT_PANEL_STATUS_PILL_PADDING_X_PX: f32 = PAD_STANDARD;
-/// Gap between the state label and the trailing chevron / between
-/// adjacent inline children when callers compose the pill manually.
-pub const RIGHT_PANEL_STATUS_PILL_GAP_PX: f32 = GAP_SM;
 /// Corner radius for the pill background. A small radius keeps the
 /// row's vertical rhythm intact while still reading as a button.
 pub const RIGHT_PANEL_STATUS_PILL_RADIUS_PX: f32 = RADIUS_SM;
@@ -2236,12 +2035,6 @@ pub const BADGE_PAD_X: f32 = PAD_XS;
 pub const BADGE_PAD_Y: f32 = 0.0;
 /// Font size inside a `Badge` (px). Slightly smaller than body text.
 pub const BADGE_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Inset margin applied when `Divider::inset()` is set (px).
-pub const DIVIDER_INSET: f32 = 6.0;
-/// Dash + gap lengths used by `Divider::horizontal_dashed()` and
-/// `Divider::vertical_dashed()` (px).
-pub const DIVIDER_DASH_LEN: f32 = 4.0;
-pub const DIVIDER_DASH_GAP: f32 = GAP_XS;
 /// Bar height (px) for the 5-hour / 7-day gauges. 8 px reads as a
 /// "ribbon" rather than a thick block — same visual weight as
 /// macOS download progress bars.
@@ -2275,30 +2068,12 @@ pub const USAGE_PLAN_BADGE_RADIUS: f32 = RADIUS_LG;
 pub const USAGE_ACCENT_CHIP_BG: Hsla = ACCENT;
 /// Logo-chip / plan-badge foreground.
 pub const USAGE_ACCENT_CHIP_FG: Hsla = ACCENT_FG;
-/// Background for gauge / stat cards — raised one step above the panel.
-pub const USAGE_CARD_BG: Hsla = SURFACE_2;
-/// Hairline border around a card.
-pub const USAGE_CARD_BORDER: Hsla = HAIRLINE;
-/// Card border width (px).
-pub const USAGE_CARD_BORDER_W: f32 = 1.0;
-/// Card corner radius (px).
-pub const USAGE_CARD_RADIUS: f32 = RADIUS_LG;
-/// Gauge-card inner horizontal padding (px).
-pub const USAGE_CARD_PAD_X: f32 = PAD_XL;
-/// Gauge-card inner vertical padding (px).
-pub const USAGE_CARD_PAD_Y: f32 = PAD_LG;
 /// Vertical gap between stacked gauge cards (px).
 pub const USAGE_CARD_GAP: f32 = GAP_LG;
 /// Big utilization-percent font size on a gauge card (px).
 pub const USAGE_GAUGE_PERCENT_FONT_SIZE: f32 = 18.0;
-/// Vertical gap between a gauge card's header row, bar, and reset text (px).
-pub const USAGE_GAUGE_INNER_GAP: f32 = GAP_LG;
 /// Gap between the three "today" stat cards (px).
 pub const USAGE_STAT_GRID_GAP: f32 = GAP_LG;
-/// Stat-card horizontal inner padding (px).
-pub const USAGE_STAT_CARD_PAD_X: f32 = PAD_SM;
-/// Stat-card vertical inner padding (px).
-pub const USAGE_STAT_CARD_PAD_Y: f32 = PAD_LG;
 /// Stat-card big-value font size (px).
 pub const USAGE_STAT_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Stat-card label font size (px).
@@ -2325,10 +2100,6 @@ pub const USAGE_CHART_BAR_OTHER: Hsla = ACCENT_MUTED;
 pub const USAGE_TOTAL_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
 /// Totals-row label font size (px).
 pub const USAGE_TOTAL_LABEL_FONT_SIZE: f32 = FONT_SIZE_XXS;
-/// Totals-row vertical padding (px).
-pub const USAGE_TOTAL_PAD_Y: f32 = PAD_SM;
-/// Refresh / cache-age badge font size (px).
-pub const USAGE_REFRESH_BADGE_FONT_SIZE: f32 = FONT_SIZE_XS;
 /// "📎 N" chip background — surfaces auxiliary file presence.
 pub const SKILL_AUX_CHIP_BG: Hsla = hsla(0.0, 0.0, 0.20, 0.85);
 pub const SKILL_ROW_RADIUS: f32 = RADIUS_SM;

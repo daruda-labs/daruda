@@ -60,6 +60,7 @@ daruda_theme_fields! {
     status_bar_project_dot => STATUS_BAR_PROJECT_DOT,
     status_bar_detached_bg => STATUS_BAR_DETACHED_BG,
     status_bar_detached_text => STATUS_BAR_DETACHED_TEXT,
+    status_bar_account_hover_bg => BG_HOVER,
     dock_bg => BG_PANEL,
     button_widget_bg => BG_HOVER,
     button_widget_bg_hover => BG_ACTIVE,

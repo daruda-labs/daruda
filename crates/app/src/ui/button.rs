@@ -142,6 +142,32 @@ pub fn button_header_action(
         .label(icon)
 }
 
+/// Status-bar account slot — the dropdown trigger showing the focused
+/// pane's account (or "System"). `ghost()` paints no border in any state
+/// (see `ButtonVariant::Ghost::border_color`), which left it reading as
+/// plain text next to the status bar's other muted labels; this bakes an
+/// always-on hairline border plus a fixed compact height so it reads as a
+/// clickable control at rest, not just on hover.
+pub fn button_status_account(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    let t = theme::current(cx);
+    let variant = ButtonCustomVariant::new(cx)
+        .foreground(t.text_muted)
+        .border(t.border)
+        .hover(t.status_bar_account_hover_bg);
+    Button::new(id)
+        .xsmall()
+        .tab_stop(false)
+        .custom(variant)
+        .label(label)
+        .h(px(theme::STATUS_BAR_ACCOUNT_HEIGHT))
+        .px(px(theme::STATUS_BAR_ACCOUNT_PAD_X))
+        .rounded(px(theme::STATUS_BAR_ACCOUNT_RADIUS))
+}
+
 /// `+` tile sized to align with [`crate::ui::MacroKey`] icon cells in
 /// the bottom-dock grid — square footprint with a dashed outline that
 /// fills bg on hover.

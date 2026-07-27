@@ -88,6 +88,11 @@
       "$ref": "#/$defs/Rgba",
       "default": "#e2c58dff"
     },
+    "status_bar_account_hover_bg": {
+      "description": "Maps to `palette::BG_HOVER`.",
+      "$ref": "#/$defs/Rgba",
+      "default": "#141516ff"
+    },
     "dock_bg": {
       "description": "Maps to `palette::BG_PANEL`.",
       "$ref": "#/$defs/Rgba",

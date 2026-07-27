@@ -3,8 +3,7 @@
 
 use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, Sizable as _, button,
-    menu_builder, spinner,
+    DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_account, menu_builder, spinner,
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
@@ -230,12 +229,14 @@ impl RenderOnce for StatusBar {
                 )
             })
             .when_some(data.account.clone(), |el, slot| {
+                let label = SharedString::from(format!(
+                    "{}{}",
+                    slot.label,
+                    crate::surface::strings::TASK_PILL_CHEVRON
+                ));
                 el.child(
-                    button("status-account", slot.label.clone())
-                        .ghost()
-                        .xsmall()
+                    button_status_account("status-account", label, cx)
                         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(muted)
                         .dropdown_menu(menu_builder(move |menu, _window, _cx| {
                             build_account_menu(&slot, menu)
                         })),
