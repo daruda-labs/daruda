@@ -653,7 +653,7 @@ settings:
   accounts_delete: "Delete"
   accounts_add: "+ Add account"
   accounts_remove_confirm_title: "Delete this account?"
-  accounts_remove_confirm_body: "%{count} pane(s) using this account will fall back to the provider default."
+  accounts_remove_confirm_body: "%{count} pane(s) using this account will revert to the system default (~/.claude)."
   accounts_remove_confirm_ok: "Delete"
   accounts_last_auth_never: "Never authenticated"
   accounts_last_auth_just_now: "Authenticated just now"

@@ -39,6 +39,53 @@ impl Default for AccountId {
     }
 }
 
+/// A pane's account choice. `SystemDefault` is the explicit "System
+/// (`~/.claude`)" selection — ambient environment, no `CLAUDE_CONFIG_DIR`
+/// override; `Managed(id)` pins the pane to a managed account's isolated
+/// config dir.
+///
+/// Replaces the former overloaded `Option<AccountId>`, whose inner `None`
+/// meant *both* "unset → fall back to the provider default" *and* "explicit
+/// system default" — an ambiguity that produced three separate
+/// account-switching bugs. There is no "unset" state here: a fresh pane is
+/// seeded with an explicit selection at creation, so resolution never needs
+/// a provider-default fallback (the fallback was the bug).
+///
+/// Persisted as `Option<AccountId>` (`None` ↔ `SystemDefault`, `Some(id)` ↔
+/// `Managed(id)`) via [`Self::from_persisted`] / [`Self::to_persisted`], so
+/// the on-disk schema is unchanged and no migration is required.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum AccountSelection {
+    #[default]
+    SystemDefault,
+    Managed(AccountId),
+}
+
+impl AccountSelection {
+    /// Reconstruct a runtime selection from the persisted `Option<AccountId>`.
+    pub fn from_persisted(value: Option<AccountId>) -> Self {
+        match value {
+            Some(id) => Self::Managed(id),
+            None => Self::SystemDefault,
+        }
+    }
+
+    /// The persisted representation (`None` for the system default).
+    pub fn to_persisted(self) -> Option<AccountId> {
+        match self {
+            Self::Managed(id) => Some(id),
+            Self::SystemDefault => None,
+        }
+    }
+
+    /// The managed account id this selection pins, or `None` for the
+    /// system default. (Same value as [`Self::to_persisted`]; named for
+    /// call sites that read it as "which account", not "how to persist".)
+    pub fn account_id(self) -> Option<AccountId> {
+        self.to_persisted()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ManagedAccount {
     pub id: AccountId,

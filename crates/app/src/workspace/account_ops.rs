@@ -16,10 +16,13 @@
 //! proven, reused path). `switch_kind` stays a pane-kind-agnostic pure
 //! function either way; Terminal's dispatch simply doesn't consult it.
 //!
-//! This file also owns the delete-cleanup side of account state
-//! (clearing a deleted account's override off every pane, and
-//! broadcasting an updated [`daruda_store::accounts::AccountsState`]
-//! snapshot to this window). The headless add-account / reauthenticate
+//! This file also owns the per-window delete-cleanup side of account
+//! state ([`Workspace::clear_account_override`] — resetting a deleted
+//! account's panes back to the system default and pruning its usage
+//! cache). The shared [`daruda_store::accounts::AccountsState`] itself is
+//! propagated app-wide through [`super::accounts_global`] (a GPUI Global +
+//! `observe_global`), not a per-window broadcast. The headless add-account
+//! / reauthenticate
 //! *login* flow that creates and refreshes accounts in the first place
 //! lives in the sibling `account_login_ops.rs` — split out because it is
 //! a distinct, self-contained domain (spawn/poll/finish machinery) large
@@ -29,7 +32,7 @@
 
 use gpui::{Context, Window};
 
-use daruda_store::accounts::{AccountId, AgentProvider};
+use daruda_store::accounts::{AccountId, AccountSelection, AgentProvider};
 
 use super::SwitchPaneAccount;
 use crate::surface::strings as s;
@@ -89,15 +92,16 @@ impl Workspace {
         self.switch_pane_account(pane_id, action.0, window, cx);
     }
 
-    /// Switch `pane_id`'s account to `account_id` (`None` = system default,
-    /// i.e. `~/.claude`). Dispatches on pane kind: an Agent chat pane
-    /// consults [`switch_kind`] (idle → in-place reconnect, busy → new
-    /// pane); a Terminal pane always opens a new pane (see the module doc);
-    /// File/TaskEdit panes don't track an account and are a no-op.
+    /// Switch `pane_id`'s account to `selection`
+    /// ([`AccountSelection::SystemDefault`] = `~/.claude`). Dispatches on
+    /// pane kind: an Agent chat pane consults [`switch_kind`] (idle →
+    /// in-place reconnect, busy → new pane); a Terminal pane always opens a
+    /// new pane (see the module doc); File/TaskEdit panes don't track an
+    /// account and are a no-op.
     pub(in crate::workspace) fn switch_pane_account(
         &mut self,
         pane_id: PaneId,
-        account_id: Option<AccountId>,
+        selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -106,7 +110,7 @@ impl Workspace {
             .panes
             .iter()
             .find(|p| p.id == pane_id)
-            .is_some_and(|p| p.account_id().is_some());
+            .is_some_and(|p| p.account_selection().is_some());
         if !switchable {
             return;
         }
@@ -115,13 +119,13 @@ impl Workspace {
             let busy = self.agent_chat_pane_is_busy_for_switch(pane_id, cx);
             match switch_kind(busy) {
                 SwitchKind::InPlace => {
-                    self.switch_agent_chat_account_in_place(pane_id, account_id, cx);
+                    self.switch_agent_chat_account_in_place(pane_id, selection, cx);
                 }
                 SwitchKind::NewPane => {
                     self.confirm_open_pane_with_account(
                         pane_id,
                         NewPaneAccountKind::AgentChat,
-                        account_id,
+                        selection,
                         window,
                         cx,
                     );
@@ -133,7 +137,7 @@ impl Workspace {
             self.confirm_open_pane_with_account(
                 pane_id,
                 NewPaneAccountKind::Terminal,
-                account_id,
+                selection,
                 window,
                 cx,
             );
@@ -162,17 +166,16 @@ impl Workspace {
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
-    /// override (`None` reverts it to the system default), then reuse
-    /// [`Self::reset_agent_chat_session`] — the same path the `/clear`
-    /// slash command runs — to tear down and reconnect the session.
-    /// `connect_agent_chat` resolves the new `CLAUDE_CONFIG_DIR` from the
-    /// override this just wrote (`agent_chat_account_id`), so the fresh
-    /// session runs under the newly selected account (or `~/.claude` when
-    /// `account_id` is `None`).
+    /// selection, then reuse [`Self::reset_agent_chat_session`] — the same
+    /// path the `/clear` slash command runs — to tear down and reconnect the
+    /// session. `connect_agent_chat` resolves the new `CLAUDE_CONFIG_DIR`
+    /// from the selection this just wrote (`agent_chat_account_selection`),
+    /// so the fresh session runs under the newly selected account (or
+    /// `~/.claude` for [`AccountSelection::SystemDefault`]).
     fn switch_agent_chat_account_in_place(
         &mut self,
         pane_id: PaneId,
-        account_id: Option<AccountId>,
+        selection: AccountSelection,
         cx: &mut Context<Self>,
     ) {
         {
@@ -187,7 +190,7 @@ impl Workspace {
             let Some(content) = pane.agent_chat_content_mut() else {
                 return;
             };
-            content.account_id = account_id;
+            content.account = selection;
         }
         self.reset_agent_chat_session(pane_id, cx);
     }
@@ -199,7 +202,7 @@ impl Workspace {
         &mut self,
         source_pane_id: PaneId,
         kind: NewPaneAccountKind,
-        account_id: Option<AccountId>,
+        selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -212,7 +215,7 @@ impl Workspace {
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     ws.update(app_cx, |ws, cx| {
-                        ws.open_new_pane_with_account(source_pane_id, kind, account_id, window, cx);
+                        ws.open_new_pane_with_account(source_pane_id, kind, selection, window, cx);
                     });
                 }
             },
@@ -233,7 +236,7 @@ impl Workspace {
         &mut self,
         source_pane_id: PaneId,
         kind: NewPaneAccountKind,
-        account_id: Option<AccountId>,
+        selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -246,12 +249,12 @@ impl Workspace {
                 let account_config_dir = pane::resolve_account_config_dir(
                     &self.accounts,
                     &self.data_dir,
-                    account_id,
+                    selection,
                     AgentProvider::Claude,
                 );
                 match self.create_pane_with_cwd(
                     cwd,
-                    account_id,
+                    selection,
                     account_config_dir.as_deref(),
                     window,
                     cx,
@@ -274,7 +277,7 @@ impl Workspace {
                 let mut new_pane =
                     self.create_new_agent_chat_pane(agent_id, local_cwd, remote_cwd, window, cx);
                 if let Some(content) = new_pane.agent_chat_content_mut() {
-                    content.account_id = account_id;
+                    content.account = selection;
                 }
                 new_pane
             }
@@ -321,64 +324,50 @@ impl Workspace {
             .runtimes
             .values()
             .flat_map(|rt| rt.panes.iter())
-            .filter(|p| p.account_id() == Some(Some(account_id)))
+            .filter(|p| p.account_selection() == Some(AccountSelection::Managed(account_id)))
             .count()
     }
 
-    /// Clear `account_id`'s override on every pane that carries it
-    /// (Terminal + AgentChat, across every loaded lane runtime) — run
-    /// when the Settings window deletes that account, so no pane is left
-    /// pointing at a config dir that no longer exists. A Terminal pane's
-    /// shell keeps running under whatever env it already spawned with;
-    /// only the cached label used for persistence/display is cleared.
+    /// Reset every pane pinned to `account_id` back to
+    /// [`AccountSelection::SystemDefault`] (Terminal + AgentChat, across
+    /// every loaded lane runtime) — run when the Settings window deletes
+    /// that account, so no pane is left pointing at a config dir that no
+    /// longer exists. A Terminal pane's shell keeps running under whatever
+    /// env it already spawned with; only the cached selection used for
+    /// persistence/display is reset.
     ///
-    /// Also prunes this account's entries from the per-account usage
-    /// caches (`self.claude.plan_limits_by_account` /
-    /// `activity_by_account`) — this is the per-window delete hook, so it
-    /// is the only place that sees both the deleted `account_id` and
-    /// `self.claude`. The system-default (`None`) entry is never touched.
+    /// Also prunes this account's entries from the per-account usage caches
+    /// (`self.claude.usage_by_account`) — this is the per-window delete hook,
+    /// so it is the only place that sees both the deleted `account_id` and
+    /// `self.claude`. The system-default entry is never touched.
     pub(crate) fn clear_account_override(&mut self, account_id: AccountId, cx: &mut Context<Self>) {
         let mut changed = false;
         for rt in self.main_area.runtimes.values_mut() {
             for p in rt.panes.iter_mut() {
                 match &mut p.content {
-                    pane::PaneContent::Terminal(t) if t.account_id == Some(account_id) => {
-                        t.account_id = None;
+                    pane::PaneContent::Terminal(t)
+                        if t.account == AccountSelection::Managed(account_id) =>
+                    {
+                        t.account = AccountSelection::SystemDefault;
                         changed = true;
                     }
-                    pane::PaneContent::AgentChat(ac) if ac.account_id == Some(account_id) => {
-                        ac.account_id = None;
+                    pane::PaneContent::AgentChat(ac)
+                        if ac.account == AccountSelection::Managed(account_id) =>
+                    {
+                        ac.account = AccountSelection::SystemDefault;
                         changed = true;
                     }
                     _ => {}
                 }
             }
         }
-        self.claude.plan_limits_by_account.remove(&Some(account_id));
-        self.claude.activity_by_account.remove(&Some(account_id));
+        self.claude
+            .usage_by_account
+            .remove(AccountSelection::Managed(account_id));
         if changed {
             self.mark_dirty_and_save(cx);
             cx.notify();
         }
-    }
-
-    /// Replace this workspace's in-memory accounts snapshot. The
-    /// Settings window's `SetDefaultAccount`/`RemoveAccount` handlers (Task
-    /// 9) broadcast through this after every `accounts.json` write; this is
-    /// how each open `Workspace` window's status-bar dropdown and
-    /// pane-spawn resolution (`resolve_account_config_dir`) pick up the
-    /// change immediately instead of waiting for their own next restore.
-    /// `Workspace::add_managed_account`'s own login flow (Plan B) writes
-    /// `accounts.json` too, but only ever to *this* window's own
-    /// `self.accounts` — it does not broadcast to other open windows (see
-    /// that method's doc for why).
-    pub(crate) fn sync_accounts_state(
-        &mut self,
-        state: daruda_store::accounts::AccountsState,
-        cx: &mut Context<Self>,
-    ) {
-        self.accounts = state;
-        cx.notify();
     }
 }
 

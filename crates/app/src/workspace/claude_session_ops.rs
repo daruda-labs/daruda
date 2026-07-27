@@ -6,7 +6,7 @@
 //! JSONL fallback watcher, the PTY tracker, and the plan-limits /
 //! service-status polls. Workspace owns this struct directly (not as
 //! an `Entity`) so the existing access patterns
-//! (`self.claude.plan_limits_by_account`, etc.) compile without
+//! (`self.claude.usage_by_account`, etc.) compile without
 //! subscription / re-render plumbing changes — the goal at this stage is
 //! **field grouping**, not actor isolation. A future refactor can
 //! promote `ClaudeContext` to its own GPUI Entity once the call graph is
@@ -20,8 +20,78 @@ use std::collections::HashMap;
 
 use gpui::Task;
 
+use daruda_store::accounts::AccountSelection;
+
 use crate::hooks::pty_tracker::{PtyBinding, PtyTracker};
 use crate::workspace::main_area::pane_tree::PaneId;
+
+/// Per-account cache of the two usage quantities the Usage tab renders —
+/// plan-rate limits and locally-aggregated activity — keyed by
+/// [`AccountSelection`]. Encapsulates the maps behind typed getters/setters
+/// so callers never reach into a raw `HashMap`; the setters return whether
+/// a *visible* field changed, letting the caller decide `cx.notify()`
+/// (keeps GPUI out of this plain-data type). The system-default slot is just
+/// the [`AccountSelection::SystemDefault`] key — no special-casing.
+#[derive(Default)]
+pub(in crate::workspace) struct PerAccountUsage {
+    plan_limits: HashMap<AccountSelection, daruda_claude::PlanLimits>,
+    activity: HashMap<AccountSelection, daruda_claude::ActivityStats>,
+}
+
+impl PerAccountUsage {
+    /// The cached plan-rate snapshot for `key`, if any has landed.
+    pub(in crate::workspace) fn plan_limits(
+        &self,
+        key: AccountSelection,
+    ) -> Option<&daruda_claude::PlanLimits> {
+        self.plan_limits.get(&key)
+    }
+
+    /// The cached activity aggregate for `key`, if any has landed.
+    pub(in crate::workspace) fn activity(
+        &self,
+        key: AccountSelection,
+    ) -> Option<&daruda_claude::ActivityStats> {
+        self.activity.get(&key)
+    }
+
+    /// Insert/replace the plan-rate snapshot for `key`; returns `true` when
+    /// a visible window (5-hour or 7-day) differs from the prior entry, so
+    /// only a meaningful change triggers a repaint.
+    pub(in crate::workspace) fn set_plan_limits(
+        &mut self,
+        key: AccountSelection,
+        limits: daruda_claude::PlanLimits,
+    ) -> bool {
+        let visible_changed = self.plan_limits.get(&key).is_none_or(|prev| {
+            prev.five_hour != limits.five_hour || prev.seven_day != limits.seven_day
+        });
+        self.plan_limits.insert(key, limits);
+        visible_changed
+    }
+
+    /// Insert/replace the activity aggregate for `key`; returns `true` when
+    /// it differs from the prior entry (a quiet tick that found no new JSONL
+    /// lines returns `false`, so an idle pane doesn't repaint — Pitfall #10).
+    pub(in crate::workspace) fn set_activity(
+        &mut self,
+        key: AccountSelection,
+        activity: daruda_claude::ActivityStats,
+    ) -> bool {
+        if self.activity.get(&key) == Some(&activity) {
+            return false;
+        }
+        self.activity.insert(key, activity);
+        true
+    }
+
+    /// Drop both cached quantities for `key` — run when its account is
+    /// deleted so no stale usage lingers under a dangling selection.
+    pub(in crate::workspace) fn remove(&mut self, key: AccountSelection) {
+        self.plan_limits.remove(&key);
+        self.activity.remove(&key);
+    }
+}
 
 pub(in crate::workspace) struct ClaudeContext {
     /// Background-poll cadences for the OAuth `/api/oauth/usage` and
@@ -30,15 +100,16 @@ pub(in crate::workspace) struct ClaudeContext {
     /// `read_with` without locking the full `Config`.
     pub(in crate::workspace) usage_poll: daruda_config::PollConfig,
 
-    /// Latest plan-rate response (5-hour + 7-day windows), keyed by the
-    /// account it was fetched for. `None` = the system-default Keychain
-    /// login (no managed account substitution). Default-constructed
-    /// (empty map) before the first successful fetch — gauges then
-    /// render in their placeholder state for whichever account is
-    /// focused. `set_plan_limits` updates the entry for its key and
-    /// bumps `cx.notify()` only when that entry's visible fields changed.
-    pub(in crate::workspace) plan_limits_by_account:
-        HashMap<Option<daruda_store::accounts::AccountId>, daruda_claude::PlanLimits>,
+    /// Per-account cache of the Usage tab's two quantities (plan-rate
+    /// limits + locally-aggregated activity), keyed by
+    /// [`AccountSelection`](daruda_store::accounts::AccountSelection).
+    /// Default-constructed (empty) before the first fetch/aggregation, so
+    /// gauges + activity cards render in their placeholder state for
+    /// whichever account is focused. Reads/writes go through
+    /// [`PerAccountUsage`]'s typed getters/setters (`set_plan_limits` /
+    /// `set_activity_stats` decide `cx.notify()` from the returned
+    /// "visible changed" flag).
+    pub(in crate::workspace) usage_by_account: PerAccountUsage,
 
     /// Latest service-status indicator from `status.claude.com`.
     /// Account-independent — `status.claude.com` reports Anthropic's
@@ -46,17 +117,6 @@ pub(in crate::workspace) struct ClaudeContext {
     /// (`Unknown`) before the first fetch lands; `set_service_status`
     /// updates and bumps `cx.notify()`.
     pub(in crate::workspace) service_status: daruda_claude::ServiceStatus,
-
-    /// Locally aggregated Claude Code activity (today's counts + the
-    /// 7-day chart + totals), keyed by the account it was aggregated for
-    /// (`None` = the system-default `~/.claude/projects` JSONL logs).
-    /// Refreshed off the same `limits_secs` cadence by the `Activity`
-    /// pump. Default-constructed (empty map) until the first aggregation
-    /// lands, in which case the Usage tab renders its activity cards as
-    /// zeros for whichever account is focused. `set_activity_stats`
-    /// updates the entry for its key and bumps `cx.notify()`.
-    pub(in crate::workspace) activity_by_account:
-        HashMap<Option<daruda_store::accounts::AccountId>, daruda_claude::ActivityStats>,
 
     /// Guards `refresh_usage_now` against overlapping manual refreshes —
     /// the button's one-shot fetch sets this on entry and clears it when
@@ -322,22 +382,18 @@ impl Workspace {
             .is_some_and(|(pane_id, _)| *pane_id == self.active_runtime().focused_pane_id)
     }
 
-    /// Replace the cached plan-rate snapshot for `key` (the account it
-    /// was fetched for; `None` = system default). Called by `limits_pump`
-    /// after a successful `/api/oauth/usage` fetch. Skips `cx.notify()`
-    /// when only `fetched_at` moved for that account's prior entry.
+    /// Replace the cached plan-rate snapshot for `key` (the account it was
+    /// fetched for; [`AccountSelection::SystemDefault`] = system default).
+    /// Called by `limits_pump` after a successful `/api/oauth/usage` fetch.
+    /// Skips `cx.notify()` when only `fetched_at` moved for that account's
+    /// prior entry.
     pub(in crate::workspace) fn set_plan_limits(
         &mut self,
-        key: Option<daruda_store::accounts::AccountId>,
+        key: AccountSelection,
         limits: daruda_claude::PlanLimits,
         cx: &mut Context<Self>,
     ) {
-        let prev = self.claude.plan_limits_by_account.get(&key);
-        let visible_changed = prev.is_none_or(|prev| {
-            prev.five_hour != limits.five_hour || prev.seven_day != limits.seven_day
-        });
-        self.claude.plan_limits_by_account.insert(key, limits);
-        if visible_changed {
+        if self.claude.usage_by_account.set_plan_limits(key, limits) {
             cx.notify();
         }
     }
@@ -357,24 +413,22 @@ impl Workspace {
         }
     }
 
-    /// Replace the cached activity aggregate for `key` (the account it
-    /// was aggregated for; `None` = system default). Called by the
-    /// `Activity` pump and by `refresh_usage_now` after `update_activity`
-    /// lands. Skips the redraw when the stats are byte-for-byte unchanged
-    /// vs. that account's prior entry (a quiet tick that found no new
-    /// JSONL lines) so an idle pane doesn't repaint the whole window tree
+    /// Replace the cached activity aggregate for `key` (the account it was
+    /// aggregated for; [`AccountSelection::SystemDefault`] = system default).
+    /// Called by the `Activity` pump and by `refresh_usage_now` after
+    /// `update_activity` lands. Skips the redraw when the stats are unchanged
+    /// vs. that account's prior entry (a quiet tick that found no new JSONL
+    /// lines) so an idle pane doesn't repaint the whole window tree
     /// (Pitfall #10).
     pub(in crate::workspace) fn set_activity_stats(
         &mut self,
-        key: Option<daruda_store::accounts::AccountId>,
+        key: AccountSelection,
         activity: daruda_claude::ActivityStats,
         cx: &mut Context<Self>,
     ) {
-        if self.claude.activity_by_account.get(&key) == Some(&activity) {
-            return;
+        if self.claude.usage_by_account.set_activity(key, activity) {
+            cx.notify();
         }
-        self.claude.activity_by_account.insert(key, activity);
-        cx.notify();
     }
 
     /// Manual-refresh backend for the Usage tab's ⟳ button. Re-fetches

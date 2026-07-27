@@ -1,17 +1,16 @@
 //! `Workspace::clear_account_override` — the per-window account-delete
-//! hook. Covers the usage-cache prune (`self.claude.plan_limits_by_account`
-//! / `activity_by_account`) added alongside the existing pane-override
-//! clear.
+//! hook. Covers the usage-cache prune (`self.claude.usage_by_account`)
+//! added alongside the existing pane-selection reset.
 
 use super::*;
-use daruda_store::accounts::AccountId;
+use daruda_store::accounts::{AccountId, AccountSelection};
 use daruda_store::project::PaneCwd;
 
 /// A pane already switched to a managed account must be switchable back to
-/// the system default (`None`) — the bug this test guards: before the fix,
-/// `switch_pane_account`'s `account_id` parameter was a concrete `AccountId`
-/// with no way to express "system default", so a managed-account pane had
-/// no path back to `~/.claude`.
+/// the system default — the bug this test guards: before the fix,
+/// `switch_pane_account`'s target could not express "system default", so a
+/// managed-account pane had no path back to `~/.claude`. With
+/// [`AccountSelection`] the two states are distinct and both reachable.
 #[gpui::test]
 async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -30,7 +29,7 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
                     window,
                     cx,
                 );
-                pane.agent_chat_content_mut().unwrap().account_id = Some(managed);
+                pane.agent_chat_content_mut().unwrap().account = AccountSelection::Managed(managed);
                 let id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 id
@@ -46,12 +45,15 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
             .iter()
             .find(|p| p.id == pane_id)
             .unwrap();
-        assert_eq!(pane.account_id(), Some(Some(managed)));
+        assert_eq!(
+            pane.account_selection(),
+            Some(AccountSelection::Managed(managed))
+        );
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
-            ws.switch_pane_account(pane_id, None, window, cx);
+            ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx);
         });
     })
     .unwrap();
@@ -65,19 +67,19 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
             .find(|p| p.id == pane_id)
             .unwrap();
         assert_eq!(
-            pane.account_id(),
-            Some(None),
-            "switching to None must revert the pane to the system default"
+            pane.account_selection(),
+            Some(AccountSelection::SystemDefault),
+            "switching to SystemDefault must revert the pane to the system default"
         );
     });
 }
 
 /// A freshly created pane (the `Cmd+T` path) must be seeded with the
-/// provider's configured default account, not left `None` — since the
-/// `resolve_account_config_dir` fix, `None` means the explicit system
-/// default (`~/.claude`), so a pane that should inherit the default account
-/// needs that written onto its own `account_id` at creation time instead of
-/// relying on a resolve-time fallback.
+/// provider's configured default account, not left `SystemDefault` — since
+/// the `resolve_account_config_dir` fix, `SystemDefault` means the explicit
+/// system default (`~/.claude`), so a pane that should inherit the default
+/// account needs that written onto its own selection at creation time
+/// instead of relying on a resolve-time fallback.
 #[gpui::test]
 async fn create_pane_seeds_the_configured_provider_default(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
@@ -109,8 +111,8 @@ async fn create_pane_seeds_the_configured_provider_default(cx: &mut TestAppConte
         .expect("fresh pane spawn must succeed");
 
     assert_eq!(
-        pane.account_id(),
-        Some(Some(default_id)),
+        pane.account_selection(),
+        Some(AccountSelection::Managed(default_id)),
         "a freshly created pane must be seeded with the provider default account"
     );
 }
@@ -122,37 +124,32 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
     let kept = AccountId::new();
 
     ws.update(cx, |ws, cx| {
-        ws.claude
-            .plan_limits_by_account
-            .insert(Some(deleted), daruda_claude::PlanLimits::default());
-        ws.claude
-            .plan_limits_by_account
-            .insert(Some(kept), daruda_claude::PlanLimits::default());
-        ws.claude
-            .plan_limits_by_account
-            .insert(None, daruda_claude::PlanLimits::default());
-        ws.claude
-            .activity_by_account
-            .insert(Some(deleted), daruda_claude::ActivityStats::default());
-        ws.claude
-            .activity_by_account
-            .insert(Some(kept), daruda_claude::ActivityStats::default());
-        ws.claude
-            .activity_by_account
-            .insert(None, daruda_claude::ActivityStats::default());
+        for key in [
+            AccountSelection::Managed(deleted),
+            AccountSelection::Managed(kept),
+            AccountSelection::SystemDefault,
+        ] {
+            ws.claude
+                .usage_by_account
+                .set_plan_limits(key, daruda_claude::PlanLimits::default());
+            ws.claude
+                .usage_by_account
+                .set_activity(key, daruda_claude::ActivityStats::default());
+        }
 
         ws.clear_account_override(deleted, cx);
 
+        let usage = &ws.claude.usage_by_account;
         assert!(
-            !ws.claude
-                .plan_limits_by_account
-                .contains_key(&Some(deleted))
+            usage
+                .plan_limits(AccountSelection::Managed(deleted))
+                .is_none()
         );
-        assert!(ws.claude.plan_limits_by_account.contains_key(&Some(kept)));
-        assert!(ws.claude.plan_limits_by_account.contains_key(&None));
+        assert!(usage.plan_limits(AccountSelection::Managed(kept)).is_some());
+        assert!(usage.plan_limits(AccountSelection::SystemDefault).is_some());
 
-        assert!(!ws.claude.activity_by_account.contains_key(&Some(deleted)));
-        assert!(ws.claude.activity_by_account.contains_key(&Some(kept)));
-        assert!(ws.claude.activity_by_account.contains_key(&None));
+        assert!(usage.activity(AccountSelection::Managed(deleted)).is_none());
+        assert!(usage.activity(AccountSelection::Managed(kept)).is_some());
+        assert!(usage.activity(AccountSelection::SystemDefault).is_some());
     });
 }

@@ -661,23 +661,26 @@ impl Workspace {
                         window,
                         cx,
                     );
-                    // The constructor always seeds `account_id: None` — patch
-                    // in the persisted override now that the pane exists.
+                    // The constructor seeds the provider default — patch in
+                    // the persisted selection now that the pane exists.
                     if let Some(content) = restored.agent_chat_content_mut() {
-                        content.account_id = ac.account_id;
+                        content.account =
+                            daruda_store::accounts::AccountSelection::from_persisted(ac.account_id);
                     }
                     restored
                 } else {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
+                    let account =
+                        daruda_store::accounts::AccountSelection::from_persisted(*account_id);
                     let account_config_dir = pane::resolve_account_config_dir(
                         &self.accounts,
                         &self.data_dir,
-                        *account_id,
+                        account,
                         daruda_store::accounts::AgentProvider::Claude,
                     );
                     self.create_pane_with_cwd(
                         effective,
-                        *account_id,
+                        account,
                         account_config_dir.as_deref(),
                         window,
                         cx,
@@ -716,19 +719,19 @@ impl Workspace {
                 if n == 0 {
                     // Degenerate serialization — materialize a fresh leaf
                     // so we never surface an empty Split to the renderer.
-                    // No serialized leaf survives to carry an account_id
+                    // No serialized leaf survives to carry a selection
                     // here, so this is a fresh pane like any other —
                     // seed it with the provider default.
-                    let account_id = self.default_account_id_for_new_pane();
+                    let account = self.default_account_selection_for_new_pane();
                     let account_config_dir = pane::resolve_account_config_dir(
                         &self.accounts,
                         &self.data_dir,
-                        account_id,
+                        account,
                         daruda_store::accounts::AgentProvider::Claude,
                     );
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
-                        account_id,
+                        account,
                         account_config_dir.as_deref(),
                         window,
                         cx,
@@ -883,7 +886,7 @@ fn serialize_layout(
                     session_id: v.session_id.clone(),
                     title: v.session_title.clone(),
                     agent_id: Some(v.agent_id.clone()),
-                    account_id: ac.account_id,
+                    account_id: ac.account.to_persisted(),
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {

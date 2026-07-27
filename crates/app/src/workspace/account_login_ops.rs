@@ -27,7 +27,7 @@ use daruda_store::accounts::{AccountId, AccountsState, AgentProvider, ManagedAcc
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::{AddManagedAccount, PendingLogin, ReauthenticateAccount};
+use super::{AddManagedAccount, PendingLogin, ReauthenticateAccount, accounts_global};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
@@ -67,6 +67,57 @@ pub(in crate::workspace) enum LoginMode {
 /// login-failed path; cancel must match it).
 pub(in crate::workspace) fn cleanup_dir_on_cancel(mode: LoginMode) -> bool {
     matches!(mode, LoginMode::Add)
+}
+
+/// How [`Workspace::spawn_login_flow`] finishes a resolved login — the one
+/// axis on which the add and reauth flows differ once the shared
+/// spawn/poll machinery is done. Carries everything that differs between
+/// the two: which finish method the outcome dispatches into (add files a
+/// new [`ManagedAccount`] under `provider`; reauth updates the existing row
+/// by id, no provider), and the title of the spawn-failure toast. The
+/// [`LoginMode`] (which drives cleanup-on-cancel / cleanup-on-spawn-failure)
+/// is *derived* from the variant ([`Self::mode`]) rather than passed
+/// alongside, so the two can't disagree.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::workspace) enum LoginFinish {
+    Add { provider: AgentProvider },
+    Reauth,
+}
+
+impl LoginFinish {
+    fn mode(self) -> LoginMode {
+        match self {
+            LoginFinish::Add { .. } => LoginMode::Add,
+            LoginFinish::Reauth => LoginMode::Reauth,
+        }
+    }
+
+    /// Dispatch a resolved `outcome` into the flow-specific finish method.
+    fn dispatch(
+        self,
+        ws: &mut Workspace,
+        account_id: AccountId,
+        config_dir: PathBuf,
+        outcome: LoginOutcome,
+        cx: &mut Context<Workspace>,
+    ) {
+        match self {
+            LoginFinish::Add { provider } => {
+                ws.finish_login(account_id, config_dir, provider, outcome, cx)
+            }
+            LoginFinish::Reauth => ws.finish_reauth(account_id, config_dir, outcome, cx),
+        }
+    }
+
+    /// Title for the toast shown when `spawn_login` itself fails to launch
+    /// the child (distinct from a launched-then-failed login, which the
+    /// finish methods report).
+    fn spawn_error_title(self) -> String {
+        match self {
+            LoginFinish::Add { .. } => s::settings_accounts_login_failed(),
+            LoginFinish::Reauth => s::settings_accounts_reauth_failed(),
+        }
+    }
 }
 
 // The [`LoginOutcome::Denied`] / [`LoginOutcome::TimedOut`] toast-body
@@ -182,7 +233,39 @@ impl Workspace {
             return;
         }
 
+        self.spawn_login_flow(
+            account_id,
+            config_dir,
+            command,
+            LoginFinish::Add { provider },
+            cx,
+        );
+    }
+
+    /// Shared spawn/poll/finish machinery behind both headless login flows
+    /// ([`Self::add_managed_account`] + [`Self::reauthenticate_account`]).
+    /// The caller has already run its own front-guards (busy /
+    /// command-available / account-exists) and provisioned `config_dir`;
+    /// this owns everything after: stash `Preparing`, resolve a managed-node
+    /// PATH off-thread, spawn the login child, track it as `InProgress`, and
+    /// await its `wait()` on the background executor — dispatching the
+    /// result through `finish`.
+    ///
+    /// `finish` ([`LoginFinish`]) is the single axis the two flows differ
+    /// on: it picks the finish method and spawn-failure toast, and its
+    /// derived [`LoginMode`] decides whether a spawn failure or closed-window
+    /// race removes `config_dir` (add's dir is throwaway → yes; reauth's is
+    /// the account's permanent dir → no, via [`cleanup_dir_on_cancel`]).
+    fn spawn_login_flow(
+        &mut self,
+        account_id: AccountId,
+        config_dir: PathBuf,
+        command: String,
+        finish: LoginFinish,
+        cx: &mut Context<Self>,
+    ) {
         let env = daruda_config::account_env(&config_dir);
+        let mode = finish.mode();
 
         // Stash `Preparing` before the async node-resolve gap even starts —
         // it blocks a second concurrent login (`can_start_login`) and gives
@@ -191,10 +274,7 @@ impl Workspace {
         // doc for why this state exists at all (`resolve_node_path_env` is
         // blocking and may download Node.js, so it can't run inline here on
         // the UI thread).
-        self.pending_login = PendingLogin::Preparing {
-            account_id,
-            mode: LoginMode::Add,
-        };
+        self.pending_login = PendingLogin::Preparing { account_id, mode };
         cx.notify();
 
         let resolve_command = command.clone();
@@ -230,7 +310,7 @@ impl Workspace {
                         ws.pending_login = PendingLogin::InProgress {
                             account_id,
                             handle,
-                            mode: LoginMode::Add,
+                            mode,
                         };
                         cx.notify();
 
@@ -243,32 +323,29 @@ impl Workspace {
                             let cleanup_path = wait_config_dir.clone();
                             if this
                                 .update(cx, |ws, cx| {
-                                    ws.finish_login(
-                                        account_id,
-                                        wait_config_dir,
-                                        provider,
-                                        outcome,
-                                        cx,
-                                    )
+                                    finish.dispatch(ws, account_id, wait_config_dir, outcome, cx)
                                 })
                                 .is_err()
                             {
-                                // Workspace window closed mid-login:
-                                // `finish_login`'s own cleanup never ran, so
-                                // run it directly here (no `self` needed) —
-                                // otherwise a closed-window login attempt
-                                // would leak an orphaned per-account config
-                                // dir.
-                                cleanup_account_dir(&cleanup_path);
+                                // Workspace window closed mid-login: the
+                                // finish path's own cleanup never ran. Run
+                                // it here only for the add flow — a reauth's
+                                // `config_dir` is the account's permanent
+                                // one and must survive (see `LoginFinish`).
+                                if cleanup_dir_on_cancel(mode) {
+                                    cleanup_account_dir(&cleanup_path);
+                                }
                             }
                         })
                         .detach();
                     }
                     Err(e) => {
-                        cleanup_account_dir(&config_dir);
+                        if cleanup_dir_on_cancel(mode) {
+                            cleanup_account_dir(&config_dir);
+                        }
                         ws.pending_login = PendingLogin::None;
                         ws.report_error(
-                            ErrorReport::new(s::settings_accounts_login_failed())
+                            ErrorReport::new(finish.spawn_error_title())
                                 .message(e.to_string())
                                 .severity(ErrorSeverity::Error)
                                 .at(file!(), line!())
@@ -280,12 +357,12 @@ impl Workspace {
                 }
             });
 
-            if updated.is_err() {
+            if updated.is_err() && cleanup_dir_on_cancel(mode) {
                 // Workspace window closed during the node resolve, before
                 // `spawn_login` ever ran: nothing was spawned to leak a
-                // process, but the throwaway config dir created above still
+                // process, but the add flow's throwaway config dir still
                 // needs the same cleanup the wait-path's closed-window
-                // fallback does.
+                // fallback does (reauth's permanent dir must not — no-op).
                 cleanup_account_dir(&closed_window_cleanup_path);
             }
         })
@@ -427,7 +504,12 @@ impl Workspace {
                 &e,
             );
         }
-        self.accounts = state;
+        // Publish to the app-wide Global (fires `observe_global` on every
+        // window, including this one, refreshing each `accounts` mirror);
+        // set this window's mirror eagerly too so the code right below sees
+        // it without waiting for the deferred callback.
+        self.accounts = state.clone();
+        accounts_global::replace(cx, state);
 
         let toast = if is_duplicate {
             s::settings_accounts_login_already_exists()
@@ -602,90 +684,7 @@ impl Workspace {
             return;
         }
 
-        let env = daruda_config::account_env(&config_dir);
-
-        // See `add_managed_account`'s matching comment / `PendingLogin::Preparing`'s
-        // doc: the node resolve below is blocking and may download Node.js, so
-        // it runs on the background executor, and this state covers the gap
-        // before a real login process (and cancel handle) exists.
-        self.pending_login = PendingLogin::Preparing {
-            account_id,
-            mode: LoginMode::Reauth,
-        };
-        cx.notify();
-
-        let resolve_command = command.clone();
-        cx.spawn(async move |this, cx| {
-            let path_pair = cx
-                .background_executor()
-                .spawn(async move { resolve_node_path_env(&resolve_command) })
-                .await;
-
-            // Unlike `add_managed_account`'s closed-window fallback, there is
-            // nothing to clean up on a lost `Workspace` here: `config_dir` is
-            // the account's permanent directory, not a throwaway one an
-            // orphaned attempt would leak.
-            // SILENT-OK: workspace window closed mid-reauth (during the node resolve, or after) — nothing to react to.
-            let _ = this.update(cx, move |ws, cx| {
-                // The user may have cancelled during the resolve — bail
-                // without touching anything if this `Preparing` isn't the
-                // one staged above.
-                let is_current = matches!(
-                    &ws.pending_login,
-                    PendingLogin::Preparing { account_id: current, .. }
-                        if *current == account_id
-                );
-                if !is_current {
-                    return;
-                }
-
-                let mut inject = env.inject.clone();
-                if let Some(pair) = path_pair {
-                    inject.push(pair);
-                }
-
-                match spawn_login(&command, &config_dir, &inject, &env.strip, LOGIN_TIMEOUT) {
-                    Ok(login_process) => {
-                        let handle = login_process.handle();
-                        ws.pending_login = PendingLogin::InProgress {
-                            account_id,
-                            handle,
-                            mode: LoginMode::Reauth,
-                        };
-                        cx.notify();
-
-                        cx.spawn(async move |this, cx| {
-                            let outcome = cx
-                                .background_executor()
-                                .spawn(async move { login_process.wait() })
-                                .await;
-                            // SILENT-OK: workspace window closed mid-reauth — nothing to react to.
-                            let _ = this.update(cx, |ws, cx| {
-                                ws.finish_reauth(account_id, config_dir, outcome, cx)
-                            });
-                        })
-                        .detach();
-                    }
-                    Err(e) => {
-                        // No `cleanup_account_dir` here — see this method's
-                        // doc: `config_dir` is the account's real,
-                        // already-good directory, not a throwaway one for
-                        // this attempt alone.
-                        ws.pending_login = PendingLogin::None;
-                        ws.report_error(
-                            ErrorReport::new(s::settings_accounts_reauth_failed())
-                                .message(e.to_string())
-                                .severity(ErrorSeverity::Error)
-                                .at(file!(), line!())
-                                .build(),
-                            cx,
-                        );
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
+        self.spawn_login_flow(account_id, config_dir, command, LoginFinish::Reauth, cx);
     }
 
     /// Picks up a reauthenticate-account login's result on this
@@ -762,8 +761,11 @@ impl Workspace {
         let Some(existing) = state.accounts.iter_mut().find(|a| a.id == account_id) else {
             // The account was removed (Settings-window delete) while
             // this reauth was in flight — nothing left to update; the
-            // delete flow already removed `config_dir` itself.
-            self.accounts = state;
+            // delete flow already removed `config_dir` itself. Still
+            // republish the freshly-loaded disk state so this window's
+            // mirror matches what's on disk (and any other window's).
+            self.accounts = state.clone();
+            accounts_global::replace(cx, state);
             cx.notify();
             return;
         };
@@ -784,7 +786,12 @@ impl Workspace {
                 &e,
             );
         }
-        self.accounts = state;
+        // Publish to the app-wide Global (fires `observe_global` on every
+        // window, including this one, refreshing each `accounts` mirror);
+        // set this window's mirror eagerly too so the code right below sees
+        // it without waiting for the deferred callback.
+        self.accounts = state.clone();
+        accounts_global::replace(cx, state);
 
         self.report_error(
             ErrorReport::new(s::settings_accounts_reauth_added())

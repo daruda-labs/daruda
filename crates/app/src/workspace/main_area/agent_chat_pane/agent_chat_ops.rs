@@ -357,7 +357,7 @@ impl Workspace {
                 view,
                 cached_title,
                 cwd,
-                account_id: self.default_account_id_for_new_pane(),
+                account: self.default_account_selection_for_new_pane(),
             }),
         }
     }
@@ -676,7 +676,7 @@ impl Workspace {
         let account_config_dir = crate::workspace::main_area::pane::resolve_account_config_dir(
             &self.accounts,
             &self.data_dir,
-            self.agent_chat_account_id(pane_id),
+            self.agent_chat_account_selection(pane_id),
             daruda_store::accounts::AgentProvider::Claude,
         );
         let wrapped = match account_config_dir.as_deref() {
@@ -1474,22 +1474,24 @@ impl Workspace {
             .agent_chat_view()
     }
 
-    /// The AgentChat pane's account override (`None` = system default,
-    /// `~/.claude`). Same cross-lane scan as [`Self::agent_chat_view`] and for
-    /// the same reason — `connect_agent_chat` resolves this at connect time,
-    /// which can happen after a lane switch moved the pane out of the
-    /// active runtime.
-    pub(in crate::workspace) fn agent_chat_account_id(
+    /// The AgentChat pane's [`AccountSelection`]. Same cross-lane scan as
+    /// [`Self::agent_chat_view`] and for the same reason — `connect_agent_chat`
+    /// resolves this at connect time, which can happen after a lane switch
+    /// moved the pane out of the active runtime. Falls back to
+    /// [`AccountSelection::SystemDefault`] when the pane is gone or isn't an
+    /// AgentChat pane (a resolve-time no-op — same effect as no override).
+    pub(in crate::workspace) fn agent_chat_account_selection(
         &self,
         pane_id: PaneId,
-    ) -> Option<daruda_store::accounts::AccountId> {
+    ) -> daruda_store::accounts::AccountSelection {
         self.main_area
             .runtimes
             .values()
             .flat_map(|rt| rt.panes.iter())
-            .find(|p| p.id == pane_id)?
-            .agent_chat_content()?
-            .account_id
+            .find(|p| p.id == pane_id)
+            .and_then(Pane::agent_chat_content)
+            .map(|ac| ac.account)
+            .unwrap_or(daruda_store::accounts::AccountSelection::SystemDefault)
     }
 }
 

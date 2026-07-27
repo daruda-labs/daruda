@@ -336,6 +336,7 @@ impl Workspace {
         // "(plan)" suffix the status-bar dropdown slot shows.
         let account_label = crate::workspace::status_bar::account_label(
             focused_account
+                .account_id()
                 .and_then(|id| self.accounts.find(id))
                 .and_then(|account| account.email.as_deref()),
             None,
@@ -345,15 +346,15 @@ impl Workspace {
             workspace: self.right_dock.read(cx).workspace.clone(),
             plan_limits: self
                 .claude
-                .plan_limits_by_account
-                .get(&focused_account)
+                .usage_by_account
+                .plan_limits(focused_account)
                 .cloned()
                 .unwrap_or_default(),
             service_status: self.claude.service_status.clone(),
             activity: self
                 .claude
-                .activity_by_account
-                .get(&focused_account)
+                .usage_by_account
+                .activity(focused_account)
                 .cloned()
                 .unwrap_or_default(),
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,

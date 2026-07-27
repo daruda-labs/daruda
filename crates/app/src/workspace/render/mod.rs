@@ -1081,9 +1081,9 @@ impl Render for Workspace {
             .map(|p| p.title())
             .unwrap_or_else(|| "shell".into());
         // Same focused-pane lookup for the account slot: Terminal/AgentChat
-        // panes track an `account_id` override (`None` = provider default);
-        // File/TaskEdit panes don't track an account at all, so the slot
-        // is hidden (`None`) rather than showing a misleading "System".
+        // panes carry an `AccountSelection`; File/TaskEdit panes don't track
+        // an account at all, so the slot is hidden (`None`) rather than
+        // showing a misleading "System".
         let focused_pane_id = self.active_runtime().focused_pane_id;
         let weak_workspace = cx.entity().downgrade();
         let login_unavailable = self.active_agent_login_unavailable();
@@ -1093,11 +1093,11 @@ impl Render for Workspace {
             .panes
             .iter()
             .find(|p| p.id == focused_pane_id)
-            .and_then(|p| p.account_id())
-            .map(|account_id| {
+            .and_then(|p| p.account_selection())
+            .map(|selection| {
                 status_bar::AccountSlot::resolve(
                     focused_pane_id,
-                    account_id,
+                    selection,
                     &self.accounts,
                     weak_workspace.clone(),
                     login_unavailable,

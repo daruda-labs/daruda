@@ -4,19 +4,17 @@
 //! `sections::mod::render_agent_catalog_row`).
 //!
 //! Cross-window state: `daruda_store::accounts::AccountsState` is
-//! persisted once as `accounts.json`, but each open `Workspace` window
-//! also caches a copy (`Workspace.accounts`, Task 6/7/8) for its own
-//! pane-spawn/status-bar reads. This section is the sole place that
-//! writes `accounts.json` (`SetDefaultAccount`/`RemoveAccount`); after
-//! every write it re-broadcasts the new state to every open `Workspace`
-//! window via `WindowRegistry::for_each_workspace` +
-//! `Workspace::sync_accounts_state`, so their caches never go stale
-//! waiting for a restart. This mirrors the pattern the Plugin section
-//! uses for `SkillsState`, adapted for a per-window field instead of a
-//! `cx` Global — see `sections::plugin::run_plugin_op`'s doc comment for
-//! why a direct broadcast (not a Global) is the right call here too:
-//! deleting/defaulting an account must work even when no Workspace
-//! window happens to be open.
+//! persisted once as `accounts.json` and held in-memory as the app-wide
+//! `crate::workspace::accounts_global::AccountsGlobal` — the single source
+//! of truth every window (each `Workspace` + this Settings window) mirrors
+//! and refreshes via `cx.observe_global`. This section writes `accounts.json`
+//! for `SetDefaultAccount`/`RemoveAccount`, then publishes the new state with
+//! `accounts_global::replace`, which fires `observe_global` on every window
+//! symmetrically — no manual per-window broadcast to forget. This matches the
+//! `SkillsState`/`GlobalTasks` Global pattern the rest of the app uses for
+//! cross-window shared state (the earlier per-window-field + manual broadcast
+//! approach let account *logins* — which never broadcast — go stale in other
+//! windows until restart).
 //!
 //! The "+ Add account" row is a narrower case: unlike delete/default (pure
 //! `accounts.json` edits), a headless login (`Workspace::add_managed_account`)
@@ -40,6 +38,7 @@ use crate::surface::strings as s;
 use crate::ui::theme;
 use crate::ui::{ButtonVariant, Disableable as _, button, button_danger};
 use crate::window_registry::WindowRegistry;
+use crate::workspace::accounts_global;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
 
 const PROVIDERS: [AgentProvider; 2] = [AgentProvider::Claude, AgentProvider::Codex];
@@ -362,7 +361,7 @@ impl SettingsWindow {
     }
 
     /// Immediate (no confirm) — makes `account_id` the provider default
-    /// for new panes, persists, and syncs every open Workspace window.
+    /// for new panes, persists, and publishes to every window.
     fn set_default_account(
         &mut self,
         account_id: AccountId,
@@ -389,14 +388,17 @@ impl SettingsWindow {
                 &e,
             );
         }
-        self.accounts = state;
-        self.broadcast_accounts_state(cx);
+        // Publish to the app-wide Global — `observe_global` refreshes every
+        // window's mirror (including this one). Set this section's mirror
+        // eagerly so its own render below is immediate.
+        self.accounts = state.clone();
+        accounts_global::replace(cx, state);
         cx.notify();
     }
 
     /// G9 confirm dialog before delete — destructive, and (per the
-    /// brief) the body must show how many live panes fall back to the
-    /// provider default. `referencing` sums
+    /// brief) the body must show how many live panes revert to the
+    /// system default. `referencing` sums
     /// `Workspace::panes_referencing_account` across every open
     /// Workspace window; a lane not visited this session in a closed or
     /// not-yet-opened window isn't counted (see that method's doc for
@@ -437,7 +439,8 @@ impl SettingsWindow {
         // but does not close, the cross-window race).
         let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
         let Some(account) = state.find(account_id).cloned() else {
-            self.accounts = state;
+            self.accounts = state.clone();
+            accounts_global::replace(cx, state);
             cx.notify();
             return;
         };
@@ -462,19 +465,18 @@ impl SettingsWindow {
                 &e,
             );
         }
-        self.accounts = state.clone();
+        // Reset every pane pinned to this account back to the system
+        // default (+ prune its per-account usage cache) in every open
+        // Workspace window — this is pane/cache state the Global doesn't
+        // carry, so it stays a direct `for_each_workspace` sweep.
         WindowRegistry::for_each_workspace(cx, move |ws, _window, cx| {
             ws.clear_account_override(account_id, cx);
-            ws.sync_accounts_state(state.clone(), cx);
         });
+        // Publish the account removal itself once — `observe_global`
+        // refreshes every window's `accounts` mirror symmetrically.
+        self.accounts = state.clone();
+        accounts_global::replace(cx, state);
         cx.notify();
-    }
-
-    fn broadcast_accounts_state(&self, cx: &mut gpui::Context<Self>) {
-        let state = self.accounts.clone();
-        WindowRegistry::for_each_workspace(cx, move |ws, _window, cx| {
-            ws.sync_accounts_state(state.clone(), cx);
-        });
     }
 }
 
@@ -486,7 +488,7 @@ mod tests {
     fn remove_confirm_counts_referencing_panes() {
         assert_eq!(
             remove_confirm_body(3),
-            "3 pane(s) using this account will fall back to the provider default."
+            "3 pane(s) using this account will revert to the system default (~/.claude)."
         );
     }
 
@@ -494,7 +496,7 @@ mod tests {
     fn remove_confirm_body_zero_panes() {
         assert_eq!(
             remove_confirm_body(0),
-            "0 pane(s) using this account will fall back to the provider default."
+            "0 pane(s) using this account will revert to the system default (~/.claude)."
         );
     }
 

@@ -139,6 +139,10 @@ pub struct SettingsWindow {
     /// install / uninstall completions (and external `claude plugin`
     /// CLI runs) without polling.
     _skills_global_subscription: Subscription,
+    /// Subscription that refreshes the `accounts` mirror + repaints whenever
+    /// the app-wide `AccountsGlobal` changes — so an add/reauth/default/
+    /// delete in any Workspace window shows here without a restart.
+    _accounts_global_subscription: Subscription,
     /// Subscription that calls `cx.notify()` whenever the `Updater`
     /// entity changes status — so the About page reflects check /
     /// download / install progress reactively. `None` when the updater
@@ -645,7 +649,20 @@ impl SettingsWindow {
         let _updater_subscription =
             crate::update::Updater::get(cx).map(|e| cx.observe(&e, |_, _, cx| cx.notify()));
 
-        let accounts = daruda_store::accounts::load_accounts().unwrap_or_default();
+        // Managed accounts come from the app-wide Global (single source of
+        // truth). Install it from disk if this window opened before any
+        // Workspace (idempotent), then mirror the current value — refreshed
+        // on change by `_accounts_global_subscription`.
+        crate::workspace::accounts_global::install_if_absent(
+            cx,
+            daruda_store::accounts::load_accounts().unwrap_or_default(),
+        );
+        let accounts = crate::workspace::accounts_global::snapshot(cx);
+        let _accounts_global_subscription = cx
+            .observe_global::<crate::workspace::accounts_global::AccountsGlobal>(|this, cx| {
+                this.accounts = crate::workspace::accounts_global::snapshot(cx);
+                cx.notify();
+            });
 
         let result = Self {
             panel_focus_handle: cx.focus_handle(),
@@ -706,6 +723,7 @@ impl SettingsWindow {
             plugin_view_skill: None,
             _skills_global_subscription: cx
                 .observe_global::<crate::agent::skills::SkillsState>(|_, cx| cx.notify()),
+            _accounts_global_subscription,
             _updater_subscription,
         };
         // The scroll handle is populated during prepaint, which runs after render.

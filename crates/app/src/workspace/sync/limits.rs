@@ -84,7 +84,13 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                         Err(_) => break,
                     }
                 }
-                Endpoint::Status => (None, None),
+                // Status is account-independent — the key is unused here
+                // (`set_service_status` takes none); `SystemDefault` just
+                // satisfies the tuple's type.
+                Endpoint::Status => (
+                    daruda_store::accounts::AccountSelection::SystemDefault,
+                    None,
+                ),
             };
 
             // 4. Run the blocking fetch off the GPUI thread, then

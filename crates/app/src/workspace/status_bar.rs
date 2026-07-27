@@ -8,7 +8,7 @@ use crate::ui::{
 };
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
-use daruda_store::accounts::{AccountId, AgentProvider, ManagedAccount};
+use daruda_store::accounts::{AccountSelection, AgentProvider, ManagedAccount};
 use gpui::{App, IntoElement, RenderOnce, SharedString, WeakEntity, Window, div, prelude::*, px};
 
 /// Fixed height of the status bar in pixels.
@@ -17,7 +17,7 @@ pub(super) const STATUS_BAR_HEIGHT: f32 = theme::STATUS_BAR_HEIGHT;
 /// Display + dropdown data for the focused pane's account, shown as a
 /// clickable slot in the status bar's right section. Resolved by the
 /// snapshot builder in `render/mod.rs` from the focused pane's
-/// `account_id` + `Workspace.accounts`.
+/// [`AccountSelection`] + `Workspace.accounts`.
 #[derive(Clone)]
 pub(super) struct AccountSlot {
     /// `"email (plan)"`, `"email"`, or the "System" fallback — see
@@ -32,9 +32,8 @@ pub(super) struct AccountSlot {
     /// The focused pane the dropdown's menu items dispatch
     /// `Workspace::switch_pane_account` against.
     pub pane_id: PaneId,
-    /// The pane's own override (`None` = the explicit system default,
-    /// `~/.claude`), so the dropdown can mark the active entry.
-    pub current: Option<AccountId>,
+    /// The pane's own selection, so the dropdown can mark the active entry.
+    pub current: AccountSelection,
     /// Managed accounts matching `provider`, for the dropdown's entries.
     pub accounts: Vec<ManagedAccount>,
     /// Dispatch target for the dropdown's menu-item clicks.
@@ -52,21 +51,20 @@ pub(super) struct AccountSlot {
 
 impl AccountSlot {
     /// Resolve the status-bar account slot for a Terminal/AgentChat pane's
-    /// `account_id` (`None` = the explicit system default, `~/.claude` —
-    /// see `resolve_account_config_dir`'s doc for why this must not fall
-    /// back to the provider default) against the workspace's
-    /// `AccountsState`. Always produces a slot: an id that no longer
+    /// [`AccountSelection`] against the workspace's `AccountsState`. Always
+    /// produces a slot: a [`AccountSelection::Managed`] id that no longer
     /// resolves (deleted account) falls back to the same "System" label as
-    /// a `None` id, rather than surfacing a dangling reference to the user.
+    /// [`AccountSelection::SystemDefault`], rather than surfacing a dangling
+    /// reference to the user.
     pub(super) fn resolve(
         pane_id: PaneId,
-        account_id: Option<AccountId>,
+        selection: AccountSelection,
         accounts: &daruda_store::accounts::AccountsState,
         workspace: WeakEntity<Workspace>,
         login_unavailable: bool,
         login_pending: bool,
     ) -> Self {
-        let (label, provider) = match account_id.and_then(|id| accounts.find(id)) {
+        let (label, provider) = match selection.account_id().and_then(|id| accounts.find(id)) {
             Some(account) => (
                 // Status-bar slot shows the email only — the organization is
                 // omitted here (it's still shown in the account dropdown to
@@ -86,7 +84,7 @@ impl AccountSlot {
             label: label.into(),
             provider,
             pane_id,
-            current: account_id,
+            current: selection,
             accounts: matching,
             workspace,
             login_unavailable,
@@ -282,7 +280,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     let menu = {
         let workspace = slot.workspace.clone();
         let pane_id = slot.pane_id;
-        let is_current = slot.current.is_none();
+        let is_current = slot.current == AccountSelection::SystemDefault;
         menu.item(
             PopupMenuItem::new(SharedString::from(
                 crate::surface::strings::status_bar_account_system(),
@@ -291,7 +289,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
             .on_click(move |_, window, app| {
                 if let Some(ws) = workspace.upgrade() {
                     ws.update(app, |ws, cx| {
-                        ws.switch_pane_account(pane_id, None, window, cx)
+                        ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx)
                     });
                 }
             }),
@@ -312,7 +310,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
         let workspace = slot.workspace.clone();
         let pane_id = slot.pane_id;
         let account_id = account.id;
-        let is_current = slot.current == Some(account_id);
+        let is_current = slot.current == AccountSelection::Managed(account_id);
         let label = account_label(account.email.as_deref(), account.organization.as_deref());
         m.item(
             PopupMenuItem::new(SharedString::from(label))
@@ -320,7 +318,12 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 .on_click(move |_, window, app| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(app, |ws, cx| {
-                            ws.switch_pane_account(pane_id, Some(account_id), window, cx)
+                            ws.switch_pane_account(
+                                pane_id,
+                                AccountSelection::Managed(account_id),
+                                window,
+                                cx,
+                            )
                         });
                     }
                 }),

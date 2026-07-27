@@ -6,6 +6,7 @@
 
 mod account_login_ops;
 mod account_ops;
+pub(crate) mod accounts_global;
 mod actions;
 mod annotation_dialog;
 mod annotation_ops;
@@ -81,18 +82,19 @@ pub struct RunMacroByShortcut(pub gpui::SharedString);
 pub struct OpenSettings(pub daruda_config::BuiltinSection);
 
 /// Switch the focused pane's managed account (Task 8, A+C hybrid). Carries
-/// `Option<`[`daruda_store::accounts::AccountId`]`>` so the dropdown's
+/// an [`daruda_store::accounts::AccountSelection`] so the dropdown's
 /// per-account menu item can dispatch a concrete managed-account target
-/// (`Some`) while its "System default" entry dispatches `None` — reverting
-/// the pane back to `~/.claude`. There is no sensible default account to
-/// bind a keyboard shortcut to, so this has no `SHORTCUT_*` const (see
+/// ([`AccountSelection::Managed`]) while its "System default" entry
+/// dispatches [`AccountSelection::SystemDefault`] — reverting the pane back
+/// to `~/.claude`. There is no sensible default account to bind a keyboard
+/// shortcut to, so this has no `SHORTCUT_*` const (see
 /// `surface::keybindings`) — dispatched only from the status-bar account
 /// dropdown (`status_bar::build_account_menu`) via `window.dispatch_action`
 /// / a direct `Workspace::switch_pane_account` call. `no_json`: never
 /// loaded from keymap.json.
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
-pub struct SwitchPaneAccount(pub Option<daruda_store::accounts::AccountId>);
+pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 
 /// Start a headless add-account login (Plan B — see
 /// `account_login_ops::add_managed_account`). Carries the [`AgentProvider`]
@@ -548,16 +550,27 @@ pub struct Workspace {
     /// `Workspace::default_account_id_for_new_pane`) — resolution itself
     /// never falls back to it, an explicit `None` override always means
     /// the system default. Loaded from
-    /// `accounts.json` on construction via `data_dir` (same isolation as
-    /// `panels`); absent/corrupt/unreadable file falls back to an empty
-    /// state (no managed accounts — panes spawn with the ambient
-    /// environment unchanged, see `main_area::pane::resolve_account_config_dir`).
+    /// Read-cache of the app-wide [`accounts_global::AccountsGlobal`] (the
+    /// single source of truth). Seeded from the global at construction and
+    /// refreshed *only* by `_accounts_global_subscription` — never written
+    /// elsewhere. Cached as a field (rather than read through `cx` each
+    /// time) so the many cx-free read sites
+    /// (`main_area::pane::resolve_account_config_dir` callers,
+    /// `focused_account_key`, the status-bar slot) stay cx-free, exactly
+    /// like the config fields cache `SettingsStore`. Empty when no managed
+    /// accounts exist — panes then spawn with the ambient environment
+    /// unchanged.
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
     /// In-flight headless add-account login (Plan B), if any — see
     /// [`PendingLogin`]. Drives the add-account spinner/cancel affordance;
     /// `None` outside of `Workspace::add_managed_account`'s call through
     /// `Workspace::finish_login` / `Workspace::cancel_pending_login`.
     pub(in crate::workspace) pending_login: PendingLogin,
+    /// Subscription that refreshes the `accounts` read-cache and repaints
+    /// whenever the app-wide [`accounts_global::AccountsGlobal`] changes —
+    /// so an add/reauth/default/delete in *any* window (or the Settings
+    /// window) is reflected here immediately, with no manual broadcast.
+    _accounts_global_subscription: gpui::Subscription,
     /// Subscription that calls `cx.notify()` whenever the app-wide
     /// `GlobalTasks` changes — so the Tasks tab in this workspace
     /// re-renders after a CRUD or lifecycle mutation triggered by any
@@ -968,7 +981,15 @@ impl Workspace {
         let (pty_tracker, pty_rx) = crate::hooks::pty_tracker::PtyTracker::spawn();
         let pty_event_pump = sync::pty::spawn(pty_rx, cx);
 
-        let accounts = daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default();
+        // Install the app-wide accounts Global from disk if this is the
+        // first window (idempotent), then take the mirror from the Global —
+        // a later window reads whatever the first installed, since one
+        // process = one profile = one `data_dir`.
+        accounts_global::install_if_absent(
+            cx,
+            daruda_store::accounts::load_accounts_in(&data_dir).unwrap_or_default(),
+        );
+        let accounts = accounts_global::snapshot(cx);
         // Sweep any per-account config dir left behind by a login that
         // was cancelled or crashed before being promoted to a
         // `ManagedAccount` — a shallow, one-shot readdir under
@@ -1019,9 +1040,8 @@ impl Workspace {
             right_dock_view: daruda_store::project::RightDockView::default(),
             claude: claude_session_ops::ClaudeContext {
                 usage_poll: config.usage.poll.clone(),
-                plan_limits_by_account: std::collections::HashMap::new(),
+                usage_by_account: claude_session_ops::PerAccountUsage::default(),
                 service_status: daruda_claude::ServiceStatus::default(),
-                activity_by_account: std::collections::HashMap::new(),
                 usage_refresh_in_flight: false,
                 claude_status: {
                     // Cold restore: load any status files that survived a
@@ -1133,6 +1153,15 @@ impl Workspace {
             panels: main_area::bottom_dock::macro_ops::load_or_seed_panels(&data_dir),
             accounts,
             pending_login: PendingLogin::None,
+            // Managed accounts live in the app-wide `AccountsGlobal`; this
+            // subscription refreshes the `accounts` read-cache from it and
+            // repaints whenever any window mutates it (single, symmetric
+            // cross-window propagation path — see `accounts_global`).
+            _accounts_global_subscription: cx
+                .observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
+                    ws.accounts = accounts_global::snapshot(cx);
+                    cx.notify();
+                }),
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the

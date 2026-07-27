@@ -207,6 +207,16 @@ fn main() {
         bind_keys::register_global_actions(cx, config.clone());
         register_recent_actions(cx, config.clone());
 
+        // Canonical startup install of the app-wide managed-accounts Global
+        // (the single source of truth every window mirrors). Window
+        // constructors also install it idempotently, so this is belt-and-
+        // suspenders for the first window plus the authoritative install
+        // point when that window is Welcome (no Workspace).
+        crate::workspace::accounts_global::install_if_absent(
+            cx,
+            daruda_store::accounts::load_accounts().unwrap_or_default(),
+        );
+
         window_startup::open_first_window(config, window_opts, cx);
 
         watchers_lifecycle::spawn_all(cx);
