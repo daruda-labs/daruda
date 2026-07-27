@@ -836,6 +836,198 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
     });
 }
 
+/// A `ConfigOptionsChanged` carrying the agent's rebuilt `Mode` option
+/// refreshes `modes` — the agent re-advertises its mode list per model and
+/// announces the new one only there, so a `ModeChanged` for a mode added after
+/// connect must be accepted rather than dropped as unknown.
+#[gpui::test]
+async fn config_options_change_refreshes_the_advertised_modes(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let mode_choice = |id: &str| ConfigChoiceView {
+        value: id.to_string(),
+        name: id.to_string(),
+        description: None,
+    };
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let view = agent_view(ws, id);
+                view.update(cx, |v, cx| {
+                    // Connect-time state: the model in use advertises no `auto`.
+                    v.modes = Some(ModeStateView {
+                        available: vec![
+                            SessionModeView {
+                                id: "default".to_string(),
+                                name: "Manual".to_string(),
+                                description: None,
+                            },
+                            SessionModeView {
+                                id: "plan".to_string(),
+                                name: "Plan Mode".to_string(),
+                                description: None,
+                            },
+                        ],
+                        current: "plan".to_string(),
+                    });
+                    // A mode outside the advertised list is rejected — the guard
+                    // this refresh exists to keep honest.
+                    v.apply_event(
+                        AcpEvent::ModeChanged {
+                            mode_id: "auto".to_string(),
+                        },
+                        "",
+                        false,
+                        cx,
+                    );
+                    assert_eq!(
+                        v.modes.as_ref().expect("modes injected").current,
+                        "plan",
+                        "an unadvertised mode id is dropped, not applied"
+                    );
+                    // The agent switched to a model that supports `auto` and
+                    // re-advertised its modes through the config option.
+                    v.apply_event(
+                        AcpEvent::ConfigOptionsChanged(vec![ConfigOptionView {
+                            id: "mode".to_string(),
+                            name: "Mode".to_string(),
+                            description: None,
+                            category: ConfigOptionCategoryView::Mode,
+                            current_value: "plan".to_string(),
+                            options: vec![
+                                mode_choice("auto"),
+                                mode_choice("default"),
+                                mode_choice("plan"),
+                            ],
+                        }]),
+                        "",
+                        false,
+                        cx,
+                    );
+                    v.apply_event(
+                        AcpEvent::ModeChanged {
+                            mode_id: "auto".to_string(),
+                        },
+                        "",
+                        false,
+                        cx,
+                    );
+                    // An option set carrying no `Mode` entry (an agent that
+                    // advertises mode only on `SessionModeState`) leaves the
+                    // mode state alone rather than blanking it.
+                    v.apply_event(
+                        AcpEvent::ConfigOptionsChanged(vec![ConfigOptionView {
+                            id: "model".to_string(),
+                            name: "Model".to_string(),
+                            description: None,
+                            category: ConfigOptionCategoryView::Model,
+                            current_value: "sonnet".to_string(),
+                            options: vec![ConfigChoiceView {
+                                value: "sonnet".to_string(),
+                                name: "Sonnet".to_string(),
+                                description: None,
+                            }],
+                        }]),
+                        "",
+                        false,
+                        cx,
+                    );
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        let view = view.read(cx);
+        let modes = view.modes.as_ref().expect("modes stay advertised");
+        assert!(
+            modes.available.iter().any(|m| m.id == "auto"),
+            "the refreshed list carries the newly advertised mode"
+        );
+        assert_eq!(
+            modes.current, "auto",
+            "a ModeChanged for a mode added after connect now applies"
+        );
+    });
+}
+
+/// The refresh never invents mode support: a pane whose agent advertised no
+/// `SessionModeState` at connect keeps `modes` at `None`, even when the config
+/// set happens to carry a `Mode` option.
+#[gpui::test]
+async fn config_options_change_does_not_add_modes_to_a_modeless_pane(cx: &mut TestAppContext) {
+    use daruda_acp::{AcpEvent, ConfigChoiceView, ConfigOptionCategoryView, ConfigOptionView};
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let tmp = std::env::temp_dir();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(tmp.clone())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let view = agent_view(ws, id);
+                view.update(cx, |v, cx| {
+                    assert!(v.modes.is_none(), "no session connected yet");
+                    v.apply_event(
+                        AcpEvent::ConfigOptionsChanged(vec![ConfigOptionView {
+                            id: "mode".to_string(),
+                            name: "Mode".to_string(),
+                            description: None,
+                            category: ConfigOptionCategoryView::Mode,
+                            current_value: "default".to_string(),
+                            options: vec![ConfigChoiceView {
+                                value: "default".to_string(),
+                                name: "Manual".to_string(),
+                                description: None,
+                            }],
+                        }]),
+                        "",
+                        false,
+                        cx,
+                    );
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        let view = agent_view(ws, pane_id);
+        assert!(
+            view.read(cx).modes.is_none(),
+            "whether the agent has modes stays decided by Connected"
+        );
+    });
+}
+
 #[gpui::test]
 async fn cancel_agent_turn_cancels_the_pending_permission(cx: &mut TestAppContext) {
     use daruda_acp::{ChatItem, PermissionChoice, PermissionItem, PermissionResolution};

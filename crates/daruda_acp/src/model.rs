@@ -298,8 +298,9 @@ pub struct SessionModeView {
     pub description: Option<String>,
 }
 
-/// Mode state advertised at session-connect time and updated by
-/// `CurrentModeUpdate` notifications (mirror of the protocol's
+/// Mode state advertised at session-connect time, updated by
+/// `CurrentModeUpdate` notifications, and re-derived from the `Mode` config
+/// option via [`ModeStateView::from_config_options`] (mirror of the protocol's
 /// `SessionModeState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModeStateView {
@@ -417,6 +418,45 @@ impl From<&agent_client_protocol::schema::v1::SessionModeState> for ModeStateVie
                 .collect(),
             current: s.current_mode_id.to_string(),
         }
+    }
+}
+
+impl ModeStateView {
+    /// Re-derive the mode state from an advertised config-option set.
+    ///
+    /// `SessionModeState` is delivered once, in the `session/new` /
+    /// `session/load` response, but an agent may rebuild its mode list
+    /// mid-session — the Claude adapter drops `auto` when the newly selected
+    /// model reports no classifier support — and announces the new list only
+    /// through the `Mode`-category config option. Re-deriving on every config
+    /// change keeps the host's advertised modes and current mode from going
+    /// stale against the agent's real ones.
+    ///
+    /// `None` when the set carries no `Mode` option, or that option advertises
+    /// no choices — the caller then keeps the mode state it already has. Unlike
+    /// [`From<&SessionModeState>`], which builds the initial state and so has
+    /// nothing to lose by accepting an empty list, this refresh overwrites live
+    /// state: an empty selector is far likelier to be an adapter transient than
+    /// a real "this agent has no modes now", so prefer the last known-good list.
+    pub fn from_config_options(options: &[ConfigOptionView]) -> Option<Self> {
+        let mode = options
+            .iter()
+            .find(|o| o.category == ConfigOptionCategoryView::Mode)?;
+        if mode.options.is_empty() {
+            return None;
+        }
+        Some(ModeStateView {
+            available: mode
+                .options
+                .iter()
+                .map(|c| SessionModeView {
+                    id: c.value.clone(),
+                    name: c.name.clone(),
+                    description: c.description.clone(),
+                })
+                .collect(),
+            current: mode.current_value.clone(),
+        })
     }
 }
 
@@ -796,5 +836,101 @@ mod tests {
         );
         let view = ConfigOptionView::from_protocol(&opt).expect("maps");
         assert_eq!(view.category, ConfigOptionCategoryView::Other);
+    }
+
+    /// Build the option views the adapter's `config_option_update` carries:
+    /// a `Mode`-category select plus an unrelated `Model` one.
+    fn mode_and_model_options(
+        current_mode: &'static str,
+        mode_ids: &[&'static str],
+    ) -> Vec<ConfigOptionView> {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+        let mode = SessionConfigOption::select(
+            "mode",
+            "Mode",
+            current_mode,
+            mode_ids
+                .iter()
+                .map(|id| SessionConfigSelectOption::new(*id, *id).description("desc"))
+                .collect::<Vec<_>>(),
+        )
+        .category(SessionConfigOptionCategory::Mode);
+        let model = SessionConfigOption::select(
+            "model",
+            "Model",
+            "sonnet",
+            vec![SessionConfigSelectOption::new("sonnet", "Sonnet")],
+        )
+        .category(SessionConfigOptionCategory::Model);
+        [mode, model]
+            .iter()
+            .filter_map(ConfigOptionView::from_protocol)
+            .collect()
+    }
+
+    #[test]
+    fn mode_state_view_from_config_options_maps_the_mode_option() {
+        let options = mode_and_model_options("auto", &["auto", "default", "plan"]);
+
+        let view = ModeStateView::from_config_options(&options).expect("mode option maps");
+
+        assert_eq!(view.current, "auto");
+        assert_eq!(
+            view.available
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["auto", "default", "plan"],
+            "choices map to advertised modes in order"
+        );
+        assert_eq!(view.available[0].name, "auto");
+        assert_eq!(view.available[0].description.as_deref(), Some("desc"));
+    }
+
+    #[test]
+    fn mode_state_view_from_config_options_reflects_a_shrunken_mode_list() {
+        // The adapter drops `auto` after a switch to a model without classifier
+        // support and clamps the current mode — the host must follow both.
+        let before = mode_and_model_options("auto", &["auto", "default", "plan"]);
+        let after = mode_and_model_options("default", &["default", "plan"]);
+
+        let before = ModeStateView::from_config_options(&before).expect("maps");
+        let after = ModeStateView::from_config_options(&after).expect("maps");
+
+        assert_eq!(before.available.len(), 3);
+        assert_eq!(after.available.len(), 2);
+        assert!(after.available.iter().all(|m| m.id != "auto"));
+        assert_eq!(after.current, "default");
+    }
+
+    #[test]
+    fn mode_state_view_from_config_options_without_a_mode_option_is_none() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+        let model = SessionConfigOption::select(
+            "model",
+            "Model",
+            "sonnet",
+            vec![SessionConfigSelectOption::new("sonnet", "Sonnet")],
+        )
+        .category(SessionConfigOptionCategory::Model);
+        let options: Vec<ConfigOptionView> = [model]
+            .iter()
+            .filter_map(ConfigOptionView::from_protocol)
+            .collect();
+
+        assert_eq!(ModeStateView::from_config_options(&options), None);
+        assert_eq!(ModeStateView::from_config_options(&[]), None);
+    }
+
+    #[test]
+    fn mode_state_view_from_config_options_with_no_choices_is_none() {
+        // An empty selector can't be rendered or cycled; the caller keeps the
+        // mode state it already has rather than blanking it.
+        let options = mode_and_model_options("default", &[]);
+        assert_eq!(ModeStateView::from_config_options(&options), None);
     }
 }

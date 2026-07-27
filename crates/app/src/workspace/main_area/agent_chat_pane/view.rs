@@ -487,8 +487,12 @@ pub(in crate::workspace) struct AgentChatView {
     /// Select config options (model / effort / …) advertised by the agent at
     /// `session/new` time and replaced wholesale on `ConfigOptionsChanged`.
     /// Empty until the session connects or when the agent advertises none.
-    /// `Mode`-category options are intentionally not kept here — mode is
-    /// rendered through [`Self::modes`] and the existing mode chip.
+    /// The `Mode`-category option is stored but never rendered as a chip
+    /// (`snapshots.rs` filters it out): it is the input [`Self::modes`] is
+    /// re-derived from. [`Self::modes`] is the read surface for mode — this
+    /// entry is only authoritative at the instant it arrives, since
+    /// [`Self::set_mode`] and the connect-time mode application write
+    /// [`Self::modes`] alone.
     pub(in crate::workspace) config_options: Vec<ConfigOptionView>,
     /// Which optional session methods the agent advertised at connect
     /// (`session/load` / `list` / `resume` / `close`). The active consumer today
@@ -1091,6 +1095,16 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::ConfigOptionsChanged(options) => {
+                // A mid-session mode list only ever arrives here (see
+                // [`ModeStateView::from_config_options`]), so re-derive rather
+                // than let the connect-time list go stale. Gated on an
+                // already-advertised mode state: whether this agent has modes
+                // at all stays decided by `Connected`.
+                if self.modes.is_some()
+                    && let Some(mode_state) = ModeStateView::from_config_options(&options)
+                {
+                    self.modes = Some(mode_state);
+                }
                 self.config_options = options;
             }
             AcpEvent::UsageChanged(usage) => {
