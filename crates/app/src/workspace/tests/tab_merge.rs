@@ -91,7 +91,10 @@ async fn test_merge_tab_self_merge_is_noop(cx: &mut TestAppContext) {
     // A single tab: dragging it back onto its own (already active) pane.
     let (tab_id, pane_id) = workspace.read_with(cx, |ws, _| {
         let idx = ws.active_runtime().active_tab_index;
-        (ws.active_runtime().tabs[idx].id, ws.active_runtime().panes[0].id)
+        (
+            ws.active_runtime().tabs[idx].id,
+            ws.active_runtime().panes[0].id,
+        )
     });
     let tabs_before = workspace.read_with(cx, |ws, _| ws.active_runtime().tabs.len());
 

@@ -49,19 +49,16 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
 // Header (logo + title + plan badge)
 // ----------------------------------------------------------------
 
-/// `[C] Claude Code   alice@co.com   [TEAM 5x]` — logo chip, product
-/// title, the focused pane's account identity, and the plan badge
-/// pushed to the trailing edge. The account label is always present
-/// (falls back to the "System" wording); the plan badge is omitted
-/// when no plan metadata is available (Keychain miss / before the
-/// first fetch).
+/// Account label sits on its own full-width row below the title row so a
+/// long email can't push the plan badge off-screen — `w_full` lets it wrap
+/// instead of being clipped by the fixed-width title row.
 fn header(
     plan: Option<&PlanInfo>,
     account_label: SharedString,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let t = theme::current(cx);
-    let mut row = div()
+    let mut title_row = div()
         .flex()
         .flex_row()
         .items_center()
@@ -73,13 +70,19 @@ fn header(
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .text_color(t.text_muted)
                 .child(SharedString::from(strings::usage_brand_title())),
-        )
-        .child(account_label_text(account_label, t.text_muted));
+        );
 
     if let Some(label) = plan_badge_label(plan) {
-        row = row.child(plan_badge(label));
+        title_row = title_row.child(plan_badge(label));
     }
-    row
+
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(theme::GAP_XS))
+        .child(title_row)
+        .child(account_label_text(account_label, t.text_muted))
 }
 
 /// Display-only identity of the account the tab's usage/activity data
@@ -88,7 +91,7 @@ fn header(
 /// dropdown. An account selector is deferred (plan §6.8 option B).
 fn account_label_text(label: SharedString, muted: Hsla) -> impl IntoElement {
     div()
-        .flex_none()
+        .w_full()
         .text_size(px(theme::USAGE_PLAN_BADGE_FONT_SIZE))
         .text_color(muted)
         .child(label)
