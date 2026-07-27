@@ -264,6 +264,7 @@ async fn streaming_write_diff_rebuild_paints_full_editor(cx: &mut TestAppContext
 
     let (rows, bounds) = view.read_with(cx, |v, cx| {
         let editor = v
+            .assets
             .diff_editors
             .get("w1#0")
             .expect("diff editor built for the tool call");

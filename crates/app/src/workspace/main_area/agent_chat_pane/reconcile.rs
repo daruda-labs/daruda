@@ -90,13 +90,13 @@ impl AgentChatView {
             for (di, diff) in tc.diffs.iter().enumerate() {
                 let key = diff_editor_key(&tc.id, di);
                 let fingerprint = diff_source_fingerprint(diff);
-                if self.diff_editor_sources.get(&key) == Some(&fingerprint) {
+                if self.assets.diff_editor_sources.get(&key) == Some(&fingerprint) {
                     continue;
                 }
                 let Some((model, stat)) =
                     build_diff_view_model(diff, syntax_theme, is_light, &colors)
                 else {
-                    if self.diff_editors.contains_key(&key) {
+                    if self.assets.diff_editors.contains_key(&key) {
                         stale.push(key);
                     }
                     continue;
@@ -110,9 +110,9 @@ impl AgentChatView {
         }
 
         for key in stale {
-            self.diff_editors.remove(&key);
-            self.diff_stats.remove(&key);
-            self.diff_editor_sources.remove(&key);
+            self.assets.diff_editors.remove(&key);
+            self.assets.diff_stats.remove(&key);
+            self.assets.diff_editor_sources.remove(&key);
         }
 
         let window_handle = self.window_handle;
@@ -123,9 +123,11 @@ impl AgentChatView {
                 // summary (`+N −M`) reads it back via `diff_editor_key`. Stored
                 // only when the editor builds — a no-change diff yields no
                 // editor and no stat (absent ≡ `0/0`).
-                self.diff_stats.insert(key.clone(), stat);
-                self.diff_editor_sources.insert(key.clone(), fingerprint);
-                self.diff_editors.insert(key, editor);
+                self.assets.diff_stats.insert(key.clone(), stat);
+                self.assets
+                    .diff_editor_sources
+                    .insert(key.clone(), fingerprint);
+                self.assets.diff_editors.insert(key, editor);
             }
         }
         // A tool card just grew (or a stale editor was dropped/replaced), and
@@ -155,8 +157,13 @@ impl AgentChatView {
             };
             for source in mermaid_sources(text) {
                 let key = mermaid_key(&source, dark);
-                if self.mermaid_images.lock().unwrap().contains_key(&key)
-                    || self.mermaid_inflight.contains(&key)
+                if self
+                    .assets
+                    .mermaid_images
+                    .lock()
+                    .unwrap()
+                    .contains_key(&key)
+                    || self.assets.mermaid_inflight.contains(&key)
                     || pending.iter().any(|(k, _)| *k == key)
                 {
                     continue;
@@ -171,7 +178,7 @@ impl AgentChatView {
         // Mark all pending keys in-flight before spawning so a second event
         // arriving before any task resolves doesn't re-spawn the same source.
         for (key, _) in &pending {
-            self.mermaid_inflight.insert(*key);
+            self.assets.mermaid_inflight.insert(*key);
         }
 
         for (key, source) in pending {
@@ -195,12 +202,16 @@ impl AgentChatView {
                     .await;
                 // SILENT-OK: view/window dropped before the raster resolved — nothing left to cache it on.
                 let _ = this.update(cx, |view, cx| {
-                    view.mermaid_inflight.remove(&key);
+                    view.assets.mermaid_inflight.remove(&key);
                     // Convert the raster to a GPU-ready image once, here, so the
                     // render hook clones the same `CachedImage` each frame and
                     // gpui reuses the uploaded texture.
                     if let Some(image) = raster.and_then(|r| CachedImage::from_raster(&r)) {
-                        view.mermaid_images.lock().unwrap().insert(key, image);
+                        view.assets
+                            .mermaid_images
+                            .lock()
+                            .unwrap()
+                            .insert(key, image);
                         // The fence grew from a code block to a diagram, so its
                         // cached height is stale — remeasure before repainting or
                         // it clips. Index is unknown here, so this is a full
@@ -239,8 +250,8 @@ impl AgentChatView {
                     continue;
                 };
                 let key = tool_image_key(data);
-                if self.tool_images.lock().unwrap().contains_key(&key)
-                    || self.tool_image_inflight.contains(&key)
+                if self.assets.tool_images.lock().unwrap().contains_key(&key)
+                    || self.assets.tool_image_inflight.contains(&key)
                     || pending.iter().any(|(k, _)| *k == key)
                 {
                     continue;
@@ -255,7 +266,7 @@ impl AgentChatView {
         // Mark all pending keys in-flight before spawning so a second event
         // arriving before any task resolves doesn't re-spawn the same image.
         for (key, _) in &pending {
-            self.tool_image_inflight.insert(*key);
+            self.assets.tool_image_inflight.insert(*key);
         }
 
         for (key, data) in pending {
@@ -281,7 +292,7 @@ impl AgentChatView {
                     .await;
                 // SILENT-OK: view/window dropped before the decode resolved — nothing left to cache it on.
                 let _ = this.update(cx, |view, cx| {
-                    view.tool_image_inflight.remove(&key);
+                    view.assets.tool_image_inflight.remove(&key);
                     // Convert the raster to a GPU-ready image here (main
                     // thread), same as `reconcile_mermaid` — once, so the
                     // render hook clones the same `CachedImage` each frame.
@@ -289,7 +300,7 @@ impl AgentChatView {
                     // is cached too, so a malformed payload renders a failure
                     // label once instead of retrying forever.
                     let cached = raster.and_then(|r| CachedImage::from_raster(&r));
-                    view.tool_images.lock().unwrap().insert(key, cached);
+                    view.assets.tool_images.lock().unwrap().insert(key, cached);
                     // The block just resolved from a pending placeholder to a
                     // decoded image (or a failure label), so its cached height
                     // is stale — remeasure before repainting or it clips.

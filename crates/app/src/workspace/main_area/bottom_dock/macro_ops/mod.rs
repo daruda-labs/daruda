@@ -591,9 +591,10 @@ impl Workspace {
         let view = self.agent_chat_view(focused)?;
         let v = view.read(cx);
         let id = v
+            .queue
             .pending_prompts
             .last()
-            .or_else(|| v.paused_prompts.last())?
+            .or_else(|| v.queue.paused_prompts.last())?
             .id;
         Some((focused, id))
     }

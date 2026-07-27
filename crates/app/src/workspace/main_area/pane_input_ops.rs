@@ -96,7 +96,7 @@ impl Workspace {
                         // row reverts and the composer clears.
                         let editing = self
                             .agent_chat_view(pane_id)
-                            .is_some_and(|v| v.read(cx).editing_prompt.is_some());
+                            .is_some_and(|v| v.read(cx).queue.editing_prompt.is_some());
                         if editing {
                             self.cancel_edit_queued_prompt(pane_id, window, cx);
                         }

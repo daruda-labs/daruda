@@ -17,17 +17,21 @@ use gpui::{
 };
 
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
-/// (built in the ops layer; this view only embeds them).
-pub(super) type DiffEditors = std::collections::HashMap<String, Entity<crate::ui::InputState>>;
+/// (built in the ops layer; this view only embeds them). `pub(in
+/// crate::workspace)` rather than `pub(super)`: `AgentChatView::assets`
+/// (`view.rs`) uses this as its field type too, so both the owning cache
+/// and its read-only render-side view share one definition.
+pub(in crate::workspace) type DiffEditors =
+    std::collections::HashMap<String, Entity<crate::ui::InputState>>;
 
 /// Per-diff `+N −M` line counts keyed by `"{tool_call_id}#{diff_index}"`
 /// (built in the ops layer; this view only reads them for the collapsed
 /// diff summary).
-pub(super) type DiffStats = std::collections::HashMap<String, DiffStat>;
+pub(in crate::workspace) type DiffStats = std::collections::HashMap<String, DiffStat>;
 
 /// Rendered mermaid diagrams keyed by source hash. Shared so the cached
 /// markdown code-block hook can see async image arrivals after parse.
-pub(super) type MermaidImages = std::sync::Arc<
+pub(in crate::workspace) type MermaidImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
             u64,
@@ -40,7 +44,7 @@ pub(super) type MermaidImages = std::sync::Arc<
 /// `Some` = decoded & GPU-ready; `None` = a cached decode failure. Shared so
 /// `output_block_view` sees async decode arrivals landed by
 /// `reconcile_tool_images`.
-pub(super) type ToolImages = std::sync::Arc<
+pub(in crate::workspace) type ToolImages = std::sync::Arc<
     std::sync::Mutex<
         std::collections::HashMap<
             u64,
@@ -297,10 +301,10 @@ fn render_row(
                 item,
                 row.indent > 0,
                 &this.items,
-                &this.diff_editors,
-                &this.diff_stats,
-                &this.mermaid_images,
-                &this.tool_images,
+                &this.assets.diff_editors,
+                &this.assets.diff_stats,
+                &this.assets.mermaid_images,
+                &this.assets.tool_images,
                 &this.fold,
                 t,
                 this.dim_amount,
@@ -324,7 +328,7 @@ fn render_row(
                     key,
                     expanded,
                     text,
-                    &this.mermaid_images,
+                    &this.assets.mermaid_images,
                     this.dim_amount,
                     cx,
                 )

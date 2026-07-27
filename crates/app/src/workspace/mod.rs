@@ -1708,7 +1708,7 @@ impl Workspace {
             .filter_map(|p| p.agent_chat_view().map(|v| (p.id, v.clone())))
             .filter(|(_, v)| {
                 let vr = v.read(cx);
-                vr.was_busy || vr.maybe_active()
+                vr.activity.was_busy || vr.maybe_active()
             })
             .collect();
 
@@ -1725,7 +1725,7 @@ impl Workspace {
             // and stored it in `was_busy`; read that instead of calling
             // `is_busy()` again (a second O(items) `subagent_activity` scan with a
             // fresh `Instant::now()`) so the whole tick uses one consistent `now`.
-            if view.read(cx).was_busy {
+            if view.read(cx).activity.was_busy {
                 busy_ids.push(view.entity_id());
             }
             if let Some(outcome) = edge {

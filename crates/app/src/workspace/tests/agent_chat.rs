@@ -31,7 +31,11 @@ pub(super) fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatVie
 /// The queued-prompt texts in FIFO order — the queue holds `QueuedPrompt`
 /// (id + text), so tests compare on the text projection.
 fn queue_texts(v: &AgentChatView) -> Vec<String> {
-    v.pending_prompts.iter().map(|q| q.text.clone()).collect()
+    v.queue
+        .pending_prompts
+        .iter()
+        .map(|q| q.text.clone())
+        .collect()
 }
 
 #[gpui::test]
@@ -1650,11 +1654,12 @@ async fn escape_parks_the_queue_then_a_second_escape_clears_it(cx: &mut TestAppC
     view.read_with(cx, |v, _| {
         assert!(v.turn_is_idle(), "the turn is settled");
         assert!(
-            v.pending_prompts.is_empty(),
+            v.queue.pending_prompts.is_empty(),
             "the live queue is emptied by the park"
         );
         assert_eq!(
-            v.paused_prompts
+            v.queue
+                .paused_prompts
                 .iter()
                 .map(|q| q.text.clone())
                 .collect::<Vec<_>>(),
@@ -1676,7 +1681,10 @@ async fn escape_parks_the_queue_then_a_second_escape_clears_it(cx: &mut TestAppC
     cx.run_until_parked();
 
     view.read_with(cx, |v, _| {
-        assert!(v.paused_prompts.is_empty(), "the parked queue is cleared");
+        assert!(
+            v.queue.paused_prompts.is_empty(),
+            "the parked queue is cleared"
+        );
     });
 
     // Third Escape: idle, no queue → not handled, so Escape propagates.
@@ -1784,12 +1792,12 @@ async fn pump_pending_prompt_is_a_noop_without_a_handle(cx: &mut TestAppContext)
     let empty_view = workspace.read_with(cx, |ws, _| agent_view(ws, pane_id));
     cx.update(|cx| {
         empty_view.update(cx, |v, cx| {
-            v.pending_prompts.clear();
+            v.queue.pending_prompts.clear();
             v.pump_pending_prompt(cx);
         })
     });
     empty_view.read_with(cx, |v, _| {
-        assert!(v.pending_prompts.is_empty());
+        assert!(v.queue.pending_prompts.is_empty());
         assert!(v.turn_is_idle());
     });
 }
@@ -1871,7 +1879,7 @@ async fn queued_prompt_ops_remove_one_and_clear_all(cx: &mut TestAppContext) {
                 ws.send_agent_prompt_text(id, "first".to_string(), cx);
                 ws.send_agent_prompt_text(id, "second".to_string(), cx);
                 ws.send_agent_prompt_text(id, "third".to_string(), cx);
-                let remove_id = agent_view(ws, id).read(cx).pending_prompts[1].id;
+                let remove_id = agent_view(ws, id).read(cx).queue.pending_prompts[1].id;
                 (id, remove_id)
             })
         })
@@ -1908,7 +1916,7 @@ async fn queued_prompt_ops_remove_one_and_clear_all(cx: &mut TestAppContext) {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert!(
-            view.pending_prompts.is_empty(),
+            view.queue.pending_prompts.is_empty(),
             "clear removes every prompt"
         );
         assert!(view.items.is_empty(), "clearing the queue does not echo");
@@ -2515,7 +2523,7 @@ async fn turn_failed_keeps_session_connected_and_shows_error(cx: &mut TestAppCon
                     "the failure is surfaced as an inline Error item"
                 );
                 // Recorded as an errored outcome (fires at the busy→idle edge).
-                assert_eq!(v.pending_completion, Some(TurnOutcome::Errored));
+                assert_eq!(v.activity.pending_completion, Some(TurnOutcome::Errored));
             });
         })
     })
@@ -2876,7 +2884,7 @@ async fn reconcile_activity_idle_to_busy_stamps_span_start(cx: &mut TestAppConte
         v.set_turn_in_flight();
         let edge = v.reconcile_activity(std::time::Instant::now());
         assert_eq!(edge, None, "the busy edge fires no completion");
-        assert!(v.was_busy, "reconcile records the busy level");
+        assert!(v.activity.was_busy, "reconcile records the busy level");
         assert!(
             v.activity_elapsed().is_some(),
             "the span start is stamped on idle→busy"
@@ -2898,7 +2906,7 @@ async fn reconcile_activity_busy_to_idle_returns_pending_once(cx: &mut TestAppCo
         assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
         // A completion was captured while busy (as `TurnEnded` would), and the
         // turn settled.
-        v.pending_completion = Some(TurnOutcome::Completed);
+        v.activity.pending_completion = Some(TurnOutcome::Completed);
         v.set_turn_idle();
         let edge = v.reconcile_activity(std::time::Instant::now());
         assert_eq!(
@@ -2957,7 +2965,7 @@ async fn reconcile_activity_two_turns_one_span_fires_latest_once(cx: &mut TestAp
         // Turn 1 ends and turn 2 starts before any idle reconcile: the pane
         // never leaves the busy level, so no edge — the first outcome is
         // captured but not fired.
-        v.pending_completion = Some(TurnOutcome::Stopped);
+        v.activity.pending_completion = Some(TurnOutcome::Stopped);
         v.set_turn_in_flight();
         assert_eq!(
             v.reconcile_activity(std::time::Instant::now()),
@@ -2966,7 +2974,7 @@ async fn reconcile_activity_two_turns_one_span_fires_latest_once(cx: &mut TestAp
         );
 
         // Turn 2 ends → the latest outcome overwrites, then the pane settles.
-        v.pending_completion = Some(TurnOutcome::Completed);
+        v.activity.pending_completion = Some(TurnOutcome::Completed);
         v.set_turn_idle();
         assert_eq!(
             v.reconcile_activity(std::time::Instant::now()),
@@ -2997,12 +3005,12 @@ async fn connect_time_pump_then_turn_end_fires_completion(cx: &mut TestAppContex
         // busy level so a later settle edge is detectable.
         assert_eq!(v.reconcile_activity(std::time::Instant::now()), None);
         assert!(
-            v.was_busy,
+            v.activity.was_busy,
             "the connect-time reconcile stamps the busy level"
         );
 
         // The first ACP event is `TurnEnded`: settle + stash the outcome.
-        v.pending_completion = Some(TurnOutcome::Completed);
+        v.activity.pending_completion = Some(TurnOutcome::Completed);
         v.set_turn_idle();
         // The busy→idle edge is detected (not stranded) and fires exactly once.
         assert_eq!(
@@ -3047,12 +3055,12 @@ async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAp
     view.update(cx, |v, cx| {
         v.set_turn_idle();
         v.items = vec![running_child()];
-        v.pending_completion = Some(TurnOutcome::Completed);
+        v.activity.pending_completion = Some(TurnOutcome::Completed);
         assert!(v.is_busy(), "a running child subagent keeps the pane busy");
 
         v.cancel_turn(cx);
         assert_eq!(
-            v.pending_completion,
+            v.activity.pending_completion,
             Some(TurnOutcome::Completed),
             "Stop with no foreground turn keeps the already-captured completion"
         );
@@ -3061,12 +3069,12 @@ async fn cancel_turn_preserves_completion_when_no_turn_in_flight(cx: &mut TestAp
     // Case 2: a real in-flight foreground turn — Stop settles it locally and
     // stashes `Stopped` (fired at the settle edge), overwriting any prior capture.
     view.update(cx, |v, cx| {
-        v.pending_completion = None;
+        v.activity.pending_completion = None;
         v.set_turn_in_flight();
         v.cancel_turn(cx);
         assert!(v.turn_is_idle(), "Stop settles the live turn locally");
         assert_eq!(
-            v.pending_completion,
+            v.activity.pending_completion,
             Some(TurnOutcome::Stopped),
             "Stop of a live turn stashes Stopped"
         );
@@ -3095,11 +3103,11 @@ async fn stop_buffers_reprompt_and_second_stop_parks_it(cx: &mut TestAppContext)
             "Stop settles the turn locally (hung-safe)"
         );
         assert!(
-            v.cancel_in_flight,
+            v.activity.cancel_in_flight,
             "the cancel window stays open until the ack"
         );
         assert_eq!(
-            v.pending_completion,
+            v.activity.pending_completion,
             Some(TurnOutcome::Stopped),
             "the cancelled turn's Stopped is stashed to fire at the settle edge"
         );
@@ -3123,11 +3131,12 @@ async fn stop_buffers_reprompt_and_second_stop_parks_it(cx: &mut TestAppContext)
         // it. It stays resumable rather than being silently dropped.
         v.cancel_turn(cx);
         assert!(
-            v.pending_prompts.is_empty(),
+            v.queue.pending_prompts.is_empty(),
             "the second Stop empties the live queue"
         );
         assert_eq!(
-            v.paused_prompts
+            v.queue
+                .paused_prompts
                 .iter()
                 .map(|q| q.text.clone())
                 .collect::<Vec<_>>(),
@@ -3146,7 +3155,10 @@ async fn stop_buffers_reprompt_and_second_stop_parks_it(cx: &mut TestAppContext)
             false,
             cx,
         );
-        assert!(!v.cancel_in_flight, "the ack closes the cancel window");
+        assert!(
+            !v.activity.cancel_in_flight,
+            "the ack closes the cancel window"
+        );
         assert!(v.turn_is_idle(), "nothing left to run after both Stops");
     });
 }
@@ -3164,10 +3176,10 @@ async fn send_prompt_text_editing_replaces_slot_in_place(cx: &mut TestAppContext
         v.send_prompt_text("first".into(), cx);
         v.send_prompt_text("second".into(), cx);
         v.send_prompt_text("third".into(), cx);
-        let middle = v.pending_prompts[1].id;
+        let middle = v.queue.pending_prompts[1].id;
         v.begin_edit(middle, cx);
         assert_eq!(
-            v.editing_prompt,
+            v.queue.editing_prompt,
             Some(middle),
             "begin_edit records the target"
         );
@@ -3182,7 +3194,10 @@ async fn send_prompt_text_editing_replaces_slot_in_place(cx: &mut TestAppContext
             ],
             "editing replaces the slot in place, order preserved"
         );
-        assert!(v.editing_prompt.is_none(), "send clears the editing flag");
+        assert!(
+            v.queue.editing_prompt.is_none(),
+            "send clears the editing flag"
+        );
         assert!(v.items.is_empty(), "an in-place edit does not echo");
     });
 }
@@ -3198,16 +3213,16 @@ async fn send_prompt_text_editing_target_gone_falls_through_to_new(cx: &mut Test
 
     view.update(cx, |v, cx| {
         v.send_prompt_text("only".into(), cx);
-        let id = v.pending_prompts[0].id;
+        let id = v.queue.pending_prompts[0].id;
         v.begin_edit(id, cx);
         // Model the target leaving the queue while the composer still targets it.
         v.remove_queued(id, cx);
         assert_eq!(
-            v.editing_prompt,
+            v.queue.editing_prompt,
             Some(id),
             "removing a row does not by itself clear the editing flag"
         );
-        assert!(v.pending_prompts.is_empty());
+        assert!(v.queue.pending_prompts.is_empty());
 
         v.send_prompt_text("typed".into(), cx);
         assert_eq!(
@@ -3216,7 +3231,7 @@ async fn send_prompt_text_editing_target_gone_falls_through_to_new(cx: &mut Test
             "a drained edit target falls through to a new queued prompt"
         );
         assert!(
-            v.editing_prompt.is_none(),
+            v.queue.editing_prompt.is_none(),
             "the stale editing flag is cleared on send"
         );
         assert!(
@@ -3252,6 +3267,7 @@ async fn up_arrow_in_empty_composer_edits_last_queued_prompt(cx: &mut TestAppCon
                 ws.send_agent_prompt_text(id, "q2".into(), cx);
                 let last = agent_view(ws, id)
                     .read(cx)
+                    .queue
                     .pending_prompts
                     .last()
                     .expect("queue non-empty")
@@ -3279,7 +3295,7 @@ async fn up_arrow_in_empty_composer_edits_last_queued_prompt(cx: &mut TestAppCon
             "the composer receives the last queued prompt's text"
         );
         assert_eq!(
-            agent_view(ws, pane_id).read(cx).editing_prompt,
+            agent_view(ws, pane_id).read(cx).queue.editing_prompt,
             Some(last_id),
             "the editing flag targets the last queued prompt"
         );
@@ -3394,7 +3410,11 @@ async fn up_arrow_with_nonempty_composer_does_not_edit_queue(cx: &mut TestAppCon
             "a non-empty composer is left for history recall, not a queue edit"
         );
         assert!(
-            agent_view(ws, pane_id).read(cx).editing_prompt.is_none(),
+            agent_view(ws, pane_id)
+                .read(cx)
+                .queue
+                .editing_prompt
+                .is_none(),
             "no queue edit begins when the composer is non-empty"
         );
     });
@@ -3423,7 +3443,7 @@ async fn cancel_edit_queued_prompt_clears_flag_and_empties_composer(cx: &mut Tes
                 ws.active_runtime_mut().panes.push(pane);
                 ws.active_runtime_mut().focused_pane_id = id;
                 ws.send_agent_prompt_text(id, "editable".into(), cx);
-                let prompt_id = agent_view(ws, id).read(cx).pending_prompts[0].id;
+                let prompt_id = agent_view(ws, id).read(cx).queue.pending_prompts[0].id;
                 ws.begin_edit_queued_prompt(id, prompt_id, window, cx);
                 (id, prompt_id)
             })
@@ -3434,7 +3454,10 @@ async fn cancel_edit_queued_prompt_clears_flag_and_empties_composer(cx: &mut Tes
     // begin pulled the text into the composer and set the editing flag.
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.terminal_input.read(cx).value(), "editable");
-        assert_eq!(agent_view(ws, pane_id).read(cx).editing_prompt, Some(id));
+        assert_eq!(
+            agent_view(ws, pane_id).read(cx).queue.editing_prompt,
+            Some(id)
+        );
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -3452,7 +3475,11 @@ async fn cancel_edit_queued_prompt_clears_flag_and_empties_composer(cx: &mut Tes
             "cancel empties the composer"
         );
         assert!(
-            agent_view(ws, pane_id).read(cx).editing_prompt.is_none(),
+            agent_view(ws, pane_id)
+                .read(cx)
+                .queue
+                .editing_prompt
+                .is_none(),
             "cancel clears the editing flag; the prompt stays queued"
         );
         assert_eq!(
@@ -3489,6 +3516,7 @@ async fn clear_queue_while_editing_empties_composer(cx: &mut TestAppContext) {
                 ws.send_agent_prompt_text(id, "q2".into(), cx);
                 let last = agent_view(ws, id)
                     .read(cx)
+                    .queue
                     .pending_prompts
                     .last()
                     .unwrap()
@@ -3508,9 +3536,12 @@ async fn clear_queue_while_editing_empties_composer(cx: &mut TestAppContext) {
 
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
-        assert!(view.read(cx).pending_prompts.is_empty(), "queue cleared");
         assert!(
-            view.read(cx).editing_prompt.is_none(),
+            view.read(cx).queue.pending_prompts.is_empty(),
+            "queue cleared"
+        );
+        assert!(
+            view.read(cx).queue.editing_prompt.is_none(),
             "editing flag cleared"
         );
         assert_eq!(
@@ -3546,7 +3577,7 @@ async fn whitespace_submit_while_editing_cancels_edit(cx: &mut TestAppContext) {
                 ws.active_runtime_mut().panes.push(pane);
                 ws.active_runtime_mut().focused_pane_id = id;
                 ws.send_agent_prompt_text(id, "editable".into(), cx);
-                let pid = agent_view(ws, id).read(cx).pending_prompts[0].id;
+                let pid = agent_view(ws, id).read(cx).queue.pending_prompts[0].id;
                 ws.begin_edit_queued_prompt(id, pid, window, cx);
                 id
             })
@@ -3574,7 +3605,7 @@ async fn whitespace_submit_while_editing_cancels_edit(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         assert!(
-            view.read(cx).editing_prompt.is_none(),
+            view.read(cx).queue.editing_prompt.is_none(),
             "whitespace submit cancels the edit"
         );
         assert_eq!(

@@ -13,7 +13,6 @@
 //! rule #10 exception also used by `TerminalView` and `ToastLayer`.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, ChatItem, ConnectPhase, PermissionDecision, PermissionKindView,
@@ -23,20 +22,20 @@ use daruda_acp::{
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, Focusable, FollowMode,
-    ListAlignment, ListState, Pixels, ScrollHandle, Subscription, Task, Window, prelude::*, px,
+    AnyWindowHandle, App, Bounds, Context, FocusHandle, Focusable, FollowMode, ListAlignment,
+    ListState, Pixels, ScrollHandle, Subscription, Task, Window, prelude::*, px,
 };
 
 use super::agent_chat_helpers::{
-    DiffStat, apply_info_field, cancel_pending_permission, collect_foldable_keys, fold_active,
+    apply_info_field, cancel_pending_permission, collect_foldable_keys, fold_active,
     fold_key_item_index, permission_card_mut,
 };
 use super::fold::{FoldKey, FoldState};
+use super::render::{DiffEditors, DiffStats, MermaidImages, ToolImages};
 use super::rows::{RenderRow, RowKind, project};
 use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use crate::surface::strings as s;
-use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// How long a background subagent's run stays "active" after its last child
@@ -141,10 +140,13 @@ pub(in crate::workspace) enum AgentSessionStatus {
 /// Whether a `session/prompt` turn is currently in flight. `InFlight` carries
 /// the wall-clock start instant (runtime-only; never persisted) so the enum
 /// can't represent "in flight but no start time" or "idle with a start time".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum Turn {
+    #[default]
     Idle,
-    InFlight { started_at: std::time::Instant },
+    InFlight {
+        started_at: std::time::Instant,
+    },
 }
 
 impl Turn {
@@ -214,6 +216,30 @@ pub(in crate::workspace) enum TelegramFirstResponseEffect {
     Fallback,
 }
 
+/// Which Telegram first-response-watch action `apply_event` owes its tail,
+/// decided once per event arm (like the `touched_tool` / `touched_text` /
+/// `turn_settled` flags already in that function) rather than each arm
+/// calling a `*_telegram_first_response_watch` method itself. The three
+/// underlying methods (`clear_telegram_first_response_watch` /
+/// `take_telegram_first_response` / `finish_telegram_first_response_watch`)
+/// then each have exactly one call site in `apply_event` instead of being
+/// duplicated at every arm that needs them, so a future arm added to the
+/// match can't silently forget one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum TelegramWatchAction {
+    #[default]
+    None,
+    /// A permission card interrupted the turn, or a Stop's cancel-ack
+    /// landed — no relay is owed either way.
+    Clear,
+    /// New conversation content arrived — check whether it resolves the
+    /// armed watch.
+    CheckUpdate,
+    /// The turn or session settled — resolve the watch to its terminal
+    /// effect.
+    Finish,
+}
+
 /// A prompt the user submitted while a turn was in flight (or before the
 /// session connected), held in the queue until it can be dispatched. Unlike
 /// the send-now path, a queued prompt is NOT echoed into the transcript — it
@@ -239,6 +265,199 @@ pub(in crate::workspace) enum EscapeOutcome {
     ClearedQueue,
     /// Nothing to act on — the caller reports not-handled so Escape propagates.
     Ignored,
+}
+
+/// The prompt-send sequencing for one Agent chat pane: the buffered/parked
+/// queues and the in-flight-turn tracking that gates draining them. One
+/// prompt turn runs at a time, so these four fields are always read and
+/// mutated as a unit by the queue ops (`enqueue_prompt`, `resume_queue`,
+/// `remove_queued`, `clear_queue`, `begin_edit`, `cancel_edit`,
+/// `pump_pending_prompt`, `drain_next_queued_prompt`) and by `send_prompt_text`
+/// / `cancel_turn` / `handle_escape`. Grouping them gives `AgentChatView` one
+/// field for this concern instead of four, and keeps `turn` — already
+/// module-private to `view.rs`, enforced by `scripts/lint-agent-activity.sh`
+/// — private the same way inside this struct rather than as a bare
+/// `AgentChatView` field.
+#[derive(Default)]
+pub(in crate::workspace) struct PromptQueue {
+    /// Prompts buffered because they could not be sent yet, in submission
+    /// order. A prompt is buffered when the session is not ready to prompt
+    /// (`status != Connected` or `handle` is still `None` — the lazy connect
+    /// happens on first focus) **or** a turn is already in flight. The session
+    /// runs one turn at a time, so exactly one buffered prompt is drained per
+    /// turn-completion by [`AgentChatView::pump_pending_prompt`]: the
+    /// `Connected` event pumps the first, and each `TurnEnded` pumps the next,
+    /// keeping only one turn tracked at a time.
+    /// Cleared on a connect failure / terminal `Error` (there is no reconnect
+    /// path, so buffered prompts can never be delivered); never serialized.
+    ///
+    /// A queued prompt is NOT echoed into `items` — it lives only here (surfaced
+    /// by the bottom-dock queued-prompt strip, keyed by [`PromptId`]) until it
+    /// drains, at which point `pump_pending_prompt` echoes it as a `UserText` at
+    /// send time. The user can remove an individual entry
+    /// ([`AgentChatView::remove_queued`]) or clear the whole queue
+    /// ([`AgentChatView::clear_queue`]) from the strip.
+    pub(in crate::workspace) pending_prompts: Vec<QueuedPrompt>,
+    /// Prompts parked by a Stop (`cancel_turn`) while a queue was buffered
+    /// behind the cancelled turn. Unlike [`Self::pending_prompts`], these are
+    /// NOT auto-drained: they live outside the live queue so the cancel-ack /
+    /// `TurnEnded` pump never touches them. The user resumes them explicitly
+    /// (the queue strip's Resume button → [`AgentChatView::resume_queue`],
+    /// which moves them back to the front of the live queue) or discards them
+    /// (a second Esc / the strip's clear-all → [`AgentChatView::clear_queue`]).
+    /// A prompt typed *after* the Stop sends immediately as a fresh turn,
+    /// ahead of these. Runtime-only; never serialized; wiped on a session
+    /// teardown / reset.
+    pub(in crate::workspace) paused_prompts: Vec<QueuedPrompt>,
+    /// Monotonic counter minting the next [`PromptId`] for a queued prompt.
+    /// Never read outside `view.rs`. Runtime-only; never serialized.
+    next_prompt_id: u64,
+    /// The queued prompt currently being edited in the composer, if any. Set by
+    /// [`AgentChatView::begin_edit`] (from the strip's ✎ button or ↑ in an
+    /// empty composer) and cleared on send ([`AgentChatView::send_prompt_text`]
+    /// replaces the slot in place), cancel ([`AgentChatView::cancel_edit`]),
+    /// drain (the edit target pumped onto the wire), or any queue reset. While
+    /// `Some`, the strip marks that row as the edit target and a send replaces
+    /// its text rather than enqueuing a new prompt. Runtime-only; never
+    /// serialized.
+    pub(in crate::workspace) editing_prompt: Option<PromptId>,
+    /// Whether a prompt turn is in flight (between submit and the matching
+    /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
+    /// re-submit while the agent is busy, and carries the turn's start instant
+    /// (runtime-only, never persisted) for the elapsed-time display.
+    ///
+    /// Confined to this module: `Turn` is the prompt-queue sequencing state, not
+    /// the pane's activity signal. Production code outside `view.rs` must never
+    /// read it — "is the pane working / did it just finish" decisions go through
+    /// [`AgentChatView::is_busy`] / [`AgentChatView::activity_state`] /
+    /// [`AgentChatView::activity_elapsed`], and completion fires only via
+    /// `fire_activity_completion` at the busy→idle edge. Tests reach it through
+    /// the `#[cfg(test)]` hooks on [`AgentChatView`].
+    turn: Turn,
+}
+
+/// Async-built rendering artifacts derived from the conversation: read-only
+/// diff editors for tool-call file edits, rasterized mermaid diagrams, and
+/// decoded tool-output images. Each cache is filled by its own reconciler in
+/// `reconcile.rs` (`reconcile_diff_editors` / `reconcile_mermaid` /
+/// `reconcile_tool_images`), gated in `apply_event` on the content that
+/// feeds it changing; `render/` only ever reads them by reference (never
+/// constructs or clears one). Grouped into one type so `AgentChatView`
+/// carries a single "derived render asset" field instead of seven, and a
+/// session reset (`teardown_transient_session_state`) wipes them with one
+/// call ([`Self::clear`]) instead of seven individually-ordered lines.
+#[derive(Default)]
+pub(in crate::workspace) struct AssetCache {
+    /// Read-only diff editor entities for tool-call file modifications, keyed by
+    /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
+    /// Built (and rebuilt on content change) by `reconcile_diff_editors` — the
+    /// same diff-through-editor renderer the File viewer uses. Entities are
+    /// created in the reconcile op, never in `render` (which only embeds them).
+    pub(in crate::workspace) diff_editors: DiffEditors,
+    /// `diff_source_fingerprint` of the diff each `diff_editors` entry was
+    /// built from, same keys as `diff_editors`. Lets `reconcile_diff_editors`
+    /// detect a `ToolCallUpdate` that replaced a tool call's diffs (streaming
+    /// write/edit growing from a partial snapshot) and rebuild instead of
+    /// leaving the cached editor frozen on stale content.
+    pub(in crate::workspace) diff_editor_sources: HashMap<String, u64>,
+    /// Added / removed line counts per tool-call diff, keyed by the same
+    /// `"{tool_call_id}#{diff_index}"` as `diff_editors`. Runtime cache —
+    /// never serialized (the conversation itself is not persisted, only `cwd`).
+    pub(in crate::workspace) diff_stats: DiffStats,
+    /// Rendered mermaid diagrams keyed by fence-source hash, filled async by
+    /// `reconcile_mermaid`. Stored as a GPU-ready image (converted once at
+    /// insert) so each render clones the same image — gpui's texture cache
+    /// hits instead of re-uploading the bitmap every frame. Shared
+    /// `Arc<Mutex<…>>` so the `code_block_render` hook reads the live cache.
+    /// Runtime cache; never serialized.
+    pub(in crate::workspace) mermaid_images: MermaidImages,
+    /// Source hashes with a rasterization currently spawned, so
+    /// `reconcile_mermaid` doesn't re-spawn the same diagram while it is still
+    /// rendering on the background executor. Runtime cache; never serialized.
+    pub(in crate::workspace) mermaid_inflight: HashSet<u64>,
+    /// Decoded tool-output images keyed by base64-content hash
+    /// (`tool_image_key`). `Some` = decoded & GPU-ready; `None` = decode failed
+    /// (so a failure label renders instead and the key is never re-spawned).
+    /// Filled async by `reconcile_tool_images`. Shared `Arc<Mutex<…>>` for the
+    /// same reason as `mermaid_images`. Runtime cache; never serialized.
+    pub(in crate::workspace) tool_images: ToolImages,
+    /// Content hashes with a decode currently spawned, so
+    /// `reconcile_tool_images` doesn't re-spawn the same image while it is
+    /// still decoding on the background executor. Runtime cache; never
+    /// serialized.
+    pub(in crate::workspace) tool_image_inflight: HashSet<u64>,
+}
+
+impl AssetCache {
+    /// Wipe every cache in place — same `Arc`s, contents cleared — rather
+    /// than `*self = Self::default()`, so a live clone of `mermaid_images` /
+    /// `tool_images` (the markdown code-block hook clones the `Arc` fresh on
+    /// every render; see `render/blocks.rs`) stays attached to the same
+    /// underlying map instead of pointing at a now-orphaned one.
+    fn clear(&mut self) {
+        self.diff_editors.clear();
+        self.diff_editor_sources.clear();
+        self.diff_stats.clear();
+        self.mermaid_inflight.clear();
+        if let Ok(mut m) = self.mermaid_images.lock() {
+            m.clear();
+        }
+        self.tool_image_inflight.clear();
+        if let Ok(mut m) = self.tool_images.lock() {
+            m.clear();
+        }
+    }
+}
+
+/// The pane's activity bookkeeping: whether it is busy right now, since when,
+/// and what completion is owed once it settles. Read and mutated together by
+/// `AgentChatView::{is_busy, reconcile_activity, reconcile_post_turn,
+/// take_pending_post_turn, activity_elapsed, maybe_active}` — those stay
+/// methods on `AgentChatView` (not `Self`) because they also need `turn` and
+/// `items`, which live outside this struct. Grouped here so that cohesive
+/// read/write pattern has one field on `AgentChatView` instead of seven.
+#[derive(Default)]
+pub(in crate::workspace) struct ActivityTracker {
+    /// Per-subagent last-activity timestamps, keyed by the parent tool id every
+    /// child tool stamps in its `parent_tool_id`. Bumped in `apply_event` each
+    /// time one of a subagent's child tools produces a tool-call event, and read
+    /// by [`daruda_acp::subagent_activity`] to hold the subagent's run "active"
+    /// across the gaps between its sequential child calls (see
+    /// [`SUBAGENT_QUIESCENCE`]). Runtime-only; never serialized.
+    pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
+    /// Wall-clock start of the current busy activity span (turn + any trailing
+    /// subagents), set on the idle→busy edge and cleared on busy→idle by
+    /// `AgentChatView::reconcile_activity`. Anchors the working-indicator
+    /// elapsed timer across the whole span rather than just the foreground
+    /// turn. Runtime-only; never serialized.
+    pub(in crate::workspace) activity_started_at: Option<std::time::Instant>,
+    /// Whether the pane was busy at the last `AgentChatView::reconcile_activity`
+    /// tick — the edge-detection memory that turns the `is_busy` level signal
+    /// into idle→busy / busy→idle transitions. Runtime-only; never serialized.
+    pub(in crate::workspace) was_busy: bool,
+    /// The outcome captured when the turn/session ended, held until the pane
+    /// actually settles busy→idle (which may trail `end_turn` while subagents
+    /// finish). Taken and returned by `AgentChatView::reconcile_activity` on
+    /// the busy→idle edge so the completion signal fires at the true settle
+    /// point. Runtime-only; never serialized.
+    pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
+    /// Count of `AssistantText` items already delivered to Telegram (by the turn
+    /// completion relay or a prior post-turn relay). Baseline for the post-turn
+    /// delta. Snapped at every `settle_turn`.
+    pub(in crate::workspace) post_turn_relayed_assistant_texts: usize,
+    /// Set to `now` whenever a post-turn (no in-flight turn, not restoring) update
+    /// touches text/tools; cleared when the follow-up is relayed. Drives the
+    /// quiescence settle that `reconcile_post_turn` detects on the pulse tick.
+    pub(in crate::workspace) post_turn_dirty_at: Option<std::time::Instant>,
+    /// True between a Stop and its `cancelled` `TurnEnded` ack. Stop settles the
+    /// turn locally (responsive + hung-safe) and fires `Stopped`, but the cancel
+    /// is still outstanding on the wire. While set, `send_prompt_text` buffers a
+    /// re-prompt into `pending_prompts` (client-side, so a second Stop can clear
+    /// it) instead of racing it onto the wire ahead of the cancel; the ack then
+    /// clears this flag and `pump_pending_prompt` drains the buffered prompt as a
+    /// fresh turn. Cleared by the first `TurnEnded`/`Error` after the Stop, or on
+    /// session reset. Runtime-only.
+    pub(in crate::workspace) cancel_in_flight: bool,
 }
 
 /// Native ACP (Agent Client Protocol) chat pane, owned as `Entity<AgentChatView>`.
@@ -322,44 +541,9 @@ pub(in crate::workspace) struct AgentChatView {
     /// still alive there. Dropping it (pane close) closes the command channel and
     /// shuts the connection task down.
     pub(in crate::workspace) handle: Option<AcpSessionHandle>,
-    /// Prompts buffered because they could not be sent yet, in submission
-    /// order. A prompt is buffered when the session is not ready to prompt
-    /// (`status != Connected` or `handle` is still `None` — the lazy connect
-    /// happens on first focus) **or** a turn is already in flight. The session
-    /// runs one turn at a time, so exactly one buffered prompt is drained per
-    /// turn-completion by [`Self::pump_pending_prompt`]: the `Connected` event
-    /// pumps the first, and each `TurnEnded` pumps the next, keeping only one
-    /// turn tracked at a time.
-    /// Cleared on a connect failure / terminal `Error` (there is no reconnect
-    /// path, so buffered prompts can never be delivered); never serialized.
-    ///
-    /// A queued prompt is NOT echoed into `items` — it lives only here (surfaced
-    /// by the bottom-dock queued-prompt strip, keyed by [`PromptId`]) until it
-    /// drains, at which point `pump_pending_prompt` echoes it as a `UserText` at
-    /// send time. The user can remove an individual entry ([`Self::remove_queued`])
-    /// or clear the whole queue ([`Self::clear_queue`]) from the strip.
-    pub(in crate::workspace) pending_prompts: Vec<QueuedPrompt>,
-    /// Prompts parked by a Stop (`cancel_turn`) while a queue was buffered
-    /// behind the cancelled turn. Unlike [`Self::pending_prompts`], these are
-    /// NOT auto-drained: they live outside the live queue so the cancel-ack /
-    /// `TurnEnded` pump never touches them. The user resumes them explicitly
-    /// (the queue strip's Resume button → [`Self::resume_queue`], which moves
-    /// them back to the front of the live queue) or discards them (a second
-    /// Esc / the strip's clear-all → [`Self::clear_queue`]). A prompt typed
-    /// *after* the Stop sends immediately as a fresh turn, ahead of these.
-    /// Runtime-only; never serialized; wiped on a session teardown / reset.
-    pub(in crate::workspace) paused_prompts: Vec<QueuedPrompt>,
-    /// Monotonic counter minting the next [`PromptId`] for a queued prompt.
-    /// Runtime-only; never serialized.
-    pub(in crate::workspace) next_prompt_id: u64,
-    /// The queued prompt currently being edited in the composer, if any. Set by
-    /// [`Self::begin_edit`] (from the strip's ✎ button or ↑ in an empty
-    /// composer) and cleared on send ([`Self::send_prompt_text`] replaces the
-    /// slot in place), cancel ([`Self::cancel_edit`]), drain (the edit target
-    /// pumped onto the wire), or any queue reset. While `Some`, the strip marks
-    /// that row as the edit target and a send replaces its text rather than
-    /// enqueuing a new prompt. Runtime-only; never serialized.
-    pub(in crate::workspace) editing_prompt: Option<PromptId>,
+    /// The buffered/parked queue of prompts not yet on the wire, plus the
+    /// in-flight-turn sequencing that gates draining it — see [`PromptQueue`].
+    pub(in crate::workspace) queue: PromptQueue,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(in crate::workspace) _event_pump: Option<Task<()>>,
@@ -380,101 +564,19 @@ pub(in crate::workspace) struct AgentChatView {
     /// watched: either none was ever armed, or it already resolved (a
     /// qualifying chat item landed), was consumed by a permission request, or
     /// the turn settled. Cleared by whichever of those happens first; the
-    /// `agent_chat_ops.rs` event pump and the periodic Telegram flush pump
+    /// `agent_chat_connect_ops.rs` event pump and the periodic Telegram flush pump
     /// (`Workspace::flush_telegram_first_response_fallbacks`) are the only
     /// consumers. Runtime-only; never serialized.
     telegram_first_response_watch: Option<FirstResponseWatch>,
-    /// Whether a prompt turn is in flight (between submit and the matching
-    /// `TurnEnded`). Drives the input affordance (Send ↔ Stop), disables
-    /// re-submit while the agent is busy, and carries the turn's start instant
-    /// (runtime-only, never persisted) for the elapsed-time display.
-    ///
-    /// Confined to this module: `Turn` is the prompt-queue sequencing state, not
-    /// the pane's activity signal. Production code outside `view.rs` must never
-    /// read it — "is the pane working / did it just finish" decisions go through
-    /// [`Self::is_busy`] / [`Self::activity_state`] / [`Self::activity_elapsed`],
-    /// and completion fires only via `fire_activity_completion` at the busy→idle
-    /// edge. Tests reach it through the `#[cfg(test)]` hooks below.
-    turn: Turn,
-    /// Per-subagent last-activity timestamps, keyed by the parent tool id every
-    /// child tool stamps in its `parent_tool_id`. Bumped in `apply_event` each
-    /// time one of a subagent's child tools produces a tool-call event, and read
-    /// by [`daruda_acp::subagent_activity`] to hold the subagent's run "active"
-    /// across the gaps between its sequential child calls (see
-    /// [`SUBAGENT_QUIESCENCE`]). Runtime-only; never serialized.
-    pub(in crate::workspace) subagent_last_activity: HashMap<String, std::time::Instant>,
-    /// Wall-clock start of the current busy activity span (turn + any trailing
-    /// subagents), set on the idle→busy edge and cleared on busy→idle by
-    /// [`Self::reconcile_activity`]. Anchors the working-indicator elapsed timer
-    /// across the whole span rather than just the foreground turn. Runtime-only;
-    /// never serialized.
-    pub(in crate::workspace) activity_started_at: Option<std::time::Instant>,
-    /// Whether the pane was busy at the last [`Self::reconcile_activity`] tick —
-    /// the edge-detection memory that turns the `is_busy` level signal into
-    /// idle→busy / busy→idle transitions. Runtime-only; never serialized.
-    pub(in crate::workspace) was_busy: bool,
-    /// The outcome captured when the turn/session ended, held until the pane
-    /// actually settles busy→idle (which may trail `end_turn` while subagents
-    /// finish). Taken and returned by [`Self::reconcile_activity`] on the
-    /// busy→idle edge so the completion signal fires at the true settle point.
-    /// Runtime-only; never serialized.
-    pub(in crate::workspace) pending_completion: Option<TurnOutcome>,
-    /// Count of `AssistantText` items already delivered to Telegram (by the turn
-    /// completion relay or a prior post-turn relay). Baseline for the post-turn
-    /// delta. Snapped at every `settle_turn`.
-    pub(in crate::workspace) post_turn_relayed_assistant_texts: usize,
-    /// Set to `now` whenever a post-turn (no in-flight turn, not restoring) update
-    /// touches text/tools; cleared when the follow-up is relayed. Drives the
-    /// quiescence settle that `reconcile_post_turn` detects on the pulse tick.
-    pub(in crate::workspace) post_turn_dirty_at: Option<std::time::Instant>,
-    /// True between a Stop and its `cancelled` `TurnEnded` ack. Stop settles the
-    /// turn locally (responsive + hung-safe) and fires `Stopped`, but the cancel
-    /// is still outstanding on the wire. While set, `send_prompt_text` buffers a
-    /// re-prompt into `pending_prompts` (client-side, so a second Stop can clear
-    /// it) instead of racing it onto the wire ahead of the cancel; the ack then
-    /// clears this flag and `pump_pending_prompt` drains the buffered prompt as a
-    /// fresh turn. Cleared by the first `TurnEnded`/`Error` after the Stop, or on
-    /// session reset. Runtime-only.
-    pub(in crate::workspace) cancel_in_flight: bool,
-    /// Read-only diff editor entities for tool-call file modifications, keyed by
-    /// `"{tool_call_id}#{diff_index}"` (one editor per file in a tool call).
-    /// Built (and rebuilt on content change) by `reconcile_diff_editors` — the
-    /// same diff-through-editor renderer the File viewer uses. Entities are
-    /// created in the reconcile op, never in `render` (which only embeds them).
-    pub(in crate::workspace) diff_editors:
-        HashMap<String, Entity<gpui_component::input::InputState>>,
-    /// `diff_source_fingerprint` of the diff each `diff_editors` entry was
-    /// built from, same keys as `diff_editors`. Lets `reconcile_diff_editors`
-    /// detect a `ToolCallUpdate` that replaced a tool call's diffs (streaming
-    /// write/edit growing from a partial snapshot) and rebuild instead of
-    /// leaving the cached editor frozen on stale content.
-    pub(in crate::workspace) diff_editor_sources: HashMap<String, u64>,
-    /// Added / removed line counts per tool-call diff, keyed by the same
-    /// `"{tool_call_id}#{diff_index}"` as `diff_editors`. Runtime cache —
-    /// never serialized (the conversation itself is not persisted, only `cwd`).
-    pub(in crate::workspace) diff_stats: HashMap<String, DiffStat>,
-    /// Rendered mermaid diagrams keyed by fence-source hash, filled async by
-    /// `reconcile_mermaid`. Stored as a GPU-ready [`CachedImage`] (converted
-    /// once at insert) so each render clones the same image — gpui's texture
-    /// cache hits instead of re-uploading the bitmap every frame. Shared
-    /// `Arc<Mutex<…>>` so the `code_block_render` hook reads the live cache.
-    /// Runtime cache; never serialized.
-    pub(in crate::workspace) mermaid_images: Arc<Mutex<HashMap<u64, CachedImage>>>,
-    /// Source hashes with a rasterization currently spawned, so
-    /// `reconcile_mermaid` doesn't re-spawn the same diagram while it is still
-    /// rendering on the background executor. Runtime cache; never serialized.
-    pub(in crate::workspace) mermaid_inflight: HashSet<u64>,
-    /// Decoded tool-output images keyed by base64-content hash
-    /// (`tool_image_key`). `Some` = decoded & GPU-ready; `None` = decode failed
-    /// (so a failure label renders instead and the key is never re-spawned).
-    /// Filled async by `reconcile_tool_images`. Shared `Arc<Mutex<…>>` for the
-    /// same reason as `mermaid_images`. Runtime cache; never serialized.
-    pub(in crate::workspace) tool_images: Arc<Mutex<HashMap<u64, Option<CachedImage>>>>,
-    /// Content hashes with a decode currently spawned, so
-    /// `reconcile_tool_images` doesn't re-spawn the same image while it is
-    /// still decoding on the background executor. Runtime cache; never
-    /// serialized.
-    pub(in crate::workspace) tool_image_inflight: HashSet<u64>,
+    /// Diff editors, mermaid diagrams, and tool-output images built async
+    /// from the conversation's content — see [`AssetCache`].
+    pub(in crate::workspace) assets: AssetCache,
+    /// The pane's activity bookkeeping — see [`ActivityTracker`]. Read and
+    /// mutated together by `is_busy` / `reconcile_activity` /
+    /// `reconcile_post_turn` / `activity_elapsed`, which also need `queue.turn`
+    /// and `items` (neither moved here) so those methods stay `impl
+    /// AgentChatView` rather than `impl ActivityTracker`.
+    pub(in crate::workspace) activity: ActivityTracker,
     /// Per-conversation fold state — which blocks the user has explicitly
     /// expanded / collapsed. Transient / session-only; never serialized.
     pub(in crate::workspace) fold: FoldState,
@@ -572,7 +674,7 @@ impl AgentChatView {
     /// drive it through these sanctioned accessors instead of touching the field.
     #[cfg(test)]
     pub(in crate::workspace) fn set_turn_in_flight(&mut self) {
-        self.turn = Turn::InFlight {
+        self.queue.turn = Turn::InFlight {
             started_at: std::time::Instant::now(),
         };
     }
@@ -580,13 +682,13 @@ impl AgentChatView {
     /// Test-only hook: return the turn to idle (as `settle_turn` does).
     #[cfg(test)]
     pub(in crate::workspace) fn set_turn_idle(&mut self) {
-        self.turn = Turn::Idle;
+        self.queue.turn = Turn::Idle;
     }
 
     /// Test-only hook: whether the turn is idle (no prompt in flight).
     #[cfg(test)]
     pub(in crate::workspace) fn turn_is_idle(&self) -> bool {
-        !self.turn.is_in_flight()
+        !self.queue.turn.is_in_flight()
     }
 
     /// Test-only hook: run the model half of the queued-prompt drain without a
@@ -647,9 +749,9 @@ impl AgentChatView {
     /// guaranteed false without scanning `items` — the gate the pulse uses to
     /// avoid an O(items) scan of idle/terminated conversations every tick.
     pub(in crate::workspace) fn maybe_active(&self) -> bool {
-        self.turn.is_in_flight()
-            || !self.subagent_last_activity.is_empty()
-            || self.post_turn_dirty_at.is_some()
+        self.queue.turn.is_in_flight()
+            || !self.activity.subagent_last_activity.is_empty()
+            || self.activity.post_turn_dirty_at.is_some()
     }
 
     /// On the pulse tick: if a post-turn follow-up has quiesced (no in-flight turn
@@ -660,27 +762,27 @@ impl AgentChatView {
         now: std::time::Instant,
         quiescence: std::time::Duration,
     ) -> Option<String> {
-        if self.turn.is_in_flight() {
+        if self.queue.turn.is_in_flight() {
             return None;
         }
-        let dirty_at = self.post_turn_dirty_at?;
+        let dirty_at = self.activity.post_turn_dirty_at?;
         if now.saturating_duration_since(dirty_at) < quiescence {
             return None;
         }
-        self.post_turn_dirty_at = None;
+        self.activity.post_turn_dirty_at = None;
         let (delta, new_count) =
-            post_turn_delta(&self.items, self.post_turn_relayed_assistant_texts)?;
-        self.post_turn_relayed_assistant_texts = new_count;
+            post_turn_delta(&self.items, self.activity.post_turn_relayed_assistant_texts)?;
+        self.activity.post_turn_relayed_assistant_texts = new_count;
         Some(delta)
     }
 
     /// Force-flush a not-yet-quiesced post-turn follow-up (called when a new prompt
     /// is about to subsume it). `None` when nothing is pending.
     pub(in crate::workspace) fn take_pending_post_turn(&mut self) -> Option<String> {
-        self.post_turn_dirty_at.take()?;
+        self.activity.post_turn_dirty_at.take()?;
         let (delta, new_count) =
-            post_turn_delta(&self.items, self.post_turn_relayed_assistant_texts)?;
-        self.post_turn_relayed_assistant_texts = new_count;
+            post_turn_delta(&self.items, self.activity.post_turn_relayed_assistant_texts)?;
+        self.activity.post_turn_relayed_assistant_texts = new_count;
         Some(delta)
     }
 
@@ -690,19 +792,19 @@ impl AgentChatView {
     /// messages arriving *after* that point count as a background follow-up —
     /// the single update site for this mirrored count.
     fn snap_post_turn_baseline(&mut self) {
-        self.post_turn_relayed_assistant_texts = self
+        self.activity.post_turn_relayed_assistant_texts = self
             .items
             .iter()
             .filter(|it| matches!(it, ChatItem::AssistantText { .. }))
             .count();
-        self.post_turn_dirty_at = None;
+        self.activity.post_turn_dirty_at = None;
     }
 
     pub(in crate::workspace) fn is_busy(&self) -> bool {
-        self.turn.is_in_flight()
+        self.queue.turn.is_in_flight()
             || subagent_activity(
                 &self.items,
-                &self.subagent_last_activity,
+                &self.activity.subagent_last_activity,
                 std::time::Instant::now(),
                 SUBAGENT_QUIESCENCE,
             )
@@ -718,21 +820,21 @@ impl AgentChatView {
         &mut self,
         now: std::time::Instant,
     ) -> Option<TurnOutcome> {
-        let busy = self.turn.is_in_flight()
+        let busy = self.queue.turn.is_in_flight()
             || subagent_activity(
                 &self.items,
-                &self.subagent_last_activity,
+                &self.activity.subagent_last_activity,
                 now,
                 SUBAGENT_QUIESCENCE,
             )
             .any_running;
-        let edge = match (self.was_busy, busy) {
+        let edge = match (self.activity.was_busy, busy) {
             (false, true) => {
-                self.activity_started_at = Some(now);
+                self.activity.activity_started_at = Some(now);
                 None
             }
             (true, false) => {
-                self.activity_started_at = None;
+                self.activity.activity_started_at = None;
                 // The run is over: the `subagent_last_activity` map is only
                 // meaningful during an active run (the `subagent N/M` indicator
                 // is hidden when idle, and a later subagent event re-populates
@@ -742,12 +844,12 @@ impl AgentChatView {
                 // `is_busy`: this arm is only reached when `busy` is false — no
                 // child is live — so clearing the timestamps cannot change
                 // `any_running`.
-                self.subagent_last_activity.clear();
-                self.pending_completion.take()
+                self.activity.subagent_last_activity.clear();
+                self.activity.pending_completion.take()
             }
             _ => None,
         };
-        self.was_busy = busy;
+        self.activity.was_busy = busy;
         edge
     }
 
@@ -755,7 +857,7 @@ impl AgentChatView {
     /// idle. Anchors the working-indicator timer to the whole activity span
     /// (turn + trailing subagents), replacing the turn-scoped `turn.started_at()`.
     pub(in crate::workspace) fn activity_elapsed(&self) -> Option<std::time::Duration> {
-        self.activity_started_at.map(|t| t.elapsed())
+        self.activity.activity_started_at.map(|t| t.elapsed())
     }
 
     /// Count of subagents running *right now* for the working-indicator label
@@ -768,7 +870,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn subagent_progress(&self) -> Option<usize> {
         let a = subagent_activity(
             &self.items,
-            &self.subagent_last_activity,
+            &self.activity.subagent_last_activity,
             std::time::Instant::now(),
             SUBAGENT_QUIESCENCE,
         );
@@ -846,28 +948,12 @@ impl AgentChatView {
             restoring: false,
             items: Vec::new(),
             handle: None,
-            pending_prompts: Vec::new(),
-            paused_prompts: Vec::new(),
-            next_prompt_id: 0,
-            editing_prompt: None,
+            queue: PromptQueue::default(),
             _event_pump: None,
             pending_permissions: HashSet::new(),
             telegram_first_response_watch: None,
-            turn: Turn::Idle,
-            subagent_last_activity: HashMap::new(),
-            activity_started_at: None,
-            was_busy: false,
-            pending_completion: None,
-            post_turn_relayed_assistant_texts: 0,
-            post_turn_dirty_at: None,
-            cancel_in_flight: false,
-            diff_editors: HashMap::new(),
-            diff_editor_sources: HashMap::new(),
-            diff_stats: HashMap::new(),
-            mermaid_images: Arc::new(Mutex::new(HashMap::new())),
-            mermaid_inflight: HashSet::new(),
-            tool_images: Arc::new(Mutex::new(HashMap::new())),
-            tool_image_inflight: HashSet::new(),
+            activity: ActivityTracker::default(),
+            assets: AssetCache::default(),
             fold: FoldState::default(),
             list_state: {
                 // Starts empty; `sync_list_after` splices items in as events
@@ -1025,6 +1111,9 @@ impl AgentChatView {
         // send the first phone-visible reply without letting this self-owned
         // pane reach into Workspace/Telegram state.
         let mut telegram_first_response_effect = TelegramFirstResponseEffect::None;
+        // Decided per-arm below, applied once in the tail — see
+        // `TelegramWatchAction`.
+        let mut telegram_watch_action = TelegramWatchAction::None;
 
         match event {
             AcpEvent::ConnectProgress(phase) => {
@@ -1086,13 +1175,13 @@ impl AgentChatView {
                     self.session_updated_at = None;
                     self.plan_collapsed = false;
                     self.session_usage = None;
-                    self.subagent_last_activity.clear();
+                    self.activity.subagent_last_activity.clear();
                     // Reset the activity-span tracker so a prior session's edge
                     // state / captured outcome can't leak into the fresh one.
-                    self.activity_started_at = None;
-                    self.was_busy = false;
-                    self.pending_completion = None;
-                    self.cancel_in_flight = false;
+                    self.activity.activity_started_at = None;
+                    self.activity.was_busy = false;
+                    self.activity.pending_completion = None;
+                    self.activity.cancel_in_flight = false;
                 }
                 self.pump_pending_prompt(cx);
             }
@@ -1119,8 +1208,11 @@ impl AgentChatView {
                 // Stamp the quiescence clock; the pulse tick relays the settled
                 // follow-up (Claude reports background completion here, with no
                 // TurnEnded to trigger the normal completion relay).
-                if (touched_text || touched_tool) && !self.turn.is_in_flight() && !self.restoring {
-                    self.post_turn_dirty_at = Some(std::time::Instant::now());
+                if (touched_text || touched_tool)
+                    && !self.queue.turn.is_in_flight()
+                    && !self.restoring
+                {
+                    self.activity.post_turn_dirty_at = Some(std::time::Instant::now());
                 }
                 // Bump the subagent (parent) whose child just produced this
                 // tool-call event, so its run span stays "active" across the
@@ -1133,21 +1225,22 @@ impl AgentChatView {
                         _ => None,
                     });
                     if let Some(parent) = parent {
-                        self.subagent_last_activity
+                        self.activity
+                            .subagent_last_activity
                             .insert(parent, std::time::Instant::now());
                     }
                 }
-                if let Some(outcome) = self.take_telegram_first_response() {
-                    telegram_first_response_effect = TelegramFirstResponseEffect::Relay(outcome);
-                }
+                telegram_watch_action = TelegramWatchAction::CheckUpdate;
             }
             AcpEvent::PermissionRequested { id, request } => {
                 let item = permission_item(id, &request, &self.items);
                 self.items.push(item);
                 self.pending_permissions.insert(id);
-                self.clear_telegram_first_response_watch();
+                telegram_watch_action = TelegramWatchAction::Clear;
             }
-            AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_) if self.cancel_in_flight => {
+            AcpEvent::TurnEnded { .. } | AcpEvent::TurnFailed(_)
+                if self.activity.cancel_in_flight =>
+            {
                 // The terminal signal (a `cancelled` `TurnEnded`, or a
                 // `TurnFailed` if the prompt errored as the cancel raced it) for a
                 // turn a Stop already settled locally — its `Stopped` fired at
@@ -1157,8 +1250,8 @@ impl AgentChatView {
                 // re-prompt was never put on the wire (see `send_prompt_text`'s
                 // `cancel_in_flight` guard), so nothing raced this ack and a
                 // second Stop could still have cleared it.
-                self.cancel_in_flight = false;
-                self.clear_telegram_first_response_watch();
+                self.activity.cancel_in_flight = false;
+                telegram_watch_action = TelegramWatchAction::Clear;
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::TurnEnded {
@@ -1169,11 +1262,11 @@ impl AgentChatView {
                 // still-pending permission so no card keeps live buttons.
                 self.settle_turn();
                 turn_settled = true;
-                telegram_first_response_effect = self.finish_telegram_first_response_watch();
+                telegram_watch_action = TelegramWatchAction::Finish;
                 // Capture the outcome; it fires only when the pane settles
                 // busy→idle (via `reconcile_activity`), which may trail this
                 // `end_turn` while trailing subagents finish.
-                self.pending_completion = Some(if completed_normally {
+                self.activity.pending_completion = Some(if completed_normally {
                     TurnOutcome::Completed
                 } else {
                     TurnOutcome::Stopped
@@ -1234,11 +1327,11 @@ impl AgentChatView {
                 // guarded arm above; here the turn was not being cancelled.)
                 self.settle_turn();
                 turn_settled = true;
-                telegram_first_response_effect = self.finish_telegram_first_response_watch();
+                telegram_watch_action = TelegramWatchAction::Finish;
                 // Capture the errored outcome; it fires (notification +
                 // backing-task done) on the busy→idle settle edge that
                 // `reconcile_activity` detects, same as a normal completion.
-                self.pending_completion = Some(TurnOutcome::Errored);
+                self.activity.pending_completion = Some(TurnOutcome::Errored);
                 // Advance the prompt queue one turn like a natural completion, so
                 // a prompt the user buffered while this turn ran still runs. No-op
                 // when nothing is buffered (the common single-prompt case).
@@ -1259,7 +1352,7 @@ impl AgentChatView {
                 // A session-level error terminates every outstanding turn,
                 // including any cancel we were still awaiting an ack for — close
                 // the cancel window so a post-reconnect turn isn't misread.
-                self.cancel_in_flight = false;
+                self.activity.cancel_in_flight = false;
                 // A load that fails mid-replay must still render whatever was
                 // replayed — release the coalescing gate so the tail rebuilds.
                 self.restoring = false;
@@ -1274,19 +1367,19 @@ impl AgentChatView {
                 // is already dead.
                 self.settle_turn();
                 turn_settled = true;
-                telegram_first_response_effect = self.finish_telegram_first_response_watch();
+                telegram_watch_action = TelegramWatchAction::Finish;
                 // Capture the failure outcome; it fires on the busy→idle settle
                 // edge (via `reconcile_activity`), same as a normal completion.
-                self.pending_completion = Some(TurnOutcome::Errored);
+                self.activity.pending_completion = Some(TurnOutcome::Errored);
                 // The session is dead with no reconnect path, so any buffered
                 // prompts can never be delivered — drop both the live queue and
                 // a parked queue (a Stop may have parked one before this Error)
                 // rather than leaving them to be pumped or shown with a Resume
                 // button that can't send (they were never echoed, so nothing
                 // dangles in the transcript).
-                self.pending_prompts.clear();
-                self.paused_prompts.clear();
-                self.editing_prompt = None;
+                self.queue.pending_prompts.clear();
+                self.queue.paused_prompts.clear();
+                self.queue.editing_prompt = None;
                 // Drop the now-dead handle. The connection task has ended (this
                 // `Error` is its terminal signal), so its command channel is
                 // closed — a lingering `Some(handle)` would let `send_prompt_text`
@@ -1296,6 +1389,25 @@ impl AgentChatView {
                 // stranding. (Distinct from `TurnFailed`, which keeps the handle:
                 // there the connection is still alive.)
                 self.handle = None;
+            }
+        }
+        // Single dispatch point for every arm's `telegram_watch_action` above
+        // — see `TelegramWatchAction`. Safe to run unconditionally after the
+        // match: `Finish`'s "a final streaming text is resolved first"
+        // behavior (see `finish_telegram_first_response_watch`) needs
+        // `settle_turn`'s finalize to have already run, which it has by now
+        // since every arm that sets `Finish` also calls `settle_turn` earlier
+        // in its own body.
+        match telegram_watch_action {
+            TelegramWatchAction::None => {}
+            TelegramWatchAction::Clear => self.clear_telegram_first_response_watch(),
+            TelegramWatchAction::CheckUpdate => {
+                if let Some(outcome) = self.take_telegram_first_response() {
+                    telegram_first_response_effect = TelegramFirstResponseEffect::Relay(outcome);
+                }
+            }
+            TelegramWatchAction::Finish => {
+                telegram_first_response_effect = self.finish_telegram_first_response_watch();
             }
         }
         // Gate the full-conversation reconciles on what the event actually
@@ -1562,11 +1674,12 @@ impl AgentChatView {
         // the second `let` fails and we fall through to handle `text` as a
         // brand-new prompt so nothing typed is lost.
         if origin == PromptOrigin::InApp
-            && let Some(id) = self.editing_prompt.take()
+            && let Some(id) = self.queue.editing_prompt.take()
             && let Some(qp) = self
+                .queue
                 .pending_prompts
                 .iter_mut()
-                .chain(self.paused_prompts.iter_mut())
+                .chain(self.queue.paused_prompts.iter_mut())
                 .find(|q| q.id == id)
         {
             qp.text = text;
@@ -1578,12 +1691,12 @@ impl AgentChatView {
         }
         let dispatch = if matches!(self.status, AgentSessionStatus::Connected)
             && let Some(handle) = &self.handle
-            && !self.turn.is_in_flight()
-            && !self.cancel_in_flight
+            && !self.queue.turn.is_in_flight()
+            && !self.activity.cancel_in_flight
         {
             // Connected and idle: send now, mark the turn in flight, and echo.
             handle.send_prompt(text.clone());
-            self.turn = Turn::InFlight {
+            self.queue.turn = Turn::InFlight {
                 started_at: std::time::Instant::now(),
             };
             self.echo_prompt(text, cx);
@@ -1726,12 +1839,12 @@ impl AgentChatView {
     /// parked. Backs the queue strip's Resume button via the
     /// `Workspace::resume_queued_prompts` shim (one-way data flow).
     pub(in crate::workspace) fn resume_queue(&mut self, cx: &mut Context<Self>) {
-        if self.paused_prompts.is_empty() {
+        if self.queue.paused_prompts.is_empty() {
             return;
         }
-        let mut resumed = std::mem::take(&mut self.paused_prompts);
-        resumed.append(&mut self.pending_prompts);
-        self.pending_prompts = resumed;
+        let mut resumed = std::mem::take(&mut self.queue.paused_prompts);
+        resumed.append(&mut self.queue.pending_prompts);
+        self.queue.pending_prompts = resumed;
         // Dispatch the first one now if the session can prompt; a no-op offline
         // (the queue just sits in `pending_prompts` and drains on connect).
         self.pump_pending_prompt(cx);
@@ -1744,9 +1857,11 @@ impl AgentChatView {
     /// travels with the entry so [`Self::drain_next_queued_prompt`] knows
     /// whether to arm the Telegram watch once this prompt actually dispatches.
     fn enqueue_prompt(&mut self, text: String, origin: PromptOrigin) -> PromptId {
-        let id = PromptId(self.next_prompt_id);
-        self.next_prompt_id += 1;
-        self.pending_prompts.push(QueuedPrompt { id, text, origin });
+        let id = PromptId(self.queue.next_prompt_id);
+        self.queue.next_prompt_id += 1;
+        self.queue
+            .pending_prompts
+            .push(QueuedPrompt { id, text, origin });
         id
     }
 
@@ -1756,10 +1871,10 @@ impl AgentChatView {
     /// × button via the `Workspace::remove_queued_prompt` shim (one-way data
     /// flow).
     pub(in crate::workspace) fn remove_queued(&mut self, id: PromptId, cx: &mut Context<Self>) {
-        let before = self.pending_prompts.len() + self.paused_prompts.len();
-        self.pending_prompts.retain(|q| q.id != id);
-        self.paused_prompts.retain(|q| q.id != id);
-        if self.pending_prompts.len() + self.paused_prompts.len() != before {
+        let before = self.queue.pending_prompts.len() + self.queue.paused_prompts.len();
+        self.queue.pending_prompts.retain(|q| q.id != id);
+        self.queue.paused_prompts.retain(|q| q.id != id);
+        if self.queue.pending_prompts.len() + self.queue.paused_prompts.len() != before {
             // Deliberately does NOT clear `editing_prompt` if the removed row was
             // the edit target: `send_prompt_text` takes the flag and, finding the
             // id gone from both queues, falls through to enqueue the composer text
@@ -1777,12 +1892,12 @@ impl AgentChatView {
     /// `Workspace::clear_queued_prompts` shim (one-way data flow), and the
     /// second-Esc discard via `Workspace::cancel_agent_turn_if_active`.
     pub(in crate::workspace) fn clear_queue(&mut self, cx: &mut Context<Self>) {
-        if self.pending_prompts.is_empty() && self.paused_prompts.is_empty() {
+        if self.queue.pending_prompts.is_empty() && self.queue.paused_prompts.is_empty() {
             return;
         }
-        self.pending_prompts.clear();
-        self.paused_prompts.clear();
-        self.editing_prompt = None;
+        self.queue.pending_prompts.clear();
+        self.queue.paused_prompts.clear();
+        self.queue.editing_prompt = None;
         // Queue-only change: the transcript rows are unaffected, so notify
         // re-stages the strip without a transcript reproject.
         cx.notify();
@@ -1793,7 +1908,7 @@ impl AgentChatView {
     /// `Workspace::begin_edit_queued_prompt` shim (which pulls the text into the
     /// input); this view only records which slot a subsequent send replaces.
     pub(in crate::workspace) fn begin_edit(&mut self, id: PromptId, cx: &mut Context<Self>) {
-        self.editing_prompt = Some(id);
+        self.queue.editing_prompt = Some(id);
         cx.notify();
     }
 
@@ -1802,7 +1917,7 @@ impl AgentChatView {
     /// button via the `Workspace::cancel_edit_queued_prompt` shim, which also
     /// empties the composer.
     pub(in crate::workspace) fn cancel_edit(&mut self, cx: &mut Context<Self>) {
-        if self.editing_prompt.take().is_some() {
+        if self.queue.editing_prompt.take().is_some() {
             cx.notify();
         }
     }
@@ -1810,17 +1925,20 @@ impl AgentChatView {
     /// Move the next queued prompt into the active-turn model and return the
     /// text that should be sent over ACP. No-op while a turn or cancel is active.
     fn drain_next_queued_prompt(&mut self, cx: &mut Context<Self>) -> Option<String> {
-        if self.turn.is_in_flight() || self.cancel_in_flight || self.pending_prompts.is_empty() {
+        if self.queue.turn.is_in_flight()
+            || self.activity.cancel_in_flight
+            || self.queue.pending_prompts.is_empty()
+        {
             return None;
         }
-        let qp = self.pending_prompts.remove(0);
+        let qp = self.queue.pending_prompts.remove(0);
         // If the drained entry was the one being edited, drop the stale editing
         // flag so a later send doesn't try to replace an id that is no longer
         // queued.
-        if self.editing_prompt == Some(qp.id) {
-            self.editing_prompt = None;
+        if self.queue.editing_prompt == Some(qp.id) {
+            self.queue.editing_prompt = None;
         }
-        self.turn = Turn::InFlight {
+        self.queue.turn = Turn::InFlight {
             started_at: std::time::Instant::now(),
         };
         let text = qp.text;
@@ -1870,11 +1988,11 @@ impl AgentChatView {
     ///    (keeps parity with the Stop button, which shows whenever `is_busy()`).
     /// 4. Else nothing to do → propagate Escape.
     pub(in crate::workspace) fn handle_escape(&mut self, cx: &mut Context<Self>) -> EscapeOutcome {
-        if self.turn.is_in_flight() {
+        if self.queue.turn.is_in_flight() {
             self.cancel_turn(cx);
             return EscapeOutcome::Cancelled;
         }
-        if !self.paused_prompts.is_empty() {
+        if !self.queue.paused_prompts.is_empty() {
             self.clear_queue(cx);
             return EscapeOutcome::ClearedQueue;
         }
@@ -1912,9 +2030,9 @@ impl AgentChatView {
         // a second Stop can still clear it. A trailing-subagent Stop (turn already
         // idle) neither stashes nor opens the window: the foreground turn's
         // already-captured outcome is preserved and fires when the tools settle.
-        if self.turn.is_in_flight() {
-            self.pending_completion = Some(TurnOutcome::Stopped);
-            self.cancel_in_flight = true;
+        if self.queue.turn.is_in_flight() {
+            self.activity.pending_completion = Some(TurnOutcome::Stopped);
+            self.activity.cancel_in_flight = true;
         }
         self.settle_turn();
         self.clear_telegram_first_response_watch();
@@ -1928,8 +2046,10 @@ impl AgentChatView {
         // (idle + connected) sends immediately as a fresh turn, ahead of the
         // parked queue. `append` preserves FIFO order and stacks after any items
         // parked by a prior Stop.
-        self.paused_prompts.append(&mut self.pending_prompts);
-        self.editing_prompt = None;
+        self.queue
+            .paused_prompts
+            .append(&mut self.queue.pending_prompts);
+        self.queue.editing_prompt = None;
         // `settle_turn` mutated items (streaming → done, running tools →
         // cancelled, pending card → resolved), changing fold visibility and row
         // heights, so reproject and remeasure before notifying.
@@ -1946,7 +2066,7 @@ impl AgentChatView {
     /// and can never drift (e.g. one leaving streaming/tools live so the rollup
     /// blinks forever). Idempotent: a later `TurnEnded` after a Stop is a no-op.
     fn settle_turn(&mut self) {
-        self.turn = Turn::Idle;
+        self.queue.turn = Turn::Idle;
         self.settle_items();
         // Everything the turn produced is delivered by the completion relay, so
         // reset the post-turn baseline to the current assistant-text count; only
@@ -2118,29 +2238,19 @@ impl AgentChatView {
         self.handle = None;
         self._event_pump = None;
         self.items.clear();
-        self.pending_prompts.clear();
-        self.paused_prompts.clear();
-        self.editing_prompt = None;
+        self.queue.pending_prompts.clear();
+        self.queue.paused_prompts.clear();
+        self.queue.editing_prompt = None;
         self.pending_permissions.clear();
         self.telegram_first_response_watch = None;
-        self.turn = Turn::Idle;
-        self.subagent_last_activity.clear();
-        self.activity_started_at = None;
-        self.was_busy = false;
-        self.pending_completion = None;
-        self.cancel_in_flight = false;
+        self.queue.turn = Turn::Idle;
+        self.activity.subagent_last_activity.clear();
+        self.activity.activity_started_at = None;
+        self.activity.was_busy = false;
+        self.activity.pending_completion = None;
+        self.activity.cancel_in_flight = false;
         self.session_usage = None;
-        self.diff_editors.clear();
-        self.diff_editor_sources.clear();
-        self.diff_stats.clear();
-        self.mermaid_inflight.clear();
-        if let Ok(mut m) = self.mermaid_images.lock() {
-            m.clear();
-        }
-        self.tool_image_inflight.clear();
-        if let Ok(mut m) = self.tool_images.lock() {
-            m.clear();
-        }
+        self.assets.clear();
         self.fold = FoldState::default();
         self.session_config = SessionConfig::default();
         self.plan.clear();
@@ -2334,18 +2444,18 @@ mod tests {
         window
             .update(cx, |view, _window, cx| {
                 view.set_turn_in_flight();
-                view.pending_prompts.push(queued(1, "a"));
-                view.pending_prompts.push(queued(2, "b"));
+                view.queue.pending_prompts.push(queued(1, "a"));
+                view.queue.pending_prompts.push(queued(2, "b"));
 
                 view.cancel_turn(cx);
 
                 assert!(view.turn_is_idle(), "Stop settles the turn locally");
                 assert!(
-                    view.pending_prompts.is_empty(),
+                    view.queue.pending_prompts.is_empty(),
                     "the live queue is emptied by the Stop"
                 );
                 assert_eq!(
-                    texts(&view.paused_prompts),
+                    texts(&view.queue.paused_prompts),
                     vec!["a".to_string(), "b".to_string()],
                     "Stop parks the queue (FIFO) instead of dropping it"
                 );
@@ -2362,19 +2472,19 @@ mod tests {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
-                view.paused_prompts.push(queued(1, "p1"));
-                view.paused_prompts.push(queued(2, "p2"));
+                view.queue.paused_prompts.push(queued(1, "p1"));
+                view.queue.paused_prompts.push(queued(2, "p2"));
                 // A prompt queued (behind a since-cancelled turn) after the Stop.
-                view.pending_prompts.push(queued(3, "live"));
+                view.queue.pending_prompts.push(queued(3, "live"));
 
                 view.resume_queue(cx);
 
                 assert!(
-                    view.paused_prompts.is_empty(),
+                    view.queue.paused_prompts.is_empty(),
                     "resume drains the parked queue"
                 );
                 assert_eq!(
-                    texts(&view.pending_prompts),
+                    texts(&view.queue.pending_prompts),
                     vec!["p1".to_string(), "p2".to_string(), "live".to_string()],
                     "parked prompts resume ahead of the live queue (FIFO)"
                 );
@@ -2390,25 +2500,25 @@ mod tests {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
-                view.paused_prompts.push(queued(1, "a"));
-                view.paused_prompts.push(queued(2, "b"));
-                view.pending_prompts.push(queued(3, "c"));
+                view.queue.paused_prompts.push(queued(1, "a"));
+                view.queue.paused_prompts.push(queued(2, "b"));
+                view.queue.pending_prompts.push(queued(3, "c"));
 
                 view.remove_queued(super::PromptId(1), cx);
                 assert_eq!(
-                    texts(&view.paused_prompts),
+                    texts(&view.queue.paused_prompts),
                     vec!["b".to_string()],
                     "removing a parked prompt drops it from the parked queue"
                 );
                 assert_eq!(
-                    texts(&view.pending_prompts),
+                    texts(&view.queue.pending_prompts),
                     vec!["c".to_string()],
                     "the live queue is untouched by removing a parked prompt"
                 );
 
                 view.clear_queue(cx);
                 assert!(
-                    view.paused_prompts.is_empty() && view.pending_prompts.is_empty(),
+                    view.queue.paused_prompts.is_empty() && view.queue.pending_prompts.is_empty(),
                     "clear-all empties both the parked and live queues"
                 );
             })
@@ -2422,21 +2532,21 @@ mod tests {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
-                view.paused_prompts.push(queued(1, "old"));
+                view.queue.paused_prompts.push(queued(1, "old"));
                 view.begin_edit(super::PromptId(1), cx);
 
                 view.send_prompt_text("new".to_string(), cx);
 
                 assert_eq!(
-                    texts(&view.paused_prompts),
+                    texts(&view.queue.paused_prompts),
                     vec!["new".to_string()],
                     "the parked prompt's text is replaced in place"
                 );
                 assert!(
-                    view.pending_prompts.is_empty(),
+                    view.queue.pending_prompts.is_empty(),
                     "editing does not enqueue a new prompt"
                 );
-                assert_eq!(view.editing_prompt, None, "the edit flag is cleared");
+                assert_eq!(view.queue.editing_prompt, None, "the edit flag is cleared");
             })
             .unwrap();
     }
@@ -2499,7 +2609,8 @@ mod tests {
 
                 assert_eq!(dispatch, super::PromptDispatch::Queued);
                 assert_eq!(
-                    view.pending_prompts
+                    view.queue
+                        .pending_prompts
                         .iter()
                         .map(|q| q.text.as_str())
                         .collect::<Vec<_>>(),
@@ -2507,7 +2618,7 @@ mod tests {
                     "a phone reply is a new prompt, not an edit commit"
                 );
                 assert_eq!(
-                    view.editing_prompt,
+                    view.queue.editing_prompt,
                     Some(id),
                     "the in-app edit target remains active"
                 );
@@ -2583,7 +2694,7 @@ mod tests {
         window
             .update(cx, |view, _window, cx| {
                 // A queue parked by a prior Stop.
-                view.paused_prompts.push(queued(1, "a"));
+                view.queue.paused_prompts.push(queued(1, "a"));
                 // A live child tool under a subagent parent → `is_busy()` true
                 // even though no foreground turn is in flight.
                 view.items.push(ChatItem::ToolCall(ToolCallItem {
@@ -2607,7 +2718,7 @@ mod tests {
                     "Escape clears the parked queue instead of re-cancelling"
                 );
                 assert!(
-                    view.paused_prompts.is_empty(),
+                    view.queue.paused_prompts.is_empty(),
                     "the parked queue is discarded"
                 );
             })
@@ -2626,7 +2737,7 @@ mod tests {
         window
             .update(cx, |view, _window, _cx| {
                 view.items.push(assistant_text_item("done"));
-                view.post_turn_dirty_at = Some(dirty_at);
+                view.activity.post_turn_dirty_at = Some(dirty_at);
             })
             .unwrap();
 
@@ -2665,7 +2776,7 @@ mod tests {
         window
             .update(cx, |view, _window, _cx| {
                 view.items.push(assistant_text_item("flushed"));
-                view.post_turn_dirty_at = Some(std::time::Instant::now());
+                view.activity.post_turn_dirty_at = Some(std::time::Instant::now());
                 assert_eq!(view.take_pending_post_turn(), Some("flushed".to_string()));
                 assert_eq!(view.take_pending_post_turn(), None);
             })
@@ -2684,9 +2795,9 @@ mod tests {
                 view.items.push(assistant_text_item("history-1"));
                 view.items.push(assistant_text_item("history-2"));
                 view.snap_post_turn_baseline();
-                assert_eq!(view.post_turn_relayed_assistant_texts, 2);
+                assert_eq!(view.activity.post_turn_relayed_assistant_texts, 2);
 
-                view.post_turn_dirty_at =
+                view.activity.post_turn_dirty_at =
                     Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
                 assert_eq!(
                     view.reconcile_post_turn(

@@ -6,13 +6,19 @@
 //! - [`render`] — pure view of an `&AgentChatView` (MVU view purity); event
 //!   closures one-line dispatch into view ops.
 //! - [`agent_chat_ops`] — `Workspace` ops needing workspace state: pane/tab
-//!   construction, the live ACP connection + event pump, desktop notifications,
-//!   bottom-dock prompt / cancel routing, plus GPUI-free reconciler helpers.
+//!   construction, desktop notifications, mode/config switching, and misc
+//!   pane accessors.
+//! - [`agent_chat_connect_ops`] — the ACP connection lifecycle: lazy-connect,
+//!   manual retry, the background connect + event pump, and the `/clear` reset.
+//! - [`agent_chat_queue_ops`] — bottom-dock prompt send / queue / edit / cancel
+//!   routing.
 //! - [`telegram_ops`] — Telegram relay: outbound pings and inbound
 //!   phone-relayed replies / permission decisions routed back into a pane.
 
+pub(in crate::workspace) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_helpers;
 pub(in crate::workspace) mod agent_chat_ops;
+pub(in crate::workspace) mod agent_chat_queue_ops;
 pub(in crate::workspace) mod autoscroll_ops;
 pub(in crate::workspace) mod config_chip;
 pub(in crate::workspace) mod fold;

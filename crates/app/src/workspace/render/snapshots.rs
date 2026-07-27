@@ -229,13 +229,14 @@ impl Workspace {
             .and_then(|p| p.agent_chat_view())
             .map(|view| {
                 let view = view.read(cx);
-                let editing = view.editing_prompt;
+                let editing = view.queue.editing_prompt;
                 // Parked prompts (kept by a Stop) sort ahead of the live queue —
                 // they were submitted before anything queued after the Stop.
                 let mut out: Vec<crate::workspace::layout::QueuedPromptView> = Vec::new();
-                for (prompts, paused) in
-                    [(&view.paused_prompts, true), (&view.pending_prompts, false)]
-                {
+                for (prompts, paused) in [
+                    (&view.queue.paused_prompts, true),
+                    (&view.queue.pending_prompts, false),
+                ] {
                     for q in prompts {
                         out.push(crate::workspace::layout::QueuedPromptView {
                             id: q.id,
