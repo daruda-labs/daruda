@@ -40,13 +40,24 @@ pub enum AttributionConfidence {
     Command,
 }
 
+/// The lane that claimed a port, and the evidence that matched it.
+/// Kept as one struct (rather than two parallel `Option` fields on
+/// [`AttributedPort`]) since a match always carries both together —
+/// splitting them would let a caller represent a label without a
+/// confidence or vice versa, which the attribution logic never
+/// produces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortOwner {
+    pub lane_label: String,
+    pub confidence: AttributionConfidence,
+}
+
 /// Result of attributing one [`ScannedPort`] against a lane list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttributedPort {
     pub port: u16,
-    /// The matched lane's label, `None` when no lane claims this port.
-    pub lane_label: Option<String>,
-    pub confidence: Option<AttributionConfidence>,
+    /// `None` when no lane claims this port.
+    pub owner: Option<PortOwner>,
 }
 
 /// Attribute every entry in `ports` to the deepest-matching lane in
@@ -54,27 +65,18 @@ pub struct AttributedPort {
 pub fn attribute(ports: &[ScannedPort], lanes: &[LaneCandidate]) -> Vec<AttributedPort> {
     ports
         .iter()
-        .map(|port| {
-            let owner = attribute_one(port, lanes);
-            AttributedPort {
-                port: port.port,
-                lane_label: owner.as_ref().map(|owner| owner.lane_label.clone()),
-                confidence: owner.map(|owner| owner.confidence),
-            }
+        .map(|port| AttributedPort {
+            port: port.port,
+            owner: attribute_one(port, lanes),
         })
         .collect()
 }
 
-struct AttributedOwner {
-    lane_label: String,
-    confidence: AttributionConfidence,
-}
-
-fn attribute_one(port: &ScannedPort, lanes: &[LaneCandidate]) -> Option<AttributedOwner> {
+fn attribute_one(port: &ScannedPort, lanes: &[LaneCandidate]) -> Option<PortOwner> {
     if let Some(cwd) = &port.cwd
         && let Some(lane) = deepest_matching(cwd, lanes)
     {
-        return Some(AttributedOwner {
+        return Some(PortOwner {
             lane_label: lane.label.clone(),
             confidence: AttributionConfidence::Cwd,
         });
@@ -82,7 +84,7 @@ fn attribute_one(port: &ScannedPort, lanes: &[LaneCandidate]) -> Option<Attribut
 
     let command = port.command.as_deref()?;
     deepest_matching_by(lanes, |lane| includes_path_boundary(command, &lane.path)).map(|lane| {
-        AttributedOwner {
+        PortOwner {
             lane_label: lane.label.clone(),
             confidence: AttributionConfidence::Command,
         }
@@ -167,8 +169,9 @@ mod tests {
         let lanes = vec![lane("/repo/app", "app")];
         let ports = vec![scanned(3000, Some("/repo/app"), None)];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label.as_deref(), Some("app"));
-        assert_eq!(result[0].confidence, Some(AttributionConfidence::Cwd));
+        let owner = result[0].owner.as_ref().expect("expected an owner");
+        assert_eq!(owner.lane_label, "app");
+        assert_eq!(owner.confidence, AttributionConfidence::Cwd);
     }
 
     #[test]
@@ -176,7 +179,7 @@ mod tests {
         let lanes = vec![lane("/repo/app", "app")];
         let ports = vec![scanned(3000, Some("/repo/app/src/server"), None)];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label.as_deref(), Some("app"));
+        assert_eq!(result[0].owner.as_ref().unwrap().lane_label, "app");
     }
 
     #[test]
@@ -184,7 +187,7 @@ mod tests {
         let lanes = vec![lane("/repo/app", "app")];
         let ports = vec![scanned(3000, Some("/repo/app-2"), None)];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label, None);
+        assert_eq!(result[0].owner, None);
     }
 
     #[test]
@@ -195,8 +198,9 @@ mod tests {
         ];
         let ports = vec![scanned(3000, Some("/repo/nested-worktree/src"), None)];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label.as_deref(), Some("repo-feature"));
-        assert_eq!(result[0].confidence, Some(AttributionConfidence::Cwd));
+        let owner = result[0].owner.as_ref().expect("expected an owner");
+        assert_eq!(owner.lane_label, "repo-feature");
+        assert_eq!(owner.confidence, AttributionConfidence::Cwd);
     }
 
     #[test]
@@ -208,8 +212,9 @@ mod tests {
             Some("node /repo/app/server.js"),
         )];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label.as_deref(), Some("app"));
-        assert_eq!(result[0].confidence, Some(AttributionConfidence::Command));
+        let owner = result[0].owner.as_ref().expect("expected an owner");
+        assert_eq!(owner.lane_label, "app");
+        assert_eq!(owner.confidence, AttributionConfidence::Command);
     }
 
     #[test]
@@ -224,8 +229,9 @@ mod tests {
             Some("node /repo/worktrees/feature/server.js"),
         )];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label.as_deref(), Some("repo-feature"));
-        assert_eq!(result[0].confidence, Some(AttributionConfidence::Command));
+        let owner = result[0].owner.as_ref().expect("expected an owner");
+        assert_eq!(owner.lane_label, "repo-feature");
+        assert_eq!(owner.confidence, AttributionConfidence::Command);
     }
 
     #[test]
@@ -237,7 +243,7 @@ mod tests {
             Some("node /repo/app-2/server.js"),
         )];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label, None);
+        assert_eq!(result[0].owner, None);
     }
 
     #[test]
@@ -245,8 +251,7 @@ mod tests {
         let lanes = vec![lane("/repo/app", "app")];
         let ports = vec![scanned(3000, None, None)];
         let result = attribute(&ports, &lanes);
-        assert_eq!(result[0].lane_label, None);
-        assert_eq!(result[0].confidence, None);
+        assert_eq!(result[0].owner, None);
     }
 
     #[test]
@@ -259,6 +264,6 @@ mod tests {
         let result = attribute(&ports, &lanes);
         assert_eq!(result.len(), 2);
         assert_eq!(result[1].port, 4000);
-        assert_eq!(result[1].lane_label, None);
+        assert_eq!(result[1].owner, None);
     }
 }

@@ -195,19 +195,19 @@ impl Workspace {
                     .process_name
                     .clone()
                     .unwrap_or_else(|| format!("PID {}", port.pid)),
-                kind: match (attributed.lane_label, attributed.confidence) {
-                    (Some(lane_label), Some(confidence)) => PortKind::Workspace {
-                        lane_label,
-                        confidence,
+                kind: match attributed.owner {
+                    Some(owner) => PortKind::Workspace {
+                        lane_label: owner.lane_label,
+                        confidence: owner.confidence,
                     },
-                    _ if is_container_process(
+                    None if is_container_process(
                         port.process_name.as_deref(),
                         port.command.as_deref(),
                     ) =>
                     {
                         PortKind::Container
                     }
-                    _ => PortKind::External,
+                    None => PortKind::External,
                 },
             })
             .collect();

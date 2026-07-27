@@ -23,6 +23,7 @@ const PORT_TABLE_PORT_W: f32 = 46.0;
 const PORT_TABLE_PROCESS_W: f32 = 118.0;
 const PORT_TABLE_GAP: f32 = 10.0;
 const PORT_SECTION_GAP: f32 = 4.0;
+const PORT_ROW_RADIUS: f32 = 3.0;
 
 /// Render the Ports trigger button. The trigger count is workspace
 /// ports only; non-workspace ports remain available from the dropdown
@@ -147,11 +148,6 @@ fn sort_host_for_address(address: &str) -> String {
         .to_string()
 }
 
-#[cfg(test)]
-fn port_row_label(entry: &PortEntry) -> String {
-    format!("{}  {}  {}", entry.port, entry.process, entry.address)
-}
-
 fn port_scroll_body(
     groups: &[(String, Vec<PortEntry>)],
     external: &[PortEntry],
@@ -241,7 +237,7 @@ fn port_click_row(row_ix: usize, entry: &PortEntry, cx: &App) -> AnyElement {
     let address = entry.address.clone();
     div()
         .id(("ports-menu-row", row_ix))
-        .rounded(px(3.0))
+        .rounded(px(PORT_ROW_RADIUS))
         .cursor_pointer()
         .hover(|this| this.bg(t.status_bar_account_hover_bg))
         .on_click(move |_, _window, app| {
@@ -307,6 +303,10 @@ fn port_table_cell(width: f32, text: impl Into<SharedString>) -> impl IntoElemen
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn port_row_label(entry: &PortEntry) -> String {
+        format!("{}  {}  {}", entry.port, entry.process, entry.address)
+    }
 
     fn workspace_entry(address: &str, lane_label: &str) -> PortEntry {
         PortEntry {
