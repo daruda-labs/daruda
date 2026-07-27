@@ -1,10 +1,33 @@
-//! `Workspace::clear_account_override` — the per-window account-delete
-//! hook. Covers the usage-cache prune (`self.claude.usage_by_account`)
-//! added alongside the existing pane-selection reset.
+//! Per-pane account switching + `Workspace::clear_account_override` (the
+//! per-window account-delete hook, including its usage-cache prune).
 
+use super::agent_chat::agent_view;
 use super::*;
+use crate::workspace::main_area::pane_tree::PaneId;
+use daruda_acp::ChatItem;
 use daruda_store::accounts::{AccountId, AccountSelection};
 use daruda_store::project::PaneCwd;
+
+/// An Agent chat pane pinned to `selection`, pushed onto the active runtime.
+fn seed_agent_pane(
+    ws: &mut Workspace,
+    selection: AccountSelection,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> PaneId {
+    let mut pane = ws.create_agent_chat_pane(
+        Some(PaneCwd::Local(std::env::temp_dir())),
+        None,
+        daruda_config::AgentDefinition::claude_default().id,
+        None,
+        window,
+        cx,
+    );
+    pane.agent_chat_content_mut().unwrap().account = selection;
+    let id = pane.id;
+    ws.active_runtime_mut().panes.push(pane);
+    id
+}
 
 /// A pane already switched to a managed account must be switchable back to
 /// the system default — the bug this test guards: before the fix,
@@ -17,22 +40,10 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
     cx.run_until_parked();
 
     let managed = AccountId::new();
-    let tmp = std::env::temp_dir();
     let pane_id = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let mut pane = ws.create_agent_chat_pane(
-                    Some(PaneCwd::Local(tmp.clone())),
-                    None,
-                    daruda_config::AgentDefinition::claude_default().id,
-                    None,
-                    window,
-                    cx,
-                );
-                pane.agent_chat_content_mut().unwrap().account = AccountSelection::Managed(managed);
-                let id = pane.id;
-                ws.active_runtime_mut().panes.push(pane);
-                id
+                seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx)
             })
         })
         .unwrap();
@@ -70,6 +81,104 @@ async fn switch_pane_account_reverts_a_managed_account_to_system_default(cx: &mu
             pane.account_selection(),
             Some(AccountSelection::SystemDefault),
             "switching to SystemDefault must revert the pane to the system default"
+        );
+    });
+}
+
+/// Picking the account the pane is already on must change nothing. Before the
+/// guard, the click ran the full in-place switch — `/clear`'s teardown — so
+/// re-selecting the checked entry in the status-bar dropdown destroyed the
+/// conversation for no gain.
+#[gpui::test]
+async fn switch_pane_account_to_the_current_selection_is_a_no_op(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let managed = AccountId::new();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let id = seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx);
+                agent_view(ws, id).update(cx, |v, _| {
+                    v.items.push(ChatItem::UserText("keep me".into()));
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.switch_pane_account(pane_id, AccountSelection::Managed(managed), window, cx);
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            agent_view(ws, pane_id).read(cx).items.len(),
+            1,
+            "re-selecting the account the pane already uses must not reset the session"
+        );
+    });
+}
+
+/// An idle pane holding a conversation must not be wiped by a switch. The new
+/// account needs its own ACP session and the transcript cannot move to it, so
+/// the switch confirms first and opens a *new* pane — until that confirmation
+/// the source pane keeps both its conversation and its own account.
+#[gpui::test]
+async fn switch_pane_account_keeps_an_idle_conversation(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let managed = AccountId::new();
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let id = seed_agent_pane(ws, AccountSelection::Managed(managed), window, cx);
+                agent_view(ws, id).update(cx, |v, _| {
+                    v.items
+                        .push(ChatItem::UserText("a long investigation".into()));
+                });
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let panes_before = workspace.read_with(cx, |ws, _| ws.active_runtime().panes.len());
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx);
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            agent_view(ws, pane_id).read(cx).items.len(),
+            1,
+            "an idle pane's conversation must survive an account switch"
+        );
+        let pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)
+            .unwrap();
+        assert_eq!(
+            pane.account_selection(),
+            Some(AccountSelection::Managed(managed)),
+            "the source pane keeps its own account — the new one goes to the new pane"
+        );
+        assert_eq!(
+            ws.active_runtime().panes.len(),
+            panes_before,
+            "the new pane only opens once the user confirms the dialog"
         );
     });
 }

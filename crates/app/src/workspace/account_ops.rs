@@ -1,20 +1,25 @@
-//! Per-pane account switching (Task 8, A+C hybrid): an idle pane
-//! reconnects in place under the new account; a busy pane keeps running
-//! and the switch opens a fresh pane instead of tearing down live work.
+//! Per-pane account switching. The invariant: **a switch never destroys
+//! work.** A pane holding something — a live turn or a conversation — keeps
+//! it, and the switch opens a fresh pane under the new account instead. Only
+//! a pane with nothing to lose reconnects in place.
 //!
-//! **Agent chat** panes get the full A+C treatment: idle reconnects in
-//! place by reusing [`Workspace::reset_agent_chat_session`] (the same
-//! production path the `/clear` slash command already exercises — no new
-//! session-teardown machinery), busy opens a new pane.
+//! **Agent chat** panes let [`switch_kind`] decide. In place reuses
+//! [`Workspace::reset_agent_chat_session`] (the same production path the
+//! `/clear` slash command already exercises — no new session-teardown
+//! machinery), which is safe precisely because there is no transcript to
+//! lose. A conversation can never follow the user to another account: the new
+//! account is a different `CLAUDE_CONFIG_DIR`, so it needs its own ACP session
+//! (neither `session/load` nor a resume crosses accounts) and the transcript
+//! stays readable only in the pane that owns it. Wanting the same pane back is
+//! spelled `/clear` first — that leaves nothing to protect, so the switch that
+//! follows is an in-place one.
 //!
-//! **Terminal** panes always open a new pane, regardless of
-//! [`switch_kind`]'s idle/busy verdict. There is no existing safe
-//! in-place PTY-respawn primitive in this codebase (tearing down and
-//! rebuilding a live shell's PTY resources — master, stdout poll task,
-//! stdin channel — mid-pane-lifetime is exactly the kind of invented
-//! session-teardown mechanism the project avoids shipping without a
-//! proven, reused path). `switch_kind` stays a pane-kind-agnostic pure
-//! function either way; Terminal's dispatch simply doesn't consult it.
+//! **Terminal** panes always open a new pane, without consulting
+//! [`switch_kind`]. There is no existing safe in-place PTY-respawn primitive
+//! in this codebase (tearing down and rebuilding a live shell's PTY resources
+//! — master, stdout poll task, stdin channel — mid-pane-lifetime is exactly
+//! the kind of invented session-teardown mechanism the project avoids shipping
+//! without a proven, reused path).
 //!
 //! This file also owns the per-window delete-cleanup side of account
 //! state ([`Workspace::clear_account_override`] — resetting a deleted
@@ -39,41 +44,50 @@ use crate::surface::strings as s;
 use crate::ui::ButtonVariant;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
+use crate::workspace::main_area::agent_chat_pane::agent_chat_helpers::has_conversation;
 use crate::workspace::main_area::agent_chat_pane::agent_chat_ops::resolve_open_agent_id;
 use crate::workspace::main_area::agent_chat_pane::view::AgentSessionStatus;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
-/// Whether a pane-account switch reconnects the same pane or opens a new
-/// one. Purely a function of whether the pane is currently doing work.
+/// What a pane would lose if the switch tore it down — so it doesn't. Also
+/// selects which pane constructor the new pane uses and which sentence the
+/// confirm dialog shows, keeping the two in lockstep (a Terminal cause can
+/// never draw an Agent chat body, or vice versa).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum SwitchKind {
-    /// Pane is idle: tear down and reconnect the same pane under the new
-    /// account.
-    InPlace,
-    /// Pane is busy: leave it running and open a new pane under the new
-    /// account instead.
-    NewPane,
+pub(in crate::workspace) enum NewPaneCause {
+    /// Terminal pane: no safe in-place PTY respawn exists — see the module doc.
+    Terminal,
+    /// Agent chat mid-turn: a teardown would interrupt live work.
+    AgentChatBusy,
+    /// Agent chat holding a transcript the new account's session can't carry.
+    AgentChatConversation,
 }
 
-/// Pure decision: a busy pane never gets torn down mid-work, so switching
-/// its account opens a new pane; an idle pane reconnects in place.
-pub(in crate::workspace) fn switch_kind(pane_busy: bool) -> SwitchKind {
+/// Whether a pane-account switch reconnects the same pane or opens a new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum SwitchKind {
+    /// Nothing to lose: tear down and reconnect the same pane under the new
+    /// account.
+    InPlace,
+    /// Something must survive: leave the pane alone and open a new one under
+    /// the new account instead.
+    NewPane(NewPaneCause),
+}
+
+/// Pure decision for an Agent chat pane. Busy work and a conversation are both
+/// things a switch must not destroy, so each keeps its pane; a pane with
+/// neither — choosing an account before the first prompt, the common case —
+/// reconnects in place.
+pub(in crate::workspace) fn switch_kind(pane_busy: bool, holds_conversation: bool) -> SwitchKind {
     if pane_busy {
-        SwitchKind::NewPane
+        SwitchKind::NewPane(NewPaneCause::AgentChatBusy)
+    } else if holds_conversation {
+        SwitchKind::NewPane(NewPaneCause::AgentChatConversation)
     } else {
         SwitchKind::InPlace
     }
-}
-
-/// Which pane constructor a new-pane account switch should use — mirrors
-/// `main_area::tab_ops::NewPaneKind` but scoped to this module (that enum
-/// also carries split-tree wiring this flow doesn't need).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NewPaneAccountKind {
-    Terminal,
-    AgentChat,
 }
 
 impl Workspace {
@@ -93,11 +107,10 @@ impl Workspace {
     }
 
     /// Switch `pane_id`'s account to `selection`
-    /// ([`AccountSelection::SystemDefault`] = `~/.claude`). Dispatches on
-    /// pane kind: an Agent chat pane consults [`switch_kind`] (idle →
-    /// in-place reconnect, busy → new pane); a Terminal pane always opens a
-    /// new pane (see the module doc); File/TaskEdit panes don't track an
-    /// account and are a no-op.
+    /// ([`AccountSelection::SystemDefault`] = `~/.claude`). Dispatches on pane
+    /// kind: an Agent chat pane consults [`switch_kind`]; a Terminal pane
+    /// always opens a new pane (see the module doc); File/TaskEdit panes don't
+    /// track an account and are a no-op.
     pub(in crate::workspace) fn switch_pane_account(
         &mut self,
         pane_id: PaneId,
@@ -105,64 +118,58 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let switchable = self
+        let Some(current) = self
             .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == pane_id)
-            .is_some_and(|p| p.account_selection().is_some());
-        if !switchable {
+            .and_then(|p| p.account_selection())
+        else {
+            return; // pane gone, or a kind that tracks no account
+        };
+        // The dropdown lists the pane's current account as a clickable entry,
+        // and every branch below either tears a session down or opens an extra
+        // pane — so a re-pick of the account already in use stops here.
+        if current == selection {
             return;
         }
 
-        if self.agent_chat_view(pane_id).is_some() {
-            let busy = self.agent_chat_pane_is_busy_for_switch(pane_id, cx);
-            match switch_kind(busy) {
-                SwitchKind::InPlace => {
-                    self.switch_agent_chat_account_in_place(pane_id, selection, cx);
-                }
-                SwitchKind::NewPane => {
-                    self.confirm_open_pane_with_account(
-                        pane_id,
-                        NewPaneAccountKind::AgentChat,
-                        selection,
-                        window,
-                        cx,
-                    );
-                }
-            }
+        let kind = if self.agent_chat_view(pane_id).is_some() {
+            self.agent_chat_switch_kind(pane_id, cx)
         } else {
-            // Terminal pane — see the module doc: every switch opens a new
-            // pane, idle or busy alike.
-            self.confirm_open_pane_with_account(
-                pane_id,
-                NewPaneAccountKind::Terminal,
-                selection,
-                window,
-                cx,
-            );
+            SwitchKind::NewPane(NewPaneCause::Terminal)
+        };
+        match kind {
+            SwitchKind::InPlace => {
+                self.switch_agent_chat_account_in_place(pane_id, selection, cx);
+            }
+            SwitchKind::NewPane(cause) => {
+                self.confirm_open_pane_with_account(pane_id, cause, selection, window, cx);
+            }
         }
     }
 
-    /// Busy signal for an Agent chat pane's account switch: a live
-    /// prompt/subagent turn ([`AgentChatView::is_busy`] — the single
-    /// activity-state source), or a connect handshake already in flight.
-    /// The latter isn't covered by `is_busy` (that's about turns, not
-    /// connection lifecycle) but re-triggering `connect_agent_chat` while
-    /// one is already running would race two connect attempts, so it
-    /// counts as busy here too.
-    fn agent_chat_pane_is_busy_for_switch(&self, pane_id: PaneId, cx: &Context<Self>) -> bool {
+    /// [`switch_kind`] for an Agent chat pane, reading both of its inputs in
+    /// one borrow.
+    ///
+    /// Busy is [`AgentChatView::is_busy`] (the single activity-state source)
+    /// plus a connect handshake already in flight: that is connection
+    /// lifecycle rather than a turn, so `is_busy` doesn't cover it, but
+    /// re-triggering `connect_agent_chat` under one would race two connect
+    /// attempts.
+    fn agent_chat_switch_kind(&self, pane_id: PaneId, cx: &Context<Self>) -> SwitchKind {
         let Some(view) = self.agent_chat_view(pane_id) else {
-            return false;
+            return SwitchKind::InPlace;
         };
         let v = view.read(cx);
-        v.is_busy()
+        let busy = v.is_busy()
             || matches!(
                 v.status,
                 AgentSessionStatus::PreparingRuntime(_)
                     | AgentSessionStatus::Connecting
                     | AgentSessionStatus::Handshaking(_)
-            )
+            );
+        switch_kind(busy, has_conversation(&v.items))
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
@@ -197,25 +204,32 @@ impl Workspace {
 
     /// `SwitchKind::NewPane`: confirm with the user first (G9 — this opens
     /// an extra pane they didn't explicitly ask to open), then build it via
-    /// [`Self::open_new_pane_with_account`].
+    /// [`Self::open_new_pane_with_account`]. The body names the actual reason
+    /// this pane can't be reused, since the three read very differently to a
+    /// user deciding whether to go ahead.
     fn confirm_open_pane_with_account(
         &mut self,
         source_pane_id: PaneId,
-        kind: NewPaneAccountKind,
+        cause: NewPaneCause,
         selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let body = match cause {
+            NewPaneCause::Terminal => s::switch_account_new_pane_body_terminal(),
+            NewPaneCause::AgentChatBusy => s::switch_account_new_pane_body_busy(),
+            NewPaneCause::AgentChatConversation => s::switch_account_new_pane_body_conversation(),
+        };
         let weak = cx.weak_entity();
         open_confirm_dialog(
             s::switch_account_new_pane_title(),
-            s::switch_account_new_pane_body(),
+            body,
             s::switch_account_new_pane_confirm(),
             ButtonVariant::Primary,
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     ws.update(app_cx, |ws, cx| {
-                        ws.open_new_pane_with_account(source_pane_id, kind, selection, window, cx);
+                        ws.open_new_pane_with_account(source_pane_id, cause, selection, window, cx);
                     });
                 }
             },
@@ -235,7 +249,7 @@ impl Workspace {
     fn open_new_pane_with_account(
         &mut self,
         source_pane_id: PaneId,
-        kind: NewPaneAccountKind,
+        cause: NewPaneCause,
         selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -243,8 +257,8 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return;
         }
-        let new_pane = match kind {
-            NewPaneAccountKind::Terminal => {
+        let new_pane = match cause {
+            NewPaneCause::Terminal => {
                 let cwd = self.default_cwd_for_new_pane();
                 let account_config_dir = pane::resolve_account_config_dir(
                     &self.accounts,
@@ -266,7 +280,7 @@ impl Workspace {
                     }
                 }
             }
-            NewPaneAccountKind::AgentChat => {
+            NewPaneCause::AgentChatBusy | NewPaneCause::AgentChatConversation => {
                 let (local_cwd, remote_cwd) = self.active_lane_cwds();
                 let agent_id = self
                     .agent_chat_view(source_pane_id)
@@ -297,7 +311,7 @@ impl Workspace {
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
 
-        if matches!(kind, NewPaneAccountKind::AgentChat) && !self.bottom_dock.read(cx).is_open {
+        if !matches!(cause, NewPaneCause::Terminal) && !self.bottom_dock.read(cx).is_open {
             self.bottom_dock.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
@@ -376,8 +390,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn switch_kind_busy_new_pane_idle_in_place() {
-        assert_eq!(switch_kind(false), SwitchKind::InPlace);
-        assert_eq!(switch_kind(true), SwitchKind::NewPane);
+    fn switch_kind_reconnects_in_place_only_with_nothing_to_lose() {
+        assert_eq!(switch_kind(false, false), SwitchKind::InPlace);
+    }
+
+    #[test]
+    fn switch_kind_protects_a_conversation_on_an_idle_pane() {
+        assert_eq!(
+            switch_kind(false, true),
+            SwitchKind::NewPane(NewPaneCause::AgentChatConversation)
+        );
+    }
+
+    #[test]
+    fn switch_kind_protects_live_work_whatever_the_transcript_holds() {
+        for holds_conversation in [false, true] {
+            assert_eq!(
+                switch_kind(true, holds_conversation),
+                SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
+                "a busy pane is never torn down mid-work"
+            );
+        }
     }
 }

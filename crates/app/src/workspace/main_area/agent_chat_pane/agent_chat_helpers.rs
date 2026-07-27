@@ -472,6 +472,19 @@ pub(in crate::workspace) fn is_active(item: &daruda_acp::ChatItem) -> bool {
     }
 }
 
+/// True when `items` holds conversation content that a session teardown would
+/// destroy. [`ChatItem::Error`](daruda_acp::ChatItem::Error) does not count: it
+/// is a session-failure notice, not the user's transcript, so a pane whose only
+/// content is "session limit reached" — the usual reason to reach for another
+/// account — still counts as empty and can reconnect in place.
+///
+/// Read by [`switch_kind`](crate::workspace::account_ops::switch_kind) to
+/// decide whether an account switch may reuse the pane.
+pub(in crate::workspace) fn has_conversation(items: &[daruda_acp::ChatItem]) -> bool {
+    use daruda_acp::ChatItem;
+    items.iter().any(|it| !matches!(it, ChatItem::Error(_)))
+}
+
 /// The `active` input [`FoldState::is_expanded`](super::fold::FoldState::is_expanded)
 /// reads for `key`, derived from the live conversation. A block is active while
 /// it streams / runs; a response is active while it is the last turn or its run
@@ -655,6 +668,33 @@ mod tests {
             text: text.to_owned(),
             streaming: false,
             message_id: None,
+        }
+    }
+
+    #[test]
+    fn has_conversation_is_false_for_an_empty_pane() {
+        assert!(!has_conversation(&[]));
+    }
+
+    #[test]
+    fn has_conversation_ignores_error_only_content() {
+        // The pane that hit a usage limit holds nothing but the notice — the
+        // switch that follows has no transcript to protect.
+        let items = [ChatItem::Error("session limit reached".to_owned())];
+        assert!(!has_conversation(&items));
+    }
+
+    #[test]
+    fn has_conversation_counts_any_real_transcript_item() {
+        for item in [
+            ChatItem::UserText("hi".to_owned()),
+            asst("hello"),
+            ChatItem::Error("boom".to_owned()),
+        ]
+        .windows(2)
+        .map(|w| w.to_vec())
+        {
+            assert!(has_conversation(&item), "{item:?} holds a transcript");
         }
     }
 
