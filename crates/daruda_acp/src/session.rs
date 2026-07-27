@@ -61,6 +61,7 @@ use futures::channel::oneshot;
 use futures::future::Either;
 
 use crate::connection::{AcpClientError, AdapterCommand};
+use crate::mode_tracker::ModeTracker;
 use crate::model::{ConfigOptionView, ModeStateView, SessionCapabilitiesView};
 
 /// Map of in-flight permission requests awaiting a host decision: request id →
@@ -196,9 +197,15 @@ pub enum AcpEvent {
     /// usable, so the user can re-prompt (e.g. once the limit resets) without
     /// reconnecting — distinct from the terminal [`AcpEvent::Error`].
     TurnFailed(String),
-    /// The agent self-switched mode (via `CurrentModeUpdate` notification) or a
-    /// `set_mode` request was confirmed. `mode_id` is the new active mode.
-    ModeChanged { mode_id: String },
+    /// The session's mode state changed — the agent self-switched (via a
+    /// `CurrentModeUpdate` notification), a `set_mode` was confirmed, or the
+    /// agent re-advertised its mode list (it rebuilds one per model).
+    ///
+    /// Carries the whole reconciled state, not just the new id: the protocol
+    /// splits "which mode" and "which modes exist" across two channels, and
+    /// [`crate::mode_tracker`] folds them so the host has a single mode mirror
+    /// to assign. Emitted only when the state actually changed.
+    ModeChanged { state: ModeStateView },
     /// The agent advertised or updated its available slash commands
     /// (`AvailableCommandsUpdate`). Replaces the host's cached command list.
     AvailableCommandsChanged(Vec<crate::model::SlashCommand>),
@@ -578,18 +585,44 @@ async fn run_connection(
     let notif_tx = event_tx.clone();
     let perm_event_tx = event_tx.clone();
     let next_permission_id = Arc::new(AtomicU64::new(0));
+    // Owns the session's mode state for the whole connection; see
+    // `crate::mode_tracker` for why mode can't be forwarded as it arrives.
+    let mode_tracker = ModeTracker::default();
+    let notif_mode_tracker = mode_tracker.clone();
 
     agent_client_protocol::Client
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                // Intercept `CurrentModeUpdate` so the host sees a typed
-                // `ModeChanged` event rather than the raw update. All other
-                // updates are forwarded as `AcpEvent::Update`.
-                let event = match notification.update {
-                    SessionUpdate::CurrentModeUpdate(u) => AcpEvent::ModeChanged {
-                        mode_id: u.current_mode_id.to_string(),
-                    },
+                // The two mode-bearing updates are folded through the tracker
+                // (0..2 events out); the rest map 1:1.
+                let update = match notification.update {
+                    SessionUpdate::CurrentModeUpdate(u) => {
+                        if let Some(state) =
+                            notif_mode_tracker.apply_current_mode(u.current_mode_id.to_string())
+                        {
+                            let _ = notif_tx.unbounded_send(AcpEvent::ModeChanged { state });
+                        }
+                        return Ok(());
+                    }
+                    // The agent pushed a config-option change it made itself
+                    // (e.g. a fast-mode toggle, or effort reconciliation after a
+                    // mode downgrade) — not a reply to our `set_config_option`.
+                    // Carries the full option set, so reuse the same
+                    // ConfigOptionsChanged full-replace the request path emits;
+                    // without this the model/effort chips show a stale value
+                    // after any agent-driven change.
+                    SessionUpdate::ConfigOptionUpdate(u) => {
+                        send_config_options_fold(
+                            &notif_mode_tracker,
+                            config_options_from_protocol(&u.config_options),
+                            &notif_tx,
+                        );
+                        return Ok(());
+                    }
+                    other => other,
+                };
+                let event = match update {
                     SessionUpdate::AvailableCommandsUpdate(u) => {
                         AcpEvent::AvailableCommandsChanged(
                             u.available_commands
@@ -612,16 +645,6 @@ async fn run_connection(
                         title: u.title.into(),
                         updated_at: u.updated_at.into(),
                     },
-                    // The agent pushed a config-option change it made itself
-                    // (e.g. a fast-mode toggle, or effort reconciliation after a
-                    // mode downgrade) — not a reply to our `set_config_option`.
-                    // Carries the full option set, so reuse the same
-                    // ConfigOptionsChanged full-replace the request path emits;
-                    // without this the model/effort/mode chips show a stale value
-                    // after any agent-driven change.
-                    SessionUpdate::ConfigOptionUpdate(u) => AcpEvent::ConfigOptionsChanged(
-                        config_options_from_protocol(&u.config_options),
-                    ),
                     // Live context-window / cost accounting. Surfaced as a typed
                     // event (like mode / plan / config) rather than raw `Update`
                     // so the host renders a context meter without parsing
@@ -811,14 +834,31 @@ async fn run_connection(
                 }
             }
 
+            // Hand the (post-`set_mode`) state to the tracker before any
+            // mode-bearing traffic can reach the host: from here on it is the
+            // one owner, and `Connected` is the last place mode arrives by any
+            // other route. Seeding `None` marks a modeless agent permanently
+            // inert, so mode affordances stay a connect-time decision.
+            mode_tracker.seed(modes.clone());
+
             let _ = event_tx.unbounded_send(AcpEvent::Connected {
                 session_id: session_id.to_string(),
                 modes,
-                config_options,
+                // Mode is carried by `modes` above; strip the duplicate so the
+                // host has exactly one representation of it (mirrors what
+                // `send_config_options_fold` does for every later set).
+                config_options: crate::mode_tracker::strip_mode_options(config_options),
                 capabilities,
             });
 
-            prompt_loop(&connection, session_id, command_rx, &event_tx).await?;
+            prompt_loop(
+                &connection,
+                session_id,
+                command_rx,
+                &event_tx,
+                &mode_tracker,
+            )
+            .await?;
             Ok(())
         })
         .await
@@ -839,6 +879,7 @@ async fn prompt_loop(
     session_id: SessionId,
     mut command_rx: UnboundedReceiver<Command>,
     event_tx: &UnboundedSender<AcpEvent>,
+    mode_tracker: &ModeTracker,
 ) -> Result<(), agent_client_protocol::Error> {
     let mut stash: VecDeque<String> = VecDeque::new();
     loop {
@@ -861,8 +902,15 @@ async fn prompt_loop(
                 // for the next command. The response carries the updated set; a
                 // failure is non-fatal (Notice).
                 Some(Command::SetConfigOption { config_id, value }) => {
-                    send_set_config_option(connection, &session_id, config_id, value, event_tx)
-                        .await;
+                    send_set_config_option(
+                        connection,
+                        &session_id,
+                        config_id,
+                        value,
+                        event_tx,
+                        mode_tracker,
+                    )
+                    .await;
                     continue;
                 }
                 None => return Ok(()),
@@ -875,6 +923,7 @@ async fn prompt_loop(
             &mut command_rx,
             &mut stash,
             event_tx,
+            mode_tracker,
         )
         .await?;
         if dropped {
@@ -895,6 +944,7 @@ async fn run_turn(
     command_rx: &mut UnboundedReceiver<Command>,
     stash: &mut VecDeque<String>,
     event_tx: &UnboundedSender<AcpEvent>,
+    mode_tracker: &ModeTracker,
 ) -> Result<bool, agent_client_protocol::Error> {
     let response = connection
         .send_request(PromptRequest::new(
@@ -953,8 +1003,15 @@ async fn run_turn(
                     // Config change mid-turn: issue it and keep awaiting the
                     // prompt response; the updated set arrives in the response,
                     // forwarded as ConfigOptionsChanged. Non-fatal on rejection.
-                    send_set_config_option(connection, session_id, config_id, value, event_tx)
-                        .await;
+                    send_set_config_option(
+                        connection,
+                        session_id,
+                        config_id,
+                        value,
+                        event_tx,
+                        mode_tracker,
+                    )
+                    .await;
                 }
                 None => {
                     // Handle dropped mid-turn: cancel and let the turn wind
@@ -1025,6 +1082,7 @@ async fn send_set_config_option(
     config_id: String,
     value: String,
     event_tx: &UnboundedSender<AcpEvent>,
+    mode_tracker: &ModeTracker,
 ) {
     match connection
         .send_request(SetSessionConfigOptionRequest::new(
@@ -1036,8 +1094,11 @@ async fn send_set_config_option(
         .await
     {
         Ok(resp) => {
-            let options = config_options_from_protocol(&resp.config_options);
-            let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(options));
+            send_config_options_fold(
+                mode_tracker,
+                config_options_from_protocol(&resp.config_options),
+                event_tx,
+            );
         }
         Err(e) => {
             let _ = event_tx.unbounded_send(AcpEvent::Notice(format!(
@@ -1046,6 +1107,24 @@ async fn send_set_config_option(
             )));
         }
     }
+}
+
+/// Fold a full option set through the mode tracker and emit what the host
+/// needs: a `ModeChanged` when the mode state actually moved, then the
+/// mode-stripped option set. The single emit site shared by the agent-pushed
+/// `ConfigOptionUpdate` notification and the `set_config_option` reply, so both
+/// carry identical ordering — mode first, matching the adapter's own ordering
+/// guarantee for order-sensitive consumers.
+fn send_config_options_fold(
+    mode_tracker: &ModeTracker,
+    options: Vec<ConfigOptionView>,
+    event_tx: &UnboundedSender<AcpEvent>,
+) {
+    let fold = mode_tracker.fold_config_options(options);
+    if let Some(state) = fold.mode {
+        let _ = event_tx.unbounded_send(AcpEvent::ModeChanged { state });
+    }
+    let _ = event_tx.unbounded_send(AcpEvent::ConfigOptionsChanged(fold.options));
 }
 
 /// Map a protocol config-option list to the view model, dropping non-select

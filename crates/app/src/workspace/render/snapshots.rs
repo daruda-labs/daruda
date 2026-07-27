@@ -203,29 +203,20 @@ impl Workspace {
             .filter(|m| !m.available.is_empty())
             .map(|m| (focused_id, m));
         // Config-option chips: same focused-agent-pane gate as the mode chip,
-        // sourced from `config_options`. Every category except `Mode` surfaces
-        // as a chip (mode renders separately via `agent_mode`, sourced from
-        // `ModeStateView` — the adapter advertises mode on both paths, so
-        // keeping it out here avoids a duplicate chip). This is deliberately
-        // not an allowlist of known categories: whatever a given agent
-        // advertises (Model, ThoughtLevel, ModelConfig, a future protocol
-        // category, …) rides the same generic `config_chip` UI without daruda
-        // needing to special-case it per agent. `None` when the focused pane is
-        // not an agent pane or advertises no such options.
+        // sourced from `config_options` (which never carries mode — `daruda_acp`
+        // folds that into `agent_mode` above). This is deliberately not an
+        // allowlist of known categories: whatever a given agent advertises
+        // (Model, ThoughtLevel, ModelConfig, a future protocol category, …)
+        // rides the same generic `config_chip` UI without daruda needing to
+        // special-case it per agent. `None` when the focused pane is not an
+        // agent pane or advertises no such options.
         let agent_config_options = self
             .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .map(|view| {
-                view.read(cx)
-                    .config_options
-                    .iter()
-                    .filter(|o| !matches!(o.category, daruda_acp::ConfigOptionCategoryView::Mode))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
+            .map(|view| view.read(cx).config_options.clone())
             .filter(|opts| !opts.is_empty())
             .map(|opts| (focused_id, opts));
         // Queued prompts of the focused agent pane, projected for the

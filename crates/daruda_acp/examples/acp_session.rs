@@ -94,8 +94,12 @@ fn main() {
                         break;
                     }
                 }
-                AcpEvent::ModeChanged { mode_id } => {
-                    eprintln!("[mode-changed] mode_id={mode_id}");
+                AcpEvent::ModeChanged { state } => {
+                    eprintln!(
+                        "[mode-changed] current={} available={:?}",
+                        state.current,
+                        state.available.iter().map(|m| &m.id).collect::<Vec<_>>()
+                    );
                 }
                 AcpEvent::AvailableCommandsChanged(cmds) => {
                     eprintln!("[commands] {} available", cmds.len());

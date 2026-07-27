@@ -481,18 +481,14 @@ pub(in crate::workspace) struct AgentChatView {
     /// site. Transient / session-only.
     pub(in crate::workspace) rows: Vec<RenderRow>,
     /// Session-mode state advertised by the agent at `session/new` time and
-    /// updated on `CurrentModeUpdate` notifications. `None` until the session
-    /// connects, or when the agent does not advertise modes.
+    /// replaced wholesale on `ModeChanged`. `None` until the session connects,
+    /// or when the agent does not advertise modes.
     pub(in crate::workspace) modes: Option<ModeStateView>,
     /// Select config options (model / effort / …) advertised by the agent at
     /// `session/new` time and replaced wholesale on `ConfigOptionsChanged`.
     /// Empty until the session connects or when the agent advertises none.
-    /// The `Mode`-category option is stored but never rendered as a chip
-    /// (`snapshots.rs` filters it out): it is the input [`Self::modes`] is
-    /// re-derived from. [`Self::modes`] is the read surface for mode — this
-    /// entry is only authoritative at the instant it arrives, since
-    /// [`Self::set_mode`] and the connect-time mode application write
-    /// [`Self::modes`] alone.
+    /// Never carries a `Mode`-category option: `daruda_acp` folds mode into
+    /// [`Self::modes`] and strips it here, so mode has exactly one mirror.
     pub(in crate::workspace) config_options: Vec<ConfigOptionView>,
     /// Which optional session methods the agent advertised at connect
     /// (`session/load` / `list` / `resume` / `close`). The active consumer today
@@ -1095,38 +1091,13 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::ConfigOptionsChanged(options) => {
-                // A mid-session mode list only ever arrives here (see
-                // [`ModeStateView::from_config_options`]), so re-derive rather
-                // than let the connect-time list go stale. Gated on an
-                // already-advertised mode state: whether this agent has modes
-                // at all stays decided by `Connected`.
-                if self.modes.is_some()
-                    && let Some(mode_state) = ModeStateView::from_config_options(&options)
-                {
-                    self.modes = Some(mode_state);
-                }
                 self.config_options = options;
             }
             AcpEvent::UsageChanged(usage) => {
                 self.session_usage = Some(usage);
             }
-            AcpEvent::ModeChanged { mode_id } => {
-                if let Some(m) = &mut self.modes {
-                    if m.available.iter().any(|v| v.id == mode_id) {
-                        m.current = mode_id;
-                    } else {
-                        daruda_store::observability::log_writer::LogWriter::log(
-                            ErrorReport::new(
-                                "ACP session: received ModeChanged for unknown mode id",
-                            )
-                            .severity(ErrorSeverity::Warning)
-                            .at(file!(), line!())
-                            .with_context("mode_id", mode_id)
-                            .dedup(format!("agent_chat.unknown_mode.{}", self.pane_id))
-                            .build(),
-                        );
-                    }
-                }
+            AcpEvent::ModeChanged { state } => {
+                self.modes = Some(state);
             }
             AcpEvent::Update(update) => {
                 // Fold protocol traffic through this pane's per-agent strategy

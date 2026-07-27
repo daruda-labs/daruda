@@ -13,6 +13,7 @@ pub mod adapter;
 pub mod connection;
 pub mod mapping;
 pub mod model;
+pub(crate) mod mode_tracker;
 pub mod node;
 pub(crate) mod output_highlight;
 pub mod session;

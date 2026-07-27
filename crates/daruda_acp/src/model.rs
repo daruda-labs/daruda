@@ -438,7 +438,10 @@ impl ModeStateView {
     /// nothing to lose by accepting an empty list, this refresh overwrites live
     /// state: an empty selector is far likelier to be an adapter transient than
     /// a real "this agent has no modes now", so prefer the last known-good list.
-    pub fn from_config_options(options: &[ConfigOptionView]) -> Option<Self> {
+    ///
+    /// Crate-internal: [`crate::mode_tracker`] is the only caller, so the host
+    /// sees one reconciled mode fact instead of a second mirror to fold in.
+    pub(crate) fn from_config_options(options: &[ConfigOptionView]) -> Option<Self> {
         let mode = options
             .iter()
             .find(|o| o.category == ConfigOptionCategoryView::Mode)?;
