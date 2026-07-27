@@ -120,7 +120,7 @@ impl CompletionProvider for SlashCommandProvider {
         let focused = ws.active_runtime().focused_pane_id;
         let commands: Vec<SlashCommand> = with_builtin_clear(
             ws.agent_chat_view(focused)
-                .map(|v| v.read(cx).available_commands.clone())
+                .map(|v| v.read(cx).session_config.available_commands.clone())
                 .unwrap_or_default(),
         );
 

@@ -22,7 +22,6 @@ use futures::channel::mpsc::unbounded;
 use gpui::{AppContext as _, Context, Entity, Window};
 use std::path::PathBuf;
 
-use super::agent_chat_helpers::next_mode_id;
 use super::slash_dispatch::{LocalSlashCommand, SlashDispatch, classify_slash};
 use super::telegram_ops::DeferKind;
 use super::view::{
@@ -893,8 +892,11 @@ impl Workspace {
                             // detect `Connected` (modes arriving) and
                             // `ModeChanged` (current switching) and refresh the
                             // bottom-input placeholder when either fires.
-                            let mode_before =
-                                view.read(cx).modes.as_ref().map(|m| m.current.clone());
+                            let mode_before = view
+                                .read(cx)
+                                .session_config
+                                .current_mode_id()
+                                .map(str::to_string);
                             // Desktop notification for a permission wait, gated by
                             // focus. Must borrow `&event` before the move into
                             // `apply_event` below. Turn *completion* fires later,
@@ -943,8 +945,11 @@ impl Workspace {
                             // modes became available (Connected). Only fires for
                             // the focused pane to avoid redundant work on parked
                             // lane views.
-                            let mode_after =
-                                view.read(cx).modes.as_ref().map(|m| m.current.clone());
+                            let mode_after = view
+                                .read(cx)
+                                .session_config
+                                .current_mode_id()
+                                .map(str::to_string);
                             let focused_id = ws.active_runtime().focused_pane_id;
                             if mode_before != mode_after && focused_id == pane_id {
                                 ws.refresh_terminal_input_placeholder(cx);
@@ -1412,7 +1417,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
             return false;
         };
-        let Some(next) = view.read(cx).modes.as_ref().and_then(next_mode_id) else {
+        let Some(next) = view.read(cx).session_config.next_mode_id() else {
             return false;
         };
         view.update(cx, |v, cx| v.set_mode(next, cx));

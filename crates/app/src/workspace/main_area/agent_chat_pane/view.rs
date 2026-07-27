@@ -16,10 +16,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use daruda_acp::{
-    AcpEvent, AcpSessionHandle, ChatItem, ConfigOptionView, ConnectPhase, ModeStateView,
-    PermissionDecision, PermissionKindView, PlanEntryView, SessionCapabilitiesView, SlashCommand,
-    UsageView, apply_update_with, cancel_pending_tools, finalize_streaming, permission_item,
-    subagent_activity, touched_tool_id,
+    AcpEvent, AcpSessionHandle, ChatItem, ConnectPhase, PermissionDecision, PermissionKindView,
+    PlanEntryView, SessionCapabilitiesView, UsageView, apply_update_with, cancel_pending_tools,
+    finalize_streaming, permission_item, subagent_activity, touched_tool_id,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
@@ -34,6 +33,7 @@ use super::agent_chat_helpers::{
 };
 use super::fold::{FoldKey, FoldState};
 use super::rows::{RenderRow, RowKind, project};
+use super::session_config::SessionConfig;
 use super::telegram_ops::{FirstResponseOutcome, FirstResponseWatch};
 use crate::surface::strings as s;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
@@ -480,16 +480,11 @@ pub(in crate::workspace) struct AgentChatView {
     /// the render processor reads `rows[ix]`. Derived cache — single rebuild
     /// site. Transient / session-only.
     pub(in crate::workspace) rows: Vec<RenderRow>,
-    /// Session-mode state advertised by the agent at `session/new` time and
-    /// replaced wholesale on `ModeChanged`. `None` until the session connects,
-    /// or when the agent does not advertise modes.
-    pub(in crate::workspace) modes: Option<ModeStateView>,
-    /// Select config options (model / effort / …) advertised by the agent at
-    /// `session/new` time and replaced wholesale on `ConfigOptionsChanged`.
-    /// Empty until the session connects or when the agent advertises none.
-    /// Never carries a `Mode`-category option: `daruda_acp` folds mode into
-    /// [`Self::modes`] and strips it here, so mode has exactly one mirror.
-    pub(in crate::workspace) config_options: Vec<ConfigOptionView>,
+    /// What the connected agent advertises about this session: its modes,
+    /// select config options, and slash commands. Established at `Connected`,
+    /// each part replaced wholesale by its own event, all cleared together on
+    /// teardown. Runtime-only; never serialized.
+    pub(in crate::workspace) session_config: SessionConfig,
     /// Which optional session methods the agent advertised at connect
     /// (`session/load` / `list` / `resume` / `close`). The active consumer today
     /// is resume gating, applied in the connection core (`resolve_resume` in
@@ -505,10 +500,6 @@ pub(in crate::workspace) struct AgentChatView {
     /// cumulative Usage tab (this is the current context fill). Runtime-only;
     /// never serialized. Cleared on a fresh session.
     pub(in crate::workspace) session_usage: Option<UsageView>,
-    /// Slash commands advertised by the agent via `AvailableCommandsChanged`.
-    /// Runtime-only; never serialized. Consumed by the slash-command
-    /// autocomplete provider (later task).
-    pub(in crate::workspace) available_commands: Vec<SlashCommand>,
     /// The agent's live execution plan (`PlanChanged`); full-replaced each update.
     /// Runtime-only; never serialized.
     pub(in crate::workspace) plan: Vec<PlanEntryView>,
@@ -875,11 +866,9 @@ impl AgentChatView {
                 state
             },
             rows: Vec::new(),
-            modes: None,
-            config_options: Vec::new(),
+            session_config: SessionConfig::default(),
             session_capabilities: SessionCapabilitiesView::default(),
             session_usage: None,
-            available_commands: Vec::new(),
             plan: Vec::new(),
             // Seed the persisted title so a restored dormant pane shows its
             // label before the session loads; the agent replaces it on the
@@ -1042,8 +1031,8 @@ impl AgentChatView {
                 capabilities,
             } => {
                 self.status = AgentSessionStatus::Connected;
-                self.modes = modes;
-                self.config_options = config_options;
+                self.session_config.modes = modes;
+                self.session_config.config_options = config_options;
                 self.session_capabilities = capabilities;
                 // A real resume (`session/load`) returns the same id we asked to
                 // load; a resume the agent couldn't load was downgraded to a fresh
@@ -1091,13 +1080,13 @@ impl AgentChatView {
                 self.pump_pending_prompt(cx);
             }
             AcpEvent::ConfigOptionsChanged(options) => {
-                self.config_options = options;
+                self.session_config.config_options = options;
             }
             AcpEvent::UsageChanged(usage) => {
                 self.session_usage = Some(usage);
             }
             AcpEvent::ModeChanged { state } => {
-                self.modes = Some(state);
+                self.session_config.modes = Some(state);
             }
             AcpEvent::Update(update) => {
                 // Fold protocol traffic through this pane's per-agent strategy
@@ -1189,7 +1178,7 @@ impl AgentChatView {
                 }
             }
             AcpEvent::AvailableCommandsChanged(commands) => {
-                self.available_commands = commands;
+                self.session_config.available_commands = commands;
             }
             // Full-replace the plan. Auto-expand when the plan content actually
             // changes (new turn's plan arrived) so the user sees the fresh
@@ -2067,34 +2056,30 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Switch the active session mode. Optimistically updates `modes.current`
-    /// so the chip reflects the selection immediately; the adapter reconciles
-    /// via a `ModeChanged` event if it disagrees. Sends `session/set_mode` over
-    /// the live handle (no-op when the handle is absent).
+    /// Switch the active session mode: show the pick immediately, then ask the
+    /// agent over the live handle (no-op when the handle is absent). A
+    /// `ModeChanged` replaces the whole state if the agent disagrees.
     pub(in crate::workspace) fn set_mode(&mut self, mode_id: String, cx: &mut Context<Self>) {
-        if let Some(m) = &mut self.modes {
-            m.current = mode_id.clone();
-        }
+        self.session_config
+            .set_current_mode_optimistically(mode_id.clone());
         if let Some(h) = &self.handle {
             h.set_mode(mode_id);
         }
         cx.notify();
     }
 
-    /// Change a select config option (model / effort / …). Optimistically
-    /// updates the option's `current_value` so the chip reflects the choice
-    /// immediately; the adapter reconciles by replacing the whole option set via
-    /// a `ConfigOptionsChanged` event. Sends `session/set_config_option` over
-    /// the live handle (no-op when the handle is absent).
+    /// Change a select config option (model / effort / …): show the pick
+    /// immediately, then ask the agent over the live handle (no-op when the
+    /// handle is absent). The reply replaces the whole option set via a
+    /// `ConfigOptionsChanged` event.
     pub(in crate::workspace) fn set_config_option(
         &mut self,
         config_id: String,
         value: String,
         cx: &mut Context<Self>,
     ) {
-        if let Some(opt) = self.config_options.iter_mut().find(|o| o.id == config_id) {
-            opt.current_value = value.clone();
-        }
+        self.session_config
+            .set_option_value_optimistically(&config_id, value.clone());
         if let Some(h) = &self.handle {
             h.set_config_option(config_id, value);
         }
@@ -2138,9 +2123,7 @@ impl AgentChatView {
             m.clear();
         }
         self.fold = FoldState::default();
-        self.modes = None;
-        self.config_options.clear();
-        self.available_commands.clear();
+        self.session_config = SessionConfig::default();
         self.plan.clear();
         self.plan_collapsed = false;
         self.session_title = None;

@@ -18,7 +18,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Fetch the `AgentChatView` entity for `pane_id` (panics if the pane is gone
 /// or is not an AgentChat pane).
-fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatView> {
+pub(super) fn agent_view(ws: &Workspace, pane_id: PaneId) -> Entity<AgentChatView> {
     ws.active_runtime()
         .panes
         .iter()
@@ -802,7 +802,7 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
                 view.update(cx, |v, cx| {
                     // Inject a ModeStateView with two modes so `set_mode` has
                     // something to flip. No live handle (handle stays `None`).
-                    v.modes = Some(ModeStateView {
+                    v.session_config.modes = Some(ModeStateView {
                         available: vec![
                             SessionModeView {
                                 id: "auto".to_string(),
@@ -828,7 +828,11 @@ async fn set_mode_updates_current_optimistically(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
-        let modes = view.modes.as_ref().expect("modes were injected");
+        let modes = view
+            .session_config
+            .modes
+            .as_ref()
+            .expect("modes were injected");
         assert_eq!(
             modes.current, "plan",
             "set_mode flips current immediately (optimistic)"
@@ -869,7 +873,7 @@ async fn mode_changed_replaces_the_whole_mode_state(cx: &mut TestAppContext) {
                 let view = agent_view(ws, id);
                 view.update(cx, |v, cx| {
                     // Connect-time state: the model in use advertises no `auto`.
-                    v.modes = Some(ModeStateView {
+                    v.session_config.modes = Some(ModeStateView {
                         available: vec![mode("default"), mode("plan")],
                         current: "plan".to_string(),
                     });
@@ -896,7 +900,11 @@ async fn mode_changed_replaces_the_whole_mode_state(cx: &mut TestAppContext) {
     workspace.read_with(cx, |ws, cx| {
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
-        let modes = view.modes.as_ref().expect("modes stay advertised");
+        let modes = view
+            .session_config
+            .modes
+            .as_ref()
+            .expect("modes stay advertised");
         assert_eq!(
             modes
                 .available
@@ -938,7 +946,7 @@ async fn config_options_change_leaves_the_mode_state_alone(cx: &mut TestAppConte
                 ws.active_runtime_mut().panes.push(pane);
                 let view = agent_view(ws, id);
                 view.update(cx, |v, cx| {
-                    v.modes = Some(ModeStateView {
+                    v.session_config.modes = Some(ModeStateView {
                         available: vec![SessionModeView {
                             id: "plan".to_string(),
                             name: "Plan Mode".to_string(),
@@ -974,10 +982,14 @@ async fn config_options_change_leaves_the_mode_state_alone(cx: &mut TestAppConte
         let view = agent_view(ws, pane_id);
         let view = view.read(cx);
         assert_eq!(
-            view.modes.as_ref().expect("modes untouched").current,
+            view.session_config
+                .modes
+                .as_ref()
+                .expect("modes untouched")
+                .current,
             "plan"
         );
-        assert_eq!(view.config_options.len(), 1);
+        assert_eq!(view.session_config.config_options.len(), 1);
     });
 }
 

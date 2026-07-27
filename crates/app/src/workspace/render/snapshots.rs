@@ -199,8 +199,7 @@ impl Workspace {
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .and_then(|view| view.read(cx).modes.clone())
-            .filter(|m| !m.available.is_empty())
+            .and_then(|view| view.read(cx).session_config.mode_for_chip().cloned())
             .map(|m| (focused_id, m));
         // Config-option chips: same focused-agent-pane gate as the mode chip,
         // sourced from `config_options` (which never carries mode — `daruda_acp`
@@ -216,7 +215,7 @@ impl Workspace {
             .iter()
             .find(|p| p.id == focused_id)
             .and_then(|p| p.agent_chat_view())
-            .map(|view| view.read(cx).config_options.clone())
+            .map(|view| view.read(cx).session_config.config_options.clone())
             .filter(|opts| !opts.is_empty())
             .map(|opts| (focused_id, opts));
         // Queued prompts of the focused agent pane, projected for the

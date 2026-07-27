@@ -326,13 +326,10 @@ impl Workspace {
         let is_agent = self.is_agent_chat_pane(focused_id);
         let mode_name: Option<String> = if is_agent {
             self.agent_chat_view(focused_id).and_then(|v| {
-                let view = v.read(cx);
-                view.modes.as_ref().and_then(|m| {
-                    m.available
-                        .iter()
-                        .find(|av| av.id == m.current)
-                        .map(|av| av.name.clone())
-                })
+                v.read(cx)
+                    .session_config
+                    .current_mode_name()
+                    .map(str::to_string)
             })
         } else {
             None

@@ -20,6 +20,7 @@ pub(in crate::workspace) mod mode_chip;
 pub(in crate::workspace) mod reconcile;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod rows;
+pub(in crate::workspace) mod session_config;
 pub(in crate::workspace) mod slash_dispatch;
 pub(in crate::workspace) mod telegram_ops;
 pub(in crate::workspace) mod view;

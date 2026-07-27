@@ -663,6 +663,7 @@ impl Workspace {
             .agent_chat_view(focused)
             .and_then(|v| {
                 v.read(cx)
+                    .session_config
                     .available_commands
                     .iter()
                     .find(|c| c.name == name)
