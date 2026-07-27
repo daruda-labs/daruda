@@ -287,6 +287,18 @@ pub(in crate::workspace) struct AgentChatView {
     /// via `session/load` instead of starting a fresh session. Persisted so
     /// the conversation comes back across restarts.
     pub(in crate::workspace) session_id: Option<String>,
+    /// ACP session-mode id this session was last known to be in, mirrored
+    /// from `session_config.modes.current` on every `Connected` / `ModeChanged`
+    /// (unlike `session_config`, never cleared by `/clear` or a retry's
+    /// teardown) and persisted so a resumed session can have it reapplied via
+    /// `session/set_mode` on the next connect.
+    ///
+    /// WORKAROUND: `session/load`'s response can carry the resumed session's
+    /// real mode, but the `claude-agent-acp` adapter recomputes it from
+    /// `settings.json` on every process launch instead of the session's
+    /// actual last mode — see `daruda_acp::session`'s `restore_mode` param,
+    /// which this field feeds on connect.
+    pub(in crate::workspace) last_known_mode_id: Option<String>,
     /// `true` while a resume (`session/load`) is replaying its history: the
     /// adapter streams many `session/update`s before the `Connected` reply.
     /// While set, `apply_event` accumulates items but skips the per-event
@@ -803,6 +815,7 @@ impl AgentChatView {
         cwd: Option<PaneCwd>,
         status: AgentSessionStatus,
         session_id: Option<String>,
+        mode_id: Option<String>,
         agent_id: String,
         agent_name: String,
         title: Option<String>,
@@ -824,6 +837,7 @@ impl AgentChatView {
             cwd,
             status,
             session_id,
+            last_known_mode_id: mode_id,
             agent_id,
             agent_name,
             // A restored pane connects lazily; the resume decision (and the
@@ -1031,6 +1045,9 @@ impl AgentChatView {
                 capabilities,
             } => {
                 self.status = AgentSessionStatus::Connected;
+                if let Some(state) = &modes {
+                    self.last_known_mode_id = Some(state.current.clone());
+                }
                 self.session_config.modes = modes;
                 self.session_config.config_options = config_options;
                 self.session_capabilities = capabilities;
@@ -1086,6 +1103,7 @@ impl AgentChatView {
                 self.session_usage = Some(usage);
             }
             AcpEvent::ModeChanged { state } => {
+                self.last_known_mode_id = Some(state.current.clone());
                 self.session_config.modes = Some(state);
             }
             AcpEvent::Update(update) => {
@@ -2062,6 +2080,7 @@ impl AgentChatView {
     pub(in crate::workspace) fn set_mode(&mut self, mode_id: String, cx: &mut Context<Self>) {
         self.session_config
             .set_current_mode_optimistically(mode_id.clone());
+        self.last_known_mode_id = Some(mode_id.clone());
         if let Some(h) = &self.handle {
             h.set_mode(mode_id);
         }
@@ -2215,6 +2234,7 @@ mod tests {
                 window.window_handle(),
                 None,
                 super::AgentSessionStatus::Idle,
+                None,
                 None,
                 "claude".to_string(),
                 "Claude".to_string(),

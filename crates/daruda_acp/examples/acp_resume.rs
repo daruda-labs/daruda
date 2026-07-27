@@ -41,7 +41,7 @@ fn main() {
 
     smol::block_on(async move {
         let (handle, mut events) =
-            match connect_session(Default::default(), cwd, Vec::new(), resume, "") {
+            match connect_session(Default::default(), cwd, Vec::new(), None, resume, "") {
                 Ok(pair) => pair,
                 Err(err) => {
                     eprintln!("connect failed: {err}");

@@ -550,8 +550,12 @@ pub const PANE_HEADER_CWD_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const PANE_HEADER_CLOSE_FONT_SIZE: f32 = FONT_SIZE_XS;
 /// Status bar font size (px).
 pub const STATUS_BAR_FONT_SIZE: f32 = FONT_SIZE_SM;
-/// Status bar horizontal padding (px).
-pub const STATUS_BAR_PAD_X: f32 = PAD_LG;
+/// Status bar horizontal padding (px). Wider than the shared `PAD_LG`
+/// spacing token: macOS rounds the window's own bottom corners, and the
+/// status bar sits flush against the bottom edge, so a bordered control
+/// near the trailing edge (the account chip) needs extra clearance from
+/// the true corner or its straight border reads as clipped by the curve.
+pub const STATUS_BAR_PAD_X: f32 = 24.0;
 /// Dock placeholder message font size (px).
 pub const DOCK_PLACEHOLDER_FONT_SIZE: f32 = FONT_SIZE_MD;
 /// Dock toggle icon size (px).
@@ -684,22 +688,22 @@ pub const SETTINGS_WINDOW_W: f32 = 720.0;
 /// Settings window height (px).
 pub const SETTINGS_WINDOW_H: f32 = 680.0;
 /// Title bar height (px).
-pub const TITLE_BAR_HEIGHT: f32 = 24.0;
+pub const TITLE_BAR_HEIGHT: f32 = 28.0;
 /// Tab bar height (px).
 pub const TAB_BAR_HEIGHT: f32 = 28.0;
 /// Status bar height (px).
-pub const STATUS_BAR_HEIGHT: f32 = 22.0;
+pub const STATUS_BAR_HEIGHT: f32 = 24.0;
 /// Diameter of the project-config indicator dot.
 pub const STATUS_BAR_PROJECT_DOT_SIZE: f32 = 6.0;
 /// Inline detached-HEAD chip — font size, horizontal padding,
 /// vertical padding, corner radius. Sized to sit flush with the
-/// 22px status bar height without forcing a row-height increase.
+/// 24px status bar height without forcing a row-height increase.
 pub const STATUS_BAR_DETACHED_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const STATUS_BAR_DETACHED_PAD_X: f32 = 5.0;
 pub const STATUS_BAR_DETACHED_PAD_Y: f32 = 1.0;
 pub const STATUS_BAR_DETACHED_RADIUS: f32 = RADIUS_XS;
 /// Account slot chip — fixed height, horizontal padding, corner radius.
-/// 18px leaves 2px of clearance above/below inside the 22px status bar
+/// 18px leaves 3px of clearance above/below inside the 24px status bar
 /// (same "don't force a row-height increase" constraint as the detached
 /// chip above), with room for the always-on hairline border that gives
 /// the dropdown trigger a resting-state outline (`ghost()` alone paints
@@ -707,6 +711,25 @@ pub const STATUS_BAR_DETACHED_RADIUS: f32 = RADIUS_XS;
 pub const STATUS_BAR_ACCOUNT_HEIGHT: f32 = 18.0;
 pub const STATUS_BAR_ACCOUNT_PAD_X: f32 = 6.0;
 pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
+/// Window-width breakpoints driving `StatusBarDensity`. Below
+/// `STATUS_BAR_COMPACT_WIDTH` the project/branch label abbreviates to
+/// just the branch and the Ports chip drops its "Ports:" word (bare
+/// count); below `STATUS_BAR_ICON_ONLY_WIDTH` the account slot also
+/// drops its text label, leaving only its dropdown chevron.
+pub const STATUS_BAR_COMPACT_WIDTH: f32 = 720.0;
+pub const STATUS_BAR_ICON_ONLY_WIDTH: f32 = 480.0;
+/// Claude usage chip — gap between the chip's own spans (window label,
+/// severity-coloured percent, reset countdown, chevron). Tighter than
+/// `STATUS_BAR_GAP`, which separates whole segments rather than words
+/// inside one pill.
+pub const STATUS_BAR_USAGE_CHIP_GAP: f32 = GAP_SM;
+/// Fixed width of a row in the usage chip's dropdown. `PopupMenu` sizes
+/// to its content, so the gauge bars need an explicit width to share one
+/// scale instead of each stretching to its own label's length.
+pub const STATUS_BAR_USAGE_ROW_WIDTH: f32 = 180.0;
+/// Vertical gap between a dropdown row's header line, its gauge bar, and
+/// its reset caption.
+pub const STATUS_BAR_USAGE_ROW_GAP: f32 = GAP_XS;
 /// Agent chat font size (px) — the whole conversation pane (message bodies,
 /// headers, tool titles, chrome) shares this one size. Compile-time default
 /// for the config-driven `font.agent_chat_size`; the render path resolves the

@@ -1125,6 +1125,16 @@ impl Render for Workspace {
             }
             None => false,
         };
+        // Usage chip reads the same per-account cache the Usage tab does,
+        // keyed by the focused pane's account, so switching panes swaps the
+        // chip to that account's numbers without a refetch.
+        let (usage_account, _) = self.focused_account_key();
+        let usage = self
+            .claude
+            .usage_by_account
+            .plan_limits(usage_account)
+            .cloned()
+            .unwrap_or_default();
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
@@ -1132,6 +1142,11 @@ impl Render for Workspace {
             error: self.last_error.clone(),
             has_project_config,
             account: focused_account,
+            ports: self.attributed_ports.clone(),
+            ports_status: self.port_scan_status,
+            usage,
+            visible: self.mirrors.status_bar.clone(),
+            workspace: weak_workspace.clone(),
         };
         let status_bar = status_bar::StatusBar(status_data);
 

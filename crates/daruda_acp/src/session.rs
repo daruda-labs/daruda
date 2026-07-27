@@ -135,7 +135,8 @@ pub enum ConnectPhase {
     /// `session/load` sent — resuming a persisted session id.
     LoadingSession,
     /// `session/set_mode` sent to apply the configured initial mode on a
-    /// freshly created session.
+    /// freshly created session, or the persisted `restore_mode` on a resumed
+    /// one.
     ApplyingMode,
 }
 
@@ -427,13 +428,22 @@ fn wire_log_path_for(base: &Path, agent_id: &str) -> PathBuf {
 /// Open a long-lived ACP session against `command`, rooted at `cwd`.
 ///
 /// `initial_modes` is a priority-ordered list of ACP mode ids (e.g.
-/// `["bypassPermissions", "auto"]`) to apply right after `session/new` via
-/// `session/set_mode`. The first mode the adapter both advertises and accepts
-/// wins; a candidate that is unadvertised or whose `set_mode` is rejected falls
-/// through to the next, so a preferred-but-unavailable mode degrades to its
-/// fallback instead of leaving the session in an arbitrary state. If none apply
-/// (empty list, no advertised candidate, or the adapter doesn't support modes),
-/// `Connected` is emitted with whatever mode the adapter defaults to.
+/// `["bypassPermissions", "auto"]`) to apply right after a *fresh*
+/// `session/new` via `session/set_mode`. The first mode the adapter both
+/// advertises and accepts wins; a candidate that is unadvertised or whose
+/// `set_mode` is rejected falls through to the next, so a preferred-but-unavailable
+/// mode degrades to its fallback instead of leaving the session in an arbitrary
+/// state. If none apply (empty list, no advertised candidate, or the adapter
+/// doesn't support modes), `Connected` is emitted with whatever mode the
+/// adapter defaults to.
+///
+/// `restore_mode` is the single mode id the host last saw this *resumed*
+/// session in (persisted across restarts), applied the same way on a real
+/// `session/load` instead of `initial_modes`. Some adapters recompute their
+/// advertised mode from static config on every process launch rather than the
+/// resumed session's actual last mode (see the `restore_mode` application
+/// site in [`run_connection`] for the specifics); this is the host's
+/// workaround for that.
 ///
 /// Spawns the protocol connection as a detached smol task and returns a handle
 /// plus the event receiver. The task runs until the handle is dropped (command
@@ -448,6 +458,7 @@ pub fn connect_session(
     command: AdapterCommand,
     cwd: PathBuf,
     initial_modes: Vec<String>,
+    restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
@@ -470,6 +481,7 @@ pub fn connect_session(
             agent,
             cwd,
             initial_modes,
+            restore_mode,
             resume,
             command_rx,
             task_event_tx.clone(),
@@ -502,11 +514,13 @@ pub fn connect_session(
 /// milestones so the host can show a status line during the (first-run only)
 /// download. `agent_id` is the catalog id (e.g. `"claude"` / `"codex"`) —
 /// see [`connect_session`]'s doc comment for what it's used for.
+#[allow(clippy::too_many_arguments)] // Thin pass-through to `connect_session` — bundling wraps callers more than it saves.
 pub fn connect_agent_session(
     command: String,
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_modes: Vec<String>,
+    restore_mode: Option<String>,
     resume: Option<SessionId>,
     agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
@@ -517,7 +531,7 @@ pub fn connect_agent_session(
     } else {
         AdapterCommand(command)
     };
-    connect_session(adapter, cwd, initial_modes, resume, agent_id)
+    connect_session(adapter, cwd, initial_modes, restore_mode, resume, agent_id)
 }
 
 /// Wall-clock budget for `initialize` and — on a *fresh* session —
@@ -573,10 +587,12 @@ async fn with_connect_timeout<T>(
 
 /// Drive the whole connection: handshake, session creation, then the prompt /
 /// cancel select loop, until the command channel closes or the protocol fails.
+#[allow(clippy::too_many_arguments)] // Internal connection state threaded through one call — bundling wraps callers more than it saves.
 async fn run_connection(
     agent: AcpAgent,
     cwd: PathBuf,
     initial_modes: Vec<String>,
+    restore_mode: Option<String>,
     resume: Option<SessionId>,
     command_rx: UnboundedReceiver<Command>,
     event_tx: UnboundedSender<AcpEvent>,
@@ -774,23 +790,41 @@ async fn run_connection(
             };
 
             // Apply the configured initial mode on a *fresh* session (including a
-            // resume downgraded to session/new). `initial_modes` is a
-            // priority-ordered candidate list — try each in turn and stop at the
-            // first the adapter both advertises and accepts. A candidate that is
-            // not advertised is skipped without a request; one whose set_mode is
+            // resume downgraded to session/new): `initial_modes`, a
+            // priority-ordered candidate list. On a *real* `session/load`, try
+            // `restore_mode` instead — the single mode id the host last saw this
+            // session in.
+            //
+            // WORKAROUND: the protocol lets `session/load`'s response carry the
+            // resumed session's real mode, so in principle this candidate loop
+            // should be unnecessary on a resume. But `claude-agent-acp` never
+            // persists mode per session — it recomputes `permissionMode` from
+            // `settings.json` on every process launch — so the value the load
+            // response reports is the settings default, not the session's actual
+            // last mode. Root cause is upstream (`claude-agent-acp`'s
+            // `createSession`), out of scope here; `restore_mode` (persisted by
+            // the host itself) papers over it until that adapter fixes it.
+            //
+            // Either way: try each candidate in turn and stop at the first the
+            // adapter both advertises and accepts. A candidate that is not
+            // advertised is skipped without a request; one whose set_mode is
             // rejected falls through to the next, so a preferred-but-unavailable
             // mode (e.g. `bypassPermissions`) degrades to its fallback (`auto`)
-            // rather than leaving the session in an arbitrary state. Skipped on a
-            // real load (preserve the resumed mode).
+            // rather than leaving the session in an arbitrary state.
             //
-            // Every candidate failing is NON-FATAL: the session/new already
-            // succeeded and the session is usable. Leave mode_state.current at
-            // the adapter's real current mode (the chip reflects that), emit a
-            // Notice so the host can log it, and continue to Connected.
-            if fresh && let Some(mode_state) = modes.as_mut() {
+            // Every candidate failing is NON-FATAL: the session already
+            // succeeded and is usable. Leave mode_state.current at the adapter's
+            // real current mode (the chip reflects that), emit a Notice so the
+            // host can log it, and continue to Connected.
+            let mode_candidates: Vec<String> = if fresh {
+                initial_modes
+            } else {
+                restore_mode.into_iter().collect()
+            };
+            if let Some(mode_state) = modes.as_mut() {
                 let mut applied = false;
                 let mut last_reject: Option<(String, String)> = None;
-                for id in &initial_modes {
+                for id in &mode_candidates {
                     // Not advertised — this candidate can't apply; try the next.
                     if !mode_state.available.iter().any(|m| &m.id == id) {
                         continue;

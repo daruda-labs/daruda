@@ -53,7 +53,7 @@ pub use badge::Badge;
 pub use button::{
     Button, button, button_add_tile, button_bare, button_chip, button_close, button_danger,
     button_delete_glyph, button_edit_cancel_glyph, button_edit_glyph, button_header_action,
-    button_primary, button_status_account, button_toggle,
+    button_primary, button_status_pill, button_status_pill_bare, button_toggle,
 };
 pub use button_group::{ButtonGroup, button_group};
 pub use chart::BarChart;

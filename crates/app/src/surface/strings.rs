@@ -726,21 +726,32 @@ pub fn usage_weekday_label(idx: u8) -> String {
 /// Always prefixed with `"Resets in "` so callers concatenate a
 /// single string and don't have to reason about pluralization.
 pub fn format_reset_countdown(remaining: std::time::Duration) -> String {
+    if remaining.as_secs() == 0 {
+        return "Resets now".to_string();
+    }
+    format!("Resets in {}", format_reset_short(remaining))
+}
+
+/// The same buckets as [`format_reset_countdown`] without the "Resets"
+/// prefix — for the status-bar usage chip, where the surrounding chip
+/// already says what the number is and the sentence form would not fit.
+/// `0` renders as `"now"`.
+pub fn format_reset_short(remaining: std::time::Duration) -> String {
     let secs = remaining.as_secs();
     if secs == 0 {
-        return "Resets now".to_string();
+        return "now".to_string();
     }
     let mins_total = secs / 60;
     let hours_total = mins_total / 60;
     let days_total = hours_total / 24;
     if days_total >= 1 {
-        format!("Resets in {}d {}h", days_total, hours_total % 24)
+        format!("{}d {}h", days_total, hours_total % 24)
     } else if hours_total >= 1 {
-        format!("Resets in {}h {}m", hours_total, mins_total % 60)
+        format!("{}h {}m", hours_total, mins_total % 60)
     } else if mins_total >= 1 {
-        format!("Resets in {}m", mins_total)
+        format!("{}m", mins_total)
     } else {
-        "Resets in <1m".to_string()
+        "<1m".to_string()
     }
 }
 
@@ -1996,6 +2007,96 @@ pub fn status_bar_account_provider_claude() -> String {
 }
 pub fn status_bar_account_provider_codex() -> String {
     rust_i18n::t!("settings.status_bar_account_provider_codex").into_owned()
+}
+
+/// Status-bar Ports segment's dropdown trigger label — the count of
+/// workspace-owned listening TCP ports found by the last scan.
+pub fn status_bar_ports_label(count: usize) -> String {
+    rust_i18n::t!("settings.status_bar_ports_label", count => count).into_owned()
+}
+
+/// Ports popover summary: workspace-owned ports first, non-workspace
+/// ports second.
+pub fn status_bar_ports_summary(workspace: usize, external: usize) -> String {
+    rust_i18n::t!(
+        "settings.status_bar_ports_summary",
+        workspace => workspace,
+        external => external
+    )
+    .into_owned()
+}
+
+pub fn status_bar_ports_scanning() -> String {
+    rust_i18n::t!("settings.status_bar_ports_scanning").into_owned()
+}
+
+pub fn status_bar_ports_scan_unavailable() -> String {
+    rust_i18n::t!("settings.status_bar_ports_scan_unavailable").into_owned()
+}
+
+/// Ports popover placeholder when the scan found only non-workspace
+/// ports.
+pub fn status_bar_ports_no_workspace() -> String {
+    rust_i18n::t!("settings.status_bar_ports_no_workspace").into_owned()
+}
+
+/// Ports popover section label for ports no open lane's cwd/command
+/// line claims, including container-like listener processes.
+pub fn status_bar_ports_external_section() -> String {
+    rust_i18n::t!("settings.status_bar_ports_external_section").into_owned()
+}
+
+pub fn status_bar_ports_external_count(count: usize) -> String {
+    rust_i18n::t!("settings.status_bar_ports_external_count", count => count).into_owned()
+}
+
+pub fn status_bar_ports_workspace_count(count: usize) -> String {
+    rust_i18n::t!("settings.status_bar_ports_workspace_count", count => count).into_owned()
+}
+
+pub fn status_bar_ports_table_port() -> String {
+    rust_i18n::t!("settings.status_bar_ports_table_port").into_owned()
+}
+
+pub fn status_bar_ports_table_process() -> String {
+    rust_i18n::t!("settings.status_bar_ports_table_process").into_owned()
+}
+
+pub fn status_bar_ports_table_address() -> String {
+    rust_i18n::t!("settings.status_bar_ports_table_address").into_owned()
+}
+
+/// Status bar's right-click toggle menu — one checkable entry per
+/// [`daruda_config::StatusBarItem`], in `StatusBarItem::ALL` order.
+pub fn status_bar_toggle_project_branch() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_project_branch").into_owned()
+}
+pub fn status_bar_toggle_account_slot() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_account_slot").into_owned()
+}
+pub fn status_bar_toggle_ports() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_ports").into_owned()
+}
+pub fn status_bar_toggle_claude_usage() -> String {
+    rust_i18n::t!("settings.status_bar_toggle_claude_usage").into_owned()
+}
+
+/// Claude-usage percentage — the one span that carries the severity
+/// colour, in both the status-bar chip and its dropdown gauge rows.
+pub fn status_bar_usage_chip_percent(pct: u32) -> String {
+    rust_i18n::t!("settings.status_bar_usage_chip_percent", pct => pct).into_owned()
+}
+
+/// Claude-usage chip's trailing reset countdown, rendered as its own
+/// muted span after the coloured percentage — e.g. `"· 2h 13m"`.
+pub fn status_bar_usage_chip_reset(reset: &str) -> String {
+    rust_i18n::t!("settings.status_bar_usage_chip_reset", reset => reset).into_owned()
+}
+
+/// Last entry in the Claude-usage dropdown — switches the right dock to
+/// the Usage tab, where the same numbers are shown as gauges.
+pub fn status_bar_usage_open_panel() -> String {
+    rust_i18n::t!("settings.status_bar_usage_open_panel").into_owned()
 }
 
 /// Sidebar nav label + section header for the Settings "Accounts" page

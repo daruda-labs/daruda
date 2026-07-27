@@ -175,6 +175,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         title: None,
         agent_id: Some("claude".to_string()),
         account_id: Some(id),
+        mode_id: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -184,6 +185,29 @@ fn agent_chat_content_round_trip_preserves_account_id() {
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert!(legacy.account_id.is_none());
+}
+
+#[test]
+fn agent_chat_content_round_trip_preserves_mode_id() {
+    // A restart resumes the session via `session/load`; the persisted mode
+    // id is what lets the host reapply the last-known mode afterward (see
+    // `SerializedAgentChatContent::mode_id`).
+    let content = SerializedAgentChatContent {
+        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
+        session_id: Some("sess-abc123".to_string()),
+        title: None,
+        agent_id: Some("claude".to_string()),
+        account_id: None,
+        mode_id: Some("acceptEdits".to_string()),
+    };
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.mode_id, Some("acceptEdits".to_string()));
+
+    // Legacy payload (pre-mode_id) still loads, defaulting to None.
+    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
+    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
+    assert!(legacy.mode_id.is_none());
 }
 
 #[test]
@@ -201,6 +225,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             title: Some("Fix the parser".to_string()),
             agent_id: Some("claude".to_string()),
             account_id: None,
+            mode_id: None,
         }),
         account_id: None,
     };
@@ -239,6 +264,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             title: None,
             agent_id: None,
             account_id: None,
+            mode_id: None,
         }),
         account_id: None,
     };

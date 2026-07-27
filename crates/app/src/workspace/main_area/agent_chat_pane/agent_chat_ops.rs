@@ -357,6 +357,11 @@ impl Workspace {
                     cwd,
                     status,
                     session_id,
+                    // Session restore (`Workspace::rebuild_layout` in
+                    // `persistence.rs`) patches the persisted mode id in
+                    // afterward via `agent_chat_content_mut`, same as it does
+                    // for `content.account` — see that call site.
+                    None,
                     agent_id,
                     agent_name,
                     title,
@@ -653,11 +658,25 @@ impl Workspace {
         // Priority-ordered modes to try on a *fresh* session: this agent's own
         // `default_mode`, then the global default, then `auto`. Resolved after
         // the reconcile above so a pane whose agent_id was stale gets the mode
-        // of the agent it actually launches. `run_connection` skips this
-        // entirely on a real `session/load`, preserving the resumed mode.
+        // of the agent it actually launches. `run_connection` uses this only on
+        // a fresh `session/new`; a real `session/load` uses `restore_mode`
+        // below instead.
         let initial_modes = self
             .agent
             .connect_mode_priority(agent_default_mode(&self.agents, &agent_id));
+        // The mode this pane's session was last known to be in — reapplied
+        // after a resume (`session/load`) via `session/set_mode`.
+        //
+        // WORKAROUND: `session/load`'s response can in principle carry the
+        // resumed session's real mode, but `claude-agent-acp` recomputes it
+        // from `settings.json` on every process launch instead of the
+        // session's actual last mode, so relying on that response alone loses
+        // the mode across every app restart. Root cause is upstream
+        // (`claude-agent-acp`'s `createSession`); the host tracks and
+        // reapplies the mode itself until that's fixed there.
+        let restore_mode = self
+            .agent_chat_view(pane_id)
+            .and_then(|v| v.read(cx).last_known_mode_id.clone());
 
         // A `Remote` cwd's launch needs the lane's remote path assembled in;
         // `Local` needs none. This is the only place a connect resolves the
@@ -793,6 +812,7 @@ impl Workspace {
                         node_root,
                         connect_cwd,
                         initial_modes,
+                        restore_mode,
                         resume.map(daruda_acp::SessionId::new),
                         &agent_id,
                         &mut progress,
@@ -896,6 +916,10 @@ impl Workspace {
                             // is triggered below when either changes.
                             let session_id_before = view.read(cx).session_id.clone();
                             let title_before = view.read(cx).session_title.clone();
+                            // Also persisted (see `last_known_mode_id`'s doc) —
+                            // reapplied on the next resume to work around
+                            // `claude-agent-acp` not restoring it itself.
+                            let mode_id_before = view.read(cx).last_known_mode_id.clone();
                             // Capture current mode before the event so we can
                             // detect `Connected` (modes arriving) and
                             // `ModeChanged` (current switching) and refresh the
@@ -945,6 +969,7 @@ impl Workspace {
                                 let v = view.read(cx);
                                 if v.session_id != session_id_before
                                     || v.session_title != title_before
+                                    || v.last_known_mode_id != mode_id_before
                                 {
                                     ws.mark_dirty_and_save(cx);
                                 }
@@ -1393,6 +1418,9 @@ impl Workspace {
         // The bottom-input placeholder includes the current mode name;
         // refresh it now that the mode has changed.
         self.refresh_terminal_input_placeholder(cx);
+        // Persist the new `last_known_mode_id` so a resume after restart
+        // reapplies it (see that field's doc).
+        self.mark_dirty_and_save(cx);
     }
 
     /// Change a select config option (model / effort / …) of an Agent chat
@@ -1432,6 +1460,9 @@ impl Workspace {
         // The bottom-input placeholder includes the current mode name;
         // refresh it now that the mode has cycled.
         self.refresh_terminal_input_placeholder(cx);
+        // Persist the new `last_known_mode_id` so a resume after restart
+        // reapplies it (see that field's doc).
+        self.mark_dirty_and_save(cx);
         true
     }
 

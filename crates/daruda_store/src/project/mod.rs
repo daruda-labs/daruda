@@ -316,6 +316,19 @@ pub struct SerializedAgentChatContent {
     /// Managed account this pane runs under; `None` = provider default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<crate::accounts::AccountId>,
+    /// ACP session-mode id the host last saw this session in (e.g.
+    /// `"acceptEdits"`), persisted so a resumed session (`session/load`) can
+    /// have it reapplied via `session/set_mode`. `None` when the agent has no
+    /// modes, or none was ever observed.
+    ///
+    /// WORKAROUND: `session/load`'s response can in principle report the
+    /// resumed session's real mode, but at least one shipped adapter
+    /// (`claude-agent-acp`) recomputes it from static settings on every
+    /// process launch instead of the session's actual last mode — so the
+    /// host tracks and reapplies it itself. See `daruda_acp::session`'s
+    /// `restore_mode` parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_id: Option<String>,
 }
 
 /// Serializable mirror of `daruda::workspace::pane_file_view::FileViewMode`.

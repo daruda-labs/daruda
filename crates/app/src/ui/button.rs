@@ -142,17 +142,27 @@ pub fn button_header_action(
         .label(icon)
 }
 
-/// Status-bar account slot — the dropdown trigger showing the focused
-/// pane's account (or "System"). `ghost()` paints no border in any state
-/// (see `ButtonVariant::Ghost::border_color`), which left it reading as
-/// plain text next to the status bar's other muted labels; this bakes an
-/// always-on hairline border plus a fixed compact height so it reads as a
-/// clickable control at rest, not just on hover.
-pub fn button_status_account(
+/// Status-bar pill button — the dropdown trigger shape shared by the
+/// account slot (focused pane's account, or "System") and the Ports
+/// segment (listening-port count). `ghost()` paints no border in any
+/// state (see `ButtonVariant::Ghost::border_color`), which left it
+/// reading as plain text next to the status bar's other muted labels;
+/// this bakes an always-on hairline border plus a fixed compact height
+/// so it reads as a clickable control at rest, not just on hover.
+pub fn button_status_pill(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Button {
+    button_status_pill_bare(id, cx).label(label)
+}
+
+/// [`button_status_pill`] without a label — for a pill that composes its
+/// own spans as children because parts of it colour independently (the
+/// usage chip tints only its percentage). The button paints `text_color`
+/// from its variant on the outer container, so child spans inherit the
+/// neutral `text_muted` unless they set their own colour.
+pub fn button_status_pill_bare(id: impl Into<ElementId>, cx: &App) -> Button {
     let t = theme::current(cx);
     let variant = ButtonCustomVariant::new(cx)
         .foreground(t.text_muted)
@@ -162,7 +172,6 @@ pub fn button_status_account(
         .xsmall()
         .tab_stop(false)
         .custom(variant)
-        .label(label)
         .h(px(theme::STATUS_BAR_ACCOUNT_HEIGHT))
         .px(px(theme::STATUS_BAR_ACCOUNT_PAD_X))
         .rounded(px(theme::STATUS_BAR_ACCOUNT_RADIUS))

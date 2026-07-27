@@ -666,6 +666,15 @@ impl Workspace {
                     if let Some(content) = restored.agent_chat_content_mut() {
                         content.account =
                             daruda_store::accounts::AccountSelection::from_persisted(ac.account_id);
+                        // Seed the last-known mode so the lazy connect can
+                        // reapply it on resume (`connect_agent_chat`'s
+                        // `restore_mode`) — a no-op when this agent's session
+                        // id was dropped above (fresh session applies
+                        // `initial_modes` instead).
+                        let mode_id = ac.mode_id.clone();
+                        content
+                            .view
+                            .update(cx, |v, _| v.last_known_mode_id = mode_id);
                     }
                     restored
                 } else {
@@ -887,6 +896,7 @@ fn serialize_layout(
                     title: v.session_title.clone(),
                     agent_id: Some(v.agent_id.clone()),
                     account_id: ac.account.to_persisted(),
+                    mode_id: v.last_known_mode_id.clone(),
                 }
             });
             let cwd = if file.is_some() || agent_chat.is_some() {

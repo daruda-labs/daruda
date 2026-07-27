@@ -192,6 +192,13 @@ impl Dock {
         self.is_open = !self.is_open;
     }
 
+    /// Open the dock, idempotently — for affordances that reveal a
+    /// specific panel ("open the Usage panel") rather than toggling
+    /// visibility, where `toggle` would close an already-open dock.
+    pub fn open(&mut self) {
+        self.is_open = true;
+    }
+
     #[allow(dead_code)]
     pub fn resize(&mut self, new_size: f32) {
         self.size = new_size.clamp(self.min_size, self.max_size);

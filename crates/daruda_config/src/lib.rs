@@ -18,11 +18,13 @@ pub mod left_dock;
 pub mod logs;
 pub mod notifications;
 pub mod panels;
+pub mod ports;
 pub mod project;
 pub mod render;
 pub mod scrollback;
 pub mod settings_section;
 pub mod shell;
+pub mod status_bar;
 pub mod telegram;
 pub mod theme_presets;
 pub mod ui_theme_presets;
@@ -53,11 +55,13 @@ pub use left_dock::{IconColorMode, LeftDockConfig};
 pub use logs::LogsConfig;
 pub use notifications::NotificationsConfig;
 pub use panels::PanelsConfig;
+pub use ports::PortsConfig;
 pub use project::{ProjectConfig, project_config_dir, project_config_path, project_id};
 pub use render::{ALLOWED_MAX_FPS, RenderConfig};
 pub use scrollback::ScrollbackConfig;
 pub use settings_section::{BuiltinSection, SettingsSection};
 pub use shell::ShellConfig;
+pub use status_bar::{StatusBarConfig, StatusBarItem};
 pub use telegram::TelegramConfig;
 pub use theme_presets::{PRESETS as THEME_PRESETS, ThemePreset};
 pub use ui_theme_presets::{PRESETS as UI_THEME_PRESETS, UiThemePreset};
@@ -116,6 +120,8 @@ pub struct Config {
     pub clipboard: ClipboardConfig,
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
+    pub status_bar: StatusBarConfig,
+    pub ports: PortsConfig,
     pub logs: LogsConfig,
     pub render: RenderConfig,
     pub agent: AgentConfig,
@@ -156,6 +162,8 @@ impl Default for Config {
             clipboard: Default::default(),
             usage: Default::default(),
             panels: Default::default(),
+            status_bar: Default::default(),
+            ports: Default::default(),
             logs: Default::default(),
             render: Default::default(),
             agent: Default::default(),
@@ -352,6 +360,24 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
 
     patch_section(&mut doc, "panels", |t| {
         t["grid_columns"] = toml_edit::value(i64::from(config.panels.grid_columns));
+    });
+
+    patch_section(&mut doc, "status_bar", |t| {
+        let mut arr = toml_edit::Array::new();
+        for item in &config.status_bar.visible_items {
+            let slug = match item {
+                StatusBarItem::ProjectBranch => "project_branch",
+                StatusBarItem::AccountSlot => "account_slot",
+                StatusBarItem::Ports => "ports",
+                StatusBarItem::ClaudeUsage => "claude_usage",
+            };
+            arr.push(slug);
+        }
+        t["visible_items"] = toml_edit::value(arr);
+    });
+
+    patch_section(&mut doc, "ports", |t| {
+        t["poll_secs"] = toml_edit::value(config.ports.poll_secs as i64);
     });
 
     patch_section(&mut doc, "claude_status", |t| {

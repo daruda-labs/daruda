@@ -8,6 +8,7 @@ pub mod availability;
 pub mod git;
 pub mod history;
 pub mod paths;
+pub mod port_attribution;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

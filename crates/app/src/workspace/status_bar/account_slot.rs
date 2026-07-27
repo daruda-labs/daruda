@@ -1,24 +1,23 @@
-//! Bottom status bar — displays project/branch context and focused
-//! pane title. Always visible at the bottom of the workspace.
+//! Status bar's account slot — the focused pane's account (or the
+//! "System" fallback), rendered as a dropdown trigger + menu for
+//! switching between managed accounts.
 
 use crate::ui::theme;
-use crate::ui::{
-    DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_account, menu_builder, spinner,
-};
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
 use daruda_store::accounts::{AccountSelection, AgentProvider, ManagedAccount};
-use gpui::{App, IntoElement, RenderOnce, SharedString, WeakEntity, Window, div, prelude::*, px};
+use gpui::{App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
-/// Fixed height of the status bar in pixels.
-pub(super) const STATUS_BAR_HEIGHT: f32 = theme::STATUS_BAR_HEIGHT;
+const ACCOUNT_SLOT_MAX_WIDTH: f32 = 220.0;
+const ACCOUNT_SLOT_COMPACT_MAX_WIDTH: f32 = 150.0;
 
 /// Display + dropdown data for the focused pane's account, shown as a
 /// clickable slot in the status bar's right section. Resolved by the
 /// snapshot builder in `render/mod.rs` from the focused pane's
 /// [`AccountSelection`] + `Workspace.accounts`.
 #[derive(Clone)]
-pub(super) struct AccountSlot {
+pub(in crate::workspace) struct AccountSlot {
     /// `"email (plan)"`, `"email"`, or the "System" fallback — see
     /// [`account_label`].
     pub label: SharedString,
@@ -55,7 +54,7 @@ impl AccountSlot {
     /// resolves (deleted account) falls back to the same "System" label as
     /// [`AccountSelection::SystemDefault`], rather than surfacing a dangling
     /// reference to the user.
-    pub(super) fn resolve(
+    pub(in crate::workspace) fn resolve(
         pane_id: PaneId,
         selection: AccountSelection,
         accounts: &daruda_store::accounts::AccountsState,
@@ -111,159 +110,58 @@ fn provider_label(provider: AgentProvider) -> String {
     }
 }
 
-/// Collected status bar data — snapshot taken before rendering to
-/// avoid entity reads during element construction (GPUI re-entrant
-/// panic prevention).
-pub(super) struct StatusBarData {
-    /// `<project>/<branch>` for git-backed active lanes, just
-    /// `<project>` for non-git or detached HEAD, `None` in Welcome
-    /// state (no project loaded). The detached marker is rendered
-    /// separately via [`Self::is_detached`].
-    pub project_branch: Option<SharedString>,
-    /// True when the active lane is git-backed but on a detached
-    /// HEAD. Drives the inline "detached" chip rendered next to
-    /// `project_branch`; harmless when `project_branch` is `None`
-    /// (the chip suppresses itself).
-    pub is_detached: bool,
-    /// Focused pane title (process name / shell prompt).
-    pub title: SharedString,
-    /// Transient error string (pane spawn failures, etc.). When set,
-    /// shows in the right section so the user actually notices the
-    /// failure.
-    pub error: Option<SharedString>,
-    /// True when the workspace's project layer has a config.toml on
-    /// disk. Drives a small dot in the right section so the user sees
-    /// at a glance that some user-global keys are being shadowed.
-    pub has_project_config: bool,
-    /// The focused pane's resolved account slot. `None` when the focused
-    /// pane doesn't track an account (File / TaskEdit panes) — hides the
-    /// slot entirely. `Some` for Terminal / AgentChat panes, even when no
-    /// account is configured (shows the "System" fallback label).
-    pub account: Option<AccountSlot>,
+/// Render the account slot's dropdown trigger button.
+pub(super) fn render(
+    slot: &AccountSlot,
+    density: super::StatusBarDensity,
+    cx: &App,
+) -> impl IntoElement {
+    let label = (density != super::StatusBarDensity::IconOnly).then(|| slot.label.clone());
+    let max_width = if density == super::StatusBarDensity::Full {
+        ACCOUNT_SLOT_MAX_WIDTH
+    } else {
+        ACCOUNT_SLOT_COMPACT_MAX_WIDTH
+    };
+    let slot = slot.clone();
+    button_status_pill_bare("status-account", cx)
+        .max_w(px(max_width))
+        .overflow_hidden()
+        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .min_w_0()
+                .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
+                .children(label.map(|label| {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .truncate()
+                        .child(label)
+                }))
+                .child(div().flex_none().child(SharedString::from(
+                    crate::surface::strings::TASK_PILL_CHEVRON.trim_start(),
+                ))),
+        )
+        .dropdown_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
+            build_account_menu(&slot, menu)
+        }))
 }
 
-/// GPUI render-once wrapper for the status bar element.
-#[derive(IntoElement)]
-pub(super) struct StatusBar(pub(super) StatusBarData);
-
-impl RenderOnce for StatusBar {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let data = self.0;
-        // Snapshot every theme slot once so the chain below reads each
-        // colour through the live `DarudaTheme` Global; the four mid-render
-        // `.text_color(t.text_muted)` etc. lookups stay consistent even if
-        // a theme swap fires between expressions.
-        let t = theme::current(cx);
-        let muted = t.text_muted;
-        let faint = t.text_subtle;
-        let project_dot = t.status_bar_project_dot;
-        let error_color = theme::ERROR;
-        let detached_bg = t.status_bar_detached_bg;
-        let detached_text = t.status_bar_detached_text;
-        let bg = t.status_bar_bg;
-        let border = t.border;
-
-        // Detached chip is meaningful only when there's a
-        // project/branch slot to anchor next to; in Welcome state
-        // (`project_branch` is `None`) suppress the chip too.
-        let show_detached = data.is_detached && data.project_branch.is_some();
-
-        let left = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::STATUS_BAR_GAP))
-            .when_some(data.project_branch.clone(), |el, pb| {
-                el.child(
-                    div()
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(muted)
-                        .child(pb),
-                )
-            })
-            .when(show_detached, |el| {
-                el.child(
-                    div()
-                        .px(px(theme::STATUS_BAR_DETACHED_PAD_X))
-                        .py(px(theme::STATUS_BAR_DETACHED_PAD_Y))
-                        .rounded(px(theme::STATUS_BAR_DETACHED_RADIUS))
-                        .bg(detached_bg)
-                        .text_size(px(theme::STATUS_BAR_DETACHED_FONT_SIZE))
-                        .text_color(detached_text)
-                        .child(SharedString::from(
-                            crate::surface::strings::status_bar_detached_chip(),
-                        )),
-                )
-            })
-            .when(data.project_branch.is_some(), |el| {
-                el.child(
-                    div()
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(faint)
-                        .child(SharedString::from("—")),
-                )
-            })
-            .child(
-                div()
-                    .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                    .text_color(muted)
-                    .child(data.title.clone()),
-            );
-
-        let right = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::STATUS_BAR_GAP))
-            .when(data.has_project_config, |el| {
-                el.child(
-                    div()
-                        .id("status-project-config")
-                        .w(px(theme::STATUS_BAR_PROJECT_DOT_SIZE))
-                        .h(px(theme::STATUS_BAR_PROJECT_DOT_SIZE))
-                        .rounded_full()
-                        .bg(project_dot)
-                        .tooltip(crate::ui::tooltip::text(
-                            crate::surface::strings::status_bar_project_config_tooltip(),
-                        )),
-                )
-            })
-            .when_some(data.account.clone(), |el, slot| {
-                let label = SharedString::from(format!(
-                    "{}{}",
-                    slot.label,
-                    crate::surface::strings::TASK_PILL_CHEVRON
-                ));
-                el.child(
-                    button_status_account("status-account", label, cx)
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .dropdown_menu(menu_builder(move |menu, _window, _cx| {
-                            build_account_menu(&slot, menu)
-                        })),
-                )
-            })
-            .when_some(data.error.clone(), |el, err| {
-                el.child(
-                    div()
-                        .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-                        .text_color(error_color)
-                        .child(err),
-                )
-            });
-
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .w_full()
-            .h(px(STATUS_BAR_HEIGHT))
-            .px(px(theme::STATUS_BAR_PAD_X))
-            .bg(bg)
-            .border_t_1()
-            .border_color(border)
-            .child(left)
-            .child(right)
+/// `"{label} ▾"` normally; at `IconOnly` the text label is dropped —
+/// only the dropdown chevron remains, so the dropdown stays discoverable
+/// without the row growing wide enough to force a wrap.
+#[cfg(test)]
+fn trigger_label(label: &str, density: super::StatusBarDensity) -> String {
+    if density == super::StatusBarDensity::IconOnly {
+        crate::surface::strings::TASK_PILL_CHEVRON
+            .trim_start()
+            .to_string()
+    } else {
+        format!("{label}{}", crate::surface::strings::TASK_PILL_CHEVRON)
     }
 }
 
@@ -384,7 +282,8 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
 
 #[cfg(test)]
 mod tests {
-    use super::account_label;
+    use super::{account_label, trigger_label};
+    use crate::workspace::status_bar::StatusBarDensity;
 
     #[test]
     fn account_slot_label_prefers_email_then_falls_back() {
@@ -394,5 +293,16 @@ mod tests {
         );
         assert_eq!(account_label(Some("alice@x.com"), None), "alice@x.com");
         assert_eq!(account_label(None, None), "System (~/.claude)");
+    }
+
+    #[test]
+    fn trigger_label_keeps_text_outside_icon_only() {
+        assert!(trigger_label("alice@x.com", StatusBarDensity::Full).starts_with("alice@x.com"));
+        assert!(trigger_label("alice@x.com", StatusBarDensity::Compact).starts_with("alice@x.com"));
+    }
+
+    #[test]
+    fn trigger_label_drops_text_at_icon_only() {
+        assert!(!trigger_label("alice@x.com", StatusBarDensity::IconOnly).contains("alice@x.com"));
     }
 }

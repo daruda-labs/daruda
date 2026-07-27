@@ -1,4 +1,5 @@
 use super::*;
+use daruda_store::project::RightDockView;
 
 // ---- Dock integration ----
 
@@ -40,6 +41,36 @@ fn test_toggle_right_dock(cx: &mut TestAppContext) {
     ws.update(cx, |ws, cx| {
         assert!(!ws.right_dock.read(cx).is_open);
         ws.right_dock.update(cx, |d, _| d.toggle());
+        assert!(ws.right_dock.read(cx).is_open);
+    });
+}
+
+/// The status bar's usage chip offers "open the Usage panel". Usage is
+/// the right dock's default selected view, so selecting the tab alone is
+/// a no-op — the reveal path has to open the closed dock too.
+#[gpui::test]
+fn test_reveal_right_dock_view_opens_a_closed_dock_on_the_default_view(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        assert!(!ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Usage);
+        ws.reveal_right_dock_view(RightDockView::Usage, cx);
+        assert!(ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Usage);
+    });
+}
+
+#[gpui::test]
+fn test_reveal_right_dock_view_switches_view_and_keeps_an_open_dock_open(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.right_dock.update(cx, |d, _| d.toggle());
+        ws.reveal_right_dock_view(RightDockView::Skills, cx);
+        assert!(ws.right_dock.read(cx).is_open);
+        assert_eq!(ws.right_dock_view, RightDockView::Skills);
+        // Idempotent: revealing the already-visible view must not toggle
+        // the dock back shut.
+        ws.reveal_right_dock_view(RightDockView::Skills, cx);
         assert!(ws.right_dock.read(cx).is_open);
     });
 }

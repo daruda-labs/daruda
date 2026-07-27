@@ -39,6 +39,7 @@ mod right_dock;
 pub(crate) mod screenshot_scenario;
 mod spawn_helpers;
 pub(crate) mod status_bar;
+mod status_bar_ops;
 pub(in crate::workspace) mod sync;
 #[cfg(test)]
 mod tests;
@@ -702,6 +703,19 @@ pub struct Workspace {
     /// still saves to the pane it was meant for on the next input-pane
     /// focus. `None` until the first input-capable pane is focused.
     pub(in crate::workspace) input_owner: Option<main_area::pane_tree::PaneId>,
+    /// Status of the latest listening-TCP-port scan. Starts as Pending
+    /// before the first scan tick lands, then tracks whether the scanner
+    /// produced rows or was unavailable on the current platform/runtime.
+    pub(in crate::workspace) port_scan_status: sync::ports::PortScanStatus,
+    /// Latest listening-TCP-port scan, attributed to a lane where
+    /// possible. Refreshed by `sync::ports`'s background poll loop
+    /// (`set_scanned_ports`); read by the status bar's Ports segment
+    /// snapshot builder.
+    pub(in crate::workspace) attributed_ports: Vec<sync::ports::PortEntry>,
+    /// Background listening-port scan loop for the status bar's Ports
+    /// segment. Dropping it (Workspace teardown) cancels the loop.
+    #[allow(dead_code)]
+    _ports_pump: gpui::Task<()>,
 }
 
 impl Workspace {
@@ -1157,11 +1171,12 @@ impl Workspace {
             // subscription refreshes the `accounts` read-cache from it and
             // repaints whenever any window mutates it (single, symmetric
             // cross-window propagation path — see `accounts_global`).
-            _accounts_global_subscription: cx
-                .observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
+            _accounts_global_subscription: cx.observe_global::<accounts_global::AccountsGlobal>(
+                |ws, cx| {
                     ws.accounts = accounts_global::snapshot(cx);
                     cx.notify();
-                }),
+                },
+            ),
             // Task data lives in the app-wide `GlobalTasks`; this
             // subscription rebroadcasts mutations into this
             // workspace's render path and re-evaluates whether the
@@ -1238,6 +1253,9 @@ impl Workspace {
             input_history: std::collections::HashMap::new(),
             input_drafts: std::collections::HashMap::new(),
             input_owner: None,
+            port_scan_status: sync::ports::PortScanStatus::Pending,
+            attributed_ports: Vec::new(),
+            _ports_pump: sync::ports::spawn(cx),
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by

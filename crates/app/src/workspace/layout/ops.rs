@@ -121,6 +121,27 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Reveal `view` in the right dock: open the dock if it's closed,
+    /// then select the view. `set_right_dock_view` alone only moves the
+    /// tab selection and returns early when the view is already
+    /// selected, so a "show me this panel" affordance built on it is a
+    /// silent no-op whenever the dock is closed — and `Usage` is the
+    /// default selection, so that was every first click.
+    pub(in crate::workspace) fn reveal_right_dock_view(
+        &mut self,
+        view: daruda_store::project::RightDockView,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.right_dock.read(cx).is_open {
+            self.mutate_durable(cx, |ws, cx| {
+                ws.right_dock.update(cx, |d, _| d.open());
+                ws.main_area.pending_resize = true;
+            });
+        }
+        self.set_right_dock_view(view, cx);
+        cx.notify();
+    }
+
     // ---- Divider drag ----
 
     pub(in crate::workspace) fn begin_divider_drag(

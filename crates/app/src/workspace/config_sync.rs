@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use daruda_config::{Config, IconColorMode};
+use daruda_config::{Config, IconColorMode, StatusBarConfig};
 
 #[derive(Clone)]
 pub(in crate::workspace) struct ConfigMirrors {
@@ -41,6 +41,16 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// host appearance, so `apply_config` reloads open markdown panes to
     /// re-theme their rendered diagrams (mermaid) for the new surface.
     pub ui_preset: String,
+
+    /// Mirror of `daruda_config::StatusBarConfig`. Drives which segments
+    /// `StatusBar::render` includes and whether the Ports scan pump
+    /// (`workspace::sync::ports`) bothers scanning at all.
+    pub status_bar: StatusBarConfig,
+
+    /// Mirror of `daruda_config::PortsConfig::interval()`. Read by the
+    /// Ports scan pump under `read_with` without locking the full
+    /// `Config`, same shape as `terminal_redraw_interval`.
+    pub ports_poll_interval: Duration,
 }
 
 impl ConfigMirrors {
@@ -53,6 +63,8 @@ impl ConfigMirrors {
             files_icon_color_mode: config.left_dock.file_icon_color_mode.clone(),
             terminal_redraw_interval: config.render.redraw_interval(),
             ui_preset: config.theme.ui_preset.clone(),
+            status_bar: config.status_bar.clone(),
+            ports_poll_interval: config.ports.interval(),
         }
     }
 }

@@ -13,6 +13,7 @@ mod files;
 mod lifecycle;
 mod modal_tab_containment;
 mod palette_agent;
+mod ports;
 // Disabled: drives save_state/restore_state against removed legacy
 // WorkspaceState/ProjectState types; needs a rewrite for the UUID-keyed schema.
 mod lanes;

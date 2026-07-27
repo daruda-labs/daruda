@@ -181,7 +181,7 @@ Daruda is not strict MVU, but the architecture leans on three rules. Treat them 
 - **Commit messages**: `<type>: <subject>` (imperative, ≤72 chars). Types: `feat` `fix` `refactor` `perf` `test` `chore` `ci` `docs`. Body only when WHY is non-obvious. Prohibitions: no Phase/Step/ticket numbers, no "what I did" lists (diff shows that), no future-work notes.
 - **User-facing values go through config** (`daruda_config`). Pixel/color constants → `ux/theme.rs`.
 - **User-facing strings go through i18n** — every string visible to the user must be a `pub fn` in `surface/strings.rs` backed by a key in `crates/app/locales/en.yml` (+ matching key in `ko.yml`). Never embed raw string literals at call sites. See `crates/app/locales/CLAUDE.md` for the full checklist.
-- **Comments**: current logic only. No history, no "used to be X".
+- **Comments**: current logic only. No history, no "used to be X". Keep each to 2-3 lines — summarize, don't explain at length. Don't restate what's already verifiable by reading the code (e.g. what a well-named function/variable does); only note the non-obvious WHY.
 - **In-progress docs**: keep outside the repo in a personal document store.
 
 ## File-structure rules

@@ -562,8 +562,10 @@ fn status_dot(color: Hsla) -> impl IntoElement {
 
 /// Map a severity bucket to its bar color. Free function (not a method
 /// on `LimitSeverity`) because the data layer is GPUI-free — `Hsla`
-/// lives in the theme module.
-fn severity_color(severity: LimitSeverity) -> Hsla {
+/// lives in the theme module. Shared with the status bar's usage chip
+/// (`status_bar::usage_chip`) so both surfaces bucket the same number
+/// into the same colour.
+pub(in crate::workspace) fn severity_color(severity: LimitSeverity) -> Hsla {
     match severity {
         LimitSeverity::Low => theme::SIGNAL_GREEN,
         LimitSeverity::Medium => theme::SIGNAL_YELLOW,
