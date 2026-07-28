@@ -69,13 +69,12 @@ pub(super) fn render(
                             .text_color(percent_color)
                             .child(SharedString::from(parts.percent)),
                     )
+                    // No dropdown chevron: this is a reading, not a control,
+                    // and the pill's hover state already says it is clickable.
                     .children(
                         parts
                             .reset
                             .map(|reset| div().child(SharedString::from(reset))),
-                    )
-                    .child(
-                        div().child(SharedString::from(strings::TASK_PILL_CHEVRON.trim_start())),
                     ),
             )
             .dropdown_menu(menu_builder(move |menu, _window, _cx| {
