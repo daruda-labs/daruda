@@ -3,6 +3,7 @@
 
 use super::agent_chat::agent_view;
 use super::*;
+use crate::workspace::claude_session_ops::UsageKey;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::ChatItem;
 use daruda_store::accounts::{AccountId, AccountSelection};
@@ -428,9 +429,17 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
             AccountSelection::Managed(kept),
             AccountSelection::SystemDefault,
         ] {
-            ws.claude
-                .usage_by_account
-                .set_plan_limits(key, daruda_claude::PlanLimits::default());
+            // Seed both domains: a deleted account must be pruned from every
+            // one of them, not just the domain that happened to be focused.
+            for recipe in daruda_store::accounts::AccountRecipeId::ALL {
+                ws.claude.usage_by_account.advance_usage(
+                    UsageKey {
+                        recipe,
+                        account: key,
+                    },
+                    Ok(daruda_claude::ProviderUsage::new(recipe, Vec::new(), None)),
+                );
+            }
             ws.claude
                 .usage_by_account
                 .set_activity(key, daruda_claude::ActivityStats::default());
@@ -439,13 +448,27 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
         ws.clear_account_override(deleted, cx);
 
         let usage = &ws.claude.usage_by_account;
-        assert!(
-            usage
-                .plan_limits(AccountSelection::Managed(deleted))
-                .is_none()
+        let outcome = |account| {
+            usage.usage(UsageKey {
+                recipe: daruda_store::accounts::AccountRecipeId::Claude,
+                account,
+            })
+        };
+        assert_eq!(
+            outcome(AccountSelection::Managed(deleted)),
+            daruda_claude::UsageOutcome::Pending,
+            "a deleted account's usage must be gone, not merely stale"
         );
-        assert!(usage.plan_limits(AccountSelection::Managed(kept)).is_some());
-        assert!(usage.plan_limits(AccountSelection::SystemDefault).is_some());
+        assert!(outcome(AccountSelection::Managed(kept)).has_numbers());
+        assert!(outcome(AccountSelection::SystemDefault).has_numbers());
+        // The other domain's entry for the deleted account is gone too.
+        assert_eq!(
+            usage.usage(UsageKey {
+                recipe: daruda_store::accounts::AccountRecipeId::Codex,
+                account: AccountSelection::Managed(deleted),
+            }),
+            daruda_claude::UsageOutcome::Pending
+        );
 
         assert!(usage.activity(AccountSelection::Managed(deleted)).is_none());
         assert!(usage.activity(AccountSelection::Managed(kept)).is_some());
@@ -628,4 +651,96 @@ async fn a_terminal_pane_prepares_its_managed_accounts_config_dir(cx: &mut TestA
         config_dir.is_dir(),
         "create_pane_with_cwd must run AccountRecipe::prepare_dir"
     );
+}
+
+/// The Usage tab stacks one block per signed-in domain. A domain nobody is
+/// signed into contributes none — that is what keeps a Claude-only user from
+/// seeing a permanently empty Codex block, and vice versa.
+#[gpui::test]
+async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+
+    let sections = |ws: &mut Workspace, cx: &mut gpui::Context<Workspace>| {
+        ws.prepare_right_dock_snapshot(cx)
+            .usage
+            .iter()
+            .map(|section| section.recipe)
+            .collect::<Vec<_>>()
+    };
+
+    ws.update(cx, |ws, cx| {
+        // Before any poll lands both domains are `Pending`: a section each,
+        // holding the layout rather than popping in a beat later.
+        assert_eq!(
+            sections(ws, cx),
+            daruda_store::accounts::AccountRecipeId::ALL.to_vec()
+        );
+
+        let claude_key = UsageKey {
+            recipe: daruda_store::accounts::AccountRecipeId::Claude,
+            account: AccountSelection::SystemDefault,
+        };
+        let codex_key = UsageKey {
+            recipe: daruda_store::accounts::AccountRecipeId::Codex,
+            account: AccountSelection::SystemDefault,
+        };
+
+        ws.claude.usage_by_account.advance_usage(
+            claude_key,
+            Ok(daruda_claude::ProviderUsage::new(
+                daruda_store::accounts::AccountRecipeId::Claude,
+                Vec::new(),
+                None,
+            )),
+        );
+        ws.claude
+            .usage_by_account
+            .advance_usage(codex_key, Err(daruda_claude::FetchError::NoToken));
+
+        assert_eq!(
+            sections(ws, cx),
+            vec![daruda_store::accounts::AccountRecipeId::Claude],
+            "a signed-out domain must leave no section behind"
+        );
+
+        // Signing out of both leaves nothing, which the renderer replaces with
+        // a single "no provider" notice.
+        ws.claude
+            .usage_by_account
+            .advance_usage(claude_key, Err(daruda_claude::FetchError::NoToken));
+        assert!(sections(ws, cx).is_empty());
+    });
+}
+
+/// A failed refresh is not a sign-out: the section stays, showing the last
+/// numbers, so a network blip doesn't collapse the dashboard.
+#[gpui::test]
+async fn a_failed_refresh_keeps_its_usage_section(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        let key = UsageKey {
+            recipe: daruda_store::accounts::AccountRecipeId::Claude,
+            account: AccountSelection::SystemDefault,
+        };
+        ws.claude.usage_by_account.advance_usage(
+            key,
+            Ok(daruda_claude::ProviderUsage::new(
+                daruda_store::accounts::AccountRecipeId::Claude,
+                Vec::new(),
+                None,
+            )),
+        );
+        ws.claude
+            .usage_by_account
+            .advance_usage(key, Err(daruda_claude::FetchError::Http("500".into())));
+
+        let snap = ws.prepare_right_dock_snapshot(cx);
+        let claude = snap
+            .usage
+            .iter()
+            .find(|s| s.recipe == daruda_store::accounts::AccountRecipeId::Claude)
+            .expect("the section survives a failed refresh");
+        assert!(claude.outcome.is_stale());
+        assert!(claude.outcome.snapshot().is_some());
+    });
 }

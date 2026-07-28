@@ -2,8 +2,10 @@
 //! plaintext `auth.json` inside the account's `CODEX_HOME` — no Keychain —
 //! so the directory alone is the isolation boundary.
 
-mod home;
+pub mod home;
 mod identity;
+
+pub use home::system_codex_home;
 
 use std::io;
 use std::path::Path;

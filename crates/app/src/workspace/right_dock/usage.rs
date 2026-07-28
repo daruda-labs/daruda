@@ -1,8 +1,9 @@
-//! Usage tab body — a widget-style dashboard (header, status pill, plan
-//! gauges, today's stats, 7-day chart, totals) modelled on the Übersicht
-//! `claude-usage` widget.
+//! Usage tab body — a widget-style dashboard modelled on the Übersicht
+//! `claude-usage` widget: a refresh header, one block per signed-in auth
+//! domain (name, plan badge, service pill, gauges), then the activity cards.
+//! Activity stays Claude-only, so it sits outside the per-domain blocks.
 //!
-//! Plan limits come from `RightDockSnapshot::plan_limits` (limits pump);
+//! Plan limits come from `RightDockSnapshot::usage` (limits pump);
 //! activity from `RightDockSnapshot::activity` (local JSONL aggregation
 //! pump). The ↻ badge dispatches `Workspace::refresh_usage_now`. Static
 //! text comes from `surface::strings::usage_*`, pixels/colors from
@@ -12,58 +13,77 @@ use std::time::{Duration, SystemTime};
 
 use crate::ui::theme;
 use daruda_claude::activity::ActivityStats;
-use daruda_claude::limits::{LimitSeverity, LimitWindow, PlanInfo, PlanLimits};
 use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
+use daruda_claude::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
-use super::super::sync::limits::UsageAvailability;
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
     button, group_box,
 };
 
-/// Render the Usage tab body.
+/// Render the Usage tab body: the refresh header, then one block per signed-in
+/// auth domain, then the (Claude-only) activity dashboard.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    if snap.usage_availability == UsageAvailability::UnsupportedDomain {
-        return unsupported_domain_body(snap.account_label.clone(), cx);
+    if snap.usage.is_empty() {
+        return no_provider_body(cx);
     }
-    crate::workspace::right_dock::right_panel_body()
-        .child(header(
-            snap.plan_limits.plan.as_ref(),
-            snap.account_label.clone(),
-            cx,
-        ))
-        .child(status_pill(&snap.service_status, cx))
+    let body = crate::workspace::right_dock::right_panel_body()
+        // One badge for the whole tab: the button refreshes every domain, so a
+        // per-section copy would be N buttons doing the same thing. The age
+        // shown is the oldest section's — the one that says how fresh the
+        // *dashboard* is.
         .child(usage_section_header(
-            snap.plan_limits.fetched_at,
+            snap.usage
+                .iter()
+                .filter_map(|section| section.outcome.snapshot()?.fetched_at)
+                .min(),
             snap.usage_refresh_in_flight,
             &snap.workspace,
-        ))
-        .child(gauges_block(&snap.plan_limits, cx))
-        .child(today_block(&snap.activity, cx))
+        ));
+    let body = snap.usage.iter().fold(body, |body, section| {
+        body.child(provider_section(section, cx))
+    });
+    body.child(today_block(&snap.activity, cx))
         .child(chart_block(&snap.activity, cx))
         .child(totals_block(&snap.activity, cx))
         .into_any_element()
 }
 
-/// Body for an account whose auth domain has no usage source: whose
-/// account this is, then a short notice — no brand title (this isn't
-/// Claude's data) and no gauges stuck on a permanent placeholder.
-fn unsupported_domain_body(account_label: SharedString, cx: &gpui::App) -> AnyElement {
+/// Body when no provider is signed in: a single notice rather than gauges stuck
+/// on a permanent placeholder.
+fn no_provider_body(cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
-        .child(account_label_text(
-            account_label,
-            theme::current(cx).text_muted,
-        ))
         .child(
-            crate::ui::placeholder_text(strings::usage_domain_unavailable())
+            crate::ui::placeholder_text(strings::usage_no_provider())
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                 .text_color(theme::current(cx).text_subtle),
         )
         .into_any_element()
+}
+
+/// One auth domain's block: header (icon + name + plan badge), account label,
+/// service pill, then a gauge card per window.
+fn provider_section(
+    section: &crate::workspace::layout::snap::UsageSectionSnapshot,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(header(
+            section.recipe,
+            section.outcome.snapshot().and_then(|u| u.plan.as_ref()),
+            section.account_label.clone(),
+            cx,
+        ))
+        .child(status_pill(section.service_status.as_ref(), cx))
+        .child(gauges_block(section.outcome.snapshot(), cx))
 }
 
 // ----------------------------------------------------------------
@@ -74,6 +94,7 @@ fn unsupported_domain_body(account_label: SharedString, cx: &gpui::App) -> AnyEl
 /// long email can't push the plan badge off-screen — `w_full` lets it wrap
 /// instead of being clipped by the fixed-width title row.
 fn header(
+    recipe: daruda_store::accounts::AccountRecipeId,
     plan: Option<&PlanInfo>,
     account_label: SharedString,
     cx: &gpui::App,
@@ -85,12 +106,17 @@ fn header(
         .items_center()
         .w_full()
         .gap(px(theme::USAGE_HEADER_GAP))
+        .child(crate::ui::agent_icon(
+            Some(crate::agent::icons::icon_for_recipe(recipe)),
+            px(theme::USAGE_SECTION_ICON_SIZE),
+            t.text_muted,
+        ))
         .child(
             div()
                 .flex_grow()
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .text_color(t.text_muted)
-                .child(SharedString::from(strings::usage_brand_title())),
+                .child(SharedString::from(strings::account_recipe_label(recipe))),
         );
 
     if let Some(label) = plan_badge_label(plan) {
@@ -189,40 +215,30 @@ fn refresh_badge_label(fetched_at: Option<SystemTime>, in_flight: bool) -> Strin
 // Plan-limit gauge cards
 // ----------------------------------------------------------------
 
-/// Stack of gauge cards: 5h above 7d, plus the Opus card only when the
-/// plan meters Opus separately. 5h/7d always render (placeholder before
-/// the first fetch) so the layout is stable.
-fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::USAGE_CARD_GAP))
-        .child(gauge_card(
-            strings::usage_limit_5h_label(),
-            limits.five_hour.as_ref(),
+/// One gauge card per window the provider reported, shortest first
+/// (`ProviderUsage` sorts them). Before the first fetch lands — or when the
+/// provider metered nothing — a single placeholder card holds the space, since
+/// which windows exist is now the provider's answer rather than a fixed set.
+fn gauges_block(usage: Option<&ProviderUsage>, cx: &gpui::App) -> impl IntoElement {
+    let windows = usage.map(|u| u.windows.as_slice()).unwrap_or_default();
+    let col = div().flex().flex_col().gap(px(theme::USAGE_CARD_GAP));
+    if windows.is_empty() {
+        return col.child(gauge_card(strings::usage_limit_unavailable(), None, cx));
+    }
+    windows.iter().fold(col, |col, window| {
+        col.child(gauge_card(
+            crate::workspace::usage_labels::window_label(window),
+            Some(window),
             cx,
         ))
-        .child(gauge_card(
-            strings::usage_limit_7d_label(),
-            limits.seven_day.as_ref(),
-            cx,
-        ));
-
-    if let Some(opus) = limits.seven_day_opus.as_ref() {
-        col = col.child(gauge_card(
-            strings::usage_limit_opus_label(),
-            Some(opus),
-            cx,
-        ));
-    }
-    col
+    })
 }
 
 /// One gauge card: header row (label + big %), bar, optional reset text.
 /// `None` window → placeholder (dim bar + "Unavailable", no %).
 fn gauge_card(
     label: impl Into<SharedString>,
-    window: Option<&LimitWindow>,
+    window: Option<&UsageWindow>,
     cx: &gpui::App,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -544,7 +560,11 @@ fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement 
 
 /// Status row: a colored dot plus the upstream status label on a faint
 /// tint of the indicator color.
-fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
+fn status_pill(status: Option<&ServiceStatus>, cx: &gpui::App) -> impl IntoElement {
+    // Absent until this domain's first status fetch lands — the same dimmed
+    // "unknown" pill the API's own `Unknown` indicator produces.
+    let unknown = ServiceStatus::default();
+    let status = status.unwrap_or(&unknown);
     let color = indicator_color(status.indicator, cx);
     let label = strings::service_status_label(status);
     let muted_text = theme::current(cx).text_muted;
@@ -675,12 +695,8 @@ fn chart_heights(messages: &[u64], max_px: f32, min_px: f32) -> Vec<f32> {
 /// Returns `None` when there is no plan metadata at all (no badge).
 fn plan_badge_label(plan: Option<&PlanInfo>) -> Option<String> {
     let plan = plan?;
-    let sub = plan
-        .subscription_type
-        .as_deref()
-        .unwrap_or("")
-        .to_lowercase();
-    let tier = plan.rate_limit_tier.as_deref().unwrap_or("").to_lowercase();
+    let sub = plan.tier.as_deref().unwrap_or("").to_lowercase();
+    let tier = plan.qualifier.as_deref().unwrap_or("").to_lowercase();
 
     let base = match sub.as_str() {
         "team" => "TEAM",
@@ -746,8 +762,8 @@ mod tests {
 
     fn plan(sub: Option<&str>, tier: Option<&str>) -> PlanInfo {
         PlanInfo {
-            subscription_type: sub.map(str::to_string),
-            rate_limit_tier: tier.map(str::to_string),
+            tier: sub.map(str::to_string),
+            qualifier: tier.map(str::to_string),
         }
     }
 

@@ -194,6 +194,23 @@ pub(in crate::workspace) fn account_label(
     }
 }
 
+/// Mark for the trigger pill: only a pane pinned to one auth domain has a
+/// single agent to name. A pane that accepts any domain (or none) gets no
+/// icon rather than an arbitrary one.
+///
+/// Dropped below `Full`, where the pill's narrower cap can't hold both the mark
+/// and a full email address — the address is what identifies the account, and
+/// which domains exist is already legible from the usage pills beside it.
+fn trigger_icon(domain: AccountDomain, density: super::StatusBarDensity) -> Option<&'static str> {
+    if density.is_reduced() {
+        return None;
+    }
+    match domain {
+        AccountDomain::Exactly(recipe) => Some(crate::agent::icons::icon_for_recipe(recipe)),
+        AccountDomain::Any | AccountDomain::Unsupported => None,
+    }
+}
+
 /// Render the account slot's dropdown trigger button.
 pub(super) fn render(
     slot: &AccountSlot,
@@ -223,6 +240,13 @@ pub(super) fn render(
                 .items_center()
                 .min_w_0()
                 .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
+                .children(trigger_icon(slot.domain, density).map(|path| {
+                    crate::ui::agent_icon(
+                        Some(path),
+                        px(theme::STATUS_BAR_AGENT_ICON_SIZE),
+                        theme::current(cx).text_muted,
+                    )
+                }))
                 .child(
                     div()
                         .flex_1()
@@ -238,20 +262,6 @@ pub(super) fn render(
         .dropdown_menu(crate::ui::menu_builder(move |menu, _window, _cx| {
             build_account_menu(&slot, menu)
         }))
-}
-
-/// `"{label} ▾"` normally; at `IconOnly` the text label is dropped —
-/// only the dropdown chevron remains, so the dropdown stays discoverable
-/// without the row growing wide enough to force a wrap.
-#[cfg(test)]
-fn trigger_label(label: &str, density: super::StatusBarDensity) -> String {
-    if density == super::StatusBarDensity::IconOnly {
-        crate::surface::strings::TASK_PILL_CHEVRON
-            .trim_start()
-            .to_string()
-    } else {
-        format!("{label}{}", crate::surface::strings::TASK_PILL_CHEVRON)
-    }
 }
 
 /// Build the account slot's dropdown menu from the resolved slot: the
@@ -286,6 +296,10 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     };
     let menu = slot.sections.iter().fold(menu, |menu, section| {
         let menu = menu.separator().label(section.label.clone()).separator();
+        // The section header carries no icon slot (`PopupMenuItem::Label`), so
+        // the mark rides each row — which is also what disambiguates a mixed
+        // list once more than one domain has accounts.
+        let icon = crate::agent::icons::icon_for_recipe(section.recipe);
         section.accounts.iter().fold(menu, |m, account| {
             let workspace = slot.workspace.clone();
             let pane_id = slot.pane_id;
@@ -295,6 +309,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 .unwrap_or_else(crate::surface::strings::settings_accounts_unknown_email);
             m.item(
                 PopupMenuItem::new(SharedString::from(label))
+                    .icon(crate::ui::agent_menu_icon(Some(icon)))
                     .checked(is_current)
                     .on_click(move |_, window, app| {
                         if let Some(ws) = workspace.upgrade() {
@@ -343,9 +358,13 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
             AddAccountRow::Add { recipe, label } => {
                 let recipe = *recipe;
                 m.item(
-                    PopupMenuItem::new(label.clone()).on_click(move |_, window, app| {
-                        window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
-                    }),
+                    PopupMenuItem::new(label.clone())
+                        .icon(crate::ui::agent_menu_icon(Some(
+                            crate::agent::icons::icon_for_recipe(recipe),
+                        )))
+                        .on_click(move |_, window, app| {
+                            window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
+                        }),
                 )
             }
             AddAccountRow::Inert(label) => m.item(PopupMenuItem::new(label.clone()).disabled(true)),
@@ -415,15 +434,24 @@ mod tests {
         assert_eq!(account_label(None, None), None);
     }
 
+    /// At `Full` the pill has room for the mark; below it the 150px cap has to
+    /// go to the email, which is what names the account. A regression here
+    /// clips the mark to a sliver instead of shortening the address.
     #[test]
-    fn trigger_label_keeps_text_outside_icon_only() {
-        assert!(trigger_label("alice@x.com", StatusBarDensity::Full).starts_with("alice@x.com"));
-        assert!(trigger_label("alice@x.com", StatusBarDensity::Compact).starts_with("alice@x.com"));
+    fn the_trigger_mark_is_dropped_below_full_density() {
+        let domain = AccountDomain::Exactly(AccountRecipeId::Claude);
+        assert!(trigger_icon(domain, StatusBarDensity::Full).is_some());
+        for density in [StatusBarDensity::Compact, StatusBarDensity::IconOnly] {
+            assert_eq!(trigger_icon(domain, density), None);
+        }
     }
 
+    /// A pane that accepts any domain has no single agent to mark.
     #[test]
-    fn trigger_label_drops_text_at_icon_only() {
-        assert!(!trigger_label("alice@x.com", StatusBarDensity::IconOnly).contains("alice@x.com"));
+    fn a_multi_or_no_domain_pane_has_no_trigger_mark() {
+        for domain in [AccountDomain::Any, AccountDomain::Unsupported] {
+            assert_eq!(trigger_icon(domain, StatusBarDensity::Full), None);
+        }
     }
 
     #[test]

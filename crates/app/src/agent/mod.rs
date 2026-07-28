@@ -3,6 +3,7 @@
 //! All submodules are GPUI-free except `tasks_global`, which exists
 //! solely to attach the `impl Global` marker.
 
+pub mod icons;
 pub mod mcp;
 pub mod skills;
 pub mod tasks_global;

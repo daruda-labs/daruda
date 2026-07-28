@@ -79,11 +79,20 @@ mod tests {
         )
     }
 
+    /// Mirrors the real file's shape, `tokens.account_id` included: the usage
+    /// source reads that key out of this same file for its
+    /// `ChatGPT-Account-Id` header, so a fixture without it would let a change
+    /// here silently break that.
     fn write_auth(dir: &Path, id_token: &str) {
         let auth = serde_json::json!({
             "auth_mode": "chatgpt",
             "OPENAI_API_KEY": Value::Null,
-            "tokens": { "id_token": id_token, "access_token": "a", "refresh_token": "r" },
+            "tokens": {
+                "id_token": id_token,
+                "access_token": "a",
+                "refresh_token": "r",
+                "account_id": "ce62a47c-2346-4c67-a552-e94a60e0a946",
+            },
             "last_refresh": "2026-07-28T00:00:00Z",
         });
         std::fs::write(dir.join(AUTH_FILE), auth.to_string()).expect("write auth.json");
@@ -179,6 +188,26 @@ mod tests {
         let payload = URL_SAFE_NO_PAD.encode("plain text");
         write_auth(dir.path(), &format!("header.{payload}.signature"));
         assert_eq!(read_codex_identity(dir.path()), AccountIdentity::default());
+    }
+
+    /// The identity reader and the usage source both parse this one file. This
+    /// pins the keys each needs, so a fixture drifting from the real shape
+    /// can't hide a break in the other reader.
+    #[test]
+    fn the_auth_file_carries_what_both_readers_need() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_auth(dir.path(), &jwt(full_payload()));
+        let raw = std::fs::read_to_string(dir.path().join(AUTH_FILE)).expect("read");
+        let auth: Value = serde_json::from_str(&raw).expect("parse");
+
+        // Identity reads the JWT claims; usage reads the bearer token and the
+        // account id beside it.
+        assert!(auth["tokens"]["id_token"].is_string());
+        assert!(auth["tokens"]["access_token"].is_string());
+        assert!(
+            auth["tokens"]["account_id"].is_string(),
+            "usage scopes its request with this key"
+        );
     }
 
     #[test]

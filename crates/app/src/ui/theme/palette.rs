@@ -711,11 +711,18 @@ pub const STATUS_BAR_DETACHED_RADIUS: f32 = RADIUS_XS;
 pub const STATUS_BAR_ACCOUNT_HEIGHT: f32 = 18.0;
 pub const STATUS_BAR_ACCOUNT_PAD_X: f32 = 6.0;
 pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
+/// Agent/auth-domain mark inside a status-bar pill. Two below the 14px cap
+/// that `STATUS_BAR_ACCOUNT_HEIGHT` minus its border leaves, so the glyph
+/// never touches the pill edge.
+pub const STATUS_BAR_AGENT_ICON_SIZE: f32 = 12.0;
+/// Provider mark heading a Usage tab section — sized to the section title
+/// beside it rather than to the status bar's tighter row.
+pub const USAGE_SECTION_ICON_SIZE: f32 = 14.0;
 /// Window-width breakpoints driving `StatusBarDensity`. Below
 /// `STATUS_BAR_COMPACT_WIDTH` the project/branch label abbreviates to
 /// just the branch and the Ports chip drops its "Ports:" word (bare
-/// count); below `STATUS_BAR_ICON_ONLY_WIDTH` the account slot also
-/// drops its text label, leaving only its dropdown chevron.
+/// count). `STATUS_BAR_ICON_ONLY_WIDTH` is the narrowest tier; segments
+/// keep their labels there and shed only inter-word padding.
 pub const STATUS_BAR_COMPACT_WIDTH: f32 = 720.0;
 pub const STATUS_BAR_ICON_ONLY_WIDTH: f32 = 480.0;
 /// Claude usage chip — gap between the chip's own spans (window label,

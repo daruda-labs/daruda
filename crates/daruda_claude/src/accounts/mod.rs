@@ -25,7 +25,10 @@ pub mod sweep;
 
 pub use claude::ClaudeRecipe;
 pub use codex::CodexRecipe;
-pub use credentials::{AccountError, delete_scoped_credentials, read_scoped_credentials};
+pub use credentials::{
+    AccountError, PlanInfo, delete_scoped_credentials, read_scoped_credentials,
+    read_system_credentials,
+};
 pub use identity::{AccountIdentity, read_account_identity};
 pub use layout::{account_config_dir, accounts_root, scoped_keychain_service};
 pub use login::{

@@ -110,16 +110,16 @@ fn summary_label(status: PortScanStatus, workspace_count: usize, external_count:
     }
 }
 
-/// `"Ports: N ▾"` at `Full`; bare `"N ▾"` at `Compact`/`IconOnly` — the
-/// count is the only information that survives every tier, so it never
-/// disappears the way the account slot's text label can.
+/// `"Ports: N"` at `Full`; bare `"N"` at `Compact`/`IconOnly` — the count is
+/// the only information that survives every tier. No dropdown chevron: this
+/// is a reading, not a control, and the pill's hover state already says it
+/// is clickable.
 fn trigger_label(count: usize, density: StatusBarDensity) -> String {
-    let text = if density.is_reduced() {
+    if density.is_reduced() {
         count.to_string()
     } else {
         crate::surface::strings::status_bar_ports_label(count)
-    };
-    format!("{text}{}", crate::surface::strings::TASK_PILL_CHEVRON)
+    }
 }
 
 /// Ports owned by an open lane, grouped by lane label (`(lane_label,
@@ -421,8 +421,23 @@ mod tests {
 
     #[test]
     fn trigger_label_is_bare_count_when_reduced() {
-        assert!(trigger_label(3, StatusBarDensity::Compact).starts_with("3"));
-        assert!(trigger_label(3, StatusBarDensity::IconOnly).starts_with("3"));
+        assert_eq!(trigger_label(3, StatusBarDensity::Compact), "3");
+        assert_eq!(trigger_label(3, StatusBarDensity::IconOnly), "3");
+    }
+
+    /// The chevron is reserved for pills you pick a value from; a port count
+    /// is a reading, and two chevrons in a row read as noise once the usage
+    /// chip sits beside it.
+    #[test]
+    fn trigger_label_carries_no_dropdown_chevron() {
+        let chevron = crate::surface::strings::TASK_PILL_CHEVRON.trim();
+        for density in [
+            StatusBarDensity::Full,
+            StatusBarDensity::Compact,
+            StatusBarDensity::IconOnly,
+        ] {
+            assert!(!trigger_label(3, density).contains(chevron));
+        }
     }
 
     #[test]

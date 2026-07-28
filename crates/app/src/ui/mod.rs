@@ -13,6 +13,7 @@
 //! call site reads as one line: `crate::ui::button_primary("save", "Save")`.
 
 pub mod accordion;
+pub mod agent_icon;
 pub mod agent_status_badge;
 pub mod alert;
 pub mod badge;
@@ -49,6 +50,7 @@ pub mod tab_bar;
 pub mod theme;
 pub mod tooltip;
 
+pub use agent_icon::{agent_icon, agent_menu_icon};
 pub use agent_status_badge::{AgentStatusBadge, IndicatorSize, StatusPulseClock, color_for_status};
 pub use badge::Badge;
 pub use button::{

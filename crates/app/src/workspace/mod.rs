@@ -45,6 +45,7 @@ pub(in crate::workspace) mod sync;
 mod tests;
 mod toast_layer;
 mod update_ops;
+mod usage_labels;
 mod window_close_ops;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;
@@ -1050,7 +1051,7 @@ impl Workspace {
             claude: claude_session_ops::ClaudeContext {
                 usage_poll: config.usage.poll.clone(),
                 usage_by_account: claude_session_ops::PerAccountUsage::default(),
-                service_status: daruda_claude::ServiceStatus::default(),
+                service_status: std::collections::HashMap::new(),
                 usage_refresh_in_flight: false,
                 claude_status: {
                     // Cold restore: load any status files that survived a

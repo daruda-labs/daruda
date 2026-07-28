@@ -267,7 +267,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn prepare_right_dock_snapshot(
+    pub(in crate::workspace) fn prepare_right_dock_snapshot(
         &mut self,
         cx: &mut Context<Self>,
     ) -> RightDockSnapshot {
@@ -313,42 +313,50 @@ impl Workspace {
             .filter(|&(_, &n)| n > 0)
             .map(|(sid, &n)| (sid.clone(), n))
             .collect();
-        // Usage tab shows the focused pane's account — plan limits and
-        // activity are cached per-account (`focused_account`) so a
-        // lane/pane focus switch renders that account's cache instantly
-        // while the pump refetches it in the background. An account with
-        // no cache entry yet (never fetched, or the pump hasn't ticked
-        // since focus moved) falls back to the placeholder default.
+        // The Usage tab stacks a section per auth domain, so both providers'
+        // limits can be compared without switching panes. Each reads the
+        // account the pump filed under (`usage_account`); a domain nobody is
+        // signed into contributes no section at all.
         let focused = self.focused_account();
         let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.focused_account_pane(cx),
         );
-        let usage_availability =
-            crate::workspace::sync::limits::usage_availability(focused.recipe(pane_domain));
         let focused_account = focused.key();
-        // Display-only identity for the Usage tab header: the focused
-        // account's email when resolved, else a "System" fallback naming
-        // the domain's ambient home — `FocusedAccount::recipe` is total,
-        // so the domain is always known here. Reuses the status bar's
-        // `account_label` formatter with `plan=None`: this header wants
-        // identity only, not the "(plan)" suffix the dropdown slot shows.
-        let account_label = usage_account_label(
-            focused_account
-                .account_id()
-                .and_then(|id| self.accounts.find(id))
-                .and_then(|account| account.email.as_deref()),
-            focused.recipe(pane_domain),
-        );
+        let usage_sections: Vec<crate::workspace::layout::snap::UsageSectionSnapshot> =
+            daruda_store::accounts::AccountRecipeId::ALL
+                .into_iter()
+                .filter_map(|recipe| {
+                    let account = crate::workspace::sync::limits::usage_account(
+                        recipe,
+                        &focused,
+                        pane_domain,
+                    );
+                    let outcome = self
+                        .claude
+                        .usage_by_account
+                        .usage(crate::workspace::claude_session_ops::UsageKey { recipe, account });
+                    if outcome.is_signed_out() {
+                        return None;
+                    }
+                    Some(crate::workspace::layout::snap::UsageSectionSnapshot {
+                        recipe,
+                        account_label: usage_account_label(
+                            account
+                                .account_id()
+                                .and_then(|id| self.accounts.find(id))
+                                .and_then(|a| a.email.as_deref()),
+                            recipe,
+                        )
+                        .into(),
+                        outcome,
+                        service_status: self.claude.service_status.get(&recipe).cloned(),
+                    })
+                })
+                .collect();
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
-            plan_limits: self
-                .claude
-                .usage_by_account
-                .plan_limits(focused_account)
-                .cloned()
-                .unwrap_or_default(),
-            service_status: self.claude.service_status.clone(),
+            usage: usage_sections,
             activity: self
                 .claude
                 .usage_by_account
@@ -377,8 +385,6 @@ impl Workspace {
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
-            usage_availability,
-            account_label: account_label.into(),
         }
     }
 }

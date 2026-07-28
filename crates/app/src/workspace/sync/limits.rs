@@ -1,50 +1,60 @@
-//! Background-poll tasks for the Anthropic plan-rate API, the public
-//! service-status page, and the local JSONL activity aggregation.
+//! Background-poll tasks for each auth domain's plan-rate API, its provider's
+//! public service-status page, and the local JSONL activity aggregation.
 //!
-//! Three independent loops, one per endpoint, so cadences can differ
+//! One loop per (endpoint, domain) pair, so cadences can differ
 //! (`[usage.poll].limits_secs` vs. `status_secs`; `Activity` shares
 //! `limits_secs`), a hung fetch on one never blocks the others, and each can
 //! be disabled (`= 0`) independently. Each loop snapshots its live-reload-aware
 //! cadence, idle-rechecks when disabled, otherwise dispatches the blocking
 //! `ureq` fetch onto the background executor and forwards the result to a
-//! workspace setter, then sleeps the cadence. Failed fetches are silently
-//! dropped (previous snapshot stays); the Usage tab renders placeholders while
-//! the cache is still `Default::default()`.
+//! workspace setter, then sleeps the cadence. Limit fetches forward their
+//! failures too — see [`daruda_claude::UsageOutcome`]; a failed status fetch or
+//! a quiet activity tick leaves the previous value in place.
 //!
 //! Known limitation: the pump is per-`Workspace`, so N project windows fire
-//! `2 * N` account-wide requests per tick. Harmless at the default 5-minute
-//! cadence; a process-wide singleton would need to outlive Workspace (the
-//! Welcome window has none) to fix it.
+//! `2 * DOMAINS * N` account-wide requests per tick. Harmless at the default
+//! 5-minute cadence; a process-wide singleton would need to outlive Workspace
+//! (the Welcome window has none) to fix it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_claude::{ActivityStats, PlanLimits, ServiceStatus, activity, limits, service_status};
+use daruda_claude::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
 use daruda_config::PollConfig;
+use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 use gpui::{Context, Task, WeakEntity};
 
 use crate::workspace::Workspace;
+use crate::workspace::claude_session_ops::UsageKey;
+use crate::workspace::main_area::pane::FocusedAccount;
 
 /// Re-check cadence while the endpoint is disabled (`secs == 0`). Reuses
 /// [`PollConfig::MIN_POLL_SECS`] (60 s): flipping the toggle on takes effect
 /// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 
-/// Spawn the endpoint pumps. Returns the `Task<()>` handles so the
-/// caller (Workspace constructor) can keep them alive in a field —
-/// dropping any task cancels its loop.
-pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Task<()>, Task<()>) {
-    (
-        spawn_loop(cx, Endpoint::Limits),
-        spawn_loop(cx, Endpoint::Status),
-        spawn_loop(cx, Endpoint::Activity),
-    )
+/// Spawn the endpoint pumps: limits and status for every auth domain, plus the
+/// single activity loop. Returns the `Task<()>` handles so the caller
+/// (Workspace constructor) can keep them alive in a field — dropping any task
+/// cancels its loop.
+pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> Vec<Task<()>> {
+    let mut pumps = Vec::new();
+    for recipe in AccountRecipeId::ALL {
+        pumps.push(spawn_loop(cx, Endpoint::Limits(recipe)));
+        pumps.push(spawn_loop(cx, Endpoint::Status(recipe)));
+    }
+    pumps.push(spawn_loop(cx, Endpoint::Activity));
+    pumps
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Endpoint {
-    Limits,
-    Status,
+    /// One auth domain's plan-rate API, for the account that domain resolves
+    /// to.
+    Limits(AccountRecipeId),
+    /// One provider's public status page. Account-independent but still
+    /// domain-specific — each provider hosts its own page.
+    Status(AccountRecipeId),
     /// Local JSONL aggregation (no network). Shares the `limits_secs`
     /// cadence — it is the other half of the Usage tab's data and there
     /// is no reason to refresh it on a different schedule, so it adds no
@@ -54,34 +64,57 @@ enum Endpoint {
 
 /// Whether `kind` reads a source scoped to the focused pane's account
 /// (`Limits`, `Activity`) rather than an account-independent one
-/// (`Status` — Anthropic's global service health).
+/// (`Status` — the provider's global service health).
 fn account_scoped(kind: Endpoint) -> bool {
     match kind {
-        Endpoint::Limits | Endpoint::Activity => true,
-        Endpoint::Status => false,
+        Endpoint::Limits(_) | Endpoint::Activity => true,
+        Endpoint::Status(_) => false,
     }
 }
 
-/// Whether the account-scoped endpoints have anything to read for an
-/// account in the `recipe` auth domain.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum UsageAvailability {
-    Polled,
-    /// Another auth domain: no Anthropic credentials and no
-    /// `<config_dir>/projects` tree, so both sources are empty by
-    /// construction.
-    UnsupportedDomain,
+/// Which account `kind` reads this tick, or `None` when it has nothing to read.
+///
+/// A `Limits` loop covers one domain, which is usually *not* the focused pane's:
+/// the focused pane names an account only for its own domain, so every other
+/// domain reports its ambient login — the only account daruda can name for a
+/// domain nothing is focused on.
+///
+/// `Activity` is Claude-only: `daruda_claude::activity` parses Claude Code's own
+/// JSONL session logs, a layout no other CLI writes.
+fn target_account(
+    kind: Endpoint,
+    focused: FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) -> Option<(AccountSelection, Option<PathBuf>)> {
+    let focused_recipe = focused.recipe(pane_domain);
+    match kind {
+        Endpoint::Limits(recipe) => {
+            let account = usage_account(recipe, &focused, pane_domain);
+            let config_dir = (account != AccountSelection::SystemDefault)
+                .then(|| focused.into_config_dir())
+                .flatten();
+            Some((account, config_dir))
+        }
+        Endpoint::Activity if focused_recipe == AccountRecipeId::Claude => {
+            Some((focused.key(), focused.into_config_dir()))
+        }
+        Endpoint::Activity => None,
+        Endpoint::Status(_) => Some((AccountSelection::SystemDefault, None)),
+    }
 }
 
-/// The account-scoped endpoints read Claude-only sources (Anthropic's
-/// plan-limits API, Claude Code's JSONL logs), so any other domain would
-/// only cache a useless result and render it as real.
-pub(in crate::workspace) fn usage_availability(
-    recipe: daruda_store::accounts::AccountRecipeId,
-) -> UsageAvailability {
-    match recipe {
-        daruda_store::accounts::AccountRecipeId::Claude => UsageAvailability::Polled,
-        daruda_store::accounts::AccountRecipeId::Codex => UsageAvailability::UnsupportedDomain,
+/// The account key one domain's usage is cached under. The renderer needs the
+/// same answer the pump used, or it would read an empty slot — so both call
+/// this rather than each spelling the rule out.
+pub(in crate::workspace) fn usage_account(
+    recipe: AccountRecipeId,
+    focused: &FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) -> AccountSelection {
+    if recipe == focused.recipe(pane_domain) {
+        focused.key()
+    } else {
+        AccountSelection::SystemDefault
     }
 }
 
@@ -92,8 +125,8 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    `Err(_)` once the entity is gone — that's our
             //    cue to exit the loop.
             let interval = match this.read_with(cx, |ws, _| match kind {
-                Endpoint::Limits | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
-                Endpoint::Status => ws.claude.usage_poll.status_interval(),
+                Endpoint::Limits(_) | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
+                Endpoint::Status(_) => ws.claude.usage_poll.status_interval(),
             }) {
                 Ok(opt) => opt,
                 Err(_) => break,
@@ -105,14 +138,10 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 continue;
             };
 
-            // 3. Account-scoped endpoints are keyed by the focused pane's
-            //    account — resolved fresh each tick (on the UI thread, like
-            //    the cadence read above) so a focus switch refetches the
-            //    newly-focused account on the *next* tick.
-            let (account_key, config_dir) = if account_scoped(kind) {
-                // The domain rides along: a pane on the ambient account has no
-                // account row to name one, so its own agent decides whether an
-                // Anthropic poll applies at all.
+            // 3. Resolve which account this tick reads — fresh each time (on
+            //    the UI thread, like the cadence read above) so a focus switch
+            //    is picked up on the *next* tick.
+            let target = if account_scoped(kind) {
                 let resolved = this.read_with(cx, |ws, cx| {
                     let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
                         &ws.focused_account_pane(cx),
@@ -123,20 +152,16 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                     Ok(pair) => pair,
                     Err(_) => break,
                 };
-                if usage_availability(focused.recipe(pane_domain)) != UsageAvailability::Polled {
-                    // Skip the fetch outright: its result would be empty
-                    // and would overwrite this account's cache with it.
-                    cx.background_executor().timer(dur).await;
-                    continue;
-                }
-                (focused.key(), focused.into_config_dir())
+                target_account(kind, focused, pane_domain)
             } else {
-                // The key is unused for `Status` (`set_service_status`
-                // takes none); `SystemDefault` just satisfies the type.
-                (
-                    daruda_store::accounts::AccountSelection::SystemDefault,
-                    None,
-                )
+                // Unused for `Status` (`set_service_status` is keyed by domain,
+                // not account); `SystemDefault` just satisfies the type.
+                Some((AccountSelection::SystemDefault, None))
+            };
+            let Some((account_key, config_dir)) = target else {
+                // Nothing for this endpoint to read this tick.
+                cx.background_executor().timer(dur).await;
+                continue;
             };
 
             // 4. Run the blocking fetch off the GPUI thread, then
@@ -146,45 +171,106 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 .spawn(async move { fetch(kind, config_dir.as_deref()) })
                 .await;
 
-            match fetched {
-                Fetched::Limits(Ok(l)) => {
-                    if this
-                        .update(cx, |ws, cx| ws.set_plan_limits(account_key, l, cx))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Fetched::Status(Ok(s)) => {
-                    if this
-                        .update(cx, |ws, cx| ws.set_service_status(s, cx))
-                        .is_err()
-                    {
-                        break;
-                    }
+            let forwarded = match fetched {
+                // Failures are forwarded, not dropped: `NoToken` is how the
+                // cache learns the domain is signed out, and any other error
+                // is how it learns to mark its numbers stale.
+                Fetched::Limits(recipe, result) => this.update(cx, |ws, cx| {
+                    ws.advance_usage(
+                        UsageKey {
+                            recipe,
+                            account: account_key,
+                        },
+                        result,
+                        cx,
+                    )
+                }),
+                Fetched::Status(recipe, Ok(s)) => {
+                    this.update(cx, |ws, cx| ws.set_service_status(recipe, s, cx))
                 }
                 Fetched::Activity(Some(a)) => {
-                    if this
-                        .update(cx, |ws, cx| ws.set_activity_stats(account_key, a, cx))
-                        .is_err()
-                    {
-                        break;
-                    }
+                    this.update(cx, |ws, cx| ws.set_activity_stats(account_key, a, cx))
                 }
-                Fetched::Limits(Err(_)) | Fetched::Status(Err(_)) | Fetched::Activity(None) => {
-                    // Silent fallback — the renderer treats a
-                    // never-updated `Default::default()` snapshot
-                    // as "data unavailable" and shows placeholder
-                    // chrome. Logging would be churn (the next
-                    // tick will retry), and the user already sees
-                    // the placeholder UI.
-                }
+                // A failed status fetch or a quiet activity tick leaves the
+                // previous value in place; the next tick retries, and logging
+                // would be churn the user already sees as unchanged chrome.
+                Fetched::Status(_, Err(_)) | Fetched::Activity(None) => Ok(()),
+            };
+            if forwarded.is_err() {
+                break;
             }
 
             // 5. Sleep and loop.
             cx.background_executor().timer(dur).await;
         }
     })
+}
+
+/// Everything one manual refresh gathered, ready to apply on the UI thread.
+pub(in crate::workspace) struct RefreshRound {
+    /// One entry per auth domain, keyed the way the pump keys it. Failures ride
+    /// along — which failure it was is what tells a signed-out domain from a
+    /// broken refresh.
+    pub limits: Vec<(UsageKey, Result<ProviderUsage, daruda_claude::FetchError>)>,
+    pub status: Vec<(
+        AccountRecipeId,
+        Result<ServiceStatus, daruda_claude::FetchError>,
+    )>,
+    /// `None` when the focused domain has no local activity log to read, or the
+    /// read found nothing.
+    pub activity: Option<(AccountSelection, ActivityStats)>,
+}
+
+/// One round of every usage source across every auth domain — the Usage tab's
+/// ⟳ button, which refreshes the whole dashboard rather than one section of it.
+/// Routes through the same [`target_account`] the pumps use, so the two can't
+/// disagree about which account a domain reads or whether activity applies.
+///
+/// Blocking (HTTP + disk); call from the background executor.
+pub(in crate::workspace) fn refresh_round(
+    focused: FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) -> RefreshRound {
+    let mut limits = Vec::new();
+    let mut status = Vec::new();
+    for recipe in AccountRecipeId::ALL {
+        let account = usage_account(recipe, &focused, pane_domain);
+        let config_dir = target_account(Endpoint::Limits(recipe), focused.clone(), pane_domain)
+            .and_then(|(_, dir)| dir);
+        limits.push((
+            UsageKey { recipe, account },
+            fetch_limits(recipe, config_dir.as_deref()),
+        ));
+        status.push((recipe, fetch_status(recipe)));
+    }
+    let activity = target_account(Endpoint::Activity, focused, pane_domain).and_then(
+        |(account, config_dir)| {
+            fetch_activity_in(config_dir.as_deref()).map(|stats| (account, stats))
+        },
+    );
+    RefreshRound {
+        limits,
+        status,
+        activity,
+    }
+}
+
+fn fetch_limits(
+    recipe: AccountRecipeId,
+    config_dir: Option<&Path>,
+) -> Result<ProviderUsage, daruda_claude::FetchError> {
+    usage::source_for(recipe).fetch(config_dir)
+}
+
+fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_claude::FetchError> {
+    service_status::fetch_service_status(usage::source_for(recipe).status_url())
+}
+
+fn fetch_activity_in(config_dir: Option<&Path>) -> Option<ActivityStats> {
+    match config_dir {
+        Some(dir) => fetch_activity_for(dir),
+        None => fetch_activity(),
+    }
 }
 
 /// Result envelope so every endpoint can share a single
@@ -194,8 +280,16 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
 /// unreadable projects root) are all handled by the same silent
 /// fallback — there is nothing the loop does differently per error.
 enum Fetched {
-    Limits(Result<PlanLimits, daruda_claude::FetchError>),
-    Status(Result<ServiceStatus, daruda_claude::FetchError>),
+    /// Carries its domain so the consumer keys the cache without re-reading
+    /// `Endpoint` — pairing the two would make an exhaustive match impossible.
+    Limits(
+        AccountRecipeId,
+        Result<ProviderUsage, daruda_claude::FetchError>,
+    ),
+    Status(
+        AccountRecipeId,
+        Result<ServiceStatus, daruda_claude::FetchError>,
+    ),
     Activity(Option<ActivityStats>),
 }
 
@@ -204,15 +298,9 @@ enum Fetched {
 /// unused for `Status`, which is account-independent.
 fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     match kind {
-        Endpoint::Limits => Fetched::Limits(match config_dir {
-            Some(dir) => limits::fetch_plan_limits_for(dir),
-            None => limits::fetch_plan_limits(),
-        }),
-        Endpoint::Status => Fetched::Status(service_status::fetch_service_status()),
-        Endpoint::Activity => Fetched::Activity(match config_dir {
-            Some(dir) => fetch_activity_for(dir),
-            None => fetch_activity(),
-        }),
+        Endpoint::Limits(recipe) => Fetched::Limits(recipe, fetch_limits(recipe, config_dir)),
+        Endpoint::Status(recipe) => Fetched::Status(recipe, fetch_status(recipe)),
+        Endpoint::Activity => Fetched::Activity(fetch_activity_in(config_dir)),
     }
 }
 
@@ -278,33 +366,88 @@ fn activity_paths_for(config_dir: &Path) -> Option<(PathBuf, PathBuf)> {
 mod tests {
     use std::path::Path;
 
-    use daruda_store::accounts::AccountRecipeId;
+    use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
 
-    use super::{
-        Endpoint, UsageAvailability, account_scoped, activity_paths_for, usage_availability,
-    };
+    use crate::workspace::main_area::pane::AccountDomain;
+
+    use super::{Endpoint, FocusedAccount, account_scoped, activity_paths_for, target_account};
 
     #[test]
     fn only_limits_and_activity_are_account_scoped() {
-        assert!(account_scoped(Endpoint::Limits));
+        assert!(account_scoped(Endpoint::Limits(AccountRecipeId::Claude)));
         assert!(account_scoped(Endpoint::Activity));
-        assert!(!account_scoped(Endpoint::Status));
+        assert!(!account_scoped(Endpoint::Status(AccountRecipeId::Claude)));
     }
 
+    fn managed(recipe: AccountRecipeId) -> FocusedAccount {
+        FocusedAccount::Managed {
+            id: AccountId::new(),
+            recipe,
+            config_dir: std::path::PathBuf::from("/data/accounts/some-uuid"),
+        }
+    }
+
+    /// A `Limits` loop covers one domain, and only the loop matching the
+    /// focused pane's domain may read that pane's account. The other domain's
+    /// loop reads its ambient login — otherwise it would fetch one provider's
+    /// endpoint with the other provider's config dir.
     #[test]
-    fn a_claude_account_is_polled() {
-        assert_eq!(
-            usage_availability(AccountRecipeId::Claude),
-            UsageAvailability::Polled
+    fn a_limits_loop_reads_the_focused_account_only_in_its_own_domain() {
+        let focused = managed(AccountRecipeId::Claude);
+        let domain = AccountDomain::Exactly(AccountRecipeId::Claude);
+
+        let (key, dir) = target_account(
+            Endpoint::Limits(AccountRecipeId::Claude),
+            focused.clone(),
+            domain,
+        )
+        .expect("the focused domain always has an account to read");
+        assert_eq!(key, focused.key());
+        assert!(dir.is_some(), "a managed account brings its own config dir");
+
+        let (key, dir) = target_account(Endpoint::Limits(AccountRecipeId::Codex), focused, domain)
+            .expect("another domain still reads its ambient login");
+        assert_eq!(key, AccountSelection::SystemDefault);
+        assert_eq!(dir, None);
+    }
+
+    /// `daruda_claude::activity` parses Claude Code's own JSONL layout, which
+    /// no other CLI writes — pointing it at another domain's config dir would
+    /// only ever find nothing.
+    #[test]
+    fn activity_is_skipped_entirely_outside_the_claude_domain() {
+        assert!(
+            target_account(
+                Endpoint::Activity,
+                managed(AccountRecipeId::Codex),
+                AccountDomain::Exactly(AccountRecipeId::Codex),
+            )
+            .is_none()
+        );
+        assert!(
+            target_account(
+                Endpoint::Activity,
+                managed(AccountRecipeId::Claude),
+                AccountDomain::Exactly(AccountRecipeId::Claude),
+            )
+            .is_some()
         );
     }
 
+    /// A pane with no managed account still belongs to a domain, so its
+    /// ambient login is what each loop reads.
     #[test]
-    fn a_codex_account_is_not_polled() {
-        assert_eq!(
-            usage_availability(AccountRecipeId::Codex),
-            UsageAvailability::UnsupportedDomain
-        );
+    fn a_system_default_pane_reads_the_ambient_login_in_every_domain() {
+        for recipe in AccountRecipeId::ALL {
+            let (key, dir) = target_account(
+                Endpoint::Limits(recipe),
+                FocusedAccount::SystemDefault,
+                AccountDomain::Any,
+            )
+            .expect("the ambient login is always readable");
+            assert_eq!(key, AccountSelection::SystemDefault);
+            assert_eq!(dir, None);
+        }
     }
 
     #[test]

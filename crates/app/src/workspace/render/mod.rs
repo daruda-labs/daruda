@@ -197,6 +197,9 @@ fn build_new_tab_menu(
             );
             m.item(
                 PopupMenuItem::new(label)
+                    .icon(crate::ui::agent_menu_icon(
+                        crate::agent::icons::icon_for_agent(id),
+                    ))
                     .disabled(disabled)
                     .on_click(move |_, window, app| {
                         if let Some(w) = ws.upgrade() {
@@ -227,6 +230,9 @@ fn build_new_tab_menu(
                     let label = agent_menu_entry_label(name.clone(), disabled);
                     m.item(
                         PopupMenuItem::new(gpui::SharedString::from(label))
+                            .icon(crate::ui::agent_menu_icon(
+                                crate::agent::icons::icon_for_agent(id),
+                            ))
                             .disabled(disabled)
                             .on_click(move |_, window, app| {
                                 if let Some(w) = ws.upgrade() {
@@ -1130,16 +1136,28 @@ impl Render for Workspace {
             }
             None => false,
         };
-        // Usage chip reads the same per-account cache the Usage tab does,
-        // keyed by the focused pane's account, so switching panes swaps the
-        // chip to that account's numbers without a refetch.
-        let usage_account = self.focused_account().key();
-        let usage = self
-            .claude
-            .usage_by_account
-            .plan_limits(usage_account)
-            .cloned()
-            .unwrap_or_default();
+        // One usage pill per auth domain, reading the same per-account cache
+        // the Usage tab does. `usage_account` picks the same account the pump
+        // filed under: the focused pane's for its own domain, the ambient
+        // login for the others. Domains with nothing to show drop out here, so
+        // the renderer never has to decide whether a pill is worth drawing.
+        let focused = self.focused_account();
+        let usage_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+            &self.focused_account_pane(cx),
+        );
+        let usage: Vec<_> = daruda_store::accounts::AccountRecipeId::ALL
+            .into_iter()
+            .map(|recipe| {
+                let account =
+                    crate::workspace::sync::limits::usage_account(recipe, &focused, usage_domain);
+                let outcome = self
+                    .claude
+                    .usage_by_account
+                    .usage(crate::workspace::claude_session_ops::UsageKey { recipe, account });
+                (recipe, outcome)
+            })
+            .filter(|(_, outcome)| outcome.has_numbers())
+            .collect();
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
