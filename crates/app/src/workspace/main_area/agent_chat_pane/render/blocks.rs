@@ -40,7 +40,7 @@ fn mermaid_code_block_render(
         // Cloning the cached `CachedImage` is an `Arc` bump, so gpui reuses the
         // already-uploaded texture instead of re-uploading the bitmap.
         let image = images.lock().ok()?.get(&key).cloned()?;
-        let diagram = image.block();
+        let diagram = image.block_diagram();
         // The diagram is a bitmap (not selectable), so overlay a hover-revealed
         // button that copies the mermaid source to the clipboard.
         let group = SharedString::from(format!("mermaid-{key}"));

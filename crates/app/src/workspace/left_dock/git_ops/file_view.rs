@@ -12,6 +12,7 @@ use crate::workspace::main_area::file_view_pane::diff_editor::{
     DiffColors, build_diff_editor_model,
 };
 use crate::workspace::main_area::file_view_pane::file_content::LoadOutcome;
+use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, SelectionDrag};
 
 impl Workspace {
@@ -507,13 +508,14 @@ impl Workspace {
         let wt_path = wt.path.clone();
         let repo_root = self.git_repo_root_for(target);
         let syntax_theme = self.syntax_theme.clone();
-        // Match rendered diagrams (mermaid) to the host appearance. Computed
-        // here because the loader runs GPUI-free on a background thread.
-        // Falls back to dark (the default theme) if the global is absent.
-        let diagram_dark = cx
+        // Match rendered diagrams (mermaid) to the host appearance and
+        // palette. Computed here because the loader runs GPUI-free on a
+        // background thread. Falls back to dark (the default theme) if the
+        // global is absent.
+        let mermaid_palette = cx
             .try_global::<crate::ui::theme::DarudaTheme>()
-            .map(crate::ui::theme::DarudaTheme::is_dark)
-            .unwrap_or(true);
+            .map(MermaidPalette::from_theme)
+            .unwrap_or_default();
 
         let path_bg = path.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
@@ -527,7 +529,7 @@ impl Workspace {
                     mode,
                     file_status,
                     &syntax_theme,
-                    diagram_dark,
+                    &mermaid_palette,
                 )
             },
             move |ws, outcome, cx| {

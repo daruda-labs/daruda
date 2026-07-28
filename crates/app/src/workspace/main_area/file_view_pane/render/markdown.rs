@@ -129,7 +129,7 @@ fn render_md_block(block: &MdBlock, t: &DarudaTheme) -> AnyElement {
         }
 
         MdBlock::Mermaid { source, raster } => match raster {
-            Some(raster) => render_md_image(Some(raster), "", ImageLayout::Block, t),
+            Some(raster) => render_md_image(Some(raster), "", ImageLayout::Diagram, t),
             None => {
                 // Rendering failed/pending: fall back to the raw source, styled
                 // like a code block.
@@ -439,8 +439,15 @@ fn render_md_span(span: &MdSpan, t: &DarudaTheme) -> AnyElement {
 /// How a markdown image is sized.
 #[derive(Clone, Copy)]
 enum ImageLayout {
-    /// Standalone image / diagram: fits the pane width, height capped.
+    /// Standalone decorative image (photo/screenshot): fits the pane width,
+    /// height capped so one large embedded photo can't dominate the document.
     Block,
+    /// Mermaid diagram: fits the pane width, height uncapped. A diagram is
+    /// structured information to be read, not decorative — capping its
+    /// height shrinks a tall flowchart (e.g. many vertical steps) until its
+    /// text is unreadable. The containing document already scrolls, so a
+    /// tall diagram just takes more scroll room instead of being squeezed.
+    Diagram,
     /// Image embedded in a text run: sized to the line so it flows with text.
     Inline,
 }
@@ -461,8 +468,11 @@ fn render_md_image(
             .into_any_element();
     };
     match layout {
-        // Block-sized: shared with the agent-chat mermaid renderer.
+        // Block-sized, height-capped: decorative images only.
         ImageLayout::Block => raster_block_image(raster)
+            .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
+        // Width-capped only: shared with the agent-chat mermaid renderer.
+        ImageLayout::Diagram => raster_diagram_image(raster)
             .unwrap_or_else(|| div().child(format!("[{alt}]")).into_any_element()),
         // Sized to the text line; gpui derives width from the aspect ratio.
         ImageLayout::Inline => {
@@ -505,7 +515,8 @@ impl CachedImage {
     }
 
     /// Block-layout element at logical size, capped to the container and max
-    /// image height while preserving the cached texture id.
+    /// image height while preserving the cached texture id. For decorative
+    /// images only — see [`Self::block_diagram`] for diagrams.
     pub(in crate::workspace) fn block(&self) -> AnyElement {
         img(ImageSource::Render(self.image.clone()))
             .w(px(self.logical_w))
@@ -513,12 +524,30 @@ impl CachedImage {
             .max_h(px(theme::MD_IMAGE_MAX_HEIGHT))
             .into_any_element()
     }
+
+    /// Diagram-layout element: capped to the container width only, height
+    /// uncapped. A diagram is read, not decorative — the containing document
+    /// already scrolls, so a tall one just takes more scroll room instead of
+    /// being squeezed to `MD_IMAGE_MAX_HEIGHT` like a decorative image.
+    pub(in crate::workspace) fn block_diagram(&self) -> AnyElement {
+        img(ImageSource::Render(self.image.clone()))
+            .w(px(self.logical_w))
+            .max_w_full()
+            .into_any_element()
+    }
 }
 
 /// Block-layout element for a raster, converting fresh for Markdown preview.
-/// Agent chat caches [`CachedImage`] instead.
+/// Agent chat caches [`CachedImage`] instead. Decorative images only — see
+/// [`raster_diagram_image`] for diagrams.
 pub(in crate::workspace) fn raster_block_image(raster: &RasterImage) -> Option<AnyElement> {
     Some(CachedImage::from_raster(raster)?.block())
+}
+
+/// Diagram-layout element for a raster, converting fresh for Markdown
+/// preview. Agent chat caches [`CachedImage`] instead.
+pub(in crate::workspace) fn raster_diagram_image(raster: &RasterImage) -> Option<AnyElement> {
+    Some(CachedImage::from_raster(raster)?.block_diagram())
 }
 
 /// Returns true when `block_idx` falls within the char-selection row range.

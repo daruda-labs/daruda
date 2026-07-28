@@ -10,6 +10,7 @@
 //! via [`FileViewMode`].
 
 use super::highlighter::{highlight_hunks, highlight_raw_rows};
+use super::mermaid_theme::MermaidPalette;
 use super::word_diff::apply_word_diff;
 use super::{
     FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
@@ -40,19 +41,24 @@ pub(in crate::workspace) fn load_file_content(
     mode: FileViewMode,
     file_status: Option<char>,
     syntax_theme: &str,
-    diagram_dark: bool,
+    mermaid_palette: &MermaidPalette,
 ) -> LoadOutcome {
     match mode {
-        FileViewMode::Raw | FileViewMode::Preview => {
-            load_raw(wt_path, repo_root, path, staged, syntax_theme, diagram_dark)
-        }
+        FileViewMode::Raw | FileViewMode::Preview => load_raw(
+            wt_path,
+            repo_root,
+            path,
+            staged,
+            syntax_theme,
+            mermaid_palette,
+        ),
         FileViewMode::Changes => LoadOutcome::Plain(load_diff(
             repo_root,
             path,
             staged,
             file_status,
             syntax_theme,
-            diagram_dark,
+            mermaid_palette.dark,
         )),
     }
 }
@@ -63,7 +69,7 @@ fn load_raw(
     path: &std::path::Path,
     staged: bool,
     syntax_theme: &str,
-    diagram_dark: bool,
+    mermaid_palette: &MermaidPalette,
 ) -> LoadOutcome {
     use crate::ui::theme;
 
@@ -123,8 +129,11 @@ fn load_raw(
             let ext = path.extension_str();
 
             if ext == "md" || ext == "markdown" {
-                let mut blocks =
-                    super::markdown_viewer::parse_markdown(&text, syntax_theme, !diagram_dark);
+                let mut blocks = super::markdown_viewer::parse_markdown(
+                    &text,
+                    syntax_theme,
+                    !mermaid_palette.dark,
+                );
                 if let Some(base_dir) = path.parent().map(std::path::Path::to_path_buf) {
                     super::markdown_viewer::resolve_images(&mut blocks, &mut |url| {
                         super::visual::load_image_source(url, &base_dir)
@@ -135,7 +144,8 @@ fn load_raw(
                 super::markdown_viewer::resolve_mermaid(&mut blocks, &mut |source| {
                     // Match the diagram theme to the host appearance so edges
                     // stay visible (dark UI → dark diagram).
-                    let themed = super::markdown_viewer::mermaid_with_theme(source, diagram_dark);
+                    let themed =
+                        super::markdown_viewer::mermaid_with_theme(source, mermaid_palette);
                     // selkie is a young reimplementation; guard against a panic
                     // on malformed input so one bad diagram can't fail the load.
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -149,7 +159,7 @@ fn load_raw(
                 let all_lines: Vec<String> = text.lines().map(str::to_owned).collect();
                 let total_count = all_lines.len();
                 let mut raw_rows = build_raw_rows(&all_lines);
-                highlight_raw_rows(&mut raw_rows, ext, syntax_theme, !diagram_dark);
+                highlight_raw_rows(&mut raw_rows, ext, syntax_theme, !mermaid_palette.dark);
                 return LoadOutcome::Plain(PaneFileContent::LoadedMarkdown {
                     blocks,
                     raw_rows,

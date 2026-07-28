@@ -9,6 +9,7 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::highlighter::highlight_raw_rows;
+use super::mermaid_theme::MermaidPalette;
 use super::visual::RasterImage;
 use super::{VisualRow, VisualRowKind};
 
@@ -648,10 +649,6 @@ pub(in crate::workspace) fn resolve_images(
     }
 }
 
-/// Prepend a mermaid `%%{init}%%` theme directive matching the host
-/// appearance, so a dark UI renders a dark diagram (light edges/text). On a
-/// light UI the source is unchanged (mermaid's default is already light). A
-/// user-authored `%%{init ...}%%` directive is always respected.
 /// If `spans` is a single image (ignoring surrounding whitespace), return its
 /// `(alt, raster)`. Such a paragraph renders the image block-style (large);
 /// otherwise images render inline, sized to the text line.
@@ -673,12 +670,37 @@ pub(in crate::workspace) fn lone_image(spans: &[MdSpan]) -> Option<(&str, Option
     found
 }
 
-pub(in crate::workspace) fn mermaid_with_theme(source: &str, dark: bool) -> String {
-    if !dark || source.contains("%%{init") {
-        source.to_string()
-    } else {
-        format!("%%{{init: {{\"theme\":\"dark\"}}}}%%\n{source}")
+/// Prepend a mermaid `%%{init}%%` directive matching the host appearance, so
+/// a dark UI renders a diagram in daruda's actual surface/text/border colors
+/// (`palette`) rather than selkie's generic dark preset. On a light UI the
+/// source is unchanged (mermaid's default is already light).
+///
+/// A user directive that sets an explicit `theme` name (e.g. `"forest"`) is
+/// fully respected — nothing is prepended. A user directive that only
+/// overrides `themeVariables` (no `theme` name) still gets our directive
+/// prepended: selkie merges multiple `%%{init}%%` blocks with later ones
+/// overriding earlier ones per-field, so the user's overrides win for the
+/// keys they set while ours fill in the rest instead of leaving them at
+/// mermaid's light default.
+pub(in crate::workspace) fn mermaid_with_theme(source: &str, palette: &MermaidPalette) -> String {
+    if !palette.dark {
+        return source.to_string();
     }
+    let has_explicit_theme = selkie::diagrams::detect_init(source)
+        .and_then(|cfg| cfg.theme)
+        .is_some();
+    if has_explicit_theme {
+        return source.to_string();
+    }
+    format!(
+        "%%{{init: {{\"theme\":\"dark\",\"themeVariables\":{{\"background\":\"{}\",\"primaryColor\":\"{}\",\"primaryTextColor\":\"{}\",\"primaryBorderColor\":\"{}\",\"lineColor\":\"{}\",\"secondaryColor\":\"{}\"}}}}}}%%\n{source}",
+        palette.background,
+        palette.primary_color,
+        palette.primary_text_color,
+        palette.primary_border_color,
+        palette.line_color,
+        palette.secondary_color,
+    )
 }
 
 /// Walk every mermaid block in `blocks` (recursing into list item children) and
@@ -854,22 +876,55 @@ mod tests {
         assert!(lone_image(&[img(), img()]).is_none());
     }
 
+    fn test_palette() -> MermaidPalette {
+        MermaidPalette {
+            dark: true,
+            background: "#111111".to_owned(),
+            primary_color: "#222222".to_owned(),
+            primary_text_color: "#eeeeee".to_owned(),
+            primary_border_color: "#333333".to_owned(),
+            line_color: "#cccccc".to_owned(),
+            secondary_color: "#444444".to_owned(),
+        }
+    }
+
     #[test]
     fn mermaid_with_theme_injects_dark_only_when_needed() {
-        // dark UI + plain source → dark directive prepended.
-        let d = mermaid_with_theme("graph TD\nA-->B", true);
+        // dark UI + plain source → dark directive (with daruda's palette hex
+        // values) prepended.
+        let palette = test_palette();
+        let d = mermaid_with_theme("graph TD\nA-->B", &palette);
         assert!(d.starts_with("%%{init") && d.contains("dark"));
+        assert!(d.contains(&palette.background));
         assert!(d.contains("graph TD"));
 
         // light UI → unchanged.
+        let mut light = palette.clone();
+        light.dark = false;
         assert_eq!(
-            mermaid_with_theme("graph TD\nA-->B", false),
+            mermaid_with_theme("graph TD\nA-->B", &light),
             "graph TD\nA-->B"
         );
 
-        // user-supplied directive → respected even on a dark UI.
+        // user directive with an explicit theme name → respected even on a
+        // dark UI, nothing prepended.
         let user = "%%{init: {\"theme\":\"forest\"}}%%\ngraph TD\nA-->B";
-        assert_eq!(mermaid_with_theme(user, true), user);
+        assert_eq!(mermaid_with_theme(user, &palette), user);
+    }
+
+    #[test]
+    fn mermaid_with_theme_merges_when_user_omits_theme_name() {
+        // user directive overrides only `themeVariables`, no `theme` name →
+        // our dark directive is still prepended (selkie merges multiple
+        // `%%{init}%%` blocks, later overrides earlier per-field), so the
+        // user's override survives while unset fields get daruda's palette.
+        let palette = test_palette();
+        let user =
+            "%%{init: {\"themeVariables\": {\"primaryColor\": \"#ff0000\"}}}%%\ngraph TD\nA-->B";
+        let themed = mermaid_with_theme(user, &palette);
+        assert!(themed.starts_with("%%{init") && themed.contains("dark"));
+        assert!(themed.contains(&palette.background));
+        assert!(themed.contains(user));
     }
 
     #[test]

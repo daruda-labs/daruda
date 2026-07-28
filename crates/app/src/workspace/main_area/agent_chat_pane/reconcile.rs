@@ -24,6 +24,7 @@ use super::agent_chat_helpers::{
 use super::view::AgentChatView;
 use crate::workspace::main_area::file_view_pane::diff_editor::{DiffColors, DiffEditorModel};
 use crate::workspace::main_area::file_view_pane::markdown_viewer::mermaid_with_theme;
+use crate::workspace::main_area::file_view_pane::mermaid_theme::MermaidPalette;
 use crate::workspace::main_area::file_view_pane::render::CachedImage;
 use crate::workspace::main_area::file_view_pane::visual;
 
@@ -181,12 +182,20 @@ impl AgentChatView {
             self.assets.mermaid_inflight.insert(*key);
         }
 
+        // Resolved here (main thread) so the background rasterizer never
+        // touches `Hsla` / the `DarudaTheme` global — see `MermaidPalette`.
+        let palette = cx
+            .try_global::<crate::ui::theme::DarudaTheme>()
+            .map(MermaidPalette::from_theme)
+            .unwrap_or_default();
+
         for (key, source) in pending {
+            let palette = palette.clone();
             cx.spawn(async move |this, cx| {
                 let raster = cx
                     .background_executor()
                     .spawn(async move {
-                        let themed = mermaid_with_theme(&source, dark);
+                        let themed = mermaid_with_theme(&source, &palette);
                         // selkie is a young reimplementation; guard against a
                         // panic on malformed input so one bad diagram can't take
                         // the executor down — on panic / error we drop it and the
