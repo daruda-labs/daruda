@@ -601,10 +601,6 @@ pub fn task_subtask_manual_label() -> String {
 // Plan-limit gauges
 // ----------------------------------------------------------------
 
-/// Header title for the Usage tab (product brand — same in all locales).
-pub fn usage_brand_title() -> String {
-    rust_i18n::t!("usage.brand_title").into_owned()
-}
 /// Section heading rendered above the plan-limit gauge block.
 pub fn usage_limits_section_label() -> String {
     rust_i18n::t!("usage.limits_section_label").into_owned()
@@ -642,10 +638,9 @@ pub fn usage_stale_marker() -> String {
 pub fn usage_limit_unavailable() -> String {
     rust_i18n::t!("usage.limit_unavailable").into_owned()
 }
-/// Body shown in place of the dashboard when the focused pane's account
-/// belongs to an auth domain daruda has no usage source for.
-pub fn usage_domain_unavailable() -> String {
-    rust_i18n::t!("usage.domain_unavailable").into_owned()
+/// Body shown in place of the dashboard when no provider is signed in.
+pub fn usage_no_provider() -> String {
+    rust_i18n::t!("usage.no_provider").into_owned()
 }
 
 // ----------------------------------------------------------------

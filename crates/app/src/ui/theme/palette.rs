@@ -715,6 +715,9 @@ pub const STATUS_BAR_ACCOUNT_RADIUS: f32 = RADIUS_XS;
 /// that `STATUS_BAR_ACCOUNT_HEIGHT` minus its border leaves, so the glyph
 /// never touches the pill edge.
 pub const STATUS_BAR_AGENT_ICON_SIZE: f32 = 12.0;
+/// Provider mark heading a Usage tab section — sized to the section title
+/// beside it rather than to the status bar's tighter row.
+pub const USAGE_SECTION_ICON_SIZE: f32 = 14.0;
 /// Window-width breakpoints driving `StatusBarDensity`. Below
 /// `STATUS_BAR_COMPACT_WIDTH` the project/branch label abbreviates to
 /// just the branch and the Ports chip drops its "Ports:" word (bare

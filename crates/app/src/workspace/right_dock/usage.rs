@@ -1,6 +1,7 @@
-//! Usage tab body — a widget-style dashboard (header, status pill, plan
-//! gauges, today's stats, 7-day chart, totals) modelled on the Übersicht
-//! `claude-usage` widget.
+//! Usage tab body — a widget-style dashboard modelled on the Übersicht
+//! `claude-usage` widget: a refresh header, one block per signed-in auth
+//! domain (name, plan badge, service pill, gauges), then the activity cards.
+//! Activity stays Claude-only, so it sits outside the per-domain blocks.
 //!
 //! Plan limits come from `RightDockSnapshot::usage` (limits pump);
 //! activity from `RightDockSnapshot::activity` (local JSONL aggregation
@@ -24,45 +25,65 @@ use crate::ui::{
     button, group_box,
 };
 
-/// Render the Usage tab body.
+/// Render the Usage tab body: the refresh header, then one block per signed-in
+/// auth domain, then the (Claude-only) activity dashboard.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    if snap.usage.is_signed_out() {
-        return signed_out_body(snap.account_label.clone(), cx);
+    if snap.usage.is_empty() {
+        return no_provider_body(cx);
     }
-    crate::workspace::right_dock::right_panel_body()
-        .child(header(
-            snap.usage.snapshot().and_then(|u| u.plan.as_ref()),
-            snap.account_label.clone(),
-            cx,
-        ))
-        .child(status_pill(snap.service_status.as_ref(), cx))
+    let body = crate::workspace::right_dock::right_panel_body()
+        // One badge for the whole tab: the button refreshes every domain, so a
+        // per-section copy would be N buttons doing the same thing. The age
+        // shown is the oldest section's — the one that says how fresh the
+        // *dashboard* is.
         .child(usage_section_header(
-            snap.usage.snapshot().and_then(|u| u.fetched_at),
+            snap.usage
+                .iter()
+                .filter_map(|section| section.outcome.snapshot()?.fetched_at)
+                .min(),
             snap.usage_refresh_in_flight,
             &snap.workspace,
-        ))
-        .child(gauges_block(snap.usage.snapshot(), cx))
-        .child(today_block(&snap.activity, cx))
+        ));
+    let body = snap.usage.iter().fold(body, |body, section| {
+        body.child(provider_section(section, cx))
+    });
+    body.child(today_block(&snap.activity, cx))
         .child(chart_block(&snap.activity, cx))
         .child(totals_block(&snap.activity, cx))
         .into_any_element()
 }
 
-/// Body for a domain nobody is signed into: whose account slot this is, then a
-/// short notice — no brand title and no gauges stuck on a permanent
-/// placeholder.
-fn signed_out_body(account_label: SharedString, cx: &gpui::App) -> AnyElement {
+/// Body when no provider is signed in: a single notice rather than gauges stuck
+/// on a permanent placeholder.
+fn no_provider_body(cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
-        .child(account_label_text(
-            account_label,
-            theme::current(cx).text_muted,
-        ))
         .child(
-            crate::ui::placeholder_text(strings::usage_domain_unavailable())
+            crate::ui::placeholder_text(strings::usage_no_provider())
                 .text_size(px(theme::DOCK_PLACEHOLDER_FONT_SIZE))
                 .text_color(theme::current(cx).text_subtle),
         )
         .into_any_element()
+}
+
+/// One auth domain's block: header (icon + name + plan badge), account label,
+/// service pill, then a gauge card per window.
+fn provider_section(
+    section: &crate::workspace::layout::snap::UsageSectionSnapshot,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
+        .child(header(
+            section.recipe,
+            section.outcome.snapshot().and_then(|u| u.plan.as_ref()),
+            section.account_label.clone(),
+            cx,
+        ))
+        .child(status_pill(section.service_status.as_ref(), cx))
+        .child(gauges_block(section.outcome.snapshot(), cx))
 }
 
 // ----------------------------------------------------------------
@@ -73,6 +94,7 @@ fn signed_out_body(account_label: SharedString, cx: &gpui::App) -> AnyElement {
 /// long email can't push the plan badge off-screen — `w_full` lets it wrap
 /// instead of being clipped by the fixed-width title row.
 fn header(
+    recipe: daruda_store::accounts::AccountRecipeId,
     plan: Option<&PlanInfo>,
     account_label: SharedString,
     cx: &gpui::App,
@@ -84,12 +106,17 @@ fn header(
         .items_center()
         .w_full()
         .gap(px(theme::USAGE_HEADER_GAP))
+        .child(crate::ui::agent_icon(
+            Some(crate::agent::icons::icon_for_recipe(recipe)),
+            px(theme::USAGE_SECTION_ICON_SIZE),
+            t.text_muted,
+        ))
         .child(
             div()
                 .flex_grow()
                 .text_size(px(theme::USAGE_TITLE_FONT_SIZE))
                 .text_color(t.text_muted)
-                .child(SharedString::from(strings::usage_brand_title())),
+                .child(SharedString::from(strings::account_recipe_label(recipe))),
         );
 
     if let Some(label) = plan_badge_label(plan) {

@@ -307,14 +307,10 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// dock entity. Tab-strip click handlers upgrade this to dispatch
     /// `set_right_dock_view` without re-entering the dock context.
     pub workspace: WeakEntity<Workspace>,
-    /// What the last plan-rate poll established for the focused pane's
-    /// account. `SignedOut` hides the dashboard; `Pending` draws a
-    /// placeholder; a failed refresh keeps the previous numbers, marked stale.
-    pub usage: daruda_claude::UsageOutcome,
-    /// Latest service-status snapshot for the focused pane's auth domain.
-    /// `None` before that domain's first fetch lands, which the renderer maps
-    /// to a dimmed pill.
-    pub service_status: Option<daruda_claude::ServiceStatus>,
+    /// One section per auth domain worth showing, in `AccountRecipeId::ALL`
+    /// order. Empty when no provider is signed in, which the renderer replaces
+    /// with a single notice.
+    pub usage: Vec<UsageSectionSnapshot>,
     /// Locally aggregated activity (today + 7-day chart + totals).
     /// Default-constructed (empty) before the first aggregation, in
     /// which case the renderer draws zeroed activity cards.
@@ -383,15 +379,24 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Carried by-value so the panel renderer never re-enters the
     /// workspace entity (G2 / pitfall §4).
     pub mcp: crate::agent::mcp::McpSnapshot,
-    /// Display-only identity of the focused pane's account — the
-    /// managed account's email, or the "System" fallback when the
-    /// focused pane has no override / no email captured yet. Resolved
-    /// from `Workspace::focused_account` + `Workspace.accounts` at
-    /// snapshot time; the Usage tab header renders it next to the plan
-    /// badge so the user can see whose usage the tab is showing. Purely
-    /// informational — no selector, no `SwitchPaneAccount` dispatch
-    /// (deferred; see plan §6.8 B).
+}
+
+/// One auth domain's block in the Usage tab: whose account it is, what the last
+/// poll found, and that provider's service health.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsageSectionSnapshot {
+    pub recipe: daruda_store::accounts::AccountRecipeId,
+    /// Display-only identity — the managed account's email, or a "System"
+    /// fallback naming the domain's ambient home. Purely informational: no
+    /// selector, no `SwitchPaneAccount` dispatch.
     pub account_label: gpui::SharedString,
+    /// `Pending` draws a placeholder; a failed refresh keeps the previous
+    /// numbers, marked stale. `SignedOut` never reaches here — such a domain
+    /// has no section at all.
+    pub outcome: daruda_claude::UsageOutcome,
+    /// `None` before this domain's first status fetch lands, which the renderer
+    /// maps to a dimmed pill.
+    pub service_status: Option<daruda_claude::ServiceStatus>,
 }
 
 impl RightDockSnapshot {
@@ -402,7 +407,6 @@ impl RightDockSnapshot {
     pub(in crate::workspace) fn content_differs(&self, prev: &Self) -> bool {
         self.right_dock_view != prev.right_dock_view
             || self.usage != prev.usage
-            || self.service_status != prev.service_status
             || self.activity != prev.activity
             || self.usage_refresh_in_flight != prev.usage_refresh_in_flight
             || self.skills != prev.skills
@@ -414,7 +418,6 @@ impl RightDockSnapshot {
             || self.claude_status_per_session != prev.claude_status_per_session
             || self.tool_use_failure_counts != prev.tool_use_failure_counts
             || self.mcp != prev.mcp
-            || self.account_label != prev.account_label
     }
 }
 

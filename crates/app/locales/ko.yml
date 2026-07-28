@@ -786,14 +786,13 @@ mcp:
 
 # Usage tab
 usage:
-  brand_title: "Claude Code"
   limit_window_minutes: "%{n}분"
   limit_window_hours: "%{n}시간"
   limit_window_days: "%{n}일"
   limit_window_months: "%{n}개월"
   limit_opus_suffix: " · Opus"
   stale_marker: "⚠"
-  domain_unavailable: "사용량 데이터는 Claude 계정에서만 제공됩니다."
+  no_provider: "Claude 또는 Codex에 로그인하면 플랜 사용량이 표시됩니다."
   limit_unavailable: "사용 불가"
   limits_section_label: "플랜 사용량"
   section_today: "오늘의 활동"
