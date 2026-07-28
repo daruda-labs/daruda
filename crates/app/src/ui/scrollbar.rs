@@ -13,9 +13,19 @@
 //! horizontally (the agent-chat diff embed's long, non-wrapped lines) —
 //! same [`thumb_geometry`] math, transposed onto the width/left/bottom axis.
 
-use gpui::{AnyElement, ElementId, Hsla, ListState, Pixels, div, prelude::*, px};
+use gpui::{
+    AnyElement, App, ElementId, Hsla, ListState, Pixels, ScrollHandle, SharedString,
+    StyleRefinement, Window, div, prelude::*, px,
+};
+use gpui_component::StyledExt as _;
 
 use crate::ui::theme;
+
+/// The gpui_component built-in scrollbar (draggable track + thumb), for
+/// regions where the display-only thumbs above aren't enough — e.g. the
+/// status-bar Ports dropdown. Re-exported here so call sites stay on
+/// `crate::ui::*` (shape C wrapper).
+pub use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
 /// Build the thumb overlay for a vertically-scrolling region, or `None`
 /// when the content fits the viewport (or bounds are not yet measured).
@@ -160,6 +170,104 @@ fn scroll_at_bottom(offset_y: f32, max_y: f32, slack: f32) -> bool {
     max_y <= 0.0 || (max_y + offset_y) <= slack
 }
 
+/// Vertically scrolling region capped at `max_h`, with the built-in draggable
+/// [`Scrollbar`] pinned over a right gutter. Owns every layout invariant a
+/// hand-assembled version gets wrong: the scrollbar must sit in an inset-0
+/// absolute container (a bare `Scrollbar` has auto insets, and in a non-flex
+/// parent Taffy resolves that to the static position *below* the body — the
+/// ports-dropdown misplacement), the body and bar must share one tracked
+/// handle, and content needs [`theme::SCROLL_AREA_GUTTER`] to clear the thumb.
+/// Thumb visibility follows the theme (`scrollbar_show = Always` in daruda);
+/// the bar still hides itself when content fits.
+///
+/// Debug selectors (test hooks): `{id}-wrapper` and `{id}-scrollbar-layer`.
+#[derive(IntoElement)]
+pub struct ScrollArea {
+    id: SharedString,
+    max_h: Pixels,
+    handle: Option<ScrollHandle>,
+    style: StyleRefinement,
+    content: AnyElement,
+}
+
+/// Build a [`ScrollArea`]. Width comes from the content (plus the gutter);
+/// chain `Styled` methods for overrides. The scroll handle is internal,
+/// keyed by `id` — use [`ScrollArea::track`] when the caller needs offsets.
+pub fn scroll_area(
+    id: impl Into<SharedString>,
+    max_h: Pixels,
+    content: impl IntoElement,
+) -> ScrollArea {
+    ScrollArea {
+        id: id.into(),
+        max_h,
+        handle: None,
+        style: StyleRefinement::default(),
+        content: content.into_any_element(),
+    }
+}
+
+impl ScrollArea {
+    /// Track an external handle instead of the internal keyed one — for
+    /// callers (or tests) that read scroll offsets back.
+    pub fn track(mut self, handle: &ScrollHandle) -> Self {
+        self.handle = Some(handle.clone());
+        self
+    }
+}
+
+impl Styled for ScrollArea {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl RenderOnce for ScrollArea {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let handle = match self.handle {
+            Some(handle) => handle,
+            None => window
+                .use_keyed_state(
+                    ElementId::Name(format!("{}-handle", self.id).into()),
+                    cx,
+                    |_, _| ScrollHandle::default(),
+                )
+                .read(cx)
+                .clone(),
+        };
+        let id = self.id;
+        let wrapper_selector = format!("{id}-wrapper");
+        let layer_selector = format!("{id}-scrollbar-layer");
+        div()
+            .relative()
+            .debug_selector(move || wrapper_selector)
+            .max_h(self.max_h)
+            .refine_style(&self.style)
+            .child(
+                div()
+                    .id(ElementId::Name(id.clone()))
+                    .max_h(self.max_h)
+                    .pr(px(theme::SCROLL_AREA_GUTTER))
+                    .overflow_y_scroll()
+                    .track_scroll(&handle)
+                    .child(self.content),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .debug_selector(move || layer_selector)
+                    .child(
+                        Scrollbar::vertical(&handle)
+                            .id(ElementId::Name(format!("{id}-scrollbar").into())),
+                    ),
+            )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +326,59 @@ mod tests {
         assert_eq!(
             thumb_geometry(px(100.), px(200.), px(-100.), px(30.)),
             Some((px(80.), px(50.)))
+        );
+    }
+
+    struct ScrollAreaProbe {
+        rows: usize,
+        max_h: Pixels,
+        handle: ScrollHandle,
+    }
+
+    impl gpui::Render for ScrollAreaProbe {
+        fn render(
+            &mut self,
+            _window: &mut Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let content = div().flex().flex_col().children(
+                (0..self.rows).map(|i| div().child(SharedString::from(format!("row {i}")))),
+            );
+            scroll_area("probe-scroll", self.max_h, content).track(&self.handle)
+        }
+    }
+
+    /// Ground truth that the composed structure actually scrolls: content far
+    /// taller than `max_h` must produce a nonzero tracked `max_offset` after a
+    /// real paint. Guards the primitive's body wiring (`overflow_y_scroll` +
+    /// `track_scroll` + the height cap) — not observable from the code alone.
+    #[gpui::test]
+    async fn overflowing_scroll_area_computes_nonzero_scroll_offset(cx: &mut gpui::TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let handle = ScrollHandle::default();
+        let probe_handle = handle.clone();
+        let (_probe, cx) = cx.add_window_view(move |_, _| ScrollAreaProbe {
+            rows: 200,
+            max_h: px(100.),
+            handle: probe_handle,
+        });
+        cx.run_until_parked();
+
+        assert!(
+            handle.max_offset().y > px(0.),
+            "200 text rows inside a 100px cap must overflow, got {:?}",
+            handle.max_offset()
+        );
+        let wrapper = cx
+            .debug_bounds("probe-scroll-wrapper")
+            .expect("wrapper painted");
+        let bar_layer = cx
+            .debug_bounds("probe-scroll-scrollbar-layer")
+            .expect("scrollbar overlay painted");
+        assert_eq!(wrapper.size.height, px(100.), "wrapper capped at max_h");
+        assert_eq!(
+            bar_layer, wrapper,
+            "scrollbar overlay must be pinned to the wrapper bounds"
         );
     }
 

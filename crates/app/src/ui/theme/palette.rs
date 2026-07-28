@@ -1867,6 +1867,9 @@ pub const SCROLLBAR_THUMB: Hsla = hsla(0.0, 0.0, 1.0, 0.25);
 pub const SCROLLBAR_THUMB_HOVER: Hsla = hsla(0.0, 0.0, 1.0, 0.45);
 /// Scrollbar track background (subtle, nearly transparent fill).
 pub const SCROLLBAR_TRACK_BG: Hsla = hsla(0.0, 0.0, 1.0, 0.04);
+/// Right gutter a `ui::scroll_area` reserves beside its content so text
+/// clears the draggable thumb (px).
+pub const SCROLL_AREA_GUTTER: f32 = 10.0;
 
 // ============================================================================
 // Shared layout tokens — single source of truth for dimensions/metrics

@@ -63,7 +63,9 @@ ui/
 ├── list.rs         # FilteredItem + FilteredDelegate + searchable_list_state + list(&state)
 ├── markdown.rs     # markdown(id, text) — rendered, drag-selectable/copyable markdown over gpui_component::text::TextView (RenderOnce; .selectable()/.color()/.text_size()/.full_width())
 ├── menu.rs         # ContextMenuExt / DropdownMenu / PopupMenu / PopupMenuItem re-exports
+├── popover.rs      # Popover/PopoverState re-export — trigger-anchored panel for browsing surfaces (clicks inside keep it open; outside/Escape dismiss); menus stay on .dropdown_menu + menu_builder
 ├── progress.rs     # progress(value) factory over gpui_component::Progress (Styled fill bar)
+├── scrollbar.rs    # vertical_thumb/horizontal_thumb display-only thumb overlays (preserved daruda widget) + scroll_area(id, max_h, content) — capped overflow body + gutter + pinned built-in draggable Scrollbar (owns the inset-0 pinning invariant) + Scrollbar/ScrollbarShow re-exports
 ├── select.rs       # SelectOption + state_with_options + select(&state)
 ├── selectable_text.rs # selectable_text(id, text) — verbatim drag-selectable/copyable plain text over gpui_component::text::TextView::plain (RenderOnce; .selectable()/.color()/.text_size()/.full_width()); no markdown interpretation (zed `new_text` analog)
 ├── tab_bar.rs      # tab_bar(id) + tab(label) factories over gpui_component (Small + underline; tab() bakes 10px x-padding)

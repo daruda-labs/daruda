@@ -8,19 +8,20 @@
 
 use super::StatusBarDensity;
 use crate::ui::theme;
-use crate::ui::{DropdownMenu as _, PopupMenuItem, button_status_pill, menu_builder};
+use crate::ui::{Divider, Popover, button_status_pill};
 use crate::workspace::sync::ports::{PortEntry, PortKind, PortScanStatus};
-use gpui::{
-    AnyElement, App, ClipboardItem, IntoElement, ScrollHandle, SharedString, div, prelude::*, px,
-};
-use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use gpui::{AnyElement, App, ClipboardItem, IntoElement, SharedString, div, prelude::*, px};
 use std::collections::BTreeMap;
 
 const PORT_MENU_SCROLL_MAX_H: f32 = 360.0;
-const PORT_MENU_SCROLLBAR_GUTTER: f32 = 10.0;
 const PORT_TABLE_WIDTH: f32 = 340.0;
 const PORT_TABLE_PORT_W: f32 = 46.0;
-const PORT_TABLE_PROCESS_W: f32 = 118.0;
+/// Fits the widest common bind address (`255.255.255.255:65535`) at the
+/// status-bar font. Rarer, longer forms (bracketed IPv6) clip visually,
+/// but the row click still copies the full string. The process column is
+/// the flex one — process names are the unbounded field, so the table's
+/// slack goes where it's needed instead of pooling after short addresses.
+const PORT_TABLE_ADDRESS_W: f32 = 124.0;
 const PORT_TABLE_GAP: f32 = 10.0;
 const PORT_SECTION_GAP: f32 = 4.0;
 const PORT_ROW_RADIUS: f32 = 3.0;
@@ -28,6 +29,12 @@ const PORT_ROW_RADIUS: f32 = 3.0;
 /// Render the Ports trigger button. The trigger count is workspace
 /// ports only; non-workspace ports remain available from the dropdown
 /// but never become their own status-bar chip.
+///
+/// The dropdown is a [`Popover`] panel, not a `PopupMenu`: the port list
+/// is a browsing surface (scroll, click a row to copy) and menu items
+/// dismiss on click. The panel closes on outside click or Escape only;
+/// each workspace render rebuilds the content closure from the current
+/// scan, so an open panel tracks live port updates.
 pub(super) fn render(
     ports: &[PortEntry],
     status: PortScanStatus,
@@ -40,42 +47,57 @@ pub(super) fn render(
     let external_count = external.len();
     let label = SharedString::from(trigger_label(workspace_count, density));
     let summary = SharedString::from(summary_label(status, workspace_count, external_count));
-    let scroll_handle = ScrollHandle::default();
-    button_status_pill("status-ports", label, cx)
+    Popover::new("status-ports-popover")
+        .trigger(
+            button_status_pill("status-ports", label, cx)
+                .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+                .debug_selector(|| "status-ports-trigger".into())
+                .tooltip(summary.clone()),
+        )
+        .content(move |_, _window, cx| ports_panel(status, &groups, &external, summary.clone(), cx))
+}
+
+/// Dropdown panel body: summary line, divider, then — once the scan has
+/// data — the column header and the scrollable port table.
+fn ports_panel(
+    status: PortScanStatus,
+    groups: &[(String, Vec<PortEntry>)],
+    external: &[PortEntry],
+    summary: SharedString,
+    cx: &App,
+) -> AnyElement {
+    let t = theme::current(cx);
+    let panel = div()
+        .flex()
+        .flex_col()
+        .gap(px(PORT_SECTION_GAP))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
-        .tooltip(summary.clone())
-        .dropdown_menu(menu_builder(move |menu, _window, _cx| {
-            let menu = menu.label(summary.clone());
-
-            match status {
-                PortScanStatus::Pending => {
-                    return menu.separator().label(SharedString::from(
-                        crate::surface::strings::status_bar_ports_scanning(),
-                    ));
-                }
-                PortScanStatus::Unavailable => {
-                    return menu.separator().label(SharedString::from(
-                        crate::surface::strings::status_bar_ports_scan_unavailable(),
-                    ));
-                }
-                PortScanStatus::Available => {}
-            }
-
-            if workspace_count == 0 && external_count == 0 {
-                return menu.separator().label(SharedString::from(
-                    crate::surface::strings::status_bar_ports_no_workspace(),
-                ));
-            }
-
-            let groups = groups.clone();
-            let external = external.clone();
-            let scroll_handle = scroll_handle.clone();
-            menu.separator()
-                .item(table_header_item())
-                .item(PopupMenuItem::element(move |_window, cx| {
-                    port_scroll_body(&groups, &external, &scroll_handle, cx)
-                }))
-        }))
+        .child(div().child(summary))
+        .child(Divider::horizontal());
+    match status {
+        PortScanStatus::Pending => panel
+            .child(status_row(
+                crate::surface::strings::status_bar_ports_scanning(),
+                cx,
+            ))
+            .into_any_element(),
+        PortScanStatus::Unavailable => panel
+            .child(status_row(
+                crate::surface::strings::status_bar_ports_scan_unavailable(),
+                cx,
+            ))
+            .into_any_element(),
+        PortScanStatus::Available if groups.is_empty() && external.is_empty() => panel
+            .child(status_row(
+                crate::surface::strings::status_bar_ports_no_workspace(),
+                cx,
+            ))
+            .into_any_element(),
+        PortScanStatus::Available => panel
+            .child(div().text_color(t.text_subtle).child(table_header()))
+            .child(port_scroll_body(groups, external, cx))
+            .into_any_element(),
+    }
 }
 
 fn summary_label(status: PortScanStatus, workspace_count: usize, external_count: usize) -> String {
@@ -151,7 +173,6 @@ fn sort_host_for_address(address: &str) -> String {
 fn port_scroll_body(
     groups: &[(String, Vec<PortEntry>)],
     external: &[PortEntry],
-    scroll_handle: &ScrollHandle,
     cx: &App,
 ) -> AnyElement {
     let mut content = div()
@@ -193,27 +214,7 @@ fn port_scroll_body(
         }
     }
 
-    let body_scroll = scroll_handle.clone();
-    let bar_scroll = scroll_handle.clone();
-    div()
-        .relative()
-        .w(px(PORT_TABLE_WIDTH + PORT_MENU_SCROLLBAR_GUTTER))
-        .max_h(px(PORT_MENU_SCROLL_MAX_H))
-        .child(
-            div()
-                .id("ports-scroll-body")
-                .max_h(px(PORT_MENU_SCROLL_MAX_H))
-                .pr(px(PORT_MENU_SCROLLBAR_GUTTER))
-                .overflow_y_scroll()
-                .track_scroll(&body_scroll)
-                .child(content),
-        )
-        .child(
-            Scrollbar::vertical(&bar_scroll)
-                .id("ports-menu-scrollbar")
-                .scrollbar_show(ScrollbarShow::Always),
-        )
-        .into_any_element()
+    crate::ui::scroll_area("ports-scroll", px(PORT_MENU_SCROLL_MAX_H), content).into_any_element()
 }
 
 fn section_label(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
@@ -247,10 +248,6 @@ fn port_click_row(row_ix: usize, entry: &PortEntry, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn table_header_item() -> PopupMenuItem {
-    PopupMenuItem::element(|_window, _cx| table_header()).disabled(true)
-}
-
 fn table_header() -> AnyElement {
     port_table_row(
         crate::surface::strings::status_bar_ports_table_port(),
@@ -280,15 +277,15 @@ fn port_table_row(
         .w(px(PORT_TABLE_WIDTH))
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
         .child(port_table_cell(PORT_TABLE_PORT_W, port))
-        .child(port_table_cell(PORT_TABLE_PROCESS_W, process))
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .child(address.into()),
+                .child(process.into()),
         )
+        .child(port_table_cell(PORT_TABLE_ADDRESS_W, address))
         .into_any_element()
 }
 
@@ -453,5 +450,135 @@ mod tests {
             kind: PortKind::External,
         };
         assert_eq!(port_row_label(&entry), "5432  postgres  127.0.0.1:5432");
+    }
+
+    /// The process column is the flex remainder of the fixed table width.
+    /// Guard the budget so a future width tweak can't starve it below the
+    /// 118px it had as a fixed column (where "Obsidian Helper (Renderer)"
+    /// already truncated).
+    #[test]
+    fn process_column_flex_keeps_a_usable_budget() {
+        let process_flex =
+            PORT_TABLE_WIDTH - PORT_TABLE_PORT_W - PORT_TABLE_ADDRESS_W - 2.0 * PORT_TABLE_GAP;
+        assert!(
+            process_flex >= 118.0,
+            "process column shrank to {process_flex}px — rebalance the table widths"
+        );
+    }
+
+    struct DropdownProbe {
+        ports: Vec<PortEntry>,
+    }
+
+    impl gpui::Render for DropdownProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div().size_full().child(render(
+                &self.ports,
+                PortScanStatus::Available,
+                StatusBarDensity::Full,
+                cx,
+            ))
+        }
+    }
+
+    /// Reproduces the real interaction path: click the actual status-bar
+    /// trigger through `render()` with enough ports to overflow
+    /// `PORT_MENU_SCROLL_MAX_H`, then assert the mounted `ui::scroll_area`
+    /// is capped and its scrollbar overlay is pinned (the primitive's own
+    /// test proves the scroll math; this proves the full chain mounts it).
+    #[gpui::test]
+    async fn opening_the_real_dropdown_caps_the_scroll_body_height(cx: &mut gpui::TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let ports: Vec<PortEntry> = (0..40)
+            .map(|i| external_entry(&format!("127.0.0.1:{}", 4000 + i)))
+            .collect();
+        let (_probe, cx) = cx.add_window_view(move |_, _| DropdownProbe { ports });
+        cx.run_until_parked();
+
+        let trigger = cx
+            .debug_bounds("status-ports-trigger")
+            .expect("trigger button painted");
+        cx.simulate_click(trigger.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        let wrapper = cx
+            .debug_bounds("ports-scroll-wrapper")
+            .expect("dropdown opened and the scroll wrapper painted");
+        assert!(
+            wrapper.size.height <= gpui::px(PORT_MENU_SCROLL_MAX_H),
+            "scroll wrapper is {:?} tall — must be capped at {PORT_MENU_SCROLL_MAX_H}px",
+            wrapper.size.height
+        );
+        assert!(
+            wrapper.size.height > gpui::px(0.),
+            "scroll wrapper painted with zero height — content collapsed"
+        );
+
+        // The scrollbar overlay must coincide with the scroll wrapper —
+        // the ports-dropdown misplacement regression (thumb painted under
+        // the popup's bottom edge), now owned by `ui::scroll_area`.
+        let bar_layer = cx
+            .debug_bounds("ports-scroll-scrollbar-layer")
+            .expect("scrollbar overlay painted");
+        assert_eq!(
+            bar_layer, wrapper,
+            "scrollbar overlay is not pinned to the scroll wrapper — \
+             the thumb will paint outside the dropdown"
+        );
+    }
+
+    /// The panel is a [`Popover`], so a click inside it (a row's
+    /// clipboard-copy click, or blank space beside the scrollbar) must
+    /// leave it open. This regressed under `PopupMenu`, whose `confirm()`
+    /// dismisses unconditionally on any clicked item — the reason the
+    /// dropdown is a popover panel and not a menu.
+    #[gpui::test]
+    async fn clicking_inside_the_port_list_keeps_the_dropdown_open(cx: &mut gpui::TestAppContext) {
+        crate::test_support::init_gpui_component(cx);
+        let ports: Vec<PortEntry> = (0..40)
+            .map(|i| external_entry(&format!("127.0.0.1:{}", 4000 + i)))
+            .collect();
+        let (_probe, cx) = cx.add_window_view(move |_, _| DropdownProbe { ports });
+        cx.run_until_parked();
+
+        let trigger = cx
+            .debug_bounds("status-ports-trigger")
+            .expect("trigger button painted");
+        cx.simulate_click(trigger.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        let wrapper = cx
+            .debug_bounds("ports-scroll-wrapper")
+            .expect("dropdown opened and the scroll wrapper painted");
+
+        // A click well inside the list body, away from the trigger and
+        // away from the scrollbar's own hit strip on the far right edge.
+        let inside_the_list = wrapper.origin + gpui::point(wrapper.size.width / 4., px(40.));
+        cx.simulate_click(inside_the_list, gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert!(
+            cx.debug_bounds("ports-scroll-wrapper").is_some(),
+            "dropdown dismissed by a click inside the port list"
+        );
+
+        // Outside click is the dismissal affordance — the popover's
+        // `on_mouse_down_out` must close the panel.
+        let outside = wrapper.origin
+            + gpui::point(
+                wrapper.size.width + px(100.),
+                wrapper.size.height + px(100.),
+            );
+        cx.simulate_click(outside, gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert!(
+            cx.debug_bounds("ports-scroll-wrapper").is_none(),
+            "dropdown stayed open after a click outside the panel"
+        );
     }
 }
