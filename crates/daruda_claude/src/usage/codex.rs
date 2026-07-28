@@ -44,7 +44,7 @@ impl UsageSource for CodexUsage {
             headers.push(("ChatGPT-Account-Id", account_id));
         }
         let body = get_json(USAGE_URL, &headers)?;
-        Ok(parse_usage(&body))
+        parse_usage(&body)
     }
 
     fn status_url(&self) -> &'static str {
@@ -81,32 +81,48 @@ fn read_credentials(home: &Path) -> Result<Credentials, FetchError> {
 /// Unlike Anthropic, the plan tier rides in the usage response rather than the
 /// credential store, so it is read here. There is no equivalent of Anthropic's
 /// rate-limit multiplier, so the qualifier stays empty.
-pub fn parse_usage(value: &Value) -> ProviderUsage {
-    let rate_limit = &value["rate_limit"];
-    let windows = [
-        &rate_limit["primary_window"],
-        &rate_limit["secondary_window"],
-    ]
-    .into_iter()
-    .filter_map(parse_window)
-    .collect();
+///
+/// Errors on a response this code cannot read — a missing `rate_limit` object,
+/// or a window that is present but malformed. That is the line between "the
+/// schema moved under us" (which must surface, so the numbers aren't quietly
+/// replaced by "Unavailable") and "this account meters nothing right now"
+/// (a null window, which is a real answer).
+pub fn parse_usage(value: &Value) -> Result<ProviderUsage, FetchError> {
+    let rate_limit = value
+        .get("rate_limit")
+        .filter(|v| v.is_object())
+        .ok_or_else(|| FetchError::Parse("missing `rate_limit` object".into()))?;
+    let mut windows = Vec::new();
+    for name in ["primary_window", "secondary_window"] {
+        if let Some(window) = parse_window(&rate_limit[name], name)? {
+            windows.push(window);
+        }
+    }
     let plan = value["plan_type"].as_str().map(|tier| PlanInfo {
         tier: Some(tier.to_string()),
         qualifier: None,
     });
-    ProviderUsage::new(AccountRecipeId::Codex, windows, plan)
+    Ok(ProviderUsage::new(AccountRecipeId::Codex, windows, plan))
 }
 
-/// `used_percent` arrives as an integer on some plans and a float on others,
-/// so it is read as a number rather than either. A window without one is not
-/// a window — the field is the whole point.
-fn parse_window(value: &Value) -> Option<UsageWindow> {
+/// `Ok(None)` for a window the response says isn't metered; an error for one it
+/// reports but this code can't read.
+///
+/// `used_percent` arrives as an integer on some plans and a float on others, so
+/// it is read as a number rather than either.
+fn parse_window(value: &Value, name: &str) -> Result<Option<UsageWindow>, FetchError> {
     if value.is_null() {
-        return None;
+        return Ok(None);
     }
-    let utilization = value["used_percent"].as_f64()? as f32;
-    Some(UsageWindow {
-        window: Duration::from_secs(value["limit_window_seconds"].as_u64()?),
+    let field = |field: &str| FetchError::Parse(format!("{name}: unreadable `{field}`"));
+    let utilization = value["used_percent"]
+        .as_f64()
+        .ok_or_else(|| field("used_percent"))? as f32;
+    let window = value["limit_window_seconds"]
+        .as_u64()
+        .ok_or_else(|| field("limit_window_seconds"))?;
+    Ok(Some(UsageWindow {
+        window: Duration::from_secs(window),
         utilization: utilization.clamp(0.0, 100.0),
         resets_at: value["reset_at"].as_u64().map(|epoch| {
             // Unix seconds, where Anthropic sends RFC 3339.
@@ -114,7 +130,7 @@ fn parse_window(value: &Value) -> Option<UsageWindow> {
         }),
         // Codex meters every model against one budget.
         scope: WindowScope::Overall,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -147,7 +163,7 @@ mod tests {
 
     #[test]
     fn a_team_plan_reports_one_monthly_window() {
-        let usage = parse_usage(&team_plan_response());
+        let usage = parse_usage(&team_plan_response()).expect("the live shape parses");
         assert_eq!(usage.recipe, AccountRecipeId::Codex);
         assert_eq!(usage.windows.len(), 1);
         let window = &usage.windows[0];
@@ -174,17 +190,33 @@ mod tests {
             "limit_window_seconds": 18_000,
             "reset_at": 1_787_800_000_u64,
         });
-        let usage = parse_usage(&body);
+        let usage = parse_usage(&body).expect("two valid windows parse");
         let lengths: Vec<u64> = usage.windows.iter().map(|w| w.window.as_secs()).collect();
         assert_eq!(lengths, [18_000, 2_628_000]);
         assert_eq!(usage.windows[0].utilization, 40.5);
     }
 
+    /// A response with no `rate_limit` at all is the schema having moved, not an
+    /// idle account: surfacing it keeps the tab from replacing real numbers with
+    /// "Unavailable" as though the refresh had succeeded.
     #[test]
-    fn a_response_without_rate_limits_yields_an_empty_snapshot() {
-        let usage = parse_usage(&json!({ "plan_type": "plus" }));
+    fn a_response_without_rate_limits_is_a_parse_error() {
+        assert!(matches!(
+            parse_usage(&json!({ "plan_type": "plus" })),
+            Err(FetchError::Parse(_))
+        ));
+    }
+
+    /// Both windows null is a real answer — this account meters nothing right
+    /// now — so it parses, unlike the missing-object case above.
+    #[test]
+    fn null_windows_parse_as_an_account_metering_nothing() {
+        let body = json!({
+            "plan_type": "plus",
+            "rate_limit": { "primary_window": Value::Null, "secondary_window": Value::Null },
+        });
+        let usage = parse_usage(&body).expect("null windows are a real answer");
         assert!(usage.windows.is_empty());
-        // Still a real answer — the plan is known even with no window metered.
         assert_eq!(
             usage.plan.as_ref().and_then(|p| p.tier.as_deref()),
             Some("plus")
@@ -192,16 +224,29 @@ mod tests {
     }
 
     #[test]
-    fn a_window_missing_its_length_or_percent_is_dropped() {
+    fn a_window_missing_its_length_or_percent_is_a_parse_error() {
         for window in [
             json!({ "used_percent": 5 }),
             json!({ "limit_window_seconds": 18_000 }),
+            json!({ "used_percent": "2%", "limit_window_seconds": 18_000 }),
         ] {
             let mut body = team_plan_response();
-            body["rate_limit"]["primary_window"] = window;
+            body["rate_limit"]["primary_window"] = window.clone();
             body["rate_limit"]["secondary_window"] = Value::Null;
-            assert!(parse_usage(&body).windows.is_empty());
+            assert!(
+                matches!(parse_usage(&body), Err(FetchError::Parse(_))),
+                "accepted a malformed window: {window}"
+            );
         }
+    }
+
+    /// A malformed *secondary* window is as much a schema break as a primary
+    /// one — it must not be skipped while the primary still parses.
+    #[test]
+    fn a_malformed_secondary_window_is_not_silently_skipped() {
+        let mut body = team_plan_response();
+        body["rate_limit"]["secondary_window"] = json!({ "used_percent": 40 });
+        assert!(matches!(parse_usage(&body), Err(FetchError::Parse(_))));
     }
 
     #[test]
@@ -209,7 +254,7 @@ mod tests {
         let mut body = team_plan_response();
         body["rate_limit"]["primary_window"] =
             json!({ "used_percent": 7, "limit_window_seconds": 18_000 });
-        let usage = parse_usage(&body);
+        let usage = parse_usage(&body).expect("a reset time is optional");
         assert_eq!(usage.windows.len(), 1);
         assert!(usage.windows[0].resets_at.is_none());
     }
@@ -219,14 +264,20 @@ mod tests {
         let mut body = team_plan_response();
         body["rate_limit"]["primary_window"] =
             json!({ "used_percent": 140, "limit_window_seconds": 18_000 });
-        assert_eq!(parse_usage(&body).windows[0].utilization, 100.0);
+        let usage = parse_usage(&body).expect("an out-of-range percent still parses");
+        assert_eq!(usage.windows[0].utilization, 100.0);
     }
 
     #[test]
     fn an_unknown_plan_leaves_the_badge_empty_rather_than_guessing() {
         let mut body = team_plan_response();
         body["plan_type"] = Value::Null;
-        assert!(parse_usage(&body).plan.is_none());
+        assert!(
+            parse_usage(&body)
+                .expect("an absent plan is not a parse failure")
+                .plan
+                .is_none()
+        );
     }
 
     #[test]
