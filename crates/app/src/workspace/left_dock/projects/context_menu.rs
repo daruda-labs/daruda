@@ -4,7 +4,7 @@
 //! `PopupMenuItem` closures are `'static` and free of borrows on the
 //! row or snapshot they were built from.
 
-use gpui::{App, ClickEvent, SharedString, Window};
+use gpui::{App, ClickEvent, SharedString};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
@@ -13,6 +13,7 @@ use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::PopupMenuItem;
+use crate::workspace::render::ws_popup_menu_item;
 
 /// Inputs for [`build_context_menu_items`]. Grouped into a struct so
 /// the lane-row call site stays readable as per-lane flags accumulate
@@ -107,80 +108,75 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
         path_str.clone(),
     );
 
-    let workspace_for_description = workspace.clone();
-    let edit_description_item = PopupMenuItem::new(surface_strings::ctx_edit_description())
-        .on_click(
-            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-                if workspace_for_description.upgrade().is_none() {
-                    return;
-                }
-                let current = current_description.clone();
-                let callback_ws = workspace_for_description.clone();
-                crate::workspace::dialog_helpers::open_single_field_dialog(
-                    callback_ws,
-                    surface_strings::edit_description_modal_title(),
-                    surface_strings::edit_description_placeholder(),
-                    current.as_deref(),
-                    move |workspace, value, _window, cx| {
-                        workspace.set_lane_description(
-                            LaneRef {
-                                project: project_id,
-                                lane: wt_id,
-                            },
-                            value,
-                            cx,
-                        );
-                    },
-                    window,
-                    app_cx,
-                );
-            },
-        );
+    let edit_description_item = ws_popup_menu_item(
+        workspace.clone(),
+        surface_strings::ctx_edit_description(),
+        false,
+        move |_ws, window, cx| {
+            let current = current_description.clone();
+            let callback_ws = cx.entity().downgrade();
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                callback_ws,
+                surface_strings::edit_description_modal_title(),
+                surface_strings::edit_description_placeholder(),
+                current.as_deref(),
+                move |workspace, value, _window, cx| {
+                    workspace.set_lane_description(
+                        LaneRef {
+                            project: project_id,
+                            lane: wt_id,
+                        },
+                        value,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        },
+    );
 
-    let workspace_for_remote_cwd = workspace.clone();
-    let edit_remote_cwd_item = PopupMenuItem::new(surface_strings::ctx_edit_remote_cwd())
-        .on_click(
-            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-                if workspace_for_remote_cwd.upgrade().is_none() {
-                    return;
-                }
-                let current = current_remote_cwd.clone();
-                let callback_ws = workspace_for_remote_cwd.clone();
-                crate::workspace::dialog_helpers::open_single_field_dialog(
-                    callback_ws,
-                    surface_strings::edit_remote_cwd_modal_title(),
-                    surface_strings::edit_remote_cwd_placeholder(),
-                    current.as_deref(),
-                    move |workspace, value, _window, cx| {
-                        workspace.set_lane_remote_cwd(
-                            LaneRef {
-                                project: project_id,
-                                lane: wt_id,
-                            },
-                            value,
-                            cx,
-                        );
-                    },
-                    window,
-                    app_cx,
-                );
-            },
-        )
-        // The setting only takes hold for panes created after this edit —
-        // an already-created (but not yet connected) agent-chat pane keeps
-        // whatever cwd it resolved at creation time. Surfaced as a hover
-        // tooltip rather than new modal chrome, mirroring how the disabled
-        // Merge item explains itself elsewhere in this menu.
-        .tooltip(surface_strings::ctx_edit_remote_cwd_hint());
+    let edit_remote_cwd_item = ws_popup_menu_item(
+        workspace.clone(),
+        surface_strings::ctx_edit_remote_cwd(),
+        false,
+        move |_ws, window, cx| {
+            let current = current_remote_cwd.clone();
+            let callback_ws = cx.entity().downgrade();
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                callback_ws,
+                surface_strings::edit_remote_cwd_modal_title(),
+                surface_strings::edit_remote_cwd_placeholder(),
+                current.as_deref(),
+                move |workspace, value, _window, cx| {
+                    workspace.set_lane_remote_cwd(
+                        LaneRef {
+                            project: project_id,
+                            lane: wt_id,
+                        },
+                        value,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        },
+    )
+    // The setting only takes hold for panes created after this edit —
+    // an already-created (but not yet connected) agent-chat pane keeps
+    // whatever cwd it resolved at creation time. Surfaced as a hover
+    // tooltip rather than new modal chrome, mirroring how the disabled
+    // Merge item explains itself elsewhere in this menu.
+    .tooltip(surface_strings::ctx_edit_remote_cwd_hint());
 
-    let workspace_for_rename = workspace.clone();
-    let rename_item = PopupMenuItem::new(surface_strings::ctx_rename()).on_click(
-        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-            if workspace_for_rename.upgrade().is_none() {
-                return;
-            }
+    let rename_item = ws_popup_menu_item(
+        workspace.clone(),
+        surface_strings::ctx_rename(),
+        false,
+        move |_ws, window, cx| {
             let current = current_name.clone();
-            let callback_ws = workspace_for_rename.clone();
+            let callback_ws = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_single_field_dialog(
                 callback_ws,
                 surface_strings::rename_modal_title(),
@@ -197,7 +193,7 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
                     );
                 },
                 window,
-                app_cx,
+                cx,
             );
         },
     );
@@ -221,7 +217,6 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
             project: project_id,
             lane: wt_id,
         };
-        let workspace_for_remove = workspace.clone();
         items.push(PopupMenuItem::separator());
         if availability == LaneAvailability::AccessDenied {
             // Disabled, informational only — no handler.
@@ -229,25 +224,23 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
                 PopupMenuItem::new(surface_strings::ctx_grant_full_disk_access()).disabled(true),
             );
         }
-        items.push(PopupMenuItem::new(surface_strings::ctx_remove()).on_click(
-            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-                let Some(ws) = workspace_for_remove.upgrade() else {
-                    return;
-                };
-                ws.update(app_cx, |ws, cx| {
-                    if removable {
-                        ws.open_remove_lane_modal(target, window, cx);
-                    } else {
-                        // Main / default lane stands in for the whole
-                        // project. Route Remove through the project-delete
-                        // chooser targeted by id — do NOT force focus onto
-                        // this (inaccessible) lane, or cancelling would
-                        // strand the user on a dead lane. Activation, if
-                        // any, happens only once the user confirms inside
-                        // the modal.
-                        ws.open_delete_project_modal(project_id, window, cx);
-                    }
-                });
+        items.push(ws_popup_menu_item(
+            workspace.clone(),
+            surface_strings::ctx_remove(),
+            false,
+            move |ws, window, cx| {
+                if removable {
+                    ws.open_remove_lane_modal(target, window, cx);
+                } else {
+                    // Main / default lane stands in for the whole
+                    // project. Route Remove through the project-delete
+                    // chooser targeted by id — do NOT force focus onto
+                    // this (inaccessible) lane, or cancelling would
+                    // strand the user on a dead lane. Activation, if
+                    // any, happens only once the user confirms inside
+                    // the modal.
+                    ws.open_delete_project_modal(project_id, window, cx);
+                }
             },
         ));
         return items;
@@ -266,73 +259,68 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<P
         } else {
             // source_branch is guaranteed Some when is_git && !is_detached.
             let branch = source_branch.unwrap_or_default();
-            let workspace_for_merge = workspace.clone();
-            PopupMenuItem::new(surface_strings::ctx_merge_into()).on_click(
-                move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-                    let Some(ws) = workspace_for_merge.upgrade() else {
-                        return;
-                    };
+            ws_popup_menu_item(
+                workspace.clone(),
+                surface_strings::ctx_merge_into(),
+                false,
+                move |ws, window, cx| {
                     let branch = branch.clone();
                     let base_ref = base_ref.clone();
-                    let workspace_weak = workspace_for_merge.clone();
-                    // Clone before ws.update so the outer Fn closure can
-                    // be called again without violating the Fn constraint.
+                    let workspace_weak = cx.entity().downgrade();
                     let src_path = source_path.clone();
                     let src_repo_root = source_repo_root.clone().unwrap_or_default();
-                    ws.update(app_cx, |ws, cx| {
-                        // Build target list: other git worktrees with a
-                        // branch — from the *menu's own* project, not the
-                        // active one (lane ids collide across projects).
-                        let target_options: Vec<super::merge_modal::TargetOption> = ws
-                            .project_for(project_id)
-                            .map(|p| p.lanes.as_slice())
-                            .unwrap_or(&[])
-                            .iter()
-                            .filter(|w| w.id != wt_id)
-                            .filter_map(|w| match &w.kind {
-                                daruda_store::project::LaneKind::Git {
-                                    branch: Some(b), ..
-                                } => Some(super::merge_modal::TargetOption {
-                                    wt_id: w.id,
-                                    branch: b.clone(),
-                                    wt_path: w.path.clone(),
-                                }),
-                                _ => None,
-                            })
-                            .collect();
 
-                        if target_options.is_empty() {
-                            let report =
-                                ErrorReport::new(surface_strings::merge_modal_no_targets())
-                                    .severity(ErrorSeverity::Info)
-                                    .at(file!(), line!())
-                                    .dedup("lane.merge.no_targets")
-                                    .build();
-                            ws.report_error(report, cx);
-                            return;
-                        }
+                    // Build target list: other git worktrees with a
+                    // branch — from the *menu's own* project, not the
+                    // active one (lane ids collide across projects).
+                    let target_options: Vec<super::merge_modal::TargetOption> = ws
+                        .project_for(project_id)
+                        .map(|p| p.lanes.as_slice())
+                        .unwrap_or(&[])
+                        .iter()
+                        .filter(|w| w.id != wt_id)
+                        .filter_map(|w| match &w.kind {
+                            daruda_store::project::LaneKind::Git {
+                                branch: Some(b), ..
+                            } => Some(super::merge_modal::TargetOption {
+                                wt_id: w.id,
+                                branch: b.clone(),
+                                wt_path: w.path.clone(),
+                            }),
+                            _ => None,
+                        })
+                        .collect();
 
-                        crate::workspace::dialog_helpers::open_form_modal(
-                            SharedString::from(format!("Merge \"{branch}\" into")),
-                            None,
-                            move |window, cx| {
-                                super::merge_modal::MergeModal::new(
-                                    project_id,
-                                    wt_id,
-                                    branch.clone(),
-                                    src_path,
-                                    src_repo_root,
-                                    target_options,
-                                    base_ref.clone(),
-                                    workspace_weak.clone(),
-                                    window,
-                                    cx,
-                                )
-                            },
-                            window,
-                            cx,
-                        );
-                    });
+                    if target_options.is_empty() {
+                        let report = ErrorReport::new(surface_strings::merge_modal_no_targets())
+                            .severity(ErrorSeverity::Info)
+                            .at(file!(), line!())
+                            .dedup("lane.merge.no_targets")
+                            .build();
+                        ws.report_error(report, cx);
+                        return;
+                    }
+
+                    crate::workspace::dialog_helpers::open_form_modal(
+                        SharedString::from(format!("Merge \"{branch}\" into")),
+                        None,
+                        move |window, cx| {
+                            super::merge_modal::MergeModal::new(
+                                project_id,
+                                wt_id,
+                                branch.clone(),
+                                src_path,
+                                src_repo_root,
+                                target_options,
+                                base_ref.clone(),
+                                workspace_weak.clone(),
+                                window,
+                                cx,
+                            )
+                        },
+                        window,
+                        cx,
+                    );
                 },
             )
         };

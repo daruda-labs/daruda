@@ -13,6 +13,7 @@ use crate::ui::PopupMenuItem;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_single_field_dialog;
 use crate::workspace::group_ops::group_color_presets;
+use crate::workspace::render::ws_popup_menu_item;
 
 /// Build the flat menu for a group header.
 pub(in crate::workspace) fn build_group_menu_items(
@@ -24,60 +25,51 @@ pub(in crate::workspace) fn build_group_menu_items(
     let mut items: Vec<PopupMenuItem> = Vec::new();
 
     // -- Rename --
-    let ws_rename = ws.clone();
     let initial = current_name.to_string();
-    items.push(
-        PopupMenuItem::new(s::group_menu_rename()).on_click(move |_, window, app_cx| {
-            let Some(workspace) = ws_rename.upgrade() else {
-                return;
-            };
-            let weak = ws_rename.clone();
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::group_menu_rename(),
+        false,
+        move |_, window, cx| {
+            let weak = cx.entity().downgrade();
             let initial = initial.clone();
-            workspace.update(app_cx, |_, cx| {
-                open_single_field_dialog(
-                    weak,
-                    s::group_rename_dialog_title(),
-                    s::group_rename_dialog_placeholder(),
-                    Some(&initial),
-                    move |ws, value, _window, cx| {
-                        let Some(name) = value else {
-                            return;
-                        };
-                        ws.rename_group(group_id, name, cx);
-                    },
-                    window,
-                    cx,
-                );
-            });
-        }),
-    );
+            open_single_field_dialog(
+                weak,
+                s::group_rename_dialog_title(),
+                s::group_rename_dialog_placeholder(),
+                Some(&initial),
+                move |ws, value, _window, cx| {
+                    let Some(name) = value else {
+                        return;
+                    };
+                    ws.rename_group(group_id, name, cx);
+                },
+                window,
+                cx,
+            );
+        },
+    ));
 
     items.push(PopupMenuItem::separator());
 
     // -- Color presets --
     for (label, hex) in group_color_presets() {
-        let ws_color = ws.clone();
-        items.push(
-            PopupMenuItem::new(label).on_click(move |_, _window, app_cx| {
-                let Some(workspace) = ws_color.upgrade() else {
-                    return;
-                };
-                workspace.update(app_cx, |ws, cx| {
-                    ws.recolor_group(group_id, Some(hex.to_string()), cx);
-                });
-            }),
-        );
+        items.push(ws_popup_menu_item(
+            ws.clone(),
+            label,
+            false,
+            move |ws, _window, cx| {
+                ws.recolor_group(group_id, Some(hex.to_string()), cx);
+            },
+        ));
     }
 
-    let ws_clear = ws.clone();
-    items.push(PopupMenuItem::new(s::group_menu_color_clear()).on_click(
-        move |_, _window, app_cx| {
-            let Some(workspace) = ws_clear.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.recolor_group(group_id, None, cx);
-            });
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::group_menu_color_clear(),
+        false,
+        move |ws, _window, cx| {
+            ws.recolor_group(group_id, None, cx);
         },
     ));
 
@@ -89,34 +81,28 @@ pub(in crate::workspace) fn build_group_menu_items(
     } else {
         s::group_menu_collapse()
     };
-    let ws_collapse = ws.clone();
-    items.push(
-        PopupMenuItem::new(collapse_label).on_click(move |_, _window, app_cx| {
-            let Some(workspace) = ws_collapse.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.toggle_group_collapse(group_id, cx);
-            });
-        }),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        collapse_label,
+        false,
+        move |ws, _window, cx| {
+            ws.toggle_group_collapse(group_id, cx);
+        },
+    ));
 
     items.push(PopupMenuItem::separator());
 
     // -- Delete --
     // No confirmation modal: `delete_group` demotes member projects to
     // ungrouped (no data loss) — only the visual grouping disappears.
-    let ws_delete = ws.clone();
-    items.push(
-        PopupMenuItem::new(s::group_menu_delete()).on_click(move |_, _window, app_cx| {
-            let Some(workspace) = ws_delete.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.delete_group(group_id, cx);
-            });
-        }),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::group_menu_delete(),
+        false,
+        move |ws, _window, cx| {
+            ws.delete_group(group_id, cx);
+        },
+    ));
 
     items
 }

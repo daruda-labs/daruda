@@ -12,6 +12,7 @@ use gpui::WeakEntity;
 
 use crate::surface::strings as s;
 use crate::ui::PopupMenuItem;
+use crate::workspace::render::ws_popup_menu_item;
 use crate::workspace::{MoveActiveProjectToGroup, RenameActiveProject, Workspace};
 
 pub(in crate::workspace) fn build_project_menu_items(
@@ -27,32 +28,26 @@ pub(in crate::workspace) fn build_project_menu_items(
     };
 
     // -- Rename --
-    let ws_rename = ws.clone();
-    items.push(
-        PopupMenuItem::new(s::project_menu_rename()).on_click(move |_, window, app_cx| {
-            let Some(workspace) = ws_rename.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.activate_lane(snap_target, window, cx);
-                ws.on_rename_active_project(&RenameActiveProject, window, cx);
-            });
-        }),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::project_menu_rename(),
+        false,
+        move |ws, window, cx| {
+            ws.activate_lane(snap_target, window, cx);
+            ws.on_rename_active_project(&RenameActiveProject, window, cx);
+        },
+    ));
 
     // -- Move to Group --
-    let ws_move = ws.clone();
-    items.push(
-        PopupMenuItem::new(s::project_menu_move_to_group()).on_click(move |_, window, app_cx| {
-            let Some(workspace) = ws_move.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.activate_lane(snap_target, window, cx);
-                ws.on_move_active_project_to_group(&MoveActiveProjectToGroup, window, cx);
-            });
-        }),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::project_menu_move_to_group(),
+        false,
+        move |ws, window, cx| {
+            ws.activate_lane(snap_target, window, cx);
+            ws.on_move_active_project_to_group(&MoveActiveProjectToGroup, window, cx);
+        },
+    ));
 
     items.push(PopupMenuItem::separator());
 
@@ -63,35 +58,27 @@ pub(in crate::workspace) fn build_project_menu_items(
     // before global handlers fire (the keyboard shortcut still routes through
     // the global handler since it dispatches from a key event). Snap focus to
     // the right-clicked project first so the op targets it.
-    let ws_delete = ws.clone();
-    items.push(
-        PopupMenuItem::new(s::project_menu_delete()).on_click(move |_, window, app_cx| {
-            let Some(workspace) = ws_delete.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.activate_lane(snap_target, window, cx);
-                ws.open_delete_active_project_modal(window, cx);
-            });
-        }),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::project_menu_delete(),
+        false,
+        move |ws, window, cx| {
+            ws.activate_lane(snap_target, window, cx);
+            ws.open_delete_active_project_modal(window, cx);
+        },
+    ));
 
     items.push(PopupMenuItem::separator());
 
     // -- Open in New Window --
-    let ws_open = ws.clone();
-    items.push(
-        PopupMenuItem::new(s::project_menu_open_in_new_window()).on_click(
-            move |_, _window, app_cx| {
-                let Some(workspace) = ws_open.upgrade() else {
-                    return;
-                };
-                workspace.update(app_cx, |ws, cx| {
-                    ws.open_project_in_new_window(project_id, cx);
-                });
-            },
-        ),
-    );
+    items.push(ws_popup_menu_item(
+        ws.clone(),
+        s::project_menu_open_in_new_window(),
+        false,
+        move |ws, _window, cx| {
+            ws.open_project_in_new_window(project_id, cx);
+        },
+    ));
 
     items
 }

@@ -7,7 +7,7 @@
 
 use crate::ui::theme;
 use daruda_store::panels::{ButtonDisplay, ButtonWidget, TabId};
-use gpui::{App, ClickEvent, IntoElement, SharedString, Window, px};
+use gpui::{ClickEvent, IntoElement, SharedString, px};
 
 use super::super::macro_edit_modal::MacroEditModal;
 use crate::surface::strings as surface_strings;
@@ -16,6 +16,7 @@ use crate::ui::{PopupMenuItem, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
+use crate::workspace::render::ws_popup_menu_item;
 
 /// Render one button widget. Returned element is sized for `flex_wrap`
 /// — text mode is auto-width, icon mode is fixed-square.
@@ -103,14 +104,14 @@ fn edit_item(
     btn: ButtonWidget,
     workspace: gpui::WeakEntity<Workspace>,
 ) -> PopupMenuItem {
-    PopupMenuItem::new(surface_strings::ctx_macro_edit()).on_click(
-        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-            if workspace.upgrade().is_none() {
-                return;
-            }
+    ws_popup_menu_item(
+        workspace,
+        surface_strings::ctx_macro_edit(),
+        false,
+        move |_ws, window, cx| {
             let tab_id = tab_id.clone();
             let btn = btn.clone();
-            let workspace_for_modal = workspace.clone();
+            let workspace_for_modal = cx.entity().downgrade();
             crate::workspace::dialog_helpers::open_form_modal(
                 "Edit Macro",
                 None,
@@ -124,7 +125,7 @@ fn edit_item(
                     )
                 },
                 window,
-                app_cx,
+                cx,
             );
         },
     )
@@ -136,13 +137,13 @@ fn delete_item(
     label: String,
     workspace: gpui::WeakEntity<Workspace>,
 ) -> PopupMenuItem {
-    PopupMenuItem::new(surface_strings::ctx_macro_delete()).on_click(
-        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
-            if workspace.upgrade().is_none() {
-                return;
-            }
+    ws_popup_menu_item(
+        workspace,
+        surface_strings::ctx_macro_delete(),
+        false,
+        move |_ws, window, cx| {
             let body = format!("Delete macro \u{201c}{label}\u{201d}?");
-            let workspace_for_modal = workspace.clone();
+            let workspace_for_modal = cx.entity().downgrade();
             let tab_id = tab_id.clone();
             let widget_id = widget_id.clone();
             crate::workspace::dialog_helpers::open_confirm_dialog(
@@ -160,7 +161,7 @@ fn delete_item(
                     }
                 },
                 window,
-                app_cx,
+                cx,
             );
         },
     )
