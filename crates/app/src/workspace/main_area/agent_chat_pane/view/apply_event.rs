@@ -19,10 +19,8 @@ use crate::surface::strings as s;
 
 impl AgentChatView {
     /// Fold a single [`AcpEvent`] into the chat model + status, reconcile the
-    /// diff editors / mermaid diagrams the new content needs, then notify so
-    /// the (cached) pane subtree repaints. The Workspace pump calls this on the
-    /// foreground for every event, passing the current `syntax_theme` /
-    /// `is_light` (it owns the config mirror).
+    /// diff editors / mermaid diagrams the new content needs, then notify.
+    /// Called by the Workspace pump on the foreground for every event.
     pub(in crate::workspace) fn apply_event(
         &mut self,
         event: AcpEvent,
@@ -446,12 +444,10 @@ impl AgentChatView {
         telegram_first_response_effect
     }
 
-    /// Release a stuck replay gate. A `session/load` normally ends in either a
-    /// `Connected` reply or an `Error`, both of which clear `restoring`; but if
-    /// a misbehaving adapter closes the event stream mid-load without either,
-    /// the gate would stay set and the accumulated items would never be
-    /// projected — a pane frozen mid-restore. The pump calls this once its loop
-    /// exits so whatever arrived still renders. No-op when not restoring.
+    /// Release a stuck replay gate: if a misbehaving adapter closes the event
+    /// stream mid-load without a `Connected`/`Error` to clear `restoring`, the
+    /// accumulated items would never project. The pump calls this once its
+    /// loop exits so whatever arrived still renders. No-op when not restoring.
     pub(in crate::workspace) fn abort_restore(&mut self, cx: &mut Context<Self>) {
         if self.restoring {
             self.restoring = false;
@@ -466,21 +462,13 @@ impl AgentChatView {
     }
 
     /// End-of-stream safety-net predicate: true while `status` is a
-    /// non-terminal connecting state (`PreparingRuntime`/`Connecting`/
-    /// `Handshaking`). The event pump checks this once its loop exits
-    /// (channel closed — handle dropped, or the connection task ended without
-    /// emitting a terminal event). Normally the stream never closes before
-    /// `Connected` or `Error` fires; both already resolve the status. But a
-    /// connection task that panics, or a `run_connection` future dropped by an
-    /// upstream bug before its `Err` path runs, closes the channel silently —
-    /// with no event left to ever move `status`, the pane would otherwise be
-    /// stuck on "Connecting…"/"Handshaking…" forever with no error and no
-    /// retry affordance (`Workspace::retry_agent_chat_connect` requires
-    /// `Error` to fire). The pump feeds a real `AcpEvent::Error` through
-    /// `apply_event` when this is true, rather than setting `status` here
-    /// directly, so the failure gets the exact same handling as any other
-    /// terminal error (turn settle, handle drop, pending-prompt clear —
-    /// see the `AcpEvent::Error` arm).
+    /// non-terminal connecting state. Normally the stream never closes before
+    /// `Connected`/`Error` fires, but a connection task that panics (or is
+    /// dropped before its `Err` path runs) closes it silently, stranding the
+    /// pane on "Connecting…" forever with no retry affordance. When this is
+    /// true, the pump feeds a real `AcpEvent::Error` through `apply_event`
+    /// instead of setting `status` directly, so the failure gets the exact
+    /// same handling as any other terminal error.
     pub(in crate::workspace) fn is_still_connecting(&self) -> bool {
         matches!(
             self.status,
@@ -492,18 +480,11 @@ impl AgentChatView {
 
     /// Recompute the projected render rows from `items` + `fold` and sync the
     /// virtualized `list` to them. The single rebuild site; call after any
-    /// `items` or `fold` mutation.
-    ///
-    /// Rows include synthetic headers (tool-group, later response), and folding
-    /// flips `hidden` without changing the row set — so we diff old vs new by
-    /// `same_slot`:
-    /// - **structural** (slot divergence / count change = an append, or a run
-    ///   becoming a group): `splice` from the first divergent slot — scroll
-    ///   above it is preserved.
-    /// - **same slots & count** (a fold toggle flipping `hidden`, or a streamed
-    ///   chunk growing the tail): `remeasure_items` over just the changed span
-    ///   with the `Absolute` anchor, so reading history during streaming never
-    ///   drifts (a full `remeasure()` would re-anchor proportionally).
+    /// `items` or `fold` mutation. Diffs old vs new rows by `same_slot`:
+    /// structural changes `splice` from the first divergent slot (scroll above
+    /// it preserved); same slots & count (a fold flip or streamed tail growth)
+    /// `remeasure_items` over just the changed span with an `Absolute` anchor
+    /// so reading history during streaming never drifts.
     pub(super) fn rebuild_rows(&mut self) {
         let old = std::mem::take(&mut self.rows);
         // The inline working indicator means "answering" — suppress it while
@@ -563,20 +544,12 @@ impl AgentChatView {
         }
     }
 
-    /// Trace one list-sync decision — a splice or a remeasure — to the NDJSON
-    /// log, silent unless `DARUDA_DEBUG_AGENT_LIST` is set in the environment.
-    /// The intermittent oversized-gap ("~3 page") bug is a virtualized-list
-    /// height-cache staleness issue: a row's height changes (async markdown
-    /// reparse, fold, tool-result landing) without the matching row being
-    /// re-measured, so its stale cached height inflates the scroll geometry.
-    /// This stays compiled in (near-zero cost when off) so, on recurrence,
-    /// flipping the env var captures the sync timeline — `branch` + the
-    /// `[from, to)` span touched vs. the total row count — to confirm whether a
-    /// content change slipped through without a remeasure.
-    ///
-    /// `prev_rows` is the row count *before* this sync; it equals the current
-    /// count for a remeasure (which never changes the count) and differs only on
-    /// a splice, so a count delta is visible in the trace.
+    /// Trace one list-sync decision (splice or remeasure) to the NDJSON log,
+    /// silent unless `DARUDA_DEBUG_AGENT_LIST` is set. Kept compiled in
+    /// (near-zero cost off) to capture the sync timeline on recurrence of the
+    /// intermittent oversized-gap bug (a row's height changes without a
+    /// matching remeasure). `prev_rows` is the count *before* this sync, so a
+    /// splice's count delta is visible in the trace.
     fn trace_list_sync(&self, branch: &str, from: usize, to: usize, prev_rows: usize) {
         if !debug_list_trace_enabled() {
             return;

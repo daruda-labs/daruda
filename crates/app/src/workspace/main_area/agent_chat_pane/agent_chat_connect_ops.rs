@@ -47,12 +47,9 @@ fn agent_default_mode<'a>(
 }
 
 impl Workspace {
-    /// Lazy-connect entry point: start the ACP session for `pane_id` iff it is
-    /// an Agent chat pane still parked in [`AgentSessionStatus::Idle`] with a
-    /// working directory. Called from [`Self::focus_pane`] so the session
-    /// attaches on first focus and never twice (the `Idle` guard short-circuits
-    /// once a connect is in flight or has resolved). A no-cwd pane is already
-    /// parked in `Error`, so it is skipped here.
+    /// Lazy-connect entry point: start the ACP session for `pane_id` iff still
+    /// parked in [`AgentSessionStatus::Idle`] with a cwd. Called from
+    /// `focus_pane` so the session attaches on first focus and never twice.
     pub(in crate::workspace) fn maybe_connect_agent_chat(
         &mut self,
         pane_id: PaneId,
@@ -90,11 +87,9 @@ impl Workspace {
         self.connect_agent_chat(pane_id, cwd, resume, cx);
     }
 
-    /// Manual retry for the Error banner's "Retry" button: connect `pane_id` iff
-    /// parked in [`AgentSessionStatus::Error`]. Like
-    /// [`Self::maybe_connect_agent_chat`] but gated on `Error`;
-    /// `retry_for_reconnect` clears local `items` yet keeps `session_id`, so an
-    /// existing session resumes via `session/load` rather than starting over.
+    /// Manual retry for the Error banner: connect `pane_id` iff parked in
+    /// [`AgentSessionStatus::Error`]. Like [`Self::maybe_connect_agent_chat`]
+    /// but keeps `session_id` so it resumes via `session/load`.
     pub(in crate::workspace) fn retry_agent_chat_connect(
         &mut self,
         pane_id: PaneId,
@@ -123,10 +118,8 @@ impl Workspace {
     }
 
     /// Resolve the launch spec for `pane_id`'s agent, reconciling the view when
-    /// its `agent_id` is stale. Happy path: the view's `agent_id` is still in
-    /// the catalog, so return its launch. Miss: a live config reload
-    /// removed/renamed that agent, so rewrite the view to the session-sticky
-    /// default, persist, and launch that. `None` only when the pane is gone.
+    /// its `agent_id` is stale (a live config reload removed/renamed it) by
+    /// rewriting to the session-sticky default. `None` only when the pane is gone.
     fn resolve_pane_launch(
         &mut self,
         pane_id: PaneId,
@@ -156,17 +149,10 @@ impl Workspace {
         )
     }
 
-    /// Open the live ACP session for an already-pushed Agent chat pane and store
-    /// the event-pump task on its view. Runs the connect on the background
-    /// executor, then re-enters the workspace to store the handle and fold
-    /// events through the view. The pump lives in the view's `_event_pump`, so
-    /// closing the pane drops it (ending the loop) and drops the session handle.
-    ///
-    /// `resume` carries the persisted session id: `Some` branches `session/load`
-    /// (the adapter replays history before the `Connected` reply), `None` starts
-    /// a fresh `session/new`. A failed *resume* retries once as fresh; the stale
-    /// id stays persisted (a successful new session overwrites it via the
-    /// `Connected` persist trigger).
+    /// Open the live ACP session for an already-pushed pane and store the
+    /// event-pump task on its view; closing the pane drops both. `resume`
+    /// carries the persisted session id: `Some` branches `session/load`,
+    /// `None` starts a fresh `session/new`. A failed resume retries once fresh.
     pub(in crate::workspace) fn connect_agent_chat(
         &mut self,
         pane_id: PaneId,
@@ -668,10 +654,9 @@ impl Workspace {
         }
     }
 
-    /// Full local reset for the `/clear` slash command: wipe the conversation
-    /// UI, tear down the live ACP session, clear the persisted session id, and
-    /// start a fresh `session/new`. No-op when `pane_id` is gone or has no
-    /// lane cwd (a cwd-less pane never had a session to reset).
+    /// Full local reset for `/clear`: wipe the conversation, tear down the ACP
+    /// session, clear the persisted session id, start a fresh `session/new`.
+    /// No-op when `pane_id` is gone or has no lane cwd.
     pub(in crate::workspace) fn reset_agent_chat_session(
         &mut self,
         pane_id: PaneId,

@@ -18,18 +18,11 @@ use super::super::session_config::SessionConfig;
 use super::{AgentChatView, AgentSessionStatus, Turn, TurnOutcome};
 
 impl AgentChatView {
-    /// Stop the active turn. Sends `session/cancel` *and* ends the turn locally,
-    /// right now — it does not wait for the agent's stop reason.
-    ///
-    /// `session/cancel` is only cooperative: a hung or dead agent may never
-    /// return a `Cancelled` stop reason, and `AcpEvent::TurnEnded` (the sole
-    /// other place the in-flight turn clears) would then never arrive — leaving
-    /// the turn pulsing forever with the input stuck on "Stop". So Stop is
-    /// authoritative here: clear the in-flight state, settle streaming text and
-    /// still-running tool calls, and drain any pending permission. A later
-    /// `TurnEnded` for this turn is idempotent. Mirrors zed's
-    /// `AcpThread::cancel`, which takes `running_turn` and marks pending tools
-    /// cancelled without awaiting the agent.
+    /// Stop the active turn: send `session/cancel` *and* end the turn locally
+    /// right now, without waiting for the agent's stop reason. `cancel` is
+    /// only cooperative — a hung/dead agent may never send the `Cancelled`
+    /// `TurnEnded`, leaving the turn pulsing forever otherwise. A later
+    /// `TurnEnded` for this turn is idempotent.
     pub(in crate::workspace) fn cancel_turn(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = &self.handle {
             handle.cancel();
@@ -73,13 +66,9 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// End the current turn *locally* and settle every still-live item: clear
-    /// the in-flight flags, finalize streaming text, mark running tool calls
-    /// cancelled, and drain any pending permission. Model-only (no rows /
-    /// notify) so the three call paths — the Stop button (`cancel_turn`), a
-    /// normal `TurnEnded`, and a terminal `Error` — share one settle sequence
-    /// and can never drift (e.g. one leaving streaming/tools live so the rollup
-    /// blinks forever). Idempotent: a later `TurnEnded` after a Stop is a no-op.
+    /// End the current turn locally and settle every still-live item. Model-only
+    /// (no rows/notify) so the three call paths (Stop, `TurnEnded`, `Error`)
+    /// share one settle sequence and can't drift. Idempotent.
     pub(super) fn settle_turn(&mut self) {
         self.queue.turn = Turn::Idle;
         self.settle_items();
@@ -89,22 +78,19 @@ impl AgentChatView {
         self.snap_post_turn_baseline();
     }
 
-    /// Settle every still-live *item* — finalize streaming text, mark running
-    /// tool calls cancelled, drain any pending permission — without touching the
-    /// prompt `turn`. [`Self::settle_turn`] is this plus `turn = Idle`;
-    /// [`Self::cancel_turn`] calls this alone so the turn stays in-flight until
-    /// its real (`cancelled`) `TurnEnded` drives the settle + queue drain.
+    /// Settle every still-live item without touching `turn`. [`Self::settle_turn`]
+    /// is this plus `turn = Idle`; [`Self::cancel_turn`] calls this alone so
+    /// the turn stays in-flight until its real `TurnEnded` drives the drain.
     fn settle_items(&mut self) {
         finalize_streaming(&mut self.items);
         cancel_pending_tools(&mut self.items);
         cancel_pending_permission(self);
     }
 
-    /// Resolve the permission request `request_id` with the chosen option.
-    /// Marks *that* card resolved (found by id, not by position — several may be
-    /// outstanding), sends the decision over the session, and drops the id from
-    /// the outstanding index. No-op if the request was already answered or
-    /// cancelled. `kind` selects Allow vs. Reject semantics.
+    /// Resolve the permission request `request_id` with the chosen option:
+    /// mark that card resolved (by id, not position — several may be
+    /// outstanding), send the decision, drop the id from the index. No-op if
+    /// already answered or cancelled.
     pub(in crate::workspace) fn respond_permission(
         &mut self,
         request_id: u64,
@@ -196,13 +182,9 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Dismiss the plan region: drop the entries so `plan_region` renders
-    /// nothing. The plan is a derived render of `plan` (full-replaced by the
-    /// agent), so clearing it is a pure local presentation reset — a later
-    /// turn's `PlanChanged` repopulates it (expanded, since `plan_collapsed` is
-    /// reset here). Wired to the header's × button, shown only once every entry
-    /// is completed, so the finished checklist no longer lingers as a collapsed
-    /// header with no clear close point.
+    /// Dismiss the plan region: drop the entries so it renders nothing. Pure
+    /// local presentation reset — a later `PlanChanged` repopulates it
+    /// (expanded, since `plan_collapsed` resets too).
     pub(in crate::workspace) fn dismiss_plan(&mut self, cx: &mut Context<Self>) {
         self.plan.clear();
         self.plan_collapsed = false;
@@ -223,9 +205,8 @@ impl AgentChatView {
     }
 
     /// Change a select config option (model / effort / …): show the pick
-    /// immediately, then ask the agent over the live handle (no-op when the
-    /// handle is absent). The reply replaces the whole option set via a
-    /// `ConfigOptionsChanged` event.
+    /// immediately, then ask the agent over the live handle. The reply
+    /// replaces the whole option set via `ConfigOptionsChanged`.
     pub(in crate::workspace) fn set_config_option(
         &mut self,
         config_id: String,
@@ -240,14 +221,10 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Shared teardown for a full `/clear` reset and a post-`Error` retry:
-    /// drop the live handle and event pump (closing the ACP command channel
-    /// and ending the pump loop — the same teardown a pane close performs)
-    /// and wipe the conversation model + every runtime cache. Does NOT touch
-    /// `session_id`, `restoring`, or `status` — the two callers differ there:
-    /// a `/clear` reset drops the session id for a brand-new conversation; a
-    /// retry keeps it so the reconnect resumes the same one via
-    /// `session/load` instead of losing history.
+    /// Shared teardown for a `/clear` reset and a post-`Error` retry: drop the
+    /// live handle and event pump, wipe the conversation model + every runtime
+    /// cache. Does NOT touch `session_id`/`restoring`/`status` — the two
+    /// callers differ there (fresh conversation vs. resume via `session/load`).
     fn teardown_transient_session_state(&mut self) {
         cancel_pending_permission(self);
         self.handle = None;
@@ -274,12 +251,9 @@ impl AgentChatView {
         self.session_updated_at = None;
     }
 
-    /// Full local reset for the `/clear` slash command: wipe the conversation
-    /// model and every runtime cache via [`Self::teardown_transient_session_state`],
-    /// then also drop the persisted session id. The caller
-    /// (`Workspace::reset_agent_chat_session`) then calls `connect_agent_chat`
-    /// to supersede this with a fresh `session/new`, so the view never sits
-    /// handle-less for a render.
+    /// Full local reset for `/clear`: teardown, then also drop the persisted
+    /// session id. The caller supersedes this with a fresh `connect_agent_chat`
+    /// right after, so the view never sits handle-less for a render.
     pub(in crate::workspace) fn reset_for_new_session(&mut self, cx: &mut Context<Self>) {
         self.teardown_transient_session_state();
         // Clear the persisted id so a restart resumes the fresh session, not
@@ -296,12 +270,8 @@ impl AgentChatView {
     }
 
     /// Reconnect after a terminal `Error` without losing the conversation:
-    /// same teardown as `reset_for_new_session` (clears local `items` so a
-    /// resume's replay doesn't duplicate what was already rendered before the
-    /// failure) but keeps `session_id`, so `connect_agent_chat` resumes via
-    /// `session/load` and the adapter replays the exact same history back.
-    /// Called by `Workspace::retry_agent_chat_connect`, which then
-    /// re-invokes `connect_agent_chat` with `self.session_id` as the resume.
+    /// same teardown as [`Self::reset_for_new_session`] but keeps `session_id`,
+    /// so the reconnect resumes via `session/load` and replays the history.
     pub(in crate::workspace) fn retry_for_reconnect(&mut self, cx: &mut Context<Self>) {
         self.teardown_transient_session_state();
         self.restoring = self.session_id.is_some();
@@ -310,10 +280,8 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Jump the conversation list to the bottom and re-engage `Tail` follow.
-    /// Backs the floating scroll-to-bottom button. The list internally re-arms
-    /// tail-following once it lands at the end, so a fresh streaming chunk keeps
-    /// sticking to the bottom.
+    /// Jump the conversation list to the bottom and re-engage `Tail` follow —
+    /// the list re-arms tail-following once it lands at the end.
     pub(in crate::workspace) fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
         self.list_state.scroll_to_end();
         cx.notify();

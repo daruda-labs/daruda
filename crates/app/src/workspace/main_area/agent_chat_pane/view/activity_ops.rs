@@ -1,9 +1,7 @@
 //! Activity/status queries and edge-detection for one Agent chat pane: is it
-//! busy, since when, and what completion is owed once it settles. Reads and
-//! writes [`ActivityTracker`](super::ActivityTracker) plus `queue.turn` and
-//! `items` (both still on [`AgentChatView`](super::AgentChatView) itself),
-//! which is why these stay `impl AgentChatView` methods here rather than
-//! moving onto `ActivityTracker` itself.
+//! busy, since when, and what completion is owed once it settles. Stay `impl
+//! AgentChatView` (not [`ActivityTracker`](super::ActivityTracker)) since they
+//! also need `queue.turn` and `items`.
 
 use daruda_acp::{ChatItem, subagent_activity};
 
@@ -13,10 +11,9 @@ use super::{
 };
 
 impl AgentChatView {
-    /// Map the view's internal state to a [`daruda_claude::SessionStatus`] for
-    /// the lane indicator aggregation. Returns `None` for states that should
-    /// not contribute an indicator (dormant `Idle` — session not yet started —
-    /// and `Error` — broken session).
+    /// Map to a [`daruda_claude::SessionStatus`] for the lane indicator.
+    /// `None` for states that shouldn't contribute one (dormant `Idle`, dead
+    /// `Error`).
     pub(in crate::workspace) fn to_session_status(&self) -> Option<daruda_claude::SessionStatus> {
         use daruda_claude::SessionStatus;
         match &self.status {
@@ -34,20 +31,12 @@ impl AgentChatView {
         }
     }
 
-    /// Whether the agent is doing work right now — the prompt turn is in flight
-    /// **or** at least one background subagent is still inside its run span. A
-    /// subagent's span (see [`daruda_acp::subagent_activity`]) stays active while
-    /// it has a live child tool OR its last child event was within
-    /// [`SUBAGENT_QUIESCENCE`], which bridges the gaps between a subagent's
-    /// sequential child calls so this predicate does not flicker off in them.
-    /// This is the animation-liveness predicate the status-pulse gate reads, kept
-    /// distinct from [`Self::activity_state`]: a pending permission changes the
-    /// badge *label* but must not stop a still-live subagent badge from animating.
-    /// Cheap O(1) pre-check: could this pane possibly be busy? A prompt turn in
-    /// flight, or at least one subagent has been seen this session (so the
-    /// `subagent_last_activity` map is non-empty). When false, `is_busy()` is
-    /// guaranteed false without scanning `items` — the gate the pulse uses to
-    /// avoid an O(items) scan of idle/terminated conversations every tick.
+    /// Cheap O(1) pre-check: could this pane possibly be busy (turn in flight,
+    /// or a subagent seen this session)? When false, `is_busy()` is guaranteed
+    /// false without scanning `items` — the gate the pulse uses to skip
+    /// idle/terminated conversations. Animation-liveness only, distinct from
+    /// [`Self::activity_state`]: a pending permission changes the badge label
+    /// but must not stop a still-live subagent badge from animating.
     pub(in crate::workspace) fn maybe_active(&self) -> bool {
         self.queue.turn.is_in_flight()
             || !self.activity.subagent_last_activity.is_empty()
@@ -86,11 +75,9 @@ impl AgentChatView {
         Some(delta)
     }
 
-    /// Sync the post-turn baseline to the current `AssistantText` count and clear
-    /// the dirty clock. Called wherever `items` is bulk-set to a known baseline
-    /// (turn settle, restore/replay completion, transient teardown) so only
-    /// messages arriving *after* that point count as a background follow-up —
-    /// the single update site for this mirrored count.
+    /// Sync the post-turn baseline to the current `AssistantText` count and
+    /// clear the dirty clock. Called wherever `items` is bulk-set to a known
+    /// baseline, so only messages arriving *after* count as a follow-up.
     pub(super) fn snap_post_turn_baseline(&mut self) {
         self.activity.post_turn_relayed_assistant_texts = self
             .items
@@ -111,11 +98,10 @@ impl AgentChatView {
             .any_running
     }
 
-    /// Advance the activity span for the current `now`, returning the pending
-    /// completion outcome exactly on the busy→idle edge (else `None`). Drives the
-    /// working-indicator elapsed anchor and the completion firing. Mutating
-    /// (updates `was_busy`/`activity_started_at`); callers are the prompt-send
-    /// path, the event-pump tail, the pulse tick, and the user-cancel path.
+    /// Advance the activity span for `now`, returning the pending completion
+    /// outcome exactly on the busy→idle edge (else `None`). Drives the
+    /// working-indicator elapsed anchor; called from the send path, the
+    /// event-pump tail, the pulse tick, and the user-cancel path.
     pub(in crate::workspace) fn reconcile_activity(
         &mut self,
         now: std::time::Instant,
@@ -160,13 +146,9 @@ impl AgentChatView {
         self.activity.activity_started_at.map(|t| t.elapsed())
     }
 
-    /// Count of subagents running *right now* for the working-indicator label
-    /// (`N subagents`); `None` when none are currently running. This is the live
-    /// in-flight count (`total - settled`), not a cumulative "done of total ever"
-    /// tally — the chip disappears the moment the last subagent settles. Uses the
-    /// same span derivation as `is_busy`: a subagent counts as running while it
-    /// has a live child tool or its last child activity was within
-    /// `SUBAGENT_QUIESCENCE`.
+    /// Count of subagents running *right now* (`total - settled`), for the
+    /// working-indicator label; `None` when none are running. Live count, not
+    /// a cumulative tally — the chip disappears once the last one settles.
     pub(in crate::workspace) fn subagent_progress(&self) -> Option<usize> {
         let a = subagent_activity(
             &self.items,
