@@ -62,9 +62,9 @@ impl PerAccountUsage {
     }
 
     /// Fold a fetch result into `key`'s outcome; returns `true` when what is on
-    /// screen changed, so only a meaningful change triggers a repaint. A
-    /// snapshot's `fetched_at` moves every tick, so it is deliberately not part
-    /// of the comparison — only the windows and the state are visible.
+    /// screen changed, so only a meaningful change triggers a repaint.
+    /// `UsageOutcome::rendered_key` is what "on screen" means, so a newly
+    /// rendered field can't be left out of this comparison by accident.
     pub(in crate::workspace) fn advance_usage(
         &mut self,
         key: UsageKey,
@@ -72,10 +72,7 @@ impl PerAccountUsage {
     ) -> bool {
         let prev = self.usage(key);
         let next = prev.clone().advance(result);
-        let visible_changed = prev.snapshot().map(|u| &u.windows)
-            != next.snapshot().map(|u| &u.windows)
-            || prev.is_stale() != next.is_stale()
-            || prev.is_signed_out() != next.is_signed_out();
+        let visible_changed = prev.rendered_key() != next.rendered_key();
         self.usage.insert(key, next);
         visible_changed
     }
@@ -96,8 +93,7 @@ impl PerAccountUsage {
     }
 
     /// Drop every cached quantity for `account` across all domains — run when
-    /// the account is deleted so no stale usage lingers under a dangling
-    /// selection.
+    /// the account is deleted so no usage lingers under a dangling selection.
     pub(in crate::workspace) fn remove(&mut self, account: AccountSelection) {
         self.usage.retain(|key, _| key.account != account);
         self.activity.remove(&account);
@@ -441,14 +437,15 @@ impl Workspace {
         }
     }
 
-    /// Manual-refresh backend for the Usage tab's ⟳ button. Re-fetches
-    /// all three usage sources (plan limits, service status, local
-    /// activity) once off the GPUI thread and forwards each into its
-    /// existing setter, keyed by the focused pane's account (mirroring
-    /// the background pump — see `sync::limits::spawn_loop`). The
-    /// `usage_refresh_in_flight` guard collapses rapid clicks into a
-    /// single in-flight round-trip; it is cleared when the fetch
-    /// resolves (or with the workspace if it is gone).
+    /// Manual-refresh backend for the Usage tab's ⟳ button. The tab shows every
+    /// auth domain at once, so this refreshes every domain — limits and status
+    /// per domain, plus local activity where the focused domain has any —
+    /// through the pump's own routing (`sync::limits::refresh_round`), which is
+    /// what keeps the two from filing a domain's data under different accounts.
+    ///
+    /// The `usage_refresh_in_flight` guard collapses rapid clicks into a single
+    /// in-flight round; it is cleared when the round resolves (or with the
+    /// workspace if it is gone).
     pub(in crate::workspace) fn refresh_usage_now(&mut self, cx: &mut Context<Self>) {
         if self.claude.usage_refresh_in_flight {
             return;
@@ -456,45 +453,33 @@ impl Workspace {
         self.claude.usage_refresh_in_flight = true;
         cx.notify();
 
-        // The focused pane's domain decides which sources apply, exactly as
-        // the pump resolves it — otherwise this path fetches Anthropic's
-        // endpoints for any focused account and files the result under that
-        // account's key.
         let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.focused_account_pane(cx),
         );
         let focused = self.focused_account();
-        let recipe = focused.recipe(domain);
-        let account_key = focused.key();
-        let config_dir = focused.into_config_dir();
 
         cx.spawn(async move |this, cx| {
-            let (limits, status, activity) = cx
+            let round = cx
                 .background_executor()
-                .spawn(async move {
-                    crate::workspace::sync::limits::fetch_all_for(recipe, config_dir.as_deref())
-                })
+                .spawn(
+                    async move { crate::workspace::sync::limits::refresh_round(focused, domain) },
+                )
                 .await;
 
             // The workspace can close mid-refresh; nothing to update or
             // unset then, so the dropped guard dies with the entity.
             // SILENT-OK: workspace gone mid-refresh — no state to clear.
             let _ = this.update(cx, |ws, cx| {
-                // Failures are forwarded too: which failure it was is what
-                // distinguishes a signed-out domain from a broken refresh.
-                ws.advance_usage(
-                    UsageKey {
-                        recipe,
-                        account: account_key,
-                    },
-                    limits,
-                    cx,
-                );
-                if let Ok(s) = status {
-                    ws.set_service_status(recipe, s, cx);
+                for (key, result) in round.limits {
+                    ws.advance_usage(key, result, cx);
                 }
-                if let Some(a) = activity {
-                    ws.set_activity_stats(account_key, a, cx);
+                for (recipe, result) in round.status {
+                    if let Ok(status) = result {
+                        ws.set_service_status(recipe, status, cx);
+                    }
+                }
+                if let Some((account, stats)) = round.activity {
+                    ws.set_activity_stats(account, stats, cx);
                 }
                 ws.claude.usage_refresh_in_flight = false;
                 cx.notify();

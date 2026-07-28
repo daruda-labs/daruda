@@ -206,26 +206,53 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
     })
 }
 
-/// One round of every usage source for an account in the `recipe` domain.
-/// Shared by the pump's per-endpoint loops and the Usage tab's manual-refresh
-/// button so the two can't disagree about where a domain's data comes from —
-/// the manual path used to fetch Anthropic's endpoints for *any* focused
-/// account and cache the result under that account's key.
+/// Everything one manual refresh gathered, ready to apply on the UI thread.
+pub(in crate::workspace) struct RefreshRound {
+    /// One entry per auth domain, keyed the way the pump keys it. Failures ride
+    /// along — which failure it was is what tells a signed-out domain from a
+    /// broken refresh.
+    pub limits: Vec<(UsageKey, Result<ProviderUsage, daruda_claude::FetchError>)>,
+    pub status: Vec<(
+        AccountRecipeId,
+        Result<ServiceStatus, daruda_claude::FetchError>,
+    )>,
+    /// `None` when the focused domain has no local activity log to read, or the
+    /// read found nothing.
+    pub activity: Option<(AccountSelection, ActivityStats)>,
+}
+
+/// One round of every usage source across every auth domain — the Usage tab's
+/// ⟳ button, which refreshes the whole dashboard rather than one section of it.
+/// Routes through the same [`target_account`] the pumps use, so the two can't
+/// disagree about which account a domain reads or whether activity applies.
 ///
 /// Blocking (HTTP + disk); call from the background executor.
-pub(in crate::workspace) fn fetch_all_for(
-    recipe: AccountRecipeId,
-    config_dir: Option<&Path>,
-) -> (
-    Result<ProviderUsage, daruda_claude::FetchError>,
-    Result<ServiceStatus, daruda_claude::FetchError>,
-    Option<ActivityStats>,
-) {
-    (
-        fetch_limits(recipe, config_dir),
-        fetch_status(recipe),
-        fetch_activity_in(config_dir),
-    )
+pub(in crate::workspace) fn refresh_round(
+    focused: FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) -> RefreshRound {
+    let mut limits = Vec::new();
+    let mut status = Vec::new();
+    for recipe in AccountRecipeId::ALL {
+        let account = usage_account(recipe, &focused, pane_domain);
+        let config_dir = target_account(Endpoint::Limits(recipe), focused.clone(), pane_domain)
+            .and_then(|(_, dir)| dir);
+        limits.push((
+            UsageKey { recipe, account },
+            fetch_limits(recipe, config_dir.as_deref()),
+        ));
+        status.push((recipe, fetch_status(recipe)));
+    }
+    let activity = target_account(Endpoint::Activity, focused, pane_domain).and_then(
+        |(account, config_dir)| {
+            fetch_activity_in(config_dir.as_deref()).map(|stats| (account, stats))
+        },
+    );
+    RefreshRound {
+        limits,
+        status,
+        activity,
+    }
 }
 
 fn fetch_limits(
