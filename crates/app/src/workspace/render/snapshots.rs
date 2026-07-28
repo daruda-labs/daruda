@@ -323,8 +323,7 @@ impl Workspace {
         let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.focused_account_pane(cx),
         );
-        let usage_availability =
-            crate::workspace::sync::limits::usage_availability(focused.recipe(pane_domain));
+        let focused_recipe = focused.recipe(pane_domain);
         let focused_account = focused.key();
         // Display-only identity for the Usage tab header: the focused
         // account's email when resolved, else a "System" fallback naming
@@ -337,17 +336,18 @@ impl Workspace {
                 .account_id()
                 .and_then(|id| self.accounts.find(id))
                 .and_then(|account| account.email.as_deref()),
-            focused.recipe(pane_domain),
+            focused_recipe,
         );
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
-            plan_limits: self
-                .claude
-                .usage_by_account
-                .plan_limits(focused_account)
-                .cloned(),
-            service_status: self.claude.service_status.clone(),
+            usage: self.claude.usage_by_account.usage(
+                crate::workspace::claude_session_ops::UsageKey {
+                    recipe: focused_recipe,
+                    account: focused_account,
+                },
+            ),
+            service_status: self.claude.service_status.get(&focused_recipe).cloned(),
             activity: self
                 .claude
                 .usage_by_account
@@ -376,7 +376,6 @@ impl Workspace {
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
-            usage_availability,
             account_label: account_label.into(),
         }
     }

@@ -106,6 +106,82 @@ impl ProviderUsage {
     }
 }
 
+/// What the latest poll established about one auth domain's usage. A domain
+/// nobody is signed into must disappear from the UI rather than show empty
+/// gauges, while a domain that *is* signed in and merely failed to refresh
+/// must keep showing its last numbers — otherwise every network hiccup makes
+/// the surface flicker out and back.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum UsageOutcome {
+    /// No poll has landed yet. Renders nothing at all, not a placeholder:
+    /// the first tick is close behind and a flash of empty chrome is worse
+    /// than a beat of absence.
+    #[default]
+    Pending,
+    /// The credential store holds nothing for this domain, so the user is not
+    /// signed in. The chip and the tab section disappear.
+    SignedOut,
+    /// Signed in, but the fetch failed — an expired token (which comes back as
+    /// an HTTP 401, not a missing credential), a network blip, a schema
+    /// change. Carries the last good snapshot when there is one so the numbers
+    /// stay on screen, marked stale.
+    Failed {
+        last: Option<ProviderUsage>,
+    },
+    Ok(ProviderUsage),
+}
+
+impl UsageOutcome {
+    /// Fold a fetch result into the next outcome, carrying the current
+    /// snapshot forward when the fetch failed. The single place the three
+    /// states are assigned, so no caller re-derives the rules.
+    pub fn advance(self, result: Result<ProviderUsage, FetchError>) -> Self {
+        match result {
+            Ok(usage) => Self::Ok(usage),
+            // A vanished credential means signed out, whatever was cached
+            // before: showing the previous account's numbers would be a lie.
+            Err(FetchError::NoToken) => Self::SignedOut,
+            Err(_) => Self::Failed {
+                last: self.into_snapshot(),
+            },
+        }
+    }
+
+    /// The snapshot to render, if any.
+    pub fn snapshot(&self) -> Option<&ProviderUsage> {
+        match self {
+            Self::Ok(usage) => Some(usage),
+            Self::Failed { last } => last.as_ref(),
+            Self::Pending | Self::SignedOut => None,
+        }
+    }
+
+    fn into_snapshot(self) -> Option<ProviderUsage> {
+        match self {
+            Self::Ok(usage) => Some(usage),
+            Self::Failed { last } => last,
+            Self::Pending | Self::SignedOut => None,
+        }
+    }
+
+    /// Whether this domain should appear on screen at all. `Pending` is hidden
+    /// too — it has nothing to show yet.
+    pub fn is_visible(&self) -> bool {
+        self.snapshot().is_some()
+    }
+
+    /// Whether what is on screen is known to be out of date, so the surface
+    /// can mark it.
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Failed { last: Some(_) })
+    }
+
+    /// Whether the last poll proved nobody is signed into this domain.
+    pub fn is_signed_out(&self) -> bool {
+        matches!(self, Self::SignedOut)
+    }
+}
+
 /// Utilization at which a window is spent and further prompts are refused.
 pub const LIMIT_REACHED_PERCENT: f32 = 100.0;
 /// Boundary at which a gauge flips from green to yellow.
@@ -288,6 +364,78 @@ mod tests {
     fn no_windows_means_no_headline() {
         let usage = ProviderUsage::new(AccountRecipeId::Claude, Vec::new(), None);
         assert!(usage.headline_window().is_none());
+    }
+
+    fn snapshot() -> ProviderUsage {
+        ProviderUsage::new(
+            AccountRecipeId::Claude,
+            vec![window(FIVE_HOURS, 42.0, WindowScope::Overall)],
+            None,
+        )
+    }
+
+    #[test]
+    fn a_missing_credential_means_signed_out() {
+        let outcome = UsageOutcome::Pending.advance(Err(FetchError::NoToken));
+        assert!(outcome.is_signed_out());
+        assert!(!outcome.is_visible());
+    }
+
+    /// The user signed out after a good poll: the cached numbers belong to an
+    /// account that is no longer there, so they must go rather than linger.
+    #[test]
+    fn signing_out_discards_the_cached_snapshot() {
+        let outcome = UsageOutcome::Ok(snapshot()).advance(Err(FetchError::NoToken));
+        assert_eq!(outcome, UsageOutcome::SignedOut);
+        assert!(outcome.snapshot().is_none());
+    }
+
+    /// An expired token arrives as an HTTP 401, not a missing credential — the
+    /// user is still signed in, so the numbers stay put and get marked stale.
+    #[test]
+    fn a_failed_refresh_keeps_the_last_good_snapshot_and_marks_it_stale() {
+        let good = snapshot();
+        let outcome = UsageOutcome::Ok(good.clone()).advance(Err(FetchError::Http("401".into())));
+        assert!(outcome.is_visible());
+        assert!(outcome.is_stale());
+        assert_eq!(outcome.snapshot(), Some(&good));
+    }
+
+    #[test]
+    fn a_failure_before_any_success_shows_nothing_and_is_not_stale() {
+        let outcome = UsageOutcome::Pending.advance(Err(FetchError::Parse("bad".into())));
+        assert_eq!(outcome, UsageOutcome::Failed { last: None });
+        assert!(!outcome.is_visible());
+        assert!(!outcome.is_stale());
+        assert!(!outcome.is_signed_out());
+    }
+
+    #[test]
+    fn repeated_failures_do_not_lose_the_snapshot() {
+        let good = snapshot();
+        let outcome = UsageOutcome::Ok(good.clone())
+            .advance(Err(FetchError::Http("500".into())))
+            .advance(Err(FetchError::Http("500".into())));
+        assert_eq!(outcome.snapshot(), Some(&good));
+    }
+
+    #[test]
+    fn a_success_clears_staleness() {
+        let outcome = UsageOutcome::Failed {
+            last: Some(snapshot()),
+        }
+        .advance(Ok(snapshot()));
+        assert!(!outcome.is_stale());
+        assert!(outcome.is_visible());
+    }
+
+    #[test]
+    fn pending_shows_nothing_without_claiming_a_reason() {
+        let pending = UsageOutcome::default();
+        assert_eq!(pending, UsageOutcome::Pending);
+        assert!(!pending.is_visible());
+        assert!(!pending.is_signed_out());
+        assert!(!pending.is_stale());
     }
 
     #[test]

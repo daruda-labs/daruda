@@ -108,12 +108,10 @@ pub(super) struct StatusBarData {
     /// Status associated with `ports`, used to keep the Ports chip
     /// visible for pending, unavailable, and successful-empty scans.
     pub ports_status: PortScanStatus,
-    /// Plan-rate limits cached for the focused pane's account
-    /// (`ClaudeContext::usage_by_account`), for the usage chip. Default
-    /// (every window `None`) before the first fetch lands for that
-    /// account, or for an account with no Claude usage backend — the
-    /// chip hides itself rather than showing an empty gauge.
-    pub usage: Option<daruda_claude::ProviderUsage>,
+    /// What the last plan-rate poll established for the focused pane's
+    /// account (`ClaudeContext::usage_by_account`), for the usage chip. The
+    /// chip hides itself unless there are numbers to show.
+    pub usage: daruda_claude::UsageOutcome,
     /// Which segments the user has toggled on, via the status bar's
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.
@@ -255,7 +253,7 @@ impl RenderOnce for StatusBar {
             })
             .when(data.visible.is_visible(StatusBarItem::ClaudeUsage), |el| {
                 el.children(usage_chip::render(
-                    data.usage.as_ref(),
+                    data.usage.snapshot(),
                     density,
                     data.workspace.clone(),
                     cx,

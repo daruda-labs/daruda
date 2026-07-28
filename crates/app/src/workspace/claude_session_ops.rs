@@ -20,31 +20,37 @@ use std::collections::HashMap;
 
 use gpui::Task;
 
-use daruda_store::accounts::AccountSelection;
+use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 
 use crate::hooks::pty_tracker::{PtyBinding, PtyTracker};
 use crate::workspace::main_area::pane_tree::PaneId;
 
+/// Which account's usage a cache entry belongs to. The auth domain is part of
+/// the key because [`AccountSelection::SystemDefault`] names a *different*
+/// login in each domain — the ambient Claude login and the ambient Codex login
+/// would otherwise collide on one slot and overwrite each other every tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::workspace) struct UsageKey {
+    pub recipe: AccountRecipeId,
+    pub account: AccountSelection,
+}
+
 /// Per-account cache of the two usage quantities the Usage tab renders —
-/// plan-rate limits and locally-aggregated activity — keyed by
-/// [`AccountSelection`]. Encapsulates the maps behind typed getters/setters
-/// so callers never reach into a raw `HashMap`; the setters return whether
-/// a *visible* field changed, letting the caller decide `cx.notify()`
-/// (keeps GPUI out of this plain-data type). The system-default slot is just
-/// the [`AccountSelection::SystemDefault`] key — no special-casing.
+/// plan-rate limits and locally-aggregated activity. Encapsulates the maps
+/// behind typed getters/setters so callers never reach into a raw `HashMap`;
+/// the setters return whether a *visible* field changed, letting the caller
+/// decide `cx.notify()` (keeps GPUI out of this plain-data type).
 #[derive(Default)]
 pub(in crate::workspace) struct PerAccountUsage {
-    plan_limits: HashMap<AccountSelection, daruda_claude::ProviderUsage>,
+    usage: HashMap<UsageKey, daruda_claude::UsageOutcome>,
     activity: HashMap<AccountSelection, daruda_claude::ActivityStats>,
 }
 
 impl PerAccountUsage {
-    /// The cached plan-rate snapshot for `key`, if any has landed.
-    pub(in crate::workspace) fn plan_limits(
-        &self,
-        key: AccountSelection,
-    ) -> Option<&daruda_claude::ProviderUsage> {
-        self.plan_limits.get(&key)
+    /// What the last poll established for `key`. `Pending` before the first
+    /// one lands, so callers never have to treat "absent" separately.
+    pub(in crate::workspace) fn usage(&self, key: UsageKey) -> daruda_claude::UsageOutcome {
+        self.usage.get(&key).cloned().unwrap_or_default()
     }
 
     /// The cached activity aggregate for `key`, if any has landed.
@@ -55,22 +61,22 @@ impl PerAccountUsage {
         self.activity.get(&key)
     }
 
-    /// Insert/replace the plan-rate snapshot for `key`; returns `true` when
-    /// a visible window (5-hour or 7-day) differs from the prior entry, so
-    /// only a meaningful change triggers a repaint.
-    pub(in crate::workspace) fn set_plan_limits(
+    /// Fold a fetch result into `key`'s outcome; returns `true` when what is on
+    /// screen changed, so only a meaningful change triggers a repaint. A
+    /// snapshot's `fetched_at` moves every tick, so it is deliberately not part
+    /// of the comparison — only the windows and the state are visible.
+    pub(in crate::workspace) fn advance_usage(
         &mut self,
-        key: AccountSelection,
-        limits: daruda_claude::ProviderUsage,
+        key: UsageKey,
+        result: Result<daruda_claude::ProviderUsage, daruda_claude::FetchError>,
     ) -> bool {
-        // `fetched_at` moves every tick, so comparing whole snapshots would
-        // repaint on every poll. Only the windows are on screen — all of them,
-        // where this used to skip the Opus one.
-        let visible_changed = self
-            .plan_limits
-            .get(&key)
-            .is_none_or(|prev| prev.windows != limits.windows);
-        self.plan_limits.insert(key, limits);
+        let prev = self.usage(key);
+        let next = prev.clone().advance(result);
+        let visible_changed = prev.snapshot().map(|u| &u.windows)
+            != next.snapshot().map(|u| &u.windows)
+            || prev.is_stale() != next.is_stale()
+            || prev.is_signed_out() != next.is_signed_out();
+        self.usage.insert(key, next);
         visible_changed
     }
 
@@ -89,11 +95,12 @@ impl PerAccountUsage {
         true
     }
 
-    /// Drop both cached quantities for `key` — run when its account is
-    /// deleted so no stale usage lingers under a dangling selection.
-    pub(in crate::workspace) fn remove(&mut self, key: AccountSelection) {
-        self.plan_limits.remove(&key);
-        self.activity.remove(&key);
+    /// Drop every cached quantity for `account` across all domains — run when
+    /// the account is deleted so no stale usage lingers under a dangling
+    /// selection.
+    pub(in crate::workspace) fn remove(&mut self, account: AccountSelection) {
+        self.usage.retain(|key, _| key.account != account);
+        self.activity.remove(&account);
     }
 }
 
@@ -105,22 +112,19 @@ pub(in crate::workspace) struct ClaudeContext {
     pub(in crate::workspace) usage_poll: daruda_config::PollConfig,
 
     /// Per-account cache of the Usage tab's two quantities (plan-rate
-    /// limits + locally-aggregated activity), keyed by
-    /// [`AccountSelection`](daruda_store::accounts::AccountSelection).
-    /// Default-constructed (empty) before the first fetch/aggregation, so
-    /// gauges + activity cards render in their placeholder state for
-    /// whichever account is focused. Reads/writes go through
-    /// [`PerAccountUsage`]'s typed getters/setters (`set_plan_limits` /
-    /// `set_activity_stats` decide `cx.notify()` from the returned
-    /// "visible changed" flag).
+    /// limits + locally-aggregated activity), keyed by [`UsageKey`].
+    /// Empty before the first fetch/aggregation, which reads back as
+    /// `UsageOutcome::Pending`. Reads/writes go through [`PerAccountUsage`]'s
+    /// typed getters/setters (`advance_usage` / `set_activity_stats` decide
+    /// `cx.notify()` from the returned "visible changed" flag).
     pub(in crate::workspace) usage_by_account: PerAccountUsage,
 
-    /// Latest service-status indicator from `status.claude.com`.
-    /// Account-independent — `status.claude.com` reports Anthropic's
-    /// service health, not a per-account quantity. Default-constructed
-    /// (`Unknown`) before the first fetch lands; `set_service_status`
-    /// updates and bumps `cx.notify()`.
-    pub(in crate::workspace) service_status: daruda_claude::ServiceStatus,
+    /// Latest service-status indicator per auth domain. Account-independent —
+    /// a status page reports its provider's health, not a per-account
+    /// quantity — but not domain-independent: each provider hosts its own
+    /// page. Absent before that domain's first fetch lands;
+    /// `set_service_status` updates and bumps `cx.notify()`.
+    pub(in crate::workspace) service_status: HashMap<AccountRecipeId, daruda_claude::ServiceStatus>,
 
     /// Guards `refresh_usage_now` against overlapping manual refreshes —
     /// the button's one-shot fetch sets this on entry and clears it when
@@ -386,32 +390,35 @@ impl Workspace {
             .is_some_and(|(pane_id, _)| *pane_id == self.active_runtime().focused_pane_id)
     }
 
-    /// Replace the cached plan-rate snapshot for `key` (the account it was
-    /// fetched for; [`AccountSelection::SystemDefault`] = system default).
-    /// Called by `limits_pump` after a successful `/api/oauth/usage` fetch.
-    /// Skips `cx.notify()` when only `fetched_at` moved for that account's
-    /// prior entry.
-    pub(in crate::workspace) fn set_plan_limits(
+    /// Fold a plan-rate fetch result into `key`'s cached outcome. Called by the
+    /// limits pump and by `refresh_usage_now` — including on failure, since
+    /// which failure it was is what tells a signed-out domain from a domain
+    /// whose refresh merely broke. Skips `cx.notify()` when nothing visible
+    /// moved.
+    pub(in crate::workspace) fn advance_usage(
         &mut self,
-        key: AccountSelection,
-        limits: daruda_claude::ProviderUsage,
+        key: UsageKey,
+        result: Result<daruda_claude::ProviderUsage, daruda_claude::FetchError>,
         cx: &mut Context<Self>,
     ) {
-        if self.claude.usage_by_account.set_plan_limits(key, limits) {
+        if self.claude.usage_by_account.advance_usage(key, result) {
             cx.notify();
         }
     }
 
-    /// Replace the cached service-status snapshot. Called by
-    /// `limits_pump` after a successful `status.claude.com` fetch.
+    /// Replace one provider's cached service-status snapshot. Called by the
+    /// status pump after a successful fetch of that provider's status page.
     pub(in crate::workspace) fn set_service_status(
         &mut self,
+        recipe: AccountRecipeId,
         status: daruda_claude::ServiceStatus,
         cx: &mut Context<Self>,
     ) {
-        let visible_changed = self.claude.service_status.indicator != status.indicator
-            || self.claude.service_status.description != status.description;
-        self.claude.service_status = status;
+        let prev = self.claude.service_status.get(&recipe);
+        let visible_changed = prev.is_none_or(|prev| {
+            prev.indicator != status.indicator || prev.description != status.description
+        });
+        self.claude.service_status.insert(recipe, status);
         if visible_changed {
             cx.notify();
         }
@@ -474,11 +481,18 @@ impl Workspace {
             // unset then, so the dropped guard dies with the entity.
             // SILENT-OK: workspace gone mid-refresh — no state to clear.
             let _ = this.update(cx, |ws, cx| {
-                if let Ok(l) = limits {
-                    ws.set_plan_limits(account_key, l, cx);
-                }
+                // Failures are forwarded too: which failure it was is what
+                // distinguishes a signed-out domain from a broken refresh.
+                ws.advance_usage(
+                    UsageKey {
+                        recipe,
+                        account: account_key,
+                    },
+                    limits,
+                    cx,
+                );
                 if let Ok(s) = status {
-                    ws.set_service_status(s, cx);
+                    ws.set_service_status(recipe, s, cx);
                 }
                 if let Some(a) = activity {
                     ws.set_activity_stats(account_key, a, cx);

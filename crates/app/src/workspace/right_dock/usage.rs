@@ -2,7 +2,7 @@
 //! gauges, today's stats, 7-day chart, totals) modelled on the Übersicht
 //! `claude-usage` widget.
 //!
-//! Plan limits come from `RightDockSnapshot::plan_limits` (limits pump);
+//! Plan limits come from `RightDockSnapshot::usage` (limits pump);
 //! activity from `RightDockSnapshot::activity` (local JSONL aggregation
 //! pump). The ↻ badge dispatches `Workspace::refresh_usage_now`. Static
 //! text comes from `surface::strings::usage_*`, pixels/colors from
@@ -18,7 +18,6 @@ use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*
 
 use super::super::layout::Dock;
 use super::super::layout::RightDockSnapshot;
-use super::super::sync::limits::UsageAvailability;
 use crate::surface::strings;
 use crate::ui::{
     ButtonVariants as _, Disableable as _, GroupBoxVariants as _, SectionHeader, Sizable as _,
@@ -27,32 +26,32 @@ use crate::ui::{
 
 /// Render the Usage tab body.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
-    if snap.usage_availability == UsageAvailability::UnsupportedDomain {
-        return unsupported_domain_body(snap.account_label.clone(), cx);
+    if snap.usage.is_signed_out() {
+        return signed_out_body(snap.account_label.clone(), cx);
     }
     crate::workspace::right_dock::right_panel_body()
         .child(header(
-            snap.plan_limits.as_ref().and_then(|u| u.plan.as_ref()),
+            snap.usage.snapshot().and_then(|u| u.plan.as_ref()),
             snap.account_label.clone(),
             cx,
         ))
-        .child(status_pill(&snap.service_status, cx))
+        .child(status_pill(snap.service_status.as_ref(), cx))
         .child(usage_section_header(
-            snap.plan_limits.as_ref().and_then(|u| u.fetched_at),
+            snap.usage.snapshot().and_then(|u| u.fetched_at),
             snap.usage_refresh_in_flight,
             &snap.workspace,
         ))
-        .child(gauges_block(snap.plan_limits.as_ref(), cx))
+        .child(gauges_block(snap.usage.snapshot(), cx))
         .child(today_block(&snap.activity, cx))
         .child(chart_block(&snap.activity, cx))
         .child(totals_block(&snap.activity, cx))
         .into_any_element()
 }
 
-/// Body for an account whose auth domain has no usage source: whose
-/// account this is, then a short notice — no brand title (this isn't
-/// Claude's data) and no gauges stuck on a permanent placeholder.
-fn unsupported_domain_body(account_label: SharedString, cx: &gpui::App) -> AnyElement {
+/// Body for a domain nobody is signed into: whose account slot this is, then a
+/// short notice — no brand title and no gauges stuck on a permanent
+/// placeholder.
+fn signed_out_body(account_label: SharedString, cx: &gpui::App) -> AnyElement {
     crate::workspace::right_dock::right_panel_body()
         .child(account_label_text(
             account_label,
@@ -534,7 +533,11 @@ fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement 
 
 /// Status row: a colored dot plus the upstream status label on a faint
 /// tint of the indicator color.
-fn status_pill(status: &ServiceStatus, cx: &gpui::App) -> impl IntoElement {
+fn status_pill(status: Option<&ServiceStatus>, cx: &gpui::App) -> impl IntoElement {
+    // Absent until this domain's first status fetch lands — the same dimmed
+    // "unknown" pill the API's own `Unknown` indicator produces.
+    let unknown = ServiceStatus::default();
+    let status = status.unwrap_or(&unknown);
     let color = indicator_color(status.indicator, cx);
     let label = strings::service_status_label(status);
     let muted_text = theme::current(cx).text_muted;

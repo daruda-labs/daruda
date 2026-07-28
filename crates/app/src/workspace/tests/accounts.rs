@@ -3,6 +3,7 @@
 
 use super::agent_chat::agent_view;
 use super::*;
+use crate::workspace::claude_session_ops::UsageKey;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::ChatItem;
 use daruda_store::accounts::{AccountId, AccountSelection};
@@ -428,14 +429,17 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
             AccountSelection::Managed(kept),
             AccountSelection::SystemDefault,
         ] {
-            ws.claude.usage_by_account.set_plan_limits(
-                key,
-                daruda_claude::ProviderUsage::new(
-                    daruda_store::accounts::AccountRecipeId::Claude,
-                    Vec::new(),
-                    None,
-                ),
-            );
+            // Seed both domains: a deleted account must be pruned from every
+            // one of them, not just the domain that happened to be focused.
+            for recipe in daruda_store::accounts::AccountRecipeId::ALL {
+                ws.claude.usage_by_account.advance_usage(
+                    UsageKey {
+                        recipe,
+                        account: key,
+                    },
+                    Ok(daruda_claude::ProviderUsage::new(recipe, Vec::new(), None)),
+                );
+            }
             ws.claude
                 .usage_by_account
                 .set_activity(key, daruda_claude::ActivityStats::default());
@@ -444,13 +448,27 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
         ws.clear_account_override(deleted, cx);
 
         let usage = &ws.claude.usage_by_account;
-        assert!(
-            usage
-                .plan_limits(AccountSelection::Managed(deleted))
-                .is_none()
+        let outcome = |account| {
+            usage.usage(UsageKey {
+                recipe: daruda_store::accounts::AccountRecipeId::Claude,
+                account,
+            })
+        };
+        assert_eq!(
+            outcome(AccountSelection::Managed(deleted)),
+            daruda_claude::UsageOutcome::Pending,
+            "a deleted account's usage must be gone, not merely stale"
         );
-        assert!(usage.plan_limits(AccountSelection::Managed(kept)).is_some());
-        assert!(usage.plan_limits(AccountSelection::SystemDefault).is_some());
+        assert!(outcome(AccountSelection::Managed(kept)).is_visible());
+        assert!(outcome(AccountSelection::SystemDefault).is_visible());
+        // The other domain's entry for the deleted account is gone too.
+        assert_eq!(
+            usage.usage(UsageKey {
+                recipe: daruda_store::accounts::AccountRecipeId::Codex,
+                account: AccountSelection::Managed(deleted),
+            }),
+            daruda_claude::UsageOutcome::Pending
+        );
 
         assert!(usage.activity(AccountSelection::Managed(deleted)).is_none());
         assert!(usage.activity(AccountSelection::Managed(kept)).is_some());

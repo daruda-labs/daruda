@@ -1139,12 +1139,17 @@ impl Render for Workspace {
         // Usage chip reads the same per-account cache the Usage tab does,
         // keyed by the focused pane's account, so switching panes swaps the
         // chip to that account's numbers without a refetch.
-        let usage_account = self.focused_account().key();
-        let usage = self
-            .claude
-            .usage_by_account
-            .plan_limits(usage_account)
-            .cloned();
+        let focused = self.focused_account();
+        let usage_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+            &self.focused_account_pane(cx),
+        );
+        let usage =
+            self.claude
+                .usage_by_account
+                .usage(crate::workspace::claude_session_ops::UsageKey {
+                    recipe: focused.recipe(usage_domain),
+                    account: focused.key(),
+                });
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),
