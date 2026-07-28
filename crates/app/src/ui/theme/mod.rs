@@ -270,7 +270,10 @@ pub fn apply_daruda_palette(cx: &mut App) {
     // custom scrollbar `crate::ui::scrollbar` has no track), so the built-in
     // gpui_component scrollbar's track bar must not paint a background.
     t.scrollbar = gpui::transparent_black();
-    t.scrollbar_thumb = d.button_widget_bg;
+    // Same slot the app-side custom thumbs read (translucent white) — an
+    // opaque surface-ladder gray vanishes on popover/modal surfaces that sit
+    // on the same rung (popover bg is byte-identical to `button_widget_bg`).
+    t.scrollbar_thumb = d.scrollbar_thumb;
     // Match the app-side custom scrollbar's hover (white-45%) so the built-in
     // scrollbar reads the same on hover as the panes' thumb.
     t.scrollbar_thumb_hover = d.file_viewer_scrollbar_thumb_hover;
@@ -619,6 +622,76 @@ mod tests {
 
             set_agent_chat_bg(cx, 128, 128, 128);
             assert!(agent_chat_syntax_is_light(cx), "l=128/255 crosses to light");
+        });
+    }
+
+    /// The built-in gpui_component scrollbar draws its thumb over popover /
+    /// modal surfaces (dropdown menus, dialogs). A thumb mapped to an opaque
+    /// surface-ladder gray was byte-identical to the popover background —
+    /// painted but invisible (the status-bar Ports dropdown regression).
+    /// The bridge must keep the thumb visually distinct on those surfaces.
+    #[gpui::test]
+    fn scrollbar_thumb_contrasts_with_popover_surface(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            let t = Theme::global(cx);
+            assert_ne!(
+                t.scrollbar_thumb, t.popover,
+                "thumb color equals the popover background — invisible scrollbar"
+            );
+            assert!(
+                t.scrollbar_thumb.a < 1.0,
+                "thumb should be translucent so it reads on any surface rung"
+            );
+        });
+    }
+
+    /// `apply_daruda_palette` maps ~80 slots by hand; nothing structural
+    /// stops a foreground slot from landing on its own surface color (the
+    /// invisible-scrollbar class of bug, above). Pin every foreground /
+    /// surface pair gpui_component widgets actually paint text with. This
+    /// only rejects the "same slot mapped twice" failure — not low
+    /// contrast in general — which is exactly the class the bridge has
+    /// shipped before.
+    #[gpui::test]
+    fn bridged_foreground_surface_pairs_stay_distinct(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            init_if_missing(cx);
+            let t = Theme::global(cx);
+            let pairs = [
+                ("foreground on background", t.foreground, t.background),
+                (
+                    "popover_foreground on popover",
+                    t.popover_foreground,
+                    t.popover,
+                ),
+                ("muted_foreground on muted", t.muted_foreground, t.muted),
+                ("accent_foreground on accent", t.accent_foreground, t.accent),
+                (
+                    "secondary_foreground on secondary",
+                    t.secondary_foreground,
+                    t.secondary,
+                ),
+                (
+                    "primary_foreground on primary",
+                    t.primary_foreground,
+                    t.primary,
+                ),
+                ("danger_foreground on danger", t.danger_foreground, t.danger),
+                (
+                    "tab_active_foreground on tab_active",
+                    t.tab_active_foreground,
+                    t.tab_active,
+                ),
+                (
+                    "group_box_foreground on group_box",
+                    t.group_box_foreground,
+                    t.group_box,
+                ),
+            ];
+            for (name, fg, bg) in pairs {
+                assert_ne!(fg, bg, "{name}: text color equals its surface — invisible");
+            }
         });
     }
 }
