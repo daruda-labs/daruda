@@ -148,6 +148,19 @@ impl UsageOutcome {
         }
     }
 
+    /// Everything a surface draws from this outcome, as a comparable key.
+    /// `fetched_at` is deliberately absent — it moves every poll, so including
+    /// it would repaint on every tick. Whoever adds a rendered field to
+    /// [`ProviderUsage`] adds it here, or the change won't reach the screen.
+    pub fn rendered_key(&self) -> (Option<&[UsageWindow]>, Option<&PlanInfo>, bool, bool) {
+        (
+            self.snapshot().map(|u| u.windows.as_slice()),
+            self.snapshot().and_then(|u| u.plan.as_ref()),
+            self.is_stale(),
+            self.is_signed_out(),
+        )
+    }
+
     /// The snapshot to render, if any.
     pub fn snapshot(&self) -> Option<&ProviderUsage> {
         match self {
@@ -165,9 +178,12 @@ impl UsageOutcome {
         }
     }
 
-    /// Whether this domain should appear on screen at all. `Pending` is hidden
-    /// too — it has nothing to show yet.
-    pub fn is_visible(&self) -> bool {
+    /// Whether there are numbers to render. Deliberately not named for
+    /// visibility: each surface decides that for itself — the status-bar pill
+    /// needs numbers to be worth its width, while the Usage tab keeps a section
+    /// for a `Pending` domain so the layout doesn't shift when the first poll
+    /// lands. The one rule both share is [`Self::is_signed_out`].
+    pub fn has_numbers(&self) -> bool {
         self.snapshot().is_some()
     }
 
@@ -346,9 +362,9 @@ mod tests {
         assert_eq!(both.headline_window().unwrap().scope, WindowScope::Overall);
     }
 
-    /// A provider metering one long window (Codex bills monthly) must still
-    /// get a headline — the old field-keyed rule returned nothing without a
-    /// 5-hour window, which would leave such a provider with no chip at all.
+    /// A provider metering one long window (Codex bills monthly) still gets a
+    /// headline: the rule keys on window length, not on a particular window
+    /// existing, so such a provider is not left without a chip.
     #[test]
     fn a_lone_long_window_is_still_the_headline() {
         let usage = ProviderUsage::new(
@@ -377,7 +393,7 @@ mod tests {
     fn a_missing_credential_means_signed_out() {
         let outcome = UsageOutcome::Pending.advance(Err(FetchError::NoToken));
         assert!(outcome.is_signed_out());
-        assert!(!outcome.is_visible());
+        assert!(!outcome.has_numbers());
     }
 
     /// The user signed out after a good poll: the cached numbers belong to an
@@ -395,7 +411,7 @@ mod tests {
     fn a_failed_refresh_keeps_the_last_good_snapshot_and_marks_it_stale() {
         let good = snapshot();
         let outcome = UsageOutcome::Ok(good.clone()).advance(Err(FetchError::Http("401".into())));
-        assert!(outcome.is_visible());
+        assert!(outcome.has_numbers());
         assert!(outcome.is_stale());
         assert_eq!(outcome.snapshot(), Some(&good));
     }
@@ -404,7 +420,7 @@ mod tests {
     fn a_failure_before_any_success_shows_nothing_and_is_not_stale() {
         let outcome = UsageOutcome::Pending.advance(Err(FetchError::Parse("bad".into())));
         assert_eq!(outcome, UsageOutcome::Failed { last: None });
-        assert!(!outcome.is_visible());
+        assert!(!outcome.has_numbers());
         assert!(!outcome.is_stale());
         assert!(!outcome.is_signed_out());
     }
@@ -425,16 +441,49 @@ mod tests {
         }
         .advance(Ok(snapshot()));
         assert!(!outcome.is_stale());
-        assert!(outcome.is_visible());
+        assert!(outcome.has_numbers());
     }
 
     #[test]
     fn pending_shows_nothing_without_claiming_a_reason() {
         let pending = UsageOutcome::default();
         assert_eq!(pending, UsageOutcome::Pending);
-        assert!(!pending.is_visible());
+        assert!(!pending.has_numbers());
         assert!(!pending.is_signed_out());
         assert!(!pending.is_stale());
+    }
+
+    /// The plan badge is on screen next to the gauges, so a tier change with
+    /// identical windows still has to reach it — the repaint gate compares this
+    /// key, and leaving `plan` out of it left the badge stale.
+    #[test]
+    fn the_rendered_key_notices_a_plan_change_with_unchanged_windows() {
+        let windows = vec![window(FIVE_HOURS, 42.0, WindowScope::Overall)];
+        let plan = |tier: &str| {
+            Some(PlanInfo {
+                tier: Some(tier.to_string()),
+                qualifier: None,
+            })
+        };
+        let pro = UsageOutcome::Ok(ProviderUsage::new(
+            AccountRecipeId::Claude,
+            windows.clone(),
+            plan("pro"),
+        ));
+        let team = UsageOutcome::Ok(ProviderUsage::new(
+            AccountRecipeId::Claude,
+            windows.clone(),
+            plan("team"),
+        ));
+        let same = UsageOutcome::Ok(ProviderUsage::new(
+            AccountRecipeId::Claude,
+            windows,
+            plan("pro"),
+        ));
+        assert_ne!(pro.rendered_key(), team.rendered_key());
+        // A re-poll that changed nothing visible must not repaint, even though
+        // `fetched_at` moved.
+        assert_eq!(pro.rendered_key(), same.rendered_key());
     }
 
     #[test]

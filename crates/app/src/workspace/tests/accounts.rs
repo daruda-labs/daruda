@@ -459,8 +459,8 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
             daruda_claude::UsageOutcome::Pending,
             "a deleted account's usage must be gone, not merely stale"
         );
-        assert!(outcome(AccountSelection::Managed(kept)).is_visible());
-        assert!(outcome(AccountSelection::SystemDefault).is_visible());
+        assert!(outcome(AccountSelection::Managed(kept)).has_numbers());
+        assert!(outcome(AccountSelection::SystemDefault).has_numbers());
         // The other domain's entry for the deleted account is gone too.
         assert_eq!(
             usage.usage(UsageKey {

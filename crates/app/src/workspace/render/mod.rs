@@ -1156,7 +1156,7 @@ impl Render for Workspace {
                     .usage(crate::workspace::claude_session_ops::UsageKey { recipe, account });
                 (recipe, outcome)
             })
-            .filter(|(_, outcome)| outcome.is_visible())
+            .filter(|(_, outcome)| outcome.has_numbers())
             .collect();
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
