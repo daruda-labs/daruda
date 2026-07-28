@@ -1,20 +1,20 @@
-//! Background-poll tasks for the Anthropic plan-rate API, the public
-//! service-status page, and the local JSONL activity aggregation.
+//! Background-poll tasks for each auth domain's plan-rate API, its provider's
+//! public service-status page, and the local JSONL activity aggregation.
 //!
-//! Three independent loops, one per endpoint, so cadences can differ
+//! One loop per (endpoint, domain) pair, so cadences can differ
 //! (`[usage.poll].limits_secs` vs. `status_secs`; `Activity` shares
 //! `limits_secs`), a hung fetch on one never blocks the others, and each can
 //! be disabled (`= 0`) independently. Each loop snapshots its live-reload-aware
 //! cadence, idle-rechecks when disabled, otherwise dispatches the blocking
 //! `ureq` fetch onto the background executor and forwards the result to a
-//! workspace setter, then sleeps the cadence. Failed fetches are silently
-//! dropped (previous snapshot stays); the Usage tab renders placeholders while
-//! the cache is still `Default::default()`.
+//! workspace setter, then sleeps the cadence. Limit fetches forward their
+//! failures too — see [`daruda_claude::UsageOutcome`]; a failed status fetch or
+//! a quiet activity tick leaves the previous value in place.
 //!
 //! Known limitation: the pump is per-`Workspace`, so N project windows fire
-//! `2 * N` account-wide requests per tick. Harmless at the default 5-minute
-//! cadence; a process-wide singleton would need to outlive Workspace (the
-//! Welcome window has none) to fix it.
+//! `2 * DOMAINS * N` account-wide requests per tick. Harmless at the default
+//! 5-minute cadence; a process-wide singleton would need to outlive Workspace
+//! (the Welcome window has none) to fix it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,15 +33,18 @@ use crate::workspace::main_area::pane::FocusedAccount;
 /// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 
-/// Spawn the endpoint pumps. Returns the `Task<()>` handles so the
-/// caller (Workspace constructor) can keep them alive in a field —
-/// dropping any task cancels its loop.
-pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Task<()>, Task<()>) {
-    (
-        spawn_loop(cx, Endpoint::Limits(AccountRecipeId::Claude)),
-        spawn_loop(cx, Endpoint::Status(AccountRecipeId::Claude)),
-        spawn_loop(cx, Endpoint::Activity),
-    )
+/// Spawn the endpoint pumps: limits and status for every auth domain, plus the
+/// single activity loop. Returns the `Task<()>` handles so the caller
+/// (Workspace constructor) can keep them alive in a field — dropping any task
+/// cancels its loop.
+pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> Vec<Task<()>> {
+    let mut pumps = Vec::new();
+    for recipe in AccountRecipeId::ALL {
+        pumps.push(spawn_loop(cx, Endpoint::Limits(recipe)));
+        pumps.push(spawn_loop(cx, Endpoint::Status(recipe)));
+    }
+    pumps.push(spawn_loop(cx, Endpoint::Activity));
+    pumps
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -85,15 +88,33 @@ fn target_account(
 ) -> Option<(AccountSelection, Option<PathBuf>)> {
     let focused_recipe = focused.recipe(pane_domain);
     match kind {
-        Endpoint::Limits(recipe) if recipe == focused_recipe => {
-            Some((focused.key(), focused.into_config_dir()))
+        Endpoint::Limits(recipe) => {
+            let account = usage_account(recipe, &focused, pane_domain);
+            let config_dir = (account != AccountSelection::SystemDefault)
+                .then(|| focused.into_config_dir())
+                .flatten();
+            Some((account, config_dir))
         }
-        Endpoint::Limits(_) => Some((AccountSelection::SystemDefault, None)),
         Endpoint::Activity if focused_recipe == AccountRecipeId::Claude => {
             Some((focused.key(), focused.into_config_dir()))
         }
         Endpoint::Activity => None,
         Endpoint::Status(_) => Some((AccountSelection::SystemDefault, None)),
+    }
+}
+
+/// The account key one domain's usage is cached under. The renderer needs the
+/// same answer the pump used, or it would read an empty slot — so both call
+/// this rather than each spelling the rule out.
+pub(in crate::workspace) fn usage_account(
+    recipe: AccountRecipeId,
+    focused: &FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) -> AccountSelection {
+    if recipe == focused.recipe(pane_domain) {
+        focused.key()
+    } else {
+        AccountSelection::SystemDefault
     }
 }
 
@@ -207,24 +228,15 @@ pub(in crate::workspace) fn fetch_all_for(
     )
 }
 
-/// A domain with no usage source reports `NoToken` rather than an empty
-/// snapshot, so the caller can't mistake "can't read this" for "read it and
-/// there was nothing".
 fn fetch_limits(
     recipe: AccountRecipeId,
     config_dir: Option<&Path>,
 ) -> Result<ProviderUsage, daruda_claude::FetchError> {
-    match usage::source_for(recipe) {
-        Some(source) => source.fetch(config_dir),
-        None => Err(daruda_claude::FetchError::NoToken),
-    }
+    usage::source_for(recipe).fetch(config_dir)
 }
 
 fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_claude::FetchError> {
-    match usage::source_for(recipe) {
-        Some(source) => service_status::fetch_service_status(source.status_url()),
-        None => Err(daruda_claude::FetchError::NoToken),
-    }
+    service_status::fetch_service_status(usage::source_for(recipe).status_url())
 }
 
 fn fetch_activity_in(config_dir: Option<&Path>) -> Option<ActivityStats> {

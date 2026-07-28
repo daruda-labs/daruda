@@ -199,15 +199,14 @@ pub(in crate::workspace) struct ClaudeContext {
     pub(in crate::workspace) last_pushed_notification:
         HashMap<String, chrono::DateTime<chrono::Utc>>,
 
-    /// Three background-poll tasks driving the Usage tab —
-    /// `/api/oauth/usage` (plan-rate windows), `status.claude.com`
-    /// (service status), and the local JSONL activity aggregation.
-    /// Each task re-reads the workspace's poll cadence every tick so
-    /// live config edits flow without restart. Dropping the tasks
-    /// (when Workspace is dropped) cancels the loops; held in a tuple
-    /// so a single field owns all three.
+    /// Background-poll tasks driving the Usage tab: plan-rate windows and
+    /// service status for each auth domain, plus the local JSONL activity
+    /// aggregation. Each task re-reads the workspace's poll cadence every tick
+    /// so live config edits flow without restart. Dropping the tasks (when
+    /// Workspace is dropped) cancels the loops; held in one field so the set
+    /// grows with the domain list rather than the struct.
     #[allow(dead_code)]
-    pub(in crate::workspace) _limits_pumps: (Task<()>, Task<()>, Task<()>),
+    pub(in crate::workspace) _limits_pumps: Vec<Task<()>>,
 }
 
 // ---- Workspace methods that own the claude field ----

@@ -631,6 +631,11 @@ pub fn usage_limit_window_months(n: u64) -> String {
 pub fn usage_limit_opus_suffix() -> String {
     rust_i18n::t!("usage.limit_opus_suffix").into_owned()
 }
+/// Marker appended to numbers a failed refresh left on screen, so the reading
+/// doesn't pass for current.
+pub fn usage_stale_marker() -> String {
+    rust_i18n::t!("usage.stale_marker").into_owned()
+}
 /// Placeholder label for either gauge when the OAuth token is
 /// unavailable, the API call failed, or the window is missing from
 /// the response.

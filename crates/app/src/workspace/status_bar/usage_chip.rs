@@ -13,6 +13,7 @@ use crate::workspace::Workspace;
 use crate::workspace::right_dock::usage::severity_color;
 use crate::workspace::usage_labels::{percent, window_label};
 use daruda_claude::{LimitSeverity, ProviderUsage, UsageWindow};
+use daruda_store::accounts::AccountRecipeId;
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 use std::time::{Duration, SystemTime};
 
@@ -31,35 +32,47 @@ struct WindowRow {
     resets_in: Option<Duration>,
 }
 
-/// Render the usage chip. `None` when the account has no usage snapshot yet or
-/// the provider reported no window — an empty chip would take status bar width
-/// to say nothing.
+/// Render one auth domain's usage chip. `None` when there are no numbers to
+/// show — an empty chip would take status bar width to say nothing, and a
+/// domain nobody is signed into should leave no trace.
 pub(super) fn render(
-    usage: Option<&ProviderUsage>,
+    recipe: AccountRecipeId,
+    outcome: &daruda_claude::UsageOutcome,
     density: StatusBarDensity,
     workspace: WeakEntity<Workspace>,
     cx: &App,
 ) -> Option<impl IntoElement> {
     let now = SystemTime::now();
-    let usage = usage?;
+    let usage = outcome.snapshot()?;
     let rows = rows(usage, now);
     let chip = window_row(usage.headline_window()?, now);
     let parts = chip_parts(&chip, density);
     let percent_color = row_color(&chip);
     let menu_rows = rows.clone();
+    let t = theme::current(cx);
+    // The brand mark is what tells two chips apart once the percentages are
+    // all that's left of them at the narrowest density.
+    let icon = crate::ui::agent_icon(
+        Some(crate::agent::icons::icon_for_recipe(recipe)),
+        px(theme::STATUS_BAR_AGENT_ICON_SIZE),
+        t.text_muted,
+    );
+    let label = crate::surface::strings::account_recipe_label(recipe);
     Some(
-        button_status_pill_bare("status-claude-usage", cx)
+        button_status_pill_bare(SharedString::from(format!("status-usage-{label}")), cx)
             .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+            .tooltip(SharedString::from(label))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
-                    // Only the percentage takes the severity colour; the
+                    // Only the percentage takes the severity colour; the icon,
                     // window name and countdown stay muted like every other
                     // status-bar label, so the colour reads as a gauge on one
                     // number instead of tinting the whole pill.
+                    .child(icon)
                     .children(
                         parts
                             .window
@@ -76,10 +89,19 @@ pub(super) fn render(
                         parts
                             .reset
                             .map(|reset| div().child(SharedString::from(reset))),
-                    ),
+                    )
+                    // A refresh that failed keeps the last numbers on screen;
+                    // this is what says they are no longer current.
+                    .when(outcome.is_stale(), |row| {
+                        row.child(
+                            div()
+                                .text_color(t.text_subtle)
+                                .child(SharedString::from(strings::usage_stale_marker())),
+                        )
+                    }),
             )
             .dropdown_menu(menu_builder(move |menu, _window, _cx| {
-                build_menu(&menu_rows, workspace.clone(), menu)
+                build_menu(recipe, &menu_rows, workspace.clone(), menu)
             })),
     )
 }
@@ -153,8 +175,15 @@ fn chip_parts(row: &WindowRow, density: StatusBarDensity) -> ChipParts {
 /// Section header, one gauge row per window, then a jump to the Usage
 /// tab. The gauge rows carry no click handler — there is nothing to act
 /// on per window, and `PopupMenu` dismisses on any click regardless.
-fn build_menu(rows: &[WindowRow], workspace: WeakEntity<Workspace>, menu: PopupMenu) -> PopupMenu {
-    let menu = menu.label(SharedString::from(strings::usage_limits_section_label()));
+fn build_menu(
+    recipe: AccountRecipeId,
+    rows: &[WindowRow],
+    workspace: WeakEntity<Workspace>,
+    menu: PopupMenu,
+) -> PopupMenu {
+    // Named after the domain, not "PLAN USAGE": with a pill per provider the
+    // dropdown has to say whose limits these are.
+    let menu = menu.label(SharedString::from(strings::account_recipe_label(recipe)));
     let menu = rows.iter().fold(menu, |menu, row| {
         let row = row.clone();
         menu.item(PopupMenuItem::element(move |_window, cx| {

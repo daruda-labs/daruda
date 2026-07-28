@@ -38,6 +38,26 @@ const SYSTEM_HOME_DIR: &str = system_home_dir!();
 /// [`SYSTEM_HOME_DIR`] as a tilde path, for the Settings "System" choice.
 pub(super) const SYSTEM_HOME_HINT: &str = concat!("~/", system_home_dir!());
 
+/// The ambient codex home every unmanaged pane reads: `$CODEX_HOME` when the
+/// user set it, else `~/.codex`. `None` only when there is no home directory
+/// and no override — nothing to read from.
+pub fn system_codex_home() -> Option<std::path::PathBuf> {
+    system_codex_home_from(std::env::var_os("CODEX_HOME"), dirs::home_dir())
+}
+
+/// Pure core of [`system_codex_home`], split out so the override and the
+/// default can be unit-tested without mutating the real process environment
+/// (parallel `cargo test` runs share one).
+fn system_codex_home_from(
+    override_dir: Option<std::ffi::OsString>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if let Some(dir) = override_dir {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    Some(home?.join(SYSTEM_HOME_DIR))
+}
+
 pub fn prepare_codex_home(dest: &Path) -> io::Result<()> {
     match dirs::home_dir() {
         Some(home) => prepare_dir_from(&home.join(SYSTEM_HOME_DIR), dest),

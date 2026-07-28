@@ -17,6 +17,7 @@ use crate::ui::theme;
 use crate::workspace::Workspace;
 use crate::workspace::sync::ports::{PortEntry, PortScanStatus};
 use daruda_config::StatusBarItem;
+use daruda_store::accounts::AccountRecipeId;
 use gpui::{App, IntoElement, RenderOnce, SharedString, WeakEntity, Window, div, prelude::*, px};
 
 /// Fixed height of the status bar in pixels.
@@ -108,10 +109,11 @@ pub(super) struct StatusBarData {
     /// Status associated with `ports`, used to keep the Ports chip
     /// visible for pending, unavailable, and successful-empty scans.
     pub ports_status: PortScanStatus,
-    /// What the last plan-rate poll established for the focused pane's
-    /// account (`ClaudeContext::usage_by_account`), for the usage chip. The
-    /// chip hides itself unless there are numbers to show.
-    pub usage: daruda_claude::UsageOutcome,
+    /// One entry per auth domain that has numbers to show, in
+    /// `AccountRecipeId::ALL` order. A domain nobody is signed into — or whose
+    /// first poll hasn't landed — contributes nothing, so the usage area is
+    /// empty for a user with no AI provider configured.
+    pub usage: Vec<(AccountRecipeId, daruda_claude::UsageOutcome)>,
     /// Which segments the user has toggled on, via the status bar's
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.
@@ -252,12 +254,12 @@ impl RenderOnce for StatusBar {
                 ))
             })
             .when(data.visible.is_visible(StatusBarItem::ClaudeUsage), |el| {
-                el.children(usage_chip::render(
-                    data.usage.snapshot(),
-                    density,
-                    data.workspace.clone(),
-                    cx,
-                ))
+                // One pill per signed-in domain: running Claude and Codex side
+                // by side is the case daruda exists for, so both readings stay
+                // visible rather than following focus.
+                el.children(data.usage.iter().filter_map(|(recipe, outcome)| {
+                    usage_chip::render(*recipe, outcome, density, data.workspace.clone(), cx)
+                }))
             })
             .when(show_account, |el| {
                 el.children(

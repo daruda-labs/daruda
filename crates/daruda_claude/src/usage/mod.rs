@@ -14,6 +14,7 @@ use crate::accounts::PlanInfo;
 use crate::http::FetchError;
 
 pub mod claude;
+pub mod codex;
 
 /// What a window meters, when its length alone doesn't say. Anthropic bills an
 /// Opus-only 7-day budget alongside the overall 7-day one, so the two windows
@@ -230,13 +231,11 @@ pub trait UsageSource: Send + Sync {
     fn status_url(&self) -> &'static str;
 }
 
-/// The usage source for `id`, or `None` for a domain daruda cannot read usage
-/// from yet — the caller skips the poll rather than reporting another
-/// provider's numbers under this domain's name.
-pub fn source_for(id: AccountRecipeId) -> Option<&'static dyn UsageSource> {
+/// The usage source for `id`. Total, like `accounts::recipe_for`.
+pub fn source_for(id: AccountRecipeId) -> &'static dyn UsageSource {
     match id {
-        AccountRecipeId::Claude => Some(&claude::ClaudeUsage),
-        AccountRecipeId::Codex => None,
+        AccountRecipeId::Claude => &claude::ClaudeUsage,
+        AccountRecipeId::Codex => &codex::CodexUsage,
     }
 }
 
