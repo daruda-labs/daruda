@@ -19,7 +19,7 @@ use gpui::{
 /// Read-only diff editor entities keyed by `"{tool_call_id}#{diff_index}"`
 /// (built in the ops layer; this view only embeds them). `pub(in
 /// crate::workspace)` rather than `pub(super)`: `AgentChatView::assets`
-/// (`view.rs`) uses this as its field type too, so both the owning cache
+/// (`view/mod.rs`) uses this as its field type too, so both the owning cache
 /// and its read-only render-side view share one definition.
 pub(in crate::workspace) type DiffEditors =
     std::collections::HashMap<String, Entity<crate::ui::InputState>>;
