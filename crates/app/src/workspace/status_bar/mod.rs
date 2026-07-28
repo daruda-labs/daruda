@@ -37,9 +37,9 @@ enum StatusBarDensity {
     /// Branch-only project/branch label; bare port count (no "Ports:"
     /// word); account slot label unchanged.
     Compact,
-    /// Same abbreviated project/branch and bare port count as
-    /// `Compact`; the account slot additionally drops its text label,
-    /// leaving only its dropdown chevron.
+    /// Narrowest tier. Same abbreviated project/branch and bare port
+    /// count as `Compact`; segments keep their labels and shed only
+    /// inter-word padding, so the name is historical.
     IconOnly,
 }
 

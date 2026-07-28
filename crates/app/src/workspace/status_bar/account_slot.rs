@@ -257,20 +257,6 @@ pub(super) fn render(
         }))
 }
 
-/// `"{label} ▾"` normally; at `IconOnly` the text label is dropped —
-/// only the dropdown chevron remains, so the dropdown stays discoverable
-/// without the row growing wide enough to force a wrap.
-#[cfg(test)]
-fn trigger_label(label: &str, density: super::StatusBarDensity) -> String {
-    if density == super::StatusBarDensity::IconOnly {
-        crate::surface::strings::TASK_PILL_CHEVRON
-            .trim_start()
-            .to_string()
-    } else {
-        format!("{label}{}", crate::surface::strings::TASK_PILL_CHEVRON)
-    }
-}
-
 /// Build the account slot's dropdown menu from the resolved slot: the
 /// domain-named "System default" entry (always present so a managed-account
 /// pane can always be reverted), then one headed section per auth domain
@@ -393,7 +379,6 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::status_bar::StatusBarDensity;
     use daruda_store::accounts::AccountId;
     use std::path::PathBuf;
 
@@ -439,17 +424,6 @@ mod tests {
             Some("alice@x.com")
         );
         assert_eq!(account_label(None, None), None);
-    }
-
-    #[test]
-    fn trigger_label_keeps_text_outside_icon_only() {
-        assert!(trigger_label("alice@x.com", StatusBarDensity::Full).starts_with("alice@x.com"));
-        assert!(trigger_label("alice@x.com", StatusBarDensity::Compact).starts_with("alice@x.com"));
-    }
-
-    #[test]
-    fn trigger_label_drops_text_at_icon_only() {
-        assert!(!trigger_label("alice@x.com", StatusBarDensity::IconOnly).contains("alice@x.com"));
     }
 
     #[test]
