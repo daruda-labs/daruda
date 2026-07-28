@@ -1095,23 +1095,16 @@ impl Render for Workspace {
             .and_then(|p| p.account_selection());
         let focused_account = focused_selection.map(|selection| {
             // The dropdown is scoped to the pane's own auth domain, so an
-            // agent-chat pane reads its own agent's launch rather than the
-            // session's active agent. `agent_id` lives in the view entity,
-            // hence the eager read into plain data here.
-            let slot_pane = match self.agent_chat_view(focused_pane_id) {
-                Some(view) => {
-                    let agent_id = view.read(cx).agent_id.clone();
-                    status_bar::SlotPane::AgentChat(self.agent_launch_for(&agent_id))
-                }
-                None => status_bar::SlotPane::Terminal,
-            };
-            let domain = status_bar::SlotDomain::for_pane(&slot_pane);
+            // agent-chat pane follows its own agent rather than the session's
+            // active one.
+            let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+                &self.focused_account_pane(cx),
+            );
             status_bar::AccountSlot::resolve(
                 focused_pane_id,
                 selection,
                 domain,
                 &self.accounts,
-                |recipe| self.login_command_for_recipe(recipe).is_some(),
                 weak_workspace.clone(),
                 login_pending,
             )

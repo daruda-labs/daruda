@@ -146,7 +146,7 @@ impl Workspace {
     pub(in crate::workspace) fn login_command_for_recipe(
         &self,
         requested: AccountRecipeId,
-    ) -> Option<String> {
+    ) -> String {
         let active_id = resolve_open_agent_id(&self.agents, self.last_agent_id.as_deref());
         resolve_login_command(&self.agents, &active_id, requested)
     }
@@ -169,9 +169,7 @@ impl Workspace {
     /// once the wait resolves.
     ///
     /// The command and the domain the new account is filed under come from
-    /// that one resolution, so they can't name different domains. Rejects
-    /// up front (toast, no process spawned) only when no login command
-    /// resolves at all.
+    /// that one resolution, so they can't name different domains.
     /// `pub(crate)`: the Settings window's Accounts section also calls this
     /// directly — via `WindowRegistry::first_workspace` — since the headless
     /// login has no other entry point that reaches a specific `Workspace`
@@ -194,16 +192,7 @@ impl Workspace {
             return;
         }
 
-        let Some(command) = self.login_command_for_recipe(recipe) else {
-            self.report_error(
-                ErrorReport::new(s::settings_accounts_login_unavailable())
-                    .severity(ErrorSeverity::Warning)
-                    .dedup("account.add.login_unavailable")
-                    .build(),
-                cx,
-            );
-            return;
-        };
+        let command = self.login_command_for_recipe(recipe);
 
         let account_id = AccountId::new();
         let config_dir = account_config_dir(&self.data_dir, account_id);
@@ -482,6 +471,7 @@ impl Workspace {
 
         let is_duplicate = match find_duplicate(
             &state,
+            recipe_id,
             identity.email.as_deref(),
             identity.organization.as_deref(),
         ) {
@@ -647,16 +637,7 @@ impl Workspace {
         // Scoped to the account's own domain: a login for another domain
         // run against this config dir would overwrite these credentials
         // with a different domain's.
-        let Some(command) = self.login_command_for_recipe(recipe) else {
-            self.report_error(
-                ErrorReport::new(s::settings_accounts_login_unavailable())
-                    .severity(ErrorSeverity::Warning)
-                    .dedup("account.reauth.login_unavailable")
-                    .build(),
-                cx,
-            );
-            return;
-        };
+        let command = self.login_command_for_recipe(recipe);
 
         // Defensive only: `config_dir` is the account's existing
         // directory from its original login, so this is a no-op unless
@@ -825,13 +806,17 @@ impl Workspace {
 /// (keeps the user's own pinned adapter version when it already signs into
 /// that domain), the first catalog entry that does, then the built-in
 /// adapter for the domain — so a catalog holding no agent for a domain can
-/// still add an account there. `None` only if even the built-in yields no
-/// command.
+/// still add an account there.
+///
+/// Total: every candidate that can win is a local `Raw` launch (a domain is
+/// only derived from one), and the built-in backstop is too, so
+/// `login_command` always answers. A domain with no local login flow at all
+/// would make this fallible again.
 pub(in crate::workspace) fn resolve_login_command(
     agents: &[daruda_config::AgentDefinition],
     active_id: &str,
     requested: AccountRecipeId,
-) -> Option<String> {
+) -> String {
     let login_args = recipe_for(requested).login_args();
     let signs_into_requested =
         |a: &&daruda_config::AgentDefinition| a.launch.account_recipe() == Some(requested);
@@ -840,11 +825,13 @@ pub(in crate::workspace) fn resolve_login_command(
         .find(|a| a.id == active_id)
         .filter(signs_into_requested);
     let from_catalog = || agents.iter().find(signs_into_requested);
-    active
+    let launch = active
         .or_else(from_catalog)
         .map(|a| a.launch.clone())
-        .unwrap_or_else(|| builtin_launch_for(requested))
+        .unwrap_or_else(|| builtin_launch_for(requested));
+    launch
         .login_command(login_args)
+        .expect("a domain-deriving launch is local Raw, which always yields a login command")
 }
 
 /// The built-in adapter launch for `recipe` — the fallback when the user's
@@ -905,23 +892,30 @@ pub(in crate::workspace) fn resolve_node_path_env(command: &str) -> Option<(Stri
     }
 }
 
-/// Matches an existing managed account with the *same* email *and* the
-/// same organization — a duplicate login for an account already tracked.
-/// Same email under a *different* organization (e.g. the same person's
-/// Claude account under two orgs) is treated as a distinct account, since
-/// Claude scopes usage/plan per organization. Two accounts that both have
-/// no captured email/org (`None`/`None`) are also considered duplicates of
-/// each other under this literal-equality rule — an edge case that
-/// shouldn't arise once Plan B logins always capture `oauthAccount`.
+/// Matches an existing managed account in the *same auth domain* with the
+/// *same* email *and* the same organization — a duplicate login for an
+/// account already tracked. The domain is part of the key because one
+/// person's Claude and Codex logins are separate credentials living in
+/// separate homes; keying on identity alone would discard the second one's
+/// fresh config dir as a duplicate of the first.
+///
+/// Same email under a *different* organization (e.g. the same person under
+/// two orgs) is a distinct account, since plan/usage is scoped per
+/// organization. Two accounts that both have no captured email/org
+/// (`None`/`None`) count as duplicates under this literal-equality rule —
+/// an edge case that shouldn't arise once a login always captures identity.
 pub(in crate::workspace) fn find_duplicate(
     state: &AccountsState,
+    recipe: AccountRecipeId,
     email: Option<&str>,
     org: Option<&str>,
 ) -> Option<AccountId> {
     state
         .accounts
         .iter()
-        .find(|a| a.email.as_deref() == email && a.organization.as_deref() == org)
+        .find(|a| {
+            a.recipe == recipe && a.email.as_deref() == email && a.organization.as_deref() == org
+        })
         .map(|a| a.id)
 }
 
@@ -1037,8 +1031,7 @@ mod tests {
                 "npx -y @agentclientprotocol/claude-agent-acp@latest",
             ),
         ];
-        let command = resolve_login_command(&agents, "pinned", AccountRecipeId::Claude)
-            .expect("active agent signs into Claude");
+        let command = resolve_login_command(&agents, "pinned", AccountRecipeId::Claude);
         assert!(command.starts_with("npx -y @agentclientprotocol/claude-agent-acp@1.2.3"));
         assert!(command.ends_with("--cli auth login --claudeai"));
     }
@@ -1052,8 +1045,7 @@ mod tests {
             ),
             agent("codex", "npx -y @agentclientprotocol/codex-acp@9.9.9"),
         ];
-        let command = resolve_login_command(&agents, "claude", AccountRecipeId::Codex)
-            .expect("catalog holds a Codex agent");
+        let command = resolve_login_command(&agents, "claude", AccountRecipeId::Codex);
         assert_eq!(
             command,
             "npx -y @agentclientprotocol/codex-acp@9.9.9 cli login"
@@ -1062,8 +1054,7 @@ mod tests {
 
     #[test]
     fn resolve_login_command_falls_back_to_the_builtin_for_an_empty_catalog() {
-        let command = resolve_login_command(&[], "", AccountRecipeId::Codex)
-            .expect("built-in Codex adapter has a login command");
+        let command = resolve_login_command(&[], "", AccountRecipeId::Codex);
         let builtin = daruda_config::AgentDefinition::codex_default();
         let daruda_config::AgentLaunch::Raw(raw) = builtin.launch else {
             panic!("the built-in Codex launch is Raw");
@@ -1101,8 +1092,7 @@ mod tests {
                 "npx -y @agentclientprotocol/claude-agent-acp@latest --cwd {{cwd}}",
             ),
         ];
-        let command = resolve_login_command(&agents, "remote-ssh", AccountRecipeId::Claude)
-            .expect("built-in Claude adapter has a login command");
+        let command = resolve_login_command(&agents, "remote-ssh", AccountRecipeId::Claude);
         let daruda_config::AgentLaunch::Raw(raw) =
             daruda_config::AgentDefinition::claude_default().launch
         else {
@@ -1124,8 +1114,24 @@ mod tests {
             created_at: 0,
             last_authenticated_at: 0,
         });
-        assert_eq!(find_duplicate(&st, Some("a@x.com"), Some("Org")), Some(id));
-        assert_eq!(find_duplicate(&st, Some("a@x.com"), Some("Other")), None); // same email, diff org = distinct
-        assert_eq!(find_duplicate(&st, Some("b@x.com"), Some("Org")), None);
+        let claude = AccountRecipeId::Claude;
+        assert_eq!(
+            find_duplicate(&st, claude, Some("a@x.com"), Some("Org")),
+            Some(id)
+        );
+        // Same email, different org — a distinct account.
+        assert_eq!(
+            find_duplicate(&st, claude, Some("a@x.com"), Some("Other")),
+            None
+        );
+        assert_eq!(
+            find_duplicate(&st, claude, Some("b@x.com"), Some("Org")),
+            None
+        );
+        // Same identity in another auth domain is separate credentials.
+        assert_eq!(
+            find_duplicate(&st, AccountRecipeId::Codex, Some("a@x.com"), Some("Org")),
+            None
+        );
     }
 }

@@ -320,8 +320,11 @@ impl Workspace {
         // no cache entry yet (never fetched, or the pump hasn't ticked
         // since focus moved) falls back to the placeholder default.
         let focused = self.focused_account();
+        let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+            &self.focused_account_pane(cx),
+        );
         let usage_availability =
-            crate::workspace::sync::limits::usage_availability(focused.recipe());
+            crate::workspace::sync::limits::usage_availability(focused.recipe(pane_domain));
         let focused_account = focused.key();
         // Display-only identity for the Usage tab header: the focused
         // account's email when resolved, else a "System" fallback naming
@@ -334,7 +337,7 @@ impl Workspace {
                 .account_id()
                 .and_then(|id| self.accounts.find(id))
                 .and_then(|account| account.email.as_deref()),
-            focused.recipe(),
+            focused.recipe(pane_domain),
         );
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,

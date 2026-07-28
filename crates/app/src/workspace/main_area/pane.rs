@@ -883,6 +883,58 @@ pub(in crate::workspace) struct PreparedAccount {
     pub(in crate::workspace) env: daruda_config::AccountEnv,
 }
 
+/// Which auth domains a pane may resolve a managed account from. Three
+/// distinct states, not an `Option<AccountRecipeId>`: "any domain" and "no
+/// domain at all" are opposites, and collapsing both onto `None` let a pane
+/// with no derivable domain accept an account from every domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum AccountDomain {
+    /// No agent (a terminal shell, which may run any CLI): every managed
+    /// account is usable, and the account's own recipe decides which env var
+    /// carries its dir.
+    Any,
+    /// The pane's agent signs into exactly this domain.
+    Exactly(daruda_store::accounts::AccountRecipeId),
+    /// The pane's agent has no local auth domain — a remote launch, a JSON
+    /// stdio config, or an adapter daruda doesn't recognize — so it can hold
+    /// no managed account.
+    Unsupported,
+}
+
+/// An account-carrying pane as the account layer sees it. File / TaskEdit
+/// panes track no account and are never described this way.
+pub(in crate::workspace) enum AccountPane {
+    Terminal,
+    /// Agent chat, carrying the launch of the agent it runs (`None` when that
+    /// agent id is no longer in the catalog).
+    AgentChat(Option<daruda_config::AgentLaunch>),
+}
+
+impl AccountDomain {
+    /// The domain an agent-chat pane resolves in, from its adapter's derived
+    /// auth domain. No domain means no managed account, never "any".
+    pub(in crate::workspace) fn for_agent(
+        recipe: Option<daruda_store::accounts::AccountRecipeId>,
+    ) -> Self {
+        match recipe {
+            Some(r) => Self::Exactly(r),
+            None => Self::Unsupported,
+        }
+    }
+
+    /// The domain a pane resolves in. An agent-chat pane is scoped to *its
+    /// own* agent's domain rather than the session's active agent, so a Codex
+    /// pane never offers Claude accounts.
+    pub(in crate::workspace) fn for_pane(pane: &AccountPane) -> Self {
+        match pane {
+            AccountPane::Terminal => Self::Any,
+            AccountPane::AgentChat(launch) => {
+                Self::for_agent(launch.as_ref().and_then(|l| l.account_recipe()))
+            }
+        }
+    }
+}
+
 /// Inject the account's config-dir env var and remove the auth-override vars
 /// its recipe strips, so OAuth account selection wins (see
 /// `daruda_config::account_env`).
@@ -895,20 +947,22 @@ fn apply_account_env(pty: &mut PtyConfig, env: &daruda_config::AccountEnv) {
 /// with. Pure (no I/O) so the domain gate stays unit-testable; preparing the
 /// dir is a separate, explicit step at the call site.
 ///
-/// `required` is the pane's agent's auth domain: `Some(r)` resolves only an
-/// account whose own recipe is `r`; `None` (a terminal, which has no agent)
-/// lets the account's own recipe govern. `SystemDefault` resolves to `None`
-/// with no domain-default fallback — that fallback overrode an explicit
-/// "System" choice; the default is seeded at pane creation instead.
+/// `domain` is what the pane's process can sign into — see [`AccountDomain`].
+/// `SystemDefault` resolves to `None` with no domain-default fallback: that
+/// fallback overrode an explicit "System" choice, so the default is seeded at
+/// pane creation instead.
 pub(in crate::workspace) fn resolve_pane_account(
     state: &daruda_store::accounts::AccountsState,
     data_dir: &Path,
     selection: daruda_store::accounts::AccountSelection,
-    required: Option<daruda_store::accounts::AccountRecipeId>,
+    domain: AccountDomain,
 ) -> Option<PreparedAccount> {
+    if domain == AccountDomain::Unsupported {
+        return None;
+    }
     let id = selection.account_id()?;
     let account = state.find(id)?;
-    if required.is_some_and(|r| account.recipe != r) {
+    if matches!(domain, AccountDomain::Exactly(r) if account.recipe != r) {
         return None;
     }
     let recipe = daruda_claude::accounts::recipe_for(account.recipe);
@@ -953,15 +1007,22 @@ impl FocusedAccount {
         }
     }
 
-    /// The auth domain whose usage sources apply. `SystemDefault` reports
-    /// Claude: the ambient `~/.claude` is a real Claude source, and the
-    /// pane's *agent* domain isn't reachable from here (see
-    /// [`resolve_focused_account`]), so a focused Codex pane on the system
-    /// account still shows the user's own Claude usage — misleading at
-    /// worst, never wrong data.
-    pub(in crate::workspace) fn recipe(&self) -> daruda_store::accounts::AccountRecipeId {
+    /// The auth domain whose usage sources apply. A managed account names its
+    /// own; `SystemDefault` has no account to ask, so `pane_domain` — the
+    /// focused pane's own agent domain — decides, falling back to Claude
+    /// where the pane has no agent (a terminal shell can run either CLI, and
+    /// the ambient `~/.claude` is a real Claude source).
+    pub(in crate::workspace) fn recipe(
+        &self,
+        pane_domain: AccountDomain,
+    ) -> daruda_store::accounts::AccountRecipeId {
         match self {
-            Self::SystemDefault => daruda_store::accounts::AccountRecipeId::Claude,
+            Self::SystemDefault => match pane_domain {
+                AccountDomain::Exactly(recipe) => recipe,
+                AccountDomain::Any | AccountDomain::Unsupported => {
+                    daruda_store::accounts::AccountRecipeId::Claude
+                }
+            },
             Self::Managed { recipe, .. } => *recipe,
         }
     }
@@ -978,10 +1039,12 @@ fn resolve_focused_account(
     state: &daruda_store::accounts::AccountsState,
     data_dir: &Path,
 ) -> FocusedAccount {
-    match selection
-        .account_id()
-        .zip(resolve_pane_account(state, data_dir, selection, None))
-    {
+    match selection.account_id().zip(resolve_pane_account(
+        state,
+        data_dir,
+        selection,
+        AccountDomain::Any,
+    )) {
         Some((id, account)) => FocusedAccount::Managed {
             id,
             recipe: account.recipe,
@@ -1026,6 +1089,21 @@ impl Workspace {
             .unwrap_or(daruda_store::accounts::AccountSelection::SystemDefault);
 
         resolve_focused_account(selection, &self.accounts, &self.data_dir)
+    }
+
+    /// The focused pane as the account layer sees it. An agent-chat pane's
+    /// `agent_id` lives in its view entity, hence the `cx` read; every caller
+    /// needs the resulting [`AccountDomain`], so the derivation lives here
+    /// rather than being rebuilt per surface.
+    pub(in crate::workspace) fn focused_account_pane(&self, cx: &gpui::App) -> AccountPane {
+        let focused_pane_id = self.active_runtime().focused_pane_id;
+        match self.agent_chat_view(focused_pane_id) {
+            Some(view) => {
+                let agent_id = view.read(cx).agent_id.clone();
+                AccountPane::AgentChat(self.agent_launch_for(&agent_id))
+            }
+            None => AccountPane::Terminal,
+        }
     }
 
     /// The account a *freshly created* pane is seeded with: `recipe`'s
@@ -1086,7 +1164,8 @@ impl Workspace {
     ) -> Result<Pane, PaneSpawnError> {
         let cwd = self.default_cwd_for_new_pane();
         let account = self.default_account_selection_for_new_pane(None);
-        let prepared = resolve_pane_account(&self.accounts, &self.data_dir, account, None);
+        let prepared =
+            resolve_pane_account(&self.accounts, &self.data_dir, account, AccountDomain::Any);
         self.create_pane_with_cwd(cwd, account, prepared.as_ref(), window, cx)
     }
 
@@ -1621,6 +1700,55 @@ mod tests {
     }
 
     #[test]
+    fn terminal_pane_takes_every_domain() {
+        assert_eq!(
+            AccountDomain::for_pane(&AccountPane::Terminal),
+            AccountDomain::Any
+        );
+    }
+
+    #[test]
+    fn agent_chat_pane_scopes_to_its_own_adapter() {
+        let claude = AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
+            "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+        )));
+        assert_eq!(
+            AccountDomain::for_pane(&claude),
+            AccountDomain::Exactly(daruda_store::accounts::AccountRecipeId::Claude)
+        );
+
+        let codex = AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
+            "npx -y @agentclientprotocol/codex-acp@latest".into(),
+        )));
+        assert_eq!(
+            AccountDomain::for_pane(&codex),
+            AccountDomain::Exactly(daruda_store::accounts::AccountRecipeId::Codex)
+        );
+    }
+
+    #[test]
+    fn agent_chat_pane_on_a_remote_launch_has_no_domain() {
+        let remote = [
+            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Ssh {
+                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+                host: "build-box".into(),
+            })),
+            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Docker {
+                adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
+                container: "dev".into(),
+            })),
+            AccountPane::AgentChat(Some(daruda_config::AgentLaunch::Raw(
+                "ssh box sh -c 'cd \"{{cwd}}\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
+                    .into(),
+            ))),
+            AccountPane::AgentChat(None),
+        ];
+        for pane in &remote {
+            assert_eq!(AccountDomain::for_pane(pane), AccountDomain::Unsupported);
+        }
+    }
+
+    #[test]
     fn resolve_system_default_ignores_the_domain_default_even_when_set() {
         use daruda_store::accounts::{AccountRecipeId, AccountSelection, AccountsState};
         let (id, st) = accounts_with(AccountRecipeId::Claude);
@@ -1630,13 +1758,13 @@ mod tests {
         // configured. (Seeding a fresh pane with that default happens
         // once, at creation time — see
         // `Workspace::default_account_selection_for_new_pane`.)
-        for required in [
-            None,
-            Some(AccountRecipeId::Claude),
-            Some(AccountRecipeId::Codex),
+        for domain in [
+            AccountDomain::Any,
+            AccountDomain::Exactly(AccountRecipeId::Claude),
+            AccountDomain::Exactly(AccountRecipeId::Codex),
         ] {
             assert_eq!(
-                resolve_pane_account(&st, data, AccountSelection::SystemDefault, required),
+                resolve_pane_account(&st, data, AccountSelection::SystemDefault, domain),
                 None
             );
         }
@@ -1645,9 +1773,9 @@ mod tests {
             &st,
             data,
             AccountSelection::Managed(id),
-            Some(AccountRecipeId::Claude),
+            AccountDomain::Exactly(AccountRecipeId::Claude),
         )
-        .expect("a Claude account under a Claude-required pane resolves");
+        .expect("a Claude account under a Claude-scoped pane resolves");
         assert_eq!(
             resolved.config_dir,
             daruda_claude::accounts::account_config_dir(data, id)
@@ -1662,9 +1790,35 @@ mod tests {
         // no default set → None either way (uses system ~/.claude)
         let empty = AccountsState::default();
         assert_eq!(
-            resolve_pane_account(&empty, data, AccountSelection::SystemDefault, None),
+            resolve_pane_account(
+                &empty,
+                data,
+                AccountSelection::SystemDefault,
+                AccountDomain::Any
+            ),
             None
         );
+    }
+
+    #[test]
+    fn resolve_pane_account_refuses_every_account_when_no_domain_applies() {
+        use daruda_store::accounts::{AccountRecipeId, AccountSelection};
+        // A remote / JSON-stdio / unrecognized adapter can hold no managed
+        // account. `Unsupported` must refuse, where "no constraint" would
+        // have let every domain through.
+        for recipe in AccountRecipeId::ALL {
+            let (id, st) = accounts_with(recipe);
+            assert_eq!(
+                resolve_pane_account(
+                    &st,
+                    std::path::Path::new("/data"),
+                    AccountSelection::Managed(id),
+                    AccountDomain::Unsupported
+                ),
+                None,
+                "{recipe:?} must not reach a pane with no auth domain"
+            );
+        }
     }
 
     #[test]
@@ -1678,7 +1832,7 @@ mod tests {
                 &st,
                 data,
                 AccountSelection::Managed(id),
-                Some(AccountRecipeId::Codex)
+                AccountDomain::Exactly(AccountRecipeId::Codex)
             ),
             None
         );
@@ -1689,20 +1843,24 @@ mod tests {
         use daruda_store::accounts::{AccountRecipeId, AccountSelection};
         let (id, st) = accounts_with(AccountRecipeId::Codex);
         let data = std::path::Path::new("/data");
-        let codex_env = |required| {
-            resolve_pane_account(&st, data, AccountSelection::Managed(id), required)
+        let codex_env = |domain| {
+            resolve_pane_account(&st, data, AccountSelection::Managed(id), domain)
                 .expect("a Codex account resolves")
                 .env
                 .inject
         };
         assert!(
-            codex_env(Some(AccountRecipeId::Codex))
+            codex_env(AccountDomain::Exactly(AccountRecipeId::Codex))
                 .iter()
                 .any(|(k, _)| k == "CODEX_HOME")
         );
         // A terminal pane passes no constraint — the account's own recipe
         // still picks the env var.
-        assert!(codex_env(None).iter().any(|(k, _)| k == "CODEX_HOME"));
+        assert!(
+            codex_env(AccountDomain::Any)
+                .iter()
+                .any(|(k, _)| k == "CODEX_HOME")
+        );
     }
 
     #[test]
@@ -1714,7 +1872,7 @@ mod tests {
                 &empty,
                 std::path::Path::new("/data"),
                 AccountSelection::Managed(AccountId::new()),
-                None
+                AccountDomain::Any
             ),
             None
         );
@@ -1782,7 +1940,7 @@ mod tests {
         let (id, st) = accounts_with(AccountRecipeId::Claude);
         let focused =
             resolve_focused_account(AccountSelection::Managed(id), &st, Path::new("/data"));
-        assert_eq!(focused.recipe(), AccountRecipeId::Claude);
+        assert_eq!(focused.recipe(AccountDomain::Any), AccountRecipeId::Claude);
     }
 
     #[test]
@@ -1791,23 +1949,32 @@ mod tests {
         let (id, st) = accounts_with(AccountRecipeId::Codex);
         let focused =
             resolve_focused_account(AccountSelection::Managed(id), &st, Path::new("/data"));
-        assert_eq!(focused.recipe(), AccountRecipeId::Codex);
+        assert_eq!(focused.recipe(AccountDomain::Any), AccountRecipeId::Codex);
     }
 
     #[test]
-    fn focused_account_system_default_and_dangling_id_report_claude() {
+    fn focused_account_system_default_follows_the_focused_pane() {
         use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection, AccountsState};
-        // Documented limitation: the ambient environment is assumed to be
-        // Claude's — see `FocusedAccount::recipe`.
+        // With no account row to name a domain, the pane's own agent decides;
+        // a pane with no agent falls back to the ambient Claude home.
         let empty = AccountsState::default();
         let data = Path::new("/data");
         assert_eq!(
-            resolve_focused_account(AccountSelection::SystemDefault, &empty, data).recipe(),
+            resolve_focused_account(AccountSelection::SystemDefault, &empty, data)
+                .recipe(AccountDomain::Any),
             AccountRecipeId::Claude
+        );
+        // A Codex agent-chat pane on the ambient account reports Codex, so
+        // its usage panel shows the unsupported-domain notice instead of
+        // someone else's Claude numbers.
+        assert_eq!(
+            resolve_focused_account(AccountSelection::SystemDefault, &empty, data)
+                .recipe(AccountDomain::Exactly(AccountRecipeId::Codex)),
+            AccountRecipeId::Codex
         );
         assert_eq!(
             resolve_focused_account(AccountSelection::Managed(AccountId::new()), &empty, data)
-                .recipe(),
+                .recipe(AccountDomain::Any),
             AccountRecipeId::Claude
         );
     }

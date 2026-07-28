@@ -609,7 +609,7 @@ async fn a_terminal_pane_prepares_its_managed_accounts_config_dir(cx: &mut TestA
                 &ws.accounts,
                 &ws.data_dir,
                 selection,
-                None,
+                crate::workspace::main_area::pane::AccountDomain::Any,
             )
             .expect("the seeded Codex account resolves");
             ws.create_pane_with_cwd(

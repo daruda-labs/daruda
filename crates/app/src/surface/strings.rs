@@ -2240,12 +2240,6 @@ pub fn settings_accounts_login_already_exists() -> String {
 pub fn settings_accounts_login_failed() -> String {
     rust_i18n::t!("settings.accounts_login_failed").into_owned()
 }
-/// Toast shown when no login command can be resolved for the requested
-/// auth domain — neither the session's agent, the catalog, nor the
-/// built-in adapter for that domain yields one.
-pub fn settings_accounts_login_unavailable() -> String {
-    rust_i18n::t!("settings.accounts_login_unavailable").into_owned()
-}
 /// Toast shown when `add_managed_account` is called while a previous
 /// headless login is still in progress (`PendingLogin::InProgress`) — a
 /// second concurrent login would overwrite `pending_login`'s

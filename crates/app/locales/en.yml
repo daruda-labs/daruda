@@ -689,7 +689,6 @@ settings:
   accounts_login_added: "Account added."
   accounts_login_already_exists: "This account is already added — use Reauthenticate to refresh."
   accounts_login_failed: "Could not add account."
-  accounts_login_unavailable: "No sign-in command is available for this account type."
   accounts_login_busy: "An account login is already in progress."
   accounts_login_denied_detail: "The OAuth consent screen was denied."
   accounts_login_timed_out_detail: "The login process did not complete before timing out."

@@ -687,8 +687,12 @@ impl Workspace {
                         daruda_store::accounts::AccountSelection::from_persisted(*account_id);
                     // Terminal pane: no agent, so no required auth domain —
                     // the account's own recipe decides the env.
-                    let prepared =
-                        pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
+                    let prepared = pane::resolve_pane_account(
+                        &self.accounts,
+                        &self.data_dir,
+                        account,
+                        pane::AccountDomain::Any,
+                    );
                     self.create_pane_with_cwd(effective, account, prepared.as_ref(), window, cx)?
                 };
                 let new_id = pane.id;
@@ -727,8 +731,12 @@ impl Workspace {
                     // A degenerate Split materializes a terminal, which has
                     // no agent and so no domain default to inherit.
                     let account = self.default_account_selection_for_new_pane(None);
-                    let prepared =
-                        pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
+                    let prepared = pane::resolve_pane_account(
+                        &self.accounts,
+                        &self.data_dir,
+                        account,
+                        pane::AccountDomain::Any,
+                    );
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
                         account,

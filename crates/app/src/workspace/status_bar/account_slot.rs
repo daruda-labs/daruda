@@ -5,40 +5,14 @@
 use crate::surface::strings::account_recipe_label;
 use crate::ui::theme;
 use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
+use crate::workspace::main_area::pane::AccountDomain;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
-use daruda_config::AgentLaunch;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection, AccountsState, ManagedAccount};
 use gpui::{App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 
 const ACCOUNT_SLOT_MAX_WIDTH: f32 = 220.0;
 const ACCOUNT_SLOT_COMPACT_MAX_WIDTH: f32 = 150.0;
-
-/// The account-carrying pane kinds, as the render snapshot resolves them.
-/// File / TaskEdit panes track no account and never reach here.
-pub(in crate::workspace) enum SlotPane {
-    Terminal,
-    /// Agent chat, carrying the launch of the agent it runs (`None` when
-    /// that agent id is no longer in the catalog).
-    AgentChat(Option<AgentLaunch>),
-}
-
-/// The auth domain the focused pane's dropdown operates in. A pane's
-/// account must belong to the domain its process signs into, so the domain
-/// decides which accounts are even offered — `pane::resolve_pane_account`
-/// refuses a mismatch, and the dropdown must not present a choice the
-/// resolver will then reject.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::workspace) enum SlotDomain {
-    /// Terminal pane — no agent, so every managed account is selectable and
-    /// the account's own recipe decides what gets injected.
-    Any,
-    /// Agent-chat pane whose adapter has an auth domain.
-    Scoped(AccountRecipeId),
-    /// Agent-chat pane on a remote or unrecognized adapter — no local
-    /// browser OAuth, so it can hold no managed account.
-    Unsupported,
-}
 
 /// One recipe's block of switchable accounts in the dropdown.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,107 +32,80 @@ pub(in crate::workspace) enum AddAccountRow {
         recipe: AccountRecipeId,
         label: SharedString,
     },
-    /// Inert row — an add entry with no login command behind it, or the
-    /// note explaining why this pane can hold no managed account.
+    /// Inert row — the note explaining why this pane can hold no managed
+    /// account.
     Inert(SharedString),
 }
 
-impl SlotDomain {
-    /// Derive the domain from the focused pane. An agent-chat pane is
-    /// scoped to *its own* agent's domain rather than the session's active
-    /// agent, so a Codex pane never offers Claude accounts.
-    pub(in crate::workspace) fn for_pane(pane: &SlotPane) -> Self {
-        match pane {
-            SlotPane::Terminal => Self::Any,
-            SlotPane::AgentChat(launch) => launch
-                .as_ref()
-                .and_then(|launch| launch.account_recipe())
-                .map_or(Self::Unsupported, Self::Scoped),
+/// Full "System" wording for the dropdown entry and the pill's tooltip. A
+/// scoped domain names the ambient home it falls back to; the other two have
+/// no single one, so the path is left off rather than guessed.
+fn system_label(domain: AccountDomain) -> String {
+    match domain {
+        AccountDomain::Exactly(recipe) => crate::surface::strings::status_bar_account_system(
+            daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+        ),
+        AccountDomain::Any | AccountDomain::Unsupported => {
+            crate::surface::strings::status_bar_account_system_plain()
         }
     }
+}
 
-    /// Label for the always-present "System" entry. A scoped domain names
-    /// the ambient home it falls back to; the other two have no single one,
-    /// so the path is left off rather than guessed.
-    fn system_label(self) -> String {
-        match self {
-            Self::Scoped(recipe) => crate::surface::strings::status_bar_account_system(
-                daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
-            ),
-            Self::Any | Self::Unsupported => {
-                crate::surface::strings::status_bar_account_system_plain()
-            }
-        }
-    }
-
-    /// Managed accounts this pane may switch to, grouped one section per
-    /// recipe. Empty sections are dropped so the menu never shows a bare
-    /// header.
-    fn sections(self, accounts: &AccountsState) -> Vec<AccountSection> {
-        let recipes: Vec<AccountRecipeId> = match self {
-            Self::Any => AccountRecipeId::ALL.to_vec(),
-            Self::Scoped(recipe) => vec![recipe],
-            Self::Unsupported => Vec::new(),
-        };
-        recipes
-            .into_iter()
-            .filter_map(|recipe| {
-                let matching: Vec<ManagedAccount> = accounts
-                    .accounts
-                    .iter()
-                    .filter(|a| a.recipe == recipe)
-                    .cloned()
-                    .collect();
-                (!matching.is_empty()).then(|| AccountSection {
-                    recipe,
-                    label: account_recipe_label(recipe).into(),
-                    accounts: matching,
-                })
-            })
-            .collect()
-    }
-
-    /// The dropdown's add-account block. `login_available` answers whether
-    /// `Workspace::login_command_for_recipe` resolves anything for a domain
-    /// — a row with no command behind it is inert so the affordance doesn't
-    /// invite a click `add_managed_account` would immediately reject.
-    fn add_rows(self, login_available: impl Fn(AccountRecipeId) -> bool) -> Vec<AddAccountRow> {
-        let add_row = |recipe: AccountRecipeId, label: String| {
-            if login_available(recipe) {
-                AddAccountRow::Add {
-                    recipe,
-                    label: label.into(),
-                }
-            } else {
-                AddAccountRow::Inert(label.into())
-            }
-        };
-        match self {
-            Self::Scoped(recipe) => vec![add_row(
-                recipe,
-                crate::surface::strings::status_bar_add_account(),
-            )],
-            // A terminal may run any adapter, so each domain gets its own
-            // named entry — "+ Add account" alone wouldn't say which
-            // credentials it signs into.
-            Self::Any => AccountRecipeId::ALL
+/// Managed accounts this pane may switch to, grouped one section per recipe.
+/// Empty sections are dropped so the menu never shows a bare header.
+fn sections(domain: AccountDomain, accounts: &AccountsState) -> Vec<AccountSection> {
+    let recipes: Vec<AccountRecipeId> = match domain {
+        AccountDomain::Any => AccountRecipeId::ALL.to_vec(),
+        AccountDomain::Exactly(recipe) => vec![recipe],
+        AccountDomain::Unsupported => Vec::new(),
+    };
+    recipes
+        .into_iter()
+        .filter_map(|recipe| {
+            let matching: Vec<ManagedAccount> = accounts
+                .accounts
                 .iter()
-                .map(|&recipe| {
-                    add_row(
-                        recipe,
-                        crate::surface::strings::settings_accounts_add(&account_recipe_label(
-                            recipe,
-                        )),
-                    )
-                })
-                .collect(),
-            Self::Unsupported => vec![
-                AddAccountRow::Inert(crate::surface::strings::status_bar_add_account().into()),
-                AddAccountRow::Inert(
-                    crate::surface::strings::status_bar_account_unsupported().into(),
-                ),
-            ],
-        }
+                .filter(|a| a.recipe == recipe)
+                .cloned()
+                .collect();
+            (!matching.is_empty()).then(|| AccountSection {
+                recipe,
+                label: account_recipe_label(recipe).into(),
+                accounts: matching,
+            })
+        })
+        .collect()
+}
+
+/// The dropdown's add-account block. Every offered domain has a login command
+/// (`Workspace::login_command_for_recipe` is total), so an add row is inert
+/// only where no domain applies at all.
+fn add_rows(domain: AccountDomain) -> Vec<AddAccountRow> {
+    let add_row = |recipe: AccountRecipeId, label: String| AddAccountRow::Add {
+        recipe,
+        label: label.into(),
+    };
+    match domain {
+        AccountDomain::Exactly(recipe) => vec![add_row(
+            recipe,
+            crate::surface::strings::status_bar_add_account(),
+        )],
+        // A terminal may run any adapter, so each domain gets its own named
+        // entry — "+ Add account" alone wouldn't say which credentials it
+        // signs into.
+        AccountDomain::Any => AccountRecipeId::ALL
+            .iter()
+            .map(|&recipe| {
+                add_row(
+                    recipe,
+                    crate::surface::strings::settings_accounts_add(&account_recipe_label(recipe)),
+                )
+            })
+            .collect(),
+        AccountDomain::Unsupported => vec![
+            AddAccountRow::Inert(crate::surface::strings::status_bar_add_account().into()),
+            AddAccountRow::Inert(crate::surface::strings::status_bar_account_unsupported().into()),
+        ],
     }
 }
 
@@ -168,10 +115,16 @@ impl SlotDomain {
 /// [`AccountSelection`] + `Workspace.accounts`.
 #[derive(Clone)]
 pub(in crate::workspace) struct AccountSlot {
-    /// `"email (plan)"`, `"email"`, or the domain's "System" fallback.
+    /// Pill text: the account's email, else a bare "System". Kept short —
+    /// the status bar has ~150-220px here and an email needs all of it, so
+    /// the domain's home path lives in [`Self::tooltip`] and the dropdown's
+    /// System entry instead.
     pub label: SharedString,
+    /// Untruncated wording for the pill's tooltip, since the pill itself
+    /// clips: the email, or "System" naming the domain's ambient home.
+    pub tooltip: SharedString,
     /// The pane's auth domain — decides the "System" entry's wording.
-    pub domain: SlotDomain,
+    pub domain: AccountDomain,
     /// The focused pane the dropdown's menu items dispatch
     /// `Workspace::switch_pane_account` against.
     pub pane_id: PaneId,
@@ -198,9 +151,8 @@ impl AccountSlot {
     pub(in crate::workspace) fn resolve(
         pane_id: PaneId,
         selection: AccountSelection,
-        domain: SlotDomain,
+        domain: AccountDomain,
         accounts: &AccountsState,
-        login_available: impl Fn(AccountRecipeId) -> bool,
         workspace: WeakEntity<Workspace>,
         login_pending: bool,
     ) -> Self {
@@ -208,16 +160,20 @@ impl AccountSlot {
         // Status-bar slot shows the email only — the organization is omitted
         // here (it's still shown in the account dropdown to disambiguate
         // same-email accounts).
-        let label = account_label(resolved.and_then(|a| a.email.as_deref()), None)
-            .unwrap_or_else(|| domain.system_label());
+        let email = account_label(resolved.and_then(|a| a.email.as_deref()), None);
+        let label = email
+            .clone()
+            .unwrap_or_else(crate::surface::strings::status_bar_account_system_plain);
+        let tooltip = email.unwrap_or_else(|| system_label(domain));
         Self {
             label: label.into(),
+            tooltip: tooltip.into(),
             domain,
             pane_id,
             current: selection,
-            sections: domain.sections(accounts),
+            sections: sections(domain, accounts),
             workspace,
-            add_rows: domain.add_rows(login_available),
+            add_rows: add_rows(domain),
             login_pending,
         }
     }
@@ -244,17 +200,22 @@ pub(super) fn render(
     density: super::StatusBarDensity,
     cx: &App,
 ) -> impl IntoElement {
-    let label = (density != super::StatusBarDensity::IconOnly).then(|| slot.label.clone());
+    // The label rides every density: it is short by construction (an email or
+    // a bare "System"), and dropping it left a bare chevron with nothing to
+    // say which account was active.
+    let label = slot.label.clone();
     let max_width = if density == super::StatusBarDensity::Full {
         ACCOUNT_SLOT_MAX_WIDTH
     } else {
         ACCOUNT_SLOT_COMPACT_MAX_WIDTH
     };
+    let tooltip = slot.tooltip.clone();
     let slot = slot.clone();
     button_status_pill_bare("status-account", cx)
         .max_w(px(max_width))
         .overflow_hidden()
         .text_size(px(theme::STATUS_BAR_FONT_SIZE))
+        .tooltip(tooltip)
         .child(
             div()
                 .flex()
@@ -262,14 +223,14 @@ pub(super) fn render(
                 .items_center()
                 .min_w_0()
                 .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
-                .children(label.map(|label| {
+                .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .overflow_hidden()
                         .truncate()
-                        .child(label)
-                }))
+                        .child(label),
+                )
                 .child(div().flex_none().child(SharedString::from(
                     crate::surface::strings::TASK_PILL_CHEVRON.trim_start(),
                 ))),
@@ -307,7 +268,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
         let pane_id = slot.pane_id;
         let is_current = slot.current == AccountSelection::SystemDefault;
         menu.item(
-            PopupMenuItem::new(SharedString::from(slot.domain.system_label()))
+            PopupMenuItem::new(SharedString::from(system_label(slot.domain)))
                 .checked(is_current)
                 .on_click(move |_, window, app| {
                     if let Some(ws) = workspace.upgrade() {
@@ -469,12 +430,12 @@ mod tests {
     fn scoped_domain_lists_only_its_own_accounts() {
         let state = mixed_state();
 
-        let claude = SlotDomain::Scoped(AccountRecipeId::Claude).sections(&state);
+        let claude = sections(AccountDomain::Exactly(AccountRecipeId::Claude), &state);
         assert_eq!(claude.len(), 1);
         assert_eq!(claude[0].recipe, AccountRecipeId::Claude);
         assert_eq!(emails(&claude[0]), ["alice@x.com", "carol@x.com"]);
 
-        let codex = SlotDomain::Scoped(AccountRecipeId::Codex).sections(&state);
+        let codex = sections(AccountDomain::Exactly(AccountRecipeId::Codex), &state);
         assert_eq!(codex.len(), 1);
         assert_eq!(codex[0].recipe, AccountRecipeId::Codex);
         assert_eq!(emails(&codex[0]), ["bob@x.com"]);
@@ -482,7 +443,7 @@ mod tests {
 
     #[test]
     fn any_domain_groups_every_account_in_a_stable_order() {
-        let sections = SlotDomain::Any.sections(&mixed_state());
+        let sections = sections(AccountDomain::Any, &mixed_state());
         assert_eq!(
             sections.iter().map(|s| s.recipe).collect::<Vec<_>>(),
             AccountRecipeId::ALL
@@ -497,7 +458,7 @@ mod tests {
             accounts: vec![account("bob@x.com", AccountRecipeId::Codex)],
             ..AccountsState::default()
         };
-        let sections = SlotDomain::Any.sections(&state);
+        let sections = sections(AccountDomain::Any, &state);
         assert_eq!(
             sections.iter().map(|s| s.recipe).collect::<Vec<_>>(),
             [AccountRecipeId::Codex]
@@ -506,74 +467,22 @@ mod tests {
 
     #[test]
     fn unsupported_domain_lists_no_accounts() {
-        assert!(SlotDomain::Unsupported.sections(&mixed_state()).is_empty());
+        assert!(sections(AccountDomain::Unsupported, &mixed_state()).is_empty());
     }
 
     #[test]
     fn system_label_names_the_scoped_domains_home() {
         assert!(
-            SlotDomain::Scoped(AccountRecipeId::Claude)
-                .system_label()
-                .contains("~/.claude")
+            system_label(AccountDomain::Exactly(AccountRecipeId::Claude)).contains("~/.claude")
         );
-        assert!(
-            SlotDomain::Scoped(AccountRecipeId::Codex)
-                .system_label()
-                .contains("~/.codex")
-        );
-        let any = SlotDomain::Any.system_label();
+        assert!(system_label(AccountDomain::Exactly(AccountRecipeId::Codex)).contains("~/.codex"));
+        let any = system_label(AccountDomain::Any);
         assert!(!any.contains("~/.claude") && !any.contains("~/.codex"));
     }
 
     #[test]
-    fn terminal_pane_takes_every_domain() {
-        assert_eq!(SlotDomain::for_pane(&SlotPane::Terminal), SlotDomain::Any);
-    }
-
-    #[test]
-    fn agent_chat_pane_scopes_to_its_own_adapter() {
-        let claude = SlotPane::AgentChat(Some(AgentLaunch::Raw(
-            "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
-        )));
-        assert_eq!(
-            SlotDomain::for_pane(&claude),
-            SlotDomain::Scoped(AccountRecipeId::Claude)
-        );
-
-        let codex = SlotPane::AgentChat(Some(AgentLaunch::Raw(
-            "npx -y @agentclientprotocol/codex-acp@latest".into(),
-        )));
-        assert_eq!(
-            SlotDomain::for_pane(&codex),
-            SlotDomain::Scoped(AccountRecipeId::Codex)
-        );
-    }
-
-    #[test]
-    fn agent_chat_pane_on_a_remote_launch_has_no_domain() {
-        let remote = [
-            SlotPane::AgentChat(Some(AgentLaunch::Ssh {
-                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
-                host: "build-box".into(),
-            })),
-            SlotPane::AgentChat(Some(AgentLaunch::Docker {
-                adapter_command: "npx -y @agentclientprotocol/codex-acp@latest".into(),
-                container: "dev".into(),
-            })),
-            SlotPane::AgentChat(Some(AgentLaunch::Raw(
-                "ssh box sh -c 'cd \"{{cwd}}\" && npx -y @agentclientprotocol/claude-agent-acp@latest'"
-                    .into(),
-            ))),
-            SlotPane::AgentChat(None),
-        ];
-        for pane in &remote {
-            assert_eq!(SlotDomain::for_pane(pane), SlotDomain::Unsupported);
-        }
-    }
-
-    #[test]
     fn unsupported_domain_offers_no_login_and_says_why() {
-        let rows = SlotDomain::Unsupported.add_rows(|_| true);
+        let rows = add_rows(AccountDomain::Unsupported);
         assert!(
             rows.iter()
                 .all(|row| matches!(row, AddAccountRow::Inert(_))),
@@ -584,16 +493,19 @@ mod tests {
 
     #[test]
     fn terminal_domain_offers_one_named_add_entry_per_recipe() {
-        let rows = SlotDomain::Any.add_rows(|recipe| recipe == AccountRecipeId::Claude);
+        let rows = add_rows(AccountDomain::Any);
         assert_eq!(rows.len(), AccountRecipeId::ALL.len());
-        assert!(matches!(
-            rows[0],
-            AddAccountRow::Add {
-                recipe: AccountRecipeId::Claude,
-                ..
-            }
-        ));
-        // Codex resolves no login command here, so its entry is inert.
-        assert!(matches!(rows[1], AddAccountRow::Inert(_)));
+        // Every domain has a login command (the built-in adapter backs any
+        // catalog gap), so a terminal offers each one as clickable.
+        for (row, expected) in rows.iter().zip(AccountRecipeId::ALL) {
+            let AddAccountRow::Add { recipe, label } = row else {
+                panic!("every terminal add entry is clickable, got {row:?}");
+            };
+            assert_eq!(*recipe, expected);
+            assert!(
+                label.contains(&account_recipe_label(expected)),
+                "the entry must name the domain it signs into: {label}"
+            );
+        }
     }
 }

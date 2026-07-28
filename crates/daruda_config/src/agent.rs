@@ -134,6 +134,20 @@ pub const CWD_TOKEN: &str = "{{cwd}}";
 const CLAUDE_ADAPTER_MARKERS: &[&str] = &["claude-agent-acp", "claude-code-acp"];
 const CODEX_ADAPTER_MARKERS: &[&str] = &["codex-acp"];
 
+/// Leading character that marks a [`AgentLaunch::Raw`] command as a JSON
+/// stdio config rather than a shell command line — the same discrimination
+/// `daruda_acp`'s adapter parser makes.
+const JSON_STDIO_PREFIX: char = '{';
+
+/// Whether `command` is a JSON stdio config. Such a command carries its
+/// program, args and env as structured fields, so the shell-string edits in
+/// [`AgentLaunch::wrap_with_env`] and [`AgentLaunch::login_command`] would
+/// corrupt it — both are gated on this, and it also bars the launch from
+/// carrying a managed account at all.
+fn is_json_stdio(command: &str) -> bool {
+    command.trim_start().starts_with(JSON_STDIO_PREFIX)
+}
+
 /// `remote_path`, once validated non-blank by [`AgentLaunch::wrap`], borrowed
 /// back out — or `Err(())` when it is `None` or blank (whitespace-only).
 fn require_remote_path(remote_path: Option<&str>) -> Result<&str, ()> {
@@ -264,12 +278,13 @@ impl AgentLaunch {
     /// The auth domain a managed account for this agent belongs to, keyed by
     /// adapter rather than agent id so two catalog entries running the same
     /// adapter share one set of credentials. `None` for a remote launch (no
-    /// local browser to complete OAuth in) and for an unrecognized adapter.
+    /// local browser to complete OAuth in), for a JSON stdio config (see
+    /// [`Self::is_json_stdio`]), and for an unrecognized adapter.
     pub fn account_recipe(&self) -> Option<AccountRecipeId> {
         let AgentLaunch::Raw(command) = self else {
             return None;
         };
-        if self.needs_remote_cwd() {
+        if self.needs_remote_cwd() || is_json_stdio(command) {
             return None;
         }
         if CLAUDE_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
@@ -1240,6 +1255,26 @@ mod tests {
             )
             .account_recipe(),
             None
+        );
+    }
+
+    #[test]
+    fn account_recipe_is_none_for_a_json_stdio_config() {
+        // A JSON stdio config carries program/args/env as fields, so the
+        // shell-string edits a managed account needs would corrupt it — such
+        // a launch carries no account even though the adapter is recognized.
+        let json = AgentLaunch::Raw(
+            r#"{"command":"/opt/adapters/claude-agent-acp","args":["--stdio"]}"#.into(),
+        );
+        assert_eq!(json.account_recipe(), None);
+        // Leading whitespace must not hide the JSON shape.
+        let padded =
+            AgentLaunch::Raw("  {\"command\":\"/opt/adapters/codex-acp\",\"args\":[]}".into());
+        assert_eq!(padded.account_recipe(), None);
+        // A plain shell command naming the same adapter still resolves.
+        assert_eq!(
+            AgentLaunch::Raw("/opt/adapters/claude-agent-acp --stdio".into()).account_recipe(),
+            Some(AccountRecipeId::Claude)
         );
     }
 

@@ -110,11 +110,20 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    the cadence read above) so a focus switch refetches the
             //    newly-focused account on the *next* tick.
             let (account_key, config_dir) = if account_scoped(kind) {
-                let focused = match this.read_with(cx, |ws, _| ws.focused_account()) {
-                    Ok(resolved) => resolved,
+                // The domain rides along: a pane on the ambient account has no
+                // account row to name one, so its own agent decides whether an
+                // Anthropic poll applies at all.
+                let resolved = this.read_with(cx, |ws, cx| {
+                    let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+                        &ws.focused_account_pane(cx),
+                    );
+                    (ws.focused_account(), domain)
+                });
+                let (focused, pane_domain) = match resolved {
+                    Ok(pair) => pair,
                     Err(_) => break,
                 };
-                if usage_availability(focused.recipe()) != UsageAvailability::Polled {
+                if usage_availability(focused.recipe(pane_domain)) != UsageAvailability::Polled {
                     // Skip the fetch outright: its result would be empty
                     // and would overwrite this account's cache with it.
                     cx.background_executor().timer(dur).await;

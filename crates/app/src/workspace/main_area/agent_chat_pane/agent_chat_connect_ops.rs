@@ -272,12 +272,13 @@ impl Workspace {
         // launches under; an account from another domain is refused here
         // rather than injected under the wrong config-dir env var.
         let selection = self.agent_chat_account_selection(pane_id);
-        let required = launch.account_recipe();
+        let domain =
+            crate::workspace::main_area::pane::AccountDomain::for_agent(launch.account_recipe());
         let prepared = crate::workspace::main_area::pane::resolve_pane_account(
             &self.accounts,
             &self.data_dir,
             selection,
-            required,
+            domain,
         );
         if selection.account_id().is_some() && prepared.is_none() {
             // Not an error: the pane falls back to the system account. Log

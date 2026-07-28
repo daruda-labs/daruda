@@ -311,8 +311,12 @@ impl Workspace {
         let pane = match surface {
             TaskAgentSurface::Terminal => {
                 let account = self.default_account_selection_for_new_pane(None);
-                let prepared =
-                    pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
+                let prepared = pane::resolve_pane_account(
+                    &self.accounts,
+                    &self.data_dir,
+                    account,
+                    pane::AccountDomain::Any,
+                );
                 self.create_pane_with_cwd(
                     Some(new_path.clone()),
                     account,

@@ -10,7 +10,7 @@ mod context_menu;
 mod ports_segment;
 mod usage_chip;
 
-pub(in crate::workspace) use account_slot::{AccountSlot, SlotDomain, SlotPane, account_label};
+pub(in crate::workspace) use account_slot::{AccountSlot, account_label};
 
 use crate::ui::ContextMenuExt as _;
 use crate::ui::theme;

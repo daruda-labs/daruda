@@ -262,8 +262,12 @@ impl Workspace {
                 let cwd = self.default_cwd_for_new_pane();
                 // Terminal pane: no agent, so no required auth domain —
                 // the account's own recipe decides the env.
-                let prepared =
-                    pane::resolve_pane_account(&self.accounts, &self.data_dir, selection, None);
+                let prepared = pane::resolve_pane_account(
+                    &self.accounts,
+                    &self.data_dir,
+                    selection,
+                    pane::AccountDomain::Any,
+                );
                 match self.create_pane_with_cwd(cwd, selection, prepared.as_ref(), window, cx) {
                     Ok(p) => p,
                     Err(e) => {
