@@ -1,4 +1,4 @@
-use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
+use crate::{ActiveTheme, Disableable, StyledExt, h_flex, tooltip::Tooltip};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement,
@@ -15,6 +15,7 @@ pub(crate) struct MenuItemElement {
     selected: bool,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    tooltip: Option<SharedString>,
     children: SmallVec<[AnyElement; 2]>,
 }
 
@@ -30,6 +31,7 @@ impl MenuItemElement {
             selected: false,
             on_click: None,
             on_hover: None,
+            tooltip: None,
             children: SmallVec::new(),
         }
     }
@@ -59,6 +61,12 @@ impl MenuItemElement {
     #[allow(unused)]
     pub fn on_hover(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(handler));
+        self
+    }
+
+    /// Set a hover tooltip shown over the MenuItem.
+    pub(crate) fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 }
@@ -96,6 +104,9 @@ impl RenderOnce for MenuItemElement {
             .items_center()
             .justify_between()
             .refine_style(&self.style)
+            .when_some(self.tooltip, |this, tooltip| {
+                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            })
             .when_some(self.on_hover, |this, on_hover| {
                 this.on_hover(move |hovered, window, cx| (on_hover)(hovered, window, cx))
             })

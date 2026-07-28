@@ -7,12 +7,12 @@
 
 use crate::ui::theme;
 use daruda_store::panels::{ButtonDisplay, ButtonWidget, TabId};
-use gpui::{App, ClickEvent, IntoElement, MouseDownEvent, Pixels, Point, SharedString, Window, px};
+use gpui::{App, ClickEvent, IntoElement, SharedString, Window, px};
 
 use super::super::macro_edit_modal::MacroEditModal;
 use crate::surface::strings as surface_strings;
-use crate::ui::ContextMenuItem;
 use crate::ui::dialog::ButtonVariant;
+use crate::ui::{PopupMenuItem, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
@@ -42,29 +42,25 @@ pub(in crate::workspace) fn render(
         })
     };
 
-    let on_right_click = {
+    let context_menu = {
         let tab_id = tab_id.clone();
         let widget_id = widget_id.clone();
         let btn_clone = btn.clone();
         let ws = workspace.clone();
-        cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-            cx.stop_propagation();
-            let position: Point<Pixels> = ev.position;
-            if let Some(w) = ws.upgrade() {
-                let items = build_widget_context_menu(
-                    tab_id.clone(),
-                    widget_id.clone(),
-                    btn_clone.clone(),
-                    ws.clone(),
-                );
-                w.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }
+        menu_builder(move |menu, _window, _cx| {
+            let items = build_widget_context_menu(
+                tab_id.clone(),
+                widget_id.clone(),
+                btn_clone.clone(),
+                ws.clone(),
+            );
+            items.into_iter().fold(menu, |m, item| m.item(item))
         })
     };
 
     let mut button = crate::ui::MacroKey::new(element_id, btn.label.clone())
         .on_click(on_click)
-        .on_right_click(on_right_click)
+        .context_menu(context_menu)
         .tooltip(crate::ui::tooltip::text(build_tooltip(btn)));
 
     button = match btn.display {
@@ -93,7 +89,7 @@ fn build_widget_context_menu(
     widget_id: String,
     btn: ButtonWidget,
     workspace: gpui::WeakEntity<Workspace>,
-) -> Vec<ContextMenuItem> {
+) -> Vec<PopupMenuItem> {
     let mut items = Vec::new();
     if !btn.builtin {
         items.push(edit_item(tab_id.clone(), btn.clone(), workspace.clone()));
@@ -106,34 +102,30 @@ fn edit_item(
     tab_id: TabId,
     btn: ButtonWidget,
     workspace: gpui::WeakEntity<Workspace>,
-) -> ContextMenuItem {
-    ContextMenuItem::new(
-        surface_strings::ctx_macro_edit(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            let Some(ws) = workspace.upgrade() else {
+) -> PopupMenuItem {
+    PopupMenuItem::new(surface_strings::ctx_macro_edit()).on_click(
+        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
+            if workspace.upgrade().is_none() {
                 return;
-            };
+            }
             let tab_id = tab_id.clone();
             let btn = btn.clone();
             let workspace_for_modal = workspace.clone();
-            ws.update(app_cx, |ws, cx| {
-                ws.close_context_menu(cx);
-                crate::workspace::dialog_helpers::open_form_modal(
-                    "Edit Macro",
-                    None,
-                    move |window, cx| {
-                        MacroEditModal::new(
-                            workspace_for_modal.clone(),
-                            tab_id.clone(),
-                            Some(&btn),
-                            window,
-                            cx,
-                        )
-                    },
-                    window,
-                    cx,
-                );
-            });
+            crate::workspace::dialog_helpers::open_form_modal(
+                "Edit Macro",
+                None,
+                move |window, cx| {
+                    MacroEditModal::new(
+                        workspace_for_modal.clone(),
+                        tab_id.clone(),
+                        Some(&btn),
+                        window,
+                        cx,
+                    )
+                },
+                window,
+                app_cx,
+            );
         },
     )
 }
@@ -143,20 +135,16 @@ fn delete_item(
     widget_id: String,
     label: String,
     workspace: gpui::WeakEntity<Workspace>,
-) -> ContextMenuItem {
-    ContextMenuItem::new(
-        surface_strings::ctx_macro_delete(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            let Some(ws) = workspace.upgrade() else {
+) -> PopupMenuItem {
+    PopupMenuItem::new(surface_strings::ctx_macro_delete()).on_click(
+        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
+            if workspace.upgrade().is_none() {
                 return;
-            };
+            }
             let body = format!("Delete macro \u{201c}{label}\u{201d}?");
             let workspace_for_modal = workspace.clone();
             let tab_id = tab_id.clone();
             let widget_id = widget_id.clone();
-            ws.update(app_cx, |ws, cx| {
-                ws.close_context_menu(cx);
-            });
             crate::workspace::dialog_helpers::open_confirm_dialog(
                 surface_strings::delete_macro_modal_title(),
                 body,

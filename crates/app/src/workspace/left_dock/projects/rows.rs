@@ -4,10 +4,7 @@
 
 use crate::ui::theme;
 use daruda_terminal::ux::strings;
-use gpui::{
-    ClickEvent, Context, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Rgba,
-    SharedString, div, prelude::*, px,
-};
+use gpui::{ClickEvent, Context, IntoElement, Rgba, SharedString, div, prelude::*, px};
 
 use daruda_store::project::{LaneId, ProjectId};
 
@@ -15,7 +12,8 @@ use crate::lane::Lane;
 use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button_bare,
+    ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, Icon, IconName, PopupMenuItem,
+    SectionHeader, Sizable as _, button_bare, menu_builder,
 };
 use crate::workspace::NewGroup;
 use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot};
@@ -253,23 +251,6 @@ pub(in crate::workspace) fn group_header_row(
                 ws.update(cx, |ws, cx| ws.toggle_group_collapse(group_id, cx));
             }
         }))
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let Some(ws) = ws_for_menu.upgrade() else {
-                    return;
-                };
-                let items = super::group_menu::build_group_menu_items(
-                    group_id,
-                    group_name_for_menu.clone(),
-                    group_is_collapsed,
-                    ws_for_menu.clone(),
-                );
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }),
-        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -311,6 +292,18 @@ pub(in crate::workspace) fn group_header_row(
                 }
             }),
         )
+        // `.context_menu()` returns a wrapper type that only implements
+        // `ParentElement`/`Styled` — it must be the last modifier before
+        // `.child(...)`, after every `Stateful`/`InteractiveElement` call.
+        .context_menu(menu_builder(move |menu, _window, _cx| {
+            let items = super::group_menu::build_group_menu_items(
+                group_id,
+                group_name_for_menu.clone(),
+                group_is_collapsed,
+                ws_for_menu.clone(),
+            );
+            items.into_iter().fold(menu, |m, item| m.item(item))
+        }))
         .child(label_row)
 }
 
@@ -432,22 +425,6 @@ pub(in crate::workspace) fn project_header_row(
                 ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
             }
         }))
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let Some(ws) = ws_for_menu.upgrade() else {
-                    return;
-                };
-                let items = super::project_menu::build_project_menu_items(
-                    project_id,
-                    last_active_lane_id,
-                    ws_for_menu.clone(),
-                );
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }),
-        )
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
             cx.new(|_| DragGhost {
                 label: dragged.label(),
@@ -583,28 +560,37 @@ pub(in crate::workspace) fn project_header_row(
                     })),
             )
         })
+        // `.context_menu()` returns a wrapper type that only implements
+        // `ParentElement`/`Styled` — it must be the last modifier, after
+        // every `Stateful`/`InteractiveElement`/`FluentBuilder` call above.
+        .context_menu(menu_builder(move |menu, _window, _cx| {
+            let items = super::project_menu::build_project_menu_items(
+                project_id,
+                last_active_lane_id,
+                ws_for_menu.clone(),
+            );
+            items.into_iter().fold(menu, |m, item| m.item(item))
+        }))
 }
 
 pub(in crate::workspace) fn section_header(
     _any_git: bool,
     snap: &LeftDockSnapshot,
-    cx: &mut Context<Dock>,
+    _cx: &mut Context<Dock>,
 ) -> impl IntoElement + use<> {
-    // Section-level `[+]` is a toggle: clicking it opens a flat
-    // context menu with "Add Project…" (folder picker routed through
+    // Section-level `[+]` is a toggle: clicking it opens a flat dropdown
+    // with "Add Project…" (folder picker routed through
     // `prompt_and_open_folder_with_policy`, policy-aware) and
     // "New Group…". Per-project lane creation lives on each
     // project's `[+ new lane]` row.
-    let workspace = snap.workspace.clone();
+    let ws_for_group = snap.workspace.clone();
     let add_button = button_bare("section-add-toggle")
         .ghost()
         .icon(IconName::Plus)
-        .on_click(cx.listener(move |_dock, ev: &ClickEvent, _window, cx| {
-            let position: Point<Pixels> = ev.position();
-            let ws_for_group = workspace.clone();
-            let items = vec![
-                ContextMenuItem::new(
-                    surface_strings::section_add_menu_project(),
+        .dropdown_menu(menu_builder(move |menu, _window, _cx| {
+            let ws_for_group = ws_for_group.clone();
+            menu.item(
+                PopupMenuItem::new(surface_strings::section_add_menu_project()).on_click(
                     move |_, _window, app_cx| {
                         // No workspace handle needed — the global open-folder
                         // flow reads its config from `SettingsStore` and the
@@ -615,8 +601,9 @@ pub(in crate::workspace) fn section_header(
                         crate::windows::prompt_and_open_folder_with_policy(config, app_cx);
                     },
                 ),
-                ContextMenuItem::new(
-                    surface_strings::section_add_menu_group(),
+            )
+            .item(
+                PopupMenuItem::new(surface_strings::section_add_menu_group()).on_click(
                     move |_, window, app_cx| {
                         if let Some(ws) = ws_for_group.upgrade() {
                             ws.update(app_cx, |ws, cx| {
@@ -625,10 +612,7 @@ pub(in crate::workspace) fn section_header(
                         }
                     },
                 ),
-            ];
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-            }
+            )
         }));
 
     SectionHeader::new(surface_strings::projects_section_header())
@@ -932,38 +916,31 @@ pub(in crate::workspace) fn worktree_row(
                 }
             }),
         )
-        // Right-click opens the context menu. stop_propagation prevents
-        // the event from reaching any ancestor that might close the menu
-        // before it has a chance to render.
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let position: Point<Pixels> = ev.position;
-                let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
-                if let Some(ws) = ws_for_rclick.upgrade() {
-                    let items = build_context_menu_items(super::context_menu::CtxMenuArgs {
-                        project_id,
-                        wt_id,
-                        path_str,
-                        current_description: wt_description_current.clone(),
-                        current_remote_cwd: wt_remote_cwd_current.clone(),
-                        current_name: wt_name_current.clone(),
-                        workspace: ws_for_rclick.clone(),
-                        is_git: wt_is_git,
-                        is_detached: wt_is_detached,
-                        is_dirty: wt_is_dirty,
-                        source_branch: wt_source_branch.clone(),
-                        base_ref: wt_base_ref.clone(),
-                        source_path: wt_path.clone(),
-                        source_repo_root: wt_source_repo_root.clone(),
-                        availability: wt_availability,
-                        removable,
-                    });
-                    ws.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
-                }
-            }),
-        )
+        // Right-click opens the context menu, built declaratively at hover
+        // time from the same per-row inputs the old imperative handler
+        // captured.
+        .context_menu(menu_builder(move |menu, _window, _cx| {
+            let path_str = wt_path.to_str().map(|s| s.to_string()).unwrap_or_default();
+            let items = build_context_menu_items(super::context_menu::CtxMenuArgs {
+                project_id,
+                wt_id,
+                path_str,
+                current_description: wt_description_current.clone(),
+                current_remote_cwd: wt_remote_cwd_current.clone(),
+                current_name: wt_name_current.clone(),
+                workspace: ws_for_rclick.clone(),
+                is_git: wt_is_git,
+                is_detached: wt_is_detached,
+                is_dirty: wt_is_dirty,
+                source_branch: wt_source_branch.clone(),
+                base_ref: wt_base_ref.clone(),
+                source_path: wt_path.clone(),
+                source_repo_root: wt_source_repo_root.clone(),
+                availability: wt_availability,
+                removable,
+            });
+            items.into_iter().fold(menu, |m, item| m.item(item))
+        }))
         .child(agent_status_cell(
             snap.agent_status_per_lane
                 .get(&daruda_store::project::LaneRef {

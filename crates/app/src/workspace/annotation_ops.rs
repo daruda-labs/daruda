@@ -9,7 +9,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Pixels, Point};
 
 use crate::surface::strings as s;
-use crate::ui::ContextMenuItem;
+use crate::ui::{PopupMenu, PopupMenuItem};
 use crate::workspace::Workspace;
 use crate::workspace::annotation_dialog::{AnnotationDialog, AnnotationDialogTarget};
 use crate::workspace::main_area::pane::PaneContent;
@@ -95,10 +95,28 @@ impl Workspace {
         }
     }
 
-    /// Open the Shift+Right-click annotation context menu. Always carries
-    /// "Add annotation" (enabled only for a single-line selection, else
-    /// disabled with a tooltip); appends "Delete annotation" when the click
-    /// landed on an existing mark.
+    /// Copy the pane's terminal selection to the clipboard. Wired to the
+    /// context-menu "Copy" entry (see [`Self::open_annotation_context_menu`]).
+    pub(in crate::workspace) fn copy_pane_selection(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.terminal_view_for_pane(pane_id) else {
+            self.report_pane_missing("copy_pane_selection", pane_id, cx);
+            return;
+        };
+        view.update(cx, |view, cx| view.copy_selection(window, cx));
+    }
+
+    /// Open the right-click annotation context menu (Shift+Right-click, or
+    /// a plain right-click when mouse reporting is off — see
+    /// `TerminalView::on_mouse_down`). Leads with "Copy" (enabled only with
+    /// an active selection — the most common single-click action), then a
+    /// separator, then "Add annotation" (enabled only for a single-line
+    /// selection, else disabled with a tooltip), then "Delete annotation"
+    /// when the click landed on an existing mark.
     pub(in crate::workspace) fn open_annotation_context_menu(
         &mut self,
         pane_id: PaneId,
@@ -109,12 +127,34 @@ impl Workspace {
     ) {
         let weak_ws = cx.entity().downgrade();
 
+        let has_selection = self
+            .terminal_view_for_pane(pane_id)
+            .map(|view| view.read(cx).has_selection())
+            .unwrap_or(false);
+        // No tooltip on the disabled state — unlike "Add annotation", an
+        // unavailable Copy with no selection is self-explanatory, matching
+        // every other Copy menu item in this app (`ws_popup_clipboard_item`,
+        // agent-chat's selection Copy item), neither of which annotates a
+        // disabled Copy with a reason.
+        let copy_item = if has_selection {
+            let captured = pane_id;
+            let weak = weak_ws.clone();
+            PopupMenuItem::new(s::menu_copy()).on_click(move |_, window, app_cx| {
+                if let Some(ws) = weak.upgrade() {
+                    ws.update(app_cx, |ws, cx| {
+                        ws.copy_pane_selection(captured, window, cx);
+                    });
+                }
+            })
+        } else {
+            PopupMenuItem::new(s::menu_copy()).disabled(true)
+        };
+
         // Add entry — enabled iff the user has a single-line selection.
         let add_item = if let Some(line_range) = range {
             let captured = pane_id;
             let weak = weak_ws.clone();
-            ContextMenuItem::new(
-                s::terminal_annotation_action_add(),
+            PopupMenuItem::new(s::terminal_annotation_action_add()).on_click(
                 move |_, window, app_cx| {
                     if let Some(ws) = weak.upgrade() {
                         ws.update(app_cx, |ws, cx| {
@@ -124,12 +164,12 @@ impl Workspace {
                 },
             )
         } else {
-            ContextMenuItem::new(s::terminal_annotation_action_add(), |_, _, _| {})
+            PopupMenuItem::new(s::terminal_annotation_action_add())
                 .disabled(true)
-                .with_tooltip(s::terminal_annotation_action_add_disabled_tooltip())
+                .tooltip(s::terminal_annotation_action_add_disabled_tooltip())
         };
 
-        let mut items = vec![add_item];
+        let mut items = vec![copy_item, PopupMenuItem::separator(), add_item];
 
         // Delete entry — only when the click landed on an existing mark.
         if let Some(mark_id) = self.terminal_view_for_pane(pane_id).and_then(|view| {
@@ -138,8 +178,7 @@ impl Workspace {
         }) {
             let captured = pane_id;
             let weak = weak_ws;
-            let delete_item = ContextMenuItem::new(
-                s::terminal_annotation_action_delete(),
+            let delete_item = PopupMenuItem::new(s::terminal_annotation_action_delete()).on_click(
                 move |_, _, app_cx| {
                     if let Some(ws) = weak.upgrade() {
                         ws.update(app_cx, |ws, cx| {
@@ -151,7 +190,14 @@ impl Workspace {
             items.push(delete_item);
         }
 
-        self.open_context_menu(position, items, cx);
+        // Bypasses `crate::ui::menu_builder` (declarative-path only) — apply
+        // the same compact-size convention manually since this menu is built
+        // imperatively via `PopupMenu::build`.
+        let menu = PopupMenu::build(window, cx, move |menu, _window, _cx| {
+            items.into_iter().fold(menu.small(), |m, item| m.item(item))
+        });
+
+        self.open_context_menu(position, menu, cx);
     }
 
     /// Pull up the [`AnnotationDialog`] in **create** mode, pre-filled
@@ -224,9 +270,9 @@ impl Workspace {
     }
 
     fn report_pane_missing(&mut self, site: &str, pane_id: PaneId, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(s::terminal_annotation_err_pane_missing_title())
+        let report = ErrorReport::new(s::terminal_target_pane_missing_title())
             .severity(ErrorSeverity::Info)
-            .message(s::terminal_annotation_err_pane_missing_message())
+            .message(s::terminal_target_pane_missing_message())
             .dedup(format!(
                 "{ANNOTATION_ERROR_DEDUP}.pane_missing.{site}.{pane_id}"
             ))

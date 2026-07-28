@@ -1,10 +1,10 @@
 //! Right-click context menu items for a lane row.
 //!
 //! Captures all path / id / branch metadata by value so the resulting
-//! `ContextMenuItem` closures are `'static` and free of borrows on the
+//! `PopupMenuItem` closures are `'static` and free of borrows on the
 //! row or snapshot they were built from.
 
-use gpui::{App, MouseDownEvent, SharedString, Window};
+use gpui::{App, ClickEvent, SharedString, Window};
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
@@ -12,12 +12,12 @@ use daruda_store::project::{LaneId, LaneRef, ProjectId};
 
 use crate::lane::availability::LaneAvailability;
 use crate::surface::strings as surface_strings;
-use crate::ui::ContextMenuItem;
+use crate::ui::PopupMenuItem;
 
 /// Inputs for [`build_context_menu_items`]. Grouped into a struct so
 /// the lane-row call site stays readable as per-lane flags accumulate
 /// (mirrors `rows::ProjectHeaderArgs`). Every field is owned so the
-/// resulting `ContextMenuItem` closures are `'static`.
+/// resulting `PopupMenuItem` closures are `'static`.
 pub(in crate::workspace) struct CtxMenuArgs {
     pub project_id: ProjectId,
     pub wt_id: LaneId,
@@ -46,7 +46,7 @@ pub(in crate::workspace) struct CtxMenuArgs {
 
 /// Build the context menu item list for a lane row right-click.
 /// Captures path / id by value so the closures are `'static`.
-pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<ContextMenuItem> {
+pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<PopupMenuItem> {
     let CtxMenuArgs {
         project_id,
         wt_id,
@@ -67,9 +67,8 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
     } = args;
     let workspace_for_reveal = workspace.clone();
     let path_for_reveal = path_str.clone();
-    let reveal_item = ContextMenuItem::new(
-        surface_strings::ctx_reveal_in_finder(),
-        move |_ev: &MouseDownEvent, _window, app_cx: &mut App| {
+    let reveal_item = PopupMenuItem::new(surface_strings::ctx_reveal_in_finder()).on_click(
+        move |_ev: &ClickEvent, _window, app_cx: &mut App| {
             let path = path_for_reveal.clone();
             let workspace = workspace_for_reveal.clone();
             // `open -R` reveals (selects) the path in Finder rather than
@@ -100,124 +99,106 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                     }
                 })
                 .detach();
-            // Close the context menu.
-            if let Some(ws) = workspace_for_reveal.upgrade() {
-                ws.update(app_cx, |ws, cx| ws.close_context_menu(cx));
-            }
         },
     );
 
-    let workspace_for_copy = workspace.clone();
-    let path_for_copy = path_str.clone();
-    let copy_item = ContextMenuItem::new(
+    let copy_item = crate::workspace::render::ws_popup_clipboard_item(
         surface_strings::ctx_copy_path(),
-        move |_ev: &MouseDownEvent, _window, app_cx: &mut App| {
-            app_cx.write_to_clipboard(gpui::ClipboardItem::new_string(path_for_copy.clone()));
-            if let Some(ws) = workspace_for_copy.upgrade() {
-                ws.update(app_cx, |ws, cx| ws.close_context_menu(cx));
-            }
-        },
+        path_str.clone(),
     );
 
     let workspace_for_description = workspace.clone();
-    let edit_description_item = ContextMenuItem::new(
-        surface_strings::ctx_edit_description(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            if let Some(ws) = workspace_for_description.upgrade() {
+    let edit_description_item = PopupMenuItem::new(surface_strings::ctx_edit_description())
+        .on_click(
+            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
+                if workspace_for_description.upgrade().is_none() {
+                    return;
+                }
                 let current = current_description.clone();
                 let callback_ws = workspace_for_description.clone();
-                ws.update(app_cx, |ws, cx| {
-                    ws.close_context_menu(cx);
-                    crate::workspace::dialog_helpers::open_single_field_dialog(
-                        callback_ws.clone(),
-                        surface_strings::edit_description_modal_title(),
-                        surface_strings::edit_description_placeholder(),
-                        current.as_deref(),
-                        move |workspace, value, _window, cx| {
-                            workspace.set_lane_description(
-                                LaneRef {
-                                    project: project_id,
-                                    lane: wt_id,
-                                },
-                                value,
-                                cx,
-                            );
-                        },
-                        window,
-                        cx,
-                    );
-                });
-            }
-        },
-    );
+                crate::workspace::dialog_helpers::open_single_field_dialog(
+                    callback_ws,
+                    surface_strings::edit_description_modal_title(),
+                    surface_strings::edit_description_placeholder(),
+                    current.as_deref(),
+                    move |workspace, value, _window, cx| {
+                        workspace.set_lane_description(
+                            LaneRef {
+                                project: project_id,
+                                lane: wt_id,
+                            },
+                            value,
+                            cx,
+                        );
+                    },
+                    window,
+                    app_cx,
+                );
+            },
+        );
 
     let workspace_for_remote_cwd = workspace.clone();
-    let edit_remote_cwd_item = ContextMenuItem::new(
-        surface_strings::ctx_edit_remote_cwd(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            if let Some(ws) = workspace_for_remote_cwd.upgrade() {
+    let edit_remote_cwd_item = PopupMenuItem::new(surface_strings::ctx_edit_remote_cwd())
+        .on_click(
+            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
+                if workspace_for_remote_cwd.upgrade().is_none() {
+                    return;
+                }
                 let current = current_remote_cwd.clone();
                 let callback_ws = workspace_for_remote_cwd.clone();
-                ws.update(app_cx, |ws, cx| {
-                    ws.close_context_menu(cx);
-                    crate::workspace::dialog_helpers::open_single_field_dialog(
-                        callback_ws.clone(),
-                        surface_strings::edit_remote_cwd_modal_title(),
-                        surface_strings::edit_remote_cwd_placeholder(),
-                        current.as_deref(),
-                        move |workspace, value, _window, cx| {
-                            workspace.set_lane_remote_cwd(
-                                LaneRef {
-                                    project: project_id,
-                                    lane: wt_id,
-                                },
-                                value,
-                                cx,
-                            );
-                        },
-                        window,
-                        cx,
-                    );
-                });
-            }
-        },
-    )
-    // The setting only takes hold for panes created after this edit —
-    // an already-created (but not yet connected) agent-chat pane keeps
-    // whatever cwd it resolved at creation time. Surfaced as a hover
-    // tooltip rather than new modal chrome, mirroring how the disabled
-    // Merge item explains itself elsewhere in this menu.
-    .with_tooltip(surface_strings::ctx_edit_remote_cwd_hint());
+                crate::workspace::dialog_helpers::open_single_field_dialog(
+                    callback_ws,
+                    surface_strings::edit_remote_cwd_modal_title(),
+                    surface_strings::edit_remote_cwd_placeholder(),
+                    current.as_deref(),
+                    move |workspace, value, _window, cx| {
+                        workspace.set_lane_remote_cwd(
+                            LaneRef {
+                                project: project_id,
+                                lane: wt_id,
+                            },
+                            value,
+                            cx,
+                        );
+                    },
+                    window,
+                    app_cx,
+                );
+            },
+        )
+        // The setting only takes hold for panes created after this edit —
+        // an already-created (but not yet connected) agent-chat pane keeps
+        // whatever cwd it resolved at creation time. Surfaced as a hover
+        // tooltip rather than new modal chrome, mirroring how the disabled
+        // Merge item explains itself elsewhere in this menu.
+        .tooltip(surface_strings::ctx_edit_remote_cwd_hint());
 
     let workspace_for_rename = workspace.clone();
-    let rename_item = ContextMenuItem::new(
-        surface_strings::ctx_rename(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            if let Some(ws) = workspace_for_rename.upgrade() {
-                let current = current_name.clone();
-                let callback_ws = workspace_for_rename.clone();
-                ws.update(app_cx, |ws, cx| {
-                    ws.close_context_menu(cx);
-                    crate::workspace::dialog_helpers::open_single_field_dialog(
-                        callback_ws.clone(),
-                        surface_strings::rename_modal_title(),
-                        surface_strings::rename_placeholder(),
-                        current.as_deref(),
-                        move |workspace, value, _window, cx| {
-                            workspace.set_lane_name(
-                                LaneRef {
-                                    project: project_id,
-                                    lane: wt_id,
-                                },
-                                value,
-                                cx,
-                            );
+    let rename_item = PopupMenuItem::new(surface_strings::ctx_rename()).on_click(
+        move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
+            if workspace_for_rename.upgrade().is_none() {
+                return;
+            }
+            let current = current_name.clone();
+            let callback_ws = workspace_for_rename.clone();
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                callback_ws,
+                surface_strings::rename_modal_title(),
+                surface_strings::rename_placeholder(),
+                current.as_deref(),
+                move |workspace, value, _window, cx| {
+                    workspace.set_lane_name(
+                        LaneRef {
+                            project: project_id,
+                            lane: wt_id,
                         },
-                        window,
+                        value,
                         cx,
                     );
-                });
-            }
+                },
+                window,
+                app_cx,
+            );
         },
     );
 
@@ -241,22 +222,19 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
             lane: wt_id,
         };
         let workspace_for_remove = workspace.clone();
-        items.push(ContextMenuItem::separator());
+        items.push(PopupMenuItem::separator());
         if availability == LaneAvailability::AccessDenied {
             // Disabled, informational only — no handler.
             items.push(
-                ContextMenuItem::new(surface_strings::ctx_grant_full_disk_access(), |_, _, _| {})
-                    .disabled(true),
+                PopupMenuItem::new(surface_strings::ctx_grant_full_disk_access()).disabled(true),
             );
         }
-        items.push(ContextMenuItem::new(
-            surface_strings::ctx_remove(),
-            move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
+        items.push(PopupMenuItem::new(surface_strings::ctx_remove()).on_click(
+            move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
                 let Some(ws) = workspace_for_remove.upgrade() else {
                     return;
                 };
                 ws.update(app_cx, |ws, cx| {
-                    ws.close_context_menu(cx);
                     if removable {
                         ws.open_remove_lane_modal(target, window, cx);
                     } else {
@@ -278,20 +256,19 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
     // "Merge into…" — only for git-backed lanes.
     if is_git {
         let merge_item = if is_detached {
-            ContextMenuItem::new(surface_strings::ctx_merge_into(), |_, _, _| {})
+            PopupMenuItem::new(surface_strings::ctx_merge_into())
                 .disabled(true)
-                .with_tooltip(surface_strings::ctx_merge_disabled_detached())
+                .tooltip(surface_strings::ctx_merge_disabled_detached())
         } else if is_dirty {
-            ContextMenuItem::new(surface_strings::ctx_merge_into(), |_, _, _| {})
+            PopupMenuItem::new(surface_strings::ctx_merge_into())
                 .disabled(true)
-                .with_tooltip(surface_strings::ctx_merge_disabled_dirty())
+                .tooltip(surface_strings::ctx_merge_disabled_dirty())
         } else {
             // source_branch is guaranteed Some when is_git && !is_detached.
             let branch = source_branch.unwrap_or_default();
             let workspace_for_merge = workspace.clone();
-            ContextMenuItem::new(
-                surface_strings::ctx_merge_into(),
-                move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
+            PopupMenuItem::new(surface_strings::ctx_merge_into()).on_click(
+                move |_ev: &ClickEvent, window: &mut Window, app_cx: &mut App| {
                     let Some(ws) = workspace_for_merge.upgrade() else {
                         return;
                     };
@@ -303,8 +280,6 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                     let src_path = source_path.clone();
                     let src_repo_root = source_repo_root.clone().unwrap_or_default();
                     ws.update(app_cx, |ws, cx| {
-                        ws.close_context_menu(cx);
-
                         // Build target list: other git worktrees with a
                         // branch — from the *menu's own* project, not the
                         // active one (lane ids collide across projects).
@@ -361,7 +336,7 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
                 },
             )
         };
-        items.push(ContextMenuItem::separator());
+        items.push(PopupMenuItem::separator());
         items.push(merge_item);
     }
 
@@ -372,21 +347,21 @@ pub(in crate::workspace) fn build_context_menu_items(args: CtxMenuArgs) -> Vec<C
 mod tests {
     use super::*;
 
-    fn labels(items: &[ContextMenuItem]) -> Vec<String> {
+    fn labels(items: &[PopupMenuItem]) -> Vec<String> {
         items
             .iter()
             .filter_map(|i| match i {
-                ContextMenuItem::Item { label, .. } => Some(label.to_string()),
-                ContextMenuItem::Separator => None,
+                PopupMenuItem::Item { label, .. } => Some(label.to_string()),
+                _ => None,
             })
             .collect()
     }
 
-    fn disabled_labels(items: &[ContextMenuItem]) -> Vec<String> {
+    fn disabled_labels(items: &[PopupMenuItem]) -> Vec<String> {
         items
             .iter()
             .filter_map(|i| match i {
-                ContextMenuItem::Item {
+                PopupMenuItem::Item {
                     label,
                     disabled: true,
                     ..
@@ -398,11 +373,7 @@ mod tests {
 
     // The closures only *store* the weak workspace ref; they never
     // upgrade it at build time, so an invalid handle is safe here.
-    fn build(
-        availability: LaneAvailability,
-        is_git: bool,
-        removable: bool,
-    ) -> Vec<ContextMenuItem> {
+    fn build(availability: LaneAvailability, is_git: bool, removable: bool) -> Vec<PopupMenuItem> {
         build_context_menu_items(CtxMenuArgs {
             project_id: 0,
             wt_id: 1,

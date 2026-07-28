@@ -3,6 +3,7 @@ mod agent_chat;
 mod agent_diff_layout;
 mod annotation_ops_tests;
 mod config_mirror;
+mod context_menu_ops;
 mod diag_scroll;
 mod dnd;
 mod dock;

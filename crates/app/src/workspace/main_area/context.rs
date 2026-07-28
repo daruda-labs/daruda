@@ -5,7 +5,7 @@ use gpui::Task;
 
 use super::pane_tree::{DropHalf, PaneId};
 use crate::workspace::LaneRuntime;
-use crate::workspace::layout::ops::{ContextMenuAnchor, DividerDrag};
+use crate::workspace::layout::ops::{DividerDrag, PopupMenuDeploy};
 
 /// Runtime state of the main area — TabBar + PaneTree — for every lane.
 ///
@@ -33,8 +33,8 @@ pub(in crate::workspace) struct MainAreaContext {
     pub last_viewport: Option<(f32, f32)>,
     /// Active pane-divider drag. `None` = no drag in progress.
     pub drag_state: Option<DividerDrag>,
-    /// Active right-click context menu. `None` = closed.
-    pub context_menu: Option<ContextMenuAnchor>,
+    /// Active imperatively-opened PopupMenu (System B) — see `PopupMenuDeploy`.
+    pub popup_menu_deploy: Option<PopupMenuDeploy>,
     /// When `Some(id)`, that pane is rendered full-size; all others hidden.
     pub zoomed_pane_id: Option<PaneId>,
     /// Transient hover target while a Pane header is being dragged:

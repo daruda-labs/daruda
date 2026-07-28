@@ -22,7 +22,6 @@ pub mod chart;
 pub mod checkbox;
 pub mod code_copy_button;
 pub mod code_editor;
-pub mod context_menu;
 pub mod dialog;
 pub mod disclosure;
 pub mod divider;
@@ -64,7 +63,6 @@ pub use code_editor::{
     LineDecoration, code_diff_viewer, file_viewer_editor, make_markdown_prose_state,
     make_markdown_state, markdown_editor,
 };
-pub use context_menu::{ContextMenu, ContextMenuCorner, ContextMenuItem};
 pub use disclosure::{Disclosure, disclosure};
 pub use divider::Divider;
 pub use form_helpers::{checkbox_row, field_row};
@@ -79,7 +77,9 @@ pub use input_panel::{
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
 pub use markdown::{Markdown, markdown};
-pub use menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder};
+pub use menu::{
+    ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred,
+};
 pub use placeholder::placeholder_text;
 pub use popover::{Popover, PopoverState};
 pub use progress::{Progress, progress};

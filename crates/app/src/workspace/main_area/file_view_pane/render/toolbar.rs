@@ -9,10 +9,11 @@ use gpui::{Context, IntoElement, MouseButton, MouseDownEvent, Window, div, prelu
 
 use crate::path_ext::PathExt;
 use crate::surface::strings;
-use crate::ui::ContextMenuItem;
+use crate::ui::{ContextMenuExt as _, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::git_status_color;
 use crate::workspace::main_area::file_view_pane::{FileViewMode, PaneFileContent, PaneFileView};
+use crate::workspace::render::ws_popup_clipboard_item;
 
 /// Toolbar: path label on the left, Raw/Changes tabs + optional controls + × on the right.
 pub(super) fn render_file_viewer_toolbar(
@@ -51,6 +52,7 @@ pub(super) fn render_file_viewer_toolbar(
 
     let path_for_menu = fv.path.clone();
     let lane_id_for_menu = fv.lane_id;
+    let ws_for_menu = cx.entity().downgrade();
 
     let is_raw = fv.view_mode == FileViewMode::Raw;
     let is_preview = fv.view_mode == FileViewMode::Preview;
@@ -91,50 +93,44 @@ pub(super) fn render_file_viewer_toolbar(
                 .whitespace_nowrap()
                 .text_size(px(theme::FILE_VIEWER_HEADER_FONT_SIZE))
                 .text_color(header_text)
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
-                        let ws = cx.entity().downgrade();
-                        let wt = this
-                            .active_lanes()
-                            .iter()
-                            .find(|wt| wt.id == lane_id_for_menu);
-                        let worktree_root = wt.map(|wt| wt.path.clone());
-                        // `path_for_menu` is absolute (set at the left-dock entry point).
-                        // For legacy relative paths from old session state use
-                        // LanePaths::from_git_status so the repo_root/wt_path
-                        // selection is consistent with every other path call site.
-                        let abs_pathbuf = if path_for_menu.is_absolute() {
-                            path_for_menu.clone()
-                        } else {
-                            wt.map(|wt| wt.paths().from_git_status(&path_for_menu))
-                                .unwrap_or_else(|| path_for_menu.clone())
-                        };
-                        let abs_path = abs_pathbuf.to_string_lossy().to_string();
-                        let rel_path = worktree_root
-                            .as_ref()
-                            .and_then(|root| abs_pathbuf.strip_prefix(root).ok())
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|| path_for_menu.to_string_lossy().to_string());
-                        let make_copy_item = |label: gpui::SharedString, text: String| {
-                            let ws = ws.clone();
-                            ContextMenuItem::new(label, move |_, _, app| {
-                                if let Some(w) = ws.upgrade() {
-                                    w.update(app, |this, cx| this.close_context_menu(cx));
-                                }
-                                app.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                    text.clone(),
-                                ));
-                            })
-                        };
-                        let items = vec![
-                            make_copy_item(strings::file_viewer_copy_abs_path().into(), abs_path),
-                            make_copy_item(strings::file_viewer_copy_rel_path().into(), rel_path),
-                        ];
-                        this.open_context_menu(ev.position, items, cx);
-                    }),
-                )
-                .child(label),
+                .child(label)
+                .context_menu(menu_builder(move |menu, _window, cx| {
+                    let Some(ws) = ws_for_menu.upgrade() else {
+                        return menu;
+                    };
+                    let wt = ws
+                        .read(cx)
+                        .active_lanes()
+                        .iter()
+                        .find(|wt| wt.id == lane_id_for_menu)
+                        .cloned();
+                    let worktree_root = wt.as_ref().map(|wt| wt.path.clone());
+                    // `path_for_menu` is absolute (set at the left-dock entry point).
+                    // For legacy relative paths from old session state use
+                    // LanePaths::from_git_status so the repo_root/wt_path
+                    // selection is consistent with every other path call site.
+                    let abs_pathbuf = if path_for_menu.is_absolute() {
+                        path_for_menu.clone()
+                    } else {
+                        wt.map(|wt| wt.paths().from_git_status(&path_for_menu))
+                            .unwrap_or_else(|| path_for_menu.clone())
+                    };
+                    let abs_path = abs_pathbuf.to_string_lossy().to_string();
+                    let rel_path = worktree_root
+                        .as_ref()
+                        .and_then(|root| abs_pathbuf.strip_prefix(root).ok())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path_for_menu.to_string_lossy().to_string());
+
+                    menu.item(ws_popup_clipboard_item(
+                        strings::file_viewer_copy_abs_path(),
+                        abs_path,
+                    ))
+                    .item(ws_popup_clipboard_item(
+                        strings::file_viewer_copy_rel_path(),
+                        rel_path,
+                    ))
+                })),
         )
         .child(
             div()

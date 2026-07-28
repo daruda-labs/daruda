@@ -858,8 +858,8 @@ terminal:
   annotation_dialog_title_create: "Add annotation"
   annotation_dialog_title_edit: "Edit annotation"
   annotation_placeholder: "Annotation text"
-  annotation_err_pane_missing_title: "Annotation target pane is gone"
-  annotation_err_pane_missing_message: "The terminal pane is no longer available."
+  target_pane_missing_title: "Terminal pane is gone"
+  target_pane_missing_message: "The terminal pane is no longer available."
   annotation_err_operation_failed_title: "Annotation operation failed"
   annotation_err_operation_failed_message: "The annotation could not be saved."
 

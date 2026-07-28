@@ -229,12 +229,18 @@ impl TerminalView {
             }
         }
 
-        // Shift+Right-click matches the iTerm2/kitty/Alacritty convention
-        // for opening a host context menu. Fires unconditionally, including
-        // under SGR mouse capture — the gesture is specifically intended to
-        // escape PTY capture. Subscribers consume the emitted event to build
-        // the actual menu, which the terminal crate does not own.
-        if event.button == MouseButton::Right && event.modifiers.shift {
+        // A plain right-click opens the host context menu when mouse
+        // reporting is off (a normal shell prompt) or there is no PTY input
+        // sender. Shift stays the unconditional escape hatch — the
+        // iTerm2/kitty/Alacritty/zed convention — so the menu is still
+        // reachable while an app (vim, tmux) holds SGR mouse capture.
+        // Subscribers consume the emitted event to build the actual menu,
+        // which the terminal crate does not own.
+        if event.button == MouseButton::Right
+            && (event.modifiers.shift
+                || self.input.is_none()
+                || !self.session.mouse_reporting_enabled())
+        {
             let range = self.selection_single_line_range();
             cx.emit(super::TerminalViewEvent::ContextMenuRequested {
                 position: event.position,
