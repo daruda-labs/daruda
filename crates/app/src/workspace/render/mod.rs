@@ -197,6 +197,9 @@ fn build_new_tab_menu(
             );
             m.item(
                 PopupMenuItem::new(label)
+                    .icon(crate::ui::agent_menu_icon(
+                        crate::agent::icons::icon_for_agent(id),
+                    ))
                     .disabled(disabled)
                     .on_click(move |_, window, app| {
                         if let Some(w) = ws.upgrade() {
@@ -227,6 +230,9 @@ fn build_new_tab_menu(
                     let label = agent_menu_entry_label(name.clone(), disabled);
                     m.item(
                         PopupMenuItem::new(gpui::SharedString::from(label))
+                            .icon(crate::ui::agent_menu_icon(
+                                crate::agent::icons::icon_for_agent(id),
+                            ))
                             .disabled(disabled)
                             .on_click(move |_, window, app| {
                                 if let Some(w) = ws.upgrade() {

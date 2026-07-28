@@ -4,12 +4,12 @@
 
 use daruda_acp::{ChatItem, ConnectPhase, UsageView};
 use gpui::{
-    AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px, svg,
+    AnyElement, AnyWindowHandle, Context, Hsla, IntoElement, SharedString, div, prelude::*, px,
 };
 
 use crate::surface::strings as s;
 use crate::ui::theme;
-use crate::ui::{ButtonVariants as _, Icon, IconName, Sizable as _, StatusPulseClock};
+use crate::ui::{ButtonVariants as _, Sizable as _, StatusPulseClock};
 use crate::workspace::main_area::agent_chat_pane::view::{
     AgentChatView, AgentSessionStatus, RuntimePrepPhase,
 };
@@ -165,64 +165,11 @@ pub(super) fn activity_bar(
 }
 
 fn agent_icon(agent_id: &str, dim: f32, cx: &mut Context<AgentChatView>) -> AnyElement {
-    let color = theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim);
-    match agent_icon_path(agent_id) {
-        Some(path) => svg()
-            .flex_none()
-            .w(px(theme::AGENT_CHAT_HEADER_ICON_SIZE))
-            .h(px(theme::AGENT_CHAT_HEADER_ICON_SIZE))
-            .path(path)
-            .text_color(color)
-            .into_any_element(),
-        None => Icon::new(IconName::Bot)
-            .xsmall()
-            .text_color(color)
-            .into_any_element(),
-    }
-}
-
-fn agent_icon_path(agent_id: &str) -> Option<&'static str> {
-    Some(match agent_id {
-        "claude" | "claude-acp" => "icons/agents/claude-acp.svg",
-        "codex" | "codex-acp" => "icons/agents/codex-acp.svg",
-        "agoragentic-acp" => "icons/agents/agoragentic-acp.svg",
-        "amp-acp" => "icons/agents/amp-acp.svg",
-        "auggie" => "icons/agents/auggie.svg",
-        "autohand" => "icons/agents/autohand.svg",
-        "cline" => "icons/agents/cline.svg",
-        "codebuddy-code" => "icons/agents/codebuddy-code.svg",
-        "cortex-code" => "icons/agents/cortex-code.svg",
-        "corust-agent" => "icons/agents/corust-agent.svg",
-        "crow-cli" => "icons/agents/crow-cli.svg",
-        "cursor" => "icons/agents/cursor.svg",
-        "deepagents" => "icons/agents/deepagents.svg",
-        "devin" => "icons/agents/devin.svg",
-        "dimcode" => "icons/agents/dimcode.svg",
-        "dirac" => "icons/agents/dirac.svg",
-        "factory-droid" => "icons/agents/factory-droid.svg",
-        "fast-agent" => "icons/agents/fast-agent.svg",
-        "gemini" => "icons/agents/gemini.svg",
-        "github-copilot-cli" => "icons/agents/github-copilot-cli.svg",
-        "glm-acp-agent" => "icons/agents/glm-acp-agent.svg",
-        "goose" => "icons/agents/goose.svg",
-        "grok-build" => "icons/agents/grok-build.svg",
-        "harn" => "icons/agents/harn.svg",
-        "junie" => "icons/agents/junie.svg",
-        "kilo" => "icons/agents/kilo.svg",
-        "kimi" => "icons/agents/kimi.svg",
-        "minion-code" => "icons/agents/minion-code.svg",
-        "mistral-vibe" => "icons/agents/mistral-vibe.svg",
-        "nova" => "icons/agents/nova.svg",
-        "opencode" => "icons/agents/opencode.svg",
-        "pi-acp" => "icons/agents/pi-acp.svg",
-        "poolside" => "icons/agents/poolside.svg",
-        "qoder" => "icons/agents/qoder.svg",
-        "qwen-code" => "icons/agents/qwen-code.svg",
-        "sigit" => "icons/agents/sigit.svg",
-        "stakpak" => "icons/agents/stakpak.svg",
-        "vtcode" => "icons/agents/vtcode.svg",
-        _ => return None,
-    })
+    crate::ui::agent_icon(
+        crate::agent::icons::icon_for_agent(agent_id),
+        px(theme::AGENT_CHAT_HEADER_ICON_SIZE),
+        theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim),
+    )
 }
 
 /// Format an ISO 8601 timestamp (`2026-07-01T14:32:05.000Z`) into a compact

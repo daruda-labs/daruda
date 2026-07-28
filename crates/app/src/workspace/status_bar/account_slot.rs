@@ -194,6 +194,16 @@ pub(in crate::workspace) fn account_label(
     }
 }
 
+/// Mark for the trigger pill: only a pane pinned to one auth domain has a
+/// single agent to name. A pane that accepts any domain (or none) gets no
+/// icon rather than an arbitrary one.
+fn trigger_icon(domain: AccountDomain) -> Option<&'static str> {
+    match domain {
+        AccountDomain::Exactly(recipe) => Some(crate::agent::icons::icon_for_recipe(recipe)),
+        AccountDomain::Any | AccountDomain::Unsupported => None,
+    }
+}
+
 /// Render the account slot's dropdown trigger button.
 pub(super) fn render(
     slot: &AccountSlot,
@@ -223,6 +233,13 @@ pub(super) fn render(
                 .items_center()
                 .min_w_0()
                 .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
+                .children(trigger_icon(slot.domain).map(|path| {
+                    crate::ui::agent_icon(
+                        Some(path),
+                        px(theme::STATUS_BAR_AGENT_ICON_SIZE),
+                        theme::current(cx).text_muted,
+                    )
+                }))
                 .child(
                     div()
                         .flex_1()
@@ -286,6 +303,10 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
     };
     let menu = slot.sections.iter().fold(menu, |menu, section| {
         let menu = menu.separator().label(section.label.clone()).separator();
+        // The section header carries no icon slot (`PopupMenuItem::Label`), so
+        // the mark rides each row — which is also what disambiguates a mixed
+        // list once more than one domain has accounts.
+        let icon = crate::agent::icons::icon_for_recipe(section.recipe);
         section.accounts.iter().fold(menu, |m, account| {
             let workspace = slot.workspace.clone();
             let pane_id = slot.pane_id;
@@ -295,6 +316,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 .unwrap_or_else(crate::surface::strings::settings_accounts_unknown_email);
             m.item(
                 PopupMenuItem::new(SharedString::from(label))
+                    .icon(crate::ui::agent_menu_icon(Some(icon)))
                     .checked(is_current)
                     .on_click(move |_, window, app| {
                         if let Some(ws) = workspace.upgrade() {
@@ -343,9 +365,13 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
             AddAccountRow::Add { recipe, label } => {
                 let recipe = *recipe;
                 m.item(
-                    PopupMenuItem::new(label.clone()).on_click(move |_, window, app| {
-                        window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
-                    }),
+                    PopupMenuItem::new(label.clone())
+                        .icon(crate::ui::agent_menu_icon(Some(
+                            crate::agent::icons::icon_for_recipe(recipe),
+                        )))
+                        .on_click(move |_, window, app| {
+                            window.dispatch_action(Box::new(AddManagedAccount(recipe)), app);
+                        }),
                 )
             }
             AddAccountRow::Inert(label) => m.item(PopupMenuItem::new(label.clone()).disabled(true)),
