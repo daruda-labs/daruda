@@ -185,7 +185,7 @@ pub enum SerializedLayout {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_chat: Option<SerializedAgentChatContent>,
         /// Managed account this leaf's terminal shell runs under; `None` =
-        /// provider default. Ignored for `file`/`agent_chat` leaves, which
+        /// the system default. Ignored for `file`/`agent_chat` leaves, which
         /// carry their own `account_id` (`SerializedAgentChatContent`'s).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account_id: Option<crate::accounts::AccountId>,
@@ -313,7 +313,8 @@ pub struct SerializedAgentChatContent {
     /// `None` = a pre-feature save, treated as the built-in Claude agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
-    /// Managed account this pane runs under; `None` = provider default.
+    /// Managed account this pane runs under; `None` = the system default
+    /// (ambient environment, no config-dir override).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<crate::accounts::AccountId>,
     /// ACP session-mode id the host last saw this session in (e.g.

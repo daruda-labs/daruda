@@ -1,3 +1,4 @@
+use daruda_store::accounts::AccountRecipeId;
 use serde::{Deserialize, Serialize};
 
 /// Permission mode the agent chat session starts in. Mirrors Claude Code's
@@ -126,6 +127,13 @@ pub enum AgentLaunch {
 /// working directory to launch the adapter in.
 pub const CWD_TOKEN: &str = "{{cwd}}";
 
+/// Package-name fragments that identify an adapter's auth domain inside a
+/// launch command. Matched as substrings so a version pin
+/// (`codex-acp@1.1.0`), an env prefix, or an `npx -y` wrapper all still
+/// resolve; agents sharing an adapter therefore share credentials.
+const CLAUDE_ADAPTER_MARKERS: &[&str] = &["claude-agent-acp", "claude-code-acp"];
+const CODEX_ADAPTER_MARKERS: &[&str] = &["codex-acp"];
+
 /// `remote_path`, once validated non-blank by [`AgentLaunch::wrap`], borrowed
 /// back out — or `Err(())` when it is `None` or blank (whitespace-only).
 fn require_remote_path(remote_path: Option<&str>) -> Result<&str, ()> {
@@ -195,10 +203,17 @@ impl AgentLaunch {
         }
     }
 
-    /// Like [`Self::wrap`], but injects `env.inject` and removes `env.strip`
-    /// for the spawned process. `Raw` uses a `KEY=value` prefix (preserved by
-    /// the managed Node path); `Ssh`/`Docker` fold it into the remote shell
-    /// via export/unset.
+    /// Like [`Self::wrap`], but applies `env` for the spawned process.
+    ///
+    /// `Ssh`/`Docker` fold both halves into the remote shell via
+    /// `unset`/`export`. `Raw` emits **only** the `env.inject` `KEY=value`
+    /// prefix: the string must stay parseable by
+    /// `daruda_acp::node::command_needs_node`, which reads the launcher token
+    /// after the assignments, and an `/usr/bin/env -u …` prefix here would
+    /// hide it and skip Node.js provisioning. `env.strip` is applied instead
+    /// at final launch assembly, in
+    /// `daruda_acp::launch_env::prepare_adapter_command`, once the runtime is
+    /// resolved.
     #[allow(clippy::result_unit_err)]
     pub fn wrap_with_env(
         &self,
@@ -246,12 +261,33 @@ impl AgentLaunch {
         }
     }
 
+    /// The auth domain a managed account for this agent belongs to, keyed by
+    /// adapter rather than agent id so two catalog entries running the same
+    /// adapter share one set of credentials. `None` for a remote launch (no
+    /// local browser to complete OAuth in) and for an unrecognized adapter.
+    pub fn account_recipe(&self) -> Option<AccountRecipeId> {
+        let AgentLaunch::Raw(command) = self else {
+            return None;
+        };
+        if self.needs_remote_cwd() {
+            return None;
+        }
+        if CLAUDE_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
+            Some(AccountRecipeId::Claude)
+        } else if CODEX_ADAPTER_MARKERS.iter().any(|m| command.contains(m)) {
+            Some(AccountRecipeId::Codex)
+        } else {
+            None
+        }
+    }
+
     /// The interactive login command for this agent, or `None` for remote
-    /// launches (SSH/Docker) where a local desktop browser can't complete OAuth.
-    /// The subscription (`--claudeai`) flow; matches orca's add-account command.
-    pub fn login_command(&self) -> Option<String> {
+    /// launches (SSH/Docker) where a local desktop browser can't complete
+    /// OAuth. `login_args` comes from the auth domain's `AccountRecipe`,
+    /// which owns the exact flag text; this only joins the two.
+    pub fn login_command(&self, login_args: &str) -> Option<String> {
         match self {
-            AgentLaunch::Raw(command) => Some(format!("{command} --cli auth login --claudeai")),
+            AgentLaunch::Raw(command) => Some(format!("{command} {login_args}")),
             AgentLaunch::Ssh { .. } | AgentLaunch::Docker { .. } => None,
         }
     }
@@ -1087,6 +1123,26 @@ mod tests {
     }
 
     #[test]
+    fn wrap_with_env_raw_emits_no_unset_flags() {
+        // Deliberate: `daruda_acp::node::command_needs_node` reads the
+        // launcher token after the `KEY=value` prefix, so adding an
+        // `/usr/bin/env -u …` prefix here would hide `npx` and skip Node.js
+        // provisioning. The strip is applied after runtime resolution, in
+        // `launch_env::prepare_adapter_command`.
+        use crate::account_env::AccountEnv;
+        let launch = AgentLaunch::Raw("npx -y some-acp".to_string());
+        let env = AccountEnv {
+            inject: vec![("CLAUDE_CONFIG_DIR".into(), "/data/acc/alice".into())],
+            strip: vec!["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+        };
+        let cmd = launch.wrap_with_env(None, &env).unwrap();
+        assert_eq!(cmd, "CLAUDE_CONFIG_DIR='/data/acc/alice' npx -y some-acp");
+        assert!(!cmd.contains("-u "), "{cmd}");
+        assert!(!cmd.contains("/usr/bin/env"), "{cmd}");
+        assert!(!cmd.contains("unset "), "{cmd}");
+    }
+
+    #[test]
     fn wrap_with_env_ssh_exports_and_unsets() {
         use crate::account_env::AccountEnv;
         let launch = AgentLaunch::Ssh {
@@ -1103,17 +1159,101 @@ mod tests {
     }
 
     #[test]
-    fn login_command_appends_cli_login_for_raw_only() {
+    fn login_command_appends_the_given_args_for_raw_only() {
         let raw = AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".into());
         assert_eq!(
-            raw.login_command().as_deref(),
+            raw.login_command("--cli auth login --claudeai").as_deref(),
             Some("npx -y @agentclientprotocol/claude-agent-acp@latest --cli auth login --claudeai")
+        );
+        // A different auth domain's args have a different shape — the
+        // recipe owns the exact text, this only joins with one space.
+        let codex = AgentLaunch::Raw("npx -y @agentclientprotocol/codex-acp@latest".into());
+        assert_eq!(
+            codex.login_command("cli login").as_deref(),
+            Some("npx -y @agentclientprotocol/codex-acp@latest cli login")
         );
         let ssh = AgentLaunch::Ssh {
             adapter_command: "x".into(),
             host: "h".into(),
         };
-        assert_eq!(ssh.login_command(), None);
+        assert_eq!(ssh.login_command("cli login"), None);
+        let docker = AgentLaunch::Docker {
+            adapter_command: "x".into(),
+            container: "c".into(),
+        };
+        assert_eq!(docker.login_command("cli login"), None);
+    }
+
+    #[test]
+    fn account_recipe_derives_the_auth_domain_from_the_adapter() {
+        let raw = |c: &str| AgentLaunch::Raw(c.to_string());
+        assert_eq!(
+            raw("npx -y @agentclientprotocol/claude-agent-acp@latest").account_recipe(),
+            Some(AccountRecipeId::Claude)
+        );
+        assert_eq!(
+            raw("npx -y @agentclientprotocol/codex-acp@latest").account_recipe(),
+            Some(AccountRecipeId::Codex)
+        );
+        // A version pin must not break derivation.
+        assert_eq!(
+            raw("npx -y @agentclientprotocol/codex-acp@1.1.0").account_recipe(),
+            Some(AccountRecipeId::Codex)
+        );
+        // The legacy Claude adapter shares Claude's credentials.
+        assert_eq!(
+            raw("npx -y @zed-industries/claude-code-acp@latest").account_recipe(),
+            Some(AccountRecipeId::Claude)
+        );
+        // An adapter with no managed-account support.
+        assert_eq!(
+            raw("npx -y @google/gemini-cli@latest --acp").account_recipe(),
+            None
+        );
+    }
+
+    #[test]
+    fn account_recipe_is_none_for_every_remote_launch() {
+        // Remote adapters have no local browser to complete OAuth in, even
+        // when the adapter itself is a recognized auth domain.
+        assert_eq!(
+            AgentLaunch::Ssh {
+                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+                host: "vm-work".into(),
+            }
+            .account_recipe(),
+            None
+        );
+        assert_eq!(
+            AgentLaunch::Docker {
+                adapter_command: "npx -y @agentclientprotocol/claude-agent-acp@latest".into(),
+                container: "ubuntu-dev".into(),
+            }
+            .account_recipe(),
+            None
+        );
+        // A `Raw` carrying `{{cwd}}` is the legacy remote escape hatch.
+        assert_eq!(
+            AgentLaunch::Raw(
+                "docker exec -i ubuntu-dev sh -c \"cd {{cwd}} && npx -y @agentclientprotocol/claude-agent-acp@latest\""
+                    .into()
+            )
+            .account_recipe(),
+            None
+        );
+    }
+
+    #[test]
+    fn built_in_defaults_derive_their_own_auth_domain() {
+        // Guards a future command change from silently breaking derivation.
+        assert_eq!(
+            AgentDefinition::claude_default().launch.account_recipe(),
+            Some(AccountRecipeId::Claude)
+        );
+        assert_eq!(
+            AgentDefinition::codex_default().launch.account_recipe(),
+            Some(AccountRecipeId::Codex)
+        );
     }
 
     #[test]

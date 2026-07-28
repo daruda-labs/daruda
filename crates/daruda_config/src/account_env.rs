@@ -1,18 +1,12 @@
-//! Environment a managed account's process must run with: the isolated
-//! `CLAUDE_CONFIG_DIR` to inject, and the auth-override vars to strip so
-//! OAuth selection actually wins (orca `environment.ts:37-52`).
+//! Environment a managed account's process must run with: an isolated
+//! config-dir env var to inject and the auth-override vars to strip so
+//! OAuth account selection actually wins (orca `environment.ts:37-52`).
+//! Which var name to inject and which vars to strip is auth-domain-specific
+//! (owned by the caller's `AccountRecipe`, e.g.
+//! `daruda_claude::accounts::ClaudeRecipe`) — this module only assembles
+//! the env override set generically.
 
 use std::path::Path;
-
-/// Auth-carrying env vars that override OAuth account selection and must be
-/// removed from every spawned account process.
-pub const AUTH_ENV_STRIP: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "ANTHROPIC_CUSTOM_HEADERS",
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountEnv {
@@ -20,13 +14,15 @@ pub struct AccountEnv {
     pub strip: Vec<&'static str>,
 }
 
-pub fn account_env(config_dir: &Path) -> AccountEnv {
+/// Build the env override for one managed account's process: inject
+/// `env_name=config_dir` and strip `strip`'s auth-override vars.
+pub fn account_env(env_name: &str, config_dir: &Path, strip: &[&'static str]) -> AccountEnv {
     AccountEnv {
         inject: vec![(
-            "CLAUDE_CONFIG_DIR".to_string(),
+            env_name.to_string(),
             config_dir.to_string_lossy().into_owned(),
         )],
-        strip: AUTH_ENV_STRIP.to_vec(),
+        strip: strip.to_vec(),
     }
 }
 
@@ -37,7 +33,12 @@ mod tests {
 
     #[test]
     fn injects_config_dir_and_strips_auth_overrides() {
-        let e = account_env(Path::new("/data/claude-accounts/alice"));
+        let strip: &[&str] = &["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+        let e = account_env(
+            "CLAUDE_CONFIG_DIR",
+            Path::new("/data/claude-accounts/alice"),
+            strip,
+        );
         assert!(
             e.inject
                 .iter()
@@ -45,6 +46,11 @@ mod tests {
         );
         assert!(e.strip.contains(&"ANTHROPIC_API_KEY"));
         assert!(e.strip.contains(&"CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(e.strip.contains(&"AWS_BEARER_TOKEN_BEDROCK"));
+    }
+
+    #[test]
+    fn strip_list_is_passed_through_verbatim() {
+        let e = account_env("SOME_ENV", Path::new("/tmp/x"), &[]);
+        assert!(e.strip.is_empty());
     }
 }

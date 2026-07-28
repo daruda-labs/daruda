@@ -1086,24 +1086,36 @@ impl Render for Workspace {
         // showing a misleading "System".
         let focused_pane_id = self.active_runtime().focused_pane_id;
         let weak_workspace = cx.entity().downgrade();
-        let login_unavailable = self.active_agent_login_unavailable();
         let login_pending = self.is_login_pending();
-        let focused_account = self
+        let focused_selection = self
             .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == focused_pane_id)
-            .and_then(|p| p.account_selection())
-            .map(|selection| {
-                status_bar::AccountSlot::resolve(
-                    focused_pane_id,
-                    selection,
-                    &self.accounts,
-                    weak_workspace.clone(),
-                    login_unavailable,
-                    login_pending,
-                )
-            });
+            .and_then(|p| p.account_selection());
+        let focused_account = focused_selection.map(|selection| {
+            // The dropdown is scoped to the pane's own auth domain, so an
+            // agent-chat pane reads its own agent's launch rather than the
+            // session's active agent. `agent_id` lives in the view entity,
+            // hence the eager read into plain data here.
+            let slot_pane = match self.agent_chat_view(focused_pane_id) {
+                Some(view) => {
+                    let agent_id = view.read(cx).agent_id.clone();
+                    status_bar::SlotPane::AgentChat(self.agent_launch_for(&agent_id))
+                }
+                None => status_bar::SlotPane::Terminal,
+            };
+            let domain = status_bar::SlotDomain::for_pane(&slot_pane);
+            status_bar::AccountSlot::resolve(
+                focused_pane_id,
+                selection,
+                domain,
+                &self.accounts,
+                |recipe| self.login_command_for_recipe(recipe).is_some(),
+                weak_workspace.clone(),
+                login_pending,
+            )
+        });
         // `project_config_path` (canonicalize) + `Path::exists` are
         // filesystem stats, and `render()` re-runs on every animation frame
         // (status badges request frames without `cx.notify`). Memoize the
@@ -1128,7 +1140,7 @@ impl Render for Workspace {
         // Usage chip reads the same per-account cache the Usage tab does,
         // keyed by the focused pane's account, so switching panes swaps the
         // chip to that account's numbers without a refetch.
-        let (usage_account, _) = self.focused_account_key();
+        let usage_account = self.focused_account().key();
         let usage = self
             .claude
             .usage_by_account

@@ -1573,6 +1573,7 @@ dependencies = [
 name = "daruda_claude"
 version = "0.2.7"
 dependencies = [
+ "base64",
  "chrono",
  "daruda_store",
  "dirs",

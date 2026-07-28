@@ -11,6 +11,7 @@
 
 pub mod adapter;
 pub mod connection;
+pub mod launch_env;
 pub mod mapping;
 pub(crate) mod mode_tracker;
 pub mod model;
@@ -19,7 +20,7 @@ pub(crate) mod output_highlight;
 pub mod session;
 
 pub use agent_client_protocol::schema::v1::SessionId;
-pub use connection::{AcpClientError, AdapterCommand, SpikeEvent, run_one_shot};
+pub use connection::{AcpClientError, AdapterCommand, LaunchSpec, SpikeEvent, run_one_shot};
 pub use mapping::{
     SubagentActivity, UpdateEffect, apply_update, apply_update_with, cancel_pending_tools,
     finalize_streaming, permission_item, subagent_activity, touched_tool_id,

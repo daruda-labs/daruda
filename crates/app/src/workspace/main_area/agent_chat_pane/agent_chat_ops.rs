@@ -251,8 +251,8 @@ impl Workspace {
     /// Shared pane-construction core behind [`Self::create_agent_chat_pane`]
     /// and [`Self::create_new_agent_chat_pane`]: builds the view + wraps it in
     /// a `Pane` for an already-decided cwd `outcome`. Account defaults to the
-    /// Claude provider default; session restore overwrites that seed via
-    /// `Pane::agent_chat_content_mut` right after.
+    /// configured default for this agent's own auth domain; session restore
+    /// overwrites that seed via `Pane::agent_chat_content_mut` right after.
     fn build_agent_chat_pane(
         &mut self,
         outcome: PaneCwdOutcome,
@@ -274,6 +274,11 @@ impl Workspace {
         };
         let pane_id = self.alloc_id();
         let window_handle = window.window_handle();
+        // Only this agent's own auth domain has a default that may apply here.
+        let account = self.default_account_selection_for_new_pane(
+            self.agent_launch_for(&agent_id)
+                .and_then(|l| l.account_recipe()),
+        );
         // Seed the tab title from the persisted session title so a restored
         // dormant pane shows its label before the session loads; else default.
         let cached_title = match &title {
@@ -310,7 +315,7 @@ impl Workspace {
                 view,
                 cached_title,
                 cwd,
-                account: self.default_account_selection_for_new_pane(),
+                account,
             }),
         }
     }

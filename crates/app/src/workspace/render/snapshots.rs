@@ -314,23 +314,27 @@ impl Workspace {
             .map(|(sid, &n)| (sid.clone(), n))
             .collect();
         // Usage tab shows the focused pane's account — plan limits and
-        // activity are cached per-account (`focused_account_key`) so a
+        // activity are cached per-account (`focused_account`) so a
         // lane/pane focus switch renders that account's cache instantly
         // while the pump refetches it in the background. An account with
         // no cache entry yet (never fetched, or the pump hasn't ticked
         // since focus moved) falls back to the placeholder default.
-        let (focused_account, _) = self.focused_account_key();
+        let focused = self.focused_account();
+        let usage_availability =
+            crate::workspace::sync::limits::usage_availability(focused.recipe());
+        let focused_account = focused.key();
         // Display-only identity for the Usage tab header: the focused
-        // account's email when resolved, else the "System" fallback.
-        // Reuses the status bar's `account_label` formatter with
-        // `plan=None` — this header wants identity only, not the
-        // "(plan)" suffix the status-bar dropdown slot shows.
-        let account_label = crate::workspace::status_bar::account_label(
+        // account's email when resolved, else a "System" fallback naming
+        // the domain's ambient home — `FocusedAccount::recipe` is total,
+        // so the domain is always known here. Reuses the status bar's
+        // `account_label` formatter with `plan=None`: this header wants
+        // identity only, not the "(plan)" suffix the dropdown slot shows.
+        let account_label = usage_account_label(
             focused_account
                 .account_id()
                 .and_then(|id| self.accounts.find(id))
                 .and_then(|account| account.email.as_deref()),
-            None,
+            focused.recipe(),
         );
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
@@ -370,9 +374,25 @@ impl Workspace {
             mcp: cx
                 .global::<crate::agent::mcp::McpState>()
                 .snapshot_for(self.active_lane_root().as_deref(), &self.mcp_project_dirs),
+            usage_availability,
             account_label: account_label.into(),
         }
     }
+}
+
+/// Display-only identity for the Usage tab header: `email` when the focused
+/// account resolved one, else a "System" fallback naming `recipe`'s ambient
+/// home. Reuses the status bar's formatter with `plan=None` — this header
+/// wants identity only, not the "(plan)" suffix the dropdown slot shows.
+fn usage_account_label(
+    email: Option<&str>,
+    recipe: daruda_store::accounts::AccountRecipeId,
+) -> String {
+    crate::workspace::status_bar::account_label(email, None).unwrap_or_else(|| {
+        crate::surface::strings::status_bar_account_system(
+            daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -380,4 +400,22 @@ mod tests {
     // Snapshot builders are pure projections over Workspace state.
     // Behavioral coverage is exercised indirectly by every UI test
     // that renders the workspace (lifecycle, files, splits, etc.).
+    use super::usage_account_label;
+    use daruda_store::accounts::AccountRecipeId;
+
+    #[test]
+    fn the_usage_header_fallback_names_the_focused_domains_home() {
+        let claude = usage_account_label(None, AccountRecipeId::Claude);
+        let codex = usage_account_label(None, AccountRecipeId::Codex);
+        assert!(claude.contains("~/.claude"), "{claude}");
+        assert!(codex.contains("~/.codex"), "{codex}");
+    }
+
+    #[test]
+    fn a_resolved_email_wins_over_the_domain_fallback() {
+        assert_eq!(
+            usage_account_label(Some("alice@x.com"), AccountRecipeId::Codex),
+            "alice@x.com"
+        );
+    }
 }

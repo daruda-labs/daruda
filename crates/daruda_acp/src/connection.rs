@@ -51,6 +51,31 @@ impl Default for AdapterCommand {
     }
 }
 
+/// An agent launch command plus the ambient environment variables that must
+/// not reach the spawned adapter.
+///
+/// The two travel together because a managed account's isolated credentials
+/// only win if the inherited auth-override vars (`ANTHROPIC_API_KEY` and
+/// friends) are removed — a command handed onward without its strip list
+/// silently authenticates as whatever the user exported. Both fields are
+/// public and there is no command-only constructor, so a caller has to state
+/// the strip list (an empty `Vec` for the unmanaged System account).
+///
+/// `strip_env` is deliberately *not* folded into `command` as an
+/// `/usr/bin/env` prefix: that would hide the `npx` / `node` launcher token
+/// from [`crate::node::command_needs_node`] and skip Node.js provisioning
+/// entirely. It is applied at final launch assembly instead, at the single
+/// site every launch path funnels through —
+/// [`crate::launch_env::prepare_adapter_command`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchSpec {
+    /// Bash-style command string or JSON stdio config, as
+    /// [`AdapterCommand`] describes.
+    pub command: String,
+    /// Environment variable names to unset for the spawned adapter.
+    pub strip_env: Vec<String>,
+}
+
 /// Errors surfaced while connecting or driving the protocol exchange.
 #[derive(Debug, thiserror::Error)]
 pub enum AcpClientError {

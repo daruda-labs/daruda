@@ -5,12 +5,12 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use daruda_store::accounts::AccountId;
+use daruda_store::accounts::{AccountId, AccountRecipeId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::credentials::delete_scoped_credentials;
 use super::layout::accounts_root;
+use super::recipe::{CleanupScope, recipe_for};
 
 /// Startup sweep: remove per-account config dirs under [`accounts_root`]
 /// that never got promoted to a `ManagedAccount` (login cancelled or
@@ -72,17 +72,35 @@ pub fn sweep_orphan_dirs(data_dir: &Path, known: &[AccountId], grace: Duration) 
             // Possibly an in-flight login in another window — spare it.
             continue;
         }
-        delete_scoped_credentials(&path);
-        if let Err(e) = std::fs::remove_dir_all(&path) {
-            LogWriter::log(
-                ErrorReport::new("Failed to remove orphaned account config dir")
-                    .from_error(&e)
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("account.sweep.remove_dir_failed")
-                    .build(),
-            );
+        cleanup_unattributed_dir(&path);
+    }
+}
+
+/// Clean up an orphan dir whose auth domain can't be known — an orphan is by
+/// definition absent from `accounts.json`, so there is no `recipe` to read —
+/// by running every domain's [`AccountRecipe::cleanup`] that reaches no
+/// further than the dir. Each such cleanup is keyed by the path alone and
+/// tolerates an already-removed dir, so the domains that don't own it are
+/// no-ops rather than hazards.
+fn cleanup_unattributed_dir(path: &Path) {
+    for id in AccountRecipeId::ALL {
+        let recipe = recipe_for(id);
+        if recipe.cleanup_scope() == CleanupScope::DirScoped {
+            recipe.cleanup(path);
         }
+    }
+    // Either every domain declined (all `External`) or the removal failed —
+    // the latter already logged by the recipe, but a surviving dir is the
+    // thing worth naming.
+    if path.exists() {
+        LogWriter::log(
+            ErrorReport::new("Left an orphaned account config dir in place")
+                .severity(ErrorSeverity::Warning)
+                .at(file!(), line!())
+                .with_context("dir", path.display().to_string())
+                .dedup("account.sweep.orphan_dir_remains")
+                .build(),
+        );
     }
 }
 
@@ -135,6 +153,27 @@ mod tests {
         assert!(known_dir.exists(), "known account dir must be preserved");
         assert!(!unknown_dir.exists(), "unknown-uuid dir must be removed");
         assert!(!garbage_dir.exists(), "garbage-named dir must be removed");
+    }
+
+    #[test]
+    fn sweep_unlinks_a_codex_shaped_orphan_without_following_its_links() {
+        let system_home = tempfile::tempdir().expect("system home");
+        std::fs::write(system_home.path().join("AGENTS.md"), b"user data").expect("user file");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let data_dir = tmp.path();
+        let orphan = account_config_dir(data_dir, daruda_store::accounts::AccountId::new());
+        std::fs::create_dir_all(&orphan).expect("create orphan dir");
+        std::os::unix::fs::symlink(system_home.path(), orphan.join("linked")).expect("symlink");
+
+        sweep_orphan_dirs(data_dir, &[], Duration::ZERO);
+
+        assert!(!orphan.exists(), "the orphan dir must be swept");
+        assert_eq!(
+            std::fs::read(system_home.path().join("AGENTS.md")).expect("target survives"),
+            b"user data",
+            "the sweep must unlink, never follow, a link into the user's home"
+        );
     }
 
     #[test]

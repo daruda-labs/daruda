@@ -5,7 +5,7 @@
 //! construction, mode/config, and misc accessors) because the connect flow
 //! is one large, self-contained concern with its own failure/retry paths.
 
-use daruda_acp::{NodeProgress, connect_agent_session};
+use daruda_acp::{LaunchSpec, NodeProgress, connect_agent_session};
 use daruda_config::AgentLaunch;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::PaneCwd;
@@ -18,6 +18,7 @@ use super::agent_chat_ops::{agent_name_for, catalog_default_id, resolve_open_age
 use super::view::{AgentSessionStatus, RuntimePrepPhase};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::pane::PreparedAccount;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
@@ -44,6 +45,56 @@ fn agent_default_mode<'a>(
         .find(|a| a.id == agent_id)?
         .default_mode
         .as_deref()
+}
+
+/// The ambient auth-override vars to unset for this pane's adapter, taken
+/// from the resolved account's recipe. Empty for the System account, which
+/// is defined by running under whatever the user's own environment says.
+fn account_strip_env(prepared: Option<&PreparedAccount>) -> Vec<String> {
+    prepared
+        .map(|account| {
+            account
+                .env
+                .strip
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Abort a connect whose selected account's config dir could not be
+/// prepared: park the pane in `Error` and toast. Never falls back to the
+/// system account — the user picked this one, and connecting as another
+/// silently is the failure this gate exists to prevent.
+fn fail_connect_account_prepare(
+    this: &gpui::WeakEntity<Workspace>,
+    pane_id: PaneId,
+    detail: String,
+    cx: &mut gpui::AsyncApp,
+) {
+    let report = ErrorReport::new(s::agent_chat_account_prepare_failed())
+        .message(detail)
+        .severity(ErrorSeverity::Error)
+        .at(file!(), line!())
+        .dedup("agent_chat.account.prepare_failed")
+        .build();
+    let unreported = report.clone();
+    match this.update(cx, |ws, cx| {
+        if let Some(view) = ws.agent_chat_view(pane_id).cloned() {
+            view.update(cx, |v, cx| {
+                v.set_error(s::agent_chat_account_prepare_failed(), cx)
+            });
+            // Connecting → Error clears the badge; dirty the cached docks so
+            // it doesn't linger stale.
+            ws.notify_status_docks(cx);
+        }
+        ws.report_error(report, cx);
+    }) {
+        Ok(()) => {}
+        // Window gone before the toast could land — keep the log record.
+        Err(_) => daruda_store::observability::log_writer::LogWriter::log(unreported),
+    }
 }
 
 impl Workspace {
@@ -217,17 +268,32 @@ impl Workspace {
         // never spawn a connection with a broken command, park the pane in
         // the same "no remote cwd" error `PaneCwdOutcome::Blocked` uses, and
         // bail out of this connect attempt entirely.
-        // Plan A only manages Claude accounts, so every connect resolves
-        // against the Claude provider regardless of which agent this pane
-        // runs — an agent_id → provider mapping isn't needed yet.
-        let account_config_dir = crate::workspace::main_area::pane::resolve_account_config_dir(
+        // The pane's account must belong to the auth domain its own agent
+        // launches under; an account from another domain is refused here
+        // rather than injected under the wrong config-dir env var.
+        let selection = self.agent_chat_account_selection(pane_id);
+        let required = launch.account_recipe();
+        let prepared = crate::workspace::main_area::pane::resolve_pane_account(
             &self.accounts,
             &self.data_dir,
-            self.agent_chat_account_selection(pane_id),
-            daruda_store::accounts::AgentProvider::Claude,
+            selection,
+            required,
         );
-        let wrapped = match account_config_dir.as_deref() {
-            Some(dir) => launch.wrap_with_env(remote_path, &daruda_config::account_env(dir)),
+        if selection.account_id().is_some() && prepared.is_none() {
+            // Not an error: the pane falls back to the system account. Log
+            // only so a surprised user has ground truth for why.
+            let report = ErrorReport::new(
+                "Agent chat: pane account not usable for this agent; using system",
+            )
+            .severity(ErrorSeverity::Info)
+            .with_context("agent_id", agent_id.clone())
+            .at(file!(), line!())
+            .dedup("agent_chat.account.unusable")
+            .build();
+            daruda_store::observability::log_writer::LogWriter::log(report);
+        }
+        let wrapped = match &prepared {
+            Some(account) => launch.wrap_with_env(remote_path, &account.env),
             None => launch.wrap(remote_path),
         };
         let command = match wrapped {
@@ -263,6 +329,15 @@ impl Workspace {
             .build();
             daruda_store::observability::log_writer::LogWriter::log(report);
         }
+
+        // The strip list rides alongside the command all the way into launch
+        // assembly; `wrap_with_env` above can only inject, since an
+        // `/usr/bin/env` prefix this early would hide the `npx` launcher from
+        // node detection.
+        let launch_spec = LaunchSpec {
+            command,
+            strip_env: account_strip_env(prepared.as_ref()),
+        };
 
         // Runtime provisioning (see `connect_agent_session`) can download
         // Node.js on the first run of a machine without a usable system install.
@@ -306,6 +381,26 @@ impl Workspace {
         let retry_cwd = cwd.clone();
         let was_resume = resume.is_some();
         let pump = cx.spawn(async move |this, cx| {
+            // Prep the managed account's config dir before anything spawns
+            // (Claude mirrors shared MCP servers into it; Codex materializes
+            // its home). The canonical sources can be multi-megabyte, so this
+            // stays on the background executor. A failure aborts the connect:
+            // the user picked this account, and silently continuing would run
+            // the session as a different one.
+            if let Some(account) = prepared {
+                let prep = cx
+                    .background_executor()
+                    .spawn(async move {
+                        daruda_claude::accounts::recipe_for(account.recipe)
+                            .prepare_dir(&account.config_dir)
+                            .map_err(|e| e.to_string())
+                    })
+                    .await;
+                if let Err(detail) = prep {
+                    fail_connect_account_prepare(&this, pane_id, detail, cx);
+                    return;
+                }
+            }
             // `connect_agent_session` is synchronous (it provisions node,
             // parses the command, and spawns the connection task); run it on the
             // background executor so the download / smol `spawn` bind to a worker
@@ -315,21 +410,10 @@ impl Workspace {
                 .background_executor()
                 .spawn(async move {
                     let mut progress = move |milestone| drop(progress_tx.unbounded_send(milestone));
-                    // Managed account only (`None` = system default, which
-                    // already reads MCP servers straight out of the
-                    // canonical `~/.claude.json` — no mirror needed). The
-                    // canonical file can be multi-megabyte, so this must
-                    // stay on the background executor, not the UI thread.
-                    // Terminal panes under a managed account don't get this
-                    // mirror yet — deferred extension, agent-chat is the
-                    // only MCP consumer in scope for v1.
-                    if let Some(dir) = account_config_dir.as_deref() {
-                        daruda_claude::accounts::mirror_shared_mcp_servers(dir);
-                    }
                     // `Some` resumes the persisted session (`session/load`);
                     // `None` starts a fresh session (`session/new`).
                     connect_agent_session(
-                        command,
+                        launch_spec,
                         node_root,
                         connect_cwd,
                         initial_modes,
@@ -680,8 +764,36 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::agent_default_mode;
+    use super::{account_strip_env, agent_default_mode};
     use daruda_config::{AgentDefinition, AgentLaunch};
+
+    #[test]
+    fn account_strip_env_carries_the_recipes_auth_overrides() {
+        use crate::workspace::main_area::pane::PreparedAccount;
+        use daruda_store::accounts::AccountRecipeId;
+        use std::path::PathBuf;
+
+        let recipe = daruda_claude::accounts::recipe_for(AccountRecipeId::Claude);
+        let config_dir = PathBuf::from("/data/acc/alice");
+        let prepared = PreparedAccount {
+            recipe: AccountRecipeId::Claude,
+            env: daruda_config::account_env(
+                recipe.config_dir_env(),
+                &config_dir,
+                recipe.strip_env(),
+            ),
+            config_dir,
+        };
+        let strip = account_strip_env(Some(&prepared));
+        assert_eq!(strip, recipe.strip_env());
+        assert!(strip.iter().any(|n| n == "ANTHROPIC_API_KEY"));
+
+        // Codex strips nothing, and the System account (no managed account)
+        // runs under the user's own environment by definition.
+        let codex = daruda_claude::accounts::recipe_for(AccountRecipeId::Codex);
+        assert!(codex.strip_env().is_empty());
+        assert!(account_strip_env(None).is_empty());
+    }
 
     #[test]
     fn agent_default_mode_reads_the_matching_catalog_entry() {

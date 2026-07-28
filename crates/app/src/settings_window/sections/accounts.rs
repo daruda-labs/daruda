@@ -1,34 +1,28 @@
-//! Accounts section of the Settings window — list managed accounts per
-//! provider, set the per-provider default, delete an account. Visual
-//! language mirrors the Agent-catalog section's bordered row (see
-//! `sections::mod::render_agent_catalog_row`).
+//! Accounts section of the Settings window — one block per auth domain
+//! (`AccountRecipeId`), each listing a "System" row plus that domain's
+//! managed accounts, with the per-domain default and delete/add/reauth
+//! actions. Visual language mirrors the Agent-catalog section's bordered row
+//! (see `sections::mod::render_agent_catalog_row`).
 //!
-//! Cross-window state: `daruda_store::accounts::AccountsState` is
-//! persisted once as `accounts.json` and held in-memory as the app-wide
-//! `crate::workspace::accounts_global::AccountsGlobal` — the single source
-//! of truth every window (each `Workspace` + this Settings window) mirrors
-//! and refreshes via `cx.observe_global`. This section writes `accounts.json`
-//! for `SetDefaultAccount`/`RemoveAccount`, then publishes the new state with
-//! `accounts_global::replace`, which fires `observe_global` on every window
-//! symmetrically — no manual per-window broadcast to forget. This matches the
-//! `SkillsState`/`GlobalTasks` Global pattern the rest of the app uses for
-//! cross-window shared state (the earlier per-window-field + manual broadcast
-//! approach let account *logins* — which never broadcast — go stale in other
-//! windows until restart).
+//! Every domain renders whether or not it has accounts: the System row is how
+//! the user says "no managed default here", and an absent `default_by_recipe`
+//! entry is exactly that state.
 //!
-//! The "+ Add account" row is a narrower case: unlike delete/default (pure
-//! `accounts.json` edits), a headless login (`Workspace::add_managed_account`)
-//! needs a `Workspace` to run against — it resolves the login command from
-//! that window's own agent catalog / `last_agent_id`. `start_add_account`
-//! picks `WindowRegistry::first_workspace` (a no-op toast-free log when none
-//! is open) and runs the login there; it deliberately does **not** mirror
-//! `Workspace.pending_login` into this window (see `start_add_account`'s doc)
-//! — the spinner + Cancel affordance lives in the status-bar dropdown, which
-//! reads that state natively in the window the login is actually running in.
+//! INVARIANT: `accounts.json` is shared across windows through the app-wide
+//! `accounts_global::AccountsGlobal`. This section writes the file and then
+//! publishes via `accounts_global::replace`, which fires `observe_global` on
+//! every window symmetrically — never a manual per-window broadcast, which is
+//! what let logins go stale in other windows.
+//!
+//! The add-account buttons are the one case needing a `Workspace` (the login
+//! command comes from that window's agent catalog), so `start_add_account`
+//! runs the login in `WindowRegistry::first_workspace`. It deliberately does
+//! not mirror `Workspace.pending_login` here — the spinner + Cancel lives in
+//! the status-bar dropdown of the window running the login.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use daruda_store::accounts::{AccountId, AgentProvider, ManagedAccount};
+use daruda_store::accounts::{AccountId, AccountRecipeId, ManagedAccount};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::{AnyElement, ClickEvent, IntoElement, SharedString, div, prelude::*, px};
@@ -41,12 +35,11 @@ use crate::window_registry::WindowRegistry;
 use crate::workspace::accounts_global;
 use crate::workspace::dialog_helpers::open_confirm_dialog;
 
-const PROVIDERS: [AgentProvider; 2] = [AgentProvider::Claude, AgentProvider::Codex];
-
-fn provider_label(provider: AgentProvider) -> String {
-    match provider {
-        AgentProvider::Claude => s::status_bar_account_provider_claude(),
-        AgentProvider::Codex => s::status_bar_account_provider_codex(),
+/// Element-id fragment for a recipe's rows — internal, never displayed.
+fn recipe_slug(recipe: AccountRecipeId) -> &'static str {
+    match recipe {
+        AccountRecipeId::Claude => "claude",
+        AccountRecipeId::Codex => "codex",
     }
 }
 
@@ -82,9 +75,87 @@ fn last_authenticated_label(now: u64, last_authenticated_at: u64) -> String {
 
 /// Body text for the delete-account confirm dialog. `count` is how many
 /// panes (across every open Workspace window) currently override to
-/// this account — see `Workspace::panes_referencing_account`.
-fn remove_confirm_body(count: usize) -> String {
-    s::settings_accounts_remove_confirm_body(count)
+/// this account — see `Workspace::panes_referencing_account`. The path
+/// those panes revert to is the deleted account's own auth domain's
+/// ambient home, not a fixed one.
+fn remove_confirm_body(count: usize, recipe: AccountRecipeId) -> String {
+    s::settings_accounts_remove_confirm_body(
+        count,
+        daruda_claude::accounts::recipe_for(recipe).system_home_hint(),
+    )
+}
+
+/// Apply a default-account choice to `state`: `Some(id)` pins that account
+/// for `recipe`, `None` removes the entry — the absent entry *is* the
+/// "System" choice (see `AccountsState::default_by_recipe`).
+fn apply_default_choice(
+    state: &mut daruda_store::accounts::AccountsState,
+    recipe: AccountRecipeId,
+    account: Option<AccountId>,
+) {
+    match account {
+        Some(id) => {
+            state.default_by_recipe.insert(recipe, id);
+        }
+        None => {
+            state.default_by_recipe.remove(&recipe);
+        }
+    }
+}
+
+/// Bordered card shared by the System row and every account row, so the
+/// two can't drift apart visually.
+fn row_card(cx: &gpui::App) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::MODAL_PANEL_GAP))
+        .p(px(theme::MODAL_PANEL_GAP))
+        .border_1()
+        .border_color(theme::current(cx).border)
+        .rounded(px(theme::RADIUS_MD))
+}
+
+/// A row's title + subtitle, with the default badge trailing it when this
+/// row is the domain's current default.
+fn row_header(
+    title: String,
+    subtitle: String,
+    is_default: bool,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let t = theme::current(cx);
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::SKILL_ROW_GAP))
+                .child(
+                    div()
+                        .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                        .text_color(t.text_primary)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
+                        .text_color(t.text_muted)
+                        .child(subtitle),
+                ),
+        )
+        .when(is_default, |header| {
+            header.child(
+                div()
+                    .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(s::settings_accounts_default_badge()),
+            )
+        })
 }
 
 /// Log an I/O failure without surfacing a toast — the Settings window
@@ -113,38 +184,55 @@ impl SettingsWindow {
             .gap(px(theme::MODAL_PANEL_GAP))
             .child(Self::section_label(s::settings_section_accounts(), cx));
 
-        if self.accounts.accounts.is_empty() {
-            body = body.child(
-                div()
-                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                    .text_color(theme::current(cx).text_muted)
-                    .child(s::settings_accounts_empty()),
-            );
-        } else {
-            for provider in PROVIDERS {
-                let rows: Vec<&ManagedAccount> = self
-                    .accounts
-                    .accounts
-                    .iter()
-                    .filter(|a| a.provider == provider)
-                    .collect();
-                if rows.is_empty() {
-                    continue;
-                }
-                body = body.child(
+        for recipe in AccountRecipeId::ALL {
+            let default_id = self.accounts.default_by_recipe.get(&recipe).copied();
+            body = body
+                .child(
                     div()
                         .text_size(px(theme::MODAL_BODY_FONT_SIZE))
                         .text_color(theme::current(cx).text_primary)
-                        .child(provider_label(provider)),
-                );
-                let default_id = self.accounts.default_by_provider.get(&provider).copied();
-                for account in rows {
-                    body = body.child(self.render_account_row(account, default_id, cx));
-                }
+                        .child(s::account_recipe_label(recipe)),
+                )
+                .child(self.render_system_row(recipe, default_id.is_none(), cx));
+            for account in self.accounts.accounts.iter().filter(|a| a.recipe == recipe) {
+                body = body.child(self.render_account_row(account, default_id, cx));
             }
+            body = body.child(self.render_add_account_row(recipe, cx));
         }
 
-        body.child(self.render_add_account_row(cx))
+        body.into_any_element()
+    }
+
+    /// The always-present first row of every auth domain: the ambient
+    /// credentials a new pane runs under while that domain has no default
+    /// account. Picking it removes the domain's `default_by_recipe` entry.
+    fn render_system_row(
+        &self,
+        recipe: AccountRecipeId,
+        is_default: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let slug = recipe_slug(recipe);
+        let home = daruda_claude::accounts::recipe_for(recipe).system_home_hint();
+        let actions = div().flex().flex_row().child(
+            button(
+                SharedString::from(format!("settings-accounts-system-default-{slug}")),
+                s::settings_accounts_set_default(),
+            )
+            .disabled(is_default)
+            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                this.set_default_account(recipe, None, cx);
+            })),
+        );
+
+        row_card(cx)
+            .child(row_header(
+                s::settings_accounts_system_title(),
+                home.to_string(),
+                is_default,
+                cx,
+            ))
+            .child(actions)
             .into_any_element()
     }
 
@@ -154,9 +242,8 @@ impl SettingsWindow {
         default_id: Option<AccountId>,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let t = theme::current(cx);
         let account_id = account.id;
-        let provider = account.provider;
+        let recipe = account.recipe;
         let is_default = default_id == Some(account_id);
         let row_key = account.id.0.to_string();
 
@@ -170,38 +257,6 @@ impl SettingsWindow {
             None => last_auth,
         };
 
-        let mut header = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::SKILL_ROW_GAP))
-                    .child(
-                        div()
-                            .text_size(px(theme::MODAL_BODY_FONT_SIZE))
-                            .text_color(t.text_primary)
-                            .child(email),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-                            .text_color(t.text_muted)
-                            .child(subtitle),
-                    ),
-            );
-        if is_default {
-            header = header.child(
-                div()
-                    .text_size(px(theme::SKILL_BADGE_FONT_SIZE))
-                    .text_color(t.text_muted)
-                    .child(s::settings_accounts_default_badge()),
-            );
-        }
-
         let actions = div()
             .flex()
             .flex_row()
@@ -213,7 +268,7 @@ impl SettingsWindow {
                 )
                 .disabled(is_default)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                    this.set_default_account(account_id, provider, cx);
+                    this.set_default_account(recipe, Some(account_id), cx);
                 })),
             )
             .child(
@@ -235,39 +290,40 @@ impl SettingsWindow {
                 })),
             );
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::MODAL_PANEL_GAP))
-            .p(px(theme::MODAL_PANEL_GAP))
-            .border_1()
-            .border_color(t.border)
-            .rounded(px(theme::RADIUS_MD))
-            .child(header)
+        row_card(cx)
+            .child(row_header(email, subtitle, is_default, cx))
             .child(actions)
             .into_any_element()
     }
 
-    /// Starts a headless add-account login on click — see
+    /// Starts a headless add-account login for `recipe` on click — see
     /// [`Self::start_add_account`] for why there's no live spinner here
     /// (that lives in the status-bar dropdown, which reads
     /// `Workspace.pending_login` natively; this window has no `Workspace`
     /// of its own to observe it on).
-    fn render_add_account_row(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement + use<> {
+    fn render_add_account_row(
+        &self,
+        recipe: AccountRecipeId,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement + use<> {
         div().flex().flex_row().child(
-            button("settings-accounts-add", s::settings_accounts_add()).on_click(cx.listener(
-                |this, _: &ClickEvent, _window, cx| {
-                    this.start_add_account(cx);
-                },
-            )),
+            button(
+                SharedString::from(format!("settings-accounts-add-{}", recipe_slug(recipe))),
+                s::settings_accounts_add(&s::account_recipe_label(recipe)),
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                this.start_add_account(recipe, cx);
+            })),
         )
     }
 
-    /// Starts a headless add-account login (Plan B) against the first
+    /// Starts a headless add-account login for `recipe` against the first
     /// live `Workspace` window (`WindowRegistry::first_workspace` — see
     /// its doc for why "first" rather than the OS-active window: this is
     /// a Settings-window click handler, so `cx.active_window()` would
-    /// resolve to the Settings window itself, not a workspace).
+    /// resolve to the Settings window itself, not a workspace). The domain
+    /// is the button the user pressed, not that window's active agent —
+    /// `add_managed_account` resolves a login command for it.
     ///
     /// This window has no progress/spinner affordance of its own:
     /// `Workspace.pending_login` is `pub(in crate::workspace)` and
@@ -280,7 +336,7 @@ impl SettingsWindow {
     /// affordance is the status-bar dropdown (`status_bar::build_account_menu`),
     /// which reads the state natively in the Workspace window it belongs
     /// to. A toast in that target window reports success/failure.
-    fn start_add_account(&self, cx: &mut gpui::Context<Self>) {
+    fn start_add_account(&self, recipe: AccountRecipeId, cx: &mut gpui::Context<Self>) {
         let Some((handle, weak)) = WindowRegistry::first_workspace(cx) else {
             LogWriter::log(
                 ErrorReport::new("Add-account login has no open Workspace window to run against")
@@ -294,7 +350,7 @@ impl SettingsWindow {
         let result = cx.update_window(handle, |_root, window, cx_w| {
             if let Some(ws) = weak.upgrade() {
                 ws.update(cx_w, |ws, cx| {
-                    ws.add_managed_account(AgentProvider::Claude, window, cx);
+                    ws.add_managed_account(recipe, window, cx);
                 });
             }
         });
@@ -360,12 +416,13 @@ impl SettingsWindow {
         }
     }
 
-    /// Immediate (no confirm) — makes `account_id` the provider default
-    /// for new panes, persists, and publishes to every window.
+    /// Immediate (no confirm) — sets which account new panes of `recipe`
+    /// start on (`None` = the system credentials), persists, and publishes
+    /// to every window.
     fn set_default_account(
         &mut self,
-        account_id: AccountId,
-        provider: AgentProvider,
+        recipe: AccountRecipeId,
+        account: Option<AccountId>,
         cx: &mut gpui::Context<Self>,
     ) {
         // Apply the change to freshly-loaded disk state, not to this
@@ -380,7 +437,7 @@ impl SettingsWindow {
         // (fs4 is already a dependency but unused here) — tracked as a
         // follow-up, not done in this pass.
         let mut state = daruda_store::accounts::load_accounts().unwrap_or_default();
-        state.default_by_provider.insert(provider, account_id);
+        apply_default_choice(&mut state, recipe, account);
         if let Err(e) = daruda_store::accounts::save_accounts(&state) {
             log_io_error(
                 "Failed to save accounts.json after set-default",
@@ -409,6 +466,11 @@ impl SettingsWindow {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // Gone already (a concurrent delete in another window): nothing to
+        // confirm, and `remove_account` would be a no-op anyway.
+        let Some(recipe) = self.accounts.find(account_id).map(|a| a.recipe) else {
+            return;
+        };
         let mut referencing = 0usize;
         WindowRegistry::for_each_workspace(cx, |ws, _window, _cx| {
             referencing += ws.panes_referencing_account(account_id);
@@ -416,7 +478,7 @@ impl SettingsWindow {
         let weak = cx.weak_entity();
         open_confirm_dialog(
             s::settings_accounts_remove_confirm_title(),
-            remove_confirm_body(referencing),
+            remove_confirm_body(referencing, recipe),
             s::settings_accounts_remove_confirm_ok(),
             ButtonVariant::Danger,
             move |_, _window, app_cx| {
@@ -430,7 +492,7 @@ impl SettingsWindow {
     }
 
     /// Runs after the delete confirm: best-effort removes the account's
-    /// isolated `CLAUDE_CONFIG_DIR`, drops it from `AccountsState`,
+    /// isolated config dir, drops it from `AccountsState`,
     /// persists, then clears the override on every pane that referenced
     /// it (across every open Workspace window) and syncs their caches.
     fn remove_account(&mut self, account_id: AccountId, cx: &mut gpui::Context<Self>) {
@@ -444,20 +506,11 @@ impl SettingsWindow {
             cx.notify();
             return;
         };
-        // Remove the isolated config dir AND its scoped Keychain item —
-        // otherwise the OS credential entry leaks on every deletion.
-        daruda_claude::accounts::delete_scoped_credentials(&account.config_dir);
-        if let Err(e) = std::fs::remove_dir_all(&account.config_dir)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            log_io_error(
-                "Failed to remove account config dir",
-                "settings.accounts.remove_config_dir_failed",
-                &e,
-            );
-        }
+        // The account's own auth domain owns the removal — its config dir plus
+        // whatever OS credential entry is scoped to it.
+        daruda_claude::accounts::recipe_for(account.recipe).cleanup(&account.config_dir);
         state.accounts.retain(|a| a.id != account_id);
-        state.default_by_provider.retain(|_, id| *id != account_id);
+        state.default_by_recipe.retain(|_, id| *id != account_id);
         if let Err(e) = daruda_store::accounts::save_accounts(&state) {
             log_io_error(
                 "Failed to save accounts.json after delete",
@@ -483,11 +536,73 @@ impl SettingsWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daruda_store::accounts::{AccountsState, load_accounts_in, save_accounts_in};
+
+    #[test]
+    fn default_choice_round_trips_through_accounts_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let id = AccountId::new();
+        let mut state = AccountsState::default();
+
+        apply_default_choice(&mut state, AccountRecipeId::Codex, Some(id));
+        save_accounts_in(dir.path(), &state).expect("save with a default");
+        let loaded = load_accounts_in(dir.path()).expect("load with a default");
+        assert_eq!(
+            loaded.default_by_recipe.get(&AccountRecipeId::Codex),
+            Some(&id)
+        );
+
+        let mut state = loaded;
+        apply_default_choice(&mut state, AccountRecipeId::Codex, None);
+        save_accounts_in(dir.path(), &state).expect("save without a default");
+        let loaded = load_accounts_in(dir.path()).expect("load without a default");
+        assert!(loaded.default_by_recipe.is_empty());
+    }
+
+    #[test]
+    fn default_choice_leaves_other_recipes_alone() {
+        let claude = AccountId::new();
+        let mut state = AccountsState::default();
+        apply_default_choice(&mut state, AccountRecipeId::Claude, Some(claude));
+        apply_default_choice(&mut state, AccountRecipeId::Codex, Some(AccountId::new()));
+
+        apply_default_choice(&mut state, AccountRecipeId::Codex, None);
+
+        assert_eq!(
+            state.default_by_recipe.get(&AccountRecipeId::Claude),
+            Some(&claude)
+        );
+        assert!(
+            !state
+                .default_by_recipe
+                .contains_key(&AccountRecipeId::Codex)
+        );
+    }
+
+    #[test]
+    fn every_recipe_has_a_label_and_a_system_home_hint() {
+        for recipe in AccountRecipeId::ALL {
+            assert!(!s::account_recipe_label(recipe).is_empty());
+            assert!(
+                daruda_claude::accounts::recipe_for(recipe)
+                    .system_home_hint()
+                    .starts_with("~/")
+            );
+        }
+    }
+
+    #[test]
+    fn recipe_slugs_are_unique_per_recipe() {
+        assert_ne!(
+            recipe_slug(AccountRecipeId::Claude),
+            recipe_slug(AccountRecipeId::Codex)
+        );
+    }
 
     #[test]
     fn remove_confirm_counts_referencing_panes() {
         assert_eq!(
-            remove_confirm_body(3),
+            remove_confirm_body(3, AccountRecipeId::Claude),
             "3 pane(s) using this account will revert to the system default (~/.claude)."
         );
     }
@@ -495,8 +610,16 @@ mod tests {
     #[test]
     fn remove_confirm_body_zero_panes() {
         assert_eq!(
-            remove_confirm_body(0),
+            remove_confirm_body(0, AccountRecipeId::Claude),
             "0 pane(s) using this account will revert to the system default (~/.claude)."
+        );
+    }
+
+    #[test]
+    fn remove_confirm_body_names_the_accounts_own_domain() {
+        assert_eq!(
+            remove_confirm_body(1, AccountRecipeId::Codex),
+            "1 pane(s) using this account will revert to the system default (~/.codex)."
         );
     }
 

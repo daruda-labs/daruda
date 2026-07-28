@@ -629,6 +629,11 @@ pub fn usage_limit_opus_label() -> String {
 pub fn usage_limit_unavailable() -> String {
     rust_i18n::t!("usage.limit_unavailable").into_owned()
 }
+/// Body shown in place of the dashboard when the focused pane's account
+/// belongs to an auth domain daruda has no usage source for.
+pub fn usage_domain_unavailable() -> String {
+    rust_i18n::t!("usage.domain_unavailable").into_owned()
+}
 
 // ----------------------------------------------------------------
 // Activity dashboard (today's stats + 7-day chart + totals)
@@ -1007,6 +1012,13 @@ pub fn agent_chat_no_lane_cwd() -> String {
 /// the symptom.
 pub fn agent_chat_no_remote_cwd() -> String {
     rust_i18n::t!("agent_chat.no_remote_cwd").into_owned()
+}
+
+/// Connect aborted because the pane's managed account config dir could not
+/// be prepared. The connect does not silently fall back to another account,
+/// so this names a real blocker rather than a warning.
+pub fn agent_chat_account_prepare_failed() -> String {
+    rust_i18n::t!("agent_chat.account_prepare_failed").into_owned()
 }
 
 /// Hint appended to a connection error when the pane's working directory is
@@ -1977,17 +1989,31 @@ pub fn status_bar_detached_chip() -> String {
     rust_i18n::t!("settings.status_bar_detached_chip").into_owned()
 }
 
-/// Status-bar account slot label when the focused pane has no managed
-/// account resolved (no `account_id` set, or the id no longer resolves) —
-/// the pane runs under the ambient system `~/.claude` credentials.
-pub fn status_bar_account_system() -> String {
-    rust_i18n::t!("settings.status_bar_account_system").into_owned()
+/// Status-bar account slot / dropdown label when the focused pane has no
+/// managed account resolved — the pane runs under the ambient credentials
+/// of one auth domain, `path` being that domain's home
+/// (`AccountRecipe::system_home_hint`).
+pub fn status_bar_account_system(path: &str) -> String {
+    rust_i18n::t!("settings.status_bar_account_system", path => path).into_owned()
+}
+
+/// The same label for a pane with no single auth domain (a terminal, which
+/// may run any adapter): no one ambient home is right, so the path is
+/// dropped rather than guessed.
+pub fn status_bar_account_system_plain() -> String {
+    rust_i18n::t!("settings.status_bar_account_system_plain").into_owned()
+}
+
+/// Inert status-bar dropdown row explaining why an agent-chat pane on a
+/// remote or unrecognized adapter can hold no managed account.
+pub fn status_bar_account_unsupported() -> String {
+    rust_i18n::t!("settings.status_bar_account_unsupported").into_owned()
 }
 
 /// Status-bar account dropdown entry that starts a headless add-account
-/// login (`AddManagedAccount`) — disabled while the session's active
-/// agent launch is remote (`Workspace::active_agent_login_unavailable`)
-/// or while a login is already running (see `build_account_menu`).
+/// login (`AddManagedAccount`) for the focused pane's auth domain —
+/// disabled when no login command resolves for that domain, or while a
+/// login is already running (see `build_account_menu`).
 pub fn status_bar_add_account() -> String {
     rust_i18n::t!("settings.status_bar_add_account").into_owned()
 }
@@ -1999,14 +2025,23 @@ pub fn status_bar_manage_accounts() -> String {
 }
 
 /// Section-header labels for the status-bar account dropdown, one per
-/// [`daruda_store::accounts::AgentProvider`] variant — shown above the
-/// account list once it's non-empty, so a future multi-provider catalog
-/// reads as grouped sections rather than one flat list.
-pub fn status_bar_account_provider_claude() -> String {
+/// [`daruda_store::accounts::AccountRecipeId`] variant — shown above the
+/// account list once it's non-empty, so a multi-domain catalog reads as
+/// grouped sections rather than one flat list.
+fn status_bar_account_provider_claude() -> String {
     rust_i18n::t!("settings.status_bar_account_provider_claude").into_owned()
 }
-pub fn status_bar_account_provider_codex() -> String {
+fn status_bar_account_provider_codex() -> String {
     rust_i18n::t!("settings.status_bar_account_provider_codex").into_owned()
+}
+
+/// Display name of an auth domain — the only place the enum maps to user
+/// text, shared by the Settings section and the status-bar dropdown.
+pub fn account_recipe_label(recipe: daruda_store::accounts::AccountRecipeId) -> String {
+    match recipe {
+        daruda_store::accounts::AccountRecipeId::Claude => status_bar_account_provider_claude(),
+        daruda_store::accounts::AccountRecipeId::Codex => status_bar_account_provider_codex(),
+    }
 }
 
 /// Status-bar Ports segment's dropdown trigger label — the count of
@@ -2100,17 +2135,12 @@ pub fn status_bar_usage_open_panel() -> String {
 }
 
 /// Sidebar nav label + section header for the Settings "Accounts" page
-/// (Task 9): list managed accounts, set the per-provider default, delete.
+/// list managed accounts, set the per-domain default, delete.
 pub fn settings_nav_accounts() -> String {
     rust_i18n::t!("settings.nav_accounts").into_owned()
 }
 pub fn settings_section_accounts() -> String {
     rust_i18n::t!("settings.section_accounts").into_owned()
-}
-/// Shown instead of the provider groups when no managed account exists
-/// yet (the common case until Plan B login ships).
-pub fn settings_accounts_empty() -> String {
-    rust_i18n::t!("settings.accounts_empty").into_owned()
 }
 /// Placeholder for an account with no captured email (shouldn't happen
 /// once Plan B login always captures `oauthAccount`, but the field is
@@ -2118,12 +2148,20 @@ pub fn settings_accounts_empty() -> String {
 pub fn settings_accounts_unknown_email() -> String {
     rust_i18n::t!("settings.accounts_unknown_email").into_owned()
 }
-/// Badge next to the account that's currently the provider default.
+/// Title of each auth domain's "System" row — the ambient credentials a
+/// pane runs under when no managed account is pinned. The domain's own
+/// home path (`~/.claude`, `~/.codex`) rides below it as the subtitle,
+/// straight from `AccountRecipe::system_home_hint`.
+pub fn settings_accounts_system_title() -> String {
+    rust_i18n::t!("settings.accounts_system_title").into_owned()
+}
+/// Badge next to the account that's currently its domain's default.
 pub fn settings_accounts_default_badge() -> String {
     rust_i18n::t!("settings.accounts_default_badge").into_owned()
 }
-/// "Set default" row button — makes this account the provider default
-/// for new panes. Hidden on the row that's already the default.
+/// "Set default" row button — makes this row (an account, or the domain's
+/// System credentials) what new panes of that domain start on. Disabled on
+/// the row that's already the default.
 pub fn settings_accounts_set_default() -> String {
     rust_i18n::t!("settings.accounts_set_default").into_owned()
 }
@@ -2137,20 +2175,24 @@ pub fn settings_accounts_reauthenticate() -> String {
 pub fn settings_accounts_delete() -> String {
     rust_i18n::t!("settings.accounts_delete").into_owned()
 }
-/// "+ Add account" row button — starts a headless add-account login
-/// against the first open Workspace window (see
-/// `settings_window::sections::accounts::start_add_account`).
-pub fn settings_accounts_add() -> String {
-    rust_i18n::t!("settings.accounts_add").into_owned()
+/// Add-account entry, one per auth domain — `recipe` is that domain's
+/// display label, so the entry names which credentials it signs into
+/// instead of relying on the heading above it. Used by the Settings
+/// section's buttons and by the terminal-pane status-bar dropdown, which
+/// lists every domain.
+pub fn settings_accounts_add(recipe: &str) -> String {
+    rust_i18n::t!("settings.accounts_add", recipe => recipe).into_owned()
 }
 pub fn settings_accounts_remove_confirm_title() -> String {
     rust_i18n::t!("settings.accounts_remove_confirm_title").into_owned()
 }
 /// `count` = panes across every open Workspace window currently
 /// pointing at the account being deleted (see
-/// `Workspace::panes_referencing_account`).
-pub fn settings_accounts_remove_confirm_body(count: usize) -> String {
-    rust_i18n::t!("settings.accounts_remove_confirm_body", count => count).into_owned()
+/// `Workspace::panes_referencing_account`); `path` = the ambient home of
+/// that account's auth domain, which those panes revert to.
+pub fn settings_accounts_remove_confirm_body(count: usize, path: &str) -> String {
+    rust_i18n::t!("settings.accounts_remove_confirm_body", count => count, path => path)
+        .into_owned()
 }
 pub fn settings_accounts_remove_confirm_ok() -> String {
     rust_i18n::t!("settings.accounts_remove_confirm_ok").into_owned()
@@ -2198,12 +2240,11 @@ pub fn settings_accounts_login_already_exists() -> String {
 pub fn settings_accounts_login_failed() -> String {
     rust_i18n::t!("settings.accounts_login_failed").into_owned()
 }
-/// Toast shown when `AddManagedAccount` is dispatched for a remote
-/// (SSH/Docker) agent — headless login can't open a local desktop browser
-/// for OAuth. Defensive: the UI is expected to disable the affordance for
-/// a remote agent already.
-pub fn settings_accounts_login_remote_unsupported() -> String {
-    rust_i18n::t!("settings.accounts_login_remote_unsupported").into_owned()
+/// Toast shown when no login command can be resolved for the requested
+/// auth domain — neither the session's agent, the catalog, nor the
+/// built-in adapter for that domain yields one.
+pub fn settings_accounts_login_unavailable() -> String {
+    rust_i18n::t!("settings.accounts_login_unavailable").into_owned()
 }
 /// Toast shown when `add_managed_account` is called while a previous
 /// headless login is still in progress (`PendingLogin::InProgress`) — a
@@ -2224,6 +2265,17 @@ pub fn settings_accounts_login_denied_detail() -> String {
 /// `.message()`.
 pub fn settings_accounts_login_timed_out_detail() -> String {
     rust_i18n::t!("settings.accounts_login_timed_out_detail").into_owned()
+}
+/// Authored toast-body detail for an add-account login that reported
+/// success but left no credentials in its config dir
+/// (`AccountRecipe::has_credentials`).
+pub fn settings_accounts_login_no_credentials_detail() -> String {
+    rust_i18n::t!("settings.accounts_login_no_credentials_detail").into_owned()
+}
+/// Reauthenticate counterpart of
+/// `settings_accounts_login_no_credentials_detail()`.
+pub fn settings_accounts_reauth_no_credentials_detail() -> String {
+    rust_i18n::t!("settings.accounts_reauth_no_credentials_detail").into_owned()
 }
 /// Status-bar dropdown's in-progress row, shown in place of "+ Add
 /// account" while `Workspace::is_login_pending` is true.
@@ -2255,6 +2307,12 @@ pub fn settings_accounts_reauth_failed() -> String {
 /// `settings_accounts_reauth_failed()`'s report `.message()`.
 pub fn account_reauth_missing() -> String {
     rust_i18n::t!("settings.accounts_reauth_missing").into_owned()
+}
+/// Warning toast when a terminal pane's account config dir could not be
+/// prepared. A warning rather than a blocker: the account's env still gets
+/// injected, so only the mirrored extras are missing.
+pub fn account_prepare_dir_failed() -> String {
+    rust_i18n::t!("settings.accounts_prepare_dir_failed").into_owned()
 }
 
 /// Initial contents of a freshly-created

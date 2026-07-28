@@ -42,11 +42,13 @@ pub(super) use crate::workspace::main_area::tab_ops::NewPaneKind;
 
 /// Returns a unique temp directory path for each call so parallel tests
 /// never share persistence state. The directory is left on disk after
-/// the test; macOS cleans up /tmp periodically.
+/// the test; macOS cleans up /tmp periodically. The pid keeps a *later*
+/// run from inheriting the state a previous run left at the same counter.
 fn fresh_test_data_dir() -> std::path::PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("daruda_test_{id}"))
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("daruda_test_{pid}_{id}"))
 }
 
 fn build_workspace(

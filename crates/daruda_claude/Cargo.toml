@@ -10,6 +10,7 @@ description = "Claude Code session status detection — hook event FSM + JSONL f
 workspace = true
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 daruda_store = { path = "../daruda_store" }
 dirs = "6"

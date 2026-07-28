@@ -60,7 +60,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::channel::oneshot;
 use futures::future::Either;
 
-use crate::connection::{AcpClientError, AdapterCommand};
+use crate::connection::{AcpClientError, AdapterCommand, LaunchSpec};
 use crate::mode_tracker::ModeTracker;
 use crate::model::{ConfigOptionView, ModeStateView, SessionCapabilitiesView};
 
@@ -499,11 +499,11 @@ pub fn connect_session(
     Ok((handle, event_rx))
 }
 
-/// Launch an ACP agent from an arbitrary `command` string, provisioning a
-/// Node.js runtime only when the command needs one, then open a session — the
-/// entry point the host uses instead of building an [`AdapterCommand`] by hand.
+/// Launch an ACP agent from a [`LaunchSpec`], provisioning a Node.js runtime
+/// only when its command needs one, then open a session — the entry point the
+/// host uses instead of building an [`AdapterCommand`] by hand.
 ///
-/// When `command` is an `npx` / `node` launcher (see
+/// When the command is an `npx` / `node` launcher (see
 /// [`crate::node::command_needs_node`]), a usable Node.js is ensured: the user's
 /// system Node.js when present, otherwise a managed Node.js downloaded into
 /// `node_install_dir` (see [`crate::node::ensure_node`]), and the command is
@@ -514,9 +514,15 @@ pub fn connect_session(
 /// milestones so the host can show a status line during the (first-run only)
 /// download. `agent_id` is the catalog id (e.g. `"claude"` / `"codex"`) —
 /// see [`connect_session`]'s doc comment for what it's used for.
+///
+/// Runtime selection and [`LaunchSpec::strip_env`] both live in
+/// [`crate::launch_env::prepare_adapter_command`], which applies the strip
+/// once to whichever runtime shape it selected — node detection has to read the
+/// *unstripped* command, or the `/usr/bin/env` form would mask the launcher
+/// token and skip provisioning.
 #[allow(clippy::too_many_arguments)] // Thin pass-through to `connect_session` — bundling wraps callers more than it saves.
 pub fn connect_agent_session(
-    command: String,
+    launch: LaunchSpec,
     node_install_dir: PathBuf,
     cwd: PathBuf,
     initial_modes: Vec<String>,
@@ -525,12 +531,7 @@ pub fn connect_agent_session(
     agent_id: &str,
     progress: &mut dyn FnMut(crate::node::NodeProgress),
 ) -> Result<(AcpSessionHandle, UnboundedReceiver<AcpEvent>), AcpClientError> {
-    let adapter = if crate::node::command_needs_node(&command) {
-        crate::node::ensure_node(&node_install_dir, progress)?
-            .wrap_command(&command, &node_install_dir)
-    } else {
-        AdapterCommand(command)
-    };
+    let adapter = crate::launch_env::prepare_adapter_command(&launch, &node_install_dir, progress)?;
     connect_session(adapter, cwd, initial_modes, restore_mode, resume, agent_id)
 }
 

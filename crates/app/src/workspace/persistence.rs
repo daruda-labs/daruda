@@ -606,7 +606,7 @@ impl Workspace {
     /// cross-references (focus) can be rewritten. `fallback_cwd` is used
     /// when a leaf's serialized cwd is missing — typically the owning
     /// lane's path, keeping each pane inside its lane.
-    fn rebuild_layout(
+    pub(in crate::workspace) fn rebuild_layout(
         &mut self,
         slayout: &daruda_store::project::SerializedLayout,
         fallback_cwd: Option<&std::path::Path>,
@@ -649,6 +649,9 @@ impl Workspace {
                     // else the default agent (session id dropped — it belongs
                     // to a now-absent agent and could not resume).
                     let (agent_id, keep_session) = self.resolve_restored_agent(ac.agent_id.clone());
+                    let pane_recipe = self
+                        .agent_launch_for(&agent_id)
+                        .and_then(|l| l.account_recipe());
                     let mut restored = self.create_agent_chat_pane(
                         ac.cwd.clone(),
                         if keep_session {
@@ -661,11 +664,12 @@ impl Workspace {
                         window,
                         cx,
                     );
-                    // The constructor seeds the provider default — patch in
+                    // The constructor seeds the domain default — patch in
                     // the persisted selection now that the pane exists.
+                    let account =
+                        restored_agent_account(ac.account_id, pane_recipe, &self.accounts);
                     if let Some(content) = restored.agent_chat_content_mut() {
-                        content.account =
-                            daruda_store::accounts::AccountSelection::from_persisted(ac.account_id);
+                        content.account = account;
                         // Seed the last-known mode so the lazy connect can
                         // reapply it on resume (`connect_agent_chat`'s
                         // `restore_mode`) — a no-op when this agent's session
@@ -681,19 +685,11 @@ impl Workspace {
                     let effective = effective_cwd(cwd.clone(), fallback_cwd);
                     let account =
                         daruda_store::accounts::AccountSelection::from_persisted(*account_id);
-                    let account_config_dir = pane::resolve_account_config_dir(
-                        &self.accounts,
-                        &self.data_dir,
-                        account,
-                        daruda_store::accounts::AgentProvider::Claude,
-                    );
-                    self.create_pane_with_cwd(
-                        effective,
-                        account,
-                        account_config_dir.as_deref(),
-                        window,
-                        cx,
-                    )?
+                    // Terminal pane: no agent, so no required auth domain —
+                    // the account's own recipe decides the env.
+                    let prepared =
+                        pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
+                    self.create_pane_with_cwd(effective, account, prepared.as_ref(), window, cx)?
                 };
                 let new_id = pane.id;
                 id_map.insert(*pane_id, new_id);
@@ -728,20 +724,15 @@ impl Workspace {
                 if n == 0 {
                     // Degenerate serialization — materialize a fresh leaf
                     // so we never surface an empty Split to the renderer.
-                    // No serialized leaf survives to carry a selection
-                    // here, so this is a fresh pane like any other —
-                    // seed it with the provider default.
-                    let account = self.default_account_selection_for_new_pane();
-                    let account_config_dir = pane::resolve_account_config_dir(
-                        &self.accounts,
-                        &self.data_dir,
-                        account,
-                        daruda_store::accounts::AgentProvider::Claude,
-                    );
+                    // A degenerate Split materializes a terminal, which has
+                    // no agent and so no domain default to inherit.
+                    let account = self.default_account_selection_for_new_pane(None);
+                    let prepared =
+                        pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
                     let pane = self.create_pane_with_cwd(
                         fallback_cwd.map(|p| p.to_path_buf()),
                         account,
-                        account_config_dir.as_deref(),
+                        prepared.as_ref(),
                         window,
                         cx,
                     )?;
@@ -764,6 +755,29 @@ impl Workspace {
                 })
             }
         }
+    }
+}
+
+/// The account a restored agent-chat pane keeps: its persisted pin only when
+/// that account belongs to `recipe`, the pane's agent's auth domain.
+///
+/// A cross-domain pin (or one whose account row is gone, or a pane whose agent
+/// supports no managed account) can no longer resolve, so keeping it would only
+/// re-serialize an account the pane can never use.
+pub(in crate::workspace) fn restored_agent_account(
+    persisted: Option<daruda_store::accounts::AccountId>,
+    recipe: Option<daruda_store::accounts::AccountRecipeId>,
+    accounts: &daruda_store::accounts::AccountsState,
+) -> daruda_store::accounts::AccountSelection {
+    use daruda_store::accounts::AccountSelection;
+    let Some(id) = persisted else {
+        return AccountSelection::SystemDefault;
+    };
+    match (accounts.find(id), recipe) {
+        (Some(account), Some(required)) if account.recipe == required => {
+            AccountSelection::Managed(id)
+        }
+        _ => AccountSelection::SystemDefault,
     }
 }
 

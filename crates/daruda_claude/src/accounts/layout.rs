@@ -7,12 +7,15 @@ use sha2::{Digest, Sha256};
 
 use daruda_store::accounts::AccountId;
 
-/// Root that holds every managed account's isolated config dir.
+/// Root holding every managed account's isolated config dir, for every auth
+/// domain. The `claude-accounts` name is retained for on-disk compatibility:
+/// existing accounts live there and must keep working without a re-login.
 pub fn accounts_root(data_dir: &Path) -> PathBuf {
     data_dir.join("claude-accounts")
 }
 
-/// The `CLAUDE_CONFIG_DIR` for one account.
+/// The isolated config dir for one account, whatever variable its auth domain
+/// carries it in (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …).
 pub fn account_config_dir(data_dir: &Path, id: AccountId) -> PathBuf {
     accounts_root(data_dir).join(id.0.to_string())
 }
@@ -40,7 +43,7 @@ mod tests {
         assert_eq!(a, a2, "same dir → same service name");
         assert_ne!(a, b, "different dir → different service name");
         assert!(a.starts_with("Claude Code-credentials-"));
-        // sha256 앞 8 hex
+        // First 8 hex chars of the sha256.
         assert_eq!(a.rsplit('-').next().unwrap().len(), 8);
     }
 

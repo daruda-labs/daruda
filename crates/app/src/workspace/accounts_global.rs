@@ -14,8 +14,8 @@
 //!
 //! The window-side `accounts` field is still a cache (not deleted), exactly
 //! like `Workspace`'s config fields cache `SettingsStore`: it exists so the
-//! many cx-free read sites (`resolve_account_config_dir` callers,
-//! `focused_account_key`, the status-bar slot) don't each need an `&App`.
+//! many cx-free read sites (`resolve_pane_account` callers,
+//! `focused_account`, the status-bar slot) don't each need an `&App`.
 //! Its *only* refresh site is the `observe_global` callback, so the mirror
 //! still has a single update path (MVU "one update site for mirrored
 //! state").

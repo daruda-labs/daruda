@@ -446,7 +446,9 @@ impl Workspace {
         self.claude.usage_refresh_in_flight = true;
         cx.notify();
 
-        let (account_key, config_dir) = self.focused_account_key();
+        let focused = self.focused_account();
+        let account_key = focused.key();
+        let config_dir = focused.into_config_dir();
 
         cx.spawn(async move |this, cx| {
             let (limits, status, activity) = cx

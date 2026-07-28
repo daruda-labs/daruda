@@ -183,47 +183,237 @@ async fn switch_pane_account_keeps_an_idle_conversation(cx: &mut TestAppContext)
     });
 }
 
-/// A freshly created pane (the `Cmd+T` path) must be seeded with the
-/// provider's configured default account, not left `SystemDefault` — since
-/// the `resolve_account_config_dir` fix, `SystemDefault` means the explicit
-/// system default (`~/.claude`), so a pane that should inherit the default
-/// account needs that written onto its own selection at creation time
-/// instead of relying on a resolve-time fallback.
+/// Add a managed account of `recipe` to the workspace's mirror.
+fn push_account(
+    ws: &mut Workspace,
+    recipe: daruda_store::accounts::AccountRecipeId,
+    id: AccountId,
+) {
+    ws.accounts
+        .accounts
+        .push(daruda_store::accounts::ManagedAccount {
+            id,
+            recipe,
+            email: None,
+            organization: None,
+            config_dir: std::env::temp_dir(),
+            created_at: 0,
+            last_authenticated_at: 0,
+        });
+}
+
+/// Register `default_id` as the configured default for `recipe`.
+fn seed_default_account(
+    ws: &mut Workspace,
+    recipe: daruda_store::accounts::AccountRecipeId,
+    default_id: AccountId,
+) {
+    push_account(ws, recipe, default_id);
+    ws.accounts.default_by_recipe.insert(recipe, default_id);
+}
+
+/// A freshly created agent-chat pane must be seeded with its own auth
+/// domain's configured default account at creation time, not left to a
+/// resolve-time fallback (`SystemDefault` is the explicit "System" choice).
+/// A terminal has no agent, so no domain default applies to it.
 #[gpui::test]
-async fn create_pane_seeds_the_configured_provider_default(cx: &mut TestAppContext) {
+async fn new_panes_seed_the_default_only_for_a_matching_agent(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
     let default_id = AccountId::new();
     workspace.update(cx, |ws, _| {
-        ws.accounts
-            .accounts
-            .push(daruda_store::accounts::ManagedAccount {
-                id: default_id,
-                provider: daruda_store::accounts::AgentProvider::Claude,
-                email: None,
-                organization: None,
-                config_dir: std::env::temp_dir(),
-                created_at: 0,
-                last_authenticated_at: 0,
-            });
-        ws.accounts
-            .default_by_provider
-            .insert(daruda_store::accounts::AgentProvider::Claude, default_id);
+        seed_default_account(
+            ws,
+            daruda_store::accounts::AccountRecipeId::Claude,
+            default_id,
+        );
     });
 
-    let pane = cx
+    let (terminal, agent_chat) = cx
         .update_window(window_handle.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| ws.create_pane(window, cx))
+            workspace.update(cx, |ws, cx| {
+                let terminal = ws.create_pane(window, cx).expect("fresh pane spawn");
+                let agent_chat = ws.create_new_agent_chat_pane(
+                    daruda_config::AgentDefinition::claude_default().id,
+                    Some(std::env::temp_dir()),
+                    None,
+                    window,
+                    cx,
+                );
+                (terminal.account_selection(), agent_chat.account_selection())
+            })
         })
-        .unwrap()
-        .expect("fresh pane spawn must succeed");
+        .unwrap();
 
     assert_eq!(
-        pane.account_selection(),
+        agent_chat,
         Some(AccountSelection::Managed(default_id)),
-        "a freshly created pane must be seeded with the provider default account"
+        "a Claude agent-chat pane inherits the Claude default"
     );
+    assert_eq!(
+        terminal,
+        Some(AccountSelection::SystemDefault),
+        "a terminal has no agent, so no auth domain's default applies to it"
+    );
+}
+
+/// With no configured default, every new pane starts on the system default.
+#[gpui::test]
+async fn new_panes_without_a_default_start_on_the_system_default(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let (terminal, agent_chat) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let terminal = ws.create_pane(window, cx).expect("fresh pane spawn");
+                let agent_chat = ws.create_new_agent_chat_pane(
+                    daruda_config::AgentDefinition::claude_default().id,
+                    Some(std::env::temp_dir()),
+                    None,
+                    window,
+                    cx,
+                );
+                (terminal.account_selection(), agent_chat.account_selection())
+            })
+        })
+        .unwrap();
+
+    assert_eq!(terminal, Some(AccountSelection::SystemDefault));
+    assert_eq!(agent_chat, Some(AccountSelection::SystemDefault));
+}
+
+/// Write a Codex credential fixture (`auth.json` with an `id_token` JWT) into
+/// `dir` — the plaintext file `CodexRecipe::has_credentials` reads. Codex has
+/// no Keychain item, so this is the whole credential surface.
+fn write_codex_auth_json(dir: &std::path::Path, email: &str) {
+    use base64::Engine as _;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({ "email": email }).to_string());
+    let auth = serde_json::json!({
+        "tokens": { "id_token": format!("header.{payload}.signature") },
+    });
+    std::fs::write(dir.join("auth.json"), auth.to_string()).expect("write auth.json");
+}
+
+/// Drive `finish_login`'s success path for a Codex login into `config_dir`.
+/// Mirrors the real flow: the pending login must be `InProgress` for the
+/// finish callback to be accepted.
+fn finish_codex_login(
+    ws: &mut Workspace,
+    config_dir: std::path::PathBuf,
+    cx: &mut Context<Workspace>,
+) -> AccountId {
+    use crate::workspace::PendingLogin;
+    use crate::workspace::account_login_ops::LoginMode;
+    // A real (near-instant) child process is the only way to build a
+    // `LoginProcessHandle` — it has no other public constructor.
+    let login = daruda_claude::accounts::spawn_login(
+        "/usr/bin/true",
+        &[],
+        &[],
+        std::time::Duration::from_secs(5),
+    )
+    .expect("spawn a trivial process for the test handle");
+    let account_id = AccountId::new();
+    ws.pending_login = PendingLogin::InProgress {
+        account_id,
+        recipe: daruda_store::accounts::AccountRecipeId::Codex,
+        handle: login.handle(),
+        mode: LoginMode::Add,
+    };
+    ws.finish_login(
+        account_id,
+        config_dir,
+        daruda_store::accounts::AccountRecipeId::Codex,
+        daruda_claude::accounts::LoginOutcome::Success,
+        cx,
+    );
+    account_id
+}
+
+/// Adding an account must never change which account new panes get. Before
+/// the fix the first login for a domain silently became its default, so a
+/// user who only wanted a second account found every new pane switched off
+/// System with nothing in the UI saying so.
+#[gpui::test]
+async fn login_success_does_not_promote_the_new_account_to_default(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_codex_auth_json(dir.path(), "alice@openai.com");
+
+    let account_id = workspace.update(cx, |ws, cx| {
+        finish_codex_login(ws, dir.path().to_path_buf(), cx)
+    });
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        assert!(
+            ws.accounts.accounts.iter().any(|a| a.id == account_id),
+            "the account itself is filed"
+        );
+        assert!(
+            ws.accounts.default_by_recipe.is_empty(),
+            "the first account for a domain must not become its default"
+        );
+    });
+}
+
+/// The login-success path must accept a Codex login, whose credentials are a
+/// plaintext `auth.json` and never a Keychain item — i.e. it asks the account's
+/// recipe rather than calling Claude's scoped-Keychain read directly.
+#[gpui::test]
+async fn login_success_accepts_a_codex_account_from_its_auth_json(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_codex_auth_json(dir.path(), "alice@openai.com");
+
+    let account_id = workspace.update(cx, |ws, cx| {
+        finish_codex_login(ws, dir.path().to_path_buf(), cx)
+    });
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        let account = ws
+            .accounts
+            .find(account_id)
+            .expect("a Codex login with an auth.json is kept, not discarded");
+        assert_eq!(
+            account.recipe,
+            daruda_store::accounts::AccountRecipeId::Codex
+        );
+        assert_eq!(
+            account.email.as_deref(),
+            Some("alice@openai.com"),
+            "identity comes from the recipe's own reader"
+        );
+    });
+    assert!(
+        dir.path().join("auth.json").exists(),
+        "a kept account's config dir must survive"
+    );
+}
+
+/// A Codex login that produced no credentials must still be rejected — the
+/// recipe check has to actually gate, not wave everything through.
+#[gpui::test]
+async fn login_success_without_credentials_is_rejected(cx: &mut TestAppContext) {
+    let (_wh, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let dir = tempfile::tempdir().expect("tempdir").keep();
+    let account_id = workspace.update(cx, |ws, cx| finish_codex_login(ws, dir.clone(), cx));
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, _| {
+        assert!(ws.accounts.find(account_id).is_none());
+    });
+    assert!(!dir.exists(), "the throwaway dir is cleaned up");
 }
 
 #[gpui::test]
@@ -261,4 +451,181 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
         assert!(usage.activity(AccountSelection::Managed(kept)).is_some());
         assert!(usage.activity(AccountSelection::SystemDefault).is_some());
     });
+}
+
+/// Restore must not keep an agent-chat pane pinned to an account from another
+/// auth domain: resolution refuses such a pin, so leaving it on the pane would
+/// re-serialize an account that pane can never use. Terminal panes have no
+/// agent constraining them and are left alone.
+#[gpui::test]
+async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppContext) {
+    use daruda_store::accounts::AccountRecipeId;
+    use daruda_store::project::{
+        SerializedAgentChatContent, SerializedLayout, SplitDirectionSerde,
+    };
+
+    let mut config = daruda_config::Config::default();
+    config
+        .agents
+        .push(daruda_config::AgentDefinition::codex_default());
+    let (window_handle, workspace) = build_workspace_with(cx, &config, None);
+    cx.run_until_parked();
+
+    let claude_account = AccountId::new();
+    workspace.update(cx, |ws, _| {
+        push_account(ws, AccountRecipeId::Claude, claude_account);
+    });
+
+    let agent_leaf = |pane_id: u64, agent_id: String| SerializedLayout::Leaf {
+        pane_id,
+        cwd: None,
+        file: None,
+        agent_chat: Some(SerializedAgentChatContent {
+            cwd: Some(PaneCwd::Local(std::env::temp_dir())),
+            session_id: None,
+            title: None,
+            agent_id: Some(agent_id),
+            account_id: Some(claude_account),
+            mode_id: None,
+        }),
+        account_id: None,
+    };
+    let layout = SerializedLayout::Split {
+        direction: SplitDirectionSerde::Horizontal,
+        children: vec![
+            agent_leaf(1, daruda_config::AgentDefinition::codex_default().id),
+            agent_leaf(2, daruda_config::AgentDefinition::claude_default().id),
+            SerializedLayout::Leaf {
+                pane_id: 3,
+                cwd: Some(std::env::temp_dir()),
+                file: None,
+                agent_chat: None,
+                account_id: Some(claude_account),
+            },
+        ],
+        ratios: vec![1.0 / 3.0; 3],
+    };
+
+    let mut id_map = std::collections::HashMap::new();
+    let mut scratch = Vec::new();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.rebuild_layout(&layout, None, &mut id_map, &mut scratch, window, cx)
+                .expect("rebuild");
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(
+        scratch[0].account_selection(),
+        Some(AccountSelection::SystemDefault),
+        "a Codex pane pinned to a Claude account must fall back to System"
+    );
+    assert_eq!(
+        scratch[1].account_selection(),
+        Some(AccountSelection::Managed(claude_account)),
+        "a same-domain pin survives restore"
+    );
+    assert_eq!(
+        scratch[2].account_selection(),
+        Some(AccountSelection::Managed(claude_account)),
+        "a terminal's own account governs — never reset"
+    );
+}
+
+/// A pin whose account row is gone, and a pane whose agent supports no managed
+/// account at all (remote adapter), both restore to the system default.
+#[test]
+fn restore_resets_a_dangling_or_unsupported_agent_pin() {
+    use crate::workspace::persistence::restored_agent_account;
+    use daruda_store::accounts::{AccountRecipeId, AccountsState, ManagedAccount};
+
+    let id = AccountId::new();
+    let mut state = AccountsState::default();
+    state.accounts.push(ManagedAccount {
+        id,
+        recipe: AccountRecipeId::Claude,
+        email: None,
+        organization: None,
+        config_dir: std::env::temp_dir(),
+        created_at: 0,
+        last_authenticated_at: 0,
+    });
+
+    assert_eq!(
+        restored_agent_account(Some(id), Some(AccountRecipeId::Claude), &state),
+        AccountSelection::Managed(id)
+    );
+    assert_eq!(
+        restored_agent_account(
+            Some(AccountId::new()),
+            Some(AccountRecipeId::Claude),
+            &state
+        ),
+        AccountSelection::SystemDefault,
+        "an account that no longer exists"
+    );
+    assert_eq!(
+        restored_agent_account(Some(id), None, &state),
+        AccountSelection::SystemDefault,
+        "an agent with no auth domain (remote adapter) holds no account"
+    );
+    assert_eq!(
+        restored_agent_account(None, Some(AccountRecipeId::Claude), &state),
+        AccountSelection::SystemDefault
+    );
+}
+
+/// A terminal pane must materialize its managed account's config dir, not just
+/// inject the env var pointing at it: `CODEX_HOME` on a bare directory gives a
+/// Codex CLI run from that shell none of the symlinked system resources.
+/// `create_pane_with_cwd` is the one terminal spawn funnel, so prepping there
+/// covers every path that reaches it.
+#[gpui::test]
+async fn a_terminal_pane_prepares_its_managed_accounts_config_dir(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+
+    let id = AccountId::new();
+    workspace.update(cx, |ws, _| {
+        push_account(ws, daruda_store::accounts::AccountRecipeId::Codex, id);
+    });
+
+    let config_dir = workspace.read_with(cx, |ws, _| {
+        daruda_claude::accounts::account_config_dir(&ws.data_dir, id)
+    });
+    // Negative control: nothing before the spawn creates the dir, so its
+    // existence afterwards can only come from `prepare_dir`.
+    assert!(
+        !config_dir.exists(),
+        "the account dir must not exist before the pane spawns"
+    );
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            let selection = AccountSelection::Managed(id);
+            let prepared = crate::workspace::main_area::pane::resolve_pane_account(
+                &ws.accounts,
+                &ws.data_dir,
+                selection,
+                None,
+            )
+            .expect("the seeded Codex account resolves");
+            ws.create_pane_with_cwd(
+                Some(std::env::temp_dir()),
+                selection,
+                Some(&prepared),
+                window,
+                cx,
+            )
+            .expect("terminal pane spawn");
+        })
+    })
+    .unwrap();
+
+    assert!(
+        config_dir.is_dir(),
+        "create_pane_with_cwd must run AccountRecipe::prepare_dir"
+    );
 }

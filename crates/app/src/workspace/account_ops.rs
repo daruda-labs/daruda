@@ -37,7 +37,7 @@
 
 use gpui::{Context, Window};
 
-use daruda_store::accounts::{AccountId, AccountSelection, AgentProvider};
+use daruda_store::accounts::{AccountId, AccountSelection};
 
 use super::SwitchPaneAccount;
 use crate::surface::strings as s;
@@ -260,19 +260,11 @@ impl Workspace {
         let new_pane = match cause {
             NewPaneCause::Terminal => {
                 let cwd = self.default_cwd_for_new_pane();
-                let account_config_dir = pane::resolve_account_config_dir(
-                    &self.accounts,
-                    &self.data_dir,
-                    selection,
-                    AgentProvider::Claude,
-                );
-                match self.create_pane_with_cwd(
-                    cwd,
-                    selection,
-                    account_config_dir.as_deref(),
-                    window,
-                    cx,
-                ) {
+                // Terminal pane: no agent, so no required auth domain —
+                // the account's own recipe decides the env.
+                let prepared =
+                    pane::resolve_pane_account(&self.accounts, &self.data_dir, selection, None);
+                match self.create_pane_with_cwd(cwd, selection, prepared.as_ref(), window, cx) {
                     Ok(p) => p,
                     Err(e) => {
                         self.report_pane_error("switch account", e, cx);

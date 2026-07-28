@@ -157,7 +157,7 @@ fn parse_env_assignment(token: &str) -> Option<(&str, &str)> {
 }
 
 impl NodeRuntime {
-    /// Wrap an agent launch `command` for this runtime.
+    /// Wrap an agent launch command for this runtime.
     ///
     /// `install_root` is the same app-managed directory passed to
     /// [`ensure_node`] — used here only to derive [`npx_cache_dir`], not to
@@ -177,6 +177,10 @@ impl NodeRuntime {
     /// managed path can contain spaces (macOS `Application Support`), which
     /// bash-word splitting would break. A Managed runtime with any other
     /// command passes it through unchanged.
+    ///
+    /// Runtime selection only — the auth-env strip is *not* applied here;
+    /// [`crate::launch_env::prepare_adapter_command`] applies it once to
+    /// whatever shape this returns.
     ///
     /// Only simple whitespace-tokenized `npx -y <pkg>` / `node <script> …` forms
     /// are rewritten; a caller needing more control supplies a JSON stdio config
@@ -353,7 +357,7 @@ fn parse_node_version(output: &str) -> Option<Version> {
 
 /// Node's `(os, arch)` tokens for the current platform, as used in the
 /// distribution file names. `Err` on an unsupported platform.
-fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
+pub(crate) fn node_platform() -> Result<(&'static str, &'static str), NodeError> {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
         "linux" => "linux",

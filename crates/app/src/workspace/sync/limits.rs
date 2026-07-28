@@ -41,7 +41,7 @@ pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Tas
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Endpoint {
     Limits,
     Status,
@@ -50,6 +50,39 @@ enum Endpoint {
     /// is no reason to refresh it on a different schedule, so it adds no
     /// config knob.
     Activity,
+}
+
+/// Whether `kind` reads a source scoped to the focused pane's account
+/// (`Limits`, `Activity`) rather than an account-independent one
+/// (`Status` — Anthropic's global service health).
+fn account_scoped(kind: Endpoint) -> bool {
+    match kind {
+        Endpoint::Limits | Endpoint::Activity => true,
+        Endpoint::Status => false,
+    }
+}
+
+/// Whether the account-scoped endpoints have anything to read for an
+/// account in the `recipe` auth domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum UsageAvailability {
+    Polled,
+    /// Another auth domain: no Anthropic credentials and no
+    /// `<config_dir>/projects` tree, so both sources are empty by
+    /// construction.
+    UnsupportedDomain,
+}
+
+/// The account-scoped endpoints read Claude-only sources (Anthropic's
+/// plan-limits API, Claude Code's JSONL logs), so any other domain would
+/// only cache a useless result and render it as real.
+pub(in crate::workspace) fn usage_availability(
+    recipe: daruda_store::accounts::AccountRecipeId,
+) -> UsageAvailability {
+    match recipe {
+        daruda_store::accounts::AccountRecipeId::Claude => UsageAvailability::Polled,
+        daruda_store::accounts::AccountRecipeId::Codex => UsageAvailability::UnsupportedDomain,
+    }
 }
 
 fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
@@ -72,25 +105,29 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 continue;
             };
 
-            // 3. Limits/Activity are keyed by the focused pane's account —
-            //    resolved fresh each tick (on the UI thread, like the
-            //    cadence read above) so a focus switch refetches the
-            //    newly-focused account on the *next* tick. Status is
-            //    account-independent (Anthropic's global service health).
-            let (account_key, config_dir) = match kind {
-                Endpoint::Limits | Endpoint::Activity => {
-                    match this.read_with(cx, |ws, _| ws.focused_account_key()) {
-                        Ok(resolved) => resolved,
-                        Err(_) => break,
-                    }
+            // 3. Account-scoped endpoints are keyed by the focused pane's
+            //    account — resolved fresh each tick (on the UI thread, like
+            //    the cadence read above) so a focus switch refetches the
+            //    newly-focused account on the *next* tick.
+            let (account_key, config_dir) = if account_scoped(kind) {
+                let focused = match this.read_with(cx, |ws, _| ws.focused_account()) {
+                    Ok(resolved) => resolved,
+                    Err(_) => break,
+                };
+                if usage_availability(focused.recipe()) != UsageAvailability::Polled {
+                    // Skip the fetch outright: its result would be empty
+                    // and would overwrite this account's cache with it.
+                    cx.background_executor().timer(dur).await;
+                    continue;
                 }
-                // Status is account-independent — the key is unused here
-                // (`set_service_status` takes none); `SystemDefault` just
-                // satisfies the tuple's type.
-                Endpoint::Status => (
+                (focused.key(), focused.into_config_dir())
+            } else {
+                // The key is unused for `Status` (`set_service_status`
+                // takes none); `SystemDefault` just satisfies the type.
+                (
                     daruda_store::accounts::AccountSelection::SystemDefault,
                     None,
-                ),
+                )
             };
 
             // 4. Run the blocking fetch off the GPUI thread, then
@@ -232,7 +269,34 @@ fn activity_paths_for(config_dir: &Path) -> Option<(PathBuf, PathBuf)> {
 mod tests {
     use std::path::Path;
 
-    use super::activity_paths_for;
+    use daruda_store::accounts::AccountRecipeId;
+
+    use super::{
+        Endpoint, UsageAvailability, account_scoped, activity_paths_for, usage_availability,
+    };
+
+    #[test]
+    fn only_limits_and_activity_are_account_scoped() {
+        assert!(account_scoped(Endpoint::Limits));
+        assert!(account_scoped(Endpoint::Activity));
+        assert!(!account_scoped(Endpoint::Status));
+    }
+
+    #[test]
+    fn a_claude_account_is_polled() {
+        assert_eq!(
+            usage_availability(AccountRecipeId::Claude),
+            UsageAvailability::Polled
+        );
+    }
+
+    #[test]
+    fn a_codex_account_is_not_polled() {
+        assert_eq!(
+            usage_availability(AccountRecipeId::Codex),
+            UsageAvailability::UnsupportedDomain
+        );
+    }
 
     #[test]
     fn activity_paths_for_scopes_projects_root_and_cache_to_config_dir() {

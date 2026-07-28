@@ -310,19 +310,13 @@ impl Workspace {
         // session.
         let pane = match surface {
             TaskAgentSurface::Terminal => {
-                // A brand-new lane's terminal is seeded with the Claude
-                // provider default.
-                let account = self.default_account_selection_for_new_pane();
-                let account_config_dir = pane::resolve_account_config_dir(
-                    &self.accounts,
-                    &self.data_dir,
-                    account,
-                    daruda_store::accounts::AgentProvider::Claude,
-                );
+                let account = self.default_account_selection_for_new_pane(None);
+                let prepared =
+                    pane::resolve_pane_account(&self.accounts, &self.data_dir, account, None);
                 self.create_pane_with_cwd(
                     Some(new_path.clone()),
                     account,
-                    account_config_dir.as_deref(),
+                    prepared.as_ref(),
                     window,
                     cx,
                 )

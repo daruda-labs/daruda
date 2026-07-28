@@ -98,22 +98,17 @@ pub struct OpenSettings(pub daruda_config::BuiltinSection);
 pub struct SwitchPaneAccount(pub daruda_store::accounts::AccountSelection);
 
 /// Start a headless add-account login (Plan B — see
-/// `account_login_ops::add_managed_account`). Carries the [`AgentProvider`]
-/// bucket the resulting account is filed under; the login *command* itself
-/// comes from the session's currently active/configured agent
-/// (`Workspace::agent_launch_for` + `last_agent_id`), not from this
-/// action — Plan B's headless login only implements Claude's
-/// `--cli auth login --claudeai` flow today (see
-/// `AgentLaunch::login_command`), so in practice `provider` is always
-/// [`AgentProvider::Claude`] until a second provider's login command
-/// exists. `no_json`: dispatched only from the status-bar "+ Add
-/// account…" menu item, never from keymap.json.
+/// `account_login_ops::add_managed_account`). Carries the [`AccountRecipeId`]
+/// bucket the resulting account is filed under; the login *command* is
+/// resolved for that same domain (`Workspace::login_command_for_recipe`),
+/// so the two can't disagree. `no_json`:
+/// dispatched only from the status-bar "+ Add account…" menu item, never
+/// from keymap.json.
 ///
-/// [`AgentProvider`]: daruda_store::accounts::AgentProvider
-/// [`AgentProvider::Claude`]: daruda_store::accounts::AgentProvider::Claude
+/// [`AccountRecipeId`]: daruda_store::accounts::AccountRecipeId
 #[derive(Clone, PartialEq, Debug, gpui::Action)]
 #[action(namespace = workspace, no_json)]
-pub struct AddManagedAccount(pub daruda_store::accounts::AgentProvider);
+pub struct AddManagedAccount(pub daruda_store::accounts::AccountRecipeId);
 
 /// Re-run a headless login for an **existing** managed account (Plan B —
 /// see `account_login_ops::reauthenticate_account`). Carries the target
@@ -273,12 +268,13 @@ pub(in crate::workspace) enum CommitMode {
 /// UI (a disabled "+ Add account" affordance while a login is running),
 /// not by this enum itself.
 ///
-/// `InProgress` carries only the cancel [`LoginProcessHandle`] and the
-/// `account_id` the pending login will file under — not the config dir or
-/// provider, since both are pure functions of data already on `Workspace`
-/// (`daruda_claude::accounts::account_config_dir(&self.data_dir,
-/// account_id)`) or captured directly in the `cx.spawn` continuation, so
-/// there is nothing to gain from duplicating them here.
+/// `InProgress` carries the cancel [`LoginProcessHandle`], the `account_id`
+/// the pending login will file under, and the `recipe` it signed into — but
+/// not the config dir, which is a pure function of data already on
+/// `Workspace` (`daruda_claude::accounts::account_config_dir(&self.data_dir,
+/// account_id)`). `recipe` is carried because a cancel has to clean that dir
+/// up through the right auth domain, and only the spawning flow knows which
+/// one it launched.
 ///
 /// `mode` distinguishes an add-account login (whose `account_id` names a
 /// throwaway config dir that only becomes real on success) from a
@@ -303,10 +299,12 @@ pub(in crate::workspace) enum PendingLogin {
     None,
     Preparing {
         account_id: daruda_store::accounts::AccountId,
+        recipe: daruda_store::accounts::AccountRecipeId,
         mode: account_login_ops::LoginMode,
     },
     InProgress {
         account_id: daruda_store::accounts::AccountId,
+        recipe: daruda_store::accounts::AccountRecipeId,
         // Read by `Workspace::cancel_pending_login` (`handle.cancel()`),
         // wired to the status-bar dropdown's Cancel row.
         handle: daruda_claude::accounts::LoginProcessHandle,
@@ -545,22 +543,19 @@ pub struct Workspace {
     /// through `main_area::bottom_dock::macro_ops` and persist via
     /// `main_area::bottom_dock::macro_ops::save_panels`.
     pub(in crate::workspace) panels: daruda_store::panels::PanelsState,
-    /// Managed AI-provider accounts (Plan A: Claude only) — the catalog a
-    /// pane's `account_id` resolves against, plus the per-provider default
-    /// seeded onto a freshly-created pane's `account_id` (see
-    /// `Workspace::default_account_id_for_new_pane`) — resolution itself
-    /// never falls back to it, an explicit `None` override always means
-    /// the system default. Loaded from
+    /// Managed accounts across every auth domain — the catalog a pane's
+    /// `AccountSelection` resolves against, plus the per-domain default seeded
+    /// onto a freshly-created pane (see
+    /// `Workspace::default_account_selection_for_new_pane`); resolution itself
+    /// never falls back to that default, so an explicit `SystemDefault` always
+    /// means the ambient environment.
+    ///
     /// Read-cache of the app-wide [`accounts_global::AccountsGlobal`] (the
-    /// single source of truth). Seeded from the global at construction and
-    /// refreshed *only* by `_accounts_global_subscription` — never written
-    /// elsewhere. Cached as a field (rather than read through `cx` each
-    /// time) so the many cx-free read sites
-    /// (`main_area::pane::resolve_account_config_dir` callers,
-    /// `focused_account_key`, the status-bar slot) stay cx-free, exactly
-    /// like the config fields cache `SettingsStore`. Empty when no managed
-    /// accounts exist — panes then spawn with the ambient environment
-    /// unchanged.
+    /// single source of truth): seeded at construction, refreshed *only* by
+    /// `_accounts_global_subscription`. Cached as a field so the many cx-free
+    /// read sites (`main_area::pane::resolve_pane_account` callers,
+    /// `focused_account`, the status-bar slot) stay cx-free, exactly like the
+    /// config fields cache `SettingsStore`.
     pub(in crate::workspace) accounts: daruda_store::accounts::AccountsState,
     /// In-flight headless add-account login (Plan B), if any — see
     /// [`PendingLogin`]. Drives the add-account spinner/cancel affordance;

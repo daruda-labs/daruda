@@ -1,4 +1,4 @@
-//! Managed AI-provider accounts: per-account isolated config dir + defaults.
+//! Managed auth-domain accounts: per-account isolated config dir + defaults.
 //! Persisted as `accounts.json`; runtime injection/identity lives in
 //! `daruda_claude::accounts` (this module is pure data).
 
@@ -12,14 +12,21 @@ pub mod persistence;
 pub use persistence::{load_accounts, load_accounts_in, save_accounts, save_accounts_in};
 
 /// Bump when `AccountsState`'s shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum AgentProvider {
+pub enum AccountRecipeId {
     #[default]
     Claude,
     Codex,
+}
+
+impl AccountRecipeId {
+    /// Every auth domain, in the order the UI lists them — the single place
+    /// to extend when a domain is added, so no call site hand-rolls its own
+    /// array.
+    pub const ALL: [AccountRecipeId; 2] = [Self::Claude, Self::Codex];
 }
 
 /// Stable, globally-unique account identifier (see `ProjectUuid` precedent).
@@ -45,11 +52,11 @@ impl Default for AccountId {
 /// config dir.
 ///
 /// Replaces the former overloaded `Option<AccountId>`, whose inner `None`
-/// meant *both* "unset → fall back to the provider default" *and* "explicit
+/// meant *both* "unset → fall back to the domain default" *and* "explicit
 /// system default" — an ambiguity that produced three separate
 /// account-switching bugs. There is no "unset" state here: a fresh pane is
 /// seeded with an explicit selection at creation, so resolution never needs
-/// a provider-default fallback (the fallback was the bug).
+/// a domain-default fallback (the fallback was the bug).
 ///
 /// Persisted as `Option<AccountId>` (`None` ↔ `SystemDefault`, `Some(id)` ↔
 /// `Managed(id)`) via [`Self::from_persisted`] / [`Self::to_persisted`], so
@@ -89,7 +96,8 @@ impl AccountSelection {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ManagedAccount {
     pub id: AccountId,
-    pub provider: AgentProvider,
+    #[serde(rename = "provider")]
+    pub recipe: AccountRecipeId,
     /// Captured from `oauthAccount` after login (Plan B); `None` when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
@@ -105,9 +113,12 @@ pub struct ManagedAccount {
 pub struct AccountsState {
     #[serde(default)]
     pub accounts: Vec<ManagedAccount>,
-    /// Provider → "default account for new panes".
+    /// Recipe → "default account for new panes". Empty means every new pane
+    /// starts on the system default; only an explicit user choice fills it.
+    /// Deliberately **not** aliased to v1's `default_by_provider` key — see
+    /// [`persistence::load_accounts_in`]'s migration.
     #[serde(default)]
-    pub default_by_provider: HashMap<AgentProvider, AccountId>,
+    pub default_by_recipe: HashMap<AccountRecipeId, AccountId>,
     #[serde(default)]
     pub schema_version: u32,
 }
@@ -116,17 +127,17 @@ impl Default for AccountsState {
     fn default() -> Self {
         Self {
             accounts: Vec::new(),
-            default_by_provider: HashMap::new(),
+            default_by_recipe: HashMap::new(),
             schema_version: SCHEMA_VERSION,
         }
     }
 }
 
 impl AccountsState {
-    /// Resolve the account a new pane should use for `provider`
+    /// Resolve the account a new pane should use for `recipe`
     /// (the configured default). `None` when no default is set.
-    pub fn default_account(&self, provider: AgentProvider) -> Option<&ManagedAccount> {
-        let id = self.default_by_provider.get(&provider)?;
+    pub fn default_account(&self, recipe: AccountRecipeId) -> Option<&ManagedAccount> {
+        let id = self.default_by_recipe.get(&recipe)?;
         self.accounts.iter().find(|a| a.id == *id)
     }
 
@@ -145,27 +156,45 @@ mod tests {
         let mut state = AccountsState::default();
         state.accounts.push(ManagedAccount {
             id,
-            provider: AgentProvider::Claude,
+            recipe: AccountRecipeId::Claude,
             email: Some("alice@company.com".into()),
             organization: Some("Acme".into()),
             config_dir: std::path::PathBuf::from("/tmp/acc/alice"),
             created_at: 1,
             last_authenticated_at: 2,
         });
-        state.default_by_provider.insert(AgentProvider::Claude, id);
+        state.default_by_recipe.insert(AccountRecipeId::Claude, id);
 
         let json = serde_json::to_string(&state).unwrap();
         let back: AccountsState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.accounts.len(), 1);
         assert_eq!(back.accounts[0].email.as_deref(), Some("alice@company.com"));
         assert_eq!(
-            back.default_by_provider.get(&AgentProvider::Claude),
+            back.default_by_recipe.get(&AccountRecipeId::Claude),
             Some(&id)
         );
+        // The Rust field is `recipe`, but the wire key stays `"provider"` —
+        // no `accounts.json` migration needed for this rename.
+        assert!(json.contains("\"provider\":\"claude\""));
     }
 
     #[test]
-    fn agent_provider_defaults_to_claude() {
-        assert_eq!(AgentProvider::default(), AgentProvider::Claude);
+    fn account_recipe_id_defaults_to_claude() {
+        assert_eq!(AccountRecipeId::default(), AccountRecipeId::Claude);
+    }
+
+    #[test]
+    fn all_lists_every_recipe_in_display_order() {
+        // The match is exhaustive, so a new variant is a compile error right
+        // here next to `ALL`'s own list rather than a domain that silently
+        // never reaches the UI.
+        let names: Vec<&str> = AccountRecipeId::ALL
+            .iter()
+            .map(|id| match id {
+                AccountRecipeId::Claude => "claude",
+                AccountRecipeId::Codex => "codex",
+            })
+            .collect();
+        assert_eq!(names, ["claude", "codex"]);
     }
 }
