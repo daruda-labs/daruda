@@ -1,8 +1,7 @@
-//! Status bar's Claude usage chip — a severity-coloured pill over the
-//! focused account's plan-rate utilization, with a dropdown listing every
-//! rolling window. Reads the cache `sync::limits` fills for the Usage tab
-//! and never fetches, so an unfetched account has no chip; Claude-only,
-//! since `daruda_claude::limits` is the sole rate-limit backend.
+//! Status bar's usage chip — a severity-coloured pill over the focused
+//! account's plan-rate utilization, with a dropdown listing every rolling
+//! window. Reads the cache `sync::limits` fills for the Usage tab and never
+//! fetches, so an unfetched account has no chip.
 
 use super::StatusBarDensity;
 use crate::surface::strings;
@@ -12,7 +11,8 @@ use crate::ui::{
 };
 use crate::workspace::Workspace;
 use crate::workspace::right_dock::usage::severity_color;
-use daruda_claude::{LimitSeverity, LimitWindow, PlanLimits};
+use crate::workspace::usage_labels::{percent, window_label};
+use daruda_claude::{LimitSeverity, ProviderUsage, UsageWindow};
 use gpui::{AnyElement, App, Hsla, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
 use std::time::{Duration, SystemTime};
 
@@ -21,8 +21,8 @@ use std::time::{Duration, SystemTime};
 /// one frame counts down from the same instant.
 #[derive(Clone, Debug, PartialEq)]
 struct WindowRow {
-    /// Short window name (`"5h"` / `"7d"` / `"7d · Opus"`), shared with
-    /// the Usage tab's gauge labels.
+    /// Short window name (`"5h"` / `"7d"` / `"7d · Opus"` / `"1mo"`), shared
+    /// with the Usage tab's gauge labels.
     label: String,
     /// `0.0 ..= 100.0`, clamped by the parser in `daruda_claude`.
     utilization: f32,
@@ -31,18 +31,19 @@ struct WindowRow {
     resets_in: Option<Duration>,
 }
 
-/// Render the usage chip. `None` when [`chip_row`] resolves nothing (never
-/// fetched, fetch failed, or a Codex account) — an empty chip would take
-/// status bar width to say nothing.
+/// Render the usage chip. `None` when the account has no usage snapshot yet or
+/// the provider reported no window — an empty chip would take status bar width
+/// to say nothing.
 pub(super) fn render(
-    limits: &PlanLimits,
+    usage: Option<&ProviderUsage>,
     density: StatusBarDensity,
     workspace: WeakEntity<Workspace>,
     cx: &App,
 ) -> Option<impl IntoElement> {
     let now = SystemTime::now();
-    let rows = rows(limits, now);
-    let chip = chip_row(limits, now)?;
+    let usage = usage?;
+    let rows = rows(usage, now);
+    let chip = window_row(usage.headline_window()?, now);
     let parts = chip_parts(&chip, density);
     let percent_color = row_color(&chip);
     let menu_rows = rows.clone();
@@ -91,25 +92,15 @@ fn row_color(row: &WindowRow) -> Hsla {
     severity_color(LimitSeverity::from_utilization(row.utilization))
 }
 
-/// Project the plan's three optional windows into display rows, in the
-/// Usage tab's gauge order, skipping the ones the plan doesn't meter.
-fn rows(limits: &PlanLimits, now: SystemTime) -> Vec<WindowRow> {
-    [
-        (strings::usage_limit_5h_label(), limits.five_hour.as_ref()),
-        (strings::usage_limit_7d_label(), limits.seven_day.as_ref()),
-        (
-            strings::usage_limit_opus_label(),
-            limits.seven_day_opus.as_ref(),
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(label, window)| window.map(|window| window_row(label, window, now)))
-    .collect()
+/// Project the provider's windows into display rows, in the Usage tab's gauge
+/// order (shortest first — `ProviderUsage` sorts them).
+fn rows(usage: &ProviderUsage, now: SystemTime) -> Vec<WindowRow> {
+    usage.windows.iter().map(|w| window_row(w, now)).collect()
 }
 
-fn window_row(label: String, window: &LimitWindow, now: SystemTime) -> WindowRow {
+fn window_row(window: &UsageWindow, now: SystemTime) -> WindowRow {
     WindowRow {
-        label,
+        label: window_label(window),
         utilization: window.utilization,
         resets_in: remaining(window, now),
     }
@@ -118,43 +109,10 @@ fn window_row(label: String, window: &LimitWindow, now: SystemTime) -> WindowRow
 /// Time from `now` until `window` resets. A reset time that has already
 /// passed yields `Duration::ZERO` (rendered as "now") rather than `None`
 /// — `None` is reserved for the API not reporting one at all.
-fn remaining(window: &LimitWindow, now: SystemTime) -> Option<Duration> {
+fn remaining(window: &UsageWindow, now: SystemTime) -> Option<Duration> {
     window
         .resets_at
         .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
-}
-
-/// Utilization at which a window is spent and further prompts are refused.
-const LIMIT_REACHED_PERCENT: f32 = 100.0;
-
-/// The chip's window: the 5-hour one, so the pill reports one fixed meter.
-/// A weekly window takes over only once fully spent, where it blocks work
-/// however much short-window headroom is left; the overall one outranks
-/// Opus-only. The dropdown lists every window regardless.
-fn chip_row(limits: &PlanLimits, now: SystemTime) -> Option<WindowRow> {
-    let exhausted = |label: String, window: Option<&LimitWindow>| {
-        window
-            .filter(|w| w.utilization >= LIMIT_REACHED_PERCENT)
-            .map(|w| window_row(label, w, now))
-    };
-    exhausted(strings::usage_limit_7d_label(), limits.seven_day.as_ref())
-        .or_else(|| {
-            exhausted(
-                strings::usage_limit_opus_label(),
-                limits.seven_day_opus.as_ref(),
-            )
-        })
-        .or_else(|| {
-            limits
-                .five_hour
-                .as_ref()
-                .map(|w| window_row(strings::usage_limit_5h_label(), w, now))
-        })
-}
-
-/// Utilization as the whole percent the chip and rows display.
-fn percent(utilization: f32) -> u32 {
-    utilization.clamp(0.0, 100.0).round() as u32
 }
 
 /// The chip's text, split at the boundaries where colour changes: the
@@ -261,12 +219,31 @@ fn gauge_row(row: &WindowRow, cx: &App) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daruda_claude::WindowScope;
+    use daruda_store::accounts::AccountRecipeId;
 
-    fn window(utilization: f32, resets_in_secs: Option<u64>) -> LimitWindow {
-        LimitWindow {
+    const FIVE_HOURS: u64 = 5 * 3600;
+    const SEVEN_DAYS: u64 = 7 * 24 * 3600;
+    const ONE_MONTH: u64 = 2_628_000;
+
+    fn win(secs: u64, utilization: f32, resets_in_secs: Option<u64>) -> UsageWindow {
+        UsageWindow {
+            window: Duration::from_secs(secs),
             utilization,
             resets_at: resets_in_secs.map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s)),
+            scope: WindowScope::Overall,
         }
+    }
+
+    fn opus(secs: u64, utilization: f32) -> UsageWindow {
+        UsageWindow {
+            scope: WindowScope::Opus,
+            ..win(secs, utilization, None)
+        }
+    }
+
+    fn usage(windows: Vec<UsageWindow>) -> ProviderUsage {
+        ProviderUsage::new(AccountRecipeId::Claude, windows, None)
     }
 
     /// `rows`/`remaining` take `now` explicitly so the tests pin it here
@@ -284,29 +261,26 @@ mod tests {
     }
 
     #[test]
-    fn rows_skip_windows_the_plan_does_not_meter() {
-        let limits = PlanLimits {
-            five_hour: Some(window(10.0, None)),
-            seven_day: None,
-            seven_day_opus: Some(window(20.0, None)),
-            ..PlanLimits::default()
-        };
-        let rows = rows(&limits, now());
+    fn rows_project_every_reported_window_shortest_first() {
+        let usage = usage(vec![opus(SEVEN_DAYS, 20.0), win(FIVE_HOURS, 10.0, None)]);
+        let rows = rows(&usage, now());
         assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].label, "5h");
         assert_eq!(rows[0].utilization, 10.0);
-        assert_eq!(rows[1].utilization, 20.0);
+        assert_eq!(rows[1].label, "7d · Opus");
     }
 
     #[test]
     fn rows_are_empty_without_any_window() {
-        assert!(rows(&PlanLimits::default(), now()).is_empty());
-        assert!(chip_row(&PlanLimits::default(), now()).is_none());
+        assert!(rows(&usage(Vec::new()), now()).is_empty());
     }
 
     #[test]
     fn remaining_counts_down_from_the_given_now() {
-        let win = window(0.0, Some(1_600));
-        assert_eq!(remaining(&win, now()), Some(Duration::from_secs(600)));
+        assert_eq!(
+            remaining(&win(FIVE_HOURS, 0.0, Some(1_600)), now()),
+            Some(Duration::from_secs(600))
+        );
     }
 
     #[test]
@@ -314,62 +288,33 @@ mod tests {
         // Distinct from `None` (the API omitted the field): the window is
         // resetting right now, so the chip says "now" rather than going
         // silent.
-        let win = window(0.0, Some(500));
-        assert_eq!(remaining(&win, now()), Some(Duration::ZERO));
-        assert_eq!(remaining(&window(0.0, None), now()), None);
+        assert_eq!(
+            remaining(&win(FIVE_HOURS, 0.0, Some(500)), now()),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(remaining(&win(FIVE_HOURS, 0.0, None), now()), None);
     }
 
-    /// `PlanLimits` carrying the given utilizations, each `None` when absent.
-    fn limits_of(five_hour: Option<f32>, seven_day: Option<f32>, opus: Option<f32>) -> PlanLimits {
-        PlanLimits {
-            five_hour: five_hour.map(|u| window(u, None)),
-            seven_day: seven_day.map(|u| window(u, None)),
-            seven_day_opus: opus.map(|u| window(u, None)),
-            ..PlanLimits::default()
-        }
-    }
-
+    /// The chip names one window; which one is `ProviderUsage::headline_window`
+    /// (covered there). These cases pin the label the chip actually shows for
+    /// the shapes each provider reports.
     #[test]
-    fn chip_stays_on_the_five_hour_window_however_high_the_weekly_climbs() {
-        // 99% weekly still leaves work possible, so no meter swap.
-        let limits = limits_of(Some(12.0), Some(99.9), Some(98.0));
-        let chip = chip_row(&limits, now()).expect("a 5-hour window resolves");
+    fn the_chip_names_the_short_window_for_an_anthropic_plan() {
+        let usage = usage(vec![
+            win(FIVE_HOURS, 12.0, None),
+            win(SEVEN_DAYS, 99.9, None),
+        ]);
+        let chip = window_row(usage.headline_window().unwrap(), now());
         assert_eq!(chip.label, "5h");
         assert_eq!(chip.utilization, 12.0);
     }
 
     #[test]
-    fn a_spent_weekly_window_takes_over_the_chip() {
-        let limits = limits_of(Some(3.0), Some(100.0), None);
-        assert_eq!(chip_row(&limits, now()).unwrap().label, "7d");
-    }
-
-    #[test]
-    fn a_spent_opus_window_takes_over_only_when_the_overall_one_has_room() {
-        let opus_only = limits_of(Some(3.0), Some(40.0), Some(100.0));
-        assert_eq!(chip_row(&opus_only, now()).unwrap().label, "7d · Opus");
-        // Both spent — the broader block is the one worth naming.
-        let both = limits_of(Some(3.0), Some(100.0), Some(100.0));
-        assert_eq!(chip_row(&both, now()).unwrap().label, "7d");
-    }
-
-    #[test]
-    fn a_spent_weekly_window_shows_even_without_a_five_hour_window() {
-        assert_eq!(
-            chip_row(&limits_of(None, Some(100.0), None), now())
-                .unwrap()
-                .label,
-            "7d"
-        );
-        // Nothing spent and no short window — no chip rather than an empty one.
-        assert!(chip_row(&limits_of(None, Some(40.0), None), now()).is_none());
-    }
-
-    #[test]
-    fn percent_rounds_to_a_whole_number() {
-        assert_eq!(percent(41.6), 42);
-        assert_eq!(percent(0.0), 0);
-        assert_eq!(percent(100.0), 100);
+    fn the_chip_names_the_only_window_a_monthly_provider_reports() {
+        let usage = usage(vec![win(ONE_MONTH, 2.0, None)]);
+        let chip = window_row(usage.headline_window().unwrap(), now());
+        assert_eq!(chip.label, "1mo");
+        assert_eq!(chip.utilization, 2.0);
     }
 
     #[test]

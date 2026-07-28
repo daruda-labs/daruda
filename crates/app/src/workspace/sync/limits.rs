@@ -19,8 +19,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_claude::{ActivityStats, PlanLimits, ServiceStatus, activity, limits, service_status};
+use daruda_claude::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
 use daruda_config::PollConfig;
+use daruda_store::accounts::AccountRecipeId;
 use gpui::{Context, Task, WeakEntity};
 
 use crate::workspace::Workspace;
@@ -35,16 +36,20 @@ const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 /// dropping any task cancels its loop.
 pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> (Task<()>, Task<()>, Task<()>) {
     (
-        spawn_loop(cx, Endpoint::Limits),
-        spawn_loop(cx, Endpoint::Status),
+        spawn_loop(cx, Endpoint::Limits(AccountRecipeId::Claude)),
+        spawn_loop(cx, Endpoint::Status(AccountRecipeId::Claude)),
         spawn_loop(cx, Endpoint::Activity),
     )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Endpoint {
-    Limits,
-    Status,
+    /// One auth domain's plan-rate API, for the account that domain resolves
+    /// to.
+    Limits(AccountRecipeId),
+    /// One provider's public status page. Account-independent but still
+    /// domain-specific — each provider hosts its own page.
+    Status(AccountRecipeId),
     /// Local JSONL aggregation (no network). Shares the `limits_secs`
     /// cadence — it is the other half of the Usage tab's data and there
     /// is no reason to refresh it on a different schedule, so it adds no
@@ -54,11 +59,11 @@ enum Endpoint {
 
 /// Whether `kind` reads a source scoped to the focused pane's account
 /// (`Limits`, `Activity`) rather than an account-independent one
-/// (`Status` — Anthropic's global service health).
+/// (`Status` — the provider's global service health).
 fn account_scoped(kind: Endpoint) -> bool {
     match kind {
-        Endpoint::Limits | Endpoint::Activity => true,
-        Endpoint::Status => false,
+        Endpoint::Limits(_) | Endpoint::Activity => true,
+        Endpoint::Status(_) => false,
     }
 }
 
@@ -92,8 +97,8 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    `Err(_)` once the entity is gone — that's our
             //    cue to exit the loop.
             let interval = match this.read_with(cx, |ws, _| match kind {
-                Endpoint::Limits | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
-                Endpoint::Status => ws.claude.usage_poll.status_interval(),
+                Endpoint::Limits(_) | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
+                Endpoint::Status(_) => ws.claude.usage_poll.status_interval(),
             }) {
                 Ok(opt) => opt,
                 Err(_) => break,
@@ -187,6 +192,55 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
     })
 }
 
+/// One round of every usage source for an account in the `recipe` domain.
+/// Shared by the pump's per-endpoint loops and the Usage tab's manual-refresh
+/// button so the two can't disagree about where a domain's data comes from —
+/// the manual path used to fetch Anthropic's endpoints for *any* focused
+/// account and cache the result under that account's key.
+///
+/// Blocking (HTTP + disk); call from the background executor.
+pub(in crate::workspace) fn fetch_all_for(
+    recipe: AccountRecipeId,
+    config_dir: Option<&Path>,
+) -> (
+    Result<ProviderUsage, daruda_claude::FetchError>,
+    Result<ServiceStatus, daruda_claude::FetchError>,
+    Option<ActivityStats>,
+) {
+    (
+        fetch_limits(recipe, config_dir),
+        fetch_status(recipe),
+        fetch_activity_in(config_dir),
+    )
+}
+
+/// A domain with no usage source reports `NoToken` rather than an empty
+/// snapshot, so the caller can't mistake "can't read this" for "read it and
+/// there was nothing".
+fn fetch_limits(
+    recipe: AccountRecipeId,
+    config_dir: Option<&Path>,
+) -> Result<ProviderUsage, daruda_claude::FetchError> {
+    match usage::source_for(recipe) {
+        Some(source) => source.fetch(config_dir),
+        None => Err(daruda_claude::FetchError::NoToken),
+    }
+}
+
+fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_claude::FetchError> {
+    match usage::source_for(recipe) {
+        Some(source) => service_status::fetch_service_status(source.status_url()),
+        None => Err(daruda_claude::FetchError::NoToken),
+    }
+}
+
+fn fetch_activity_in(config_dir: Option<&Path>) -> Option<ActivityStats> {
+    match config_dir {
+        Some(dir) => fetch_activity_for(dir),
+        None => fetch_activity(),
+    }
+}
+
 /// Result envelope so every endpoint can share a single
 /// `background_executor().spawn(...)` call site without dispatch
 /// branching across thread boundaries. `Activity` carries an `Option`
@@ -194,7 +248,7 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
 /// unreadable projects root) are all handled by the same silent
 /// fallback — there is nothing the loop does differently per error.
 enum Fetched {
-    Limits(Result<PlanLimits, daruda_claude::FetchError>),
+    Limits(Result<ProviderUsage, daruda_claude::FetchError>),
     Status(Result<ServiceStatus, daruda_claude::FetchError>),
     Activity(Option<ActivityStats>),
 }
@@ -204,15 +258,9 @@ enum Fetched {
 /// unused for `Status`, which is account-independent.
 fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     match kind {
-        Endpoint::Limits => Fetched::Limits(match config_dir {
-            Some(dir) => limits::fetch_plan_limits_for(dir),
-            None => limits::fetch_plan_limits(),
-        }),
-        Endpoint::Status => Fetched::Status(service_status::fetch_service_status()),
-        Endpoint::Activity => Fetched::Activity(match config_dir {
-            Some(dir) => fetch_activity_for(dir),
-            None => fetch_activity(),
-        }),
+        Endpoint::Limits(recipe) => Fetched::Limits(fetch_limits(recipe, config_dir)),
+        Endpoint::Status(recipe) => Fetched::Status(fetch_status(recipe)),
+        Endpoint::Activity => Fetched::Activity(fetch_activity_in(config_dir)),
     }
 }
 
@@ -286,9 +334,9 @@ mod tests {
 
     #[test]
     fn only_limits_and_activity_are_account_scoped() {
-        assert!(account_scoped(Endpoint::Limits));
+        assert!(account_scoped(Endpoint::Limits(AccountRecipeId::Claude)));
         assert!(account_scoped(Endpoint::Activity));
-        assert!(!account_scoped(Endpoint::Status));
+        assert!(!account_scoped(Endpoint::Status(AccountRecipeId::Claude)));
     }
 
     #[test]

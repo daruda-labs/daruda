@@ -310,7 +310,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Latest 5h / 7d plan-rate snapshot. Default-constructed (both
     /// windows `None`) before the first successful `/api/oauth/usage`
     /// fetch, in which case the renderer draws placeholder gauges.
-    pub plan_limits: daruda_claude::PlanLimits,
+    pub plan_limits: Option<daruda_claude::ProviderUsage>,
     /// Latest service-status snapshot. Default is `Unknown`, which
     /// the renderer maps to a dimmed pill.
     pub service_status: daruda_claude::ServiceStatus,

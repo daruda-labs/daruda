@@ -113,7 +113,7 @@ pub(super) struct StatusBarData {
     /// (every window `None`) before the first fetch lands for that
     /// account, or for an account with no Claude usage backend — the
     /// chip hides itself rather than showing an empty gauge.
-    pub usage: daruda_claude::PlanLimits,
+    pub usage: Option<daruda_claude::ProviderUsage>,
     /// Which segments the user has toggled on, via the status bar's
     /// right-click menu. Mirrors `daruda_config::StatusBarConfig`;
     /// `title` / `error` / the project-config dot are not user-toggleable.
@@ -255,7 +255,7 @@ impl RenderOnce for StatusBar {
             })
             .when(data.visible.is_visible(StatusBarItem::ClaudeUsage), |el| {
                 el.children(usage_chip::render(
-                    &data.usage,
+                    data.usage.as_ref(),
                     density,
                     data.workspace.clone(),
                     cx,

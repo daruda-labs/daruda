@@ -45,6 +45,7 @@ pub(in crate::workspace) mod sync;
 mod tests;
 mod toast_layer;
 mod update_ops;
+mod usage_labels;
 mod window_close_ops;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;

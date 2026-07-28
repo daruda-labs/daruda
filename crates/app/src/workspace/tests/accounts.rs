@@ -428,9 +428,14 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
             AccountSelection::Managed(kept),
             AccountSelection::SystemDefault,
         ] {
-            ws.claude
-                .usage_by_account
-                .set_plan_limits(key, daruda_claude::PlanLimits::default());
+            ws.claude.usage_by_account.set_plan_limits(
+                key,
+                daruda_claude::ProviderUsage::new(
+                    daruda_store::accounts::AccountRecipeId::Claude,
+                    Vec::new(),
+                    None,
+                ),
+            );
             ws.claude
                 .usage_by_account
                 .set_activity(key, daruda_claude::ActivityStats::default());

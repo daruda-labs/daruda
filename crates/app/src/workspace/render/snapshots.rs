@@ -346,8 +346,7 @@ impl Workspace {
                 .claude
                 .usage_by_account
                 .plan_limits(focused_account)
-                .cloned()
-                .unwrap_or_default(),
+                .cloned(),
             service_status: self.claude.service_status.clone(),
             activity: self
                 .claude

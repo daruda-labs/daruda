@@ -78,10 +78,12 @@ pub struct ServiceStatus {
     pub fetched_at: Option<SystemTime>,
 }
 
-/// Fetch and parse the public service-status response. Synchronous
-/// — callers wrap in `cx.background_executor().spawn(...)`.
-pub fn fetch_service_status() -> Result<ServiceStatus, FetchError> {
-    let body = get_json("https://status.claude.com/api/v2/status.json", &[])?;
+/// Fetch and parse a public Statuspage v2 response. `url` comes from the
+/// domain's [`UsageSource::status_url`](crate::usage::UsageSource::status_url)
+/// — each provider hosts its own page, and they share this schema.
+/// Synchronous — callers wrap in `cx.background_executor().spawn(...)`.
+pub fn fetch_service_status(url: &str) -> Result<ServiceStatus, FetchError> {
+    let body = get_json(url, &[])?;
     parse_service_status(&body)
 }
 

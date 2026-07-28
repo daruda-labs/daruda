@@ -34,7 +34,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// the [`AccountSelection::SystemDefault`] key — no special-casing.
 #[derive(Default)]
 pub(in crate::workspace) struct PerAccountUsage {
-    plan_limits: HashMap<AccountSelection, daruda_claude::PlanLimits>,
+    plan_limits: HashMap<AccountSelection, daruda_claude::ProviderUsage>,
     activity: HashMap<AccountSelection, daruda_claude::ActivityStats>,
 }
 
@@ -43,7 +43,7 @@ impl PerAccountUsage {
     pub(in crate::workspace) fn plan_limits(
         &self,
         key: AccountSelection,
-    ) -> Option<&daruda_claude::PlanLimits> {
+    ) -> Option<&daruda_claude::ProviderUsage> {
         self.plan_limits.get(&key)
     }
 
@@ -61,11 +61,15 @@ impl PerAccountUsage {
     pub(in crate::workspace) fn set_plan_limits(
         &mut self,
         key: AccountSelection,
-        limits: daruda_claude::PlanLimits,
+        limits: daruda_claude::ProviderUsage,
     ) -> bool {
-        let visible_changed = self.plan_limits.get(&key).is_none_or(|prev| {
-            prev.five_hour != limits.five_hour || prev.seven_day != limits.seven_day
-        });
+        // `fetched_at` moves every tick, so comparing whole snapshots would
+        // repaint on every poll. Only the windows are on screen — all of them,
+        // where this used to skip the Opus one.
+        let visible_changed = self
+            .plan_limits
+            .get(&key)
+            .is_none_or(|prev| prev.windows != limits.windows);
         self.plan_limits.insert(key, limits);
         visible_changed
     }
@@ -390,7 +394,7 @@ impl Workspace {
     pub(in crate::workspace) fn set_plan_limits(
         &mut self,
         key: AccountSelection,
-        limits: daruda_claude::PlanLimits,
+        limits: daruda_claude::ProviderUsage,
         cx: &mut Context<Self>,
     ) {
         if self.claude.usage_by_account.set_plan_limits(key, limits) {
@@ -446,7 +450,15 @@ impl Workspace {
         self.claude.usage_refresh_in_flight = true;
         cx.notify();
 
+        // The focused pane's domain decides which sources apply, exactly as
+        // the pump resolves it — otherwise this path fetches Anthropic's
+        // endpoints for any focused account and files the result under that
+        // account's key.
+        let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
+            &self.focused_account_pane(cx),
+        );
         let focused = self.focused_account();
+        let recipe = focused.recipe(domain);
         let account_key = focused.key();
         let config_dir = focused.into_config_dir();
 
@@ -454,17 +466,7 @@ impl Workspace {
             let (limits, status, activity) = cx
                 .background_executor()
                 .spawn(async move {
-                    (
-                        match config_dir.as_deref() {
-                            Some(dir) => daruda_claude::limits::fetch_plan_limits_for(dir),
-                            None => daruda_claude::limits::fetch_plan_limits(),
-                        },
-                        daruda_claude::service_status::fetch_service_status(),
-                        match config_dir.as_deref() {
-                            Some(dir) => crate::workspace::sync::limits::fetch_activity_for(dir),
-                            None => crate::workspace::sync::limits::fetch_activity(),
-                        },
-                    )
+                    crate::workspace::sync::limits::fetch_all_for(recipe, config_dir.as_deref())
                 })
                 .await;
 

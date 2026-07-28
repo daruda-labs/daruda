@@ -610,18 +610,26 @@ pub fn usage_limits_section_label() -> String {
     rust_i18n::t!("usage.limits_section_label").into_owned()
 }
 
-/// Label for the 5-hour rolling window gauge.
-pub fn usage_limit_5h_label() -> String {
-    rust_i18n::t!("usage.limit_5h_label").into_owned()
+/// Rolling-window gauge labels, by the coarsest unit that fits the window's
+/// length. A provider names its windows however it likes, so the label is
+/// derived from the duration (`workspace::usage_labels`) rather than fixed
+/// per window.
+pub fn usage_limit_window_minutes(n: u64) -> String {
+    rust_i18n::t!("usage.limit_window_minutes", n = n).into_owned()
 }
-/// Label for the 7-day rolling window gauge.
-pub fn usage_limit_7d_label() -> String {
-    rust_i18n::t!("usage.limit_7d_label").into_owned()
+pub fn usage_limit_window_hours(n: u64) -> String {
+    rust_i18n::t!("usage.limit_window_hours", n = n).into_owned()
 }
-/// Label for the 7-day Opus-scoped window gauge. Only rendered when
-/// the plan meters Opus separately (`seven_day_opus` is present).
-pub fn usage_limit_opus_label() -> String {
-    rust_i18n::t!("usage.limit_opus_label").into_owned()
+pub fn usage_limit_window_days(n: u64) -> String {
+    rust_i18n::t!("usage.limit_window_days", n = n).into_owned()
+}
+pub fn usage_limit_window_months(n: u64) -> String {
+    rust_i18n::t!("usage.limit_window_months", n = n).into_owned()
+}
+/// Suffix marking a window scoped to Opus-class models, which shares its
+/// length with the plan's overall window.
+pub fn usage_limit_opus_suffix() -> String {
+    rust_i18n::t!("usage.limit_opus_suffix").into_owned()
 }
 /// Placeholder label for either gauge when the OAuth token is
 /// unavailable, the API call failed, or the window is missing from

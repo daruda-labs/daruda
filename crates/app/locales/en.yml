@@ -787,9 +787,11 @@ mcp:
 # Usage tab
 usage:
   brand_title: "Claude Code"
-  limit_5h_label: "5h"
-  limit_7d_label: "7d"
-  limit_opus_label: "7d · Opus"
+  limit_window_minutes: "%{n}m"
+  limit_window_hours: "%{n}h"
+  limit_window_days: "%{n}d"
+  limit_window_months: "%{n}mo"
+  limit_opus_suffix: " · Opus"
   domain_unavailable: "Usage data is available for Claude accounts only."
   limit_unavailable: "Unavailable"
   limits_section_label: "PLAN USAGE"

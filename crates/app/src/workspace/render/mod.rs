@@ -1144,8 +1144,7 @@ impl Render for Workspace {
             .claude
             .usage_by_account
             .plan_limits(usage_account)
-            .cloned()
-            .unwrap_or_default();
+            .cloned();
         let status_data = StatusBarData {
             project_branch: self.active_project_branch_label().map(Into::into),
             is_detached: matches!(self.active_branch_status(), super::BranchStatus::Detached),

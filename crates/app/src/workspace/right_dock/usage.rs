@@ -12,8 +12,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::ui::theme;
 use daruda_claude::activity::ActivityStats;
-use daruda_claude::limits::{LimitSeverity, LimitWindow, PlanInfo, PlanLimits};
 use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
+use daruda_claude::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
 use super::super::layout::Dock;
@@ -32,17 +32,17 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
     }
     crate::workspace::right_dock::right_panel_body()
         .child(header(
-            snap.plan_limits.plan.as_ref(),
+            snap.plan_limits.as_ref().and_then(|u| u.plan.as_ref()),
             snap.account_label.clone(),
             cx,
         ))
         .child(status_pill(&snap.service_status, cx))
         .child(usage_section_header(
-            snap.plan_limits.fetched_at,
+            snap.plan_limits.as_ref().and_then(|u| u.fetched_at),
             snap.usage_refresh_in_flight,
             &snap.workspace,
         ))
-        .child(gauges_block(&snap.plan_limits, cx))
+        .child(gauges_block(snap.plan_limits.as_ref(), cx))
         .child(today_block(&snap.activity, cx))
         .child(chart_block(&snap.activity, cx))
         .child(totals_block(&snap.activity, cx))
@@ -189,40 +189,30 @@ fn refresh_badge_label(fetched_at: Option<SystemTime>, in_flight: bool) -> Strin
 // Plan-limit gauge cards
 // ----------------------------------------------------------------
 
-/// Stack of gauge cards: 5h above 7d, plus the Opus card only when the
-/// plan meters Opus separately. 5h/7d always render (placeholder before
-/// the first fetch) so the layout is stable.
-fn gauges_block(limits: &PlanLimits, cx: &gpui::App) -> impl IntoElement {
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::USAGE_CARD_GAP))
-        .child(gauge_card(
-            strings::usage_limit_5h_label(),
-            limits.five_hour.as_ref(),
+/// One gauge card per window the provider reported, shortest first
+/// (`ProviderUsage` sorts them). Before the first fetch lands — or when the
+/// provider metered nothing — a single placeholder card holds the space, since
+/// which windows exist is now the provider's answer rather than a fixed set.
+fn gauges_block(usage: Option<&ProviderUsage>, cx: &gpui::App) -> impl IntoElement {
+    let windows = usage.map(|u| u.windows.as_slice()).unwrap_or_default();
+    let col = div().flex().flex_col().gap(px(theme::USAGE_CARD_GAP));
+    if windows.is_empty() {
+        return col.child(gauge_card(strings::usage_limit_unavailable(), None, cx));
+    }
+    windows.iter().fold(col, |col, window| {
+        col.child(gauge_card(
+            crate::workspace::usage_labels::window_label(window),
+            Some(window),
             cx,
         ))
-        .child(gauge_card(
-            strings::usage_limit_7d_label(),
-            limits.seven_day.as_ref(),
-            cx,
-        ));
-
-    if let Some(opus) = limits.seven_day_opus.as_ref() {
-        col = col.child(gauge_card(
-            strings::usage_limit_opus_label(),
-            Some(opus),
-            cx,
-        ));
-    }
-    col
+    })
 }
 
 /// One gauge card: header row (label + big %), bar, optional reset text.
 /// `None` window → placeholder (dim bar + "Unavailable", no %).
 fn gauge_card(
     label: impl Into<SharedString>,
-    window: Option<&LimitWindow>,
+    window: Option<&UsageWindow>,
     cx: &gpui::App,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -675,12 +665,8 @@ fn chart_heights(messages: &[u64], max_px: f32, min_px: f32) -> Vec<f32> {
 /// Returns `None` when there is no plan metadata at all (no badge).
 fn plan_badge_label(plan: Option<&PlanInfo>) -> Option<String> {
     let plan = plan?;
-    let sub = plan
-        .subscription_type
-        .as_deref()
-        .unwrap_or("")
-        .to_lowercase();
-    let tier = plan.rate_limit_tier.as_deref().unwrap_or("").to_lowercase();
+    let sub = plan.tier.as_deref().unwrap_or("").to_lowercase();
+    let tier = plan.qualifier.as_deref().unwrap_or("").to_lowercase();
 
     let base = match sub.as_str() {
         "team" => "TEAM",
@@ -746,8 +732,8 @@ mod tests {
 
     fn plan(sub: Option<&str>, tier: Option<&str>) -> PlanInfo {
         PlanInfo {
-            subscription_type: sub.map(str::to_string),
-            rate_limit_tier: tier.map(str::to_string),
+            tier: sub.map(str::to_string),
+            qualifier: tier.map(str::to_string),
         }
     }
 
