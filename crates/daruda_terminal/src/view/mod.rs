@@ -226,6 +226,13 @@ impl TerminalView {
         self.state.selection.is_some()
     }
 
+    /// Copy the current selection to the clipboard — the entry point the
+    /// app-crate context-menu Copy item calls (action dispatch isn't
+    /// available there; this reuses the same logic as the `Copy` keybinding).
+    pub fn copy_selection(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        self.on_copy(&Copy, window, cx);
+    }
+
     /// Scroll `lines` rows up from the bottom into scrollback history, so
     /// the viewport straddles the scrollback↔live-grid seam (top rows from
     /// the `LineBuffer`, bottom rows from the live grid). Used by the

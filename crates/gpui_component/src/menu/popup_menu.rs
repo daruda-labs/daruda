@@ -42,6 +42,7 @@ pub enum PopupMenuItem {
         action: Option<Box<dyn Action>>,
         // For link item
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
+        tooltip: Option<SharedString>,
     },
     /// A menu item with custom element render.
     ElementItem {
@@ -76,6 +77,7 @@ impl PopupMenuItem {
             action: None,
             is_link: false,
             handler: None,
+            tooltip: None,
         }
     }
 
@@ -189,6 +191,21 @@ impl PopupMenuItem {
         self
     }
 
+    /// Set a hover tooltip for the menu item. Shown even when the item is
+    /// disabled — the intended use is explaining *why* a disabled action
+    /// is unavailable (e.g. "Commit first" on a disabled merge action).
+    ///
+    /// Only works for [`PopupMenuItem::Item`].
+    pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        match &mut self {
+            PopupMenuItem::Item { tooltip: t, .. } => {
+                *t = Some(text.into());
+            }
+            _ => {}
+        }
+        self
+    }
+
     /// Add a click handler for the menu item.
     ///
     /// Only works for [`PopupMenuItem::Item`] and [`PopupMenuItem::ElementItem`].
@@ -220,6 +237,7 @@ impl PopupMenuItem {
             action: None,
             is_link: true,
             handler: Some(Rc::new(move |_, _, cx| cx.open_url(&href))),
+            tooltip: None,
         }
     }
 
@@ -1111,6 +1129,7 @@ impl PopupMenu {
                 action,
                 disabled,
                 is_link,
+                tooltip,
                 ..
             } => {
                 let show_link_icon = *is_link && self.external_link_icon;
@@ -1123,6 +1142,7 @@ impl PopupMenu {
                     )
                 })
                 .disabled(*disabled)
+                .when_some(tooltip.clone(), |this, tooltip| this.tooltip(tooltip))
                 .h(item_height)
                 .gap_x_1()
                 .children(Self::render_icon(
@@ -1310,5 +1330,47 @@ impl Render for PopupMenu {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn item_with_tooltip_stores_text() {
+        if let PopupMenuItem::Item { tooltip, .. } =
+            PopupMenuItem::new("merge").tooltip("Commit first")
+        {
+            assert_eq!(tooltip.as_ref().map(|s| s.as_ref()), Some("Commit first"));
+        } else {
+            panic!("expected Item variant");
+        }
+    }
+
+    #[test]
+    fn item_tooltip_preserved_through_disabled() {
+        let item = PopupMenuItem::new("x").tooltip("reason").disabled(true);
+        if let PopupMenuItem::Item {
+            tooltip, disabled, ..
+        } = item
+        {
+            assert!(disabled);
+            assert_eq!(tooltip.as_ref().map(|s| s.as_ref()), Some("reason"));
+        } else {
+            panic!("expected Item variant");
+        }
+    }
+
+    #[test]
+    fn tooltip_is_noop_on_separator_and_label() {
+        assert!(matches!(
+            PopupMenuItem::separator().tooltip("x"),
+            PopupMenuItem::Separator
+        ));
+        assert!(matches!(
+            PopupMenuItem::label("l").tooltip("x"),
+            PopupMenuItem::Label(_)
+        ));
     }
 }

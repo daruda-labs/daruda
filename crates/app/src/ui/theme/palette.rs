@@ -395,9 +395,11 @@ pub const FORM_MODAL_SECTION_GAP: f32 = 12.0;
 /// Horizontal gap between the left/right columns of a split-form
 /// modal body (px).
 pub const FORM_MODAL_SPLIT_GAP: f32 = 16.0;
-/// Height of the 1px separator strip rendered between context-menu
-/// item groups (px). `bg` uses `MODAL_PANEL_BORDER`.
-pub const CONTEXT_MENU_SEPARATOR_H: f32 = 1.0;
+/// Minimum gap kept between an imperatively-opened `PopupMenu` (System
+/// B — `crate::ui::popup_menu_deferred`) and the window edge when
+/// `snap_to_window_with_margin` repositions it away from a clipping
+/// anchor.
+pub const POPUP_MENU_DEPLOY_EDGE_MARGIN: f32 = 8.0;
 /// Banner background — error severity. Red hue, low alpha so the
 /// underlying `MODAL_PANEL_BG` shows through.
 pub const BANNER_ERROR_BG: Hsla = with_alpha(ERROR, 0.10);

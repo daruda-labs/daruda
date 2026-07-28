@@ -20,8 +20,8 @@ use crate::lane::paths::LanePaths;
 use crate::path_ext::PathExt;
 use crate::surface::strings as app_strings;
 use crate::ui::{
-    ButtonVariants as _, ContextMenuItem, Icon, IconName, SectionHeader, Sizable as _, button,
-    button_bare,
+    ButtonVariants as _, ContextMenuExt as _, Icon, IconName, PopupMenuItem, SectionHeader,
+    Sizable as _, button, button_bare, menu_builder,
 };
 use crate::workspace::layout::Dock;
 use crate::workspace::layout::LeftDockSnapshot;
@@ -706,85 +706,6 @@ fn unified_file_row(
                 });
             }
         }))
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                let Some(ws) = workspace_for_ctx.upgrade() else {
-                    return;
-                };
-
-                let ws_stage = ws.clone();
-                let ws_discard = ws.clone();
-                let ws_diff = ws.clone();
-                let path_stage = path_for_ctx.clone();
-                let path_discard = path_for_ctx.clone();
-                let path_diff = abs_path_for_ctx_diff.clone();
-
-                let mut items: Vec<ContextMenuItem> = Vec::new();
-
-                if is_staged {
-                    items.push(ContextMenuItem::new(
-                        app_strings::ctx_git_unstage(),
-                        move |_, _, cx| {
-                            ws_stage.update(cx, |ws, cx| {
-                                ws.close_context_menu(cx);
-                                ws.unstage_file(lane_id, path_stage.clone(), cx)
-                            });
-                        },
-                    ));
-                } else {
-                    items.push(ContextMenuItem::new(
-                        app_strings::ctx_git_stage(),
-                        move |_, _, cx| {
-                            ws_stage.update(cx, |ws, cx| {
-                                ws.close_context_menu(cx);
-                                ws.stage_file(lane_id, path_stage.clone(), cx)
-                            });
-                        },
-                    ));
-                }
-
-                items.push(ContextMenuItem::separator());
-                items.push(ContextMenuItem::new(
-                    app_strings::ctx_git_open_diff(),
-                    move |_, window, cx| {
-                        ws_diff.update(cx, |ws, cx| {
-                            ws.close_context_menu(cx);
-                            ws.open_git_file_diff(
-                                lane_id,
-                                path_diff.clone(),
-                                is_staged,
-                                Some(status_char_for_diff),
-                                window,
-                                cx,
-                            )
-                        });
-                    },
-                ));
-
-                items.push(ContextMenuItem::separator());
-                items.push(
-                    ContextMenuItem::new(app_strings::ctx_git_discard(), move |_, window, cx| {
-                        ws_discard.update(cx, |ws, cx| {
-                            ws.on_discard_file(
-                                lane_id,
-                                path_discard.clone(),
-                                is_untracked,
-                                window,
-                                cx,
-                            )
-                        });
-                    })
-                    // Discard is dangerous — disable only when the file has no
-                    // working-tree changes to discard (purely staged, like `M `).
-                    // For `MM` (staged + unstaged) and untracked, leave it enabled.
-                    .disabled(discard_disabled(is_staged, has_unstaged)),
-                );
-
-                ws.update(cx, |ws, cx| ws.open_context_menu(ev.position, items, cx));
-            }),
-        )
         // Status badge — single letter (M / A / D / R / ?) coloured by
         // stage state. Same shape as the file-viewer toolbar's status
         // badge (`file_viewer/render/toolbar.rs`) so the left dock and
@@ -861,6 +782,74 @@ fn unified_file_row(
                 })
             },
         )
+        .context_menu(menu_builder(move |menu, _window, _cx| {
+            let ws_stage = workspace_for_ctx.clone();
+            let ws_discard = workspace_for_ctx.clone();
+            let ws_diff = workspace_for_ctx.clone();
+            let path_stage = path_for_ctx.clone();
+            let path_discard = path_for_ctx.clone();
+            let path_diff = abs_path_for_ctx_diff.clone();
+
+            let menu = if is_staged {
+                menu.item(PopupMenuItem::new(app_strings::ctx_git_unstage()).on_click(
+                    move |_, _, cx| {
+                        if let Some(w) = ws_stage.upgrade() {
+                            w.update(cx, |ws, cx| {
+                                ws.unstage_file(lane_id, path_stage.clone(), cx)
+                            });
+                        }
+                    },
+                ))
+            } else {
+                menu.item(PopupMenuItem::new(app_strings::ctx_git_stage()).on_click(
+                    move |_, _, cx| {
+                        if let Some(w) = ws_stage.upgrade() {
+                            w.update(cx, |ws, cx| ws.stage_file(lane_id, path_stage.clone(), cx));
+                        }
+                    },
+                ))
+            };
+
+            let menu = menu.separator().item(
+                PopupMenuItem::new(app_strings::ctx_git_open_diff()).on_click(
+                    move |_, window, cx| {
+                        if let Some(w) = ws_diff.upgrade() {
+                            w.update(cx, |ws, cx| {
+                                ws.open_git_file_diff(
+                                    lane_id,
+                                    path_diff.clone(),
+                                    is_staged,
+                                    Some(status_char_for_diff),
+                                    window,
+                                    cx,
+                                )
+                            });
+                        }
+                    },
+                ),
+            );
+
+            menu.separator().item(
+                PopupMenuItem::new(app_strings::ctx_git_discard())
+                    .on_click(move |_, window, cx| {
+                        if let Some(w) = ws_discard.upgrade() {
+                            w.update(cx, |ws, cx| {
+                                ws.on_discard_file(
+                                    lane_id,
+                                    path_discard.clone(),
+                                    is_untracked,
+                                    window,
+                                    cx,
+                                )
+                            });
+                        }
+                    })
+                    // Discard is dangerous — disable only when the file has no
+                    // working-tree changes to discard (purely staged, like `M `).
+                    // For `MM` (staged + unstaged) and untracked, leave it enabled.
+                    .disabled(discard_disabled(is_staged, has_unstaged)),
+            )
+        }))
         .into_any_element()
 }
 

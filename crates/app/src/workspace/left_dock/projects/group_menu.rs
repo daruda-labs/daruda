@@ -1,15 +1,15 @@
-//! Context menu items for a Group header — a flat `Vec<ContextMenuItem>`
-//! ready for `Workspace::open_context_menu`.
+//! Context menu items for a Group header — a flat `Vec<PopupMenuItem>`
+//! attached declaratively via `.context_menu(...)`.
 //!
 //! Items: Rename · color presets (6 + Clear) · Collapse/Expand · Delete.
-//! Sub-menus are absent because the `ui` context-menu widget is flat-only,
-//! so colour choices sit at the top level separated by `Separator`s.
+//! Sub-menus are absent because the menu is built flat, so colour choices
+//! sit at the top level separated by `Separator`s.
 
 use daruda_store::project::GroupId;
 use gpui::{SharedString, WeakEntity};
 
 use crate::surface::strings as s;
-use crate::ui::ContextMenuItem;
+use crate::ui::PopupMenuItem;
 use crate::workspace::Workspace;
 use crate::workspace::dialog_helpers::open_single_field_dialog;
 use crate::workspace::group_ops::group_color_presets;
@@ -20,15 +20,14 @@ pub(in crate::workspace) fn build_group_menu_items(
     current_name: SharedString,
     is_collapsed: bool,
     ws: WeakEntity<Workspace>,
-) -> Vec<ContextMenuItem> {
-    let mut items: Vec<ContextMenuItem> = Vec::new();
+) -> Vec<PopupMenuItem> {
+    let mut items: Vec<PopupMenuItem> = Vec::new();
 
     // -- Rename --
     let ws_rename = ws.clone();
     let initial = current_name.to_string();
-    items.push(ContextMenuItem::new(
-        s::group_menu_rename(),
-        move |_, window, app_cx| {
+    items.push(
+        PopupMenuItem::new(s::group_menu_rename()).on_click(move |_, window, app_cx| {
             let Some(workspace) = ws_rename.upgrade() else {
                 return;
             };
@@ -50,27 +49,28 @@ pub(in crate::workspace) fn build_group_menu_items(
                     cx,
                 );
             });
-        },
-    ));
+        }),
+    );
 
-    items.push(ContextMenuItem::separator());
+    items.push(PopupMenuItem::separator());
 
     // -- Color presets --
     for (label, hex) in group_color_presets() {
         let ws_color = ws.clone();
-        items.push(ContextMenuItem::new(label, move |_, _window, app_cx| {
-            let Some(workspace) = ws_color.upgrade() else {
-                return;
-            };
-            workspace.update(app_cx, |ws, cx| {
-                ws.recolor_group(group_id, Some(hex.to_string()), cx);
-            });
-        }));
+        items.push(
+            PopupMenuItem::new(label).on_click(move |_, _window, app_cx| {
+                let Some(workspace) = ws_color.upgrade() else {
+                    return;
+                };
+                workspace.update(app_cx, |ws, cx| {
+                    ws.recolor_group(group_id, Some(hex.to_string()), cx);
+                });
+            }),
+        );
     }
 
     let ws_clear = ws.clone();
-    items.push(ContextMenuItem::new(
-        s::group_menu_color_clear(),
+    items.push(PopupMenuItem::new(s::group_menu_color_clear()).on_click(
         move |_, _window, app_cx| {
             let Some(workspace) = ws_clear.upgrade() else {
                 return;
@@ -81,7 +81,7 @@ pub(in crate::workspace) fn build_group_menu_items(
         },
     ));
 
-    items.push(ContextMenuItem::separator());
+    items.push(PopupMenuItem::separator());
 
     // -- Collapse / Expand --
     let collapse_label = if is_collapsed {
@@ -90,35 +90,33 @@ pub(in crate::workspace) fn build_group_menu_items(
         s::group_menu_collapse()
     };
     let ws_collapse = ws.clone();
-    items.push(ContextMenuItem::new(
-        collapse_label,
-        move |_, _window, app_cx| {
+    items.push(
+        PopupMenuItem::new(collapse_label).on_click(move |_, _window, app_cx| {
             let Some(workspace) = ws_collapse.upgrade() else {
                 return;
             };
             workspace.update(app_cx, |ws, cx| {
                 ws.toggle_group_collapse(group_id, cx);
             });
-        },
-    ));
+        }),
+    );
 
-    items.push(ContextMenuItem::separator());
+    items.push(PopupMenuItem::separator());
 
     // -- Delete --
     // No confirmation modal: `delete_group` demotes member projects to
     // ungrouped (no data loss) — only the visual grouping disappears.
     let ws_delete = ws.clone();
-    items.push(ContextMenuItem::new(
-        s::group_menu_delete(),
-        move |_, _window, app_cx| {
+    items.push(
+        PopupMenuItem::new(s::group_menu_delete()).on_click(move |_, _window, app_cx| {
             let Some(workspace) = ws_delete.upgrade() else {
                 return;
             };
             workspace.update(app_cx, |ws, cx| {
                 ws.delete_group(group_id, cx);
             });
-        },
-    ));
+        }),
+    );
 
     items
 }

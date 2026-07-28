@@ -13,19 +13,25 @@
 //! `on_drag` / `drag_over` / `on_drop` / `on_mouse_down`. The built-in
 //! Input tab carries no such handlers — click-to-activate is handled
 //! at the TabBar level through `on_click(ix)`.
+//!
+//! The macro tab's right-click menu builds a `PopupMenu` imperatively
+//! and opens it via `Workspace::open_context_menu` — `TabBar::children`
+//! requires the concrete `Tab` type, and `PopupMenu`'s `ContextMenuExt`
+//! (`.context_menu()`) returns a distinct wrapper element with no
+//! `Into<Tab>`, so the declarative form can't attach here.
 
 use crate::ui::theme;
 use crate::ui::{Tab, tab, tab_bar};
 use daruda_store::panels::TabId;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Focusable, IntoElement, MouseButton, MouseDownEvent,
-    Pixels, Point, Render, SharedString, WeakEntity, Window, div, prelude::*, px,
+    Anchor, AnyElement, App, ClickEvent, Context, Focusable, IntoElement, MouseButton,
+    MouseDownEvent, Pixels, Point, Render, SharedString, WeakEntity, Window, div, prelude::*, px,
 };
 
 use crate::surface::strings as surface_strings;
 use crate::ui::dialog::ButtonVariant;
 
-use crate::ui::ContextMenuItem;
+use crate::ui::{DropdownMenu as _, PopupMenu, PopupMenuItem, menu_builder};
 use crate::workspace::Workspace;
 use crate::workspace::layout::BottomDockSnapshot;
 use crate::workspace::layout::Dock;
@@ -158,7 +164,7 @@ pub(in crate::workspace) fn render(
                 .px(px(theme::DOCK_VIEW_TAB_PAD_X))
                 .child(add_tab_button(snap, cx))
                 .when(!terminal_input_visible, |el| {
-                    el.child(row_preset_button(snap, cx))
+                    el.child(row_preset_button(snap))
                 }),
         )
         .into_any_element()
@@ -172,42 +178,35 @@ fn builtin_input_tab() -> Tab {
 
 /// Row-preset chip rendered next to `[+]` in the TabBar suffix. Shows
 /// the nearest preset to the current dock height (e.g. `2`) and opens
-/// a context menu listing the three presets when clicked.
-fn row_preset_button(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> impl IntoElement {
+/// a dropdown listing the three presets, with the active one checked.
+fn row_preset_button(snap: &BottomDockSnapshot) -> impl IntoElement {
     let current_preset = nearest_row_preset(snap.bottom_dock_size);
     let workspace = snap.workspace.clone();
     let label = SharedString::from(current_preset.to_string());
-    crate::ui::button_chip("bottom-dock-row-preset", label).on_click(cx.listener(
-        move |_dock, ev: &ClickEvent, _window, cx| {
-            cx.stop_propagation();
-            let Some(ws) = workspace.upgrade() else {
-                return;
-            };
-            let position = ev.position();
-            let items = build_row_preset_menu(current_preset, workspace.clone());
-            ws.update(cx, |ws, cx| {
-                // Anchor by bottom-right so the menu expands up-and-left
-                // from the chip — the chip sits at the right edge of
-                // the tab bar, and opening down-and-right would clip.
-                ws.open_context_menu_at_corner(
-                    position,
-                    items,
-                    crate::ui::ContextMenuCorner::BottomRight,
-                    cx,
-                )
-            });
-        },
-    ))
+    // Anchor by top-right so the menu expands down-and-left from the
+    // chip — the chip sits at the right edge of the tab bar, and the
+    // default top-left anchor would grow the menu off the window edge.
+    crate::ui::button_chip("bottom-dock-row-preset", label).dropdown_menu_with_anchor(
+        Anchor::TopRight,
+        menu_builder(move |menu, _window, _cx| {
+            build_row_preset_menu(menu, current_preset, workspace.clone())
+        }),
+    )
 }
 
 fn build_row_preset_menu(
+    menu: PopupMenu,
     current_preset: u8,
     workspace: WeakEntity<Workspace>,
-) -> Vec<ContextMenuItem> {
-    ROW_PRESETS
-        .iter()
-        .map(|(rows, height)| row_preset_item(*rows, *height, current_preset, workspace.clone()))
-        .collect()
+) -> PopupMenu {
+    ROW_PRESETS.iter().fold(menu, |menu, (rows, height)| {
+        menu.item(row_preset_item(
+            *rows,
+            *height,
+            current_preset,
+            workspace.clone(),
+        ))
+    })
 }
 
 fn row_preset_item(
@@ -215,27 +214,22 @@ fn row_preset_item(
     preset_h: f32,
     current_preset: u8,
     workspace: WeakEntity<Workspace>,
-) -> ContextMenuItem {
-    let prefix = if rows == current_preset {
-        surface_strings::ROW_PRESET_CHECK_PREFIX
-    } else {
-        surface_strings::ROW_PRESET_UNCHECK_PREFIX
-    };
+) -> PopupMenuItem {
     let body = match rows {
         1 => surface_strings::row_preset_1_label(),
         2 => surface_strings::row_preset_2_label(),
         _ => surface_strings::row_preset_3_label(),
     };
-    let label = format!("{prefix}{body}");
-    ContextMenuItem::new(label, move |_ev, window, app_cx| {
-        let Some(ws) = workspace.upgrade() else {
-            return;
-        };
-        ws.update(app_cx, |ws, cx| {
-            ws.close_context_menu(cx);
-            ws.set_bottom_dock_row_preset(preset_h, window, cx);
-        });
-    })
+    PopupMenuItem::new(body)
+        .checked(rows == current_preset)
+        .on_click(move |_ev, window, app_cx| {
+            let Some(ws) = workspace.upgrade() else {
+                return;
+            };
+            ws.update(app_cx, |ws, cx| {
+                ws.set_bottom_dock_row_preset(preset_h, window, cx);
+            });
+        })
 }
 
 /// `[+]` button rendered in the TabBar's right-edge `suffix` slot.
@@ -282,7 +276,7 @@ fn macro_tab(
         let tab_id = tab_id.clone();
         let label = label.clone();
         let ws = workspace.clone();
-        cx.listener(move |_dock, ev: &MouseDownEvent, _window, cx| {
+        cx.listener(move |_dock, ev: &MouseDownEvent, window, cx| {
             // Stop ancestors from interpreting the right-click before
             // the menu can render (mirrors the lanes row pattern).
             cx.stop_propagation();
@@ -290,7 +284,10 @@ fn macro_tab(
             if let Some(w) = ws.upgrade() {
                 let items =
                     build_tab_context_menu(tab_id.clone(), label.clone(), widget_count, ws.clone());
-                w.update(cx, |ws, cx| ws.open_context_menu(position, items, cx));
+                let menu = PopupMenu::build(window, cx, move |menu, _window, _cx| {
+                    items.into_iter().fold(menu.small(), |m, item| m.item(item))
+                });
+                w.update(cx, |ws, cx| ws.open_context_menu(position, menu, cx));
             }
         })
     };
@@ -329,7 +326,7 @@ fn build_tab_context_menu(
     current_name: String,
     widget_count: usize,
     workspace: WeakEntity<Workspace>,
-) -> Vec<ContextMenuItem> {
+) -> Vec<PopupMenuItem> {
     vec![
         rename_item(tab_id.clone(), current_name.clone(), workspace.clone()),
         delete_item(tab_id, current_name, widget_count, workspace),
@@ -340,35 +337,32 @@ fn rename_item(
     tab_id: TabId,
     current_name: String,
     workspace: WeakEntity<Workspace>,
-) -> ContextMenuItem {
-    ContextMenuItem::new(
-        surface_strings::ctx_panel_tab_rename(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            let Some(ws) = workspace.upgrade() else {
+) -> PopupMenuItem {
+    PopupMenuItem::new(surface_strings::ctx_panel_tab_rename()).on_click(
+        move |_ev, window: &mut Window, app_cx: &mut App| {
+            // Guard: don't pop a rename dialog for a lane whose workspace
+            // has already been torn down.
+            if workspace.upgrade().is_none() {
                 return;
-            };
+            }
             let tab_id = tab_id.clone();
             let initial = current_name.clone();
-            let callback_ws = workspace.clone();
-            ws.update(app_cx, |ws, cx| {
-                ws.close_context_menu(cx);
-                crate::workspace::dialog_helpers::open_single_field_dialog(
-                    callback_ws.clone(),
-                    surface_strings::rename_panel_tab_modal_title(),
-                    surface_strings::rename_panel_tab_placeholder(),
-                    Some(&initial),
-                    {
-                        let tab_id = tab_id.clone();
-                        move |ws, value, _window, cx| {
-                            if let Some(name) = value {
-                                ws.rename_panel_tab(tab_id.clone(), name, cx);
-                            }
+            crate::workspace::dialog_helpers::open_single_field_dialog(
+                workspace.clone(),
+                surface_strings::rename_panel_tab_modal_title(),
+                surface_strings::rename_panel_tab_placeholder(),
+                Some(&initial),
+                {
+                    let tab_id = tab_id.clone();
+                    move |ws, value, _window, cx| {
+                        if let Some(name) = value {
+                            ws.rename_panel_tab(tab_id.clone(), name, cx);
                         }
-                    },
-                    window,
-                    cx,
-                );
-            });
+                    }
+                },
+                window,
+                app_cx,
+            );
         },
     )
 }
@@ -378,19 +372,17 @@ fn delete_item(
     current_name: String,
     widget_count: usize,
     workspace: WeakEntity<Workspace>,
-) -> ContextMenuItem {
-    ContextMenuItem::new(
-        surface_strings::ctx_panel_tab_delete(),
-        move |_ev: &MouseDownEvent, window: &mut Window, app_cx: &mut App| {
-            let Some(ws) = workspace.upgrade() else {
+) -> PopupMenuItem {
+    PopupMenuItem::new(surface_strings::ctx_panel_tab_delete()).on_click(
+        move |_ev, window: &mut Window, app_cx: &mut App| {
+            // Guard: don't pop a delete confirm for a lane whose workspace
+            // has already been torn down.
+            if workspace.upgrade().is_none() {
                 return;
-            };
+            }
             let tab_id = tab_id.clone();
             let body = format_delete_body(&current_name, widget_count);
             let callback_ws = workspace.clone();
-            ws.update(app_cx, |ws, cx| {
-                ws.close_context_menu(cx);
-            });
             crate::workspace::dialog_helpers::open_confirm_dialog(
                 surface_strings::delete_panel_tab_modal_title(),
                 body,
@@ -478,5 +470,23 @@ mod tests {
         // Just above each midpoint moves to the next preset.
         assert_eq!(nearest_row_preset(mid_12 + 1.0), 2);
         assert_eq!(nearest_row_preset(mid_23 + 1.0), 3);
+    }
+
+    /// Pull the `checked` flag out of a `PopupMenuItem`, panicking on any
+    /// variant other than `Item` (the only one `row_preset_item` builds).
+    fn item_checked(item: &PopupMenuItem) -> bool {
+        match item {
+            PopupMenuItem::Item { checked, .. } => *checked,
+            _ => panic!("expected PopupMenuItem::Item"),
+        }
+    }
+
+    #[test]
+    fn row_preset_item_checks_only_the_current_preset() {
+        let ws: WeakEntity<Workspace> = WeakEntity::new_invalid();
+        for (rows, height) in ROW_PRESETS {
+            let item = row_preset_item(rows, height, 2, ws.clone());
+            assert_eq!(item_checked(&item), rows == 2, "rows={rows}");
+        }
     }
 }

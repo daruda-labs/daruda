@@ -9,6 +9,7 @@ use super::*;
 use daruda_store::observability::error_report::ErrorSeverity;
 use daruda_terminal::session::LineBufferPosition;
 use daruda_terminal::session::interval_tree::{LineCoord, LineRange};
+use gpui::{Point, px};
 
 fn first_terminal_pane_id(ws: &Workspace) -> crate::workspace::main_area::pane_tree::PaneId {
     ws.active_runtime()
@@ -98,4 +99,36 @@ async fn add_annotation_with_missing_pane_reports_error(cx: &mut TestAppContext)
                 .collect::<Vec<_>>(),
         );
     });
+}
+
+#[gpui::test]
+fn open_annotation_context_menu_builds_with_copy_item(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    // Smoke test only: no selection exists on a fresh pane, so this
+    // exercises the disabled-Copy / disabled-Add / no-Delete branches of
+    // `open_annotation_context_menu` without panicking and confirms the
+    // menu still deploys. Asserting the Copy item's *enabled* branch would
+    // need a selection set on the pane's `TerminalView`, which has no
+    // public test-support setter (selection state is driven by real mouse
+    // events) — left as a manual-verification gap, matching the crate's
+    // "render paths needing Window rely on manual smoke tests" convention.
+    window_handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane_id = first_terminal_pane_id(ws);
+                ws.open_annotation_context_menu(
+                    pane_id,
+                    Point::new(px(0.), px(0.)),
+                    None,
+                    window,
+                    cx,
+                );
+                assert!(
+                    ws.main_area.popup_menu_deploy.is_some(),
+                    "menu with Copy + Add annotation items should deploy"
+                );
+            });
+        })
+        .unwrap();
 }

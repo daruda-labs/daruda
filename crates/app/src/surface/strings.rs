@@ -1518,8 +1518,6 @@ pub fn row_preset_2_label() -> String {
 pub fn row_preset_3_label() -> String {
     rust_i18n::t!("bottom_dock.row_preset_3").into_owned()
 }
-pub const ROW_PRESET_CHECK_PREFIX: &str = "\u{2713} ";
-pub const ROW_PRESET_UNCHECK_PREFIX: &str = "  ";
 pub fn row_preset_tooltip() -> String {
     rust_i18n::t!("bottom_dock.row_preset_tooltip").into_owned()
 }
@@ -3630,15 +3628,15 @@ pub fn terminal_annotation_placeholder() -> String {
 }
 
 /// Toast/modal title when the workspace can no longer find the pane
-/// that an annotation operation targeted.
-pub fn terminal_annotation_err_pane_missing_title() -> String {
-    rust_i18n::t!("terminal.annotation_err_pane_missing_title").into_owned()
+/// that a terminal operation (annotation edit, Copy) targeted.
+pub fn terminal_target_pane_missing_title() -> String {
+    rust_i18n::t!("terminal.target_pane_missing_title").into_owned()
 }
 
 /// User-facing message body paired with
-/// [`terminal_annotation_err_pane_missing_title`].
-pub fn terminal_annotation_err_pane_missing_message() -> String {
-    rust_i18n::t!("terminal.annotation_err_pane_missing_message").into_owned()
+/// [`terminal_target_pane_missing_title`].
+pub fn terminal_target_pane_missing_message() -> String {
+    rust_i18n::t!("terminal.target_pane_missing_message").into_owned()
 }
 
 /// Toast/modal title when the underlying session rejected an annotation

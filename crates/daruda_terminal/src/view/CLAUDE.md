@@ -91,7 +91,8 @@ Cmd+F        → actions.rs → search_bar.rs (render_search_bar / recompute_mat
   `new`, `new_with_input`, `feed_output_bytes`, `queue_output_bytes`,
   `resize_terminal`, `set_search_query`, `search_step`, `clear_search`,
   `jump_to_prompt`, `jump_to_command`, `search_state`,
-  `set_dim_amount` / `dim_amount` (inactive-pane dim; see `layout.rs`).
+  `set_dim_amount` / `dim_amount` (inactive-pane dim; see `layout.rs`),
+  `has_selection`, `copy_selection`.
 
 ---
 

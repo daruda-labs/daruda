@@ -8,7 +8,8 @@
 
 use crate::ui::theme;
 use crate::ui::{
-    ButtonVariants as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button, menu_builder,
+    ButtonVariants as _, ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem, button,
+    menu_builder,
 };
 use gpui::{
     ClickEvent, ClipboardItem, Context, CursorStyle, DragMoveEvent, Focusable as _, IntoElement,
@@ -40,83 +41,34 @@ mod snapshots;
 
 pub(super) const PANE_HEADER_HEIGHT: f32 = theme::PANE_HEADER_HEIGHT;
 
-/// Wrap every clickable [`crate::ui::ContextMenuItem`] so the menu's
-/// open state is cleared before the user handler runs. Idempotent: if a
-/// handler already calls `close_context_menu` itself the second call is a
-/// no-op. Keeps the workspace's `context_menu = Some(...)` backdrop from
-/// outliving the action that opened a Dialog or transitioned a view.
-fn wrap_items_with_close(
-    items: &[crate::ui::ContextMenuItem],
-    cx: &gpui::Context<Workspace>,
-) -> Vec<crate::ui::ContextMenuItem> {
-    use crate::ui::ContextMenuItem;
-    let weak = cx.weak_entity();
-    items
-        .iter()
-        .map(|item| match item {
-            ContextMenuItem::Separator => ContextMenuItem::Separator,
-            ContextMenuItem::Item {
-                label,
-                disabled,
-                tooltip,
-                on_click,
-            } => {
-                let weak = weak.clone();
-                let inner = on_click.clone();
-                ContextMenuItem::Item {
-                    label: label.clone(),
-                    disabled: *disabled,
-                    tooltip: tooltip.clone(),
-                    on_click: std::rc::Rc::new(move |ev, win, app| {
-                        if let Some(w) = weak.upgrade() {
-                            w.update(app, |this, cx| this.close_context_menu(cx));
-                        }
-                        (inner)(ev, win, app);
-                    }),
-                }
-            }
-        })
-        .collect()
-}
-
-/// Builds a workspace-scoped context-menu item that:
-/// 1. upgrades the weak workspace reference,
-/// 2. closes the menu,
-/// 3. runs `f`.
-///
-/// Capturing a `WeakEntity<Workspace>` (rather than `&mut Workspace`
-/// directly) keeps the closure `'static` and avoids re-entrancy — the
-/// action executes in a new event cycle after the current render is done.
-pub(in crate::workspace) fn ws_menu_item(
+/// Builds a workspace-scoped `PopupMenuItem` that upgrades the weak
+/// workspace reference and runs `f`. `PopupMenu` dismisses itself after
+/// a confirmed click (`PopupMenu::confirm` always calls
+/// `self.dismiss(&Cancel, ...)` post-handler — see
+/// `gpui_component::menu::popup_menu`), so no `close_context_menu` call
+/// is needed here.
+pub(in crate::workspace) fn ws_popup_menu_item(
     ws: gpui::WeakEntity<Workspace>,
     label: impl Into<gpui::SharedString>,
     disabled: bool,
     f: impl Fn(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>) + 'static,
-) -> crate::ui::ContextMenuItem {
-    crate::ui::ContextMenuItem::new(label, move |_, win, app| {
-        if let Some(w) = ws.upgrade() {
-            w.update(app, |this, cx| {
-                this.close_context_menu(cx);
-                f(this, win, cx);
-            });
-        }
-    })
-    .disabled(disabled)
+) -> PopupMenuItem {
+    PopupMenuItem::new(label)
+        .on_click(move |_, window, app| {
+            if let Some(w) = ws.upgrade() {
+                w.update(app, |this, cx| f(this, window, cx));
+            }
+        })
+        .disabled(disabled)
 }
 
-/// Builds a workspace-scoped context-menu item that closes the menu and
-/// writes `text` to the system clipboard.
-pub(in crate::workspace) fn ws_clipboard_item(
-    ws: gpui::WeakEntity<Workspace>,
+/// Builds a `PopupMenuItem` that writes `text` to the system clipboard.
+/// PopupMenu self-dismisses, so there is no workspace state to touch.
+pub(in crate::workspace) fn ws_popup_clipboard_item(
     label: impl Into<gpui::SharedString>,
     text: String,
-) -> crate::ui::ContextMenuItem {
-    crate::ui::ContextMenuItem::new(label, move |_, _, app| {
-        if let Some(w) = ws.upgrade() {
-            w.update(app, |this, cx| {
-                this.close_context_menu(cx);
-            });
-        }
+) -> PopupMenuItem {
+    PopupMenuItem::new(label).on_click(move |_, _, app| {
         app.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
     })
 }
@@ -309,13 +261,6 @@ fn dock_resize_handle(
             this.begin_dock_drag(position, anchor_px, cx);
         }),
     )
-}
-
-/// Full-screen absolute overlay — click-to-dismiss hit target for floating
-/// panels (palette, context menu). Chain `.on_mouse_down(...)` and `.child()`
-/// to complete the pattern.
-fn backdrop() -> gpui::Div {
-    div().absolute().size_full().top_0().left_0()
 }
 
 /// Centered main-area placeholder shown when the active lane's root
@@ -624,6 +569,21 @@ impl Render for Workspace {
                             this.request_close_tab(i, window, cx);
                         }));
                     let drag_title = display.clone();
+                    // Precomputed here (not inside `.context_menu`'s builder) since
+                    // every value derives from data already in scope for this tab —
+                    // no live `Workspace` read needed at menu-open time.
+                    let ws = cx.entity().downgrade();
+                    let abs_path = file_path.clone();
+                    let rel_path = file_path.as_ref().and_then(|p| {
+                        worktree_root.as_ref().and_then(|root| {
+                            p.strip_prefix(root)
+                                .ok()
+                                .map(|r| r.to_string_lossy().into_owned())
+                        })
+                    });
+                    let abs_str = abs_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+                    let is_file = abs_path.is_some();
+                    let is_last = i + 1 >= tab_count;
 
                     div()
                         .id(("tab", i))
@@ -671,217 +631,6 @@ impl Render for Workspace {
                                 this.request_close_tab(i, window, cx);
                             }),
                         )
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
-                                use crate::surface::strings as s;
-                                use crate::ui::ContextMenuItem as CItem;
-
-                                let tab_count = this.active_runtime().tabs.len();
-                                let ws = cx.entity().downgrade();
-                                let abs_path = file_path.clone();
-                                let rel_path = file_path.as_ref().and_then(|p| {
-                                    worktree_root.as_ref().and_then(|root| {
-                                        p.strip_prefix(root)
-                                            .ok()
-                                            .map(|r| r.to_string_lossy().into_owned())
-                                    })
-                                });
-                                let abs_str =
-                                    abs_path.as_ref().map(|p| p.to_string_lossy().into_owned());
-                                let is_file = abs_path.is_some();
-                                let is_last = i + 1 >= tab_count;
-
-                                let mut items: Vec<CItem> = vec![
-                                    ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_close_tab(),
-                                        false,
-                                        move |this, win, cx| {
-                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                ws.request_close_tab(i, win, cx);
-                                            });
-                                        },
-                                    ),
-                                    ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_close_other_tabs(),
-                                        tab_count <= 1,
-                                        move |this, win, cx| {
-                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                let indices: Vec<usize> =
-                                                    (0..ws.active_runtime().tabs.len())
-                                                        .rev()
-                                                        .filter(|&j| j != i)
-                                                        .collect();
-                                                ws.request_close_tabs_bulk(indices, win, cx);
-                                            });
-                                        },
-                                    ),
-                                    ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_close_tabs_to_right(),
-                                        is_last,
-                                        move |this, win, cx| {
-                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                let indices: Vec<usize> = (i + 1
-                                                    ..ws.active_runtime().tabs.len())
-                                                    .rev()
-                                                    .collect();
-                                                ws.request_close_tabs_bulk(indices, win, cx);
-                                            });
-                                        },
-                                    ),
-                                    CItem::separator(),
-                                    ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_move_tab_left(),
-                                        i == 0,
-                                        move |this, _win, cx| {
-                                            if i > 0 {
-                                                this.mutate_durable(cx, |ws, cx| {
-                                                    ws.move_tab(i, i - 1, cx);
-                                                });
-                                            }
-                                        },
-                                    ),
-                                    ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_move_tab_right(),
-                                        is_last,
-                                        move |this, _win, cx| {
-                                            if i + 1 < this.active_runtime().tabs.len() {
-                                                this.mutate_durable(cx, |ws, cx| {
-                                                    ws.move_tab(i, i + 1, cx);
-                                                });
-                                            }
-                                        },
-                                    ),
-                                ];
-
-                                // Split + New Tab — terminal tabs only.
-                                if !is_file {
-                                    items.extend([
-                                        CItem::separator(),
-                                        ws_menu_item(
-                                            ws.clone(),
-                                            s::ctx_split_terminal_horizontal(),
-                                            false,
-                                            move |this, win, cx| {
-                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.active_runtime().active_tab_index != i {
-                                                        ws.activate_tab(i, win, cx);
-                                                    }
-                                                    ws.split_focused_pane_kind(
-                                                        NewPaneKind::Terminal,
-                                                        SplitDirection::Horizontal,
-                                                        win,
-                                                        cx,
-                                                    );
-                                                });
-                                            },
-                                        ),
-                                        ws_menu_item(
-                                            ws.clone(),
-                                            s::ctx_split_terminal_vertical(),
-                                            false,
-                                            move |this, win, cx| {
-                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.active_runtime().active_tab_index != i {
-                                                        ws.activate_tab(i, win, cx);
-                                                    }
-                                                    ws.split_focused_pane_kind(
-                                                        NewPaneKind::Terminal,
-                                                        SplitDirection::Vertical,
-                                                        win,
-                                                        cx,
-                                                    );
-                                                });
-                                            },
-                                        ),
-                                        CItem::separator(),
-                                        ws_menu_item(
-                                            ws.clone(),
-                                            s::ctx_split_agent_chat_horizontal(),
-                                            false,
-                                            move |this, win, cx| {
-                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.active_runtime().active_tab_index != i {
-                                                        ws.activate_tab(i, win, cx);
-                                                    }
-                                                    ws.split_focused_pane_kind(
-                                                        NewPaneKind::AgentChat,
-                                                        SplitDirection::Horizontal,
-                                                        win,
-                                                        cx,
-                                                    );
-                                                });
-                                            },
-                                        ),
-                                        ws_menu_item(
-                                            ws.clone(),
-                                            s::ctx_split_agent_chat_vertical(),
-                                            false,
-                                            move |this, win, cx| {
-                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    if ws.active_runtime().active_tab_index != i {
-                                                        ws.activate_tab(i, win, cx);
-                                                    }
-                                                    ws.split_focused_pane_kind(
-                                                        NewPaneKind::AgentChat,
-                                                        SplitDirection::Vertical,
-                                                        win,
-                                                        cx,
-                                                    );
-                                                });
-                                            },
-                                        ),
-                                        CItem::separator(),
-                                        ws_menu_item(
-                                            ws.clone(),
-                                            crate::surface::strings::ctx_new_tab(),
-                                            false,
-                                            |this, win, cx| {
-                                                this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                    ws.add_tab(win, cx);
-                                                });
-                                            },
-                                        ),
-                                    ]);
-                                }
-
-                                // File-pane-specific items
-                                if is_file {
-                                    items.push(CItem::separator());
-                                    if let Some(abs) = abs_str {
-                                        items.push(ws_clipboard_item(
-                                            ws.clone(),
-                                            s::ctx_copy_file_path(),
-                                            abs,
-                                        ));
-                                    }
-                                    if let Some(rel) = rel_path {
-                                        items.push(ws_clipboard_item(
-                                            ws.clone(),
-                                            s::ctx_copy_relative_path(),
-                                            rel,
-                                        ));
-                                    }
-                                    items.push(ws_menu_item(
-                                        ws.clone(),
-                                        s::ctx_close_file_viewer(),
-                                        false,
-                                        move |this, win, cx| {
-                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                ws.request_close_tab(i, win, cx);
-                                            });
-                                        },
-                                    ));
-                                }
-
-                                this.open_context_menu(ev.position, items, cx);
-                            }),
-                        )
                         .on_drag(
                             TabDrag {
                                 tab_id,
@@ -901,6 +650,196 @@ impl Render for Workspace {
                         ))
                         .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
                             this.drop_tab_onto_bar(d.tab_id, window, cx);
+                        }))
+                        .context_menu(menu_builder(move |menu, _window, _cx| {
+                            use crate::surface::strings as s;
+
+                            let mut items: Vec<PopupMenuItem> = vec![
+                                ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_close_tab(),
+                                    false,
+                                    move |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            ws.request_close_tab(i, win, cx);
+                                        });
+                                    },
+                                ),
+                                ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_close_other_tabs(),
+                                    tab_count <= 1,
+                                    move |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            let indices: Vec<usize> =
+                                                (0..ws.active_runtime().tabs.len())
+                                                    .rev()
+                                                    .filter(|&j| j != i)
+                                                    .collect();
+                                            ws.request_close_tabs_bulk(indices, win, cx);
+                                        });
+                                    },
+                                ),
+                                ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_close_tabs_to_right(),
+                                    is_last,
+                                    move |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            let indices: Vec<usize> = (i + 1
+                                                ..ws.active_runtime().tabs.len())
+                                                .rev()
+                                                .collect();
+                                            ws.request_close_tabs_bulk(indices, win, cx);
+                                        });
+                                    },
+                                ),
+                                PopupMenuItem::separator(),
+                                ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_move_tab_left(),
+                                    i == 0,
+                                    move |this, _win, cx| {
+                                        if i > 0 {
+                                            this.mutate_durable(cx, |ws, cx| {
+                                                ws.move_tab(i, i - 1, cx);
+                                            });
+                                        }
+                                    },
+                                ),
+                                ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_move_tab_right(),
+                                    is_last,
+                                    move |this, _win, cx| {
+                                        if i + 1 < this.active_runtime().tabs.len() {
+                                            this.mutate_durable(cx, |ws, cx| {
+                                                ws.move_tab(i, i + 1, cx);
+                                            });
+                                        }
+                                    },
+                                ),
+                            ];
+
+                            // Split + New Tab — terminal tabs only.
+                            if !is_file {
+                                items.extend([
+                                    PopupMenuItem::separator(),
+                                    ws_popup_menu_item(
+                                        ws.clone(),
+                                        s::ctx_split_terminal_horizontal(),
+                                        false,
+                                        move |this, win, cx| {
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                if ws.active_runtime().active_tab_index != i {
+                                                    ws.activate_tab(i, win, cx);
+                                                }
+                                                ws.split_focused_pane_kind(
+                                                    NewPaneKind::Terminal,
+                                                    SplitDirection::Horizontal,
+                                                    win,
+                                                    cx,
+                                                );
+                                            });
+                                        },
+                                    ),
+                                    ws_popup_menu_item(
+                                        ws.clone(),
+                                        s::ctx_split_terminal_vertical(),
+                                        false,
+                                        move |this, win, cx| {
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                if ws.active_runtime().active_tab_index != i {
+                                                    ws.activate_tab(i, win, cx);
+                                                }
+                                                ws.split_focused_pane_kind(
+                                                    NewPaneKind::Terminal,
+                                                    SplitDirection::Vertical,
+                                                    win,
+                                                    cx,
+                                                );
+                                            });
+                                        },
+                                    ),
+                                    PopupMenuItem::separator(),
+                                    ws_popup_menu_item(
+                                        ws.clone(),
+                                        s::ctx_split_agent_chat_horizontal(),
+                                        false,
+                                        move |this, win, cx| {
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                if ws.active_runtime().active_tab_index != i {
+                                                    ws.activate_tab(i, win, cx);
+                                                }
+                                                ws.split_focused_pane_kind(
+                                                    NewPaneKind::AgentChat,
+                                                    SplitDirection::Horizontal,
+                                                    win,
+                                                    cx,
+                                                );
+                                            });
+                                        },
+                                    ),
+                                    ws_popup_menu_item(
+                                        ws.clone(),
+                                        s::ctx_split_agent_chat_vertical(),
+                                        false,
+                                        move |this, win, cx| {
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                if ws.active_runtime().active_tab_index != i {
+                                                    ws.activate_tab(i, win, cx);
+                                                }
+                                                ws.split_focused_pane_kind(
+                                                    NewPaneKind::AgentChat,
+                                                    SplitDirection::Vertical,
+                                                    win,
+                                                    cx,
+                                                );
+                                            });
+                                        },
+                                    ),
+                                    PopupMenuItem::separator(),
+                                    ws_popup_menu_item(
+                                        ws.clone(),
+                                        crate::surface::strings::ctx_new_tab(),
+                                        false,
+                                        |this, win, cx| {
+                                            this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                                ws.add_tab(win, cx);
+                                            });
+                                        },
+                                    ),
+                                ]);
+                            }
+
+                            // File-pane-specific items
+                            if is_file {
+                                items.push(PopupMenuItem::separator());
+                                if let Some(abs) = abs_str.clone() {
+                                    items.push(ws_popup_clipboard_item(
+                                        s::ctx_copy_file_path(),
+                                        abs,
+                                    ));
+                                }
+                                if let Some(rel) = rel_path.clone() {
+                                    items.push(ws_popup_clipboard_item(
+                                        s::ctx_copy_relative_path(),
+                                        rel,
+                                    ));
+                                }
+                                items.push(ws_popup_menu_item(
+                                    ws.clone(),
+                                    s::ctx_close_file_viewer(),
+                                    false,
+                                    move |this, win, cx| {
+                                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                                            ws.request_close_tab(i, win, cx);
+                                        });
+                                    },
+                                ));
+                            }
+
+                            items.into_iter().fold(menu, |m, item| m.item(item))
                         }))
                         .child({
                             div()
@@ -1495,47 +1434,26 @@ impl Render for Workspace {
                     cx.notify();
                 }),
             ))
-            // Context menu overlay — backdrop dismisses on click-outside;
-            // the ContextMenu widget itself stops propagation on item click.
-            // Each item's on_click is wrapped so the menu state is cleared
-            // before the user handler runs. Without this, a handler that
-            // opens a Dialog (e.g. discard / amend confirms) leaves the
-            // backdrop layered behind the Dialog and steals later clicks.
+            // Imperative PopupMenu deploy overlay. `PopupMenu` already
+            // dismisses itself on outside click / Escape / confirmed click
+            // (see `PopupMenuDeploy`'s dismiss subscription); the callback
+            // below just routes that back into `close_context_menu`.
             .when_some(
                 self.main_area
-                    .context_menu
+                    .popup_menu_deploy
                     .as_ref()
-                    .map(|m| (m.position, m.corner, wrap_items_with_close(&m.items, cx))),
-                |el, (position, corner, items)| {
-                    // Backdrop is `size_full()` mounted on the workspace
-                    // root, which fills the entire window. `position`
-                    // is window-local (`ClickEvent::position()`), so a
-                    // `BottomRight` anchor must convert against the
-                    // window viewport — not `last_viewport`, which
-                    // tracks only the pane area (window minus open
-                    // docks) and would offset the menu by the dock
-                    // sizes.
-                    let parent_size = window.viewport_size();
-                    el.child(
-                        backdrop()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.close_context_menu(cx);
-                                }),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(|this, _, _, cx| {
-                                    this.close_context_menu(cx);
-                                }),
-                            )
-                            .child(
-                                crate::ui::ContextMenu::new("workspace-ctx-menu", position)
-                                    .anchor(corner, parent_size)
-                                    .items(items),
-                            ),
-                    )
+                    .map(|d| (d.menu.clone(), d.position)),
+                |el, (menu, position)| {
+                    let weak = cx.entity().downgrade();
+                    el.child(crate::ui::popup_menu_deferred(
+                        &menu,
+                        position,
+                        move |_window, cx| {
+                            if let Some(ws) = weak.upgrade() {
+                                ws.update(cx, |ws, cx| ws.close_context_menu(cx));
+                            }
+                        },
+                    ))
                 },
             )
             // gpui_component overlay layers. The window root is

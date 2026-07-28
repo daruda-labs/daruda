@@ -32,7 +32,7 @@ use gpui::{
 
 use crate::shell_quote::{Shell, format_paths_for_drop, quote_path};
 use crate::surface::strings as s;
-use crate::ui::ContextMenuItem as CItem;
+use crate::ui::{ContextMenuExt as _, PopupMenuItem, menu_builder};
 use crate::workspace::path_drag::PathDrag;
 
 use self::file_view_pane::render::render_pane_file_viewer;
@@ -155,6 +155,16 @@ fn pane_header(
     let unfocused_text = t.text_muted;
     let cwd_text = t.text_muted;
 
+    // Precomputed here (not inside `.context_menu`'s builder) — derives only
+    // from `is_zoomed`, already a snapshot param, so no live Workspace read
+    // is needed at menu-open time.
+    let ws = cx.entity().downgrade();
+    let zoom_label = if is_zoomed {
+        s::ctx_unzoom_pane()
+    } else {
+        s::ctx_zoom_pane()
+    };
+
     div()
         .id(("pane-hdr", pane_id as usize))
         .flex()
@@ -181,99 +191,90 @@ fn pane_header(
         .when(!is_focused, |d| {
             d.bg(unfocused_bg).text_color(unfocused_text)
         })
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |this, ev: &MouseDownEvent, _window, cx| {
-                let ws = cx.entity().downgrade();
-                let zoom_label = if is_zoomed {
-                    s::ctx_unzoom_pane()
-                } else {
-                    s::ctx_zoom_pane()
-                };
-                let items: Vec<CItem> = vec![
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        s::ctx_split_terminal_horizontal(),
-                        false,
-                        |this, win, cx| {
-                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane_kind(
-                                    NewPaneKind::Terminal,
-                                    SplitDirection::Horizontal,
-                                    win,
-                                    cx,
-                                );
-                            });
-                        },
-                    ),
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        s::ctx_split_terminal_vertical(),
-                        false,
-                        |this, win, cx| {
-                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane_kind(
-                                    NewPaneKind::Terminal,
-                                    SplitDirection::Vertical,
-                                    win,
-                                    cx,
-                                );
-                            });
-                        },
-                    ),
-                    CItem::separator(),
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        s::ctx_split_agent_chat_horizontal(),
-                        false,
-                        |this, win, cx| {
-                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane_kind(
-                                    NewPaneKind::AgentChat,
-                                    SplitDirection::Horizontal,
-                                    win,
-                                    cx,
-                                );
-                            });
-                        },
-                    ),
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        s::ctx_split_agent_chat_vertical(),
-                        false,
-                        |this, win, cx| {
-                            this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                ws.split_focused_pane_kind(
-                                    NewPaneKind::AgentChat,
-                                    SplitDirection::Vertical,
-                                    win,
-                                    cx,
-                                );
-                            });
-                        },
-                    ),
-                    CItem::separator(),
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        zoom_label,
-                        false,
-                        move |this, _win, cx| {
-                            this.toggle_zoom_pane(pane_id, cx);
-                        },
-                    ),
-                    CItem::separator(),
-                    crate::workspace::render::ws_menu_item(
-                        ws.clone(),
-                        s::ctx_close_pane(),
-                        false,
-                        move |this, win, cx| {
-                            this.request_close_pane(pane_id, win, cx);
-                        },
-                    ),
-                ];
-                this.open_context_menu(ev.position, items, cx);
-            }),
-        )
+        .context_menu(menu_builder(move |menu, _window, _cx| {
+            let items: Vec<PopupMenuItem> = vec![
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    s::ctx_split_terminal_horizontal(),
+                    false,
+                    |this, win, cx| {
+                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                            ws.split_focused_pane_kind(
+                                NewPaneKind::Terminal,
+                                SplitDirection::Horizontal,
+                                win,
+                                cx,
+                            );
+                        });
+                    },
+                ),
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    s::ctx_split_terminal_vertical(),
+                    false,
+                    |this, win, cx| {
+                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                            ws.split_focused_pane_kind(
+                                NewPaneKind::Terminal,
+                                SplitDirection::Vertical,
+                                win,
+                                cx,
+                            );
+                        });
+                    },
+                ),
+                PopupMenuItem::separator(),
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    s::ctx_split_agent_chat_horizontal(),
+                    false,
+                    |this, win, cx| {
+                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                            ws.split_focused_pane_kind(
+                                NewPaneKind::AgentChat,
+                                SplitDirection::Horizontal,
+                                win,
+                                cx,
+                            );
+                        });
+                    },
+                ),
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    s::ctx_split_agent_chat_vertical(),
+                    false,
+                    |this, win, cx| {
+                        this.mutate_durable_in(win, cx, |ws, win, cx| {
+                            ws.split_focused_pane_kind(
+                                NewPaneKind::AgentChat,
+                                SplitDirection::Vertical,
+                                win,
+                                cx,
+                            );
+                        });
+                    },
+                ),
+                PopupMenuItem::separator(),
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    zoom_label.clone(),
+                    false,
+                    move |this, _win, cx| {
+                        this.toggle_zoom_pane(pane_id, cx);
+                    },
+                ),
+                PopupMenuItem::separator(),
+                crate::workspace::render::ws_popup_menu_item(
+                    ws.clone(),
+                    s::ctx_close_pane(),
+                    false,
+                    move |this, win, cx| {
+                        this.request_close_pane(pane_id, win, cx);
+                    },
+                ),
+            ];
+            items.into_iter().fold(menu, |m, item| m.item(item))
+        }))
         .child(
             div()
                 .flex_1()

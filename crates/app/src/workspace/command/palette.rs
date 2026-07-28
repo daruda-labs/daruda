@@ -490,9 +490,8 @@ impl CommandPaletteOverlay {
     }
 }
 
-/// Full-screen absolute overlay — click-to-dismiss hit target.
-/// Mirrors the `backdrop()` helper in `render/mod.rs`; duplicated
-/// here because that helper is private to the render submodule.
+/// Full-screen absolute overlay — click-to-dismiss hit target for the
+/// command palette.
 fn backdrop() -> gpui::Div {
     div().absolute().size_full().top_0().left_0()
 }

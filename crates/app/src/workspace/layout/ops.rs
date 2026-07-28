@@ -5,8 +5,9 @@
 //! lanes. Drag state (`DividerDrag`, `DockDrag`) lives here
 //! because it is exclusively read by these methods plus `render.rs`.
 
-use gpui::{Context, Pixels, Point, Window};
+use gpui::{Context, DismissEvent, Entity, Pixels, Point, Subscription, Window};
 
+use crate::ui::PopupMenu;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::{
     PaneId, SplitDirection, adjust_divider, find_divider, parent_axis_extent,
@@ -24,17 +25,14 @@ pub(in crate::workspace) struct DividerDrag {
     pub(in crate::workspace) start_left_ratio: f32,
 }
 
-/// Active right-click context menu. The `items` vec is produced at the
-/// call site (lane row, files row, …) so the anchor carries a
-/// ready-to-render item list. Cleared by `close_context_menu` or when a
-/// backdrop click is received.
-pub(in crate::workspace) struct ContextMenuAnchor {
+/// Active imperatively-opened PopupMenu (System B) — the terminal
+/// annotation menu and the bottom-dock macro-tab menu, both driven by
+/// an event handler rather than a declarative `.context_menu()`
+/// attachment (see `crate::ui::popup_menu_deferred`). `None` = closed.
+pub(in crate::workspace) struct PopupMenuDeploy {
+    pub(in crate::workspace) menu: Entity<PopupMenu>,
     pub(in crate::workspace) position: Point<Pixels>,
-    pub(in crate::workspace) items: Vec<crate::ui::ContextMenuItem>,
-    /// Which corner of the menu lands on `position`. `TopLeft` is the
-    /// right-click default; `BottomRight` is used by chips near a
-    /// container edge so the menu expands inward instead of clipping.
-    pub(in crate::workspace) corner: crate::ui::ContextMenuCorner,
+    _dismiss_sub: Subscription,
 }
 
 /// Drag state for a dock resize handle. `anchor_px` is the cursor
@@ -364,45 +362,34 @@ impl Workspace {
         self.set_bottom_dock_row_preset(desired, window, cx);
     }
 
-    // ---- Context menu ----
+    // ---- Context menu (System B — imperative PopupMenu deploy) ----
 
+    /// Open an imperatively-built `PopupMenu` at `position`. Used by call
+    /// sites that can't attach a declarative `.context_menu(...)` (the
+    /// terminal annotation menu's event bridge, the macro-tab right-click
+    /// blocked on `TabBar::children`'s concrete `Tab` type — see
+    /// `crate::ui::popup_menu_deferred`). The dismiss subscription routes
+    /// Escape / outside-click / confirmed-item-click back through
+    /// `close_context_menu` uniformly.
     pub(in crate::workspace) fn open_context_menu(
         &mut self,
         position: Point<Pixels>,
-        items: Vec<crate::ui::ContextMenuItem>,
+        menu: Entity<PopupMenu>,
         cx: &mut Context<Self>,
     ) {
-        self.open_context_menu_at_corner(
+        let _dismiss_sub = cx.subscribe(&menu, |this, _menu, _event: &DismissEvent, cx| {
+            this.close_context_menu(cx);
+        });
+        self.main_area.popup_menu_deploy = Some(PopupMenuDeploy {
+            menu,
             position,
-            items,
-            crate::ui::ContextMenuCorner::TopLeft,
-            cx,
-        );
-    }
-
-    /// Open the context menu with a custom anchor corner. Use this
-    /// when the click target sits near a container edge and the
-    /// default `TopLeft` would clip the menu — `BottomRight` flips the
-    /// expansion direction so the menu opens up-and-left from
-    /// `position` instead of down-and-right.
-    pub(in crate::workspace) fn open_context_menu_at_corner(
-        &mut self,
-        position: Point<Pixels>,
-        items: Vec<crate::ui::ContextMenuItem>,
-        corner: crate::ui::ContextMenuCorner,
-        cx: &mut Context<Self>,
-    ) {
-        self.main_area.context_menu = Some(ContextMenuAnchor {
-            position,
-            items,
-            corner,
+            _dismiss_sub,
         });
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_context_menu(&mut self, cx: &mut Context<Self>) {
-        if self.main_area.context_menu.is_some() {
-            self.main_area.context_menu = None;
+        if self.main_area.popup_menu_deploy.take().is_some() {
             cx.notify();
         }
     }
