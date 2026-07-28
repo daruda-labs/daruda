@@ -318,7 +318,7 @@ impl Workspace {
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
         self.resize_all_tabs(window, cx);
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Count of this workspace's currently-*loaded* panes (every lane
@@ -375,7 +375,7 @@ impl Workspace {
             .usage_by_account
             .remove(AccountSelection::Managed(account_id));
         if changed {
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |_, _| {});
             cx.notify();
         }
     }

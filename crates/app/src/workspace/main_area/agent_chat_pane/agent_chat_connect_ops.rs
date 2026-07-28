@@ -192,7 +192,7 @@ impl Workspace {
                 v.agent_id = id;
                 v.agent_name = name;
             });
-            self.mark_dirty_and_save(cx);
+            self.mutate_durable(cx, |_, _| {});
         }
         Some(
             self.agent_launch_for(&effective_id)
@@ -577,7 +577,7 @@ impl Workspace {
                                     || v.session_title != title_before
                                     || v.last_known_mode_id != mode_id_before
                                 {
-                                    ws.mark_dirty_and_save(cx);
+                                    ws.mutate_durable(cx, |_, _| {});
                                 }
                             }
                             // Refresh placeholder when the active mode changed or
@@ -757,7 +757,7 @@ impl Workspace {
             return; // no cwd → never had a session
         };
         view.update(cx, |v, cx| v.reset_for_new_session(cx));
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         self.notify_status_docks(cx);
         self.connect_agent_chat(pane_id, cwd, None, cx);
     }

@@ -462,7 +462,7 @@ impl Workspace {
         self.refresh_terminal_input_placeholder(cx);
         // Persist the new `last_known_mode_id` so a resume after restart
         // reapplies it (see that field's doc).
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
     }
 
     /// Change a select config option (model / effort / …). Shim for the
@@ -500,7 +500,7 @@ impl Workspace {
         self.refresh_terminal_input_placeholder(cx);
         // Persist the new `last_known_mode_id` so a resume after restart
         // reapplies it (see that field's doc).
-        self.mark_dirty_and_save(cx);
+        self.mutate_durable(cx, |_, _| {});
         true
     }
 
