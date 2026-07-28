@@ -197,7 +197,14 @@ pub(in crate::workspace) fn account_label(
 /// Mark for the trigger pill: only a pane pinned to one auth domain has a
 /// single agent to name. A pane that accepts any domain (or none) gets no
 /// icon rather than an arbitrary one.
-fn trigger_icon(domain: AccountDomain) -> Option<&'static str> {
+///
+/// Dropped below `Full`, where the pill's narrower cap can't hold both the mark
+/// and a full email address — the address is what identifies the account, and
+/// which domains exist is already legible from the usage pills beside it.
+fn trigger_icon(domain: AccountDomain, density: super::StatusBarDensity) -> Option<&'static str> {
+    if density.is_reduced() {
+        return None;
+    }
     match domain {
         AccountDomain::Exactly(recipe) => Some(crate::agent::icons::icon_for_recipe(recipe)),
         AccountDomain::Any | AccountDomain::Unsupported => None,
@@ -233,7 +240,7 @@ pub(super) fn render(
                 .items_center()
                 .min_w_0()
                 .gap(px(theme::STATUS_BAR_USAGE_CHIP_GAP))
-                .children(trigger_icon(slot.domain).map(|path| {
+                .children(trigger_icon(slot.domain, density).map(|path| {
                     crate::ui::agent_icon(
                         Some(path),
                         px(theme::STATUS_BAR_AGENT_ICON_SIZE),
@@ -379,6 +386,7 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::status_bar::StatusBarDensity;
     use daruda_store::accounts::AccountId;
     use std::path::PathBuf;
 
@@ -424,6 +432,26 @@ mod tests {
             Some("alice@x.com")
         );
         assert_eq!(account_label(None, None), None);
+    }
+
+    /// At `Full` the pill has room for the mark; below it the 150px cap has to
+    /// go to the email, which is what names the account. A regression here
+    /// clips the mark to a sliver instead of shortening the address.
+    #[test]
+    fn the_trigger_mark_is_dropped_below_full_density() {
+        let domain = AccountDomain::Exactly(AccountRecipeId::Claude);
+        assert!(trigger_icon(domain, StatusBarDensity::Full).is_some());
+        for density in [StatusBarDensity::Compact, StatusBarDensity::IconOnly] {
+            assert_eq!(trigger_icon(domain, density), None);
+        }
+    }
+
+    /// A pane that accepts any domain has no single agent to mark.
+    #[test]
+    fn a_multi_or_no_domain_pane_has_no_trigger_mark() {
+        for domain in [AccountDomain::Any, AccountDomain::Unsupported] {
+            assert_eq!(trigger_icon(domain, StatusBarDensity::Full), None);
+        }
     }
 
     #[test]
