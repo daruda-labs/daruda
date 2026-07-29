@@ -321,7 +321,10 @@ impl Workspace {
                     pane_id,
                     crate::workspace::main_area::pane_input_ops::PaneTextInput {
                         body: rendered,
-                        submit: true,
+                        intent:
+                            crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command {
+                                submit: true,
+                            },
                     },
                     window,
                     cx,

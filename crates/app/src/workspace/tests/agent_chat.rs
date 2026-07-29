@@ -1992,7 +1992,7 @@ async fn bottom_dock_snapshot_reflects_active_agent_queue(cx: &mut TestAppContex
 /// return `false`.
 #[gpui::test]
 async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+    use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
@@ -2017,7 +2017,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     chat_id,
                     PaneTextInput {
                         body: "  do the thing  ".to_string(),
-                        submit: true,
+                        intent: PaneTextIntent::Command { submit: true },
                     },
                     window,
                     cx,
@@ -2041,7 +2041,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     chat_id,
                     PaneTextInput {
                         body: "   \n  ".to_string(),
-                        submit: true,
+                        intent: PaneTextIntent::Command { submit: true },
                     },
                     window,
                     cx,
@@ -2067,7 +2067,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     bogus,
                     PaneTextInput {
                         body: "x".to_string(),
-                        submit: true,
+                        intent: PaneTextIntent::Command { submit: true },
                     },
                     window,
                     cx,
@@ -2088,7 +2088,7 @@ async fn deliver_text_to_pane_routes_by_kind(cx: &mut TestAppContext) {
                     te_id,
                     PaneTextInput {
                         body: "x".to_string(),
-                        submit: false,
+                        intent: PaneTextIntent::Command { submit: false },
                     },
                     window,
                     cx,
@@ -3556,7 +3556,7 @@ async fn clear_queue_while_editing_empties_composer(cx: &mut TestAppContext) {
 /// the "Editing…" strip row against an empty body.
 #[gpui::test]
 async fn whitespace_submit_while_editing_cancels_edit(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+    use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
@@ -3592,7 +3592,7 @@ async fn whitespace_submit_while_editing_cancels_edit(cx: &mut TestAppContext) {
                 pane_id,
                 PaneTextInput {
                     body: "   ".into(),
-                    submit: true,
+                    intent: PaneTextIntent::Command { submit: true },
                 },
                 window,
                 cx,

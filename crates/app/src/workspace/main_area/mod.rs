@@ -15,6 +15,7 @@ pub(in crate::workspace) mod nav;
 pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_drag_ops;
 pub(in crate::workspace) mod pane_input_ops;
+pub(in crate::workspace) mod pane_menu;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod prompt_watcher;
 pub(in crate::workspace) mod resize;
@@ -31,8 +32,7 @@ use gpui::{
 };
 
 use crate::shell_quote::{Shell, format_paths_for_drop, quote_path};
-use crate::surface::strings as s;
-use crate::ui::{ContextMenuExt as _, PopupMenuItem, menu_builder};
+use crate::ui::{ContextMenuExt as _, menu_builder};
 use crate::workspace::path_drag::PathDrag;
 
 use self::file_view_pane::render::render_pane_file_viewer;
@@ -40,7 +40,6 @@ use self::pane::Pane;
 use self::pane_drag_ops::{PaneHeaderDrag, PaneHeaderDragGhost};
 use self::pane_tree::{DIVIDER_PX, DropHalf, PaneId, PaneLayout, SplitDirection};
 use self::tab_drag_ops::TabDrag;
-use self::tab_ops::NewPaneKind;
 use super::Workspace;
 
 /// Flex child cell wrapping a pane or nested split in a Split layout.
@@ -139,7 +138,7 @@ fn pane_header(
     is_focused: bool,
     title: SharedString,
     cwd_basename: Option<SharedString>,
-    is_zoomed: bool,
+    _is_zoomed: bool,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let close = crate::ui::button_close(("pane-close", pane_id as usize), cx).on_click(
@@ -155,15 +154,7 @@ fn pane_header(
     let unfocused_text = t.text_muted;
     let cwd_text = t.text_muted;
 
-    // Precomputed here (not inside `.context_menu`'s builder) — derives only
-    // from `is_zoomed`, already a snapshot param, so no live Workspace read
-    // is needed at menu-open time.
     let ws = cx.entity().downgrade();
-    let zoom_label = if is_zoomed {
-        s::ctx_unzoom_pane()
-    } else {
-        s::ctx_zoom_pane()
-    };
 
     div()
         .id(("pane-hdr", pane_id as usize))
@@ -191,89 +182,8 @@ fn pane_header(
         .when(!is_focused, |d| {
             d.bg(unfocused_bg).text_color(unfocused_text)
         })
-        .context_menu(menu_builder(move |menu, _window, _cx| {
-            let items: Vec<PopupMenuItem> = vec![
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    s::ctx_split_terminal_horizontal(),
-                    false,
-                    |this, win, cx| {
-                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                            ws.split_focused_pane_kind(
-                                NewPaneKind::Terminal,
-                                SplitDirection::Horizontal,
-                                win,
-                                cx,
-                            );
-                        });
-                    },
-                ),
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    s::ctx_split_terminal_vertical(),
-                    false,
-                    |this, win, cx| {
-                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                            ws.split_focused_pane_kind(
-                                NewPaneKind::Terminal,
-                                SplitDirection::Vertical,
-                                win,
-                                cx,
-                            );
-                        });
-                    },
-                ),
-                PopupMenuItem::separator(),
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    s::ctx_split_agent_chat_horizontal(),
-                    false,
-                    |this, win, cx| {
-                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                            ws.split_focused_pane_kind(
-                                NewPaneKind::AgentChat,
-                                SplitDirection::Horizontal,
-                                win,
-                                cx,
-                            );
-                        });
-                    },
-                ),
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    s::ctx_split_agent_chat_vertical(),
-                    false,
-                    |this, win, cx| {
-                        this.mutate_durable_in(win, cx, |ws, win, cx| {
-                            ws.split_focused_pane_kind(
-                                NewPaneKind::AgentChat,
-                                SplitDirection::Vertical,
-                                win,
-                                cx,
-                            );
-                        });
-                    },
-                ),
-                PopupMenuItem::separator(),
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    zoom_label.clone(),
-                    false,
-                    move |this, _win, cx| {
-                        this.toggle_zoom_pane(pane_id, cx);
-                    },
-                ),
-                PopupMenuItem::separator(),
-                crate::workspace::render::ws_popup_menu_item(
-                    ws.clone(),
-                    s::ctx_close_pane(),
-                    false,
-                    move |this, win, cx| {
-                        this.request_close_pane(pane_id, win, cx);
-                    },
-                ),
-            ];
-            items.into_iter().fold(menu, |m, item| m.item(item))
+        .context_menu(menu_builder(move |menu, window, cx| {
+            self::pane_menu::pane_context_menu(menu, ws.clone(), pane_id, window, cx)
         }))
         .child(
             div()

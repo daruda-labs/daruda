@@ -27,7 +27,9 @@ mod viewport;
 pub(crate) mod viewport_lock;
 
 use super::TerminalSession;
-use gpui::{App, Context, FocusHandle, KeyBinding, Pixels, SharedString, Subscription, actions};
+use gpui::{
+    App, Context, FocusHandle, KeyBinding, Pixels, Point, SharedString, Subscription, actions,
+};
 use selection::{
     ByteSelection, CellAnchor, SelectionMode, Side, block_copy_text, pixel_to_cell_anchor,
     selection_mode_from_modifiers,
@@ -191,6 +193,12 @@ pub(super) struct HoveredUrl {
 pub(crate) use layout::font_hash;
 pub use search::SearchState;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalLink {
+    pub url: String,
+    pub openable: bool,
+}
+
 // ---------------------------------------------------------------------------
 // TerminalView — core implementation
 // ---------------------------------------------------------------------------
@@ -226,11 +234,104 @@ impl TerminalView {
         self.state.selection.is_some()
     }
 
+    /// Snapshot the current selection as text, sharing the exact extraction
+    /// path used by Copy. Flushes pending Hangul composition first so the
+    /// visible final syllable is included in the returned string.
+    pub fn selection_text(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        self.flush_hangul(cx);
+
+        let text = match self.state.selection {
+            Some(sel) if sel.is_block() => {
+                let rect = sel.block_rect()?;
+                block_copy_text(&rect, &self.session)
+            }
+            Some(sel) => {
+                let (start, end) = sel.normalized(&self.session)?;
+                if start == end {
+                    return None;
+                }
+                self.viewport_slice_screen(start, end)
+            }
+            None => return None,
+        };
+        if text.is_empty() { None } else { Some(text) }
+    }
+
     /// Copy the current selection to the clipboard — the entry point the
     /// app-crate context-menu Copy item calls (action dispatch isn't
     /// available there; this reuses the same logic as the `Copy` keybinding).
     pub fn copy_selection(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
         self.on_copy(&Copy, window, cx);
+    }
+
+    /// Insert literal user text through the same terminal path as Paste.
+    /// Bracketed paste is honored when the shell enabled it, so multi-line
+    /// payloads are inserted for review instead of being executed line by line.
+    pub fn paste_literal(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.paste_text(text, cx);
+    }
+
+    pub(super) fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        // Commit any in-flight Hangul composition before the paste hits the
+        // PTY, matching the keyboard Paste action.
+        self.flush_hangul(cx);
+
+        if self.state.search_overlay {
+            let sanitized: String = text.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
+            self.on_search_append(&sanitized, cx);
+            return;
+        }
+
+        if self.session.bracketed_paste_enabled() {
+            self.send_input_parts(
+                &[
+                    crate::ansi::PTY_BRACKETED_PASTE_START,
+                    text.as_bytes(),
+                    crate::ansi::PTY_BRACKETED_PASTE_END,
+                ],
+                cx,
+            );
+        } else {
+            self.send_input_parts(&[text.as_bytes()], cx);
+        }
+    }
+
+    /// Link under a window-space position. OSC 8 hyperlinks preserve their raw
+    /// address for Copy Link Address, but only http(s) links are openable.
+    pub fn link_at_window_position(
+        &self,
+        position: Point<Pixels>,
+        window: &mut gpui::Window,
+    ) -> Option<TerminalLink> {
+        let (col, row) = self.mouse_position_to_cell(position, window)?;
+        self.link_at_cell(col, row)
+    }
+
+    /// Openable URL under a window-space position. Kept as the simple public
+    /// counterpart to `annotation_at_window_position`.
+    pub fn url_at_window_position(
+        &self,
+        position: Point<Pixels>,
+        window: &mut gpui::Window,
+    ) -> Option<String> {
+        self.link_at_window_position(position, window)
+            .filter(|link| link.openable)
+            .map(|link| link.url)
+    }
+
+    pub(super) fn link_at_cell(&self, col: u16, row: u16) -> Option<TerminalLink> {
+        if let Some(url) = self.session.hyperlink_at(col, row) {
+            let openable = url::is_openable_url(&url);
+            return Some(TerminalLink { url, openable });
+        }
+
+        let row0 = row.saturating_sub(1);
+        let line = self.state.viewport_lines.get(row0 as usize)?;
+        let url = url::url_at_column_in_line(line, col)?;
+        Some(TerminalLink {
+            url,
+            openable: true,
+        })
     }
 
     /// Scroll `lines` rows up from the bottom into scrollback history, so

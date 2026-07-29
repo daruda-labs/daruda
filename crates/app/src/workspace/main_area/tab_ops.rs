@@ -166,16 +166,38 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_runtime().focused_pane_id == id {
+        if !self.set_menu_target_pane(id, window, cx) {
             return;
+        }
+        self.bump_activity(id);
+        self.focus_pane(id, window, cx);
+        cx.notify();
+    }
+
+    /// Move the **model** focus to `id` without touching keyboard focus.
+    /// Returns `false` when it was already focused (nothing changed).
+    ///
+    /// This is the part of [`Self::focus_pane_on_click`] a right-click needs:
+    /// `split_focused_pane_kind` / `toggle_zoom_pane` / `close_pane_by_id`
+    /// all act on `focused_pane_id`, so the menu target must own it. The rest
+    /// of the click path — `focus_pane`, which surfaces the bottom dock and
+    /// lazily connects an idle Agent chat session — is deliberately excluded:
+    /// opening a menu is not activating the pane, and the menu takes keyboard
+    /// focus anyway.
+    pub(in crate::workspace) fn set_menu_target_pane(
+        &mut self,
+        id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_runtime().focused_pane_id == id {
+            return false;
         }
         self.set_focused_pane(id, window, cx);
         if let Some(tab) = self.active_tab_mut() {
             tab.last_focused_pane = id;
         }
-        self.bump_activity(id);
-        self.focus_pane(id, window, cx);
-        cx.notify();
+        true
     }
 
     pub(in crate::workspace) fn add_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -519,6 +541,61 @@ impl Workspace {
     // `request_close_tabs_bulk`, whose dirty-prompt covers every dirty
     // TaskEdit pane in the closing set. Never loop over `close_tab_at`
     // directly for a multi-tab close — that silently drops unsaved edits.
+
+    pub(in crate::workspace) fn close_other_tabs(
+        &mut self,
+        tab_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let indices: Vec<usize> = (0..self.active_runtime().tabs.len())
+            .rev()
+            .filter(|&index| index != tab_index)
+            .collect();
+        self.request_close_tabs_bulk(indices, window, cx);
+    }
+
+    pub(in crate::workspace) fn close_tabs_to_right(
+        &mut self,
+        tab_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let indices: Vec<usize> = (tab_index + 1..self.active_runtime().tabs.len())
+            .rev()
+            .collect();
+        self.request_close_tabs_bulk(indices, window, cx);
+    }
+
+    pub(in crate::workspace) fn move_tab_left(&mut self, tab_index: usize, cx: &mut Context<Self>) {
+        if tab_index > 0 {
+            self.move_tab(tab_index, tab_index - 1, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn move_tab_right(
+        &mut self,
+        tab_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if tab_index + 1 < self.active_runtime().tabs.len() {
+            self.move_tab(tab_index, tab_index + 1, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn split_from_tab(
+        &mut self,
+        tab_index: usize,
+        kind: NewPaneKind,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_runtime().active_tab_index != tab_index {
+            self.activate_tab(tab_index, window, cx);
+        }
+        self.split_focused_pane_kind(kind, direction, window, cx);
+    }
 
     /// Toggle the zoom state for `pane_id`. When zoomed, only that pane is
     /// rendered (full-size); the rest of the split tree is hidden.

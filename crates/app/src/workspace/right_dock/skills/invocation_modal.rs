@@ -26,7 +26,7 @@ use crate::ui::WindowExt as _;
 use crate::ui::{InputEvent, InputState, button, button_primary, input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 
 /// Plain-data carrier used to populate the invocation modal. Built by
 /// `Workspace::open_skill_invocation_modal` from a `Skill`; the modal
@@ -148,7 +148,10 @@ impl SkillInvocationModal {
             }
             ws.deliver_text_to_pane(
                 target_pane,
-                PaneTextInput { body, submit: true },
+                PaneTextInput {
+                    body,
+                    intent: PaneTextIntent::Command { submit: true },
+                },
                 window,
                 cx,
             )

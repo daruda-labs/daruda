@@ -671,12 +671,7 @@ impl Render for Workspace {
                                     tab_count <= 1,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                            let indices: Vec<usize> =
-                                                (0..ws.active_runtime().tabs.len())
-                                                    .rev()
-                                                    .filter(|&j| j != i)
-                                                    .collect();
-                                            ws.request_close_tabs_bulk(indices, win, cx);
+                                            ws.close_other_tabs(i, win, cx);
                                         });
                                     },
                                 ),
@@ -686,11 +681,7 @@ impl Render for Workspace {
                                     is_last,
                                     move |this, win, cx| {
                                         this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                            let indices: Vec<usize> = (i + 1
-                                                ..ws.active_runtime().tabs.len())
-                                                .rev()
-                                                .collect();
-                                            ws.request_close_tabs_bulk(indices, win, cx);
+                                            ws.close_tabs_to_right(i, win, cx);
                                         });
                                     },
                                 ),
@@ -700,11 +691,7 @@ impl Render for Workspace {
                                     s::ctx_move_tab_left(),
                                     i == 0,
                                     move |this, _win, cx| {
-                                        if i > 0 {
-                                            this.mutate_durable(cx, |ws, cx| {
-                                                ws.move_tab(i, i - 1, cx);
-                                            });
-                                        }
+                                        this.mutate_durable(cx, |ws, cx| ws.move_tab_left(i, cx));
                                     },
                                 ),
                                 ws_popup_menu_item(
@@ -712,11 +699,7 @@ impl Render for Workspace {
                                     s::ctx_move_tab_right(),
                                     is_last,
                                     move |this, _win, cx| {
-                                        if i + 1 < this.active_runtime().tabs.len() {
-                                            this.mutate_durable(cx, |ws, cx| {
-                                                ws.move_tab(i, i + 1, cx);
-                                            });
-                                        }
+                                        this.mutate_durable(cx, |ws, cx| ws.move_tab_right(i, cx));
                                     },
                                 ),
                             ];
@@ -731,10 +714,8 @@ impl Render for Workspace {
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                if ws.active_runtime().active_tab_index != i {
-                                                    ws.activate_tab(i, win, cx);
-                                                }
-                                                ws.split_focused_pane_kind(
+                                                ws.split_from_tab(
+                                                    i,
                                                     NewPaneKind::Terminal,
                                                     SplitDirection::Horizontal,
                                                     win,
@@ -749,10 +730,8 @@ impl Render for Workspace {
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                if ws.active_runtime().active_tab_index != i {
-                                                    ws.activate_tab(i, win, cx);
-                                                }
-                                                ws.split_focused_pane_kind(
+                                                ws.split_from_tab(
+                                                    i,
                                                     NewPaneKind::Terminal,
                                                     SplitDirection::Vertical,
                                                     win,
@@ -768,10 +747,8 @@ impl Render for Workspace {
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                if ws.active_runtime().active_tab_index != i {
-                                                    ws.activate_tab(i, win, cx);
-                                                }
-                                                ws.split_focused_pane_kind(
+                                                ws.split_from_tab(
+                                                    i,
                                                     NewPaneKind::AgentChat,
                                                     SplitDirection::Horizontal,
                                                     win,
@@ -786,10 +763,8 @@ impl Render for Workspace {
                                         false,
                                         move |this, win, cx| {
                                             this.mutate_durable_in(win, cx, |ws, win, cx| {
-                                                if ws.active_runtime().active_tab_index != i {
-                                                    ws.activate_tab(i, win, cx);
-                                                }
-                                                ws.split_focused_pane_kind(
+                                                ws.split_from_tab(
+                                                    i,
                                                     NewPaneKind::AgentChat,
                                                     SplitDirection::Vertical,
                                                     win,

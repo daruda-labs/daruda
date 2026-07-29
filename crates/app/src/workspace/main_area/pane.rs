@@ -793,8 +793,8 @@ fn handle_view_event(
         TerminalViewEvent::AnnotationDoubleClicked { id } => {
             workspace.open_annotation_dialog_for_edit(pane_id, *id, window, cx);
         }
-        TerminalViewEvent::ContextMenuRequested { position, range } => {
-            workspace.open_annotation_context_menu(pane_id, *position, *range, window, cx);
+        TerminalViewEvent::ContextMenuRequested { position, range: _ } => {
+            workspace.open_pane_context_menu_at(pane_id, *position, window, cx);
         }
     }
 }

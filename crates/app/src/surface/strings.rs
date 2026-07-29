@@ -148,6 +148,12 @@ pub fn menu_clear_buffer() -> String {
 pub fn menu_clear_scrollback() -> String {
     rust_i18n::t!("menu.clear_scrollback").into_owned()
 }
+pub fn menu_copy_last_command_output() -> String {
+    rust_i18n::t!("menu.copy_last_command_output").into_owned()
+}
+pub fn menu_scroll_to_bottom() -> String {
+    rust_i18n::t!("menu.scroll_to_bottom").into_owned()
+}
 
 // ============================================================================
 // View menu (additions)
@@ -3029,6 +3035,48 @@ pub fn ctx_zoom_pane() -> String {
 }
 pub fn ctx_unzoom_pane() -> String {
     rust_i18n::t!("ctx.unzoom_pane").into_owned()
+}
+pub fn ctx_open_link() -> String {
+    rust_i18n::t!("ctx.open_link").into_owned()
+}
+pub fn ctx_copy_link_address() -> String {
+    rust_i18n::t!("ctx.copy_link_address").into_owned()
+}
+pub fn ctx_send_selection_to_agent_chat() -> String {
+    rust_i18n::t!("ctx.send_selection_to_agent_chat").into_owned()
+}
+pub fn ctx_send_selection_to_terminal() -> String {
+    rust_i18n::t!("ctx.send_selection_to_terminal").into_owned()
+}
+pub fn ctx_stop() -> String {
+    rust_i18n::t!("common.btn_stop").into_owned()
+}
+pub fn ctx_selection_too_large() -> String {
+    rust_i18n::t!("ctx.selection_too_large").into_owned()
+}
+/// Fallback label for a send target whose pane can no longer be resolved.
+pub fn ctx_send_target_pane_fallback(id: impl std::fmt::Display) -> String {
+    rust_i18n::t!("ctx.send_target_pane_fallback", id = id.to_string()).into_owned()
+}
+/// Fallback label for a send target's tab when it has no user label and no
+/// resolvable focused pane to borrow a name from.
+pub fn ctx_send_target_tab_fallback(number: usize) -> String {
+    rust_i18n::t!("ctx.send_target_tab_fallback", number = number.to_string()).into_owned()
+}
+pub fn ctx_lane_inaccessible() -> String {
+    rust_i18n::t!("ctx.lane_inaccessible").into_owned()
+}
+pub fn ctx_open_link_failed_title() -> String {
+    rust_i18n::t!("ctx.open_link_failed_title").into_owned()
+}
+pub fn ctx_open_link_failed_message() -> String {
+    rust_i18n::t!("ctx.open_link_failed_message").into_owned()
+}
+pub fn ctx_send_selection_failed_title() -> String {
+    rust_i18n::t!("ctx.send_selection_failed_title").into_owned()
+}
+pub fn ctx_send_selection_failed_message() -> String {
+    rust_i18n::t!("ctx.send_selection_failed_message").into_owned()
 }
 
 // ============================================================================

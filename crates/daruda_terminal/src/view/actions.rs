@@ -16,70 +16,13 @@ impl TerminalView {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-
-        // Commit any in-flight Hangul composition before the paste
-        // hits the PTY — otherwise the pasted bytes interleave ahead
-        // of the pending syllable, garbling the input order.
-        self.flush_hangul(cx);
-
-        if self.state.search_overlay {
-            // While the search overlay is up, paste feeds the query
-            // input rather than the PTY. Strip embedded newlines —
-            // they'd break the single-line query model.
-            let sanitized: String = text.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
-            self.on_search_append(&sanitized, cx);
-            return;
-        }
-
-        if self.session.bracketed_paste_enabled() {
-            self.send_input_parts(
-                &[
-                    crate::ansi::PTY_BRACKETED_PASTE_START,
-                    text.as_bytes(),
-                    crate::ansi::PTY_BRACKETED_PASTE_END,
-                ],
-                cx,
-            );
-        } else {
-            self.send_input_parts(&[text.as_bytes()], cx);
-        }
+        self.paste_text(&text, cx);
     }
 
     pub(super) fn on_copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
-        // Commit pending Hangul so the user's last visible syllable
-        // is in the grid before we slice viewport_lines for the
-        // selection. Without this the composed glyph (drawn as an
-        // overlay only) is silently absent from the clipboard.
-        self.flush_hangul(cx);
-
-        let text = match self.state.selection {
-            // Block mode: rectangular slice, rows joined by `\n`.
-            // iTerm2 and Alacritty both copy each block row as its
-            // own line so pasting reconstructs the rectangle.
-            Some(sel) if sel.is_block() => {
-                let Some(rect) = sel.block_rect() else {
-                    return;
-                };
-                super::block_copy_text(&rect, &self.session)
-            }
-            // Linear mode: screen-position slice, survives scroll and
-            // viewport repaints because ScreenPos is absolute. If
-            // either endpoint has been evicted from LineBuffer the
-            // selection has no live projection — skip the copy.
-            Some(sel) => {
-                let Some((start, end)) = sel.normalized(&self.session) else {
-                    return;
-                };
-                if start == end {
-                    return;
-                }
-                self.viewport_slice_screen(start, end)
-            }
-            None => return,
-        };
-        if text.is_empty() {
+        let Some(text) = self.selection_text(cx) else {
             return;
-        }
+        };
 
         let item = ClipboardItem::new_string(text);
         cx.write_to_clipboard(item.clone());

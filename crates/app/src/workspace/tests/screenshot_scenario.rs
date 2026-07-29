@@ -60,6 +60,23 @@ async fn drive_toast_pushes_a_toast(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn drive_pane_context_menu_deploys_the_menu(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        drive(ScreenshotScenario::PaneContextMenu, &workspace, window, cx);
+    })
+    .unwrap();
+
+    workspace.read_with(cx, |ws, _| {
+        assert!(
+            ws.main_area.popup_menu_deploy.is_some(),
+            "pane-context-menu scenario should deploy the pane menu",
+        );
+    });
+}
+
+#[gpui::test]
 async fn drive_settings_opens_settings_window(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
 

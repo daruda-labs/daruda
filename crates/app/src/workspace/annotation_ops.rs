@@ -6,10 +6,9 @@
 //! as an Info report — a self-resolved race, not a loud error.
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{Context, Pixels, Point};
+use gpui::Context;
 
 use crate::surface::strings as s;
-use crate::ui::{PopupMenu, PopupMenuItem};
 use crate::workspace::Workspace;
 use crate::workspace::annotation_dialog::{AnnotationDialog, AnnotationDialogTarget};
 use crate::workspace::main_area::pane::PaneContent;
@@ -70,9 +69,8 @@ impl Workspace {
         }
     }
 
-    /// Delete an annotation. Wired to the context-menu "Delete annotation"
-    /// entry that opens when the user Shift+Right-clicks on an existing
-    /// mark (see [`Self::open_annotation_context_menu`]).
+    /// Delete an annotation. Wired to the unified pane context-menu
+    /// "Delete annotation" entry when the click lands on an existing mark.
     pub(in crate::workspace) fn remove_annotation(
         &mut self,
         pane_id: PaneId,
@@ -93,111 +91,6 @@ impl Workspace {
         if let Err(err) = outcome {
             self.report_annotation_error("remove_annotation", err, cx);
         }
-    }
-
-    /// Copy the pane's terminal selection to the clipboard. Wired to the
-    /// context-menu "Copy" entry (see [`Self::open_annotation_context_menu`]).
-    pub(in crate::workspace) fn copy_pane_selection(
-        &mut self,
-        pane_id: PaneId,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(view) = self.terminal_view_for_pane(pane_id) else {
-            self.report_pane_missing("copy_pane_selection", pane_id, cx);
-            return;
-        };
-        view.update(cx, |view, cx| view.copy_selection(window, cx));
-    }
-
-    /// Open the right-click annotation context menu (Shift+Right-click, or
-    /// a plain right-click when mouse reporting is off — see
-    /// `TerminalView::on_mouse_down`). Leads with "Copy" (enabled only with
-    /// an active selection — the most common single-click action), then a
-    /// separator, then "Add annotation" (enabled only for a single-line
-    /// selection, else disabled with a tooltip), then "Delete annotation"
-    /// when the click landed on an existing mark.
-    pub(in crate::workspace) fn open_annotation_context_menu(
-        &mut self,
-        pane_id: PaneId,
-        position: Point<Pixels>,
-        range: Option<LineRange>,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
-        let weak_ws = cx.entity().downgrade();
-
-        let has_selection = self
-            .terminal_view_for_pane(pane_id)
-            .map(|view| view.read(cx).has_selection())
-            .unwrap_or(false);
-        // No tooltip on the disabled state — unlike "Add annotation", an
-        // unavailable Copy with no selection is self-explanatory, matching
-        // every other Copy menu item in this app (`ws_popup_clipboard_item`,
-        // agent-chat's selection Copy item), neither of which annotates a
-        // disabled Copy with a reason.
-        let copy_item = if has_selection {
-            let captured = pane_id;
-            let weak = weak_ws.clone();
-            PopupMenuItem::new(s::menu_copy()).on_click(move |_, window, app_cx| {
-                if let Some(ws) = weak.upgrade() {
-                    ws.update(app_cx, |ws, cx| {
-                        ws.copy_pane_selection(captured, window, cx);
-                    });
-                }
-            })
-        } else {
-            PopupMenuItem::new(s::menu_copy()).disabled(true)
-        };
-
-        // Add entry — enabled iff the user has a single-line selection.
-        let add_item = if let Some(line_range) = range {
-            let captured = pane_id;
-            let weak = weak_ws.clone();
-            PopupMenuItem::new(s::terminal_annotation_action_add()).on_click(
-                move |_, window, app_cx| {
-                    if let Some(ws) = weak.upgrade() {
-                        ws.update(app_cx, |ws, cx| {
-                            ws.open_annotation_dialog_for_create(captured, line_range, window, cx);
-                        });
-                    }
-                },
-            )
-        } else {
-            PopupMenuItem::new(s::terminal_annotation_action_add())
-                .disabled(true)
-                .tooltip(s::terminal_annotation_action_add_disabled_tooltip())
-        };
-
-        let mut items = vec![copy_item, PopupMenuItem::separator(), add_item];
-
-        // Delete entry — only when the click landed on an existing mark.
-        if let Some(mark_id) = self.terminal_view_for_pane(pane_id).and_then(|view| {
-            view.read(cx)
-                .annotation_at_window_position(position, window)
-        }) {
-            let captured = pane_id;
-            let weak = weak_ws;
-            let delete_item = PopupMenuItem::new(s::terminal_annotation_action_delete()).on_click(
-                move |_, _, app_cx| {
-                    if let Some(ws) = weak.upgrade() {
-                        ws.update(app_cx, |ws, cx| {
-                            ws.remove_annotation(captured, mark_id, cx);
-                        });
-                    }
-                },
-            );
-            items.push(delete_item);
-        }
-
-        // Bypasses `crate::ui::menu_builder` (declarative-path only) — apply
-        // the same compact-size convention manually since this menu is built
-        // imperatively via `PopupMenu::build`.
-        let menu = PopupMenu::build(window, cx, move |menu, _window, _cx| {
-            items.into_iter().fold(menu.small(), |m, item| m.item(item))
-        });
-
-        self.open_context_menu(position, menu, cx);
     }
 
     /// Pull up the [`AnnotationDialog`] in **create** mode, pre-filled
@@ -254,7 +147,7 @@ impl Workspace {
 
     /// Find the [`Entity<TerminalView>`] backing the given pane id.
     /// Returns `None` for non-terminal panes or unknown ids.
-    fn terminal_view_for_pane(
+    pub(in crate::workspace) fn terminal_view_for_pane(
         &self,
         pane_id: PaneId,
     ) -> Option<gpui::Entity<daruda_terminal::view::TerminalView>> {

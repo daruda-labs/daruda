@@ -8,24 +8,27 @@
 //! the pure [`to_terminal_bytes`] helper, agent submit in the existing
 //! `send_agent_prompt_text` shim. The funnel only matches and delegates.
 
-use gpui::{Context, Window};
+use gpui::{Context, SharedString, Window};
 
 use super::pane::PaneContent;
 use super::pane_tree::PaneId;
 use crate::workspace::Workspace;
 
+/// Why text is being delivered. Terminals and AgentChat panes interpret the
+/// same intent according to their own input model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum PaneTextIntent {
+    /// This text is a command. `submit` means "press Enter after it".
+    Command { submit: bool },
+    /// This text is literal user content. Terminal delivery uses the paste path
+    /// so bracketed paste can prevent accidental multi-line execution.
+    Literal,
+}
+
 /// A request to deliver text to a pane.
-///
-/// Invariant driven by `submit`:
-/// - `submit = false` — "place the text where the user would type it, but
-///   don't execute it". Terminal: type the characters as-is. AgentChat:
-///   insert into the shared bottom-dock input at the cursor (preserving any
-///   existing draft) without running a turn.
-/// - `submit = true` — "execute". Terminal: append a trailing CR so the
-///   shell runs the line. AgentChat: send the text as an ACP turn.
 pub(in crate::workspace) struct PaneTextInput {
     pub body: String,
-    pub submit: bool,
+    pub intent: PaneTextIntent,
 }
 
 /// Convert a [`PaneTextInput`] into the raw bytes a terminal PTY expects.
@@ -36,13 +39,15 @@ pub(in crate::workspace) struct PaneTextInput {
 /// with exactly one trailing `\r` so the shell runs the final line as if
 /// Enter was pressed; a body that already ends in `\r` is left alone so we
 /// never send a double Enter.
-fn to_terminal_bytes(input: &PaneTextInput) -> Vec<u8> {
-    let mut payload: String = input
-        .body
+/// Takes the body and `submit` rather than the whole [`PaneTextInput`] so a
+/// [`PaneTextIntent::Literal`] payload cannot reach this newline-rewriting
+/// path even by mistake — `Literal` goes through the paste route instead.
+fn to_terminal_bytes(body: &str, submit: bool) -> Vec<u8> {
+    let mut payload: String = body
         .chars()
         .map(|c| if c == '\n' { '\r' } else { c })
         .collect();
-    if input.submit && !payload.ends_with('\r') {
+    if submit && !payload.ends_with('\r') {
         payload.push('\r');
     }
     payload.into_bytes()
@@ -73,14 +78,21 @@ impl Workspace {
                 };
                 // `view` is now owned, so the immutable `pane` borrow can end
                 // before the `&mut self` calls below.
-                let bytes = to_terminal_bytes(&input);
-                view.update(cx, |v, _| v.send_input(&bytes));
+                match input.intent {
+                    PaneTextIntent::Command { submit } => {
+                        let bytes = to_terminal_bytes(&input.body, submit);
+                        view.update(cx, |v, _| v.send_input(&bytes));
+                    }
+                    PaneTextIntent::Literal => {
+                        view.update(cx, |v, cx| v.paste_literal(&input.body, cx));
+                    }
+                }
                 self.bump_activity(pane_id);
                 cx.notify();
                 true
             }
             PaneContent::AgentChat(_) => {
-                if input.submit {
+                if matches!(input.intent, PaneTextIntent::Command { submit: true }) {
                     // Trim at the single dispatch point: an empty / whitespace-
                     // only submit (e.g. an "Enter-only" macro — empty `send` +
                     // `auto_enter`) must NOT fire a blank ACP turn on the focused
@@ -132,6 +144,40 @@ impl Workspace {
         self.deliver_text_to_pane(id, input, window, cx)
     }
 
+    /// Send a captured selection to a target pane as literal text. The target
+    /// tab and pane are focused before delivery so AgentChat's shared composer
+    /// and Terminal bracketed paste both receive the text at the visible target.
+    pub(in crate::workspace) fn send_pane_selection_to(
+        &mut self,
+        to: PaneId,
+        text: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab_index) = self
+            .active_runtime()
+            .tabs
+            .iter()
+            .position(|tab| tab.layout.pane_ids().contains(&to))
+        else {
+            return false;
+        };
+
+        if self.active_runtime().active_tab_index != tab_index {
+            self.activate_tab(tab_index, window, cx);
+        }
+        self.focus_pane_on_click(to, window, cx);
+        self.deliver_text_to_pane(
+            to,
+            PaneTextInput {
+                body: text.to_string(),
+                intent: PaneTextIntent::Literal,
+            },
+            window,
+            cx,
+        )
+    }
+
     /// Insert `text` into the shared bottom-dock input at the cursor without
     /// submitting. The AgentChat non-submit delivery path routes here: a
     /// macro with `auto_enter = false` places its text where the user types,
@@ -157,46 +203,26 @@ mod tests {
 
     #[test]
     fn submit_appends_single_cr() {
-        let bytes = to_terminal_bytes(&PaneTextInput {
-            body: "claude".to_string(),
-            submit: true,
-        });
-        assert_eq!(bytes, b"claude\r");
+        assert_eq!(to_terminal_bytes("claude", true), b"claude\r");
     }
 
     #[test]
     fn submit_does_not_double_trailing_cr() {
-        let bytes = to_terminal_bytes(&PaneTextInput {
-            body: "claude\r".to_string(),
-            submit: true,
-        });
-        assert_eq!(bytes, b"claude\r");
+        assert_eq!(to_terminal_bytes("claude\r", true), b"claude\r");
     }
 
     #[test]
     fn no_submit_sends_body_verbatim() {
-        let bytes = to_terminal_bytes(&PaneTextInput {
-            body: "git checkout ".to_string(),
-            submit: false,
-        });
-        assert_eq!(bytes, b"git checkout ");
+        assert_eq!(to_terminal_bytes("git checkout ", false), b"git checkout ");
     }
 
     #[test]
     fn interior_newline_becomes_cr() {
-        let bytes = to_terminal_bytes(&PaneTextInput {
-            body: "a\nb".to_string(),
-            submit: false,
-        });
-        assert_eq!(bytes, b"a\rb");
+        assert_eq!(to_terminal_bytes("a\nb", false), b"a\rb");
     }
 
     #[test]
     fn submit_with_interior_newline_normalizes_and_appends_cr() {
-        let bytes = to_terminal_bytes(&PaneTextInput {
-            body: "line1\nline2".to_string(),
-            submit: true,
-        });
-        assert_eq!(bytes, b"line1\rline2\r");
+        assert_eq!(to_terminal_bytes("line1\nline2", true), b"line1\rline2\r");
     }
 }

@@ -16,7 +16,7 @@ use daruda_store::panels::{
 use gpui::{App, Context, KeyBinding, Keystroke, SharedString, Window};
 
 use crate::workspace::main_area::agent_chat_pane::view::PromptId;
-use crate::workspace::main_area::pane_input_ops::PaneTextInput;
+use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{RunMacroByShortcut, Workspace};
 
@@ -538,7 +538,7 @@ impl Workspace {
         self.deliver_text_to_focused_pane(
             PaneTextInput {
                 body: trimmed.to_string(),
-                submit: true,
+                intent: PaneTextIntent::Command { submit: true },
             },
             window,
             cx,
@@ -707,7 +707,9 @@ impl Workspace {
                 self.deliver_text_to_focused_pane(
                     PaneTextInput {
                         body: btn.send.clone(),
-                        submit: btn.auto_enter,
+                        intent: PaneTextIntent::Command {
+                            submit: btn.auto_enter,
+                        },
                     },
                     window,
                     cx,

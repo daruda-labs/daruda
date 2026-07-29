@@ -8,7 +8,7 @@
 //! `crate::screenshot`; this module owns the scenario enum, its CLI-name
 //! mapping, and the workspace-driving dispatch ([`drive`]).
 
-use gpui::{App, Entity, Window};
+use gpui::{App, Entity, Point, Window, px};
 
 use super::{ToggleCommandPalette, Workspace, dialog_helpers};
 use daruda_config::BuiltinSection;
@@ -23,6 +23,14 @@ const NAME_TOAST: &str = "toast";
 /// CLI token for the Settings-window scenario. Bare opens the default section;
 /// `settings:<slug>` opens a specific section (e.g. `settings:font`).
 const NAME_SETTINGS: &str = "settings";
+/// CLI token for the pane context-menu scenario.
+const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
+
+/// Where the pane menu is deployed for the capture, in window coordinates.
+/// Near the top-left of the content area so the menu opens downward at its
+/// natural length — the shot is meant to show every entry, not the edge flip.
+const PANE_MENU_ANCHOR_X: f32 = 320.;
+const PANE_MENU_ANCHOR_Y: f32 = 160.;
 
 /// A transient UI state to drive into view before a `--screenshot` capture.
 /// One scenario per capture — these overlays are mutually exclusive on screen.
@@ -36,6 +44,10 @@ pub(crate) enum ScreenshotScenario {
     Toast,
     /// Open the Settings window at the given section.
     Settings(BuiltinSection),
+    /// Deploy the focused pane's right-click menu. The only way to eyeball
+    /// menu length, edge-flip and the keybinding column — none of which any
+    /// unit test can see.
+    PaneContextMenu,
 }
 
 impl ScreenshotScenario {
@@ -48,6 +60,7 @@ impl ScreenshotScenario {
             NAME_ERROR_MODAL => Some(Self::ErrorModal),
             NAME_TOAST => Some(Self::Toast),
             NAME_SETTINGS => Some(Self::Settings(BuiltinSection::default())),
+            NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             _ => name
                 .strip_prefix(concat!("settings", ":"))
                 .and_then(BuiltinSection::from_slug)
@@ -78,6 +91,13 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::Settings(section) => {
             crate::windows::open_settings_window(section, window, cx);
+        }
+        ScreenshotScenario::PaneContextMenu => {
+            workspace.update(cx, |ws, cx| {
+                let pane_id = ws.active_runtime().focused_pane_id;
+                let anchor = Point::new(px(PANE_MENU_ANCHOR_X), px(PANE_MENU_ANCHOR_Y));
+                ws.open_pane_context_menu_at(pane_id, anchor, window, cx);
+            });
         }
     }
 }

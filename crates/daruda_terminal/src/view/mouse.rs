@@ -5,7 +5,6 @@ use gpui::{
 
 use super::selection::ScreenPos;
 use super::state::MouseDragState;
-use super::url::url_at_column_in_line;
 use super::{ByteSelection, TerminalView};
 use gpui::ClipboardItem;
 
@@ -202,20 +201,11 @@ impl TerminalView {
 
         if event.button == MouseButton::Left && event.modifiers.platform {
             if let Some((col, row)) = self.mouse_position_to_cell(event.position, window) {
-                if let Some(link) = self.session.hyperlink_at(col, row) {
-                    cx.open_url(&link);
-                    cx.write_to_clipboard(ClipboardItem::new_string(link));
-                    return;
-                }
-
-                if let Some(line) = self
-                    .state
-                    .viewport_lines
-                    .get(row.saturating_sub(1) as usize)
-                    && let Some(url) = url_at_column_in_line(line, col)
+                if let Some(link) = self.link_at_cell(col, row)
+                    && link.openable
                 {
-                    cx.open_url(&url);
-                    cx.write_to_clipboard(ClipboardItem::new_string(url));
+                    cx.open_url(&link.url);
+                    cx.write_to_clipboard(ClipboardItem::new_string(link.url));
                     return;
                 }
             }

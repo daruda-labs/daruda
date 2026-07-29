@@ -108,11 +108,15 @@ pub(super) fn url_at_byte_index(text: &str, index: usize) -> Option<String> {
     }
 
     let candidate = std::str::from_utf8(&bytes[start..end]).ok()?;
-    if candidate.starts_with("https://") || candidate.starts_with("http://") {
+    if is_openable_url(candidate) {
         Some(candidate.to_string())
     } else {
         None
     }
+}
+
+pub(super) fn is_openable_url(candidate: &str) -> bool {
+    candidate.starts_with("https://") || candidate.starts_with("http://")
 }
 
 pub(super) fn url_at_column_in_line(line: &str, col: u16) -> Option<String> {
@@ -201,5 +205,14 @@ mod tests {
         assert_eq!(column_at_byte_index("abc", 1), 2);
         assert_eq!(column_at_byte_index("abc", 3), 4);
         assert_eq!(column_at_byte_index("abc", 99), 4); // clamps
+    }
+
+    #[test]
+    fn openable_url_filter_allows_only_http_schemes() {
+        assert!(is_openable_url("https://example.com"));
+        assert!(is_openable_url("http://example.com"));
+        assert!(!is_openable_url("javascript:alert(1)"));
+        assert!(!is_openable_url("file:///etc/passwd"));
+        assert!(!is_openable_url("daruda://open"));
     }
 }
