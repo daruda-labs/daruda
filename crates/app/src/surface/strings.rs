@@ -650,44 +650,16 @@ pub fn usage_no_provider() -> String {
 }
 
 // ----------------------------------------------------------------
-// Activity dashboard (today's stats + 7-day chart + totals)
+// Activity dashboard (recent-turns chart + token-usage chart)
 // ----------------------------------------------------------------
 
-/// Section heading above the three "today's activity" stat cards.
-pub fn usage_section_today() -> String {
-    rust_i18n::t!("usage.section_today").into_owned()
-}
-/// Section heading above the 7-day bar chart.
+/// Section heading above the 7-day turn-count bar chart.
 pub fn usage_section_7day() -> String {
     rust_i18n::t!("usage.section_7day").into_owned()
 }
-/// Section heading above the all-time totals row.
-pub fn usage_section_total() -> String {
-    rust_i18n::t!("usage.section_total").into_owned()
-}
-/// "Messages" stat-card label.
-pub fn usage_stat_messages() -> String {
-    rust_i18n::t!("usage.stat_messages").into_owned()
-}
-/// "Sessions" stat-card label.
-pub fn usage_stat_sessions() -> String {
-    rust_i18n::t!("usage.stat_sessions").into_owned()
-}
-/// "Tool Calls" stat-card label.
-pub fn usage_stat_tool_calls() -> String {
-    rust_i18n::t!("usage.stat_tool_calls").into_owned()
-}
-/// "Total Messages" totals-row label.
-pub fn usage_total_messages() -> String {
-    rust_i18n::t!("usage.total_messages").into_owned()
-}
-/// "Total Sessions" totals-row label.
-pub fn usage_total_sessions() -> String {
-    rust_i18n::t!("usage.total_sessions").into_owned()
-}
-/// "Active Days" totals-row label.
-pub fn usage_total_active_days() -> String {
-    rust_i18n::t!("usage.total_active_days").into_owned()
+/// Section heading above the 7-day token-usage bar chart.
+pub fn usage_section_tokens() -> String {
+    rust_i18n::t!("usage.section_tokens").into_owned()
 }
 /// Refresh-badge label before any fetch has landed (no cache age to
 /// show yet). Carries its own `↻` glyph.

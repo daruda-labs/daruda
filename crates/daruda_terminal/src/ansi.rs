@@ -163,7 +163,30 @@ pub const ERASE_SCROLLBACK: &[u8] = b"\x1b[3J";
 /// Erase entire display and move cursor to top-left.
 /// Injected into ghostty after an alt-screen exit to clear the restored
 /// primary screen so old terminal output doesn't show through.
+///
+/// Alt-screen housekeeping only. A user-facing "clear" must **not** use this:
+/// the TUI repaints everything after an alt-screen transition, but a shell
+/// does not, so wiping the grid would take the prompt with it. Use
+/// [`lift_rows_to_top`] instead.
 pub const ERASE_DISPLAY_AND_HOME: &[u8] = b"\x1b[2J\x1b[H";
+
+/// Scroll `above` rows off the top (`SU`) and walk the cursor up by the same
+/// amount (`CUU`), leaving the row the cursor was on at the top of the screen.
+///
+/// `CUU` is relative on purpose: the cursor keeps its position *within* the
+/// preserved line, which is the only thing a shell's line editor tracks. An
+/// absolute `CUP` would need a column the caller does not own and would
+/// desync readline's redraw arithmetic.
+///
+/// Returns an empty sequence for `above == 0` — nothing sits above the row to
+/// preserve, so both control functions would be no-ops with a `0` parameter's
+/// implicit-1 default doing the wrong thing.
+pub fn lift_rows_to_top(above: u16) -> Vec<u8> {
+    if above == 0 {
+        return Vec::new();
+    }
+    format!("\x1b[{above}S\x1b[{above}A").into_bytes()
+}
 
 // ============================================================================
 // URI schemes that appear inside OSC payloads
@@ -269,5 +292,20 @@ mod tests {
             assert!(seq.ends_with("\x1b\\"));
             assert!(seq.contains(&format!("{};", i)));
         }
+    }
+}
+
+#[cfg(test)]
+mod clear_helpers_tests {
+    use super::lift_rows_to_top;
+
+    #[test]
+    fn nothing_above_emits_nothing() {
+        assert!(lift_rows_to_top(0).is_empty());
+    }
+
+    #[test]
+    fn scrolls_up_then_walks_the_cursor_back_by_the_same_amount() {
+        assert_eq!(lift_rows_to_top(3), b"\x1b[3S\x1b[3A".to_vec());
     }
 }

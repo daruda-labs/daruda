@@ -43,7 +43,10 @@ pub(in crate::workspace) struct UsageKey {
 #[derive(Default)]
 pub(in crate::workspace) struct PerAccountUsage {
     usage: HashMap<UsageKey, daruda_claude::UsageOutcome>,
-    activity: HashMap<AccountSelection, daruda_claude::ActivityStats>,
+    /// Keyed the same way `usage` is — a plain `AccountSelection` key would
+    /// let Claude's and Codex's `SystemDefault` ambient logins collide on
+    /// one slot (see [`UsageKey`]'s own doc).
+    activity: HashMap<UsageKey, daruda_claude::ActivityStats>,
 }
 
 impl PerAccountUsage {
@@ -56,7 +59,7 @@ impl PerAccountUsage {
     /// The cached activity aggregate for `key`, if any has landed.
     pub(in crate::workspace) fn activity(
         &self,
-        key: AccountSelection,
+        key: UsageKey,
     ) -> Option<&daruda_claude::ActivityStats> {
         self.activity.get(&key)
     }
@@ -82,7 +85,7 @@ impl PerAccountUsage {
     /// lines returns `false`, so an idle pane doesn't repaint — Pitfall #10).
     pub(in crate::workspace) fn set_activity(
         &mut self,
-        key: AccountSelection,
+        key: UsageKey,
         activity: daruda_claude::ActivityStats,
     ) -> bool {
         if self.activity.get(&key) == Some(&activity) {
@@ -96,7 +99,7 @@ impl PerAccountUsage {
     /// the account is deleted so no usage lingers under a dangling selection.
     pub(in crate::workspace) fn remove(&mut self, account: AccountSelection) {
         self.usage.retain(|key, _| key.account != account);
-        self.activity.remove(&account);
+        self.activity.retain(|key, _| key.account != account);
     }
 }
 
@@ -203,6 +206,18 @@ pub(in crate::workspace) struct ClaudeContext {
     /// grows with the domain list rather than the struct.
     #[allow(dead_code)]
     pub(in crate::workspace) _limits_pumps: Vec<Task<()>>,
+
+    /// Sticky per-domain focus: the last [`FocusedAccount`] observed while a
+    /// pane of that domain (`AccountDomain::for_pane`) was actually focused.
+    /// Refreshed once per right-dock snapshot build
+    /// (`prepare_right_dock_snapshot`) via `sync::limits::observe_focus` —
+    /// the single writer. Reading a domain nobody has focused yet (a fresh
+    /// workspace, or a domain the user never switched to) falls back to
+    /// `FocusedAccount::SystemDefault`. Without this, focusing an unrelated
+    /// pane (a terminal, or another domain's agent) would snap every other
+    /// domain's Usage-tab section back to its ambient login every frame.
+    pub(in crate::workspace) sticky_focus_by_recipe:
+        HashMap<AccountRecipeId, crate::workspace::main_area::pane::FocusedAccount>,
 }
 
 // ---- Workspace methods that own the claude field ----
@@ -419,16 +434,15 @@ impl Workspace {
         }
     }
 
-    /// Replace the cached activity aggregate for `key` (the account it was
-    /// aggregated for; [`AccountSelection::SystemDefault`] = system default).
-    /// Called by the `Activity` pump and by `refresh_usage_now` after
-    /// `update_activity` lands. Skips the redraw when the stats are unchanged
-    /// vs. that account's prior entry (a quiet tick that found no new JSONL
-    /// lines) so an idle pane doesn't repaint the whole window tree
-    /// (Pitfall #10).
+    /// Replace the cached activity aggregate for `key` (the domain + account
+    /// it was aggregated for). Called by the per-domain `Activity` pumps and
+    /// by `refresh_usage_now` after `update_activity` lands. Skips the redraw
+    /// when the stats are unchanged vs. that key's prior entry (a quiet tick
+    /// that found no new JSONL lines) so an idle pane doesn't repaint the
+    /// whole window tree (Pitfall #10).
     pub(in crate::workspace) fn set_activity_stats(
         &mut self,
-        key: AccountSelection,
+        key: UsageKey,
         activity: daruda_claude::ActivityStats,
         cx: &mut Context<Self>,
     ) {
@@ -438,10 +452,10 @@ impl Workspace {
     }
 
     /// Manual-refresh backend for the Usage tab's ⟳ button. The tab shows every
-    /// auth domain at once, so this refreshes every domain — limits and status
-    /// per domain, plus local activity where the focused domain has any —
-    /// through the pump's own routing (`sync::limits::refresh_round`), which is
-    /// what keeps the two from filing a domain's data under different accounts.
+    /// auth domain at once, so this refreshes every domain — limits, status,
+    /// and local activity, each per domain — through the pump's own routing
+    /// (`sync::limits::refresh_round`), which is what keeps the two from
+    /// filing a domain's data under different accounts.
     ///
     /// The `usage_refresh_in_flight` guard collapses rapid clicks into a single
     /// in-flight round; it is cleared when the round resolves (or with the
@@ -453,17 +467,12 @@ impl Workspace {
         self.claude.usage_refresh_in_flight = true;
         cx.notify();
 
-        let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-            &self.focused_account_pane(cx),
-        );
-        let focused = self.focused_account();
+        let sticky = self.claude.sticky_focus_by_recipe.clone();
 
         cx.spawn(async move |this, cx| {
             let round = cx
                 .background_executor()
-                .spawn(
-                    async move { crate::workspace::sync::limits::refresh_round(focused, domain) },
-                )
+                .spawn(async move { crate::workspace::sync::limits::refresh_round(&sticky) })
                 .await;
 
             // The workspace can close mid-refresh; nothing to update or
@@ -478,8 +487,8 @@ impl Workspace {
                         ws.set_service_status(recipe, status, cx);
                     }
                 }
-                if let Some((account, stats)) = round.activity {
-                    ws.set_activity_stats(account, stats, cx);
+                for (key, stats) in round.activity {
+                    ws.set_activity_stats(key, stats, cx);
                 }
                 ws.claude.usage_refresh_in_flight = false;
                 cx.notify();

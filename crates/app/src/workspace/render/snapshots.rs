@@ -315,21 +315,28 @@ impl Workspace {
             .collect();
         // The Usage tab stacks a section per auth domain, so both providers'
         // limits can be compared without switching panes. Each reads the
-        // account the pump filed under (`usage_account`); a domain nobody is
-        // signed into contributes no section at all.
+        // sticky account for its domain (`usage_account`) rather than the
+        // instantaneous focus, so an unrelated pane gaining focus (a
+        // terminal, or another domain's agent) can't snap a domain's section
+        // back to its ambient login. This is the single write site for the
+        // sticky map (`observe_focus`) — the pump and manual refresh only
+        // read what it leaves behind.
         let focused = self.focused_account();
         let pane_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
             &self.focused_account_pane(cx),
         );
-        let focused_account = focused.key();
+        crate::workspace::sync::limits::observe_focus(
+            &mut self.claude.sticky_focus_by_recipe,
+            focused,
+            pane_domain,
+        );
         let usage_sections: Vec<crate::workspace::layout::snap::UsageSectionSnapshot> =
             daruda_store::accounts::AccountRecipeId::ALL
                 .into_iter()
                 .filter_map(|recipe| {
                     let account = crate::workspace::sync::limits::usage_account(
                         recipe,
-                        &focused,
-                        pane_domain,
+                        &self.claude.sticky_focus_by_recipe,
                     );
                     let outcome = self
                         .claude
@@ -353,16 +360,35 @@ impl Workspace {
                     })
                 })
                 .collect();
+        // One activity entry per section shown above — a domain with no
+        // visible usage section has nowhere in the UI to attach its
+        // activity chart either, so it's not worth looking up.
+        let activity: Vec<(
+            daruda_store::accounts::AccountRecipeId,
+            daruda_claude::ActivityStats,
+        )> = usage_sections
+            .iter()
+            .filter_map(|section| {
+                let account = crate::workspace::sync::limits::usage_account(
+                    section.recipe,
+                    &self.claude.sticky_focus_by_recipe,
+                );
+                self.claude
+                    .usage_by_account
+                    .activity(crate::workspace::claude_session_ops::UsageKey {
+                        recipe: section.recipe,
+                        account,
+                    })
+                    .filter(|stats| !stats.daily.is_empty())
+                    .cloned()
+                    .map(|stats| (section.recipe, stats))
+            })
+            .collect();
         RightDockSnapshot {
             right_dock_view: self.right_dock_view,
             workspace: self.right_dock.read(cx).workspace.clone(),
             usage: usage_sections,
-            activity: self
-                .claude
-                .usage_by_account
-                .activity(focused_account)
-                .cloned()
-                .unwrap_or_default(),
+            activity,
             usage_refresh_in_flight: self.claude.usage_refresh_in_flight,
             skills: cx
                 .global::<crate::agent::skills::SkillsState>()

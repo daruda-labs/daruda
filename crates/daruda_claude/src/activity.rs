@@ -15,18 +15,17 @@
 //! background thread; parsing streams line-by-line and never loads a
 //! whole file into memory.
 //!
-//! Counting semantics match the Übersicht `claude-usage` widget (and
-//! thereby Claude Code's own `stats-cache.json` message counts):
-//! - `messages`: records of type `user` / `assistant` / `attachment` /
-//!   `system`.
-//! - `tool_calls`: `tool_use` blocks inside `assistant` message content.
-//! - `sessions`: distinct `sessionId`s on `user` records, excluding
-//!   tool-result feedback records (content array containing a
-//!   `tool_result` block).
+//! Counting semantics match the Übersicht `claude-usage` widget's
+//! `daily` shape (`{date, turns, tokens}`):
+//! - `turns`: `user` records, excluding tool-result feedback records
+//!   (content array containing a `tool_result` block) — one turn per
+//!   human prompt.
+//! - `tokens`: `input_tokens + output_tokens` summed from every
+//!   `assistant` record's `message.usage`.
 //! - Day attribution: the record's UTC `timestamp` converted to the
 //!   **local** date. Records without a parseable timestamp are skipped.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -39,10 +38,8 @@ use serde_json::Value;
 pub struct DayActivity {
     /// `"YYYY-MM-DD"` in the local timezone.
     pub date: String,
-    pub messages: u64,
-    /// Distinct session ids seen that day (unioned across files).
-    pub sessions: u64,
-    pub tool_calls: u64,
+    pub turns: u64,
+    pub tokens: u64,
 }
 
 /// Aggregate of all activity found under the projects root.
@@ -50,11 +47,6 @@ pub struct DayActivity {
 pub struct ActivityStats {
     /// Ascending by date.
     pub daily: Vec<DayActivity>,
-    pub total_messages: u64,
-    /// Distinct session ids across all days and files.
-    pub total_sessions: u64,
-    /// Days with at least one counted message.
-    pub active_days: u64,
 }
 
 /// Failure surface for [`update_activity`]. Per-file races (a session
@@ -84,7 +76,11 @@ pub enum ActivityError {
 /// Bumped whenever the cache schema or the counting semantics change.
 /// A loaded cache with any other version is discarded and rebuilt
 /// from the JSONL files, so a version bump is always safe.
-const CACHE_VERSION: u32 = 1;
+///
+/// v2: `FileDayCounts` switched from `{messages, tool_calls, session_ids}`
+/// to `{turns, tokens}` — an old v1 cache would deserialize with the wrong
+/// field names, so the version bump forces a full rebuild instead.
+const CACHE_VERSION: u32 = 2;
 
 /// On-disk incremental cache. Plain serde JSON; corruption or version
 /// mismatch is never an error — the cache is a pure derivative of the
@@ -124,12 +120,8 @@ struct FileEntry {
 /// One file's contribution to one day.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct FileDayCounts {
-    messages: u64,
-    tool_calls: u64,
-    /// Kept as a set (not a count) so the aggregation step can union
-    /// session ids across files — one session frequently spans the
-    /// main session log and sidechain logs.
-    session_ids: BTreeSet<String>,
+    turns: u64,
+    tokens: u64,
 }
 
 /// Refresh the activity cache against the session logs under
@@ -285,37 +277,36 @@ fn count_record(line: &[u8], days: &mut BTreeMap<String, FileDayCounts>) {
     let Some(kind) = record.get("type").and_then(Value::as_str) else {
         return;
     };
-    if !matches!(kind, "user" | "assistant" | "attachment" | "system") {
-        return;
-    }
 
-    let day = days.entry(date).or_default();
-    day.messages += 1;
-
-    let content = record.pointer("/message/content");
     match kind {
         "user" => {
             // A user record whose content array carries a tool_result
             // block is Claude Code feeding a tool output back in — not
-            // a human turn, so it must not mark the session active.
-            let is_tool_result = content.and_then(Value::as_array).is_some_and(|blocks| {
-                blocks
-                    .iter()
-                    .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
-            });
-            if !is_tool_result
-                && let Some(sid) = record.get("sessionId").and_then(Value::as_str)
-                && !sid.is_empty()
-            {
-                day.session_ids.insert(sid.to_string());
+            // a human turn.
+            let is_tool_result = record
+                .pointer("/message/content")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| {
+                    blocks
+                        .iter()
+                        .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+                });
+            if !is_tool_result {
+                days.entry(date).or_default().turns += 1;
             }
         }
         "assistant" => {
-            if let Some(blocks) = content.and_then(Value::as_array) {
-                day.tool_calls += blocks
-                    .iter()
-                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
-                    .count() as u64;
+            let usage = record.pointer("/message/usage");
+            let input = usage
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output = usage
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if input + output > 0 {
+                days.entry(date).or_default().tokens += input + output;
             }
         }
         _ => {}
@@ -361,25 +352,19 @@ fn save_cache(cache_path: &Path, cache: &ActivityCache) -> Result<(), ActivityEr
 
 /// Accumulator for one day across all files.
 #[derive(Default)]
-struct DayAccum<'a> {
-    messages: u64,
-    tool_calls: u64,
-    sessions: BTreeSet<&'a str>,
+struct DayAccum {
+    turns: u64,
+    tokens: u64,
 }
 
-/// Fold the per-file day counts into the public stats. Session ids
-/// are unioned per day and globally; messages and tool calls sum.
+/// Fold the per-file day counts into the public stats.
 fn aggregate(cache: &ActivityCache) -> ActivityStats {
-    let mut per_day: BTreeMap<&str, DayAccum<'_>> = BTreeMap::new();
-    let mut all_sessions: BTreeSet<&str> = BTreeSet::new();
+    let mut per_day: BTreeMap<&str, DayAccum> = BTreeMap::new();
     for entry in cache.files.values() {
         for (date, counts) in &entry.days {
             let day = per_day.entry(date.as_str()).or_default();
-            day.messages += counts.messages;
-            day.tool_calls += counts.tool_calls;
-            day.sessions
-                .extend(counts.session_ids.iter().map(String::as_str));
-            all_sessions.extend(counts.session_ids.iter().map(String::as_str));
+            day.turns += counts.turns;
+            day.tokens += counts.tokens;
         }
     }
 
@@ -389,18 +374,12 @@ fn aggregate(cache: &ActivityCache) -> ActivityStats {
         .into_iter()
         .map(|(date, accum)| DayActivity {
             date: date.to_string(),
-            messages: accum.messages,
-            sessions: accum.sessions.len() as u64,
-            tool_calls: accum.tool_calls,
+            turns: accum.turns,
+            tokens: accum.tokens,
         })
         .collect();
 
-    ActivityStats {
-        total_messages: daily.iter().map(|d| d.messages).sum(),
-        total_sessions: all_sessions.len() as u64,
-        active_days: daily.iter().filter(|d| d.messages > 0).count() as u64,
-        daily,
-    }
+    ActivityStats { daily }
 }
 
 #[cfg(test)]
@@ -442,14 +421,10 @@ mod tests {
             + "\n"
     }
 
-    fn assistant_line(ts: &str, tool_uses: usize) -> String {
-        let mut content = vec![json!({"type": "text", "text": "sure"})];
-        for i in 0..tool_uses {
-            content.push(json!({"type": "tool_use", "id": format!("t{i}"),
-                                "name": "Bash", "input": {}}));
-        }
+    fn assistant_line(ts: &str, input_tokens: u64, output_tokens: u64) -> String {
         json!({"type": "assistant", "timestamp": ts,
-               "message": {"role": "assistant", "content": content}})
+               "message": {"role": "assistant", "content": [{"type": "text", "text": "sure"}],
+                           "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}}})
         .to_string()
             + "\n"
     }
@@ -475,10 +450,9 @@ mod tests {
     }
 
     #[test]
-    fn counts_all_four_message_record_types() {
+    fn counts_user_turns_but_not_other_record_types() {
         let (_tmp, projects, cache) = fixture();
         let body = user_line(D1, "s1")
-            + &assistant_line(D1, 0)
             + &plain_line("attachment", D1)
             + &plain_line("system", D1)
             + &plain_line("summary", D1)
@@ -486,33 +460,28 @@ mod tests {
         write_log(&projects, "p", "a", &body);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 4);
         assert_eq!(stats.daily.len(), 1);
-        assert_eq!(stats.daily[0].messages, 4);
-        assert_eq!(stats.active_days, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
-    fn tool_result_user_records_count_as_messages_but_not_sessions() {
+    fn tool_result_user_records_do_not_count_as_turns() {
         let (_tmp, projects, cache) = fixture();
         let body = user_line(D1, "s1") + &tool_result_user_line(D1, "s2");
         write_log(&projects, "p", "a", &body);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.daily[0].messages, 2);
-        // s2 only ever appears on a tool_result feedback record.
-        assert_eq!(stats.daily[0].sessions, 1);
-        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
-    fn tool_use_blocks_counted_per_assistant_record() {
+    fn assistant_usage_tokens_summed_per_day() {
         let (_tmp, projects, cache) = fixture();
-        let body = assistant_line(D1, 2) + &assistant_line(D1, 1) + &assistant_line(D1, 0);
+        let body = assistant_line(D1, 10, 5) + &assistant_line(D1, 3, 2);
         write_log(&projects, "p", "a", &body);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.daily[0].tool_calls, 3);
+        assert_eq!(stats.daily[0].tokens, 20);
     }
 
     #[test]
@@ -527,7 +496,6 @@ mod tests {
         assert_eq!(stats.daily.len(), 2);
         assert_eq!(stats.daily[0].date, expected_date(D1));
         assert_eq!(stats.daily[1].date, expected_date(D2));
-        assert_eq!(stats.active_days, 2);
     }
 
     #[test]
@@ -539,7 +507,7 @@ mod tests {
         write_log(&projects, "p", "a", &body);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.daily.iter().map(|d| d.turns).sum::<u64>(), 1);
     }
 
     #[test]
@@ -549,7 +517,7 @@ mod tests {
         write_log(&projects, "p", "a", &body);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
@@ -558,7 +526,7 @@ mod tests {
         let prefix = user_line(D1, "s1") + &user_line(D1, "s1");
         let path = write_log(&projects, "p", "a", &prefix);
         let first = update_activity(&projects, &cache).unwrap();
-        assert_eq!(first.total_messages, 2);
+        assert_eq!(first.daily[0].turns, 2);
 
         // Overwrite the consumed prefix with same-length junk, then
         // append one valid line. If the second call re-read from byte
@@ -568,7 +536,7 @@ mod tests {
         fs::write(&path, junk + &user_line(D1, "s1")).unwrap();
 
         let second = update_activity(&projects, &cache).unwrap();
-        assert_eq!(second.total_messages, 3);
+        assert_eq!(second.daily[0].turns, 3);
     }
 
     #[test]
@@ -577,7 +545,7 @@ mod tests {
         let body = user_line(D1, "s1") + &user_line(D1, "s1") + &user_line(D1, "s1");
         let path = write_log(&projects, "p", "a", &body);
         assert_eq!(
-            update_activity(&projects, &cache).unwrap().total_messages,
+            update_activity(&projects, &cache).unwrap().daily[0].turns,
             3
         );
 
@@ -585,7 +553,7 @@ mod tests {
         fs::write(&path, user_line(D1, "s9")).unwrap();
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
@@ -598,8 +566,7 @@ mod tests {
 
         // Mid-append: the partial line must not count yet.
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
-        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.daily[0].turns, 1);
 
         // The writer finishes the line — only the completed remainder
         // is parsed on the next call.
@@ -608,8 +575,7 @@ mod tests {
         drop(f);
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 2);
-        assert_eq!(stats.total_sessions, 2);
+        assert_eq!(stats.daily[0].turns, 2);
     }
 
     #[test]
@@ -621,8 +587,7 @@ mod tests {
         fs::write(&cache, "{ definitely not a cache").unwrap();
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
-        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
@@ -640,7 +605,7 @@ mod tests {
         fs::write(&cache, v.to_string()).unwrap();
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]
@@ -649,48 +614,14 @@ mod tests {
         let path_a = write_log(&projects, "p1", "a", &user_line(D1, "s1"));
         write_log(&projects, "p2", "b", &user_line(D1, "s2"));
         assert_eq!(
-            update_activity(&projects, &cache).unwrap().total_messages,
+            update_activity(&projects, &cache).unwrap().daily[0].turns,
             2
         );
 
         fs::remove_file(&path_a).unwrap();
 
         let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.total_messages, 1);
-        assert_eq!(stats.total_sessions, 1);
-    }
-
-    #[test]
-    fn same_day_sessions_unioned_across_files() {
-        let (_tmp, projects, cache) = fixture();
-        // One session spans two files (main log + sidechain); a second
-        // session appears in only one of them.
-        write_log(
-            &projects,
-            "p1",
-            "a",
-            &(user_line(D1, "shared") + &user_line(D1, "solo")),
-        );
-        write_log(&projects, "p2", "b", &user_line(D1, "shared"));
-
-        let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.daily.len(), 1);
-        assert_eq!(stats.daily[0].sessions, 2);
-        assert_eq!(stats.total_sessions, 2);
-        assert_eq!(stats.daily[0].messages, 3);
-    }
-
-    #[test]
-    fn session_spanning_two_days_counts_once_in_total() {
-        let (_tmp, projects, cache) = fixture();
-        let body = user_line(D1, "s1") + &user_line(D2, "s1");
-        write_log(&projects, "p", "a", &body);
-
-        let stats = update_activity(&projects, &cache).unwrap();
-        assert_eq!(stats.daily.len(), 2);
-        assert_eq!(stats.daily[0].sessions, 1);
-        assert_eq!(stats.daily[1].sessions, 1);
-        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.daily[0].turns, 1);
     }
 
     #[test]

@@ -117,25 +117,72 @@ impl TerminalView {
         window.toggle_fullscreen();
     }
 
-    /// Wipe the visible viewport AND scrollback history. Mirrors
-    /// iTerm2's ⌘K — feeds CSI `2J` + `H` (erase display, home cursor)
-    /// followed by `3J` (erase scrollback) directly into the VT model
-    /// so the result is independent of shell behaviour.
+    /// Wipe everything above the current prompt plus the scrollback history,
+    /// leaving the prompt at the top of the screen. Mirrors iTerm2's ⌘K
+    /// (`clearBufferSavingPrompt:`) and zed's `InternalEvent::Clear`, both of
+    /// which preserve the prompt line.
+    ///
+    /// The clear is local to the VT model — the shell is never told — so
+    /// erasing the prompt row would simply lose it: nothing would repaint,
+    /// and the shell's line editor would keep computing redraws from a cursor
+    /// position the grid no longer agrees with. Scrolling the prompt to the
+    /// top instead keeps the cursor's offset *within* that line intact, which
+    /// is the only relationship the shell tracks.
     pub(super) fn on_clear_buffer(
         &mut self,
         _: &ClearBuffer,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Unlock before erasing so the viewport snaps to the now-empty live
-        // screen immediately rather than waiting for anchor eviction on the
-        // next PTY output tick.
+        // Unlock before erasing so the viewport snaps to the live screen
+        // immediately rather than waiting for anchor eviction on the next
+        // PTY output tick.
         self.snap_to_bottom();
-        let _ = self.session.feed(crate::ansi::ERASE_DISPLAY_AND_HOME);
+        // A full-screen app owns the alt screen and repaints on its own
+        // schedule, so shifting its rows would leave the display disagreeing
+        // with the app's model until the next full redraw. Drop the primary
+        // screen's history — the only part of the buffer the user can still
+        // reach — and leave the display to its owner.
+        if !self.session.is_alt_screen() {
+            let above = self.rows_above_prompt();
+            let _ = self.session.feed(&crate::ansi::lift_rows_to_top(above));
+        }
         let _ = self.session.feed(crate::ansi::ERASE_SCROLLBACK);
         self.line_layouts.clear();
         self.line_layout_key = None;
         self.schedule_viewport_refresh(cx);
+    }
+
+    /// Viewport rows sitting above the region the clear must keep.
+    ///
+    /// The kept region runs from the current prompt's first row through the
+    /// cursor, so a multi-line prompt or a typed command that wrapped stays
+    /// whole. Without shell integration there is no prompt mark to consult
+    /// and only the cursor's own row is kept — the same fallback iTerm2's
+    /// `numberOfLinesToPreserveWhenClearingScreen` uses.
+    ///
+    /// Both inputs are normalised to **0-indexed viewport rows** first: the
+    /// cursor is a 1-indexed grid row, a mark projects to an absolute screen
+    /// row, and `SU` counts viewport rows. Mixing the three is the coordinate
+    /// hazard this file's module docs call out.
+    fn rows_above_prompt(&self) -> u16 {
+        let Some((_, cursor_grid_row)) = self.session.cursor_position() else {
+            return 0;
+        };
+        let cursor_viewport_row = cursor_grid_row.saturating_sub(1);
+        rows_above_kept_region(cursor_viewport_row, self.prompt_viewport_row())
+    }
+
+    /// Current prompt's first row in 0-indexed viewport space, if shell
+    /// integration reported one, it has not been executed yet, and it is
+    /// still on screen.
+    fn prompt_viewport_row(&self) -> Option<u16> {
+        let viewport_top = self.session.viewport_row_offset();
+        let viewport_rows = u32::from(self.session.rows());
+        let screen_row = current_prompt_start(self.session.prompt_marks().iter())
+            .and_then(|mark| self.session.abs_to_screen_row(mark.abs_y))?;
+        super::overlay::screen_row_to_visible(screen_row, viewport_top, viewport_rows)
+            .and_then(|row| u16::try_from(row).ok())
     }
 
     /// Drop scrollback history but keep the current viewport intact —
@@ -438,5 +485,114 @@ impl TerminalView {
         let is_regex = self.state.search.is_regex();
         self.set_search_query(&q, case_insensitive, is_regex, cx);
         self.state.search.cursor_byte = cur + text.len();
+    }
+}
+
+/// Rows above the region a buffer-clear keeps, in 0-indexed viewport space.
+///
+/// `prompt_row` is the current prompt's first row when shell integration
+/// reported one. A mark above the cursor widens the kept region to cover a
+/// multi-line prompt or a wrapped command; a mark at or below the cursor is
+/// ignored, because the prompt cannot start after the point the user is
+/// typing at and a stale mark must not shrink the region to nothing.
+fn rows_above_kept_region(cursor_row: u16, prompt_row: Option<u16>) -> u16 {
+    match prompt_row {
+        Some(prompt) if prompt < cursor_row => prompt,
+        _ => cursor_row,
+    }
+}
+
+/// Latest prompt mark that still describes editable input. `CommandStart`
+/// (FTCS B) is part of that prompt/input region, so it does not invalidate
+/// the prompt; `CommandExecuted`/`CommandFinished` mean the shell has moved
+/// on to command output or completion, and a prior PromptStart is stale.
+fn current_prompt_start<'a>(
+    marks: impl DoubleEndedIterator<Item = &'a crate::session::PromptMark>,
+) -> Option<&'a crate::session::PromptMark> {
+    for mark in marks.rev() {
+        match mark.kind {
+            crate::session::PromptMarkKind::PromptStart => return Some(mark),
+            crate::session::PromptMarkKind::CommandExecuted
+            | crate::session::PromptMarkKind::CommandFinished => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{current_prompt_start, rows_above_kept_region};
+    use crate::session::{LogicalLineAbs, PromptMark, PromptMarkKind};
+
+    fn mark(seq: u64, kind: PromptMarkKind) -> PromptMark {
+        PromptMark {
+            kind,
+            seq,
+            abs_y: LogicalLineAbs(seq),
+            screen_col: 1,
+            exit_code: None,
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn without_a_prompt_mark_only_the_cursor_row_is_kept() {
+        assert_eq!(rows_above_kept_region(4, None), 4);
+    }
+
+    #[test]
+    fn a_prompt_above_the_cursor_widens_the_kept_region() {
+        // Prompt started two rows up (wrapped command) — keep all three rows.
+        assert_eq!(rows_above_kept_region(4, Some(2)), 2);
+    }
+
+    #[test]
+    fn a_prompt_at_or_below_the_cursor_is_ignored() {
+        assert_eq!(rows_above_kept_region(4, Some(4)), 4);
+        assert_eq!(rows_above_kept_region(4, Some(9)), 4);
+    }
+
+    #[test]
+    fn a_cursor_already_at_the_top_scrolls_nothing() {
+        assert_eq!(rows_above_kept_region(0, None), 0);
+        assert_eq!(rows_above_kept_region(0, Some(0)), 0);
+    }
+
+    #[test]
+    fn command_start_keeps_the_prompt_current() {
+        let marks = [
+            mark(1, PromptMarkKind::PromptStart),
+            mark(2, PromptMarkKind::CommandStart),
+        ];
+        assert_eq!(
+            current_prompt_start(marks.iter()).map(|mark| mark.seq),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn command_execution_makes_the_prior_prompt_stale() {
+        let marks = [
+            mark(1, PromptMarkKind::PromptStart),
+            mark(2, PromptMarkKind::CommandStart),
+            mark(3, PromptMarkKind::CommandExecuted),
+        ];
+        assert!(current_prompt_start(marks.iter()).is_none());
+    }
+
+    #[test]
+    fn a_new_prompt_after_command_finish_is_current() {
+        let marks = [
+            mark(1, PromptMarkKind::PromptStart),
+            mark(2, PromptMarkKind::CommandStart),
+            mark(3, PromptMarkKind::CommandExecuted),
+            mark(4, PromptMarkKind::CommandFinished),
+            mark(5, PromptMarkKind::PromptStart),
+        ];
+        assert_eq!(
+            current_prompt_start(marks.iter()).map(|mark| mark.seq),
+            Some(5)
+        );
     }
 }

@@ -1006,26 +1006,6 @@ impl FocusedAccount {
             Self::Managed { config_dir, .. } => Some(config_dir),
         }
     }
-
-    /// The auth domain whose usage sources apply. A managed account names its
-    /// own; `SystemDefault` has no account to ask, so `pane_domain` — the
-    /// focused pane's own agent domain — decides, falling back to Claude
-    /// where the pane has no agent (a terminal shell can run either CLI, and
-    /// the ambient `~/.claude` is a real Claude source).
-    pub(in crate::workspace) fn recipe(
-        &self,
-        pane_domain: AccountDomain,
-    ) -> daruda_store::accounts::AccountRecipeId {
-        match self {
-            Self::SystemDefault => match pane_domain {
-                AccountDomain::Exactly(recipe) => recipe,
-                AccountDomain::Any | AccountDomain::Unsupported => {
-                    daruda_store::accounts::AccountRecipeId::Claude
-                }
-            },
-            Self::Managed { recipe, .. } => *recipe,
-        }
-    }
 }
 
 /// Pure core of [`Workspace::focused_account`]. A `Managed` id that no
@@ -1931,51 +1911,6 @@ mod tests {
         assert_eq!(
             resolve_focused_account(AccountSelection::SystemDefault, &empty, data),
             FocusedAccount::SystemDefault
-        );
-    }
-
-    #[test]
-    fn focused_account_reports_the_claude_domain() {
-        use daruda_store::accounts::{AccountRecipeId, AccountSelection};
-        let (id, st) = accounts_with(AccountRecipeId::Claude);
-        let focused =
-            resolve_focused_account(AccountSelection::Managed(id), &st, Path::new("/data"));
-        assert_eq!(focused.recipe(AccountDomain::Any), AccountRecipeId::Claude);
-    }
-
-    #[test]
-    fn focused_account_reports_the_codex_domain() {
-        use daruda_store::accounts::{AccountRecipeId, AccountSelection};
-        let (id, st) = accounts_with(AccountRecipeId::Codex);
-        let focused =
-            resolve_focused_account(AccountSelection::Managed(id), &st, Path::new("/data"));
-        assert_eq!(focused.recipe(AccountDomain::Any), AccountRecipeId::Codex);
-    }
-
-    #[test]
-    fn focused_account_system_default_follows_the_focused_pane() {
-        use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection, AccountsState};
-        // With no account row to name a domain, the pane's own agent decides;
-        // a pane with no agent falls back to the ambient Claude home.
-        let empty = AccountsState::default();
-        let data = Path::new("/data");
-        assert_eq!(
-            resolve_focused_account(AccountSelection::SystemDefault, &empty, data)
-                .recipe(AccountDomain::Any),
-            AccountRecipeId::Claude
-        );
-        // A Codex agent-chat pane on the ambient account reports Codex, so
-        // its usage panel shows the unsupported-domain notice instead of
-        // someone else's Claude numbers.
-        assert_eq!(
-            resolve_focused_account(AccountSelection::SystemDefault, &empty, data)
-                .recipe(AccountDomain::Exactly(AccountRecipeId::Codex)),
-            AccountRecipeId::Codex
-        );
-        assert_eq!(
-            resolve_focused_account(AccountSelection::Managed(AccountId::new()), &empty, data)
-                .recipe(AccountDomain::Any),
-            AccountRecipeId::Claude
         );
     }
 }

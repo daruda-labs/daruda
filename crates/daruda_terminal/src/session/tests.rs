@@ -2379,3 +2379,76 @@ fn diag_scroll_after_same_size_resize() {
         "scroll dead after same-size resize"
     );
 }
+
+/// Clear Buffer must leave the prompt on screen. `TerminalView::on_clear_buffer`
+/// feeds exactly these bytes; erasing the whole display instead (the old
+/// `ED 2` + `CUP` path) dropped the prompt row, and since the clear never
+/// reaches the shell nothing repainted it.
+#[test]
+fn clear_buffer_sequence_keeps_the_prompt_and_the_cursor_column() {
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    session
+        .feed(b"\x1b]133;A\x07user% \x1b]133;B\x07echo one\r\none\r\n")
+        .unwrap();
+    session
+        .feed(b"\x1b]133;A\x07user% \x1b]133;B\x07echo two\r\ntwo\r\n")
+        .unwrap();
+    session.feed(b"\x1b]133;A\x07user% \x1b]133;B\x07").unwrap();
+
+    let (col_before, row_before) = session.cursor_position().expect("cursor on screen");
+    assert!(row_before > 1, "the prompt must start below the top row");
+
+    // Mirrors `on_clear_buffer`: lift the cursor's row to the top, drop history.
+    let above = row_before - 1;
+    session.feed(&crate::ansi::lift_rows_to_top(above)).unwrap();
+    session.feed(crate::ansi::ERASE_SCROLLBACK).unwrap();
+
+    assert_eq!(
+        session.dump_screen_row(0).unwrap(),
+        "user% ",
+        "the prompt survives at the top of the screen"
+    );
+    assert_eq!(
+        session.cursor_position(),
+        Some((col_before, 1)),
+        "the cursor keeps its column within the prompt line and moves to row 1"
+    );
+    assert_eq!(
+        session.dump_screen_row(1).unwrap(),
+        "",
+        "everything the prompt scrolled over is gone"
+    );
+}
+
+/// On the alt screen the running app owns the display, so a buffer clear must
+/// only drop the primary screen's history. Scrolling the alt rows would leave
+/// the grid offset from what the app believes it drew.
+#[test]
+fn clear_buffer_leaves_the_alt_screen_untouched() {
+    let mut session =
+        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+    session.feed(b"scrollback line\r\n").unwrap();
+    session.feed(b"\x1b[?1049h").unwrap();
+    session.feed(b"TUI row one\r\nTUI row two").unwrap();
+    assert!(session.is_alt_screen());
+
+    let rows_before: Vec<String> = (0..session.total_rows())
+        .map(|y| session.dump_screen_row(y).unwrap())
+        .collect();
+    let cursor_before = session.cursor_position();
+    assert!(
+        rows_before.iter().any(|row| row == "TUI row one"),
+        "the alt screen holds the app's output before the clear"
+    );
+
+    // `on_clear_buffer` skips the lift while the alt screen is up and feeds
+    // only this.
+    session.feed(crate::ansi::ERASE_SCROLLBACK).unwrap();
+
+    let rows_after: Vec<String> = (0..session.total_rows())
+        .map(|y| session.dump_screen_row(y).unwrap())
+        .collect();
+    assert_eq!(rows_after, rows_before, "the alt display is left alone");
+    assert_eq!(session.cursor_position(), cursor_before);
+}

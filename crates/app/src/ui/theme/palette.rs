@@ -2107,14 +2107,6 @@ pub const USAGE_ACCENT_CHIP_FG: Hsla = ACCENT_FG;
 pub const USAGE_CARD_GAP: f32 = GAP_LG;
 /// Big utilization-percent font size on a gauge card (px).
 pub const USAGE_GAUGE_PERCENT_FONT_SIZE: f32 = 18.0;
-/// Gap between the three "today" stat cards (px).
-pub const USAGE_STAT_GRID_GAP: f32 = GAP_LG;
-/// Stat-card big-value font size (px).
-pub const USAGE_STAT_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Stat-card label font size (px).
-pub const USAGE_STAT_LABEL_FONT_SIZE: f32 = FONT_SIZE_XXS;
-/// Gap between a stat card's value and its label (px).
-pub const USAGE_STAT_CARD_GAP: f32 = GAP_XS;
 /// 7-day chart: bar height (px) the busiest day maps to.
 pub const USAGE_CHART_BAR_MAX_HEIGHT: f32 = 40.0;
 /// 7-day chart: minimum bar height (px) so a zero/low day still shows.
@@ -2131,10 +2123,6 @@ pub const USAGE_CHART_LABEL_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const USAGE_CHART_BAR_TODAY: Hsla = ACCENT;
 /// Non-today bar fill color in the 7-day chart.
 pub const USAGE_CHART_BAR_OTHER: Hsla = ACCENT_MUTED;
-/// Totals-row value font size (px).
-pub const USAGE_TOTAL_VALUE_FONT_SIZE: f32 = FONT_SIZE_LG;
-/// Totals-row label font size (px).
-pub const USAGE_TOTAL_LABEL_FONT_SIZE: f32 = FONT_SIZE_XXS;
 /// "📎 N" chip background — surfaces auxiliary file presence.
 pub const SKILL_AUX_CHIP_BG: Hsla = hsla(0.0, 0.0, 0.20, 0.85);
 pub const SKILL_ROW_RADIUS: f32 = RADIUS_SM;

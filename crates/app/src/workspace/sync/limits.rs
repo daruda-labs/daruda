@@ -1,12 +1,13 @@
 //! Background-poll tasks for each auth domain's plan-rate API, its provider's
-//! public service-status page, and the local JSONL activity aggregation.
+//! public service-status page, and its local session-log activity
+//! aggregation.
 //!
 //! One loop per (endpoint, domain) pair, so cadences can differ
 //! (`[usage.poll].limits_secs` vs. `status_secs`; `Activity` shares
 //! `limits_secs`), a hung fetch on one never blocks the others, and each can
 //! be disabled (`= 0`) independently. Each loop snapshots its live-reload-aware
 //! cadence, idle-rechecks when disabled, otherwise dispatches the blocking
-//! `ureq` fetch onto the background executor and forwards the result to a
+//! `ureq`/disk fetch onto the background executor and forwards the result to a
 //! workspace setter, then sleeps the cadence. Limit fetches forward their
 //! failures too — see [`daruda_claude::UsageOutcome`]; a failed status fetch or
 //! a quiet activity tick leaves the previous value in place.
@@ -16,10 +17,13 @@
 //! 5-minute cadence; a process-wide singleton would need to outlive Workspace
 //! (the Welcome window has none) to fix it.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use daruda_claude::{ActivityStats, ProviderUsage, ServiceStatus, activity, service_status, usage};
+use daruda_claude::{
+    ActivityStats, ProviderUsage, ServiceStatus, activity, codex_activity, service_status, usage,
+};
 use daruda_config::PollConfig;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection};
 use gpui::{Context, Task, WeakEntity};
@@ -33,17 +37,17 @@ use crate::workspace::main_area::pane::FocusedAccount;
 /// quickly without spinning on `read_with` while idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(PollConfig::MIN_POLL_SECS);
 
-/// Spawn the endpoint pumps: limits and status for every auth domain, plus the
-/// single activity loop. Returns the `Task<()>` handles so the caller
-/// (Workspace constructor) can keep them alive in a field — dropping any task
-/// cancels its loop.
+/// Spawn the endpoint pumps: limits, status, and local activity for every
+/// auth domain. Returns the `Task<()>` handles so the caller (Workspace
+/// constructor) can keep them alive in a field — dropping any task cancels
+/// its loop.
 pub(in crate::workspace) fn spawn(cx: &mut Context<Workspace>) -> Vec<Task<()>> {
     let mut pumps = Vec::new();
     for recipe in AccountRecipeId::ALL {
         pumps.push(spawn_loop(cx, Endpoint::Limits(recipe)));
         pumps.push(spawn_loop(cx, Endpoint::Status(recipe)));
+        pumps.push(spawn_loop(cx, Endpoint::Activity(recipe)));
     }
-    pumps.push(spawn_loop(cx, Endpoint::Activity));
     pumps
 }
 
@@ -55,11 +59,12 @@ enum Endpoint {
     /// One provider's public status page. Account-independent but still
     /// domain-specific — each provider hosts its own page.
     Status(AccountRecipeId),
-    /// Local JSONL aggregation (no network). Shares the `limits_secs`
-    /// cadence — it is the other half of the Usage tab's data and there
-    /// is no reason to refresh it on a different schedule, so it adds no
-    /// config knob.
-    Activity,
+    /// One domain's local session-log aggregation (no network) — Claude's
+    /// `~/.claude/projects` JSONL, Codex's `~/.codex/sessions` JSONL. Shares
+    /// the `limits_secs` cadence — it is the other half of that domain's
+    /// Usage-tab section and there is no reason to refresh it on a different
+    /// schedule, so it adds no config knob.
+    Activity(AccountRecipeId),
 }
 
 /// Whether `kind` reads a source scoped to the focused pane's account
@@ -67,55 +72,97 @@ enum Endpoint {
 /// (`Status` — the provider's global service health).
 fn account_scoped(kind: Endpoint) -> bool {
     match kind {
-        Endpoint::Limits(_) | Endpoint::Activity => true,
+        Endpoint::Limits(_) | Endpoint::Activity(_) => true,
         Endpoint::Status(_) => false,
     }
 }
 
 /// Which account `kind` reads this tick, or `None` when it has nothing to read.
 ///
-/// A `Limits` loop covers one domain, which is usually *not* the focused pane's:
-/// the focused pane names an account only for its own domain, so every other
-/// domain reports its ambient login — the only account daruda can name for a
-/// domain nothing is focused on.
-///
-/// `Activity` is Claude-only: `daruda_claude::activity` parses Claude Code's own
-/// JSONL session logs, a layout no other CLI writes.
+/// A `Limits`/`Activity` loop covers one domain, which is usually *not* the
+/// focused pane's: the focused pane names an account only for its own
+/// domain, so every other domain reports its sticky (or, absent that,
+/// ambient) login — see [`usage_account`].
 fn target_account(
     kind: Endpoint,
-    focused: FocusedAccount,
-    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+    sticky: &HashMap<AccountRecipeId, FocusedAccount>,
 ) -> Option<(AccountSelection, Option<PathBuf>)> {
-    let focused_recipe = focused.recipe(pane_domain);
     match kind {
-        Endpoint::Limits(recipe) => {
-            let account = usage_account(recipe, &focused, pane_domain);
+        Endpoint::Limits(recipe) | Endpoint::Activity(recipe) => {
+            let account = usage_account(recipe, sticky);
             let config_dir = (account != AccountSelection::SystemDefault)
-                .then(|| focused.into_config_dir())
+                .then(|| sticky_focused(recipe, sticky).into_config_dir())
                 .flatten();
             Some((account, config_dir))
         }
-        Endpoint::Activity if focused_recipe == AccountRecipeId::Claude => {
-            Some((focused.key(), focused.into_config_dir()))
-        }
-        Endpoint::Activity => None,
         Endpoint::Status(_) => Some((AccountSelection::SystemDefault, None)),
     }
 }
 
-/// The account key one domain's usage is cached under. The renderer needs the
-/// same answer the pump used, or it would read an empty slot — so both call
-/// this rather than each spelling the rule out.
-pub(in crate::workspace) fn usage_account(
+/// The sticky [`FocusedAccount`] on file for `recipe`, or the ambient default
+/// when that domain has never been observed live (a fresh workspace before
+/// its first right-dock render, or a domain the user has never focused).
+fn sticky_focused(
     recipe: AccountRecipeId,
+    sticky: &HashMap<AccountRecipeId, FocusedAccount>,
+) -> FocusedAccount {
+    sticky
+        .get(&recipe)
+        .cloned()
+        .unwrap_or(FocusedAccount::SystemDefault)
+}
+
+/// The one recipe `focused` authoritatively speaks for, or `None` when it
+/// speaks for none. A pane names a domain only by actually being scoped to
+/// it: a managed account always names its own recipe, and `SystemDefault`
+/// names one only on a pane whose agent domain is `Exactly(recipe)` — a
+/// terminal (`Any`) or an unrecognized agent (`Unsupported`) on the ambient
+/// account hasn't told us anything about any one domain, so it must not
+/// claim a sticky slot.
+fn live_recipe(
     focused: &FocusedAccount,
     pane_domain: crate::workspace::main_area::pane::AccountDomain,
-) -> AccountSelection {
-    if recipe == focused.recipe(pane_domain) {
-        focused.key()
-    } else {
-        AccountSelection::SystemDefault
+) -> Option<AccountRecipeId> {
+    match focused {
+        FocusedAccount::Managed { recipe, .. } => Some(*recipe),
+        FocusedAccount::SystemDefault => match pane_domain {
+            crate::workspace::main_area::pane::AccountDomain::Exactly(recipe) => Some(recipe),
+            crate::workspace::main_area::pane::AccountDomain::Any
+            | crate::workspace::main_area::pane::AccountDomain::Unsupported => None,
+        },
     }
+}
+
+/// Refresh the sticky slot for whichever recipe `focused` authoritatively
+/// speaks for ([`live_recipe`]), if any. Every other domain's slot is left
+/// untouched, which is what makes the Usage tab "sticky": focusing an
+/// unrelated pane (a terminal with no managed account, or another domain's
+/// agent) can't blank a domain nobody just switched away from back to its
+/// ambient login.
+///
+/// Single writer: called once per right-dock snapshot build
+/// (`prepare_right_dock_snapshot`). Every other reader (the background pump,
+/// manual refresh) only reads the map this leaves behind.
+pub(in crate::workspace) fn observe_focus(
+    sticky: &mut HashMap<AccountRecipeId, FocusedAccount>,
+    focused: FocusedAccount,
+    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+) {
+    if let Some(recipe) = live_recipe(&focused, pane_domain) {
+        sticky.insert(recipe, focused);
+    }
+}
+
+/// The account one domain's usage is cached under. The renderer needs the
+/// same answer the pump used, or it would read an empty slot — so both call
+/// this rather than each spelling the rule out. Reads the sticky map rather
+/// than the instantaneous focus, so a domain keeps showing its own account
+/// after focus moves to an unrelated pane.
+pub(in crate::workspace) fn usage_account(
+    recipe: AccountRecipeId,
+    sticky: &HashMap<AccountRecipeId, FocusedAccount>,
+) -> AccountSelection {
+    sticky_focused(recipe, sticky).key()
 }
 
 fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
@@ -125,7 +172,9 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             //    `Err(_)` once the entity is gone — that's our
             //    cue to exit the loop.
             let interval = match this.read_with(cx, |ws, _| match kind {
-                Endpoint::Limits(_) | Endpoint::Activity => ws.claude.usage_poll.limits_interval(),
+                Endpoint::Limits(_) | Endpoint::Activity(_) => {
+                    ws.claude.usage_poll.limits_interval()
+                }
                 Endpoint::Status(_) => ws.claude.usage_poll.status_interval(),
             }) {
                 Ok(opt) => opt,
@@ -139,20 +188,17 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
             };
 
             // 3. Resolve which account this tick reads — fresh each time (on
-            //    the UI thread, like the cadence read above) so a focus switch
-            //    is picked up on the *next* tick.
+            //    the UI thread) so a focus switch is picked up on the *next*
+            //    tick. The sticky map itself is only written by
+            //    `prepare_right_dock_snapshot`; this loop just reads
+            //    whatever it last left behind.
             let target = if account_scoped(kind) {
-                let resolved = this.read_with(cx, |ws, cx| {
-                    let domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-                        &ws.focused_account_pane(cx),
-                    );
-                    (ws.focused_account(), domain)
-                });
-                let (focused, pane_domain) = match resolved {
-                    Ok(pair) => pair,
-                    Err(_) => break,
-                };
-                target_account(kind, focused, pane_domain)
+                let sticky =
+                    match this.read_with(cx, |ws, _| ws.claude.sticky_focus_by_recipe.clone()) {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                target_account(kind, &sticky)
             } else {
                 // Unused for `Status` (`set_service_status` is keyed by domain,
                 // not account); `SystemDefault` just satisfies the type.
@@ -188,13 +234,20 @@ fn spawn_loop(cx: &mut Context<Workspace>, kind: Endpoint) -> Task<()> {
                 Fetched::Status(recipe, Ok(s)) => {
                     this.update(cx, |ws, cx| ws.set_service_status(recipe, s, cx))
                 }
-                Fetched::Activity(Some(a)) => {
-                    this.update(cx, |ws, cx| ws.set_activity_stats(account_key, a, cx))
-                }
+                Fetched::Activity(recipe, Some(a)) => this.update(cx, |ws, cx| {
+                    ws.set_activity_stats(
+                        UsageKey {
+                            recipe,
+                            account: account_key,
+                        },
+                        a,
+                        cx,
+                    )
+                }),
                 // A failed status fetch or a quiet activity tick leaves the
                 // previous value in place; the next tick retries, and logging
                 // would be churn the user already sees as unchanged chrome.
-                Fetched::Status(_, Err(_)) | Fetched::Activity(None) => Ok(()),
+                Fetched::Status(_, Err(_)) | Fetched::Activity(_, None) => Ok(()),
             };
             if forwarded.is_err() {
                 break;
@@ -216,38 +269,40 @@ pub(in crate::workspace) struct RefreshRound {
         AccountRecipeId,
         Result<ServiceStatus, daruda_claude::FetchError>,
     )>,
-    /// `None` when the focused domain has no local activity log to read, or the
-    /// read found nothing.
-    pub activity: Option<(AccountSelection, ActivityStats)>,
+    /// One entry per domain whose activity aggregation completed. Empty stats
+    /// are still forwarded so a manual refresh can clear stale cached charts
+    /// after session logs are deleted; the UI snapshot filters empty activity
+    /// out before rendering.
+    pub activity: Vec<(UsageKey, ActivityStats)>,
 }
 
 /// One round of every usage source across every auth domain — the Usage tab's
 /// ⟳ button, which refreshes the whole dashboard rather than one section of it.
 /// Routes through the same [`target_account`] the pumps use, so the two can't
-/// disagree about which account a domain reads or whether activity applies.
+/// disagree about which account a domain reads.
 ///
 /// Blocking (HTTP + disk); call from the background executor.
 pub(in crate::workspace) fn refresh_round(
-    focused: FocusedAccount,
-    pane_domain: crate::workspace::main_area::pane::AccountDomain,
+    sticky: &HashMap<AccountRecipeId, FocusedAccount>,
 ) -> RefreshRound {
     let mut limits = Vec::new();
     let mut status = Vec::new();
+    let mut activity = Vec::new();
     for recipe in AccountRecipeId::ALL {
-        let account = usage_account(recipe, &focused, pane_domain);
-        let config_dir = target_account(Endpoint::Limits(recipe), focused.clone(), pane_domain)
-            .and_then(|(_, dir)| dir);
+        let account = usage_account(recipe, sticky);
+        let config_dir = target_account(Endpoint::Limits(recipe), sticky).and_then(|(_, dir)| dir);
         limits.push((
             UsageKey { recipe, account },
             fetch_limits(recipe, config_dir.as_deref()),
         ));
         status.push((recipe, fetch_status(recipe)));
+
+        let activity_config_dir =
+            target_account(Endpoint::Activity(recipe), sticky).and_then(|(_, dir)| dir);
+        if let Some(stats) = fetch_activity_in(recipe, activity_config_dir.as_deref()) {
+            activity.push((UsageKey { recipe, account }, stats));
+        }
     }
-    let activity = target_account(Endpoint::Activity, focused, pane_domain).and_then(
-        |(account, config_dir)| {
-            fetch_activity_in(config_dir.as_deref()).map(|stats| (account, stats))
-        },
-    );
     RefreshRound {
         limits,
         status,
@@ -266,10 +321,20 @@ fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_claude:
     service_status::fetch_service_status(usage::source_for(recipe).status_url())
 }
 
-fn fetch_activity_in(config_dir: Option<&Path>) -> Option<ActivityStats> {
-    match config_dir {
-        Some(dir) => fetch_activity_for(dir),
-        None => fetch_activity(),
+/// Dispatch one domain's local activity aggregation to its own session-log
+/// format — Claude's flat `<config>/projects/*/*.jsonl`, Codex's nested
+/// `<config>/sessions/<Y>/<M>/<D>/*.jsonl`. `config_dir` is that recipe's
+/// resolved managed-account dir (`None` = system default).
+fn fetch_activity_in(recipe: AccountRecipeId, config_dir: Option<&Path>) -> Option<ActivityStats> {
+    match recipe {
+        AccountRecipeId::Claude => match config_dir {
+            Some(dir) => fetch_activity_for(dir),
+            None => fetch_activity(),
+        },
+        AccountRecipeId::Codex => match config_dir {
+            Some(dir) => fetch_codex_activity_for(dir),
+            None => fetch_codex_activity(),
+        },
     }
 }
 
@@ -277,7 +342,7 @@ fn fetch_activity_in(config_dir: Option<&Path>) -> Option<ActivityStats> {
 /// `background_executor().spawn(...)` call site without dispatch
 /// branching across thread boundaries. `Activity` carries an `Option`
 /// rather than a `Result` because its failures (no home dir, an
-/// unreadable projects root) are all handled by the same silent
+/// unreadable session-log root) are all handled by the same silent
 /// fallback — there is nothing the loop does differently per error.
 enum Fetched {
     /// Carries its domain so the consumer keys the cache without re-reading
@@ -290,22 +355,24 @@ enum Fetched {
         AccountRecipeId,
         Result<ServiceStatus, daruda_claude::FetchError>,
     ),
-    Activity(Option<ActivityStats>),
+    Activity(AccountRecipeId, Option<ActivityStats>),
 }
 
-/// Dispatch one fetch. `config_dir` is the focused account's resolved
-/// `CLAUDE_CONFIG_DIR` for `Limits`/`Activity` (`None` = system default);
-/// unused for `Status`, which is account-independent.
+/// Dispatch one fetch. `config_dir` is the account's resolved managed-account
+/// dir for `Limits`/`Activity` (`None` = system default); unused for
+/// `Status`, which is account-independent.
 fn fetch(kind: Endpoint, config_dir: Option<&Path>) -> Fetched {
     match kind {
         Endpoint::Limits(recipe) => Fetched::Limits(recipe, fetch_limits(recipe, config_dir)),
         Endpoint::Status(recipe) => Fetched::Status(recipe, fetch_status(recipe)),
-        Endpoint::Activity => Fetched::Activity(fetch_activity_in(config_dir)),
+        Endpoint::Activity(recipe) => {
+            Fetched::Activity(recipe, fetch_activity_in(recipe, config_dir))
+        }
     }
 }
 
-/// Resolve the system-default activity source + cache paths and run one
-/// incremental aggregation. Returns `None` when the home directory is
+/// Resolve the system-default Claude activity source + cache paths and run
+/// one incremental aggregation. Returns `None` when the home directory is
 /// unavailable or the aggregation errors (an unreadable projects root,
 /// an I/O failure mid-read) — the caller keeps the previous snapshot.
 ///
@@ -362,20 +429,60 @@ fn activity_paths_for(config_dir: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((projects_root, cache_path))
 }
 
+/// Resolve the system-default Codex activity source + cache paths and run
+/// one incremental aggregation. Sibling of [`fetch_activity`] for Codex's
+/// `~/.codex/sessions` layout — see `daruda_claude::codex_activity`.
+pub(in crate::workspace) fn fetch_codex_activity() -> Option<ActivityStats> {
+    let home = daruda_claude::accounts::codex::system_codex_home()?;
+    let (sessions_root, cache_path) = codex_activity_paths(&home);
+    codex_activity::update_activity(&sessions_root, &cache_path).ok()
+}
+
+/// Like [`fetch_codex_activity`], but aggregates a managed account's own
+/// config-dir-scoped session logs instead of the system-default
+/// `~/.codex/sessions`.
+pub(in crate::workspace) fn fetch_codex_activity_for(config_dir: &Path) -> Option<ActivityStats> {
+    let (sessions_root, cache_path) = codex_activity_paths(config_dir);
+    codex_activity::update_activity(&sessions_root, &cache_path).ok()
+}
+
+/// `(<codex_home>/sessions, <profile-scoped data dir>/cache/codex-activity[-<key>].json)`.
+/// Mirrors [`activity_paths`]/[`activity_paths_for`]'s account-scoping rule:
+/// the system-default home has no key suffix, a managed account's
+/// (isolated `CODEX_HOME`) is keyed by its final path component so its
+/// cache never collides with the system default or another account's.
+fn codex_activity_paths(codex_home: &Path) -> (PathBuf, PathBuf) {
+    let sessions_root = codex_home.join("sessions");
+    let cache_file_name = codex_home
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| *name != ".codex")
+        .map(|key| format!("codex-activity-{key}.json"))
+        .unwrap_or_else(|| "codex-activity.json".to_string());
+    let cache_path = daruda_store::persistence::default_data_dir()
+        .join("cache")
+        .join(cache_file_name);
+    (sessions_root, cache_path)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::Path;
 
     use daruda_store::accounts::{AccountId, AccountRecipeId, AccountSelection};
 
     use crate::workspace::main_area::pane::AccountDomain;
 
-    use super::{Endpoint, FocusedAccount, account_scoped, activity_paths_for, target_account};
+    use super::{
+        Endpoint, FocusedAccount, account_scoped, activity_paths_for, codex_activity_paths,
+        observe_focus, target_account, usage_account,
+    };
 
     #[test]
     fn only_limits_and_activity_are_account_scoped() {
         assert!(account_scoped(Endpoint::Limits(AccountRecipeId::Claude)));
-        assert!(account_scoped(Endpoint::Activity));
+        assert!(account_scoped(Endpoint::Activity(AccountRecipeId::Claude)));
         assert!(!account_scoped(Endpoint::Status(AccountRecipeId::Claude)));
     }
 
@@ -387,6 +494,17 @@ mod tests {
         }
     }
 
+    /// Build the sticky map `observe_focus` would leave behind after a single
+    /// observation — the shape every test below feeds to `target_account`.
+    fn sticky_after(
+        focused: FocusedAccount,
+        pane_domain: AccountDomain,
+    ) -> HashMap<AccountRecipeId, FocusedAccount> {
+        let mut sticky = HashMap::new();
+        observe_focus(&mut sticky, focused, pane_domain);
+        sticky
+    }
+
     /// A `Limits` loop covers one domain, and only the loop matching the
     /// focused pane's domain may read that pane's account. The other domain's
     /// loop reads its ambient login — otherwise it would fetch one provider's
@@ -395,42 +513,64 @@ mod tests {
     fn a_limits_loop_reads_the_focused_account_only_in_its_own_domain() {
         let focused = managed(AccountRecipeId::Claude);
         let domain = AccountDomain::Exactly(AccountRecipeId::Claude);
+        let sticky = sticky_after(focused.clone(), domain);
 
-        let (key, dir) = target_account(
-            Endpoint::Limits(AccountRecipeId::Claude),
-            focused.clone(),
-            domain,
-        )
-        .expect("the focused domain always has an account to read");
+        let (key, dir) = target_account(Endpoint::Limits(AccountRecipeId::Claude), &sticky)
+            .expect("the focused domain always has an account to read");
         assert_eq!(key, focused.key());
         assert!(dir.is_some(), "a managed account brings its own config dir");
 
-        let (key, dir) = target_account(Endpoint::Limits(AccountRecipeId::Codex), focused, domain)
+        let (key, dir) = target_account(Endpoint::Limits(AccountRecipeId::Codex), &sticky)
             .expect("another domain still reads its ambient login");
         assert_eq!(key, AccountSelection::SystemDefault);
         assert_eq!(dir, None);
     }
 
-    /// `daruda_claude::activity` parses Claude Code's own JSONL layout, which
-    /// no other CLI writes — pointing it at another domain's config dir would
-    /// only ever find nothing.
+    /// `Activity` follows the exact same sticky-account resolution as
+    /// `Limits` — one loop per domain, no special-casing.
     #[test]
-    fn activity_is_skipped_entirely_outside_the_claude_domain() {
-        assert!(
-            target_account(
-                Endpoint::Activity,
-                managed(AccountRecipeId::Codex),
-                AccountDomain::Exactly(AccountRecipeId::Codex),
-            )
-            .is_none()
+    fn an_activity_loop_reads_the_focused_account_only_in_its_own_domain() {
+        let focused = managed(AccountRecipeId::Codex);
+        let domain = AccountDomain::Exactly(AccountRecipeId::Codex);
+        let sticky = sticky_after(focused.clone(), domain);
+
+        let (key, dir) = target_account(Endpoint::Activity(AccountRecipeId::Codex), &sticky)
+            .expect("the focused domain always has an account to read");
+        assert_eq!(key, focused.key());
+        assert!(dir.is_some());
+
+        let (key, dir) = target_account(Endpoint::Activity(AccountRecipeId::Claude), &sticky)
+            .expect("another domain still reads its ambient login");
+        assert_eq!(key, AccountSelection::SystemDefault);
+        assert_eq!(dir, None);
+    }
+
+    /// Focusing an unrelated pane (here: a terminal, `AccountDomain::Any`)
+    /// must not blank a domain's sticky slot back to its ambient login — the
+    /// whole point of the sticky map.
+    #[test]
+    fn unrelated_focus_leaves_a_domains_sticky_account_untouched() {
+        let claude_account = managed(AccountRecipeId::Claude);
+        let mut sticky = HashMap::new();
+        observe_focus(
+            &mut sticky,
+            claude_account.clone(),
+            AccountDomain::Exactly(AccountRecipeId::Claude),
         );
-        assert!(
-            target_account(
-                Endpoint::Activity,
-                managed(AccountRecipeId::Claude),
-                AccountDomain::Exactly(AccountRecipeId::Claude),
-            )
-            .is_some()
+
+        // Focus moves to a terminal — `Any` domain, `SystemDefault` selection.
+        // It names no recipe (`live_recipe` returns `None` for
+        // `SystemDefault` + `Any`), so no slot is touched — Claude's must
+        // still read `claude_account`.
+        observe_focus(
+            &mut sticky,
+            FocusedAccount::SystemDefault,
+            AccountDomain::Any,
+        );
+
+        assert_eq!(
+            usage_account(AccountRecipeId::Claude, &sticky),
+            claude_account.key()
         );
     }
 
@@ -438,15 +578,26 @@ mod tests {
     /// ambient login is what each loop reads.
     #[test]
     fn a_system_default_pane_reads_the_ambient_login_in_every_domain() {
+        let sticky = sticky_after(FocusedAccount::SystemDefault, AccountDomain::Any);
         for recipe in AccountRecipeId::ALL {
-            let (key, dir) = target_account(
-                Endpoint::Limits(recipe),
-                FocusedAccount::SystemDefault,
-                AccountDomain::Any,
-            )
-            .expect("the ambient login is always readable");
+            let (key, dir) = target_account(Endpoint::Limits(recipe), &sticky)
+                .expect("the ambient login is always readable");
             assert_eq!(key, AccountSelection::SystemDefault);
             assert_eq!(dir, None);
+        }
+    }
+
+    /// A domain nobody has ever focused (empty sticky map) reads its ambient
+    /// login too — the fallback `usage_account`/`sticky_focused` apply before
+    /// any observation has ever landed (a fresh workspace's first frame).
+    #[test]
+    fn a_never_observed_domain_falls_back_to_the_ambient_login() {
+        let sticky: HashMap<AccountRecipeId, FocusedAccount> = HashMap::new();
+        for recipe in AccountRecipeId::ALL {
+            assert_eq!(
+                usage_account(recipe, &sticky),
+                AccountSelection::SystemDefault
+            );
         }
     }
 
@@ -471,6 +622,34 @@ mod tests {
         assert_ne!(
             cache_file_name, "activity.json",
             "account-scoped cache must not collide with the system-default cache file name"
+        );
+    }
+
+    #[test]
+    fn codex_activity_paths_scopes_sessions_root_and_cache_to_config_dir() {
+        let account_id = "alice-1234";
+        let config_dir = Path::new("/data/codex-accounts").join(account_id);
+
+        let (sessions_root, cache_path) = codex_activity_paths(&config_dir);
+
+        assert_eq!(sessions_root, config_dir.join("sessions"));
+        let cache_file_name = cache_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("cache path should have a file name");
+        assert!(cache_file_name.contains(account_id));
+        assert_ne!(cache_file_name, "codex-activity.json");
+    }
+
+    #[test]
+    fn codex_activity_paths_for_the_system_home_uses_the_unkeyed_cache_name() {
+        let system_home = Path::new("/Users/alice/.codex");
+        let (sessions_root, cache_path) = codex_activity_paths(system_home);
+
+        assert_eq!(sessions_root, system_home.join("sessions"));
+        assert_eq!(
+            cache_path.file_name().and_then(|n| n.to_str()),
+            Some("codex-activity.json")
         );
     }
 }

@@ -16,6 +16,7 @@
 
 pub mod accounts;
 pub mod activity;
+pub mod codex_activity;
 pub mod hooks;
 mod http;
 pub mod jsonl;

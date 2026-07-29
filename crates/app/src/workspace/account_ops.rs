@@ -24,9 +24,9 @@
 //! This file also owns the per-window delete-cleanup side of account
 //! state ([`Workspace::clear_account_override`] — resetting a deleted
 //! account's panes back to the system default and pruning its usage
-//! cache). The shared [`daruda_store::accounts::AccountsState`] itself is
-//! propagated app-wide through [`super::accounts_global`] (a GPUI Global +
-//! `observe_global`), not a per-window broadcast. The headless add-account
+//! cache and sticky focus). The shared [`daruda_store::accounts::AccountsState`]
+//! itself is propagated app-wide through [`super::accounts_global`] (a GPUI
+//! Global + `observe_global`), not a per-window broadcast. The headless add-account
 //! / reauthenticate
 //! *login* flow that creates and refreshes accounts in the first place
 //! lives in the sibling `account_login_ops.rs` — split out because it is
@@ -347,11 +347,12 @@ impl Workspace {
     /// persistence/display is reset.
     ///
     /// Also prunes this account's entries from the per-account usage caches
-    /// (`self.claude.usage_by_account`) — this is the per-window delete hook,
-    /// so it is the only place that sees both the deleted `account_id` and
-    /// `self.claude`. The system-default entry is never touched.
+    /// (`self.claude.usage_by_account`) and sticky usage focus — this is the
+    /// per-window delete hook, so it is the only place that sees both the
+    /// deleted `account_id` and `self.claude`. The system-default entry is
+    /// never touched.
     pub(crate) fn clear_account_override(&mut self, account_id: AccountId, cx: &mut Context<Self>) {
-        let mut changed = false;
+        let mut pane_changed = false;
         for rt in self.main_area.runtimes.values_mut() {
             for p in rt.panes.iter_mut() {
                 match &mut p.content {
@@ -359,13 +360,13 @@ impl Workspace {
                         if t.account == AccountSelection::Managed(account_id) =>
                     {
                         t.account = AccountSelection::SystemDefault;
-                        changed = true;
+                        pane_changed = true;
                     }
                     pane::PaneContent::AgentChat(ac)
                         if ac.account == AccountSelection::Managed(account_id) =>
                     {
                         ac.account = AccountSelection::SystemDefault;
-                        changed = true;
+                        pane_changed = true;
                     }
                     _ => {}
                 }
@@ -374,8 +375,17 @@ impl Workspace {
         self.claude
             .usage_by_account
             .remove(AccountSelection::Managed(account_id));
-        if changed {
+        let sticky_focus_len = self.claude.sticky_focus_by_recipe.len();
+        self.claude
+            .sticky_focus_by_recipe
+            .retain(|_, focused| {
+                !matches!(focused, pane::FocusedAccount::Managed { id, .. } if *id == account_id)
+            });
+        let sticky_focus_changed = self.claude.sticky_focus_by_recipe.len() != sticky_focus_len;
+        if pane_changed {
             self.mutate_durable(cx, |_, _| {});
+        }
+        if pane_changed || sticky_focus_changed {
             cx.notify();
         }
     }

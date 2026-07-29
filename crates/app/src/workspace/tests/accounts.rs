@@ -440,10 +440,30 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
                     Ok(daruda_claude::ProviderUsage::new(recipe, Vec::new(), None)),
                 );
             }
-            ws.claude
-                .usage_by_account
-                .set_activity(key, daruda_claude::ActivityStats::default());
+            ws.claude.usage_by_account.set_activity(
+                UsageKey {
+                    recipe: daruda_store::accounts::AccountRecipeId::Claude,
+                    account: key,
+                },
+                daruda_claude::ActivityStats::default(),
+            );
         }
+        ws.claude.sticky_focus_by_recipe.insert(
+            daruda_store::accounts::AccountRecipeId::Claude,
+            crate::workspace::main_area::pane::FocusedAccount::Managed {
+                id: deleted,
+                recipe: daruda_store::accounts::AccountRecipeId::Claude,
+                config_dir: std::path::PathBuf::from("/tmp/deleted"),
+            },
+        );
+        ws.claude.sticky_focus_by_recipe.insert(
+            daruda_store::accounts::AccountRecipeId::Codex,
+            crate::workspace::main_area::pane::FocusedAccount::Managed {
+                id: kept,
+                recipe: daruda_store::accounts::AccountRecipeId::Codex,
+                config_dir: std::path::PathBuf::from("/tmp/kept"),
+            },
+        );
 
         ws.clear_account_override(deleted, cx);
 
@@ -470,9 +490,47 @@ fn clear_account_override_prunes_usage_caches_for_deleted_account_only(cx: &mut 
             daruda_claude::UsageOutcome::Pending
         );
 
-        assert!(usage.activity(AccountSelection::Managed(deleted)).is_none());
-        assert!(usage.activity(AccountSelection::Managed(kept)).is_some());
-        assert!(usage.activity(AccountSelection::SystemDefault).is_some());
+        let activity_key = |account| UsageKey {
+            recipe: daruda_store::accounts::AccountRecipeId::Claude,
+            account,
+        };
+        assert!(
+            usage
+                .activity(activity_key(AccountSelection::Managed(deleted)))
+                .is_none()
+        );
+        assert!(
+            usage
+                .activity(activity_key(AccountSelection::Managed(kept)))
+                .is_some()
+        );
+        assert!(
+            usage
+                .activity(activity_key(AccountSelection::SystemDefault))
+                .is_some()
+        );
+        assert!(
+            !ws.claude
+                .sticky_focus_by_recipe
+                .values()
+                .any(|focused| matches!(
+                    focused,
+                    crate::workspace::main_area::pane::FocusedAccount::Managed { id, .. }
+                        if *id == deleted
+                )),
+            "deleted accounts must not survive in sticky usage focus"
+        );
+        assert!(
+            ws.claude
+                .sticky_focus_by_recipe
+                .values()
+                .any(|focused| matches!(
+                    focused,
+                    crate::workspace::main_area::pane::FocusedAccount::Managed { id, .. }
+                        if *id == kept
+                )),
+            "unrelated sticky usage focus entries are preserved"
+        );
     });
 }
 
@@ -709,6 +767,45 @@ async fn usage_sections_cover_signed_in_domains_only(cx: &mut TestAppContext) {
             .usage_by_account
             .advance_usage(claude_key, Err(daruda_claude::FetchError::NoToken));
         assert!(sections(ws, cx).is_empty());
+    });
+}
+
+#[gpui::test]
+async fn empty_activity_is_not_attached_to_usage_snapshot(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        let key = UsageKey {
+            recipe: daruda_store::accounts::AccountRecipeId::Claude,
+            account: AccountSelection::SystemDefault,
+        };
+        ws.claude.usage_by_account.advance_usage(
+            key,
+            Ok(daruda_claude::ProviderUsage::new(
+                daruda_store::accounts::AccountRecipeId::Claude,
+                Vec::new(),
+                None,
+            )),
+        );
+
+        ws.claude
+            .usage_by_account
+            .set_activity(key, daruda_claude::ActivityStats::default());
+        assert!(
+            ws.prepare_right_dock_snapshot(cx).activity.is_empty(),
+            "empty activity should not render chart headings"
+        );
+
+        ws.claude.usage_by_account.set_activity(
+            key,
+            daruda_claude::ActivityStats {
+                daily: vec![daruda_claude::DayActivity {
+                    date: "2026-07-29".to_string(),
+                    turns: 1,
+                    tokens: 2,
+                }],
+            },
+        );
+        assert_eq!(ws.prepare_right_dock_snapshot(cx).activity.len(), 1);
     });
 }
 

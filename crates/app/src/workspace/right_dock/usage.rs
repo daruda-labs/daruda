@@ -1,18 +1,18 @@
 //! Usage tab body — a widget-style dashboard modelled on the Übersicht
-//! `claude-usage` widget: a refresh header, one block per signed-in auth
-//! domain (name, plan badge, service pill, gauges), then the activity cards.
-//! Activity stays Claude-only, so it sits outside the per-domain blocks.
+//! `claude-usage` widget: a refresh header, then one block per signed-in
+//! auth domain (name, plan badge, service pill, gauges, then that domain's
+//! own 7-day turns chart and 7-day token-usage chart).
 //!
 //! Plan limits come from `RightDockSnapshot::usage` (limits pump);
-//! activity from `RightDockSnapshot::activity` (local JSONL aggregation
-//! pump). The ↻ badge dispatches `Workspace::refresh_usage_now`. Static
-//! text comes from `surface::strings::usage_*`, pixels/colors from
-//! `crate::ui::theme`.
+//! activity from `RightDockSnapshot::activity` (local session-log
+//! aggregation pump, one entry per domain). The ↻ badge dispatches
+//! `Workspace::refresh_usage_now`. Static text comes from
+//! `surface::strings::usage_*`, pixels/colors from `crate::ui::theme`.
 
 use std::time::{Duration, SystemTime};
 
 use crate::ui::theme;
-use daruda_claude::activity::ActivityStats;
+use daruda_claude::activity::{ActivityStats, DayActivity};
 use daruda_claude::service_status::{ServiceStatus, StatusIndicator};
 use daruda_claude::{LimitSeverity, PlanInfo, ProviderUsage, UsageWindow};
 use gpui::{AnyElement, Context, Hsla, IntoElement, SharedString, div, prelude::*, px};
@@ -26,7 +26,7 @@ use crate::ui::{
 };
 
 /// Render the Usage tab body: the refresh header, then one block per signed-in
-/// auth domain, then the (Claude-only) activity dashboard.
+/// auth domain.
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
     if snap.usage.is_empty() {
         return no_provider_body(cx);
@@ -44,12 +44,16 @@ pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &mut Context<Do
             snap.usage_refresh_in_flight,
             &snap.workspace,
         ));
-    let body = snap.usage.iter().fold(body, |body, section| {
-        body.child(provider_section(section, cx))
-    });
-    body.child(today_block(&snap.activity, cx))
-        .child(chart_block(&snap.activity, cx))
-        .child(totals_block(&snap.activity, cx))
+    snap.usage
+        .iter()
+        .fold(body, |body, section| {
+            let activity = snap
+                .activity
+                .iter()
+                .find(|(recipe, _)| *recipe == section.recipe)
+                .map(|(_, stats)| stats);
+            body.child(provider_section(section, activity, cx))
+        })
         .into_any_element()
 }
 
@@ -66,12 +70,14 @@ fn no_provider_body(cx: &gpui::App) -> AnyElement {
 }
 
 /// One auth domain's block: header (icon + name + plan badge), account label,
-/// service pill, then a gauge card per window.
+/// service pill, gauge card per window, then (when this domain has any) its
+/// own 7-day turns chart and 7-day token-usage chart.
 fn provider_section(
     section: &crate::workspace::layout::snap::UsageSectionSnapshot,
+    activity: Option<&ActivityStats>,
     cx: &gpui::App,
 ) -> impl IntoElement {
-    div()
+    let block = div()
         .flex()
         .flex_col()
         .w_full()
@@ -83,7 +89,24 @@ fn provider_section(
             cx,
         ))
         .child(status_pill(section.service_status.as_ref(), cx))
-        .child(gauges_block(section.outcome.snapshot(), cx))
+        .child(gauges_block(section.outcome.snapshot(), cx));
+
+    let Some(activity) = activity else {
+        return block;
+    };
+    block
+        .child(chart_block(
+            strings::usage_section_7day(),
+            activity,
+            |d| d.turns,
+            cx,
+        ))
+        .child(chart_block(
+            strings::usage_section_tokens(),
+            activity,
+            |d| d.tokens,
+            cx,
+        ))
 }
 
 // ----------------------------------------------------------------
@@ -324,88 +347,21 @@ fn gauge_bar(pct: f32, color: Hsla) -> impl IntoElement {
 }
 
 // ----------------------------------------------------------------
-// Today's activity (3 stat cards)
+// 7-day activity charts (turns, tokens)
 // ----------------------------------------------------------------
 
-/// "TODAY" heading + a 3-up grid of stat cards. Counts come from the
-/// `DayActivity` whose date matches the local calendar day; if none is
-/// present (no activity yet today) the cards show zeros.
-fn today_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
-    let today_str = local_today();
-    let today = activity.daily.iter().find(|d| d.date == today_str);
-    let (messages, sessions, tool_calls) = today
-        .map(|d| (d.messages, d.sessions, d.tool_calls))
-        .unwrap_or((0, 0, 0));
-
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(strings::usage_section_today()))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .w_full()
-                .gap(px(theme::USAGE_STAT_GRID_GAP))
-                .child(stat_card(
-                    fmt_count(messages),
-                    strings::usage_stat_messages(),
-                    cx,
-                ))
-                .child(stat_card(
-                    fmt_count(sessions),
-                    strings::usage_stat_sessions(),
-                    cx,
-                ))
-                .child(stat_card(
-                    fmt_count(tool_calls),
-                    strings::usage_stat_tool_calls(),
-                    cx,
-                )),
-        )
-}
-
-/// One stat card: a big value over a muted label, centered.
-fn stat_card(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
-    let t = theme::current(cx);
-    // `flex_1` on a wrapper div, not the GroupBox (GroupBox forces
-    // `w_full`, so the wrapper owns the 1/3 grid width). A full-width
-    // `items_center` child re-centers over the left-aligned GroupBox.
-    div().flex_1().min_w_0().child(
-        group_box().outline().child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .w_full()
-                .gap(px(theme::USAGE_STAT_CARD_GAP))
-                .child(
-                    div()
-                        .text_size(px(theme::USAGE_STAT_VALUE_FONT_SIZE))
-                        .text_color(t.text_muted)
-                        .child(SharedString::from(value)),
-                )
-                .child(
-                    div()
-                        .text_size(px(theme::USAGE_STAT_LABEL_FONT_SIZE))
-                        .text_color(t.text_subtle)
-                        .child(SharedString::from(label)),
-                ),
-        ),
-    )
-}
-
-// ----------------------------------------------------------------
-// 7-day activity chart
-// ----------------------------------------------------------------
-
-/// "LAST 7 DAYS" heading + a bar chart over the most recent ≤7 days with
-/// activity, weekday-labeled, today highlighted. The aggregator stores
-/// only active days (ascending by date), so zero days are dropped, not
-/// padded; today is matched by date (not position). Heights normalize to
-/// the busiest day in the window.
-fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> AnyElement {
+/// `heading` + a bar chart over the most recent ≤7 days with activity,
+/// weekday-labeled, today highlighted, sized by `value_of` (turns or
+/// tokens — the two quantities the Usage tab charts, each its own instance
+/// of this block). The aggregator stores only active days (ascending by
+/// date), so zero days are dropped, not padded; today is matched by date
+/// (not position). Heights normalize to the busiest day in the window.
+fn chart_block(
+    heading: String,
+    activity: &ActivityStats,
+    value_of: impl Fn(&DayActivity) -> u64,
+    cx: &gpui::App,
+) -> AnyElement {
     let today = chrono::Local::now().date_naive();
     let n = activity.daily.len();
     let recent = &activity.daily[n.saturating_sub(7)..];
@@ -414,16 +370,16 @@ fn chart_block(activity: &ActivityStats, cx: &gpui::App) -> AnyElement {
         .flex()
         .flex_col()
         .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(strings::usage_section_7day()));
+        .child(SectionHeader::new(heading));
 
     // Nothing aggregated yet — just the heading, no empty chart frame.
     if recent.is_empty() {
         return block.into_any_element();
     }
 
-    let messages: Vec<u64> = recent.iter().map(|d| d.messages).collect();
+    let values: Vec<u64> = recent.iter().map(&value_of).collect();
     let heights = chart_heights(
-        &messages,
+        &values,
         theme::USAGE_CHART_BAR_MAX_HEIGHT,
         theme::USAGE_CHART_BAR_MIN_HEIGHT,
     );
@@ -483,75 +439,6 @@ fn chart_bar(
                 .text_color(label_color)
                 .child(SharedString::from(label)),
         )
-}
-
-// ----------------------------------------------------------------
-// Totals row
-// ----------------------------------------------------------------
-
-/// All-time totals: a "TOTAL" section header over a 3-up row of
-/// value-over-label cells. Borderless GroupBox (`.normal()`) so the
-/// footer reads as a summary, not a card.
-fn totals_block(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::RIGHT_PANEL_ROW_GAP))
-        .child(SectionHeader::new(strings::usage_section_total()))
-        .child(totals_row(activity, cx))
-}
-
-/// The 3-up totals cells row.
-fn totals_row(activity: &ActivityStats, cx: &gpui::App) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .w_full()
-        .gap(px(theme::USAGE_STAT_GRID_GAP))
-        .child(total_item(
-            fmt_count(activity.total_messages),
-            strings::usage_total_messages(),
-            cx,
-        ))
-        .child(total_item(
-            fmt_count(activity.total_sessions),
-            strings::usage_total_sessions(),
-            cx,
-        ))
-        .child(total_item(
-            fmt_count(activity.active_days),
-            strings::usage_total_active_days(),
-            cx,
-        ))
-}
-
-/// One totals cell: a borderless GroupBox holding a centered value over
-/// its label. `flex_1` on the wrapper, not the GroupBox (which forces
-/// `w_full`).
-fn total_item(value: String, label: String, cx: &gpui::App) -> impl IntoElement {
-    let t = theme::current(cx);
-    div().flex_1().min_w_0().child(
-        group_box().normal().child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .w_full()
-                .gap(px(theme::USAGE_STAT_CARD_GAP))
-                .child(
-                    div()
-                        .text_size(px(theme::USAGE_TOTAL_VALUE_FONT_SIZE))
-                        .text_color(t.text_muted)
-                        .child(SharedString::from(value)),
-                )
-                .child(
-                    div()
-                        .text_size(px(theme::USAGE_TOTAL_LABEL_FONT_SIZE))
-                        .text_color(t.text_subtle)
-                        .child(SharedString::from(label)),
-                ),
-        ),
-    )
 }
 
 // ----------------------------------------------------------------
@@ -625,12 +512,6 @@ fn indicator_color(indicator: StatusIndicator, cx: &gpui::App) -> Hsla {
     }
 }
 
-/// Local calendar day as `"YYYY-MM-DD"`, matching the date keys the
-/// activity aggregator writes.
-fn local_today() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
-}
-
 // ---- Pure display logic (GPUI-free, unit-tested) ----
 
 /// Cache-age bucket for the refresh badge. Pure so the bucket
@@ -661,18 +542,6 @@ fn cache_age_bucket(age: Option<Duration>) -> CacheAge {
         CacheAge::Hours(secs / 3_600)
     } else {
         CacheAge::Days(secs / 86_400)
-    }
-}
-
-/// Compact count format matching the widget's `formatNumber`: ≥ 1M →
-/// `"<x>.<y>M"`, ≥ 1000 → `"<x>.<y>K"`, otherwise the plain integer.
-fn fmt_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
     }
 }
 
@@ -730,18 +599,6 @@ fn plan_badge_with_mult(base: &str, sub: &str, tier: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fmt_count_matches_widget() {
-        assert_eq!(fmt_count(0), "0");
-        assert_eq!(fmt_count(21), "21");
-        assert_eq!(fmt_count(999), "999");
-        assert_eq!(fmt_count(1_000), "1.0K");
-        assert_eq!(fmt_count(5_012), "5.0K");
-        assert_eq!(fmt_count(1_300), "1.3K");
-        assert_eq!(fmt_count(248_200), "248.2K");
-        assert_eq!(fmt_count(1_500_000), "1.5M");
-    }
 
     #[test]
     fn chart_heights_normalize_to_max() {

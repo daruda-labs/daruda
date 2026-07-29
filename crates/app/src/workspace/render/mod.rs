@@ -1051,19 +1051,20 @@ impl Render for Workspace {
             None => false,
         };
         // One usage pill per auth domain, reading the same per-account cache
-        // the Usage tab does. `usage_account` picks the same account the pump
-        // filed under: the focused pane's for its own domain, the ambient
-        // login for the others. Domains with nothing to show drop out here, so
-        // the renderer never has to decide whether a pill is worth drawing.
-        let focused = self.focused_account();
-        let usage_domain = crate::workspace::main_area::pane::AccountDomain::for_pane(
-            &self.focused_account_pane(cx),
-        );
+        // the Usage tab does. `usage_account` picks the same sticky account
+        // the pump filed under: a domain's own focused account when its pane
+        // is (or was last) live, the ambient login otherwise. Domains with
+        // nothing to show drop out here, so the renderer never has to decide
+        // whether a pill is worth drawing. `prepare_right_dock_snapshot`
+        // (called earlier this same render pass) is the sticky map's sole
+        // writer — this site only reads what it left behind.
         let usage: Vec<_> = daruda_store::accounts::AccountRecipeId::ALL
             .into_iter()
             .map(|recipe| {
-                let account =
-                    crate::workspace::sync::limits::usage_account(recipe, &focused, usage_domain);
+                let account = crate::workspace::sync::limits::usage_account(
+                    recipe,
+                    &self.claude.sticky_focus_by_recipe,
+                );
                 let outcome = self
                     .claude
                     .usage_by_account

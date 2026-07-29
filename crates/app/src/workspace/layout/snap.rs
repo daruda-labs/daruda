@@ -311,10 +311,13 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// order. Empty when no provider is signed in, which the renderer replaces
     /// with a single notice.
     pub usage: Vec<UsageSectionSnapshot>,
-    /// Locally aggregated activity (today + 7-day chart + totals).
-    /// Default-constructed (empty) before the first aggregation, in
-    /// which case the renderer draws zeroed activity cards.
-    pub activity: daruda_claude::ActivityStats,
+    /// Locally aggregated activity (7-day turns + tokens charts), one entry
+    /// per domain in `usage` that has any — a domain with no activity log
+    /// (or none aggregated yet) is simply absent, not zeroed.
+    pub activity: Vec<(
+        daruda_store::accounts::AccountRecipeId,
+        daruda_claude::ActivityStats,
+    )>,
     /// Whether a manual usage refresh is in flight, so the ⟳ button can
     /// render a disabled / spinning state.
     pub usage_refresh_in_flight: bool,
