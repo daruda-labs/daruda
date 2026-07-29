@@ -14,8 +14,8 @@
 //! For plain char-boundary rounding reach for std's
 //! `str::{floor_char_boundary, ceil_char_boundary}` (stable since 1.91) —
 //! this module used to carry stand-ins for them, which are no longer needed.
-//! A crate whose `rust-version` predates 1.91 cannot call them; `daruda_terminal`
-//! still declares 1.86 and keeps its own `text_edit` helpers for that reason.
+//! Every crate here declares the workspace floor of 1.95, so they are always
+//! callable; clippy's `incompatible_msrv` is what would say otherwise.
 
 use std::ops::Range;
 
